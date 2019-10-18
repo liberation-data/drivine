@@ -1,5 +1,5 @@
 {
-    "name": "drivine",
+    "name": "@liberation-data/drivine",
     "version": "0.0.1",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
