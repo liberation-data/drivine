@@ -1,0 +1,4 @@
+export enum TransactionContextKeys {
+    TRANSACTION = 'TRANSACTION',
+    CONNECTION_PROVIDER = 'CONNECTION_PROVIDER'
+}

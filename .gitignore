@@ -1,0 +1,32 @@
+# package directories
+node_modules
+jspm_packages
+
+# jest directories
+coverage
+
+# OS Specifics
+.DS_Store
+
+# Logs
+*.log
+logs
+
+# Coverage
+.nyc_output
+coverage
+
+# Env
+.env
+
+public
+dist
+
+# For debugging purposes
+private
+.fnmrc
+*.heapsnapshot
+
+.vs
+.idea
+

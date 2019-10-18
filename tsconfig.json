@@ -1,0 +1,23 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "module": "commonjs",
+        "declaration": false,
+        "removeComments": true,
+        "emitDecoratorMetadata": true,
+        "experimentalDecorators": true,
+        "noImplicitThis": false,
+        "suppressImplicitAnyIndexErrors": true,
+        "strictPropertyInitialization": false,
+        "target": "es2018",
+        "sourceMap": true,
+        "outDir": "./dist",
+        "baseUrl": "./",
+        "paths": {
+            "@/*": ["src/*"],
+            "*": ["node_modules/*", "src/typings/*"]
+        },
+        "strict": true
+    },
+    "exclude": ["node_modules", "aurora", "build"]
+}
