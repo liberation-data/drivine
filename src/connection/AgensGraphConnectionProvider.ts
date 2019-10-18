@@ -1,4 +1,4 @@
-import { Pool } from '@/driver/agensgraph/index';
+const AgensGraph = require('@liberation-data/agensgraph/lib');
 import { PoolClient } from 'pg';
 import { Connection } from '@/connection/Connection';
 import { AgensGraphConnection } from '@/connection/AgensGraphConnection';
@@ -17,7 +17,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         public readonly idleTimeoutMillis: number,
         public readonly defaultGraphPath: string | undefined
     ) {
-        this.pool = new Pool({
+        this.pool = new AgensGraph.Pool({
             host: this.host,
             user: this.user,
             password: this.password,

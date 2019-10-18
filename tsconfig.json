@@ -1,8 +1,8 @@
 {
     "compilerOptions": {
-        "allowJs": true,
+        "allowJs": false,
         "module": "commonjs",
-        "declaration": false,
+        "declaration": true,
         "removeComments": true,
         "emitDecoratorMetadata": true,
         "experimentalDecorators": true,
@@ -19,5 +19,5 @@
         },
         "strict": true
     },
-    "exclude": ["node_modules", "aurora", "build"]
+    "exclude": ["node_modules", "aurora", "build", "src/driver/agensgraph/**/*"]
 }

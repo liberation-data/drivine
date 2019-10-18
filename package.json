@@ -43,6 +43,7 @@
         "test:e2e": "jest --coverage --testPathPattern '3[.]EndToEnd[/]'"
     },
     "dependencies": {
+        "@liberation-data/agensgraph": "^0.1.0-rc",
         "@nestjs/common": "^6.8.3",
         "@nestjs/core": "^6.8.3",
         "@nestjs/platform-express": "^6.8.3",
