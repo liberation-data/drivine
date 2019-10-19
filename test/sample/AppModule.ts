@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine';
 import { HealthModule } from './health/HealthModule';
 import { TrafficModule } from './traffic/TrafficModule';
 import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
