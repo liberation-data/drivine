@@ -16,7 +16,7 @@ export class DrivineModule implements DynamicModule {
     public readonly module: Type<any>;
     public readonly providers: Provider[];
     public readonly exports: Provider[];
-    
+
     public static withOptions(options: DrivineModuleOptions): DynamicModule {
         return new DrivineModuleBuilder(options).build();
     }

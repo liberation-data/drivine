@@ -11,13 +11,14 @@ import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPe
 const fs = require('fs');
 
 export class DrivineModuleBuilder implements NestModule {
-
     private logger = new Logger(DrivineModuleBuilder.name);
     private _providers: Provider[];
 
     public constructor(public readonly options: DrivineModuleOptions) {
-        assert(options && options.connectionProviders && options.connectionProviders.length > 0,
-            `At least one ConnectionProvider is required. Consult documentation for advice on creation`);
+        assert(
+            options && options.connectionProviders && options.connectionProviders.length > 0,
+            `At least one ConnectionProvider is required. Consult documentation for advice on creation`
+        );
         if (this.options.connectionProviders.length > 1) {
             this.logger.warn(`This version of Drivine supports only a single database. 
                 Additional connection providers will be ignored`);
@@ -38,7 +39,7 @@ export class DrivineModuleBuilder implements NestModule {
 
     public get providers(): Provider[] {
         if (!this._providers) {
-            this._providers = [...this.providerAssembly(), ...this.fileResourceProviders()]
+            this._providers = [...this.providerAssembly(), ...this.fileResourceProviders()];
         }
         return this._providers;
     }
@@ -72,5 +73,4 @@ export class DrivineModuleBuilder implements NestModule {
     private fileContents(path: string): string {
         return fs.readFileSync(path, { encoding: 'UTF8' });
     }
-
 }

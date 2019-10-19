@@ -21,7 +21,9 @@ export class TransactionContextMiddleware implements NestMiddleware {
             this.localStorage.connectionProvider = this.connectionProvider;
             res.on('close', () => {
                 if (!res.finished) {
-                    const transaction = <Transaction>TransactionContextHolder.instance.get(TransactionContextKeys.TRANSACTION);
+                    const transaction = <Transaction>(
+                        TransactionContextHolder.instance.get(TransactionContextKeys.TRANSACTION)
+                    );
                     transaction.markAsRollback();
                 }
             });

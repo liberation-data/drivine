@@ -1,9 +1,10 @@
 import { inTestContext } from '@/test/TestContext';
 import { StreamUtils } from '@/utils/StreamUtils';
-import { RouteRepository } from '../../../sample/traffic/RouteRepository';
-import { Route } from '../../../sample/traffic/Route';
+import { RouteRepository } from './RouteRepository';
+import { Route } from './Route';
 import { Test, TestingModule } from '@nestjs/testing';
-import { AppModule } from '../../../sample/AppModule';
+import { DrivineModule, DrivineModuleOptions } from "@/DrivineModule";
+import { ConnectionProviderRegistry } from "@/connection/ConnectionProviderRegistry";
 
 const fs = require('fs');
 
@@ -12,7 +13,11 @@ describe('RouteRepository', () => {
 
     beforeAll(async () => {
         const app: TestingModule = await Test.createTestingModule({
-            imports: [AppModule],
+            imports: [
+                DrivineModule.withOptions(<DrivineModuleOptions>{
+                    connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
+                })
+            ],
             providers: [RouteRepository],
             controllers: []
         }).compile();

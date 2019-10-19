@@ -1,15 +1,19 @@
-import { inTestContext, TestContext } from '@/test/TestContext';
-import { HealthRepository } from '../../../sample/health/HealthRepository';
+import { inTestContext } from '@/test/TestContext';
+import { HealthRepository } from './HealthRepository';
 import { Test, TestingModule } from '@nestjs/testing';
-import { AppModule } from '../../../sample/AppModule';
-import { RouteRepository } from '../../../sample/traffic/RouteRepository';
+import { DrivineModule, DrivineModuleOptions } from "@/DrivineModule";
+import { ConnectionProviderRegistry } from "@/connection/ConnectionProviderRegistry";
 
 describe('HealthRepository', () => {
     let repo: HealthRepository;
 
     beforeAll(async () => {
         const app: TestingModule = await Test.createTestingModule({
-            imports: [AppModule],
+            imports: [
+                DrivineModule.withOptions(<DrivineModuleOptions>{
+                    connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
+                })
+            ],
             providers: [HealthRepository],
             controllers: []
         }).compile();

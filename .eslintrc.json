@@ -1,0 +1,150 @@
+{
+    "root": true,
+    "extends": [
+        "eslint:recommended",
+        "plugin:@typescript-eslint/recommended"
+    ],
+    "plugins": ["@typescript-eslint"],
+    "env": {
+        "node": true,
+        "es6": true
+    },
+    "rules": {
+        // Need to switch off most of the eslint rules in favour of the typescript-eslint rules
+        "brace-style": "off",
+        "camelcase": "off",
+        "curly": "error",
+        "guard-for-in": "error",
+        "no-console": "error",
+        "no-empty-function": "off",
+        "no-extra-parens": "off",
+        "no-magic-numbers": "off",
+        "no-unused-vars": "off",
+        "no-useless-constructor": "off",
+        "require-atomic-updates": "off",
+        "require-await": "off",
+        "spaced-comment": "error",
+        "no-template-curly-in-string": "error",
+        "array-callback-return": "error",
+        "block-scoped-var": "error",
+        "consistent-return": "error",
+        "default-case": "error",
+        "no-alert": "error",
+        "no-caller": "error",
+        "no-div-regex": "error",
+        "no-eval": "error",
+        "no-extend-native": "error",
+        "no-extra-bind": "error",
+        "no-extra-label": "error",
+        "no-implied-eval": "error",
+        "no-invalid-this": "error",
+        "no-iterator": "error",
+        "no-labels": "error",
+        "no-lone-blocks": "error",
+        "no-multi-str": "error",
+        "no-new-func": "error",
+        "no-new-wrappers": "error",
+        "no-return-assign": "error",
+        "no-return-await": "error",
+        "no-self-compare": "error",
+        "no-sequences": "error",
+        "no-unused-expressions": "error",
+        "complexity": ["error", { "max": 12 }],
+        "max-classes-per-file": "error",
+
+        "@typescript-eslint/ban-types": ["off"],
+        // Need to have camelcase off because off our legacy snake case for API
+        "@typescript-eslint/camelcase": ["off"],
+        "@typescript-eslint/consistent-type-assertions": ["error", { "assertionStyle": "angle-bracket" }],
+        "@typescript-eslint/consistent-type-definitions": ["error", "interface"],
+        // Note: if we ever use this config to lint js files the following rule needs
+        // to be off and an override added specifically for ts files
+        "@typescript-eslint/explicit-function-return-type": ["error", { "allowExpressions": true }],
+        "@typescript-eslint/explicit-member-accessibility": ["error"],
+        "@typescript-eslint/interface-name-prefix": ["error"],
+        "@typescript-eslint/member-ordering": [
+            "error",
+            {
+                /* The only difference between default is the constructor is specified
+                 * after static methods
+                 */
+                "default": [
+                    "public-static-field",
+                    "protected-static-field",
+                    "private-static-field",
+
+                    "public-instance-field",
+                    "protected-instance-field",
+                    "private-instance-field",
+
+                    "public-field",
+                    "protected-field",
+                    "private-field",
+
+                    "static-field",
+                    "instance-field",
+
+                    "field",
+
+                    "public-static-method",
+                    "protected-static-method",
+                    "private-static-method",
+
+                    "constructor",
+
+                    "public-instance-method",
+                    "protected-instance-method",
+                    "private-instance-method",
+
+                    "public-method",
+                    "protected-method",
+                    "private-method",
+
+                    "static-method",
+                    "instance-method",
+
+                    "method"
+                ]
+            }
+        ],
+        "@typescript-eslint/no-empty-function": ["error", { "allow": ["constructors"] }],
+        "@typescript-eslint/no-explicit-any": ["off"],
+        "@typescript-eslint/no-floating-promises": ["error"],
+        "@typescript-eslint/no-for-in-array": ["error"],
+        "@typescript-eslint/no-inferrable-types": ["off"],
+        "@typescript-eslint/no-magic-numbers": ["off"],
+        "@typescript-eslint/no-misused-promises": ["error"],
+        "@typescript-eslint/no-namespace": ["off"],
+        "@typescript-eslint/no-non-null-assertion": ["off"],
+        "@typescript-eslint/no-type-alias": ["error"],
+        "@typescript-eslint/no-unnecessary-qualifier": ["error"],
+        "@typescript-eslint/no-unnecessary-type-arguments": ["error"],
+        "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+        "@typescript-eslint/no-use-before-define": ["off"],
+        "@typescript-eslint/no-useless-constructor": ["error"],
+        "@typescript-eslint/no-var-requires": ["off"],
+        "@typescript-eslint/prefer-for-of": ["error"],
+        "@typescript-eslint/prefer-function-type": ["error"],
+        "@typescript-eslint/prefer-string-starts-ends-with": ["error"],
+        "@typescript-eslint/promise-function-async": ["error"],
+        "@typescript-eslint/require-await": ["error"],
+        "@typescript-eslint/typedef": [
+            "error",
+            {
+                "arrayDestructuring": false,
+                "arrowParameter": false,
+                "memberVariableDeclaration": false,
+                "objectDestructuring": true,
+                "parameter": true,
+                "propertyDeclaration": true
+            }
+        ],
+        "@typescript-eslint/unified-signatures": ["error"]
+    },
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": {
+        "ecmaVersion": 2018,
+        "sourceType": "module",
+        "project": "tsconfig.json"
+    }
+}
