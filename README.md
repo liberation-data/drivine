@@ -21,7 +21,7 @@ npm install @liberation-data/drivine
 
 # Define a Named (or default) Connection
 
-**File: .env**
+#### .env
 ```
 NEO_DATABASE_TYPE=NEO4J
 NEO_DATABASE_USER='neo4j'
@@ -55,7 +55,7 @@ export class AppModule implements NestModule {
 export class RouteRepository {
     public constructor(
         public readonly persistenceManager: TransactionalPersistenceManager,
-        @InjectCypher(__dirname + '/routesBetween') public readonly routesBetween: string
+        @InjectCypher('@/traffic/routesBetween')
     ) {
     }
 
