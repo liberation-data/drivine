@@ -2,7 +2,8 @@
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
-* Support multiple graph databases. Currently AgensGraph and Neo4j. 
+* Support multiple graph databases. Currently [AgensGraph](https://bitnine.net/agensgraph/) and 
+[Neo4j](https://neo4j.com/neo4j-graph-database/). 
 * Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.
 
 ## Features
