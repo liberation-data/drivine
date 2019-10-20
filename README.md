@@ -88,7 +88,7 @@ export class RouteRepository {
 ## Even Quicker Start 
 
 Clone the [starter template](https://github.com/liberation-data/drivine-inspiration) and start hacking. This module 
-contains a basic starter app, well as (coming soon) a number a graph database koans, adapted for Drivine, so you can  
+contains a basic starter app, well as (coming soon) a number a graph database koans, adapted for Drivine, so you can 
 get rolling as quickly as possible.  
 
 ## Detailed Documentation
