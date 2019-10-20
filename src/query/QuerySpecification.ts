@@ -6,6 +6,8 @@ export class QuerySpecification<T> {
     public parameters: any[];
     public mapper?: (result: any) => T;
     public transformType?: ClassType<T>;
+    private _skip: number;
+    private _limit: number;
 
     public constructor(public statement?: string) {
         this.statement = statement;
@@ -32,6 +34,25 @@ export class QuerySpecification<T> {
         return this;
     }
 
+    public skip(results: number): this {
+        this._skip = results;
+        return this;
+    }
+
+    public limit(results: number): this {
+        this._limit = results;
+        return this;
+    }
+
+    public finalize(): this {
+        Object.freeze(this);
+        return this;
+    }
+
+    public appliedStatement(): string {
+        return `${this.statement} ${this.skipClause()} ${this.limitClause()}`;
+    }
+
     /**
      * Returns parameters in the format of a supported database type.
      * @param type
@@ -47,4 +68,13 @@ export class QuerySpecification<T> {
             throw new DrivineError(`Database type ${type} is not supported.`);
         }
     }
+
+    private skipClause(): string {
+        return this._skip ? `SKIP ${this._skip}` : ``;
+    }
+
+    private limitClause(): string {
+        return this._limit ? `LIMIT ${this._limit}` : ``;
+    }
+
 }

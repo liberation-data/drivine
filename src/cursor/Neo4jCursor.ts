@@ -14,7 +14,9 @@ export class Neo4jCursor<T> extends Cursor<T> {
     public async read(count: number): Promise<T[]> {
         const results = await this.connection.query(
             new QuerySpecification<T>()
-                .withStatement(`${this.spec.statement} SKIP ${count * this.page} LIMIT ${count}`)
+                .withStatement(this.spec.statement!)
+                .skip(count * this.page)
+                .limit(count)
                 .bind(this.spec.parameters)
                 .transform(this.spec.transformType!)
                 .map(this.spec.mapper!)

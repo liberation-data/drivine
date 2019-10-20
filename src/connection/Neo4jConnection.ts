@@ -20,13 +20,14 @@ export class Neo4jConnection implements Connection {
     }
 
     public async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
+        spec.finalize();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
         let result;
         if (!this.transaction) {
-            result = await this.session.run(spec.statement!, spec.mapParameters(DatabaseType.NEO4J));
+            result = await this.session.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
         } else {
-            result = await this.transaction.run(spec.statement!, spec.mapParameters(DatabaseType.NEO4J));
+            result = await this.transaction.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
         }
         logger.log(spec, hrStart);
         return this.resultMapper.mapQueryResults<T>(result.records, spec);

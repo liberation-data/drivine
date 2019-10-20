@@ -23,15 +23,16 @@ export class AgensGraphConnection implements Connection {
     }
 
     public async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
+        spec.finalize();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
-        const result = await this.client.query(spec.statement!, spec.mapParameters(DatabaseType.AGENS_GRAPH));
+        const result = await this.client.query(spec.appliedStatement(), spec.mapParameters(DatabaseType.AGENS_GRAPH));
         logger.log(spec, hrStart);
         return this.resultMapper.mapQueryResults<T>(result.rows, spec);
     }
 
     public async openCursor<T>(spec: CursorSpecification<T>): Promise<AgensGraphCursor<T>> {
-        const pgCursorSpec = new PgCursor(spec.statement, spec.mapParameters(DatabaseType.AGENS_GRAPH));
+        const pgCursorSpec = new PgCursor(spec.appliedStatement(), spec.mapParameters(DatabaseType.AGENS_GRAPH));
         const pgCursor = await this.client.query(pgCursorSpec);
         return new AgensGraphCursor<T>(this.sessionId(), spec, pgCursor, this.resultMapper);
     }
