@@ -88,9 +88,10 @@ Will be added in the following days.
 
 ## About
 
-Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) the creator of popular library
-[Typhoon](https://github.com/appsquickly/typhoon) from [AppsQuick.ly](https://appsquick.ly). Drivine is sponsored by 
-[Liberation Data](https://liberation-data.com).   
+Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638), who is  the creator of a 
+popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from [AppsQuick.ly](https://appsquick.ly). 
+
+Drivine is sponsored by [Liberation Data](https://liberation-data.com).   
 
 ## License
 
