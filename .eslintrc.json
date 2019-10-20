@@ -45,7 +45,7 @@
         "no-new-func": "error",
         "no-new-wrappers": "error",
         "no-return-assign": "error",
-        "no-return-await": "error",
+        "no-return-await": "off",
         "no-self-compare": "error",
         "no-sequences": "error",
         "no-unused-expressions": "error",

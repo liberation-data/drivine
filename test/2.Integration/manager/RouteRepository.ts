@@ -25,6 +25,17 @@ export class RouteRepository {
     }
 
     @Transactional()
+    public async findFastestBetween(start: string, destination: string): Promise<Route> {
+        return this.persistenceManager.getOne(
+            new QuerySpecification<Route>()
+                .withStatement(this.routesBetween)
+                .bind([start, destination])
+                .limit(1)
+                .transform(Route)
+        );
+    }
+
+    @Transactional()
     public async asyncRoutesBetween(start: string, destination: string): Promise<Cursor<Route>> {
         return this.persistenceManager.openCursor(
             new CursorSpecification<Route>()

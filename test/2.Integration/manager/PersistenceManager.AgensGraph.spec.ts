@@ -50,6 +50,14 @@ describe("PersistenceManager", () => {
             });
         });
 
+        it('should find the single fastest route between two cities', async () => {
+            return inTestContext().run(async () => {
+                const result = await routeRepo.findFastestBetween('Cavite Island', 'NYC');
+                expect(result).toBeDefined();
+                expect(result.travelTime).toEqual(26);
+            });
+        });
+
         it("should find routes between two cities, returning an async iterable cursor", async () => {
             return inTestContext().run(async () => {
                 const cursor = await routeRepo.asyncRoutesBetween("Cavite Island", "NYC");

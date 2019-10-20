@@ -86,6 +86,7 @@
         "eslint-plugin-prettier": "^3.1.0",
         "husky": "^3.0.5",
         "jest": "^24.8.0",
+        "jest-each": "^24.9.0",
         "lint-staged": "^9.2.5",
         "nodemon": "^1.19.1",
         "package-preview": "^2.0.0",
@@ -128,9 +129,7 @@
             "<rootDir>/test"
         ],
         "coverageDirectory": "./coverage",
-        "setupFilesAfterEnv": [
-            "./test/defaultJestTimeout.ts"
-        ],
+        "setupFilesAfterEnv": [],
         "testEnvironment": "node",
         "moduleNameMapper": {
             "@/(.*)$": "<rootDir>/src/$1"
