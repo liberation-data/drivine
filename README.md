@@ -105,8 +105,7 @@ AMEX, Etihad Airlines, Singapore Airlines and others.
 The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
 a social network for musicians and music lovers, that consequently must support thousands of transactions per second.
 
-Jasper was a past committer to the [Spring Framework](https://spring.io/) including on  
-[Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
+Jasper was a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
 Drivine is sponsored by [Liberation Data](https://liberation-data.com).   
 
