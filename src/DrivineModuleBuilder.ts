@@ -10,7 +10,7 @@ import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPe
 
 const fs = require('fs');
 
-export class DrivineModuleBuilder implements NestModule {
+export class DrivineModuleBuilder {
     private logger = new Logger(DrivineModuleBuilder.name);
     private _providers: Provider[];
 
@@ -23,10 +23,6 @@ export class DrivineModuleBuilder implements NestModule {
             this.logger.warn(`This version of Drivine supports only a single database. 
                 Additional connection providers will be ignored`);
         }
-    }
-
-    public configure(consumer: MiddlewareConsumer): MiddlewareConsumer | void {
-        consumer.apply(TransactionContextMiddleware).forRoutes('**/**');
     }
 
     public build(): DrivineModule {
