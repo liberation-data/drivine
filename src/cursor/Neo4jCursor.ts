@@ -3,6 +3,9 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { Neo4jConnection } from '@/connection/Neo4jConnection';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
+/**
+ * This is a rudimentary placeholder for a pending implementation that will use the driver's streaming capabilities.
+ */
 export class Neo4jCursor<T> extends Cursor<T> {
     private page: number;
 
