@@ -78,11 +78,19 @@ export class RouteRepository {
 
 ## Even Quicker Start 
 
-Clone the [start template](https://github.com/liberation-data/drivine-inspiration) and start hacking. 
+Clone the [start template](https://github.com/liberation-data/drivine-inspiration) and start hacking. This module 
+contains a basic starter app, well as (coming soon) a number a graph database koans, adapted for Drivine, so you can  
+get rolling as quickly as possible.  
 
 ## Detailed Documentation
 
 Will be added in the following days.
+
+## About
+
+Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) the creator of popular library
+[Typhoon](https://github.com/appsquickly/typhoon) from [AppsQuick.ly](https://appsquick.ly). Drivine is sponsored by 
+[Liberation Data](https://liberation-data.com).   
 
 ## License
 
