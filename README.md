@@ -78,7 +78,7 @@ export class RouteRepository {
 
 ## Even Quicker Start 
 
-Clone the [start template](https://github.com/liberation-data/drivine-inspiration) and start hacking. This module 
+Clone the [starter template](https://github.com/liberation-data/drivine-inspiration) and start hacking. This module 
 contains a basic starter app, well as (coming soon) a number a graph database koans, adapted for Drivine, so you can  
 get rolling as quickly as possible.  
 
@@ -88,8 +88,16 @@ Will be added in the following days.
 
 ## About
 
-Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638), who is  the creator of a 
-popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from [AppsQuick.ly](https://appsquick.ly). 
+Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is als 
+the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from 
+[AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
+AMEX, Etihad Airlines, Singapore Airlines and others.  
+
+The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
+a social network for musicians and music lovers, that consequently must support thousands of transactions per second.
+
+Jasper was a past committer to the [Spring Framework](https://spring.io/) including on  
+[https://spring.io/projects/spring-data-neo4j](Spring Data Neo4j). 
 
 Drivine is sponsored by [Liberation Data](https://liberation-data.com).   
 
