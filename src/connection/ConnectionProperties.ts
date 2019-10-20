@@ -19,22 +19,22 @@ export interface ConnectionProperties {
  * @throws DatabaseError if required properties do not exist.
  */
 export function ConnectionPropertiesFromEnv(connectionName?: string): ConnectionProperties {
-    const name = connectionName ? `_${connectionName}` : '';
+    const prefix = connectionName ? `${connectionName}_` : '';
 
-    const databaseType = <DatabaseType>process.env[`DATABASE${name}_TYPE`];
-    const host = process.env[`DATABASE${name}_HOST`];
-    const port = Number(process.env[`DATABASE${name}_PORT`]!);
-    const userName = process.env[`DATABASE${name}_USER`]!;
-    const password = process.env[`DATABASE${name}_PASSWORD`]!;
-    const idleTimeout = Number(process.env[`DATABASE${name}_IDLE_TIMEOUT`]!);
-    const databaseName = process.env[`DATABASE${name}_NAME`]!;
-    const defaultGraphPath = process.env[`DATABASE${name}_DEFAULT_GRAPH_PATH`]!;
+    const databaseType = <DatabaseType>process.env[`${prefix}DATABASE_TYPE`];
+    const host = process.env[`${prefix}DATABASE_HOST`];
+    const port = Number(process.env[`${prefix}DATABASE_PORT`]!);
+    const userName = process.env[`${prefix}DATABASE_USER`]!;
+    const password = process.env[`${prefix}DATABASE_PASSWORD`]!;
+    const idleTimeout = Number(process.env[`${prefix}DATABASE_IDLE_TIMEOUT`]!);
+    const databaseName = process.env[`${prefix}DATABASE_NAME`]!;
+    const defaultGraphPath = process.env[`${prefix}DATABASE_DEFAULT_GRAPH_PATH`]!;
 
-    assert(databaseType, `DATABASE${name}_TYPE for named connection is required.`);
-    assert(host, `DATABASE${name}_HOST for named connection is required.`);
+    assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
+    assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
 
     if (databaseType === DatabaseType.AGENS_GRAPH) {
-        assert(databaseName, `DATABASE${name}_NAME for named connection is required.`);
+        assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
     }
 
     return <ConnectionProperties>{
