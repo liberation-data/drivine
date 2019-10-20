@@ -30,7 +30,7 @@ export async function configureApp(app: INestApplication): Promise<void> {
             connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
         }),
     ],
-    providers: [HealthRepository, RouteRepository],
+    providers: [RouteRepository],
     controllers: [RouteController],
 })
 export class AppModule implements NestModule {

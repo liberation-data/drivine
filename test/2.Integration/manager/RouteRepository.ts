@@ -15,22 +15,22 @@ export class RouteRepository {
     ) {}
 
     @Transactional()
-    public async findRoutesBetween(start: string, destination: string): Promise<Route[]> {
-        return this.persistenceManager.query(
-            new QuerySpecification<Route>()
-                .withStatement(this.routesBetween)
-                .bind([start, destination])
-                .transform(Route)
-        );
-    }
-
-    @Transactional()
     public async findFastestBetween(start: string, destination: string): Promise<Route> {
         return this.persistenceManager.getOne(
             new QuerySpecification<Route>()
                 .withStatement(this.routesBetween)
                 .bind([start, destination])
                 .limit(1)
+                .transform(Route)
+        );
+    }
+
+    @Transactional()
+    public async findRoutesBetween(start: string, destination: string): Promise<Route[]> {
+        return this.persistenceManager.query(
+            new QuerySpecification<Route>()
+                .withStatement(this.routesBetween)
+                .bind([start, destination])
                 .transform(Route)
         );
     }

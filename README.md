@@ -3,9 +3,82 @@
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
 * Support multiple graph databases. Currently AgensGraph and Neo4j. 
-* Scale to hundreds and thousands of transactions per second, without compromising architectural integrity. 
+* Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.
 
-Documentation will be added in the following days. 
+## Features
+
+* Declarative Transaction Management
+* CYPHER-backed repositories
+* Streaming without back-pressure. Cursor<T> implements Node's `AsyncIterable` to pull on demand and can also pose as a 
+`Readable` stream. 
+* Light-weight use-case specific object mapping. (More about this in the detailed docs). 
+
+## Quick Start
+
+```
+npm install @liberation-data/drivine
+``` 
+
+# Define a Named (or default) Connection
+
+**File: .env**
+```
+NEO_DATABASE_TYPE=NEO4J
+NEO_DATABASE_USER='neo4j'
+NEO_DATABASE_PASSWORD='h4ckM3'
+NEO_DATABASE_HOST='localhost'
+NEO_DATABASE_PORT='7687'
+```
+
+### Add the Drivine Module and Enable Declarative Transactions
+
+```typescript
+@Module({
+    imports: [
+        DrivineModule.withOptions(<DrivineModuleOptions>{
+            connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv('NEO')]
+        }),
+    ],
+    providers: [RouteRepository],
+    controllers: [RouteController],
+})
+export class AppModule implements NestModule {
+
+    public configure(consumer: MiddlewareConsumer): any {
+        consumer.apply(TransactionContextMiddleware).forRoutes('**/**');
+    }
+}
+```
+
+```typescript
+@Injectable()
+export class RouteRepository {
+    public constructor(
+        public readonly persistenceManager: TransactionalPersistenceManager,
+        @InjectCypher(__dirname + '/routesBetween') public readonly routesBetween: string
+    ) {
+    }
+
+    @Transactional()
+    public async findFastestBetween(start: string, destination: string): Promise<Route> {
+        return this.persistenceManager.getOne(
+            new QuerySpecification<Route>()
+                .withStatement(this.routesBetween)
+                .bind([start, destination])
+                .limit(1)
+                .transform(Route)
+        );
+    }
+}
+```
+
+## Even Quicker Start 
+
+Clone the [start template](https://github.com/liberation-data/drivine-inspiration) and start hacking. 
+
+## Detailed Documentation
+
+Will be added in the following days.
 
 ## License
 
