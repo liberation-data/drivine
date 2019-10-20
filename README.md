@@ -1,4 +1,4 @@
-# Drivine
+![Typhoon](http://liberation-data.com/images/drivine.jpg)
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
@@ -56,8 +56,7 @@ export class AppModule implements NestModule {
 export class RouteRepository {
     public constructor(
         public readonly persistenceManager: TransactionalPersistenceManager,
-        @InjectCypher('@/traffic/routesBetween')
-    ) {
+        @InjectCypher('@/traffic/routesBetween')) {
     }
 
     @Transactional()
