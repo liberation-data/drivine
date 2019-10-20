@@ -64,6 +64,8 @@ export class AppModule implements NestModule {
 }
 ```
 
+## Off To The Races!
+
 ```typescript
 @Injectable()
 export class RouteRepository {
@@ -72,7 +74,7 @@ export class RouteRepository {
         @InjectCypher('@/traffic/routesBetween')) {
     }
 
-    @Transactional()
+    @Transactional() // This has default Propagation.REQUIRED, partipicate in a current txn, or start one
     public async findFastestBetween(start: string, destination: string): Promise<Route> {
         return this.persistenceManager.getOne(
             new QuerySpecification<Route>()
@@ -97,13 +99,13 @@ Will be added in the following days.
 
 ## About
 
-Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is als 
+Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
 the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from 
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
 AMEX, Etihad Airlines, Singapore Airlines and others.  
 
 The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
-a social network for musicians and music lovers, that consequently must support thousands of transactions per second.
+a social network for musicians and music lovers, that serves hundreds/thousands of transactions per second.
 
 Jasper was a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
