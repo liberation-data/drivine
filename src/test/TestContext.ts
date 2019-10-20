@@ -12,18 +12,20 @@ require('dotenv').config({
 });
 
 export function inTestContext(): TestContext {
-    if (TestContext.instance.connectionProvider instanceof AgensGraphConnectionProvider) {
-        const provider = <AgensGraphConnectionProvider>TestContext.instance.connectionProvider;
+
+    const context = new TestContext(true, ConnectionProviderRegistry.getInstance().defaultProvider());
+
+    if (context.connectionProvider instanceof AgensGraphConnectionProvider) {
+        const provider = <AgensGraphConnectionProvider> context.connectionProvider;
         assert(
             provider.idleTimeoutMillis === 500,
             `DATABASE_IDLE_TIMEOUT must be set to 500 in test environments - so that jest can shut down cleanly`
         );
     }
-    return TestContext.instance;
+    return context;
 }
 
 export class TestContext {
-    public static instance = new TestContext(true, ConnectionProviderRegistry.buildOrResolveFromEnv());
 
     public constructor(public readonly rollback: boolean, public readonly connectionProvider: ConnectionProvider) {}
 

@@ -1,6 +1,7 @@
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { ConnectionProviderBuilder } from '@/connection/ConnectionProviderBuilder';
 import { ConnectionPropertiesFromEnv } from '@/connection/ConnectionProperties';
+import { DrivineError } from "@/DrivineError";
 
 export class ConnectionProviderRegistry {
     private static instance: ConnectionProviderRegistry;
@@ -10,7 +11,7 @@ export class ConnectionProviderRegistry {
     public static buildOrResolveFromEnv(name?: string): ConnectionProvider {
         return ConnectionProviderRegistry.getBuilder()
             .withProperties(ConnectionPropertiesFromEnv(name))
-            .buildOrResolve();
+            .buildOrResolve(name);
     }
 
     public static getBuilder(): ConnectionProviderBuilder {
@@ -18,7 +19,7 @@ export class ConnectionProviderRegistry {
         return new ConnectionProviderBuilder(registry);
     }
 
-    private static getInstance(): ConnectionProviderRegistry {
+    public static getInstance(): ConnectionProviderRegistry {
         if (!ConnectionProviderRegistry.instance) {
             ConnectionProviderRegistry.instance = new ConnectionProviderRegistry();
         }
@@ -29,8 +30,17 @@ export class ConnectionProviderRegistry {
         this.providers = new Map<string, ConnectionProvider>();
     }
 
+    public defaultProvider(): ConnectionProvider {
+        const result = this.providers.values().next().value;
+        if (!result) {
+            throw new DrivineError(`No connection providers are registered`);
+        }
+        return result;
+    }
+
     public resolve(name?: string): ConnectionProvider | undefined {
-        return this.providers.get(name ? name : 'default');
+        const provider = this.providers.get(name ? name : 'default');
+        return provider;
     }
 
     public register(connectionProvider: ConnectionProvider, name?: string): void {

@@ -19,22 +19,22 @@ export interface ConnectionProperties {
  * @throws DatabaseError if required properties do not exist.
  */
 export function ConnectionPropertiesFromEnv(connectionName?: string): ConnectionProperties {
-    const suffix = connectionName ? `_${connectionName}` : '';
+    const name = connectionName ? `_${connectionName}` : '';
 
-    const databaseType = <DatabaseType>process.env[`DATABASE_TYPE${suffix}`];
-    const host = process.env[`DATABASE_HOST${suffix}`];
-    const port = Number(process.env[`DATABASE_PORT${suffix}`]!);
-    const userName = process.env[`DATABASE_USER${suffix}`]!;
-    const password = process.env[`DATABASE_PASSWORD${suffix}`]!;
-    const idleTimeout = Number(process.env[`DATABASE_IDLE_TIMEOUT${suffix}`]!);
-    const databaseName = process.env[`DATABASE_NAME${suffix}`]!;
-    const defaultGraphPath = process.env[`DATABASE_DEFAULT_GRAPH_PATH${suffix}`]!;
+    const databaseType = <DatabaseType>process.env[`DATABASE${name}_TYPE`];
+    const host = process.env[`DATABASE${name}_HOST`];
+    const port = Number(process.env[`DATABASE${name}_PORT`]!);
+    const userName = process.env[`DATABASE${name}_USER`]!;
+    const password = process.env[`DATABASE${name}_PASSWORD`]!;
+    const idleTimeout = Number(process.env[`DATABASE${name}_IDLE_TIMEOUT`]!);
+    const databaseName = process.env[`DATABASE${name}_NAME`]!;
+    const defaultGraphPath = process.env[`DATABASE${name}_DEFAULT_GRAPH_PATH`]!;
 
-    assert(databaseType, `DATABASE_TYPE for named connection is required.`);
-    assert(host, `DATABASE_HOST for named connection is required.`);
+    assert(databaseType, `DATABASE${name}_TYPE for named connection is required.`);
+    assert(host, `DATABASE${name}_HOST for named connection is required.`);
 
     if (databaseType === DatabaseType.AGENS_GRAPH) {
-        assert(databaseName, `DATABASE_NAME for named connection is required.`);
+        assert(databaseName, `DATABASE${name}_NAME for named connection is required.`);
     }
 
     return <ConnectionProperties>{
