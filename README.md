@@ -34,6 +34,10 @@ NEO_DATABASE_PORT='7687'
 ### Add the Drivine Module and Enable Declarative Transactions
 
 ```typescript
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/DrivineModule';
+import { ConnectionProviderRegistry } from '@liberation-data/drivine/connection/ConnectionProviderRegistry';
+import {TransactionContextMiddleware} from "@liberation-data/drivine/transaction/TransactionContextMIddleware";
+
 @Module({
     imports: [
         DrivineModule.withOptions(<DrivineModuleOptions>{
