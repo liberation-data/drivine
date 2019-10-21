@@ -49,8 +49,10 @@ import {TransactionContextMiddleware} from "@liberation-data/drivine/transaction
 
 @Module({
     imports: [
-        DrivineModule.withOptions(<DrivineModuleOptions>{
-            connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv('NEO')]
+        DrivineModule.withOptions(<DrivineModuleOptions> {
+            connectionProviders: [
+                ConnectionProviderRegistry.buildOrResolveFromEnv('NEO')
+            ]
         }),
     ],
     providers: [RouteRepository],
