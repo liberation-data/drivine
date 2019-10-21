@@ -1,4 +1,4 @@
-![Drivine](http://liberation-data.com/images/drivine2.jpg)
+![Drivine](https://liberation-data.com/images/drivine2.jpg)
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
