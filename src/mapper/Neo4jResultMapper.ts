@@ -41,6 +41,9 @@ const toNative = (val: any): any => {
     if (val instanceof neo4j.v1.types.Relationship) {
         return toNative(val.properties);
     }
+    if (val instanceof neo4j.v1.types.Point) {
+        return val;
+    }
     if (neo4j.v1.isInt(val)) {
         return toNumberOrThrow(<Integer>val);
     }
