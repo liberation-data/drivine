@@ -98,6 +98,14 @@ contains a basic starter template. Also, so that you can get rolling as quickly 
 
 Will be added in the following days.
 
+## Tutorials
+
+New to graph databases? Read some tutorials. 
+
+* [Rock &amp; Roll Traffic Routing, with Neo4j](https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html) 
+* [Rock &amp; Roll Traffic Routing, with Neo4j, Chapter Two](https://liberation-data.com/saxeburg-series/2018/12/05/rock-n-roll-traffic-routing.html) 
+
+Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_cerulean) with me. 
 ## About
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
