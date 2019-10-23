@@ -111,6 +111,8 @@ New to graph databases? Read some tutorials.
 
 Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_cerulean) with me. 
 
+---------------------------------------
+
 ## About
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
