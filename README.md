@@ -8,9 +8,9 @@ Drivine is a graph database client for Node.js and TypeScript. It was created wi
 
 With regards to the second point, let's break that down into component facets. 
 
-## Features . . .  
+## Features
 
-* Facilitates the use of well understood object-oriented and functional programming patterns. 
+* Facilitates the use of <a href="https://github.com/liberation-data/drivine/wiki/Repositories">well understood object-oriented</a> and functional programming patterns. 
 * Takes care of infrastructure concerns, so that you can focus on making the most of your data. 
 * Removes boiler plate code, especially the tedious and error-prone kind. 
 * Support streaming, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
