@@ -96,7 +96,7 @@ contains a basic starter template. Also, so that you can get rolling as quickly 
 
 ## Detailed Documentation
 
-Detailed documentation (currently under construction) [is here](https://github.com/liberation-data/drivine/wiki/Drivine) 
+Detailed documentation (currently under construction) [is here](https://github.com/liberation-data/drivine/wiki/Drivine).
 
 ## Tutorials
 
