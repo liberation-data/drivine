@@ -14,7 +14,7 @@ With regards to the second point, let's break that down into component facets.
 * Takes care of infrastructure concerns, so that you can focus on making the most of your data. 
 * <a href="https://github.com/liberation-data/drivine/wiki/Transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. 
 * <a href="https://github.com/liberation-data/drivine/wiki/Cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
-* Light-weight use-case specific object mapping - scaleable OGM. 
+* Light-weight use-case specific <a href="https://github.com/liberation-data/drivine/wiki/Object-Mapping">object graph mapping (OGM)</a>.
 
 ## Quick Start
 
