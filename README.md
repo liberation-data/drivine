@@ -123,7 +123,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 AMEX, Etihad Airlines, Singapore Airlines and others.  
 
 The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
-a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second. The approach has been proven in production. You can have your rational, flexible architecture and scale it too 🍻.  
+a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second. 
 
 Jasper was a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
