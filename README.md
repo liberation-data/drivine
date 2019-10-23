@@ -80,7 +80,7 @@ export class RouteRepository {
         @InjectCypher('@/traffic/routesBetween')) {
     }
 
-    @Transactional() // Has default Propagation.REQUIRED - means partipicate in a current txn, or start one.
+    @Transactional() // Has default Propagation.REQUIRED - so partipicate in a current txn, or start one.
     public async findFastestBetween(start: string, destination: string): Promise<Route> {
         return this.persistenceManager.getOne(
             new QuerySpecification<Route>()
