@@ -12,7 +12,7 @@ With regards to the second point on scaleability, let's break that down into com
 
 ## Features
 
-* Facilitates the use of <a href="https://github.com/liberation-data/drivine/wiki/Repositories">well understood object-oriented</a> and functional programming patterns, that adhere to a single responsibility principle. 
+* Facilitates the use of <a href="https://github.com/liberation-data/drivine/wiki/Repositories">well understood object-oriented</a> and functional programming patterns, that adhere to a single responsibility principle. [NestJS](https://nestjs.com/) will be optional, but is recommended. 
 * Takes care of <a href="https://github.com/liberation-data/drivine/wiki/Connection-Manager">infrastructure concerns</a>, so that you can focus on making the most of your data. 
 * <a href="https://github.com/liberation-data/drivine/wiki/Transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. 
 * <a href="https://github.com/liberation-data/drivine/wiki/Cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
