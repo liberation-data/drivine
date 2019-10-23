@@ -8,7 +8,7 @@ Drivine is a graph database client for Node.js and TypeScript. It was created wi
 
 ---------------------------------------
 
-With regards to the second point, on scaleability, let's break that down into component facets. 
+With regards to the second point on scaleability, let's break that down into component facets. 
 
 ## Features
 
