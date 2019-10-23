@@ -6,7 +6,9 @@ Drivine is a graph database client for Node.js and TypeScript. It was created wi
 [Neo4j](https://neo4j.com/neo4j-graph-database/). 
 * **Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.**
 
-With regards to the second point, let's break that down into component facets. 
+---------------------------------------
+
+With regards to the second point, on scaleability, let's break that down into component facets. 
 
 ## Features
 
@@ -117,7 +119,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 AMEX, Etihad Airlines, Singapore Airlines and others.  
 
 The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
-a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second.
+a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second. The approach has been **proven in production**. You can have your, rational, flexible architecture and scale it too 🍻.  
 
 Jasper was a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
