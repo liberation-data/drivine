@@ -2,17 +2,21 @@
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
-* Support multiple graph databases. Currently [AgensGraph](https://bitnine.net/agensgraph/) and 
+* Support multiple graph databases (simulataneously). Currently [AgensGraph](https://bitnine.net/agensgraph/) and 
 [Neo4j](https://neo4j.com/neo4j-graph-database/). 
-* Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.
+* **Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.**
+
+---------------------------------------
+
+With regards to the second point on scaleability, let's break that down into component facets. 
 
 ## Features
 
-* Declarative Transaction Management
-* CYPHER-backed repositories
-* Streaming without back-pressure. Cursor<T> implements Node's `AsyncIterable` to pull on demand and can also pose as a 
-`Readable` stream. 
-* Light-weight use-case specific object mapping. (More about this in the detailed docs). 
+* Facilitates the use of <a href="https://github.com/liberation-data/drivine/wiki/Repositories">well understood object-oriented</a> and functional programming patterns, that adhere to a single responsibility principle. [NestJS](https://nestjs.com/) will be optional, but is recommended. 
+* Takes care of <a href="https://github.com/liberation-data/drivine/wiki/Connection-Manager">infrastructure concerns</a>, so that you can focus on making the most of your data. 
+* <a href="https://github.com/liberation-data/drivine/wiki/Transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. 
+* <a href="https://github.com/liberation-data/drivine/wiki/Cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
+* Light-weight use-case specific <a href="https://github.com/liberation-data/drivine/wiki/Object-Mapping">object graph mapping (OGM)</a>.
 
 ## Quick Start
 
@@ -76,7 +80,7 @@ export class RouteRepository {
         @InjectCypher('@/traffic/routesBetween')) {
     }
 
-    @Transactional() // This has default Propagation.REQUIRED, partipicate in a current txn, or start one
+    @Transactional() // Has default Propagation.REQUIRED - means partipicate in a current txn, or start one.
     public async findFastestBetween(start: string, destination: string): Promise<Route> {
         return this.persistenceManager.getOne(
             new QuerySpecification<Route>()
@@ -96,7 +100,9 @@ contains a basic starter template. Also, so that you can get rolling as quickly 
 
 ## Detailed Documentation
 
-Will be added in the following days.
+Detailed documentation (currently under construction) [is here](https://github.com/liberation-data/drivine/wiki/Drivine).
+
+---------------------------------------
 
 ## Tutorials
 
@@ -106,6 +112,9 @@ New to graph databases? Read some tutorials.
 * [Rock &amp; Roll Traffic Routing, with Neo4j, Chapter Two](https://liberation-data.com/saxeburg-series/2018/12/05/rock-n-roll-traffic-routing.html) 
 
 Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_cerulean) with me. 
+
+---------------------------------------
+
 ## About
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
@@ -114,7 +123,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 AMEX, Etihad Airlines, Singapore Airlines and others.  
 
 The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
-a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second.
+a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second. 
 
 Jasper was a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
