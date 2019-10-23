@@ -4,15 +4,17 @@ Drivine is a graph database client for Node.js and TypeScript. It was created wi
 
 * Support multiple graph databases. Currently [AgensGraph](https://bitnine.net/agensgraph/) and 
 [Neo4j](https://neo4j.com/neo4j-graph-database/). 
-* Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.
+* **Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.**
 
-## Features
+With regards to the second point, let's break that down into component facets. 
 
-* Declarative Transaction Management
-* CYPHER-backed repositories
-* Streaming without back-pressure. Cursor<T> implements Node's `AsyncIterable` to pull on demand and can also pose as a 
-`Readable` stream. 
-* Light-weight use-case specific object mapping. (More about this in the detailed docs). 
+## Features . . .  
+
+* Facilitates the use of well understood object-oriented and functional programming patterns. 
+* Takes care of infrastructure concerns, so that you can focus on making the most of your data. 
+* Removes boiler plate code, especially the tedious and error-prone kind. 
+* Support streaming, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
+* Light-weight use-case specific object mapping - scaleable OGM. 
 
 ## Quick Start
 
@@ -106,6 +108,7 @@ New to graph databases? Read some tutorials.
 * [Rock &amp; Roll Traffic Routing, with Neo4j, Chapter Two](https://liberation-data.com/saxeburg-series/2018/12/05/rock-n-roll-traffic-routing.html) 
 
 Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_cerulean) with me. 
+
 ## About
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
