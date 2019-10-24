@@ -134,13 +134,15 @@ The ideas behind Drivine were developed . . .
 
 #### I'm not sure how to do [xyz]
 
-If you can't find what you need in the Quick Start or User Guides above, please get in touch. As per the license, support is on a best effort, volunteer basis. 
+> If you can't find what you need in the Quick Start or User Guides above, please get in touch. As per the license, support is on a best effort, volunteer basis. 
 
 #### Interested in contributing?
-Great! A contribution guide, along with detailed documentation will be published in the coming days. 
+
+> Great! A contribution guide, along with detailed documentation will be published in the coming days. 
 
 #### I've found a bug, or have a feature request
-Please raise a <a href="https://github.com/liberation-data/drivine/issues">GitHub</a> issue.
+
+> Please raise a <a href="https://github.com/liberation-data/drivine/issues">GitHub</a> issue.
 
 ## License
 
