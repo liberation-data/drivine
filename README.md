@@ -12,7 +12,8 @@ With regards to the second point on scaleability, let's break that down into com
 
 ## Features
 
-* Facilitates the use of <a href="https://github.com/liberation-data/drivine/wiki/Repositories">well understood object-oriented</a> and functional programming patterns, that adhere to a single responsibility principle. [NestJS](https://nestjs.com/) will be optional, but is recommended. 
+* Facilitates the use of <a href="https://github.com/liberation-data/drivine/wiki/Repositories">well understood object-oriented</a> and functional programming patterns. 
+* Supports implementation of code that adheres to a single responsibility principle (SRP). [NestJS](https://nestjs.com/) will be optional, but is recommended. 
 * Takes care of <a href="https://github.com/liberation-data/drivine/wiki/Connection-Manager">infrastructure concerns</a>, so that you can focus on making the most of your data. 
 * <a href="https://github.com/liberation-data/drivine/wiki/Transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. 
 * <a href="https://github.com/liberation-data/drivine/wiki/Cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
@@ -120,14 +121,14 @@ Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_c
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
 the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from 
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
-AMEX, Etihad Airlines, Singapore Airlines and others.  
+AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
 
-The ideas behind Drivine were developed while building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177), a 
-a social network for musicians and music lovers. Vampr serves hundreds/thousands of transactions per second. 
+The ideas behind Drivine were developed: 
 
-Jasper was a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
-
-Drivine is sponsored by [Liberation Data](https://liberation-data.com).   
+* While working as part of the leadership team, under <a href="https://www.linkedin.com/in/steffs/">Steffan Karagianis</a> at <a href="https://www.msts.com/en">MSTS</a>. Thanks Steff!
+* While building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177) for <a href="https://www.linkedin.com/in/simonsjosh/">Josh Simons</a> and <a href="https://www.linkedin.com/in/baz-palmer-5052a325/">Baz Palmer</a>. Vampr is a social network for musicians and music lovers. It serves hundreds/thousands of transactions per second. 
+* Through encouragement, advice, collaboration and debate, as well as listening to shared and individual experiences with members of the graph database community. On the encouragement and advice front, a special mention for <a href="https://twitter.com/mesirii?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor">Michael Hunger</a>, <a href="https://www.linkedin.com/in/joshua-bae-3775a423/">Joshua Bae</a> and past colleagues at <a href="https://twitter.com/graph_aware">GraphAware</a>. 
+* Through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
 ## License
 
