@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later",
@@ -19,7 +19,7 @@
     "main": "dist/DrivineModule.js",
     "types": "dist/DrivineModule.d.ts",
     "scripts": {
-        "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && tscpaths -p tsconfig.dist.json -s ./dist -o ./dist && cp package.json dist/",
+        "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && tscpaths -p tsconfig.dist.json -s ./dist -o ./dist && cp package.json dist/ && cp README.md dist/",
         "format": "npm run format:src && npm run format:test",
         "format:src": "prettier --write \"src/**/*.ts\"",
         "format:src:check": "prettier --check \"src/**/*.ts\"",
