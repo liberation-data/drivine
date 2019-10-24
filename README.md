@@ -127,7 +127,7 @@ The ideas behind Drivine were developed:
 
 * While working as part of the leadership team, under <a href="https://www.linkedin.com/in/steffs/">Steffan Karagianis</a> at <a href="https://www.msts.com/en">MSTS</a>. Thanks Steff!
 * While building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177) for <a href="https://www.linkedin.com/in/simonsjosh/">Josh Simons</a> and <a href="https://www.linkedin.com/in/baz-palmer-5052a325/">Baz Palmer</a>. Vampr is a social network for musicians and music lovers. It serves hundreds/thousands of transactions per second. 
-* Through encouragement, advice, collaboration and debate, as well as listening to shared and individual experiences with members of the graph database community. On the encouragement and advice front, a special mention for <a href="https://twitter.com/mesirii?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor">Michael Hunger</a>, <a href="https://www.linkedin.com/in/joshua-bae-3775a423/">Joshua Bae</a> and past colleagues at <a href="https://twitter.com/graph_aware">GraphAware</a>. 
+* Through encouragement, advice, collaboration and debate, as well as listening to shared and individual experiences with members of the graph database community. On the encouragement and advice front, especially from <a href="https://twitter.com/mesirii?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor">Michael Hunger</a>, <a href="https://www.linkedin.com/in/joshua-bae-3775a423/">Joshua Bae</a> and past colleagues at <a href="https://twitter.com/graph_aware">GraphAware</a>. 
 * Through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
 ## License
