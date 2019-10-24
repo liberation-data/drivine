@@ -123,7 +123,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
 AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
 
-The ideas behind Drivine were developed: 
+The ideas behind Drivine were developed . . .  
 
 * While working as part of the leadership team, under <a href="https://www.linkedin.com/in/steffs/">Steffan Karagianis</a> at <a href="https://www.msts.com/en">MSTS</a>. Thanks Steff!
 * While building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177) for <a href="https://www.linkedin.com/in/simonsjosh/">Josh Simons</a> and <a href="https://www.linkedin.com/in/baz-palmer-5052a325/">Baz Palmer</a>. Vampr is a social network for musicians and music lovers. It serves hundreds/thousands of transactions per second. 
