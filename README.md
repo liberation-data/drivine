@@ -130,6 +130,18 @@ The ideas behind Drivine were developed . . .
 * Through encouragement, advice, collaboration and debate, as well as listening to shared and individual experiences with members of the graph database community. On the encouragement and advice front especially from <a href="https://twitter.com/mesirii?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor">Michael Hunger</a>, <a href="https://www.linkedin.com/in/joshua-bae-3775a423/">Joshua Bae</a> and past colleagues at <a href="https://twitter.com/graph_aware">GraphAware</a>. 
 * Through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
+## Feedback 
+
+#### I'm not sure how to do [xyz]
+
+If you can't find what you need in the Quick Start or User Guides above, please get in touch. As per the license, support is on a best effort, volunteer basis. 
+
+#### Interested in contributing?
+Great! A contribution guide, along with detailed documentation will be published in the coming days. 
+
+#### I've found a bug, or have a feature request
+Please raise a <a href="https://github.com/liberation-data/drivine/issues">GitHub</a> issue.
+
 ## License
 
 Copyright (c) 2019 Liberation Data
