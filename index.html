@@ -258,22 +258,20 @@
                     multiple graph databases (simultaneously, if you wish) and to scale to hundreds or thousands of
                     transactions per
                     second. It allows you to meet these goals without compromising architectural integrity.</p>
-                <p class="testimonial-content mobile-four">Drivine provides a sweet-spot level of abstraction with
-                    management and object to graph mapping (OGM) features including
-                    the following:</p>
+                <p class="testimonial-content mobile-four">Drivine provides a sweet-spot level of abstraction, with
+                    management and object to graph mapping (OGM) features. This includes the following:</p>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
                 <ul class="testimonial-content bullet-list mobile-four">
-                    <li>Manages infrastructure concerns, like obtaining and releasing connections and sessions.</li>
+                    <li>Manages infrastructure concerns, such as obtaining and releasing connections and sessions.</li>
                     <li>Allows implementation repositories, which can be injected into services. Your code adheres to
                         single responsibility principle (SRP).
                     </li>
                     <li>Supports declarative decorator-driven transactions.</li>
                     <li>Supports streaming.</li>
-                    <li>Maps and transforms query results onto typed entities/models. Drivine makes an important
-                        distinction with
-                        regards to its mapping approach.
+                    <li>Maps and transforms query results onto typed entities or models. Drivine makes an important
+                        distinction with regards to its mapping approach. This will be detailed below.
                     </li>
                 </ul>
             </div>
@@ -315,10 +313,10 @@
             <div class="twelve columns page-content">
                 <h3 class="about-us-title">Repositories:</h3>
                 <p class="testimonial-content mobile-four">Repositories are a common pattern of structuring
-                    object-oriented, in order to adher to single responsibility
-                    principle (SRP). They encapsulate database operations for a particular type of entity.</p>
-                <p class="testimonial-content mobile-four">The
-                    <code>PersistenceManager</code> can be used to implement repositories, using composition.</p>
+                    object-oriented code, in order to adhere to single responsibility
+                    principle (SRP). They logically group database operations for a particular type of entity.</p>
+                <p class="testimonial-content mobile-four">Simply by using composition, the
+                    <code>PersistenceManager</code> can be used to implement repositories. Here is an example:</p>
             </div>
 
             <div class="code-sample"><pre>@Injectable()
@@ -344,16 +342,15 @@ export class HealthRepository {
                <p class="testimonial-content mobile-four">Just as repositories can be composed using a <code>PersistenceManager</code>, so services can be composed using
                     repositories. But what about transactions? When analyzing the functional and non-functional requirements of a system, transactions fall under what is known
                     as a <a href="https://en.wikipedia.org/wiki/Cross-cutting_concern" target="_blank" rel="noopener">cross-cutting
-                        concern</a>. They are called as such because they’re required in many places - or in other words, they <em>cut across</em>
+                        concern</a>. They are called as such because they’re required in many places. In other words, they <em>cut across</em>
                     many modules.</p>
-               <p class="testimonial-content mobile-four">Such requirements don’t fit well with pure object-oriented programming because they break single-responsibility
-                    principle. Imagine implementing a service method that is all about transferring funds, and then adding
-                    transaction concerns. Now add security. And then audit. Before too long, the class that neatly encapsulated a
-                    single responsibility has become a mess.</p>
+               <p class="testimonial-content mobile-four">Such requirements don’t fit well with pure object-oriented programming because they can compromise efforts to adhere to SRP. Imagine implementing a service method that is all about transferring funds, and then adding
+                    transaction concerns. Now add security. And then audit. Before too long, the class that neatly represented a
+                    single role has become a mess.</p>
                <p class="testimonial-content mobile-four">Fortunately, transactional concerns can easily be modularized in TypeScript using <a
                         href="https://www.typescriptlang.org/docs/handbook/decorators.html" target="_blank" rel="noopener">Decorators</a>,
                     a kind of <a href="https://en.wikipedia.org/wiki/Higher-order_function" target="_blank" rel="noopener">higher-order
-                        function</a> that wraps the original function.</p>
+                        function</a> that wraps the original function, in our case with transactional concerns applied.</p>
                <p class="testimonial-content mobile-four">In the context of a web application we register a middleware that tracks transaction information for a given
                     request:</p>
             </div>
@@ -400,7 +397,7 @@ export class RouteRepository {
             </div>
 
             <div class="twelve columns page-content no-top-margin">
-                <p class="testimonial-content mobile-four">By default the decorator will start a new transaction if one does not exist, otherwise participate in an existing
+                <p class="testimonial-content mobile-four">By default the decorator will start a new transaction if one does not exist. Otherwise it will participate in an existing
                     transaction. When the outermost transactional method completes, the entire stack will be committed. Meanwhile,
                     if an error is thrown, the transaction is rolled back.</p>
                 <p class="testimonial-content mobile-four">We can now compose transactional services from one ore more repositories as follows:</p>
@@ -429,7 +426,7 @@ export class RouteRepository {
 
             <div class="twelve columns page-content no-top-margin">
                 <p class="testimonial-content mobile-four">In the above example, if the <code>targetId</code> is invalid, all data operations are rolled back. Otherwise a
-                    commit is performed when the outermost transactional method completes. Note that we used normal error handling - implementing boiler-plate code was not required, and that code adheres to single responsibility principle.</p>
+                    commit is performed when the outermost transactional method completes. Note that we used normal error handling - implementing boiler-plate code was not required and code clearly represented a single task.</p>
             </div>
 
 
@@ -438,11 +435,8 @@ export class RouteRepository {
                 <h3 class="about-us-title">Streaming:</h3>
 
                 <p class="testimonial-content mobile-four">It is well and good to assemble an application where transactional services are made up from an aggregate of
-                    repositories.</p>
-                <p class="testimonial-content mobile-four">However, in today’s landscape the volumes of information are frequently too large to be buffered in a single
-                    result set.</p>
-                <p class="testimonial-content mobile-four">Fortunately the <code>PersistenceManager</code> that we saw earlier provides the ability to open a <code>Cursor&lt;T&gt;</code>.
-                    It provides two kinds of streaming capability.</p>
+                    repositories. However, for some use-cases volume of data is too large to be buffered in a single result set.</p>
+                <p class="testimonial-content mobile-four">Fortunately the <code>PersistenceManager</code> that we saw earlier provides the ability to open a <code>Cursor&lt;T&gt;</code>, which provides two kinds of streaming capabilities.</p>
 
                 <p class="testimonial-content mobile-four">Let’s explore. In the example below, the repository method promises to return a <code>Cursor</code> for a <code>Route</code>.</p>
 
@@ -461,9 +455,9 @@ public async findRoutesBetween(start: string, destination: string): Promise&lt;C
 </pre>
             </div>
 
-            <div class="twelve columns page-content">
+            <div class="twelve columns page-content no-top-margin">
                 <h3 class="about-us-title">Cursors are AsyncIterable</h3>
-                <p class="testimonial-content mobile-four">It directly implements <code>AsyncIterable</code>. This means that it can be used with a <code>for
+                <p class="testimonial-content mobile-four"><code>Cursor&lt;T&gt;</code> directly implements <code>AsyncIterable</code>. This means that it can be used with a <code>for
                     await...of</code> statement. During the execution of the loop, results will be pullled in batches, until the
                     upstream is depleted.</p>
             </div>
@@ -476,10 +470,9 @@ for await (const item of cursor) {
 </pre>
             </div>
 
-            <div class="twelve columns page-content">
+            <div class="twelve columns page-content no-top-margin">
                 <h3 class="about-us-title">Cursors can pose as a Readable stream</h3>
-                <p class="testimonial-content mobile-four">Besides <code>AsyncIterable</code> cursors can compose as a <code>Readable</code> stream. Why would we need this? <code>AsyncIterable</code> is helpful, but it may lead to problems when a tight loop is pushing data into a
-                stream, such as a file-stream:</p>
+                <p class="testimonial-content mobile-four">Besides <code>AsyncIterable</code> cursors turn themselves into a <code>Readable</code> stream. Why would we need this? <code>AsyncIterable</code> is helpful, but it may lead to problems when a tight loop is pushing data into a stream, such as a file-stream. Even though data is pulled in batches, pushing to quickly into a stream will cause problems. The following example could potentially crash:</p>
             </div>
 
             <div class="code-sample"><pre>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
@@ -489,9 +482,9 @@ for await (const item of cursor) {
 </pre>
             </div>
 
-            <div class="twelve columns page-content">
-                <p class="testimonial-content mobile-four">Pushing data too quickly can overload its buffers - this is signified when <code>fs.write(item)</code> returns
-                    false. If you ignore this warning and continue, your application can crash. There is a solution.</p>
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">Pushing data too quickly can overload buffers - this is signified when <code>fs.write(item)</code> returns
+                    false. If you ignore this warning and continue, your application can crash. The solution is as follows:</p>
             </div>
 
             <div class="code-sample"><pre>cursor.asStream({ transform: (route: Route) =&gt; route.toString() }).pipe(fileStream);
@@ -499,10 +492,9 @@ await StreamUtils.untilClosed(fileStream);
 </pre>
             </div>
 
-            <div class="twelve columns page-content">
+            <div class="twelve columns page-content no-top-margin">
                 <p class="testimonial-content mobile-four">Now new information will be pulled from the cursor as needed. It is the sink stream (filestream) that will
                     coordinate this, and at the rate at which it can handle.</p>
-                <p class="testimonial-content mobile-four">Do not push grass into the cow. Milk the cow. The cow will eat when it gets hungry.</p>
             </div>
 
 
@@ -511,7 +503,7 @@ await StreamUtils.untilClosed(fileStream);
                 <h3 class="about-us-title">Object Mapping:</h3>
 
                 <p class="testimonial-content mobile-four">Drivine provides graph-to-object mapping facilities, however, as described in the introduction, due to its design
-                    goal of optimal performance it differentiates from the most typical approaches.</p>
+                    goal of <strong>optimal performance</strong> it differentiates from the most typical approaches.</p>
                 <p class="testimonial-content mobile-four">In a typical application that uses an ORM or OGM:</p>
 
             </div>
@@ -519,14 +511,15 @@ await StreamUtils.untilClosed(fileStream);
             <div class="twelve columns page-content no-top-margin">
                 <ul class="testimonial-content bullet-list mobile-four">
                     <li>Generalised <em>entities</em> - a network of classes that represent things in our domain are defined.</li>
-                    <li>Instances of these domain entites are loaded, queries are generated.</li>
+                    <li>Instances of these domain entities are loaded. The OGM tool generates queries for this on our behalf.</li>
                     <li>Having loaded instances of our generalised entities information is plucked and mapped onto <em>use-case</em>
                         specific payload objects.
                     </li>
                 </ul>
             </div>
 
-            <div class="twelve columns page-content">
+            <div class="twelve columns page-content no-top-margin">
+                <h3 class="about-us-title">Trouble Ahead:</h3>
                 <p class="testimonial-content mobile-four">The approach can work, however when an application needs to be highly scaleable, several problems are
                     entailed:</p>
 
@@ -540,21 +533,22 @@ await StreamUtils.untilClosed(fileStream);
                     <li>Because the queries are system-generated, there is limited opportunity to efficiently undertake performance
                         tuning.
                     </li>
-                    <li>Similarly, because the entities are generalized, it is unlikely the the generated queries will be the
-                        optimal ones for a <em>specific use-case</em>.
+                    <li>Similarly, because the entities are generalized, <strong>it is unlikely the the generated queries will be the
+                        optimal ones for a <em>specific use-case</em></strong>.
                     </li>
                     <li>Finally, it is an unfortunate truth that the main <em>benefit</em> of generalised entities, a rich set of
-                        expressive objects is usually forgone! We end up with an <strong>Anemic Domain Model</strong>, which Martin
-                        Fowler writes about <a href="https://martinfowler.com/bliki/AnemicDomainModel.html" target="_blank"
-                                               rel="noopener">here</a>.
+                        expressive objects is usually forgone! We end up with an <strong>Anemic Domain Model</strong>, which
+                        <a href="https://en.wikipedia.org/wiki/Martin_Fowler_(software_engineer)">Martin Fowler</a>
+                         writes about <strong><a href="https://martinfowler.com/bliki/AnemicDomainModel.html" target="_blank"
+                                                                rel="noopener">here</a></strong>.</li>
                 </ul>
             </div>
 
-            <div class="twelve columns page-content">
-                <p class="testimonial-content mobile-four">Martin Fowler says he is not sure we the anemic domain model anti-pattern is so predominant. In my opinion, one
-                    primary cause is that most ORM/OGM tools do not offer to inject service dependencies onto the entities.</p>
-                <p class="testimonial-content mobile-four">In order to exhibit richer, more expressive behavior entites need collaborating services to assist.</p>
-                <p class="testimonial-content mobile-four">Whatever the cause, it still does nothing to address the first four points.</p>
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">In the referenced article, Mr Fowler states that he is not sure <em>why</em> the anemic domain model anti-pattern is so predominant. In my opinion, one
+                    primary cause is that most ORM/OGM tools do not offer to inject service dependencies onto the entities.
+                In order to exhibit richer, more expressive behavior entities will surely collaborating services to assist in that. Too support rich models, the OGM tool can offer to inject registered services, so that this domain objects have an opportunity to provide <em>behaviors</em> and not just data. A future version of drivine may offer to do this.</p>
+                <p class="testimonial-content mobile-four">In the meantime, whatever the cause, it still does nothing to address the first four points, so let's explore . . </p>
                 <h3 class="about-us-title">Object Mapping - Drivine Approach:</h3>
                 <p class="testimonial-content mobile-four">In order to benefit from cleanly architected code that can scale to many thousands of transactions per second,
                     Drivine takes the following approach:</p>
@@ -563,14 +557,15 @@ await StreamUtils.untilClosed(fileStream);
 
             <div class="twelve columns page-content no-top-margin">
                 <ul class="testimonial-content bullet-list mobile-four no-top-margin">
-                    <li>Queries are defined by <em>you</em> - take of your queries and their performance.
-                    </li>
-                    <li>Queries are injected to be used in repositories with a decorator. Because they are self-contained, they can
+                    <li>Queries are defined by <em>you</em> in a self-contained file. Because they are self-contained, they can
                         be modified, formatted, tested and tuned easily using the tool of your choice. I personally like <a
                                 href="https://plugins.jetbrains.com/plugin/8087-graph-database-support" target="_blank"
                                 rel="noopener">IntelliJ’s Graph Database Support</a>.
                     </li>
-                    <li>Rather than defining a generalised set of entities, focus on <em>use-case specific queries</em>. You can
+                    <li>Queries are injected to be used in repositories with a decorator.
+                    </li>
+                    <li>Rather than defining a generalised set of entities, focus on <em>use-case specific scenarios</em>
+                        that project or update a sub-graph from the underlying whole graph. You can
                         extract generalised entities later on, however avoid <a
                                 href="https://en.wikipedia.org/wiki/Big_Design_Up_Front" target="_blank" rel="noopener">big design
                             up-front</a>.
@@ -579,8 +574,9 @@ await StreamUtils.untilClosed(fileStream);
             </div>
 
 
-            <div class="twelve columns page-content">
-                <p class="testimonial-content mobile-four">We can need perform type-coercion of dates, numbers or enums or load a set of related entities into a type. Object mapping is provided by the <a href="https://github.com/typestack/class-transformer">class transformer</a></p>
+            <div class="twelve columns page-content no-top-margin">
+                <h3 class="about-us-title">What can be mapped:</h3>
+                <p class="testimonial-content mobile-four">We can need perform type-coercion of dates, numbers or enums. We can load a set of related entities into a type. Object mapping is provided by the <a href="https://github.com/typestack/class-transformer">class transformer</a></p>
             </div>
 
             <div class="code-sample"><pre>export class Route {
