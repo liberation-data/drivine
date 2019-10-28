@@ -1,6 +1,15 @@
 /* -----------------------------------------
    Header, Logo & Social Media Profiles
 ----------------------------------------- */
+
+.image-cropper {
+    width: 90%;
+    height: 90%;
+    position: relative;
+    overflow: hidden;
+    border-radius: 50%;
+}
+
 .code-sample {
     margin-left: 20px;
     text-align:left;
@@ -818,7 +827,7 @@ h3.our-team-title {
     text-align: center;
     padding: 0;
     margin: 0;
-    margin-top: 8px;
+    margin-top: 12px;
     margin-bottom: 0px;
     text-shadow: none;
     float: left;
