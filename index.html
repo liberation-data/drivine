@@ -344,7 +344,7 @@ export class HealthRepository {
                         concern</a>. They are called as such because they’re required in many places. In other words, they <em>cut across</em>
                     many modules.</p>
                <p class="testimonial-content mobile-four">Such requirements don’t fit well with pure object-oriented programming because they can compromise efforts to adhere to SRP. Imagine implementing a service method that is all about transferring funds, and then adding
-                    transaction concerns. Now add security. And then audit. Before too long, the class that neatly represented a
+                    transaction behaviors. Now add security. And then audit. Before too long, the class that neatly represented a
                     single role has become a mess.</p>
                <p class="testimonial-content mobile-four">Fortunately, transactional concerns can easily be modularized in TypeScript using <a
                         href="https://www.typescriptlang.org/docs/handbook/decorators.html" target="_blank" rel="noopener">Decorators</a>,
@@ -399,7 +399,7 @@ export class RouteRepository {
                 <p class="testimonial-content mobile-four">By default the decorator will start a new transaction if one does not exist. Otherwise it will participate in an existing
                     transaction. When the outermost transactional method completes, the entire stack will be committed. Meanwhile,
                     if an error is thrown, the transaction is rolled back.</p>
-                <p class="testimonial-content mobile-four">We can now compose transactional services from one ore more repositories as follows:</p>
+                <p class="testimonial-content mobile-four">We can now compose transactional services from one or more repositories as follows:</p>
             </div>
 
             <div class="code-sample"><pre>export class TransferService {
