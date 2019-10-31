@@ -319,6 +319,7 @@ export class HealthRepository {
 
         return this.persistenceManager.getOne&lt;number&gt;(
             new QuerySpecification(`match (n) return count(n) as count`)
+                .map((it) => it.count);
         );
     }
 }
