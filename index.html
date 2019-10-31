@@ -315,14 +315,11 @@
 export class HealthRepository {
     public constructor(public readonly persistenceManager: NonTransactionalPersistenceManager) {}
 
-    public async countAllVertices():
-    Promise&lt;number&gt; {
+    public async countAllVertices(): Promise&lt;number&gt; {
 
-        const results = await this.persistenceManager.query&lt;any&gt;(
+        return this.persistenceManager.getOne&lt;number&gt;(
             new QuerySpecification(`match (n) return count(n) as count`)
         );
-
-        return results[0].count;
     }
 }
 </pre>
@@ -372,10 +369,7 @@ export class RouteRepository {
     }
 
     @Transactional()
-    public async findFastestBetween(
-        start: string,
-        destination: string): Promise&lt;Route&gt; {
-
+    public async findFastestBetween(start: string,destination: string): Promise&lt;Route&gt; {
         return this.persistenceManager.getOne(
             new QuerySpecification&lt;Route&gt;()
                 .withStatement(this.routesBetween)
