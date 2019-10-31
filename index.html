@@ -479,7 +479,7 @@ for await (const item of cursor) {
                     false. If you ignore this warning and continue, your application can crash. The solution is as follows:</p>
             </div>
 
-            <div class="code-sample"><pre>cursor.asStream({ transform: (route: Route) =&gt; route.toString() }).pipe(fileStream);
+            <div class="code-sample"><pre>cursor.asStream().pipe(fileStream);
 await StreamUtils.untilClosed(fileStream);
 </pre>
             </div>
