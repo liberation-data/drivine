@@ -389,7 +389,7 @@ export class RouteRepository {
             </div>
 
             <div class="twelve columns page-content no-top-margin">
-                <p class="testimonial-content mobile-four">By default the decorator will start a new transaction if one does not exist. Otherwise it will participate in an existing
+                <p class="testimonial-content mobile-four">By <a href="https://github.com/liberation-data/drivine/blob/master/src/transaction/Propagation.ts">default</a> the decorator will start a new transaction if one does not exist. Otherwise it will participate in an existing
                     transaction. When the outermost transactional method completes, the entire stack will be committed. Meanwhile,
                     if an error is thrown, the transaction is rolled back.</p>
                 <p class="testimonial-content mobile-four">We can now compose transactional services from one or more repositories as follows:</p>
@@ -554,7 +554,7 @@ await StreamUtils.untilClosed(fileStream);
                                 href="https://plugins.jetbrains.com/plugin/8087-graph-database-support" target="_blank"
                                 rel="noopener">IntelliJ’s Graph Database Support</a>.
                     </li>
-                    <li>Queries are injected to be used in repositories with a decorator.
+                    <li>Queries are injected to be used in repositories with a <a href="https://github.com/liberation-data/drivine/blob/master/src/DrivineInjectionDecorators.ts">decorator</a>.
                     </li>
                     <li>Rather than defining a generalised set of entities, focus on <em>use-case specific scenarios</em>
                         that project or update a sub-graph from the underlying whole graph. You can
