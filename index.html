@@ -597,7 +597,38 @@ await StreamUtils.untilClosed(fileStream);
             </div>
 
 
+            <!-- TESTING -->
+            <div class="twelve columns page-content">
+                <h3 class="about-us-title">Testing:</h3>
 
+                <p class="testimonial-content mobile-four">Drivine supports the creation of integration and end-to-end tests
+                    that run inside a roll-back transaction. This is useful when testing against shared data and/or
+                when testing transactional database operations in parallel. Within the test it is possible to read and
+                make assertions upon uncommitted data, after which it is rolled back, restoring the database to a clean state. Here's how: </p>
+            </div>
+
+            <div class="code-sample"><pre>it('should return the fastest route between start and dest ', async () => {
+    return inTestContext().run(async () => {
+        const result = await request(app.getHttpServer())
+            .get('/routes/between/Pigalle/NYC')
+            .expect(HttpStatus.OK);
+
+        expect(result.body[0].travelTime).toEqual(8.5);
+    });
+});
+</pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">In the event of trouble-shooting, if we would like to explore
+                what actually happened in the database, we can use:</p>
+            </div>
+
+            <div class="code-sample"><pre>return inTestContext().withRollback(false).run(async () => {
+    // Now the transaction will be committed.
+});
+                </pre>
+            </div>
 
             <!---- FEATURES AND DESIGN GOALS -->
             <div class="twelve columns page-section hide-for-760" id="features">
