@@ -2,21 +2,6 @@
    Header, Logo & Social Media Profiles
 ----------------------------------------- */
 
-@media screen and (min-width: 2880px) {
-
-    .header-container {
-        width: 100% !important;
-        height: 50px;
-        background: #01414e url(images/header-background-2880.png) top center no-repeat;
-        position: fixed;
-        -moz-box-shadow: 0px 1px 5px #000;
-        -webkit-box-shadow: 0px 1px 5px #000;
-        box-shadow: 0px 1px 5px #000;
-        z-index: 100;
-    }
-
-}
-
 .image-cropper {
     width: 90%;
     height: 90%;
