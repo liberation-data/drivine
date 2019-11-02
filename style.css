@@ -2,21 +2,6 @@
    Header, Logo & Social Media Profiles
 ----------------------------------------- */
 
-@media screen and (min-width: 2880px) {
-
-    .header-container {
-        width: 100% !important;
-        height: 50px;
-        background: #01414e url(images/header-background-2880.png) top center no-repeat;
-        position: fixed;
-        -moz-box-shadow: 0px 1px 5px #000;
-        -webkit-box-shadow: 0px 1px 5px #000;
-        box-shadow: 0px 1px 5px #000;
-        z-index: 100;
-    }
-
-}
-
 .image-cropper {
     width: 90%;
     height: 90%;
@@ -158,6 +143,7 @@ a.facebook-header:hover, a.twitter-header:hover {
     -webkit-border-radius: 50px;
     -moz-border-radius: 50px;
     border-radius: 50px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
 }
 
 .top-icon img {
@@ -169,6 +155,7 @@ a.facebook-header:hover, a.twitter-header:hover {
     -webkit-border-radius: 49px;
     -moz-border-radius: 49px;
     border-radius: 49px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
 }
 
 .top-divider {
