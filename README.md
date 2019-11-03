@@ -22,57 +22,9 @@ With regards to the second point on scaleability, let's break that down into com
 
 ## Quick Start
 
-```
-npm install @liberation-data/drivine
-``` 
+Start creating repositories like the one below by following the **<a href="https://github.com/liberation-data/drivine/wiki/Quick-Start">Quick Start</a>** guide. 
 
-# Define a Named (or default) Connection
-
-#### .env
-```
-NEO_DATABASE_TYPE=NEO4J
-NEO_DATABASE_USER='neo4j'
-NEO_DATABASE_PASSWORD='h4ckM3'
-NEO_DATABASE_HOST='localhost'
-NEO_DATABASE_PORT='7687'
-
-TRAFFIC_DATABASE_TYPE=AGENS_GRAPH
-TRAFFIC_DATABASE_NAME='maps'
-TRAFFIC_DATABASE_USER='agens'
-TRAFFIC_DATABASE_PASSWORD='h4ckMe'
-TRAFFIC_DATABASE_HOST='localhost'
-TRAFFIC_DATABASE_PORT='5432'
-TRAFFIC_DATABASE_IDLE_TIMEOUT=500
-TRAFFIC_DATABASE_DEFAULT_GRAPH_PATH=traffic
-```
-
-### Add the Drivine Module and Enable Declarative Transactions
-
-```typescript
-import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/DrivineModule';
-import { ConnectionProviderRegistry } from '@liberation-data/drivine/connection/ConnectionProviderRegistry';
-import {TransactionContextMiddleware} from "@liberation-data/drivine/transaction/TransactionContextMIddleware";
-
-@Module({
-    imports: [
-        DrivineModule.withOptions(<DrivineModuleOptions> {
-            connectionProviders: [
-                ConnectionProviderRegistry.buildOrResolveFromEnv('NEO')
-            ]
-        }),
-    ],
-    providers: [RouteRepository],
-    controllers: [RouteController],
-})
-export class AppModule implements NestModule {
-
-    public configure(consumer: MiddlewareConsumer): any {
-        consumer.apply(TransactionContextMiddleware).forRoutes('**/**');
-    }
-}
-```
-
-## Off To The Races!
+### Off to the Races!
 
 ```typescript
 @Injectable()
