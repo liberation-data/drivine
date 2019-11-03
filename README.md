@@ -24,8 +24,6 @@ With regards to the second point on scaleability, let's break that down into com
 
 Start creating repositories like the one below by following the **<a href="https://github.com/liberation-data/drivine/wiki/Quick-Start">Quick Start</a>** guide **<a href="https://github.com/liberation-data/drivine/wiki/Quick-Start">here</a>**. 
 
-### Off to the Races!
-
 ```typescript
 @Injectable()
 export class RouteRepository {
