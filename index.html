@@ -26,6 +26,10 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <link rel="shortcut icon" href="favicon.ico"/>
 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/styles/zenburn.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
     <!-- This script prevents links from opening in Mobile Safari. https://gist.github.com/1042026 -->
     <script>(function (a, b, c) {
         if (c in b && b[c]) {
@@ -276,7 +280,7 @@
                 <h3 class="about-us-title">Connection Management:</h3>
                 <p class="testimonial-content mobile-four">The library contains a persistence manager interface:</p>
 
-                <div class="code-sample"><pre>export interface PersistenceManager {
+                <div class="code-sample"><pre><code>export interface PersistenceManager {
 
     query&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;T[]&gt;;
 
@@ -285,9 +289,8 @@
     maybeGetOne&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;T | undefined&gt;;
 
     openCursor&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;Cursor&lt;T&gt;&gt;;
-
 }
-</pre>
+                </code></pre>
                 </div>
 
                 <p class="testimonial-content mobile-four">It is the job of the persistence manager to obtain a
@@ -311,7 +314,7 @@
                     <code>PersistenceManager</code> can be used to implement repositories. Here is an example:</p>
             </div>
 
-            <div class="code-sample"><pre>@Injectable()
+            <div class="code-sample"><pre><code>@Injectable()
 export class HealthRepository {
     public constructor(public readonly persistenceManager: NonTransactionalPersistenceManager) {}
 
@@ -323,7 +326,7 @@ export class HealthRepository {
         );
     }
 }
-</pre>
+            </code></pre>
             </div>
 
             <!-- TRANSACTIONS -->
@@ -345,21 +348,21 @@ export class HealthRepository {
                     request:</p>
             </div>
 
-            <div class="code-sample"><pre>export class AppModule implements NestModule {
+            <div class="code-sample"><pre><code>export class AppModule implements NestModule {
 
     public configure(consumer: MiddlewareConsumer): any {
         consumer.apply(TransactionContextMiddleware)
             .forRoutes('**/**');
     }
 }
-</pre>
+            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
                 <p class="testimonial-content mobile-four">And then simply apply the <code>Transactional()</code> decorator to any transactional methods.</p>
             </div>
 
-            <div class="code-sample"><pre>@Injectable()
+            <div class="code-sample"><pre><code>@Injectable()
 export class RouteRepository {
 
     public constructor(
@@ -380,7 +383,7 @@ export class RouteRepository {
         );
     }
 }
-</pre>
+            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -390,7 +393,7 @@ export class RouteRepository {
                 <p class="testimonial-content mobile-four">We can now compose transactional services from one or more repositories as follows:</p>
             </div>
 
-            <div class="code-sample"><pre>export class TransferService {
+            <div class="code-sample"><pre><code>export class TransferService {
 
     constructor(public readonly accountRepo: AccountRepository) {}
 
@@ -408,7 +411,7 @@ export class RouteRepository {
         await this.accountRepo.update(targetRepo);
     }
 }
-</pre>
+            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -429,7 +432,7 @@ export class RouteRepository {
 
             </div>
 
-            <div class="code-sample"><pre>@Transactional()
+            <div class="code-sample"><pre><code>@Transactional()
 public async findRoutesBetween(start: string, destination: string): Promise&lt;Cursor&lt;Route&gt;&gt; {
     return this.persistenceManager.openCursor(
         new CursorSpecification&lt;Route&gt;()
@@ -439,7 +442,7 @@ public async findRoutesBetween(start: string, destination: string): Promise&lt;C
             .transform(Route)
     );
 }
-</pre>
+            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -449,12 +452,12 @@ public async findRoutesBetween(start: string, destination: string): Promise&lt;C
                     upstream is depleted.</p>
             </div>
 
-            <div class="code-sample"><pre>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
+            <div class="code-sample"><pre><code>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
 for await (const item of cursor) {
     // The cursor will read more results, executing
     // database reads, until the stream is consumed.
 }
-</pre>
+            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -462,11 +465,11 @@ for await (const item of cursor) {
                 <p class="testimonial-content mobile-four">Besides <code>AsyncIterable</code> cursors turn themselves into a <code>Readable</code> stream. Why would we need this? <code>AsyncIterable</code> is helpful, but it may lead to problems when a tight loop is pushing data into a stream, such as a file-stream. Even though data is pulled in batches, pushing too quickly into a stream will cause problems. The following example could potentially crash:</p>
             </div>
 
-            <div class="code-sample"><pre>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
+            <div class="code-sample"><pre><code>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
 for await (const item of cursor) {
     const result = fs.write(item);
 }
-</pre>
+            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -474,9 +477,9 @@ for await (const item of cursor) {
                     false. If you ignore this warning and continue, your application can crash. The solution is as follows:</p>
             </div>
 
-            <div class="code-sample"><pre>cursor.asStream().pipe(fileStream);
+            <div class="code-sample"><pre><code>cursor.asStream().pipe(fileStream);
 await StreamUtils.untilClosed(fileStream);
-</pre>
+</code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -566,7 +569,7 @@ await StreamUtils.untilClosed(fileStream);
                 <p class="testimonial-content mobile-four">We can need perform type-coercion of dates, numbers or enums. We can load a set of related entities into a type. Object mapping is provided by the <a href="https://github.com/typestack/class-transformer">class transformer</a>.</p>
             </div>
 
-            <div class="code-sample"><pre>export class Route {
+            <div class="code-sample"><pre><code>export class Route {
     public readonly start: string;
     public readonly destination: string;
     public readonly metros: string[];
@@ -593,7 +596,7 @@ await StreamUtils.untilClosed(fileStream);
         return result;
     }
 }
-</pre>
+            </code></pre>
             </div>
 
 
@@ -607,7 +610,7 @@ await StreamUtils.untilClosed(fileStream);
                 make assertions upon uncommitted data, after which it is rolled back, restoring the database to a clean state. Here's how: </p>
             </div>
 
-            <div class="code-sample"><pre>it('should return the fastest route between start and dest ', async () => {
+            <div class="code-sample"><pre><code>it('should return the fastest route between start and dest ', async () => {
     return inTestContext().run(async () => {
         const result = await request(app.getHttpServer())
             .get('/routes/between/Pigalle/NYC')
@@ -616,7 +619,7 @@ await StreamUtils.untilClosed(fileStream);
         expect(result.body[0].travelTime).toEqual(8.5);
     });
 });
-</pre>
+</code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
@@ -624,10 +627,10 @@ await StreamUtils.untilClosed(fileStream);
                 what actually happened in the database, we can use:</p>
             </div>
 
-            <div class="code-sample"><pre>return inTestContext().withRollback(false).run(async () => {
+            <div class="code-sample"><pre><code>return inTestContext().withRollback(false).run(async () => {
     // Now the transaction will be committed.
 });
-                </pre>
+            </code></pre>
             </div>
 
             <!---- FEATURES AND DESIGN GOALS -->
