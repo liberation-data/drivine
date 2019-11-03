@@ -97,12 +97,14 @@ export class RouteRepository {
 
 ## Quickest Start
 
-Clone the [starter template](https://github.com/liberation-data/drivine-inspiration) and start hacking. This module 
+Clone the **[starter template](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
+
+This module 
 contains a basic starter template. Also, so that you can get rolling as quickly as possible, a number a graph database koans, for typical use-cases - recommendations, social networks, etc, each presented in a Drivine style.  
 
 ## Detailed Documentation
 
-Detailed documentation [is here](https://github.com/liberation-data/drivine/wiki/Drivine).
+Detailed documentation **[is here](https://github.com/liberation-data/drivine/wiki/Drivine)**.
 
 ---------------------------------------
 
