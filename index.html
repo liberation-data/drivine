@@ -368,9 +368,7 @@ export class RouteRepository {
     public constructor(
         public readonly persistenceManager: TransactionalPersistenceManager,
         @InjectCypher('@/traffic/routesBetween')
-        public readonly routesBetween: string
-    ) {
-    }
+        public readonly routesBetween: string) {}
 
     @Transactional()
     public async findFastestBetween(start: string,destination: string): Promise&lt;Route&gt; {
