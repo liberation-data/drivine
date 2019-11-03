@@ -459,7 +459,7 @@ for await (const item of cursor) {
 
             <div class="twelve columns page-content no-top-margin">
                 <h3 class="about-us-title">Cursors can pose as a Readable stream</h3>
-                <p class="testimonial-content mobile-four">Besides <code>AsyncIterable</code> cursors turn themselves into a <code>Readable</code> stream. Why would we need this? <code>AsyncIterable</code> is helpful, but it may lead to problems when a tight loop is pushing data into a stream, such as a file-stream. Even though data is pulled in batches, pushing to quickly into a stream will cause problems. The following example could potentially crash:</p>
+                <p class="testimonial-content mobile-four">Besides <code>AsyncIterable</code> cursors turn themselves into a <code>Readable</code> stream. Why would we need this? <code>AsyncIterable</code> is helpful, but it may lead to problems when a tight loop is pushing data into a stream, such as a file-stream. Even though data is pulled in batches, pushing too quickly into a stream will cause problems. The following example could potentially crash:</p>
             </div>
 
             <div class="code-sample"><pre>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
@@ -470,7 +470,7 @@ for await (const item of cursor) {
             </div>
 
             <div class="twelve columns page-content no-top-margin">
-                <p class="testimonial-content mobile-four">Pushing data too quickly can overload buffers - this is signified when <code>fs.write(item)</code> returns
+                <p class="testimonial-content mobile-four">Don't overload stream buffers - this is signified when <code>fs.write(item)</code> returns
                     false. If you ignore this warning and continue, your application can crash. The solution is as follows:</p>
             </div>
 
