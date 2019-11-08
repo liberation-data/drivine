@@ -1,8 +1,8 @@
 import { inTestContext } from '@/test/TestContext';
 import { HealthRepository } from './HealthRepository';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, DrivineModuleOptions } from "@/DrivineModule";
-import { ConnectionProviderRegistry } from "@/connection/ConnectionProviderRegistry";
+import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
+import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
 
 describe('HealthRepository', () => {
     let repo: HealthRepository;

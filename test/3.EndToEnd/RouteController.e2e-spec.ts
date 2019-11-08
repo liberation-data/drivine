@@ -1,11 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import * as request from 'supertest';
 import { HttpStatus, INestApplication } from '@nestjs/common';
-import { AppModule, configureApp } from "./AppModule";
-import { inTestContext } from "@/test/TestContext";
+import { AppModule, configureApp } from './AppModule';
+import { inTestContext } from '@/test/TestContext';
 
 describe('RouteController (e2e)', () => {
-
     let app: INestApplication;
 
     beforeAll(async () => {
@@ -31,7 +30,6 @@ describe('RouteController (e2e)', () => {
 
                 expect(result.body.length).toBeGreaterThan(0);
                 expect(result.body[0].travelTime).toEqual(8.5);
-
             });
         });
     });
@@ -47,5 +45,4 @@ describe('RouteController (e2e)', () => {
             });
         });
     });
-
 });

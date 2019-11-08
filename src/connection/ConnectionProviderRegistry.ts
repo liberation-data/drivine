@@ -1,7 +1,7 @@
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { ConnectionProviderBuilder } from '@/connection/ConnectionProviderBuilder';
 import { ConnectionPropertiesFromEnv } from '@/connection/ConnectionProperties';
-import { DrivineError } from "@/DrivineError";
+import { DrivineError } from '@/DrivineError';
 
 export class ConnectionProviderRegistry {
     private static instance: ConnectionProviderRegistry;

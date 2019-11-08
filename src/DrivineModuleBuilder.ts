@@ -1,12 +1,13 @@
-import { Logger, MiddlewareConsumer, NestModule, Provider } from '@nestjs/common';
+import { Logger, Provider } from '@nestjs/common';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { Cacheable } from 'typescript-cacheable';
-import { fileContentInjections } from '@/DrivineInjectionDecorators';
+import { cypherInjections, fileContentInjections, sqlInjections } from '@/DrivineInjectionDecorators';
 import * as assert from 'assert';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { TransactionContextMiddleware } from '@/transaction/TransactionContextMIddleware';
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
+import { Statement } from '@/query/Statement';
+import { QueryLanguage } from '@/query/QueryLanguage';
 
 const fs = require('fs');
 
@@ -35,7 +36,12 @@ export class DrivineModuleBuilder {
 
     public get providers(): Provider[] {
         if (!this._providers) {
-            this._providers = [...this.providerAssembly(), ...this.fileResourceProviders()];
+            this._providers = [
+                ...this.providerAssembly(),
+                ...this.cypherStatementProviders(),
+                ...this.sqlStatementProviders(),
+                ...this.fileResourceProviders()
+            ];
         }
         return this._providers;
     }
@@ -65,7 +71,36 @@ export class DrivineModuleBuilder {
         });
     }
 
-    @Cacheable()
+    public cypherStatementProviders(): Provider[] {
+        return cypherInjections.map(path => {
+            const token = `CYPHER:${path}`;
+            return <Provider>{
+                provide: token,
+                useFactory: (): any => {
+                    return <Statement>{
+                        text: this.fileContents(path),
+                        language: QueryLanguage.CYPHER
+                    };
+                }
+            };
+        });
+    }
+
+    public sqlStatementProviders(): Provider[] {
+        return sqlInjections.map(path => {
+            const token = `SQL:${path}`;
+            return <Provider>{
+                provide: token,
+                useFactory: (): any => {
+                    return <Statement>{
+                        text: this.fileContents(path),
+                        language: QueryLanguage.SQL
+                    };
+                }
+            };
+        });
+    }
+
     private fileContents(path: string): string {
         return fs.readFileSync(path, { encoding: 'UTF8' });
     }

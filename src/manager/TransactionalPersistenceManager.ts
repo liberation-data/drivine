@@ -6,11 +6,10 @@ import { Transaction } from '@/transaction/Transaction';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
-import { FinderOperations } from "@/manager/FinderOperations";
+import { FinderOperations } from '@/manager/FinderOperations';
 
 @Injectable()
 export class TransactionalPersistenceManager implements PersistenceManager {
-
     private finderOperations: FinderOperations;
 
     public constructor(public readonly localStorage: TransactionContextHolder) {
@@ -27,7 +26,7 @@ export class TransactionalPersistenceManager implements PersistenceManager {
     }
 
     public async maybeGetOne<T>(spec: QuerySpecification<T>): Promise<T | undefined> {
-        return await  this.finderOperations.maybeGetOne(spec);
+        return await this.finderOperations.maybeGetOne(spec);
     }
 
     public async openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>> {

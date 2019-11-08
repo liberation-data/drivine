@@ -1,8 +1,7 @@
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { Cursor } from "@/cursor/Cursor";
+import { Cursor } from '@/cursor/Cursor';
 
 export interface PersistenceManager {
-
     /**
      * Queries for a set of results according to the supplied specification.
      * @param spec
@@ -29,5 +28,4 @@ export interface PersistenceManager {
      * @param spec
      */
     openCursor<T>(spec: QuerySpecification<T>): Promise<Cursor<T>>;
-
 }

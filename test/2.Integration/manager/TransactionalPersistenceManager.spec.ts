@@ -3,8 +3,8 @@ import { StreamUtils } from '@/utils/StreamUtils';
 import { RouteRepository } from './RouteRepository';
 import { Route } from './Route';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, DrivineModuleOptions } from "@/DrivineModule";
-import { ConnectionProviderRegistry } from "@/connection/ConnectionProviderRegistry";
+import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
+import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
 
 const fs = require('fs');
 

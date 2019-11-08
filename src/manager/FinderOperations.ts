@@ -1,12 +1,10 @@
-import { PersistenceManager } from "@/manager/PersistenceManager";
-import { QuerySpecification } from "@/query/QuerySpecification";
-import * as assert from "assert";
-import { DrivineError } from "@/DrivineError";
+import { PersistenceManager } from '@/manager/PersistenceManager';
+import { QuerySpecification } from '@/query/QuerySpecification';
+import * as assert from 'assert';
+import { DrivineError } from '@/DrivineError';
 
 export class FinderOperations {
-
-    public constructor(public readonly persistenceManager: PersistenceManager) {
-    }
+    public constructor(public readonly persistenceManager: PersistenceManager) {}
 
     public async getOne<T>(spec: QuerySpecification<T>): Promise<T> {
         const results = await this.persistenceManager.query(spec);
@@ -24,5 +22,4 @@ export class FinderOperations {
             throw new DrivineError(`Expected one result, received ${results.length}.`);
         }
     }
-
 }

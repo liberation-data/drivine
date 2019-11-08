@@ -1,7 +1,6 @@
-import {Controller, Get, Param} from '@nestjs/common';
-import { RouteRepository } from "../2.Integration/manager/RouteRepository";
-import { Route } from "../2.Integration/manager/Route";
-
+import { Controller, Get, Param } from '@nestjs/common';
+import { RouteRepository } from '../2.Integration/manager/RouteRepository';
+import { Route } from '../2.Integration/manager/Route';
 
 export interface RecommendedRouteDto {
     start: string;
@@ -12,13 +11,13 @@ export interface RecommendedRouteDto {
 
 @Controller('/routes')
 export class RouteController {
-    public constructor(public readonly routeRepository: RouteRepository) {
-    }
+    public constructor(public readonly routeRepository: RouteRepository) {}
 
     @Get('/between/:start/:dest')
-    public async routeBetween(@Param('start') start: string, @Param('dest') dest: string):
-        Promise<RecommendedRouteDto[]> {
-
+    public async routeBetween(
+        @Param('start') start: string,
+        @Param('dest') dest: string
+    ): Promise<RecommendedRouteDto[]> {
         const routes = await this.routeRepository.findRoutesBetween(start, dest);
         return routes.map(
             (it: Route): RecommendedRouteDto => ({
@@ -31,16 +30,16 @@ export class RouteController {
     }
 
     @Get('/fastest/between/:start/:dest')
-    public async fastestBetween(@Param('start') start: string, @Param('dest') dest: string):
-        Promise<RecommendedRouteDto> {
-
+    public async fastestBetween(
+        @Param('start') start: string,
+        @Param('dest') dest: string
+    ): Promise<RecommendedRouteDto> {
         const route = await this.routeRepository.findFastestBetween(start, dest);
-        return <RecommendedRouteDto> {
+        return <RecommendedRouteDto>{
             start: route.start,
             destination: route.destination,
             via: route.intermediateMetros(),
             travelTime: route.travelTime
         };
-
     }
 }

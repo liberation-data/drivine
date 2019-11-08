@@ -1,9 +1,10 @@
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { Statement } from '@/query/Statement';
 
 export class CursorSpecification<T> extends QuerySpecification<T> {
     public batch: number = 100;
 
-    public constructor(public statement?: string) {
+    public constructor(statement?: string | Statement) {
         super(statement);
     }
 

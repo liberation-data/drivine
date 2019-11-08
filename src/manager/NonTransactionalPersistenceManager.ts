@@ -1,15 +1,14 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { DrivineError } from "@/DrivineError";
-import { PersistenceManager } from "@/manager/PersistenceManager";
-import { QuerySpecification } from "@/query/QuerySpecification";
-import { ConnectionProvider } from "@/connection/ConnectionProvider";
-import { InjectConnectionProvider } from "@/DrivineInjectionDecorators";
-import { Cursor } from "@/cursor/Cursor";
-import { FinderOperations } from "@/manager/FinderOperations";
+import { Injectable, Logger } from '@nestjs/common';
+import { DrivineError } from '@/DrivineError';
+import { PersistenceManager } from '@/manager/PersistenceManager';
+import { QuerySpecification } from '@/query/QuerySpecification';
+import { ConnectionProvider } from '@/connection/ConnectionProvider';
+import { InjectConnectionProvider } from '@/DrivineInjectionDecorators';
+import { Cursor } from '@/cursor/Cursor';
+import { FinderOperations } from '@/manager/FinderOperations';
 
 @Injectable()
 export class NonTransactionalPersistenceManager implements PersistenceManager {
-
     private logger = new Logger(NonTransactionalPersistenceManager.name);
     private finderOperations: FinderOperations;
 
@@ -33,7 +32,7 @@ export class NonTransactionalPersistenceManager implements PersistenceManager {
     }
 
     public async maybeGetOne<T>(spec: QuerySpecification<T>): Promise<T | undefined> {
-        return await  this.finderOperations.maybeGetOne(spec);
+        return await this.finderOperations.maybeGetOne(spec);
     }
 
     public async openCursor<T>(spec: QuerySpecification<T>): Promise<Cursor<T>> {

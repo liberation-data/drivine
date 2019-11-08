@@ -3,7 +3,7 @@ import { DatabaseType } from '@/connection/DatabaseType';
 
 describe('QuerySpecification', () => {
     describe('When binding parameters', () => {
-        const spec = new QuerySpecification().bind([1, 'foo', 'bar', false]);
+        const spec = new QuerySpecification().withStatement(`match (n) return count(n)`).bind([1, 'foo', 'bar', false]);
 
         it('should serialize to AgensGraph format', () => {
             const map: any[] = spec.mapParameters(DatabaseType.AGENS_GRAPH);
