@@ -63,7 +63,7 @@
         "rxjs": "^6.5.3",
         "shortid": "^2.2.15",
         "ts-data.stack": "^1.0.6",
-        "typescript-cacheable": "^1.0.5",
+        "typescript-cacheable": "^1.0.7",
         "uuid": "^3.3.2"
     },
     "devDependencies": {

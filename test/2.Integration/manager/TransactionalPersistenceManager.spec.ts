@@ -15,7 +15,7 @@ describe('RouteRepository', () => {
         const app: TestingModule = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
-                    connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
+                    connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv('MOVIES')]
                 })
             ],
             providers: [RouteRepository],

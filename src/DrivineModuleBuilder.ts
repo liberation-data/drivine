@@ -8,6 +8,7 @@ import { TransactionalPersistenceManager } from '@/manager/TransactionalPersiste
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { Statement } from '@/query/Statement';
 import { QueryLanguage } from '@/query/QueryLanguage';
+import { Cacheable } from 'typescript-cacheable';
 
 const fs = require('fs');
 
@@ -101,6 +102,7 @@ export class DrivineModuleBuilder {
         });
     }
 
+    @Cacheable()
     private fileContents(path: string): string {
         return fs.readFileSync(path, { encoding: 'UTF8' });
     }
