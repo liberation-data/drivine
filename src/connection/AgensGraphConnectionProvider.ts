@@ -19,6 +19,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
     ) {
         this.pool = new AgensGraph.Pool({
             host: this.host,
+            port: this.port,
             user: this.user,
             password: this.password,
             database: this.database,
