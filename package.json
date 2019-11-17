@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later",
@@ -56,6 +56,7 @@
         "mississippi": "^4.0.0",
         "moment": "^2.24.0",
         "neo4j-driver": "^1.7.6",
+        "pegjs": "^0.10.0",
         "pg": "^7.12.1",
         "pg-cursor": "^2.0.0",
         "pg-hstore": "^2.3.3",
