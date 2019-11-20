@@ -27,7 +27,7 @@ export async function configureApp(app: INestApplication): Promise<void> {
 @Module({
     imports: [
         DrivineModule.withOptions(<DrivineModuleOptions>{
-            connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv('MOVIES')]
+            connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
         })
     ],
     providers: [RouteRepository],
