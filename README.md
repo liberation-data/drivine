@@ -75,12 +75,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
 AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
 
-The ideas behind Drivine were developed . . .  
-
-* While working as part of the leadership team, under <a href="https://www.linkedin.com/in/steffs/">Steffan Karagianis</a> at <a href="https://www.msts.com/en">MSTS</a>. Thanks Steff!
-* While building [Vampr](https://apps.apple.com/us/app/vampr/id1069819177) on behalf of a client. Vampr is a social network for musicians and music lovers. It serves hundreds/thousands of transactions per second. 
-* Through encouragement, advice, collaboration and debate, as well as listening to shared and individual experiences with members of the graph database community. On the encouragement/advice front especially from <a href="https://twitter.com/mesirii?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor">Michael Hunger</a>, <a href="https://www.linkedin.com/in/joshua-bae-3775a423/">Joshua Bae</a> and past colleagues at <a href="https://twitter.com/graph_aware">GraphAware</a>. 
-* Through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
+The ideas behind this library were developed while developing graph-powered applications for my clients, some of which serve hundres/thousands of thransactions per second. And also through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
 
 ## Feedback 
 
