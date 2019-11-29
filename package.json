@@ -1,9 +1,18 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "0.0.6",
+    "version": "0.0.10",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/liberation-data/drivine.git"
+    },
+    "bugs": {
+        "url": "https://github.com/liberation-data/drivine/issues"
+    },
+    "homepage": "https://drivine.org",
+
     "keywords": [
         "graph",
         "graph database",
