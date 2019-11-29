@@ -32,8 +32,14 @@ export class QuerySpecification<T> {
         return this;
     }
 
-    public bind(parameters: any[]): this {
-        this.parameters = parameters;
+    /**
+     * Bind parameters to the query.
+     * @param parameters. If parameters are undefined or empty, does nothing.
+     */
+    public bind(parameters?: any[]): this {
+        if (parameters && parameters.length > 0) {
+            this.parameters = parameters;
+        }
         return this;
     }
 

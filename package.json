@@ -65,6 +65,7 @@
         "mississippi": "^4.0.0",
         "moment": "^2.24.0",
         "neo4j-driver": "^1.7.6",
+        "pegjs": "^0.10.0",
         "pg": "^7.12.1",
         "pg-cursor": "^2.0.0",
         "pg-hstore": "^2.3.3",
@@ -72,7 +73,7 @@
         "rxjs": "^6.5.3",
         "shortid": "^2.2.15",
         "ts-data.stack": "^1.0.6",
-        "typescript-cacheable": "^1.0.7",
+        "typescript-cacheable": "^2.0.1",
         "uuid": "^3.3.2"
     },
     "devDependencies": {
