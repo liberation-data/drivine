@@ -1,5 +1,5 @@
 import { DrivineModuleBuilder } from '@/DrivineModuleBuilder';
-import { DynamicModule, Global, Logger, Module, Provider, Type } from '@nestjs/common';
+import { DynamicModule, Global, Module, Provider, Type } from '@nestjs/common';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 
 require('dotenv').config({
@@ -17,9 +17,12 @@ export class DrivineModule implements DynamicModule {
     public readonly providers: Provider[];
     public readonly exports: Provider[];
 
-    private logger = new Logger(DrivineModule.name);
-
     public static withOptions(options: DrivineModuleOptions): DynamicModule {
-        return new DrivineModuleBuilder(options).build();
+        const builder = new DrivineModuleBuilder(options);
+        return <DynamicModule>{
+            module: DrivineModule,
+            providers: builder.providers,
+            exports: builder.providers
+        };
     }
 }

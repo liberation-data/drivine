@@ -27,14 +27,6 @@ export class DrivineModuleBuilder {
         }
     }
 
-    public build(): DrivineModule {
-        return Object.assign(new DrivineModule(), {
-            module: DrivineModule,
-            providers: this.providers,
-            exports: this.providers
-        });
-    }
-
     public get providers(): Provider[] {
         if (!this._providers) {
             this._providers = [
