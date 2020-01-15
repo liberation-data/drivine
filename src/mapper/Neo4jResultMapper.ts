@@ -78,7 +78,7 @@ const mapObj = (fn: Function, obj: any): any => {
 };
 
 const toNumberOrThrow = (val: Integer): number => {
-    if (val.inSafeRange) {
+    if (val.inSafeRange()) {
         return val.toNumber();
     }
     throw new Error(`${val} is not in safe range to convert to number`);
