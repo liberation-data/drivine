@@ -81,7 +81,7 @@ The ideas behind this library were developed while developing graph-powered appl
 
 #### I'm not sure how to do [xyz]
 
-> If you can't find what you need in the Quick Start or User Guides above, please get in touch. As per the license, support is on a best effort, volunteer basis. 
+> If you can't find what you need in the Quick Start or User Guides above, please get in touch. 
 
 #### Interested in contributing?
 
