@@ -75,7 +75,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
 AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
 
-The ideas behind this library were developed while developing graph-powered applications for my clients, some of which serve hundres/thousands of thransactions per second. And also through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j). 
+The ideas behind this library were developed while developing graph-powered applications like <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a>, which serve hundres/thousands of thransactions per second. I wanted to demonstrate how to use clean architecture patterns, and tools that remove boiler-plate, without sacrificing performance. I was informed in this tasks through experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j), and more iportantly, through discussion and debate with colleagues. Especially among those with experience applying mapping frameworks on applications that needed to exhibit high performance.  I believe that Drivine strikes an excellent balance in this regard. Let me know what you think. 
 
 ## Feedback 
 
