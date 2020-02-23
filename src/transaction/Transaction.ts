@@ -28,6 +28,14 @@ export class Transaction {
         this.contextHolder.currentTransaction = this;
     }
 
+    get description(): string {
+        return `${this.id} [${this.databases}]`
+    }
+
+    get databases(): string[] {
+        return Array.from(this.connectionRegistry.keys());
+    }
+
     get connections(): Connection[] {
         return Array.from(this.connectionRegistry.values());
     }
@@ -67,10 +75,11 @@ export class Transaction {
             this.logger.verbose(`Closing ${this.cursors.length} open cursors.`);
             await Promise.all(this.cursors.map(async it => it.close()));
             if (this.rollback) {
-                this.logger.verbose(`Transaction: ${this.id} successful, but is marked ROLLBACK. Rolling back.`);
+                this.logger.verbose(
+                    `Transaction: ${this.description} successful, but is marked ROLLBACK. Rolling back.`);
                 await Promise.all(this.connections.map(async it => it.rollbackTransaction()));
             } else {
-                this.logger.verbose(`Committing transaction: ${this.id}`);
+                this.logger.verbose(`Committing transaction: ${this.description}.`);
                 await Promise.all(this.connections.map(async it => it.commitTransaction()));
             }
             await this.releaseClient();
@@ -83,7 +92,7 @@ export class Transaction {
         }
         this.callStack.pop();
         if (this.callStack.isEmpty()) {
-            this.logger.verbose(`Rolling back transaction: ${this.id} due to error: ${e.message}`);
+            this.logger.verbose(`Rolling back transaction: ${this.description} due to error: ${e.message}.`);
             await Promise.all(this.connections.map(async it => it.rollbackTransaction()));
             await this.releaseClient(e);
         }
@@ -111,7 +120,7 @@ export class Transaction {
     }
 
     private async releaseClient(error?: Error): Promise<void> {
-        this.logger.verbose(`Releasing connection for transaction: ${this.id}`);
+        this.logger.verbose(`Releasing connection(s) for transaction: ${this.id}`);
         await Promise.all(this.connections.map(async it => it.release(error)));
         this.contextHolder.currentTransaction = undefined;
     }
