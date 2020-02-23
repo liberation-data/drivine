@@ -61,5 +61,4 @@ export class TransactionContextHolder {
     private set<T>(key: string, object: T): void {
         this.namespace.set(key, object);
     }
-    
 }

@@ -38,7 +38,9 @@ export class TestContext {
     @Transactional()
     private async runInTransaction(fn: (...args: any[]) => Promise<any>): Promise<any> {
         const transaction = TransactionContextHolder.getInstance().currentTransaction!;
-        transaction.markAsRollback();
+        if (this.rollback) {
+            transaction.markAsRollback();
+        }
         return fn();
     }
 }

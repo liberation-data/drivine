@@ -1,17 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { Route } from './Route';
 import { Transactional } from '@/transaction/Transactional';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { Cursor } from '@/cursor/Cursor';
 import { InjectCypher, InjectPersistenceManager } from '@/DrivineInjectionDecorators';
+import { PersistenceManager } from '@/manager/PersistenceManager';
 
 @Injectable()
 export class RouteRepository {
 
     constructor(
-        @InjectPersistenceManager() readonly persistenceManager: TransactionalPersistenceManager,
+        @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
         @InjectCypher(__dirname + '/routesBetween') readonly routesBetween: string
     ) {}
 

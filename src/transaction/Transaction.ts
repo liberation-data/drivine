@@ -64,7 +64,9 @@ export class Transaction {
             await Promise.all(this.cursors.map(async it => it.close()));
             if (this.rollback) {
                 this.logger.verbose(`Transaction: ${this.id} successful, but is marked ROLLBACK. Rolling back.`);
-                await Promise.all(Array.from(this.connections.values()).map(async it => await it.rollbackTransaction()));
+                await Promise.all(
+                    Array.from(this.connections.values()).map(async it => await it.rollbackTransaction())
+                );
             } else {
                 this.logger.verbose(`Committing transaction: ${this.id}`);
                 await Promise.all(Array.from(this.connections.values()).map(async it => await it.commitTransaction()));
@@ -108,5 +110,4 @@ export class Transaction {
         await Promise.all(Array.from(this.connections.values()).map(async it => await it.release(error)));
         this.contextHolder.currentTransaction = undefined;
     }
-
 }

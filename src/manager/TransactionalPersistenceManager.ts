@@ -8,7 +8,6 @@ import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
 
 export class TransactionalPersistenceManager implements PersistenceManager {
-
     private finderOperations: FinderOperations;
 
     constructor(readonly contextHolder: TransactionContextHolder, readonly database: string) {
@@ -38,8 +37,8 @@ export class TransactionalPersistenceManager implements PersistenceManager {
         if (!transaction) {
             throw new DrivineError(
                 'TransactionalPersistenceManager ' +
-                'requires a transaction. Mark the transactional method with the @Transactional() decorator, or use ' +
-                'NonTransactionalPersistenceManager'
+                    'requires a transaction. Mark the transactional method with the @Transactional() decorator, or use ' +
+                    'NonTransactionalPersistenceManager'
             );
         }
         return transaction;
