@@ -1,98 +1,90 @@
 import Stack from 'ts-data.stack';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Logger } from '@nestjs/common';
-import { Namespace } from 'cls-hooked';
 import * as assert from 'assert';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
-import { Connection } from '@/connection/Connection';
-import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { Cursor } from '@/cursor/Cursor';
+import { Connection } from '@/connection/Connection';
 import shortId = require('shortid');
 
 export class Transaction {
-    public readonly connectionProvider: ConnectionProvider;
-    public readonly id: string;
-    public readonly callStack: Stack<string>;
-    private localStorage: Namespace;
+    readonly id: string;
+    readonly callStack: Stack<string>;
+    private contextHolder: TransactionContextHolder;
 
     private rollback: boolean;
-    private _connection: Connection;
-    private _cursors: Cursor<any>[];
+    private connectionRegistry: Map<string, Connection>;
+    private cursors: Cursor<any>[];
 
     private readonly logger = new Logger(Transaction.name);
 
-    public constructor(connectionProvider: ConnectionProvider, rollback: boolean, localStorage: Namespace) {
-        this.connectionProvider = connectionProvider;
+    constructor(rollback: boolean, contextHolder: TransactionContextHolder) {
         this.rollback = rollback;
         this.id = shortId.generate();
         this.callStack = new Stack<string>();
-        this.localStorage = localStorage;
-
-        assert(this.connectionProvider, `Can't start a transaction without a ConnectionPool.`);
-
-        this.localStorage.set(TransactionContextKeys.TRANSACTION, this);
+        this.contextHolder = contextHolder;
+        this.contextHolder.currentTransaction = this;
     }
 
-    public get sessionId(): string {
-        assert(this._connection, `pushContext() must be called before obtaining the sessionId`);
-        return this._connection.sessionId();
+    get connections(): Connection[] {
+        return Array.from(this.connectionRegistry.values());
     }
 
-    public async query<T>(spec: QuerySpecification<T>): Promise<T[]> {
-        assert(this._connection, `pushContext() must be called running a query`);
+    async query<T>(spec: QuerySpecification<T>, database: string): Promise<T[]> {
+        assert(this.callStack.count(), `pushContext() must be called running a query`);
         try {
-            const results = await this._connection.query(spec);
+            const connection = await this.connectionFor(database);
+            const results = await connection.query(spec);
             return results;
         } catch (e) {
             throw DrivineError.withRootCause(e, spec);
         }
     }
 
-    public async openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>> {
-        assert(this._connection, `pushContext() must be called running a query`);
-        const cursor = await this._connection.openCursor(spec);
-        this._cursors.push(cursor);
+    async openCursor<T>(spec: CursorSpecification<T>, database: string): Promise<Cursor<T>> {
+        assert(this.callStack.count(), `pushContext() must be called running a query`);
+        const connection = await this.connectionFor(database);
+        const cursor = await connection.openCursor(spec);
+        this.cursors.push(cursor);
         return cursor;
     }
 
-    public async pushContext(context: string | symbol): Promise<void> {
+    async pushContext(context: string | symbol): Promise<void> {
         if (this.callStack.isEmpty()) {
-            this._connection = await this.connectionProvider.connect();
-            this._cursors = [];
+            this.connectionRegistry = new Map<string, Connection>();
+            this.cursors = [];
             this.logger.verbose(`Starting transaction: ${this.id}`);
-            await this._connection.startTransaction();
         }
         this.callStack.push(String(context));
-        await this.configureIfNeeded();
+        return Promise.resolve();
     }
 
-    public async popContext(): Promise<void> {
+    async popContext(): Promise<void> {
         this.callStack.pop();
         if (this.callStack.isEmpty()) {
-            this.logger.verbose(`Closing ${this._cursors.length} open cursors.`);
-            await Promise.all(this._cursors.map(async it => it.close()));
+            this.logger.verbose(`Closing ${this.cursors.length} open cursors.`);
+            await Promise.all(this.cursors.map(async it => it.close()));
             if (this.rollback) {
                 this.logger.verbose(`Transaction: ${this.id} successful, but is marked ROLLBACK. Rolling back.`);
-                await this._connection.rollbackTransaction();
+                await Promise.all(Array.from(this.connections).map(async it => await it.rollbackTransaction()));
             } else {
                 this.logger.verbose(`Committing transaction: ${this.id}`);
-                await this._connection.commitTransaction();
+                await Promise.all(this.connections.map(async it => await it.commitTransaction()));
             }
             await this.releaseClient();
         }
     }
 
-    public async popContextWithError(e: Error): Promise<void> {
-        if (!this._connection) {
+    async popContextWithError(e: Error): Promise<void> {
+        if (this.callStack.isEmpty()) {
             throw e;
         }
         this.callStack.pop();
         if (this.callStack.isEmpty()) {
             this.logger.verbose(`Rolling back transaction: ${this.id} due to error: ${e.message}`);
-            await this._connection.rollbackTransaction();
+            await Promise.all(this.connections.map(async it => await it.rollbackTransaction()));
             await this.releaseClient(e);
         }
     }
@@ -100,18 +92,27 @@ export class Transaction {
     /**
      * Manually signify that this transaction should be rolled back.
      */
-    public markAsRollback(): void {
+    markAsRollback(): void {
         this.rollback = true;
     }
 
-    private async configureIfNeeded(): Promise<void> {
-        // TODO : Call to platform specific config here
-        return Promise.resolve();
+    private async connectionFor(database: string): Promise<Connection> {
+        if (!this.connectionRegistry.get(database)) {
+            const databaseRegistry = this.contextHolder.databaseRegistry;
+            const connectionProvider = databaseRegistry.connectionProvider(database);
+            if (!connectionProvider) {
+                throw new DrivineError(`There is no database registered with key: ${database}`);
+            }
+            const connection = await connectionProvider.connect();
+            this.connectionRegistry.set(database, connection);
+            await connection.startTransaction();
+        }
+        return this.connectionRegistry.get(database)!;
     }
 
     private async releaseClient(error?: Error): Promise<void> {
         this.logger.verbose(`Releasing connection for transaction: ${this.id}`);
-        await this._connection.release(error);
-        TransactionContextHolder.instance.set(TransactionContextKeys.TRANSACTION, undefined);
+        await Promise.all(this.connections.map(async it => await it.release(error)));
+        this.contextHolder.currentTransaction = undefined;
     }
 }

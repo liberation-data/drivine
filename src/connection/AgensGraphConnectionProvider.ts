@@ -8,14 +8,15 @@ import { AgensGraphResultMapper } from '@/mapper/AgensGraphResultMapper';
 export class AgensGraphConnectionProvider implements ConnectionProvider {
     private readonly pool: any;
 
-    public constructor(
-        public readonly host: string,
-        public readonly user: string | undefined,
-        public readonly password: string | undefined,
-        public readonly database: string,
-        public readonly port: number,
-        public readonly idleTimeoutMillis: number,
-        public readonly defaultGraphPath: string | undefined
+    constructor(
+        readonly name: string,
+        readonly host: string,
+        readonly user: string | undefined,
+        readonly password: string | undefined,
+        readonly database: string,
+        readonly port: number,
+        readonly idleTimeoutMillis: number,
+        readonly defaultGraphPath: string | undefined
     ) {
         this.pool = new AgensGraph.Pool({
             host: this.host,
@@ -29,7 +30,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         });
     }
 
-    public async connect(): Promise<Connection> {
+    async connect(): Promise<Connection> {
         const client = await this.pool.connect();
         if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
             await this.setSessionId(client);

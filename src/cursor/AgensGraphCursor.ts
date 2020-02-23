@@ -3,7 +3,7 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { Cursor } from '@/cursor/Cursor';
 
 export class AgensGraphCursor<T> extends Cursor<T> implements AsyncIterable<T> {
-    public constructor(
+    constructor(
         sessionId: string,
         spec: CursorSpecification<T>,
         private readonly pgCursor: any,
@@ -12,7 +12,7 @@ export class AgensGraphCursor<T> extends Cursor<T> implements AsyncIterable<T> {
         super(sessionId, spec);
     }
 
-    public async read(count: number): Promise<T[]> {
+    async read(count: number): Promise<T[]> {
         this.logger.verbose(`Reading a batch of: ${count}`);
         return new Promise((resolve, reject) => {
             const hrStart = process.hrtime();
@@ -27,7 +27,7 @@ export class AgensGraphCursor<T> extends Cursor<T> implements AsyncIterable<T> {
         });
     }
 
-    public async close(): Promise<void> {
+    async close(): Promise<void> {
         return new Promise(resolve => {
             this.pgCursor.close(() => {
                 resolve();

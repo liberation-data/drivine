@@ -13,11 +13,11 @@ export interface DrivineModuleOptions {
 @Global()
 @Module({})
 export class DrivineModule implements DynamicModule {
-    public readonly module: Type<DrivineModule>;
-    public readonly providers: Provider[];
-    public readonly exports: Provider[];
+    readonly module: Type<DrivineModule>;
+    readonly providers: Provider[];
+    readonly exports: Provider[];
 
-    public static withOptions(options: DrivineModuleOptions): DynamicModule {
+    static withOptions(options: DrivineModuleOptions): DynamicModule {
         const builder = new DrivineModuleBuilder(options);
         return <DynamicModule>{
             module: DrivineModule,

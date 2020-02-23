@@ -6,21 +6,21 @@ import { QueryLanguage } from '@/query/QueryLanguage';
 import * as assert from 'assert';
 
 export class QuerySpecification<T> {
-    public statement: Statement;
-    public parameters: any[];
-    public mapper?: (result: any) => T;
-    public transformType?: ClassType<T>;
+    statement: Statement;
+    parameters: any[];
+    mapper?: (result: any) => T;
+    transformType?: ClassType<T>;
     private _skip: number;
     private _limit: number;
 
-    public constructor(statement?: string | Statement) {
+    constructor(statement?: string | Statement) {
         this.parameters = [];
         if (statement) {
             this.withStatement(statement);
         }
     }
 
-    public withStatement(statement: string | Statement): this {
+    withStatement(statement: string | Statement): this {
         if (typeof statement === 'string') {
             // TODO: Resolve default QueryLanguage from bootstrap params
             this.statement = <Statement>{ text: statement, language: QueryLanguage.CYPHER };
@@ -36,39 +36,39 @@ export class QuerySpecification<T> {
      * Bind parameters to the query.
      * @param parameters. If parameters are undefined or empty, does nothing.
      */
-    public bind(parameters?: any[]): this {
+    bind(parameters?: any[]): this {
         if (parameters && parameters.length > 0) {
             this.parameters = parameters;
         }
         return this;
     }
 
-    public map(mapper: (result: any) => T): this {
+    map(mapper: (result: any) => T): this {
         this.mapper = mapper;
         return this;
     }
 
-    public transform(type: ClassType<T>): this {
+    transform(type: ClassType<T>): this {
         this.transformType = type;
         return this;
     }
 
-    public skip(results: number): this {
+    skip(results: number): this {
         this._skip = results;
         return this;
     }
 
-    public limit(results: number): this {
+    limit(results: number): this {
         this._limit = results;
         return this;
     }
 
-    public finalize(): this {
+    finalize(): this {
         Object.freeze(this);
         return this;
     }
 
-    public appliedStatement(): string {
+    appliedStatement(): string {
         return `${this.statement.text} ${this.skipClause()} ${this.limitClause()}`;
     }
 
@@ -77,7 +77,7 @@ export class QuerySpecification<T> {
      * @param type
      */
     // TODO: Replace with polymorphism
-    public mapParameters(type: DatabaseType): any {
+    mapParameters(type: DatabaseType): any {
         const params = this.parameters ? this.parameters : [];
         if (type == DatabaseType.AGENS_GRAPH) {
             if (this.statement.language === QueryLanguage.CYPHER) {

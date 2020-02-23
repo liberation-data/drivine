@@ -14,15 +14,15 @@ const PgCursor = require('pg-cursor');
 export class AgensGraphConnection implements Connection {
     private logger = new Logger(AgensGraphConnection.name);
 
-    public constructor(public readonly client: PoolClient, public readonly resultMapper: ResultMapper) {
+    constructor(readonly client: PoolClient, readonly resultMapper: ResultMapper) {
         this.resultMapper = new AgensGraphResultMapper();
     }
 
-    public sessionId(): string {
+    sessionId(): string {
         return this.client['sessionId'];
     }
 
-    public async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
+    async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
         spec.finalize();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
@@ -31,25 +31,25 @@ export class AgensGraphConnection implements Connection {
         return this.resultMapper.mapQueryResults<T>(result.rows, spec);
     }
 
-    public async openCursor<T>(spec: CursorSpecification<T>): Promise<AgensGraphCursor<T>> {
+    async openCursor<T>(spec: CursorSpecification<T>): Promise<AgensGraphCursor<T>> {
         const pgCursorSpec = new PgCursor(spec.appliedStatement(), spec.mapParameters(DatabaseType.AGENS_GRAPH));
         const pgCursor = await this.client.query(pgCursorSpec);
         return new AgensGraphCursor<T>(this.sessionId(), spec, pgCursor, this.resultMapper);
     }
 
-    public async startTransaction(): Promise<void> {
+    async startTransaction(): Promise<void> {
         await this.client.query(`BEGIN`);
     }
 
-    public async commitTransaction(): Promise<void> {
+    async commitTransaction(): Promise<void> {
         await this.client.query(`COMMIT`);
     }
 
-    public async rollbackTransaction(): Promise<void> {
+    async rollbackTransaction(): Promise<void> {
         await this.client.query(`ROLLBACK`);
     }
 
-    public async release(err?: Error): Promise<void> {
+    async release(err?: Error): Promise<void> {
         if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }
