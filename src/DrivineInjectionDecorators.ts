@@ -1,7 +1,23 @@
 import { Inject } from '@nestjs/common';
+import { optionsWithDefaults, PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
 
-export const InjectConnectionProvider = (): any => {
-    return Inject(`ConnectionProvider`);
+export const transactionalPersistenceManagerInjections: string[] = [];
+export const nonTransactionalPersistenceManagerInjections: string[] = [];
+export const InjectPersistenceManager = (options?: PersistenceManagerOptions): any => {
+    const defaults = optionsWithDefaults(options);
+    switch (defaults.type) {
+        case 'TRANSACTIONAL':
+        default:
+            if (!transactionalPersistenceManagerInjections.includes(defaults.database!)) {
+                transactionalPersistenceManagerInjections.push(defaults.database!);
+            }
+            return Inject(`TransactionalPersistenceManager:${defaults.database!}`);
+        case 'NON_TRANSACTIONAL':
+            if (!nonTransactionalPersistenceManagerInjections.includes(defaults.database!)) {
+                nonTransactionalPersistenceManagerInjections.push(defaults.database!);
+            }
+            return Inject(`NonTransactionalPersistenceManager:${defaults.database!}`);
+    }
 };
 
 export const fileContentInjections: string[] = [];

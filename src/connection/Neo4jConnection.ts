@@ -13,13 +13,13 @@ export class Neo4jConnection implements Connection {
     private logger = new Logger(Neo4jConnection.name);
     private transaction?: Transaction;
 
-    public constructor(public readonly session: Session, public readonly resultMapper: ResultMapper) {}
+    constructor(readonly session: Session, readonly resultMapper: ResultMapper) {}
 
-    public sessionId(): string {
+    sessionId(): string {
         return this.session['sessionId'];
     }
 
-    public async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
+    async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
         spec.finalize();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
@@ -33,30 +33,30 @@ export class Neo4jConnection implements Connection {
         return this.resultMapper.mapQueryResults<T>(result.records, spec);
     }
 
-    public async openCursor<T>(spec: CursorSpecification<T>): Promise<Neo4jCursor<T>> {
+    async openCursor<T>(spec: CursorSpecification<T>): Promise<Neo4jCursor<T>> {
         return Promise.resolve(new Neo4jCursor<T>(this.sessionId(), spec, this));
     }
 
-    public async startTransaction(): Promise<void> {
+    async startTransaction(): Promise<void> {
         this.transaction = this.session.beginTransaction();
         return Promise.resolve();
     }
 
-    public async commitTransaction(): Promise<void> {
+    async commitTransaction(): Promise<void> {
         if (!this.transaction) {
             throw new DrivineError(`There is no transaction to commit.`);
         }
         await this.transaction.commit();
     }
 
-    public async rollbackTransaction(): Promise<void> {
+    async rollbackTransaction(): Promise<void> {
         if (!this.transaction) {
             throw new DrivineError(`There is no transaction to commit.`);
         }
         await this.transaction.rollback();
     }
 
-    public async release(err?: Error): Promise<void> {
+    async release(err?: Error): Promise<void> {
         if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }

@@ -1,7 +1,7 @@
 import { Readable, Writable } from 'stream';
 
 export class StreamUtils {
-    public static async untilClosed(stream: Readable | Writable): Promise<void> {
+    static async untilClosed(stream: Readable | Writable): Promise<void> {
         return new Promise((resolve, reject) => {
             stream.on('close', () => {
                 resolve();

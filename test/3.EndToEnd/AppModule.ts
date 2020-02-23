@@ -7,11 +7,11 @@ import {
     ValidationPipe
 } from '@nestjs/common';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { RouteRepository } from '../2.Integration/manager/RouteRepository';
 import { Reflector } from '@nestjs/core';
 import { RouteController } from './RouteController';
-import { TransactionContextMiddleware } from '@/transaction/TransactionContextMIddleware';
+import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 
 export async function configureApp(app: INestApplication): Promise<void> {
     app.useGlobalPipes(
@@ -27,14 +27,17 @@ export async function configureApp(app: INestApplication): Promise<void> {
 @Module({
     imports: [
         DrivineModule.withOptions(<DrivineModuleOptions>{
-            connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
+            connectionProviders: [
+                DatabaseRegistry.buildOrResolveFromEnv('NEO'),
+                DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC'),
+            ]
         })
     ],
     providers: [RouteRepository],
     controllers: [RouteController]
 })
 export class AppModule implements NestModule {
-    public configure(consumer: MiddlewareConsumer): any {
+    configure(consumer: MiddlewareConsumer): any {
         consumer.apply(TransactionContextMiddleware).forRoutes('**/**');
     }
 }

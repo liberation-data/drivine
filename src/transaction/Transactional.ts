@@ -1,5 +1,4 @@
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Propagation } from '@/transaction/Propagation';
 import { DrivineError } from '@/DrivineError';
 import { Transaction } from '@/transaction/Transaction';
@@ -11,14 +10,11 @@ export interface TransactionOptions {
 
 export function Transactional(transactionOptions?: TransactionOptions): MethodDecorator {
     return (target: any, methodName: string | symbol, descriptor: TypedPropertyDescriptor<any>) => {
-        const localStorage = TransactionContextHolder.instance;
+        const contextHolder = TransactionContextHolder.getInstance();
         const options = optionsWithDefaults(transactionOptions);
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            const connectionProvider = localStorage.get(TransactionContextKeys.CONNECTION_PROVIDER);
-            const transaction =
-                localStorage.get(TransactionContextKeys.TRANSACTION) ||
-                new Transaction(connectionProvider, options.rollback!, localStorage);
+            const transaction = contextHolder.currentTransaction || new Transaction(options.rollback!, contextHolder);
 
             try {
                 await transaction.pushContext(methodName);

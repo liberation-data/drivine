@@ -4,15 +4,15 @@ import * as assert from 'assert';
 import { DrivineError } from '@/DrivineError';
 
 export class FinderOperations {
-    public constructor(public readonly persistenceManager: PersistenceManager) {}
+    constructor(readonly persistenceManager: PersistenceManager) {}
 
-    public async getOne<T>(spec: QuerySpecification<T>): Promise<T> {
+    async getOne<T>(spec: QuerySpecification<T>): Promise<T> {
         const results = await this.persistenceManager.query(spec);
         assert(results.length === 1, `Expected exactly one result`);
         return results[0];
     }
 
-    public async maybeGetOne<T>(spec: QuerySpecification<T>): Promise<T | undefined> {
+    async maybeGetOne<T>(spec: QuerySpecification<T>): Promise<T | undefined> {
         const results = await this.persistenceManager.query(spec);
         if (results.length === 0) {
             return undefined;

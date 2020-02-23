@@ -1,0 +1,7 @@
+{
+    "hooks": {
+        "pre-commit": "npm run format:src",
+        "pre-push": "npm run lint && npm run build && npm run test",
+        "post-merge": "npm install"
+    }
+}

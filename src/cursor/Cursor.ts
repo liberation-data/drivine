@@ -20,7 +20,7 @@ export abstract class Cursor<T> {
         this.queryLogger = new StatementLogger(this.sessionId);
     }
 
-    public [Symbol.asyncIterator](): AsyncIterator<T> {
+    [Symbol.asyncIterator](): AsyncIterator<T> {
         return <AsyncIterator<T>>{
             next: async () => {
                 await this.readBatchIfExpired();
@@ -35,7 +35,7 @@ export abstract class Cursor<T> {
         };
     }
 
-    public asStream(options?: CursorStreamOptions<T>): Readable {
+    asStream(options?: CursorStreamOptions<T>): Readable {
         if (!this.stream) {
             this.stream = this.composeStreamWithOptions(options);
         }
@@ -74,7 +74,7 @@ export abstract class Cursor<T> {
         }
     }
 
-    public abstract async close(): Promise<void>;
+    abstract async close(): Promise<void>;
 
-    public abstract async read(count: number): Promise<T[]>;
+    abstract async read(count: number): Promise<T[]>;
 }
