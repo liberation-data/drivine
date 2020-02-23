@@ -33,7 +33,7 @@ export class DatabaseRegistry {
         return name? this.providers.get(name) : this.providers.values().next().value;
     }
 
-    register(connectionProvider: ConnectionProvider, name?: string): void {
-        this.providers.set(name ? name : 'default', connectionProvider);
+    register(connectionProvider: ConnectionProvider): void {
+        this.providers.set(connectionProvider.name, connectionProvider);
     }
 }

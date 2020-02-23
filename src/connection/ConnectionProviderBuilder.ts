@@ -9,9 +9,6 @@ import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 
 export class ConnectionProviderBuilder {
-    private static instance: ConnectionProviderBuilder;
-
-    private providers: WeakMap<any, ConnectionProvider>;
 
     private logger = new Logger(ConnectionProviderBuilder.name);
 
@@ -86,7 +83,7 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
-    buildOrResolve(name?: string): ConnectionProvider {
+    buildOrResolve(name: string = 'default'): ConnectionProvider {
         const retained = this.registry.connectionProvider(name);
         if (retained != undefined) {
             return retained;
@@ -95,16 +92,16 @@ export class ConnectionProviderBuilder {
         assert(this._host, `host config is required`);
 
         if (this._type === DatabaseType.AGENS_GRAPH) {
-            this.registry.register(this.buildAgensGraphProvider(), name);
+            this.registry.register(this.buildAgensGraphProvider(name));
         } else if (this._type === DatabaseType.NEO4J) {
-            this.registry.register(this.buildNeo4jProvider(), name);
+            this.registry.register(this.buildNeo4jProvider(name));
         } else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
         return this.registry.connectionProvider(name)!;
     }
 
-    private buildAgensGraphProvider(): ConnectionProvider {
+    private buildAgensGraphProvider(name: string): ConnectionProvider {
         if (!this._port) {
             this._port = 5432;
         }
@@ -114,6 +111,7 @@ export class ConnectionProviderBuilder {
         assert(this._name, `Database name is required`);
 
         return new AgensGraphConnectionProvider(
+            name,
             this._host,
             this._userName,
             this._password,
@@ -124,7 +122,7 @@ export class ConnectionProviderBuilder {
         );
     }
 
-    private buildNeo4jProvider(): ConnectionProvider {
+    private buildNeo4jProvider(name: string): ConnectionProvider {
         assert(this._userName, `Neo4j requires a username`);
 
         if (this._idleTimeout) {
@@ -138,6 +136,6 @@ export class ConnectionProviderBuilder {
             this._port = 7687;
         }
 
-        return new Neo4jConnectionProvider(this._host, this._port, this._userName!, this._password);
+        return new Neo4jConnectionProvider(name, this._host, this._port, this._userName!, this._password);
     }
 }

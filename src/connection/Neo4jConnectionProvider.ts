@@ -11,6 +11,7 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
     private driver: Driver;
 
     constructor(
+        readonly name: string,
         readonly host: string,
         readonly port: number,
         readonly user: string,

@@ -9,6 +9,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
     private readonly pool: any;
 
     constructor(
+        readonly name: string,
         readonly host: string,
         readonly user: string | undefined,
         readonly password: string | undefined,
