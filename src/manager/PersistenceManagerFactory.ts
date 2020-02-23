@@ -12,7 +12,7 @@ export class PersistenceManagerFactory {
     readonly nonTransactionalManagers: Map<string, NonTransactionalPersistenceManager> = new Map();
     readonly transactionalManagers: Map<string, TransactionalPersistenceManager> = new Map();
 
-    constructor(readonly registry: DatabaseRegistry, readonly localStorage: TransactionContextHolder) {}
+    constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {}
 
     buildOrResolve(type: PersistenceManagerType, database: string = 'default'): PersistenceManager {
         switch (type) {
@@ -26,7 +26,7 @@ export class PersistenceManagerFactory {
 
     private transactional(name: string = 'default'): TransactionalPersistenceManager {
         if (!this.transactionalManagers.get(name)) {
-            this.transactionalManagers.set(name, new TransactionalPersistenceManager(this.localStorage));
+            this.transactionalManagers.set(name, new TransactionalPersistenceManager(this.contextHolder, name));
         }
         return this.transactionalManagers.get(name)!;
     }

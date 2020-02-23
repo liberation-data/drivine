@@ -29,8 +29,11 @@ export class DatabaseRegistry {
         this.providers = new Map<string, ConnectionProvider>();
     }
 
-    connectionProvider(name?: string): ConnectionProvider | undefined {
-        return name ? this.providers.get(name) : this.providers.values().next().value;
+    connectionProvider(name: string = 'default'): ConnectionProvider | undefined {
+        if (name === 'default') {
+            return this.providers.values().next().value;
+        }
+        return this.providers.get(name);
     }
 
     register(connectionProvider: ConnectionProvider): void {

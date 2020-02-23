@@ -3,6 +3,7 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { Cursor } from '@/cursor/Cursor';
 
 export interface Connection {
+
     sessionId(): string;
 
     query<T>(spec: QuerySpecification<T>): Promise<any[]>;
@@ -16,4 +17,5 @@ export interface Connection {
     rollbackTransaction(): Promise<void>;
 
     release(err?: Error): Promise<void>;
+
 }
