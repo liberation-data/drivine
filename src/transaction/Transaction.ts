@@ -6,12 +6,10 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
 import { Connection } from '@/connection/Connection';
-import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { Cursor } from '@/cursor/Cursor';
 import shortId = require('shortid');
 
 export class Transaction {
-    readonly connectionProvider: ConnectionProvider;
     readonly id: string;
     readonly callStack: Stack<string>;
     private contextHolder: TransactionContextHolder;
@@ -22,14 +20,11 @@ export class Transaction {
 
     private readonly logger = new Logger(Transaction.name);
 
-    constructor(connectionProvider: ConnectionProvider, rollback: boolean, contextHolder: TransactionContextHolder) {
-        this.connectionProvider = connectionProvider;
+    constructor(rollback: boolean, contextHolder: TransactionContextHolder) {
         this.rollback = rollback;
         this.id = shortId.generate();
         this.callStack = new Stack<string>();
         this.contextHolder = contextHolder;
-
-        assert(this.connectionProvider, `Can't start a transaction without a ConnectionPool.`);
         this.contextHolder.currentTransaction = this;
     }
 
@@ -57,7 +52,8 @@ export class Transaction {
 
     async pushContext(context: string | symbol): Promise<void> {
         if (this.callStack.isEmpty()) {
-            this._connection = await this.connectionProvider.connect();
+            const connectionProvider = this.contextHolder.databaseRegistry.connectionProvider()!;
+            this._connection = await connectionProvider.connect();
             this._cursors = [];
             this.logger.verbose(`Starting transaction: ${this.id}`);
             await this._connection.startTransaction();

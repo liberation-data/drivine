@@ -10,14 +10,12 @@ export interface TransactionOptions {
 
 export function Transactional(transactionOptions?: TransactionOptions): MethodDecorator {
     return (target: any, methodName: string | symbol, descriptor: TypedPropertyDescriptor<any>) => {
-        const transactionContextHolder = TransactionContextHolder.getInstance();
+        const contextHolder = TransactionContextHolder.getInstance();
         const options = optionsWithDefaults(transactionOptions);
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            const connectionProvider = transactionContextHolder.databaseRegistry.connectionProvider()!;
             const transaction =
-                transactionContextHolder.currentTransaction ||
-                new Transaction(connectionProvider, options.rollback!, transactionContextHolder);
+                contextHolder.currentTransaction || new Transaction(options.rollback!, contextHolder);
 
             try {
                 await transaction.pushContext(methodName);
