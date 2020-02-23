@@ -1,8 +1,6 @@
 import Stack from 'ts-data.stack';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Logger } from '@nestjs/common';
-import { Namespace } from 'cls-hooked';
 import * as assert from 'assert';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -16,7 +14,7 @@ export class Transaction {
     readonly connectionProvider: ConnectionProvider;
     readonly id: string;
     readonly callStack: Stack<string>;
-    private localStorage: Namespace;
+    private contextHolder: TransactionContextHolder;
 
     private rollback: boolean;
     private _connection: Connection;
@@ -24,16 +22,15 @@ export class Transaction {
 
     private readonly logger = new Logger(Transaction.name);
 
-    constructor(connectionProvider: ConnectionProvider, rollback: boolean, localStorage: Namespace) {
+    constructor(connectionProvider: ConnectionProvider, rollback: boolean, contextHolder: TransactionContextHolder) {
         this.connectionProvider = connectionProvider;
         this.rollback = rollback;
         this.id = shortId.generate();
         this.callStack = new Stack<string>();
-        this.localStorage = localStorage;
+        this.contextHolder = contextHolder;
 
         assert(this.connectionProvider, `Can't start a transaction without a ConnectionPool.`);
-
-        this.localStorage.set(TransactionContextKeys.TRANSACTION, this);
+        this.contextHolder.currentTransaction = this;
     }
 
     get sessionId(): string {
@@ -112,6 +109,6 @@ export class Transaction {
     private async releaseClient(error?: Error): Promise<void> {
         this.logger.verbose(`Releasing connection for transaction: ${this.id}`);
         await this._connection.release(error);
-        TransactionContextHolder.instance.set(TransactionContextKeys.TRANSACTION, undefined);
+        this.contextHolder.currentTransaction = undefined;
     }
 }

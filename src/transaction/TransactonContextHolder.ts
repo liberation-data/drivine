@@ -1,35 +1,50 @@
 import { Injectable } from '@nestjs/common';
 import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Transaction } from '@/transaction/Transaction';
-import cls = require('cls-hooked');
-import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
+import { Namespace } from 'cls-hooked';
+const cls = require('cls-hooked');
 
 /**
  * Wrap local storage to make it injectable.
  */
 @Injectable()
 export class TransactionContextHolder {
-    static instance = cls.createNamespace('__transaction_context_holder__');
+
+    static instance: TransactionContextHolder;
+
+    readonly namespace: Namespace;
+    
+    static getInstance(): TransactionContextHolder {
+        if (!TransactionContextHolder.instance) {
+            TransactionContextHolder.instance = new TransactionContextHolder();
+        }
+        return TransactionContextHolder.instance;
+    }
+
+    constructor() {
+        const namespaceName = '__transaction_context_holder__';
+        this.namespace = cls.getNamespace(namespaceName) || cls.createNamespace(namespaceName);
+    }
 
     run(fn: (...args: any[]) => void): void {
-        return TransactionContextHolder.instance.run(fn);
+        return this.namespace.run(fn);
     }
 
     runAndReturn<T>(fn: (...args: any[]) => T): T {
-        return TransactionContextHolder.instance.runAndReturn(fn);
+        return this.namespace.runAndReturn(fn);
     }
 
     async runPromise<T>(fn: (...args: any[]) => Promise<T>): Promise<T> {
-        return TransactionContextHolder.instance.runPromise(fn);
+        return this.namespace.runPromise(fn);
     }
 
-    get currentTransaction(): Transaction {
+    get currentTransaction(): Transaction | undefined {
         return this.get<Transaction>(TransactionContextKeys.TRANSACTION);
     }
 
-    set currentTransaction(context: Transaction) {
-        this.set<Transaction>(TransactionContextKeys.TRANSACTION, context);
+    set currentTransaction(transaction: Transaction | undefined) {
+        this.set<Transaction | undefined>(TransactionContextKeys.TRANSACTION, transaction);
     }
 
     get databaseRegistry(): DatabaseRegistry {
@@ -41,10 +56,10 @@ export class TransactionContextHolder {
     }
 
     private get<T>(key: string): T {
-        return TransactionContextHolder.instance.get(key);
+        return this.namespace.get(key);
     }
 
     private set<T>(key: string, object: T): void {
-        TransactionContextHolder.instance.set(key, object);
+        this.namespace.set(key, object);
     }
 }

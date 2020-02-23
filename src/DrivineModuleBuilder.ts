@@ -2,7 +2,8 @@ import { Logger, Provider } from '@nestjs/common';
 import { DrivineModuleOptions } from '@/DrivineModule';
 import {
     cypherInjections,
-    fileContentInjections, nonTransactionalPersistenceManagerInjections,
+    fileContentInjections,
+    nonTransactionalPersistenceManagerInjections,
     sqlInjections,
     transactionalPersistenceManagerInjections
 } from '@/DrivineInjectionDecorators';
@@ -49,6 +50,7 @@ export class DrivineModuleBuilder {
     infrastructureProviders(): Provider[] {
         return [
             <Provider>{ provide: DatabaseRegistry, useFactory: () => DatabaseRegistry.getInstance() },
+            <Provider>{ provide: TransactionContextHolder, useFactory: () => TransactionContextHolder.getInstance() },
             PersistenceManagerFactory,
             TransactionContextHolder,
             TransactionContextMiddleware,

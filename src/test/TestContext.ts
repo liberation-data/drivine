@@ -1,9 +1,7 @@
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { Transactional } from '@/transaction/Transactional';
-import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
 import * as assert from 'assert';
-import { Transaction } from '@/transaction/Transaction';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 require('dotenv').config({
@@ -33,16 +31,15 @@ export class TestContext {
     }
 
     async run(fn: (...args: any[]) => Promise<any>): Promise<any> {
-        return TransactionContextHolder.instance.runPromise(async () => {
-            TransactionContextHolder.instance.set(
-                TransactionContextKeys.DATABASE_REGISTRY, DatabaseRegistry.getInstance());
+        return TransactionContextHolder.getInstance().runPromise(async () => {
+            TransactionContextHolder.getInstance().databaseRegistry = DatabaseRegistry.getInstance();
             return this.runInTransaction(fn);
         });
     }
 
     @Transactional()
     private async runInTransaction(fn: (...args: any[]) => Promise<any>): Promise<any> {
-        const transaction = <Transaction>TransactionContextHolder.instance.get(TransactionContextKeys.TRANSACTION);
+        const transaction = TransactionContextHolder.getInstance().currentTransaction!;
         transaction.markAsRollback();
         return fn();
     }
