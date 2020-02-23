@@ -30,7 +30,7 @@ export class DatabaseRegistry {
     }
 
     connectionProvider(name?: string): ConnectionProvider | undefined {
-        return name? this.providers.get(name) : this.providers.values().next().value;
+        return name ? this.providers.get(name) : this.providers.values().next().value;
     }
 
     register(connectionProvider: ConnectionProvider): void {

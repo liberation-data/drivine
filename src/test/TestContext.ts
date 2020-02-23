@@ -10,7 +10,7 @@ require('dotenv').config({
 
 export function inTestContext(): TestContext {
     const context = new TestContext(true);
-    DatabaseRegistry.getInstance().providers.forEach((provider) => {
+    DatabaseRegistry.getInstance().providers.forEach(provider => {
         if (provider instanceof AgensGraphConnectionProvider) {
             assert(
                 provider.idleTimeoutMillis === 500,
@@ -22,9 +22,7 @@ export function inTestContext(): TestContext {
 }
 
 export class TestContext {
-
-    constructor(readonly rollback: boolean) {
-    }
+    constructor(readonly rollback: boolean) {}
 
     withRollback(rollback: boolean): TestContext {
         return new TestContext(rollback);

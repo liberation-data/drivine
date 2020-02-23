@@ -9,7 +9,6 @@ import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 
 export class ConnectionProviderBuilder {
-
     private logger = new Logger(ConnectionProviderBuilder.name);
 
     // Common properties

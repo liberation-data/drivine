@@ -10,11 +10,10 @@ const cls = require('cls-hooked');
  */
 @Injectable()
 export class TransactionContextHolder {
-
     static instance: TransactionContextHolder;
 
     readonly namespace: Namespace;
-    
+
     static getInstance(): TransactionContextHolder {
         if (!TransactionContextHolder.instance) {
             TransactionContextHolder.instance = new TransactionContextHolder();

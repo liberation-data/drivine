@@ -3,8 +3,10 @@ import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 
 export const transactionalPersistenceManagerInjections: string[] = [];
 export const nonTransactionalPersistenceManagerInjections: string[] = [];
-export const InjectPersistenceManager = (type: PersistenceManagerType = PersistenceManagerType.TRANSACTIONAL,
-                                         database: string = 'default'): any => {
+export const InjectPersistenceManager = (
+    type: PersistenceManagerType = PersistenceManagerType.TRANSACTIONAL,
+    database: string = 'default'
+): any => {
     switch (type) {
         case PersistenceManagerType.TRANSACTIONAL:
         default:
@@ -46,4 +48,3 @@ export const InjectSql = (path: string): any => {
     }
     return Inject(`SQL:${filename}`);
 };
-

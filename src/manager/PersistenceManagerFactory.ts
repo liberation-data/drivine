@@ -9,13 +9,10 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class PersistenceManagerFactory {
-
     readonly nonTransactionalManagers: Map<string, NonTransactionalPersistenceManager> = new Map();
     readonly transactionalManagers: Map<string, TransactionalPersistenceManager> = new Map();
 
-    constructor(readonly registry: DatabaseRegistry,
-                readonly localStorage: TransactionContextHolder) {
-    }
+    constructor(readonly registry: DatabaseRegistry, readonly localStorage: TransactionContextHolder) {}
 
     buildOrResolve(type: PersistenceManagerType, database: string = 'default'): PersistenceManager {
         switch (type) {
@@ -44,5 +41,4 @@ export class PersistenceManagerFactory {
         }
         return this.nonTransactionalManagers.get(name)!;
     }
-
 }

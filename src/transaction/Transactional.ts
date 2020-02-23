@@ -14,8 +14,7 @@ export function Transactional(transactionOptions?: TransactionOptions): MethodDe
         const options = optionsWithDefaults(transactionOptions);
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            const transaction =
-                contextHolder.currentTransaction || new Transaction(options.rollback!, contextHolder);
+            const transaction = contextHolder.currentTransaction || new Transaction(options.rollback!, contextHolder);
 
             try {
                 await transaction.pushContext(methodName);
