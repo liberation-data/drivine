@@ -5,7 +5,7 @@ import { Neo4jConnectionProvider } from '@/connection/Neo4jConnectionProvider';
 import * as assert from 'assert';
 import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
 import { Logger } from '@nestjs/common';
-import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 
 export class ConnectionProviderBuilder {
@@ -27,13 +27,13 @@ export class ConnectionProviderBuilder {
     private _name?: string;
     private _defaultGraphPath?: string;
 
-    private registry: ConnectionProviderRegistry;
+    private registry: DatabaseRegistry;
 
-    public constructor(registry: ConnectionProviderRegistry) {
+    constructor(registry: DatabaseRegistry) {
         this.registry = registry;
     }
 
-    public withProperties(properties: ConnectionProperties): this {
+    withProperties(properties: ConnectionProperties): this {
         this._type = properties.databaseType;
         this._host = properties.host;
         this._port = properties.port;
@@ -45,49 +45,49 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
-    public withType(type: DatabaseType): this {
+    withType(type: DatabaseType): this {
         assert(type, `database type argument is required`);
         this._type = type;
         return this;
     }
 
-    public host(host: string): this {
+    host(host: string): this {
         this._host = host;
         return this;
     }
 
-    public port(port: number): this {
+    port(port: number): this {
         this._port = port;
         return this;
     }
 
-    public userName(userName: string): this {
+    userName(userName: string): this {
         this._userName = userName;
         return this;
     }
 
-    public password(password: string): this {
+    password(password: string): this {
         this._password = password;
         return this;
     }
 
-    public idleTimeout(idleTimeout: number): this {
+    idleTimeout(idleTimeout: number): this {
         this._idleTimeout = idleTimeout;
         return this;
     }
 
-    public databaseName(name: string): this {
+    databaseName(name: string): this {
         this._name = name;
         return this;
     }
 
-    public defaultGraphPath(path: string): this {
+    defaultGraphPath(path: string): this {
         this._defaultGraphPath = path;
         return this;
     }
 
-    public buildOrResolve(name?: string): ConnectionProvider {
-        const retained = this.registry.resolve(name);
+    buildOrResolve(name?: string): ConnectionProvider {
+        const retained = this.registry.connectionProvider(name);
         if (retained != undefined) {
             return retained;
         }
@@ -101,7 +101,7 @@ export class ConnectionProviderBuilder {
         } else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
-        return this.registry.resolve(name)!;
+        return this.registry.connectionProvider(name)!;
     }
 
     private buildAgensGraphProvider(): ConnectionProvider {

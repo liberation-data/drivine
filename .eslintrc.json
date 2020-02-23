@@ -60,7 +60,7 @@
         // Note: if we ever use this config to lint js files the following rule needs
         // to be off and an override added specifically for ts files
         "@typescript-eslint/explicit-function-return-type": ["error", { "allowExpressions": true }],
-        "@typescript-eslint/explicit-member-accessibility": ["error"],
+        "@typescript-eslint/explicit-member-accessibility": ["error", { "accessibility": "no-public" }],
         "@typescript-eslint/interface-name-prefix": ["error"],
         "@typescript-eslint/member-ordering": [
             "error",

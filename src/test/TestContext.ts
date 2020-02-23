@@ -5,14 +5,14 @@ import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionP
 import * as assert from 'assert';
 import { Transaction } from '@/transaction/Transaction';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 require('dotenv').config({
     path: process.env.DOTENV_CONFIG_PATH || require('find-config')('.env')
 });
 
 export function inTestContext(): TestContext {
-    const context = new TestContext(true, ConnectionProviderRegistry.getInstance().defaultProvider());
+    const context = new TestContext(true, DatabaseRegistry.getInstance().defaultProvider());
     if (context.connectionProvider instanceof AgensGraphConnectionProvider) {
         const provider = <AgensGraphConnectionProvider> context.connectionProvider;
         assert(
@@ -25,17 +25,17 @@ export function inTestContext(): TestContext {
 
 export class TestContext {
 
-    public constructor(public readonly rollback: boolean, public readonly connectionProvider: ConnectionProvider) {}
+    constructor(readonly rollback: boolean, readonly connectionProvider: ConnectionProvider) {}
 
-    public withRollback(rollback: boolean): TestContext {
+    withRollback(rollback: boolean): TestContext {
         return new TestContext(rollback, this.connectionProvider);
     }
 
-    public withConnectionProvider(provider: ConnectionProvider): TestContext {
+    withConnectionProvider(provider: ConnectionProvider): TestContext {
         return new TestContext(this.rollback, provider);
     }
 
-    public async run(fn: (...args: any[]) => Promise<any>): Promise<any> {
+    async run(fn: (...args: any[]) => Promise<any>): Promise<any> {
         return TransactionContextHolder.instance.runPromise(async () => {
             TransactionContextHolder.instance.set(TransactionContextKeys.CONNECTION_PROVIDER, this.connectionProvider);
             return this.runInTransaction(fn);

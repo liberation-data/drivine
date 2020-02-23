@@ -3,34 +3,34 @@ import { ConnectionProviderBuilder } from '@/connection/ConnectionProviderBuilde
 import { ConnectionPropertiesFromEnv } from '@/connection/ConnectionProperties';
 import { DrivineError } from '@/DrivineError';
 
-export class ConnectionProviderRegistry {
-    private static instance: ConnectionProviderRegistry;
+export class DatabaseRegistry {
+    private static instance: DatabaseRegistry;
 
     private providers: Map<string, ConnectionProvider>;
 
-    public static buildOrResolveFromEnv(name?: string): ConnectionProvider {
-        return ConnectionProviderRegistry.getBuilder()
+    static buildOrResolveFromEnv(name?: string): ConnectionProvider {
+        return DatabaseRegistry.getBuilder()
             .withProperties(ConnectionPropertiesFromEnv(name))
             .buildOrResolve(name);
     }
 
-    public static getBuilder(): ConnectionProviderBuilder {
-        const registry = ConnectionProviderRegistry.getInstance();
+    static getBuilder(): ConnectionProviderBuilder {
+        const registry = DatabaseRegistry.getInstance();
         return new ConnectionProviderBuilder(registry);
     }
 
-    public static getInstance(): ConnectionProviderRegistry {
-        if (!ConnectionProviderRegistry.instance) {
-            ConnectionProviderRegistry.instance = new ConnectionProviderRegistry();
+    static getInstance(): DatabaseRegistry {
+        if (!DatabaseRegistry.instance) {
+            DatabaseRegistry.instance = new DatabaseRegistry();
         }
-        return ConnectionProviderRegistry.instance;
+        return DatabaseRegistry.instance;
     }
 
     private constructor() {
         this.providers = new Map<string, ConnectionProvider>();
     }
 
-    public defaultProvider(): ConnectionProvider {
+    defaultProvider(): ConnectionProvider {
         const result = this.providers.values().next().value;
         if (!result) {
             throw new DrivineError(`No connection providers are registered`);
@@ -38,12 +38,12 @@ export class ConnectionProviderRegistry {
         return result;
     }
 
-    public resolve(name?: string): ConnectionProvider | undefined {
+    connectionProvider(name?: string): ConnectionProvider | undefined {
         const provider = this.providers.get(name ? name : 'default');
         return provider;
     }
 
-    public register(connectionProvider: ConnectionProvider, name?: string): void {
+    register(connectionProvider: ConnectionProvider, name?: string): void {
         this.providers.set(name ? name : 'default', connectionProvider);
     }
 }

@@ -11,13 +11,13 @@ export interface RecommendedRouteDto {
 
 @Controller('/routes')
 export class RouteController {
-    public constructor(public readonly routeRepository: RouteRepository) {}
+
+    constructor(readonly routeRepository: RouteRepository) {}
 
     @Get('/between/:start/:dest')
-    public async routeBetween(
+    async routeBetween(
         @Param('start') start: string,
-        @Param('dest') dest: string
-    ): Promise<RecommendedRouteDto[]> {
+        @Param('dest') dest: string): Promise<RecommendedRouteDto[]> {
         const routes = await this.routeRepository.findRoutesBetween(start, dest);
         return routes.map(
             (it: Route): RecommendedRouteDto => ({
@@ -30,10 +30,9 @@ export class RouteController {
     }
 
     @Get('/fastest/between/:start/:dest')
-    public async fastestBetween(
+    async fastestBetween(
         @Param('start') start: string,
-        @Param('dest') dest: string
-    ): Promise<RecommendedRouteDto> {
+        @Param('dest') dest: string): Promise<RecommendedRouteDto> {
         const route = await this.routeRepository.findFastestBetween(start, dest);
         return <RecommendedRouteDto>{
             start: route.start,

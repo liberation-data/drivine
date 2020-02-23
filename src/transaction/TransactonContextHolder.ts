@@ -10,33 +10,33 @@ import { ConnectionProvider } from '@/connection/ConnectionProvider';
  */
 @Injectable()
 export class TransactionContextHolder {
-    public static instance = cls.createNamespace('__transaction_context_holder__');
+    static instance = cls.createNamespace('__transaction_context_holder__');
 
-    public run(fn: (...args: any[]) => void): void {
+    run(fn: (...args: any[]) => void): void {
         return TransactionContextHolder.instance.run(fn);
     }
 
-    public runAndReturn<T>(fn: (...args: any[]) => T): T {
+    runAndReturn<T>(fn: (...args: any[]) => T): T {
         return TransactionContextHolder.instance.runAndReturn(fn);
     }
 
-    public async runPromise<T>(fn: (...args: any[]) => Promise<T>): Promise<T> {
+    async runPromise<T>(fn: (...args: any[]) => Promise<T>): Promise<T> {
         return TransactionContextHolder.instance.runPromise(fn);
     }
 
-    public get currentTransaction(): Transaction {
+    get currentTransaction(): Transaction {
         return this.get<Transaction>(TransactionContextKeys.TRANSACTION);
     }
 
-    public set currentTransaction(context: Transaction) {
+    set currentTransaction(context: Transaction) {
         this.set<Transaction>(TransactionContextKeys.TRANSACTION, context);
     }
 
-    public get connectionProvider(): ConnectionProvider {
+    get connectionProvider(): ConnectionProvider {
         return this.get<AgensGraphConnectionProvider>(TransactionContextKeys.CONNECTION_PROVIDER);
     }
 
-    public set connectionProvider(provider: ConnectionProvider) {
+    set connectionProvider(provider: ConnectionProvider) {
         this.set<ConnectionProvider>(TransactionContextKeys.CONNECTION_PROVIDER, provider);
     }
 

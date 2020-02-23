@@ -10,17 +10,17 @@ import shortId = require('shortid');
 export class Neo4jConnectionProvider implements ConnectionProvider {
     private driver: Driver;
 
-    public constructor(
-        public readonly host: string,
-        public readonly port: number,
-        public readonly user: string,
-        public readonly password: string | undefined
+    constructor(
+        readonly host: string,
+        readonly port: number,
+        readonly user: string,
+        readonly password: string | undefined
     ) {
         const authToken = neo.auth.basic(this.user, this.password);
         this.driver = neo.driver(`bolt://${this.host}:${this.port}`, authToken);
     }
 
-    public async connect(): Promise<Connection> {
+    async connect(): Promise<Connection> {
         const session = this.driver.session();
         session['sessionId'] = shortId.generate();
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());

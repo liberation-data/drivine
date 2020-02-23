@@ -4,7 +4,7 @@ import { RouteRepository } from './RouteRepository';
 import { Route } from './Route';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 const fs = require('fs');
 
@@ -15,7 +15,7 @@ describe('RouteRepository', () => {
         const app: TestingModule = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
-                    connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
+                    connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
                 })
             ],
             providers: [RouteRepository],

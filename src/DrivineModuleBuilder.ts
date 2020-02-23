@@ -1,5 +1,5 @@
 import { Logger, Provider } from '@nestjs/common';
-import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
+import { DrivineModuleOptions } from '@/DrivineModule';
 import { cypherInjections, fileContentInjections, sqlInjections } from '@/DrivineInjectionDecorators';
 import * as assert from 'assert';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
@@ -9,6 +9,7 @@ import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPe
 import { Statement } from '@/query/Statement';
 import { QueryLanguage } from '@/query/QueryLanguage';
 import { Cacheable } from 'typescript-cacheable';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 const fs = require('fs');
 
@@ -16,7 +17,7 @@ export class DrivineModuleBuilder {
     private logger = new Logger(DrivineModuleBuilder.name);
     private _providers: Provider[];
 
-    public constructor(public readonly options: DrivineModuleOptions) {
+    constructor(readonly options: DrivineModuleOptions) {
         assert(
             options && options.connectionProviders && options.connectionProviders.length > 0,
             `At least one ConnectionProvider is required. Consult documentation for advice on creation`
@@ -27,7 +28,7 @@ export class DrivineModuleBuilder {
         }
     }
 
-    public get providers(): Provider[] {
+    get providers(): Provider[] {
         if (!this._providers) {
             this._providers = [
                 ...this.providerAssembly(),
@@ -39,11 +40,15 @@ export class DrivineModuleBuilder {
         return this._providers;
     }
 
-    public providerAssembly(): Provider[] {
+    providerAssembly(): Provider[] {
         return [
             <Provider>{
                 provide: 'ConnectionProvider',
                 useFactory: () => this.options.connectionProviders[0]
+            },
+            <Provider>{
+                provide: DatabaseRegistry,
+                useFactory: () => DatabaseRegistry.getInstance()
             },
             TransactionContextHolder,
             TransactionContextMiddleware,
@@ -52,7 +57,7 @@ export class DrivineModuleBuilder {
         ];
     }
 
-    public fileResourceProviders(): Provider[] {
+    fileResourceProviders(): Provider[] {
         return fileContentInjections.map(path => {
             const token = `FileContents:${path}`;
             return <Provider>{
@@ -64,7 +69,7 @@ export class DrivineModuleBuilder {
         });
     }
 
-    public cypherStatementProviders(): Provider[] {
+    cypherStatementProviders(): Provider[] {
         return cypherInjections.map(path => {
             const token = `CYPHER:${path}`;
             return <Provider>{
@@ -79,7 +84,7 @@ export class DrivineModuleBuilder {
         });
     }
 
-    public sqlStatementProviders(): Provider[] {
+    sqlStatementProviders(): Provider[] {
         return sqlInjections.map(path => {
             const token = `SQL:${path}`;
             return <Provider>{

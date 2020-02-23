@@ -13,9 +13,9 @@ import { Cursor } from '@/cursor/Cursor';
 import shortId = require('shortid');
 
 export class Transaction {
-    public readonly connectionProvider: ConnectionProvider;
-    public readonly id: string;
-    public readonly callStack: Stack<string>;
+    readonly connectionProvider: ConnectionProvider;
+    readonly id: string;
+    readonly callStack: Stack<string>;
     private localStorage: Namespace;
 
     private rollback: boolean;
@@ -24,7 +24,7 @@ export class Transaction {
 
     private readonly logger = new Logger(Transaction.name);
 
-    public constructor(connectionProvider: ConnectionProvider, rollback: boolean, localStorage: Namespace) {
+    constructor(connectionProvider: ConnectionProvider, rollback: boolean, localStorage: Namespace) {
         this.connectionProvider = connectionProvider;
         this.rollback = rollback;
         this.id = shortId.generate();
@@ -36,12 +36,12 @@ export class Transaction {
         this.localStorage.set(TransactionContextKeys.TRANSACTION, this);
     }
 
-    public get sessionId(): string {
+    get sessionId(): string {
         assert(this._connection, `pushContext() must be called before obtaining the sessionId`);
         return this._connection.sessionId();
     }
 
-    public async query<T>(spec: QuerySpecification<T>): Promise<T[]> {
+    async query<T>(spec: QuerySpecification<T>): Promise<T[]> {
         assert(this._connection, `pushContext() must be called running a query`);
         try {
             const results = await this._connection.query(spec);
@@ -51,14 +51,14 @@ export class Transaction {
         }
     }
 
-    public async openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>> {
+    async openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>> {
         assert(this._connection, `pushContext() must be called running a query`);
         const cursor = await this._connection.openCursor(spec);
         this._cursors.push(cursor);
         return cursor;
     }
 
-    public async pushContext(context: string | symbol): Promise<void> {
+    async pushContext(context: string | symbol): Promise<void> {
         if (this.callStack.isEmpty()) {
             this._connection = await this.connectionProvider.connect();
             this._cursors = [];
@@ -69,7 +69,7 @@ export class Transaction {
         await this.configureIfNeeded();
     }
 
-    public async popContext(): Promise<void> {
+    async popContext(): Promise<void> {
         this.callStack.pop();
         if (this.callStack.isEmpty()) {
             this.logger.verbose(`Closing ${this._cursors.length} open cursors.`);
@@ -85,7 +85,7 @@ export class Transaction {
         }
     }
 
-    public async popContextWithError(e: Error): Promise<void> {
+    async popContextWithError(e: Error): Promise<void> {
         if (!this._connection) {
             throw e;
         }
@@ -100,7 +100,7 @@ export class Transaction {
     /**
      * Manually signify that this transaction should be rolled back.
      */
-    public markAsRollback(): void {
+    markAsRollback(): void {
         this.rollback = true;
     }
 

@@ -1,7 +1,18 @@
 import { Inject } from '@nestjs/common';
+import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 
 export const InjectConnectionProvider = (): any => {
     return Inject(`ConnectionProvider`);
+};
+
+export const InjectPersistenceManager = (type: PersistenceManagerType, database: string = 'default'): any => {
+    switch (type) {
+        case PersistenceManagerType.TRANSACTIONAL:
+        default:
+            return Inject(`TransactionalPersistenceManager:${database}`);
+        case PersistenceManagerType.NON_TRANSACTIONAL:
+            return Inject(`NonTransactionalPersistenceManager:${database}`);
+    }
 };
 
 export const fileContentInjections: string[] = [];
@@ -30,3 +41,4 @@ export const InjectSql = (path: string): any => {
     }
     return Inject(`SQL:${filename}`);
 };
+

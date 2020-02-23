@@ -2,7 +2,7 @@ import { inTestContext } from '@/test/TestContext';
 import { HealthRepository } from './HealthRepository';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { ConnectionProviderRegistry } from '@/connection/ConnectionProviderRegistry';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 describe('HealthRepository', () => {
     let repo: HealthRepository;
@@ -11,7 +11,7 @@ describe('HealthRepository', () => {
         const app: TestingModule = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
-                    connectionProviders: [ConnectionProviderRegistry.buildOrResolveFromEnv()]
+                    connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
                 })
             ],
             providers: [HealthRepository],

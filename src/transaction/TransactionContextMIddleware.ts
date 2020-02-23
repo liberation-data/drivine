@@ -8,12 +8,12 @@ import { InjectConnectionProvider } from '@/DrivineInjectionDecorators';
 
 @Injectable()
 export class TransactionContextMiddleware implements NestMiddleware {
-    public constructor(
-        public readonly localStorage: TransactionContextHolder,
-        @InjectConnectionProvider() public readonly connectionProvider: ConnectionProvider
+    constructor(
+        readonly localStorage: TransactionContextHolder,
+        @InjectConnectionProvider() readonly connectionProvider: ConnectionProvider
     ) {}
 
-    public use(req: express.Request, res: express.Response, next: express.NextFunction): any {
+    use(req: express.Request, res: express.Response, next: express.NextFunction): any {
         TransactionContextHolder.instance.bindEmitter(req);
         TransactionContextHolder.instance.bindEmitter(res);
         TransactionContextHolder.instance.bind(next);
