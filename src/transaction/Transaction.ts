@@ -15,7 +15,7 @@ export class Transaction {
     private contextHolder: TransactionContextHolder;
 
     private rollback: boolean;
-    private connections: Map<string, Connection>;
+    private connectionRegistry: Map<string, Connection>;
     private cursors: Cursor<any>[];
 
     private readonly logger = new Logger(Transaction.name);
@@ -26,6 +26,10 @@ export class Transaction {
         this.callStack = new Stack<string>();
         this.contextHolder = contextHolder;
         this.contextHolder.currentTransaction = this;
+    }
+
+    get connections(): Connection[] {
+        return Array.from(this.connectionRegistry.values());
     }
 
     async query<T>(spec: QuerySpecification<T>, database: string): Promise<T[]> {
@@ -49,7 +53,7 @@ export class Transaction {
 
     async pushContext(context: string | symbol): Promise<void> {
         if (this.callStack.isEmpty()) {
-            this.connections = new Map<string, Connection>();
+            this.connectionRegistry = new Map<string, Connection>();
             this.cursors = [];
             this.logger.verbose(`Starting transaction: ${this.id}`);
         }
@@ -65,11 +69,11 @@ export class Transaction {
             if (this.rollback) {
                 this.logger.verbose(`Transaction: ${this.id} successful, but is marked ROLLBACK. Rolling back.`);
                 await Promise.all(
-                    Array.from(this.connections.values()).map(async it => await it.rollbackTransaction())
+                    Array.from(this.connections).map(async it => await it.rollbackTransaction())
                 );
             } else {
                 this.logger.verbose(`Committing transaction: ${this.id}`);
-                await Promise.all(Array.from(this.connections.values()).map(async it => await it.commitTransaction()));
+                await Promise.all(this.connections.map(async it => await it.commitTransaction()));
             }
             await this.releaseClient();
         }
@@ -82,7 +86,7 @@ export class Transaction {
         this.callStack.pop();
         if (this.callStack.isEmpty()) {
             this.logger.verbose(`Rolling back transaction: ${this.id} due to error: ${e.message}`);
-            await Promise.all(Array.from(this.connections.values()).map(async it => await it.rollbackTransaction()));
+            await Promise.all(this.connections.map(async it => await it.rollbackTransaction()));
             await this.releaseClient(e);
         }
     }
@@ -95,22 +99,22 @@ export class Transaction {
     }
 
     private async connectionFor(database: string): Promise<Connection> {
-        if (!this.connections.get(database)) {
+        if (!this.connectionRegistry.get(database)) {
             const databaseRegistry = this.contextHolder.databaseRegistry;
             const connectionProvider = databaseRegistry.connectionProvider(database);
             if (!connectionProvider) {
-                throw new DrivineError(`There is no database registered with key: ${database}`)
+                throw new DrivineError(`There is no database registered with key: ${database}`);
             }
             const connection = await connectionProvider.connect();
-            this.connections.set(database, connection);
+            this.connectionRegistry.set(database, connection);
             await connection.startTransaction();
         }
-        return this.connections.get(database)!;
+        return this.connectionRegistry.get(database)!;
     }
 
     private async releaseClient(error?: Error): Promise<void> {
         this.logger.verbose(`Releasing connection for transaction: ${this.id}`);
-        await Promise.all(Array.from(this.connections.values()).map(async it => await it.release(error)));
+        await Promise.all(this.connections.map(async it => await it.release(error)));
         this.contextHolder.currentTransaction = undefined;
     }
 }

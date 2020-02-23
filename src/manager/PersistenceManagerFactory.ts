@@ -2,10 +2,14 @@ import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPe
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { DrivineError } from '@/DrivineError';
 import { Injectable } from '@nestjs/common';
+import {
+    optionsWithDefaults,
+    PersistenceManagerOptions,
+    PersistenceManagerOptionsWithDefaults
+} from '@/manager/PersistenceManagerOptions';
 
 @Injectable()
 export class PersistenceManagerFactory {
@@ -13,27 +17,28 @@ export class PersistenceManagerFactory {
 
     constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {}
 
-    buildOrResolve(type: PersistenceManagerType, database: string = 'default'): PersistenceManager {
-        const key = `${type}:${database}`;
-        if (!this.managers.get(`${key}`)) {
-            this.register(type, database);
+    buildOrResolve(options?: PersistenceManagerOptions): PersistenceManager {
+        const defaults = optionsWithDefaults(options);
+        if (!this.managers.get(defaults.key)) {
+            this.register(defaults);
         }
-        return this.managers.get(key)!;
+        return this.managers.get(defaults.key)!;
     }
 
-    private register(type: PersistenceManagerType, database: string): void {
-        const key = `${type}:${database}`;
-        switch (type) {
-            case PersistenceManagerType.TRANSACTIONAL:
+    private register(options: PersistenceManagerOptionsWithDefaults): void {
+        switch (options.type) {
+            case 'TRANSACTIONAL':
             default:
-                this.managers.set(key, new TransactionalPersistenceManager(this.contextHolder, database));
+                this.managers.set(options.key,
+                    new TransactionalPersistenceManager(this.contextHolder, options.database));
                 break;
-            case PersistenceManagerType.NON_TRANSACTIONAL:
-                if (!this.registry.connectionProvider(database)) {
-                    throw new DrivineError(`No database is registered under name: ${database}`);
+            case 'NON_TRANSACTIONAL':
+                if (!this.registry.connectionProvider(options.database)) {
+                    throw new DrivineError(`No database is registered under name: ${options.database}`);
                 }
-                this.managers.set(key, new NonTransactionalPersistenceManager(
-                    this.registry.connectionProvider(database)!));
+                this.managers.set(options.key,
+                    new NonTransactionalPersistenceManager(this.registry.connectionProvider(options.database)!)
+                );
                 break;
         }
     }

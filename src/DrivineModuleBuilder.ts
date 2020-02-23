@@ -18,7 +18,7 @@ import { Cacheable } from 'typescript-cacheable';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { PersistenceManager } from '@/manager/PersistenceManager';
-import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
+import { PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
 
 const fs = require('fs');
 
@@ -66,7 +66,9 @@ export class DrivineModuleBuilder {
                 provide: token,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(PersistenceManagerType.TRANSACTIONAL, database);
+                    return persistenceManagerFactory.buildOrResolve(
+                        <PersistenceManagerOptions> {type: 'TRANSACTIONAL', database: database}
+                    );
                 }
             };
         });
@@ -79,7 +81,9 @@ export class DrivineModuleBuilder {
                 provide: token,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(PersistenceManagerType.NON_TRANSACTIONAL, database);
+                    return persistenceManagerFactory.buildOrResolve(
+                        <PersistenceManagerOptions> {type: 'TRANSACTIONAL', database: database}
+                    );
                 }
             };
         });

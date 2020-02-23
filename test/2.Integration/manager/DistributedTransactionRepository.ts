@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { InjectPersistenceManager } from '@/DrivineInjectionDecorators';
-import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { Transactional } from '@/transaction/Transactional';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -9,10 +8,8 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 export class DistributedTransactionRepository {
 
     constructor(
-        @InjectPersistenceManager(PersistenceManagerType.TRANSACTIONAL, 'TRAFFIC')
-        readonly trafficManager: PersistenceManager,
-        @InjectPersistenceManager(PersistenceManagerType.TRANSACTIONAL, 'NEO')
-        readonly neoManager: PersistenceManager
+        @InjectPersistenceManager({database: 'TRAFFIC'}) readonly trafficManager: PersistenceManager,
+        @InjectPersistenceManager({database: 'NEO'}) readonly neoManager: PersistenceManager
     ) {
     }
 

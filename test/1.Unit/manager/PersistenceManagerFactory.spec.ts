@@ -3,7 +3,6 @@ import { instance, mock, when } from 'ts-mockito';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 
 describe('PersistenceManagerFactory', () => {
 
@@ -16,11 +15,11 @@ describe('PersistenceManagerFactory', () => {
 
         const factory = new PersistenceManagerFactory(instance(registry), instance(transactionContextHolder));
 
-        const result = factory.buildOrResolve(PersistenceManagerType.TRANSACTIONAL);
+        const result = factory.buildOrResolve({type: 'TRANSACTIONAL'});
         expect(result).toBeDefined();
         expect(factory.managers.size).toEqual(1);
 
-        factory.buildOrResolve(PersistenceManagerType.TRANSACTIONAL);
+        factory.buildOrResolve({type: 'TRANSACTIONAL'});
         expect(factory.managers.size).toEqual(1);
     });
 

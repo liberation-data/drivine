@@ -2,13 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { InjectPersistenceManager } from '@/DrivineInjectionDecorators';
-import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 
 @Injectable()
 export class HealthRepository {
 
     constructor(
-        @InjectPersistenceManager(PersistenceManagerType.NON_TRANSACTIONAL, 'TRAFFIC')
+        @InjectPersistenceManager({type: 'NON_TRANSACTIONAL', database: 'TRAFFIC'})
         readonly persistenceManager: NonTransactionalPersistenceManager) {
     }
 

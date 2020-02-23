@@ -1,24 +1,22 @@
 import { Inject } from '@nestjs/common';
-import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
+import { optionsWithDefaults, PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
 
 export const transactionalPersistenceManagerInjections: string[] = [];
 export const nonTransactionalPersistenceManagerInjections: string[] = [];
-export const InjectPersistenceManager = (
-    type: PersistenceManagerType = PersistenceManagerType.TRANSACTIONAL,
-    database: string = 'default'
-): any => {
-    switch (type) {
-        case PersistenceManagerType.TRANSACTIONAL:
+export const InjectPersistenceManager = (options?: PersistenceManagerOptions): any => {
+    const defaults = optionsWithDefaults(options);
+    switch (defaults.type) {
+        case 'TRANSACTIONAL':
         default:
-            if (!transactionalPersistenceManagerInjections.includes(database)) {
-                transactionalPersistenceManagerInjections.push(database);
+            if (!transactionalPersistenceManagerInjections.includes(defaults.database!)) {
+                transactionalPersistenceManagerInjections.push(defaults.database!);
             }
-            return Inject(`TransactionalPersistenceManager:${database}`);
-        case PersistenceManagerType.NON_TRANSACTIONAL:
-            if (!nonTransactionalPersistenceManagerInjections.includes(database)) {
-                nonTransactionalPersistenceManagerInjections.push(database);
+            return Inject(`TransactionalPersistenceManager:${defaults.database!}`);
+        case 'NON_TRANSACTIONAL':
+            if (!nonTransactionalPersistenceManagerInjections.includes(defaults.database!)) {
+                nonTransactionalPersistenceManagerInjections.push(defaults.database!);
             }
-            return Inject(`NonTransactionalPersistenceManager:${database}`);
+            return Inject(`NonTransactionalPersistenceManager:${defaults.database!}`);
     }
 };
 
