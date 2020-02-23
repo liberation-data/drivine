@@ -5,7 +5,9 @@ import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { DrivineError } from '@/DrivineError';
+import { Injectable } from '@nestjs/common';
 
+@Injectable()
 export class PersistenceManagerFactory {
 
     readonly nonTransactionalManagers: Map<string, NonTransactionalPersistenceManager> = new Map();

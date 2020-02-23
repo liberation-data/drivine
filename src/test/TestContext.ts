@@ -4,7 +4,6 @@ import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
 import * as assert from 'assert';
 import { Transaction } from '@/transaction/Transaction';
-import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 require('dotenv').config({
@@ -12,32 +11,31 @@ require('dotenv').config({
 });
 
 export function inTestContext(): TestContext {
-    const context = new TestContext(true, DatabaseRegistry.getInstance().defaultProvider());
-    if (context.connectionProvider instanceof AgensGraphConnectionProvider) {
-        const provider = <AgensGraphConnectionProvider> context.connectionProvider;
-        assert(
-            provider.idleTimeoutMillis === 500,
-            `DATABASE_IDLE_TIMEOUT must be set to 500 in test environments - so that jest can shut down cleanly`
-        );
-    }
+    const context = new TestContext(true);
+    DatabaseRegistry.getInstance().providers.forEach((provider) => {
+        if (provider instanceof AgensGraphConnectionProvider) {
+            assert(
+                provider.idleTimeoutMillis === 500,
+                `DATABASE_IDLE_TIMEOUT must be set to 500 in test environments - so that jest can shut down cleanly`
+            );
+        }
+    });
     return context;
 }
 
 export class TestContext {
 
-    constructor(readonly rollback: boolean, readonly connectionProvider: ConnectionProvider) {}
-
-    withRollback(rollback: boolean): TestContext {
-        return new TestContext(rollback, this.connectionProvider);
+    constructor(readonly rollback: boolean) {
     }
 
-    withConnectionProvider(provider: ConnectionProvider): TestContext {
-        return new TestContext(this.rollback, provider);
+    withRollback(rollback: boolean): TestContext {
+        return new TestContext(rollback);
     }
 
     async run(fn: (...args: any[]) => Promise<any>): Promise<any> {
         return TransactionContextHolder.instance.runPromise(async () => {
-            TransactionContextHolder.instance.set(TransactionContextKeys.CONNECTION_PROVIDER, this.connectionProvider);
+            TransactionContextHolder.instance.set(
+                TransactionContextKeys.DATABASE_REGISTRY, DatabaseRegistry.getInstance());
             return this.runInTransaction(fn);
         });
     }

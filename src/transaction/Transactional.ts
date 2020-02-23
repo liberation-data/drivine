@@ -15,7 +15,7 @@ export function Transactional(transactionOptions?: TransactionOptions): MethodDe
         const options = optionsWithDefaults(transactionOptions);
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            const connectionProvider = localStorage.get(TransactionContextKeys.CONNECTION_PROVIDER);
+            const connectionProvider = localStorage.get(TransactionContextKeys.DATABASE_REGISTRY).connectionProvider();
             const transaction =
                 localStorage.get(TransactionContextKeys.TRANSACTION) ||
                 new Transaction(connectionProvider, options.rollback!, localStorage);

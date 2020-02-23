@@ -1,16 +1,21 @@
 import { Inject } from '@nestjs/common';
 import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 
-export const InjectConnectionProvider = (): any => {
-    return Inject(`ConnectionProvider`);
-};
-
-export const InjectPersistenceManager = (type: PersistenceManagerType, database: string = 'default'): any => {
+export const transactionalPersistenceManagerInjections: string[] = [];
+export const nonTransactionalPersistenceManagerInjections: string[] = [];
+export const InjectPersistenceManager = (type: PersistenceManagerType = PersistenceManagerType.TRANSACTIONAL,
+                                         database: string = 'default'): any => {
     switch (type) {
         case PersistenceManagerType.TRANSACTIONAL:
         default:
+            if (!transactionalPersistenceManagerInjections.includes(database)) {
+                transactionalPersistenceManagerInjections.push(database);
+            }
             return Inject(`TransactionalPersistenceManager:${database}`);
         case PersistenceManagerType.NON_TRANSACTIONAL:
+            if (!nonTransactionalPersistenceManagerInjections.includes(database)) {
+                nonTransactionalPersistenceManagerInjections.push(database);
+            }
             return Inject(`NonTransactionalPersistenceManager:${database}`);
     }
 };

@@ -1,12 +1,11 @@
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { ConnectionProviderBuilder } from '@/connection/ConnectionProviderBuilder';
 import { ConnectionPropertiesFromEnv } from '@/connection/ConnectionProperties';
-import { DrivineError } from '@/DrivineError';
 
 export class DatabaseRegistry {
     private static instance: DatabaseRegistry;
 
-    private providers: Map<string, ConnectionProvider>;
+    readonly providers: Map<string, ConnectionProvider>;
 
     static buildOrResolveFromEnv(name?: string): ConnectionProvider {
         return DatabaseRegistry.getBuilder()
@@ -30,17 +29,8 @@ export class DatabaseRegistry {
         this.providers = new Map<string, ConnectionProvider>();
     }
 
-    defaultProvider(): ConnectionProvider {
-        const result = this.providers.values().next().value;
-        if (!result) {
-            throw new DrivineError(`No connection providers are registered`);
-        }
-        return result;
-    }
-
     connectionProvider(name?: string): ConnectionProvider | undefined {
-        const provider = this.providers.get(name ? name : 'default');
-        return provider;
+        return name? this.providers.get(name) : this.providers.values().next().value;
     }
 
     register(connectionProvider: ConnectionProvider, name?: string): void {

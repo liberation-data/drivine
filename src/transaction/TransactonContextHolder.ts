@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Transaction } from '@/transaction/Transaction';
-import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
 import cls = require('cls-hooked');
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 /**
  * Wrap local storage to make it injectable.
@@ -32,12 +32,12 @@ export class TransactionContextHolder {
         this.set<Transaction>(TransactionContextKeys.TRANSACTION, context);
     }
 
-    get connectionProvider(): ConnectionProvider {
-        return this.get<AgensGraphConnectionProvider>(TransactionContextKeys.CONNECTION_PROVIDER);
+    get databaseRegistry(): DatabaseRegistry {
+        return this.get<DatabaseRegistry>(TransactionContextKeys.DATABASE_REGISTRY);
     }
 
-    set connectionProvider(provider: ConnectionProvider) {
-        this.set<ConnectionProvider>(TransactionContextKeys.CONNECTION_PROVIDER, provider);
+    set databaseRegistry(registry: DatabaseRegistry) {
+        this.set<DatabaseRegistry>(TransactionContextKeys.DATABASE_REGISTRY, registry);
     }
 
     private get<T>(key: string): T {

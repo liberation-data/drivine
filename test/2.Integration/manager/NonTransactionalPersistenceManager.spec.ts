@@ -11,7 +11,10 @@ describe('HealthRepository', () => {
         const app: TestingModule = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
-                    connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
+                    connectionProviders: [
+                        DatabaseRegistry.buildOrResolveFromEnv(),
+                        DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC')
+                    ]
                 })
             ],
             providers: [HealthRepository],

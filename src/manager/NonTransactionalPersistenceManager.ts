@@ -3,16 +3,14 @@ import { DrivineError } from '@/DrivineError';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { InjectConnectionProvider } from '@/DrivineInjectionDecorators';
 import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
 
-@Injectable()
 export class NonTransactionalPersistenceManager implements PersistenceManager {
     private logger = new Logger(NonTransactionalPersistenceManager.name);
     private finderOperations: FinderOperations;
 
-    constructor(@InjectConnectionProvider() readonly connectionProvider: ConnectionProvider) {
+    constructor(readonly connectionProvider: ConnectionProvider) {
         this.finderOperations = new FinderOperations(this);
     }
 

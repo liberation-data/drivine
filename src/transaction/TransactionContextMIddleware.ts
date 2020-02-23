@@ -3,14 +3,13 @@ import { TransactionContextHolder } from '@/transaction/TransactonContextHolder'
 import * as express from 'express';
 import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Transaction } from '@/transaction/Transaction';
-import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { InjectConnectionProvider } from '@/DrivineInjectionDecorators';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 @Injectable()
 export class TransactionContextMiddleware implements NestMiddleware {
     constructor(
         readonly localStorage: TransactionContextHolder,
-        @InjectConnectionProvider() readonly connectionProvider: ConnectionProvider
+        readonly databaseRegistry: DatabaseRegistry
     ) {}
 
     use(req: express.Request, res: express.Response, next: express.NextFunction): any {
@@ -18,7 +17,7 @@ export class TransactionContextMiddleware implements NestMiddleware {
         TransactionContextHolder.instance.bindEmitter(res);
         TransactionContextHolder.instance.bind(next);
         return TransactionContextHolder.instance.run(() => {
-            this.localStorage.connectionProvider = this.connectionProvider;
+            this.localStorage.databaseRegistry = this.databaseRegistry;
             res.on('close', () => {
                 if (!res.finished) {
                     const transaction = <Transaction>(
