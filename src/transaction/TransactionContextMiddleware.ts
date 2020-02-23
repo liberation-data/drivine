@@ -26,7 +26,6 @@ export class TransactionContextMiddleware implements NestMiddleware {
                     transaction.markAsRollback();
                 }
             });
-
             return next();
         });
     }

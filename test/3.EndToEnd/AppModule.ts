@@ -11,7 +11,7 @@ import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { RouteRepository } from '../2.Integration/manager/RouteRepository';
 import { Reflector } from '@nestjs/core';
 import { RouteController } from './RouteController';
-import { TransactionContextMiddleware } from '@/transaction/TransactionContextMIddleware';
+import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 
 export async function configureApp(app: INestApplication): Promise<void> {
     app.useGlobalPipes(

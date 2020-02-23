@@ -11,11 +11,10 @@ export interface PersistenceManagerOptionsWithDefaults extends PersistenceManage
     key: string;
 }
 
-export function optionsWithDefaults(options: PersistenceManagerOptions | undefined):
-    PersistenceManagerOptionsWithDefaults {
-
+export function optionsWithDefaults(
+    options: PersistenceManagerOptions | undefined
+): PersistenceManagerOptionsWithDefaults {
     const type = options && options.type ? options.type : 'TRANSACTIONAL';
     const database = options && options.database ? options.database : 'default';
     return <PersistenceManagerOptionsWithDefaults>{ type: type, database: database, key: `${type}:${database}` };
 }
-

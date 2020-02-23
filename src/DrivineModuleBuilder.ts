@@ -9,7 +9,7 @@ import {
 } from '@/DrivineInjectionDecorators';
 import * as assert from 'assert';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { TransactionContextMiddleware } from '@/transaction/TransactionContextMIddleware';
+import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { Statement } from '@/query/Statement';
@@ -66,9 +66,10 @@ export class DrivineModuleBuilder {
                 provide: token,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(
-                        <PersistenceManagerOptions> {type: 'TRANSACTIONAL', database: database}
-                    );
+                    return persistenceManagerFactory.buildOrResolve(<PersistenceManagerOptions>{
+                        type: 'TRANSACTIONAL',
+                        database: database
+                    });
                 }
             };
         });
@@ -81,9 +82,10 @@ export class DrivineModuleBuilder {
                 provide: token,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(
-                        <PersistenceManagerOptions> {type: 'TRANSACTIONAL', database: database}
-                    );
+                    return persistenceManagerFactory.buildOrResolve(<PersistenceManagerOptions>{
+                        type: 'TRANSACTIONAL',
+                        database: database
+                    });
                 }
             };
         });

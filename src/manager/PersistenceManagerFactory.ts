@@ -29,14 +29,17 @@ export class PersistenceManagerFactory {
         switch (options.type) {
             case 'TRANSACTIONAL':
             default:
-                this.managers.set(options.key,
-                    new TransactionalPersistenceManager(this.contextHolder, options.database));
+                this.managers.set(
+                    options.key,
+                    new TransactionalPersistenceManager(this.contextHolder, options.database)
+                );
                 break;
             case 'NON_TRANSACTIONAL':
                 if (!this.registry.connectionProvider(options.database)) {
                     throw new DrivineError(`No database is registered under name: ${options.database}`);
                 }
-                this.managers.set(options.key,
+                this.managers.set(
+                    options.key,
                     new NonTransactionalPersistenceManager(this.registry.connectionProvider(options.database)!)
                 );
                 break;
