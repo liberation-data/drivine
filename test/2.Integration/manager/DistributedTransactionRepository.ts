@@ -17,10 +17,11 @@ export class DistributedTransactionRepository {
     }
 
     @Transactional()
-    async createNodes(): Promise<void> {
-        const date = new Date().valueOf();
-        const spec = new QuerySpecification(
-            `merge (:Person {firstName: 'Jasper', lastName:'Blues', lastUpdate: ${date}})`);
+    async createNodes(date: number): Promise<void> {
+        const spec = new QuerySpecification()
+            .withStatement(`merge (p:Person {firstName: 'Jasper', lastName:'Blues'}) 
+                on create set p.lastUpdate = $1 on match set p.lastUpdate=$1`)
+            .bind([date]);
         await this.trafficManager.query(spec);
         await this.neoManager.query(spec);
     }

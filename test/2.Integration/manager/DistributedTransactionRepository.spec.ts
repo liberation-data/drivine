@@ -27,7 +27,7 @@ describe('DistributedTransactionRepository', () => {
     it('should run transactions across multiple databases', async () => {
 
         return inTestContext().withRollback(false).run(async () => {
-            await repo.createNodes();
+            await repo.createNodes(new Date().valueOf());
         });
 
     });

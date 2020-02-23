@@ -18,10 +18,10 @@ describe('PersistenceManagerFactory', () => {
 
         const result = factory.buildOrResolve(PersistenceManagerType.TRANSACTIONAL);
         expect(result).toBeDefined();
-        expect(factory.transactionalManagers.size).toEqual(1);
+        expect(factory.managers.size).toEqual(1);
 
         factory.buildOrResolve(PersistenceManagerType.TRANSACTIONAL);
-        expect(factory.transactionalManagers.size).toEqual(1);
+        expect(factory.managers.size).toEqual(1);
     });
 
 });

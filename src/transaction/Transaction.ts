@@ -97,7 +97,10 @@ export class Transaction {
     private async connectionFor(database: string): Promise<Connection> {
         if (!this.connections.get(database)) {
             const databaseRegistry = this.contextHolder.databaseRegistry;
-            const connectionProvider = databaseRegistry.connectionProvider(database)!;
+            const connectionProvider = databaseRegistry.connectionProvider(database);
+            if (!connectionProvider) {
+                throw new DrivineError(`There is no database registered with key: ${database}`)
+            }
             const connection = await connectionProvider.connect();
             this.connections.set(database, connection);
             await connection.startTransaction();
