@@ -5,7 +5,7 @@ import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { DrivineError } from '@/DrivineError';
 import { Injectable } from '@nestjs/common';
-import { PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
+import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 import { DelegatingPersistenceManager } from '@/manager/DelegatingPersistenceManager';
 
 interface PersistenceManagerEntry {
@@ -18,15 +18,13 @@ interface PersistenceManagerEntry {
 export class PersistenceManagerFactory {
     readonly managers: Map<string, PersistenceManagerEntry> = new Map<string, PersistenceManagerEntry>();
 
-    constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {
-    }
+    constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {}
 
-    buildOrResolve(options?: PersistenceManagerOptions): PersistenceManager {
-        const database = options && options.database ? options.database : 'default';
+    buildOrResolve(database: string = 'default', type?: PersistenceManagerType): PersistenceManager {
         if (!this.managers.get(database)) {
             this.register(database);
         }
-        switch (options && options.type ? options.type : undefined) {
+        switch (type) {
             case 'TRANSACTIONAL':
                 return this.managers.get(database)!.transactional;
             case 'NON_TRANSACTIONAL':

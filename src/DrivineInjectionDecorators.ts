@@ -1,13 +1,11 @@
 import { Inject } from '@nestjs/common';
-import { PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
 
 export const persistenceManagerInjections: string[] = [];
-export const InjectPersistenceManager = (options?: PersistenceManagerOptions): any => {
-    const key = JSON.stringify(options || {});
-    if (!persistenceManagerInjections.includes(key)) {
-        persistenceManagerInjections.push(key);
+export const InjectPersistenceManager = (database: string = 'default'): any => {
+    if (!persistenceManagerInjections.includes(database)) {
+        persistenceManagerInjections.push(database);
     }
-    return Inject(`PersistenceManager:${key}`);
+    return Inject(`PersistenceManager:${database}`);
 };
 
 export const fileContentInjections: string[] = [];

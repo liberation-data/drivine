@@ -16,7 +16,6 @@ import { Cacheable } from 'typescript-cacheable';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { PersistenceManager } from '@/manager/PersistenceManager';
-import { PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
 
 const fs = require('fs');
 
@@ -52,13 +51,12 @@ export class DrivineModuleBuilder {
     }
 
     persistenceManagers(): Provider[] {
-        return persistenceManagerInjections.map(key => {
-            const options = <PersistenceManagerOptions>JSON.parse(key);
+        return persistenceManagerInjections.map(database => {
             return <Provider>{
-                provide: `PersistenceManager:${key}`,
+                provide: `PersistenceManager:${database}`,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(options);
+                    return persistenceManagerFactory.buildOrResolve(database);
                 }
             };
         });

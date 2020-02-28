@@ -7,8 +7,7 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 export class HealthRepository {
 
     constructor(
-        @InjectPersistenceManager({type: 'NON_TRANSACTIONAL', database: 'TRAFFIC'})
-        readonly persistenceManager: PersistenceManager) {
+        @InjectPersistenceManager('TRAFFIC') readonly persistenceManager: PersistenceManager) {
     }
 
     async countAllVertices(): Promise<number> {

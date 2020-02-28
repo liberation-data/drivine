@@ -37,9 +37,6 @@ export class DelegatingPersistenceManager implements PersistenceManager {
     private persistenceManager(): PersistenceManager {
         const type = this.contextHolder.currentTransaction ? 'TRANSACTIONAL' : 'NON_TRANSACTIONAL';
         this.logger.verbose(`Using persistence manager: ${type}`);
-        return this.factory.buildOrResolve({
-            database: this.database,
-            type: type
-        });
+        return this.factory.buildOrResolve(this.database, type);
     }
 }

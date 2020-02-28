@@ -11,15 +11,15 @@ describe('PersistenceManagerFactory', () => {
         const registry: DatabaseRegistry = mock<DatabaseRegistry>();
         const provider: ConnectionProvider = mock<ConnectionProvider>();
         const transactionContextHolder = mock(TransactionContextHolder);
-        when(registry.connectionProvider("default")).thenReturn(instance(provider));
+        when(registry.connectionProvider('default')).thenReturn(instance(provider));
 
         const factory = new PersistenceManagerFactory(instance(registry), instance(transactionContextHolder));
 
-        const result = factory.buildOrResolve({type: 'TRANSACTIONAL'});
+        const result = factory.buildOrResolve('default');
         expect(result).toBeDefined();
         expect(factory.managers.size).toEqual(1);
 
-        factory.buildOrResolve({type: 'TRANSACTIONAL'});
+        factory.buildOrResolve('default');
         expect(factory.managers.size).toEqual(1);
     });
 

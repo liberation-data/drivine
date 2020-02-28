@@ -8,8 +8,8 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 export class DistributedTransactionRepository {
 
     constructor(
-        @InjectPersistenceManager({database: 'TRAFFIC'}) readonly trafficManager: PersistenceManager,
-        @InjectPersistenceManager({database: 'NEO'}) readonly neoManager: PersistenceManager
+        @InjectPersistenceManager('TRAFFIC') readonly trafficManager: PersistenceManager,
+        @InjectPersistenceManager('NEO') readonly neoManager: PersistenceManager
     ) {
     }
 

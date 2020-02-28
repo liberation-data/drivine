@@ -8,14 +8,9 @@ export class DatabaseRegistry {
     readonly providers: Map<string, ConnectionProvider>;
 
     static buildOrResolveFromEnv(name?: string): ConnectionProvider {
-        return DatabaseRegistry.getBuilder()
-            .withProperties(ConnectionPropertiesFromEnv(name))
+        return DatabaseRegistry.getInstance()
+            .builder().withProperties(ConnectionPropertiesFromEnv(name))
             .buildOrResolve(name);
-    }
-
-    static getBuilder(): ConnectionProviderBuilder {
-        const registry = DatabaseRegistry.getInstance();
-        return new ConnectionProviderBuilder(registry);
     }
 
     static getInstance(): DatabaseRegistry {
@@ -27,6 +22,10 @@ export class DatabaseRegistry {
 
     private constructor() {
         this.providers = new Map<string, ConnectionProvider>();
+    }
+
+    builder(): ConnectionProviderBuilder {
+        return new ConnectionProviderBuilder(this);
     }
 
     connectionProvider(name: string = 'default'): ConnectionProvider | undefined {
