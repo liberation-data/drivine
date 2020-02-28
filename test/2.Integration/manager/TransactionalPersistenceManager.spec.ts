@@ -5,6 +5,7 @@ import { Route } from './Route';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
+import { inDrivineContext } from '@/DrivineContext';
 
 const fs = require('fs');
 
@@ -25,7 +26,7 @@ describe('RouteRepository', () => {
     });
 
     it('should find routes between two cities, ordered by most expedient', async () => {
-        return inTestContext().run(async () => {
+        return inDrivineContext(async () => {
             const results = await repo.findRoutesBetween('Cavite Island', 'NYC');
             expect(results.length).toBeGreaterThan(0);
             expect(results[0].travelTime).toEqual(26);

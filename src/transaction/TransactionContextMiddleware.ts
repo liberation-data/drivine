@@ -16,7 +16,7 @@ export class TransactionContextMiddleware implements NestMiddleware {
         this.transactionContextHolder.namespace.bindEmitter(req);
         this.transactionContextHolder.namespace.bindEmitter(res);
         this.transactionContextHolder.namespace.bind(next);
-        return this.transactionContextHolder.namespace.run(() => {
+        return this.transactionContextHolder.run(() => {
             this.transactionContextHolder.databaseRegistry = this.databaseRegistry;
             res.on('close', () => {
                 if (!res.finished) {

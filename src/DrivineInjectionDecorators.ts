@@ -1,23 +1,13 @@
 import { Inject } from '@nestjs/common';
-import { optionsWithDefaults, PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
+import { PersistenceManagerOptions } from '@/manager/PersistenceManagerOptions';
 
-export const transactionalPersistenceManagerInjections: string[] = [];
-export const nonTransactionalPersistenceManagerInjections: string[] = [];
+export const persistenceManagerInjections: string[] = [];
 export const InjectPersistenceManager = (options?: PersistenceManagerOptions): any => {
-    const defaults = optionsWithDefaults(options);
-    switch (defaults.type) {
-        case 'TRANSACTIONAL':
-        default:
-            if (!transactionalPersistenceManagerInjections.includes(defaults.database!)) {
-                transactionalPersistenceManagerInjections.push(defaults.database!);
-            }
-            return Inject(`TransactionalPersistenceManager:${defaults.database!}`);
-        case 'NON_TRANSACTIONAL':
-            if (!nonTransactionalPersistenceManagerInjections.includes(defaults.database!)) {
-                nonTransactionalPersistenceManagerInjections.push(defaults.database!);
-            }
-            return Inject(`NonTransactionalPersistenceManager:${defaults.database!}`);
+    const key = JSON.stringify(options || {});
+    if (!persistenceManagerInjections.includes(key)) {
+        persistenceManagerInjections.push(key);
     }
+    return Inject(`PersistenceManager:${key}`);
 };
 
 export const fileContentInjections: string[] = [];

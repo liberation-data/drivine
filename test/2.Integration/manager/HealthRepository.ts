@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { InjectPersistenceManager } from '@/DrivineInjectionDecorators';
+import { PersistenceManager } from '@/manager/PersistenceManager';
 
 @Injectable()
 export class HealthRepository {
 
     constructor(
         @InjectPersistenceManager({type: 'NON_TRANSACTIONAL', database: 'TRAFFIC'})
-        readonly persistenceManager: NonTransactionalPersistenceManager) {
+        readonly persistenceManager: PersistenceManager) {
     }
 
     async countAllVertices(): Promise<number> {

@@ -1,13 +1,11 @@
 import { Logger, Provider } from '@nestjs/common';
 import { DrivineModuleOptions } from '@/DrivineModule';
 import {
+    persistenceManagerInjections,
     cypherInjections,
     fileContentInjections,
-    nonTransactionalPersistenceManagerInjections,
-    sqlInjections,
-    transactionalPersistenceManagerInjections
+    sqlInjections
 } from '@/DrivineInjectionDecorators';
-import * as assert from 'assert';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
@@ -26,19 +24,13 @@ export class DrivineModuleBuilder {
     private logger = new Logger(DrivineModuleBuilder.name);
     private _providers: Provider[];
 
-    constructor(readonly options: DrivineModuleOptions) {
-        assert(
-            options && options.connectionProviders && options.connectionProviders.length > 0,
-            `At least one ConnectionProvider is required. Consult documentation for advice on creation`
-        );
-    }
+    constructor(readonly options: DrivineModuleOptions) {}
 
     get providers(): Provider[] {
         if (!this._providers) {
             this._providers = [
                 ...this.infrastructureProviders(),
-                ...this.transactionalPersistenceManagers(),
-                ...this.nonTransactionalPersistenceManagers(),
+                ...this.persistenceManagers(),
                 ...this.cypherStatementProviders(),
                 ...this.sqlStatementProviders(),
                 ...this.fileResourceProviders()
@@ -59,33 +51,14 @@ export class DrivineModuleBuilder {
         ];
     }
 
-    transactionalPersistenceManagers(): Provider[] {
-        return transactionalPersistenceManagerInjections.map(database => {
-            const token = `TransactionalPersistenceManager:${database}`;
+    persistenceManagers(): Provider[] {
+        return persistenceManagerInjections.map(key => {
+            const options = <PersistenceManagerOptions>JSON.parse(key);
             return <Provider>{
-                provide: token,
+                provide: `PersistenceManager:${key}`,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(<PersistenceManagerOptions>{
-                        type: 'TRANSACTIONAL',
-                        database: database
-                    });
-                }
-            };
-        });
-    }
-
-    nonTransactionalPersistenceManagers(): Provider[] {
-        return nonTransactionalPersistenceManagerInjections.map(database => {
-            const token = `NonTransactionalPersistenceManager:${database}`;
-            return <Provider>{
-                provide: token,
-                inject: [PersistenceManagerFactory],
-                useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(<PersistenceManagerOptions>{
-                        type: 'TRANSACTIONAL',
-                        database: database
-                    });
+                    return persistenceManagerFactory.buildOrResolve(options);
                 }
             };
         });

@@ -12,24 +12,21 @@ import shortId = require('shortid');
 export class Transaction {
     readonly id: string;
     readonly callStack: Stack<string>;
-    private contextHolder: TransactionContextHolder;
-
-    private rollback: boolean;
-    private connectionRegistry: Map<string, Connection>;
-    private cursors: Cursor<any>[];
+    readonly connectionRegistry: Map<string, Connection>;
+    readonly cursors: Cursor<any>[];
 
     private readonly logger = new Logger(Transaction.name);
 
-    constructor(rollback: boolean, contextHolder: TransactionContextHolder) {
-        this.rollback = rollback;
+    constructor(private rollback: boolean, readonly contextHolder: TransactionContextHolder) {
         this.id = shortId.generate();
         this.callStack = new Stack<string>();
-        this.contextHolder = contextHolder;
+        this.connectionRegistry = new Map<string, Connection>();
+        this.cursors = [];
         this.contextHolder.currentTransaction = this;
     }
 
     get description(): string {
-        return `${this.id} [${this.databases}]`
+        return `${this.id} [${this.databases}]`;
     }
 
     get databases(): string[] {
@@ -61,8 +58,6 @@ export class Transaction {
 
     async pushContext(context: string | symbol): Promise<void> {
         if (this.callStack.isEmpty()) {
-            this.connectionRegistry = new Map<string, Connection>();
-            this.cursors = [];
             this.logger.verbose(`Starting transaction: ${this.id}`);
         }
         this.callStack.push(String(context));
@@ -76,7 +71,8 @@ export class Transaction {
             await Promise.all(this.cursors.map(async it => it.close()));
             if (this.rollback) {
                 this.logger.verbose(
-                    `Transaction: ${this.description} successful, but is marked ROLLBACK. Rolling back.`);
+                    `Transaction: ${this.description} successful, but is marked ROLLBACK. Rolling back.`
+                );
                 await Promise.all(this.connections.map(async it => it.rollbackTransaction()));
             } else {
                 this.logger.verbose(`Committing transaction: ${this.description}.`);
