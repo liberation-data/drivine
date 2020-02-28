@@ -27,9 +27,9 @@ Start creating repositories like the one below. Follow the **<a href="https://gi
 ```typescript
 @Injectable()
 export class RouteRepository {
-    public constructor(
-        public readonly persistenceManager: TransactionalPersistenceManager,
-        @InjectCypher('@/traffic/routesBetween')) {
+    constructor(
+        @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
+        @InjectCypher('@/traffic/routesBetween') readonly routesBetween string) {
     }
 
     @Transactional() // Has default Propagation.REQUIRED - partipicate in a current txn, or start one.
