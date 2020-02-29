@@ -1,17 +1,9 @@
-import {
-    ClassSerializerInterceptor,
-    INestApplication,
-    MiddlewareConsumer,
-    Module,
-    NestModule,
-    ValidationPipe
-} from '@nestjs/common';
+import { ClassSerializerInterceptor, INestApplication, Module, ValidationPipe } from '@nestjs/common';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { RouteRepository } from '../2.Integration/manager/RouteRepository';
 import { Reflector } from '@nestjs/core';
 import { RouteController } from './RouteController';
-import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 
 export async function configureApp(app: INestApplication): Promise<void> {
     app.useGlobalPipes(
@@ -36,8 +28,6 @@ export async function configureApp(app: INestApplication): Promise<void> {
     providers: [RouteRepository],
     controllers: [RouteController]
 })
-export class AppModule implements NestModule {
-    configure(consumer: MiddlewareConsumer): any {
-        consumer.apply(TransactionContextMiddleware).forRoutes('**/**');
-    }
+export class AppModule {
+
 }

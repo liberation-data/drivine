@@ -23,14 +23,12 @@ describe('RouteController (e2e)', () => {
 
     describe('GET /routes/between', () => {
         it('should list routes between start and dest, ordered by travel time', async () => {
-            return inDrivineContext().run(async () => {
-                const result = await request(app.getHttpServer())
-                    .get('/routes/between/Pigalle/NYC')
-                    .expect(HttpStatus.OK);
+            const result = await request(app.getHttpServer())
+                .get('/routes/between/Pigalle/NYC')
+                .expect(HttpStatus.OK);
 
-                expect(result.body.length).toBeGreaterThan(0);
-                expect(result.body[0].travelTime).toEqual(8.5);
-            });
+            expect(result.body.length).toBeGreaterThan(0);
+            expect(result.body[0].travelTime).toEqual(8.5);
         });
     });
 

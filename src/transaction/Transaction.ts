@@ -97,12 +97,16 @@ export class Transaction {
         }
     }
 
+    markAsRollback(): void {
+        this._options = {...this._options, rollback: true}
+    }
+
     get options(): TransactionOptions {
         return this._options;
     }
 
     set options(options: TransactionOptions) {
-        // assert(this.callStack.isEmpty(), `Can't set options if the transaction is already in flight`);
+        assert(this.callStack.isEmpty(), `Can't set options if the transaction is already in flight`);
         this._options = options;
     }
 
