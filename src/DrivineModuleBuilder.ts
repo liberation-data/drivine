@@ -22,7 +22,8 @@ export class DrivineModuleBuilder {
     private logger = new Logger(DrivineModuleBuilder.name);
     private _providers: Provider[];
 
-    constructor(readonly options: DrivineModuleOptions) {}
+    constructor(readonly options: DrivineModuleOptions) {
+    }
 
     get providers(): Provider[] {
         if (!this._providers) {

@@ -3,6 +3,7 @@ import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Transaction } from '@/transaction/Transaction';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { Namespace } from 'cls-hooked';
+import { DrivineContext } from '@/context/DrivineContext';
 const cls = require('cls-hooked');
 
 /**
@@ -38,12 +39,12 @@ export class TransactionContextHolder {
         return this.namespace.runPromise(fn);
     }
 
-    get inContext(): boolean {
-        return this.get<boolean>(TransactionContextKeys.DRIVINE);
+    get drivineContext(): DrivineContext | undefined {
+        return this.get<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT);
     }
 
-    set inContext(context: boolean) {
-        this.set<boolean>(TransactionContextKeys.DRIVINE, context);
+    set drivineContext(context: DrivineContext | undefined) {
+        this.set<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT, context);
     }
 
     get currentTransaction(): Transaction | undefined {

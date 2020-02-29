@@ -2,8 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { DistributedTransactionRepository } from './DistributedTransactionRepository';
-import { inDrivineContext } from '@/context/DrivineContext';
+import { RunWithDrivine } from '@/utils/TestUtils';
+import { runInTransaction } from '@/transaction/Transactional';
 
+RunWithDrivine();
 describe('DistributedTransactionRepository', () => {
     let repo: DistributedTransactionRepository;
 
@@ -24,10 +26,8 @@ describe('DistributedTransactionRepository', () => {
     });
 
     it('should run transactions across multiple databases', async () => {
-        return inDrivineContext()
-            .withTransaction({rollback: false})
-            .run(async () => {
-                await repo.createNodes(new Date().valueOf());
-            });
+        await runInTransaction(async() => {
+            await repo.createNodes(new Date().valueOf());
+        });
     });
 });

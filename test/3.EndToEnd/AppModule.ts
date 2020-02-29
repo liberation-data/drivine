@@ -1,5 +1,5 @@
 import { ClassSerializerInterceptor, INestApplication, Module, ValidationPipe } from '@nestjs/common';
-import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
+import { DrivineModule, DrivineModuleOptions, TestConfig } from '@/DrivineModule';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { RouteRepository } from '../2.Integration/manager/RouteRepository';
 import { Reflector } from '@nestjs/core';
@@ -22,7 +22,10 @@ export async function configureApp(app: INestApplication): Promise<void> {
             connectionProviders: [
                 DatabaseRegistry.buildOrResolveFromEnv('NEO'),
                 DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC')
-            ]
+            ],
+            testConfig: <TestConfig>{
+                jest: true
+            }
         })
     ],
     providers: [RouteRepository],

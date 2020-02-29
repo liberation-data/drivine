@@ -98,7 +98,7 @@ export class Transaction {
     }
 
     markAsRollback(): void {
-        this._options = {...this._options, rollback: true}
+        this._options = { ...this._options, rollback: true };
     }
 
     get options(): TransactionOptions {

@@ -3,7 +3,12 @@ import { optionsWithDefaults, runInTransaction, TransactionOptions } from '@/tra
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
 export function inDrivineContext(): DrivineContext {
-    return new DrivineContext(TransactionContextHolder.getInstance(), DatabaseRegistry.getInstance());
+    const contextHolder = TransactionContextHolder.getInstance();
+    if (contextHolder.drivineContext) {
+        return contextHolder.drivineContext;
+    } else {
+        return new DrivineContext(contextHolder, DatabaseRegistry.getInstance());
+    }
 }
 
 export class DrivineContext {
@@ -17,11 +22,11 @@ export class DrivineContext {
     }
 
     async run(fn: () => Promise<any>): Promise<any> {
-        if (this.contextHolder.inContext) {
+        if (this.contextHolder.drivineContext) {
             return this.transactionOptions ? runInTransaction(fn, this.transactionOptions) : fn();
         } else {
             return this.contextHolder.runPromise(async () => {
-                this.contextHolder.inContext = true;
+                this.contextHolder.drivineContext = this;
                 this.contextHolder.databaseRegistry = this.databaseRegistry;
                 return this.transactionOptions ? runInTransaction(fn, this.transactionOptions) : fn();
             });

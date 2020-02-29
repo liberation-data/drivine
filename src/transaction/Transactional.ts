@@ -12,7 +12,7 @@ export function Transactional(options?: TransactionOptions): MethodDecorator {
     return (target: any, methodName: string | symbol, descriptor: TypedPropertyDescriptor<any>) => {
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            if (TransactionContextHolder.getInstance().inContext) {
+            if (TransactionContextHolder.getInstance().drivineContext) {
                 return runInTransaction(originalMethod.bind(this), options, args);
             } else {
                 return originalMethod.bind(this)(...args);

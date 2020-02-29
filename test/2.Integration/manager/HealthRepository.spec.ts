@@ -1,9 +1,10 @@
-import { inDrivineContext } from '@/context/DrivineContext';
 import { HealthRepository } from './HealthRepository';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
+import { RunWithDrivine } from '@/utils/TestUtils';
 
+RunWithDrivine()
 describe('HealthRepository', () => {
     let repo: HealthRepository;
 
@@ -24,10 +25,8 @@ describe('HealthRepository', () => {
     });
 
     it('should count all nodes', async () => {
-        return inDrivineContext().run(async () => {
             const results = await repo.countAllVertices();
             expect(results).toBeGreaterThan(0);
             console.log(`Got results: ${results}`);
-        });
     });
 });
