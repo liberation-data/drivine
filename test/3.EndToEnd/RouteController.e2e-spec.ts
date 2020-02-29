@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as request from 'supertest';
 import { HttpStatus, INestApplication } from '@nestjs/common';
 import { AppModule, configureApp } from './AppModule';
-import { inTestContext } from '@/test/TestContext';
+import { inDrivineContext } from '@/context/DrivineContext';
 
 describe('RouteController (e2e)', () => {
     let app: INestApplication;
@@ -23,7 +23,7 @@ describe('RouteController (e2e)', () => {
 
     describe('GET /routes/between', () => {
         it('should list routes between start and dest, ordered by travel time', async () => {
-            return inTestContext().run(async () => {
+            return inDrivineContext().run(async () => {
                 const result = await request(app.getHttpServer())
                     .get('/routes/between/Pigalle/NYC')
                     .expect(HttpStatus.OK);
@@ -36,7 +36,7 @@ describe('RouteController (e2e)', () => {
 
     describe('GET /routes/fastest/between', () => {
         it('should return the fastest route between start and dest ', async () => {
-            return inTestContext().run(async () => {
+            return inDrivineContext().run(async () => {
                 const result = await request(app.getHttpServer())
                     .get('/routes/between/Pigalle/NYC')
                     .expect(HttpStatus.OK);

@@ -4,6 +4,7 @@ import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
 import { Logger } from '@nestjs/common';
+import { CursorSpecification } from '@/cursor/CursorSpecification';
 
 /**
  * Delegates to NonTransactional or TransactionalPersistenceManger, depending on whether there is a transaction in
@@ -26,7 +27,7 @@ export class DelegatingPersistenceManager implements PersistenceManager {
         return this.persistenceManager().maybeGetOne<T>(spec);
     }
 
-    async openCursor<T>(spec: QuerySpecification<T>): Promise<Cursor<T>> {
+    async openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>> {
         return this.persistenceManager().openCursor(spec);
     }
 

@@ -5,6 +5,7 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
+import { CursorSpecification } from '@/cursor/CursorSpecification';
 
 export class NonTransactionalPersistenceManager implements PersistenceManager {
     private logger = new Logger(NonTransactionalPersistenceManager.name);
@@ -33,7 +34,7 @@ export class NonTransactionalPersistenceManager implements PersistenceManager {
         return await this.finderOperations.maybeGetOne(spec);
     }
 
-    async openCursor<T>(spec: QuerySpecification<T>): Promise<Cursor<T>> {
+    async openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>> {
         this.logger.verbose(`Open consumer for ${spec}`);
         return new Promise((resolve, reject) => {
             reject(new DrivineError(`Not implemented yet, please use TransactionalPersistenceManager`));

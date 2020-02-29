@@ -5,10 +5,7 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 
 @Injectable()
 export class HealthRepository {
-
-    constructor(
-        @InjectPersistenceManager('TRAFFIC') readonly persistenceManager: PersistenceManager) {
-    }
+    constructor(@InjectPersistenceManager('TRAFFIC') readonly persistenceManager: PersistenceManager) {}
 
     async countAllVertices(): Promise<number> {
         const results = await this.persistenceManager.query<any>(

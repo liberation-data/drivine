@@ -1,1 +1,1 @@
-export type PersistenceManagerType = 'TRANSACTIONAL' | 'NON_TRANSACTIONAL';
+export type PersistenceManagerType = 'TRANSACTIONAL' | 'NON_TRANSACTIONAL' | 'DELEGATING';

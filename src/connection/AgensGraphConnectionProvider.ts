@@ -41,6 +41,10 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         return new AgensGraphConnection(client, new AgensGraphResultMapper());
     }
 
+    async end(): Promise<void> {
+        await this.pool.end();
+    }
+
     private async setSessionId(client: PoolClient): Promise<void> {
         const statement = `
             select format('%s.%s', to_hex(extract(epoch from backend_start)::int), to_hex(pid)) as sid

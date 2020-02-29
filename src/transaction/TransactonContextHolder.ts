@@ -38,6 +38,14 @@ export class TransactionContextHolder {
         return this.namespace.runPromise(fn);
     }
 
+    get inContext(): boolean {
+        return this.get<boolean>(TransactionContextKeys.DRIVINE);
+    }
+
+    set inContext(context: boolean) {
+        this.set<boolean>(TransactionContextKeys.DRIVINE, context);
+    }
+
     get currentTransaction(): Transaction | undefined {
         return this.get<Transaction>(TransactionContextKeys.TRANSACTION);
     }

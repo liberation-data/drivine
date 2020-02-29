@@ -1,17 +1,16 @@
 import { Logger, Provider } from '@nestjs/common';
 import { DrivineModuleOptions } from '@/DrivineModule';
 import {
-    persistenceManagerInjections,
     cypherInjections,
     fileContentInjections,
+    persistenceManagerInjections,
     sqlInjections
 } from '@/DrivineInjectionDecorators';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
-import { Statement } from '@/query/Statement';
-import { QueryLanguage } from '@/query/QueryLanguage';
+import { cypherStatement, CypherStatement, sqlStatement, SqlStatement } from '@/query/Statement';
 import { Cacheable } from 'typescript-cacheable';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
@@ -79,12 +78,7 @@ export class DrivineModuleBuilder {
             const token = `CYPHER:${path}`;
             return <Provider>{
                 provide: token,
-                useFactory: (): any => {
-                    return <Statement>{
-                        text: this.fileContents(path),
-                        language: QueryLanguage.CYPHER
-                    };
-                }
+                useFactory: (): CypherStatement => cypherStatement(this.fileContents(path))
             };
         });
     }
@@ -94,12 +88,7 @@ export class DrivineModuleBuilder {
             const token = `SQL:${path}`;
             return <Provider>{
                 provide: token,
-                useFactory: (): any => {
-                    return <Statement>{
-                        text: this.fileContents(path),
-                        language: QueryLanguage.SQL
-                    };
-                }
+                useFactory: (): SqlStatement => sqlStatement(this.fileContents(path))
             };
         });
     }

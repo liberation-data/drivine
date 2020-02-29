@@ -1,5 +1,6 @@
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
+import { CursorSpecification } from '@/cursor/CursorSpecification';
 
 export interface PersistenceManager {
     /**
@@ -27,5 +28,5 @@ export interface PersistenceManager {
      * Returns an object that streams results either as an `AsyncIterable` or a `Readable` stream.
      * @param spec
      */
-    openCursor<T>(spec: QuerySpecification<T>): Promise<Cursor<T>>;
+    openCursor<T>(spec: CursorSpecification<T>): Promise<Cursor<T>>;
 }

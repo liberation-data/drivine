@@ -27,4 +27,8 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());
         return Promise.resolve(connection);
     }
+
+    async end(): Promise<void> {
+        return Promise.resolve();
+    }
 }

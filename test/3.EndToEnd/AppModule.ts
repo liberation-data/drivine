@@ -29,7 +29,7 @@ export async function configureApp(app: INestApplication): Promise<void> {
         DrivineModule.withOptions(<DrivineModuleOptions>{
             connectionProviders: [
                 DatabaseRegistry.buildOrResolveFromEnv('NEO'),
-                DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC'),
+                DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC')
             ]
         })
     ],

@@ -1,4 +1,1 @@
-export enum QueryLanguage {
-    CYPHER = 'CYPHER',
-    SQL = 'SQL'
-}
+export type QueryLanguage = 'CYPHER' | 'SQL';

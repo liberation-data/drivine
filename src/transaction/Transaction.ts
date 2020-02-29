@@ -8,6 +8,7 @@ import { DrivineError } from '@/DrivineError';
 import { Cursor } from '@/cursor/Cursor';
 import { Connection } from '@/connection/Connection';
 import shortId = require('shortid');
+import { TransactionOptions } from '@/transaction/Transactional';
 
 export class Transaction {
     readonly id: string;
@@ -16,12 +17,14 @@ export class Transaction {
     readonly cursors: Cursor<any>[];
 
     private readonly logger = new Logger(Transaction.name);
+    private _options: TransactionOptions;
 
-    constructor(private rollback: boolean, readonly contextHolder: TransactionContextHolder) {
+    constructor(options: TransactionOptions, readonly contextHolder: TransactionContextHolder) {
         this.id = shortId.generate();
         this.callStack = new Stack<string>();
         this.connectionRegistry = new Map<string, Connection>();
         this.cursors = [];
+        this.options = options;
         this.contextHolder.currentTransaction = this;
     }
 
@@ -69,7 +72,7 @@ export class Transaction {
         if (this.callStack.isEmpty()) {
             this.logger.verbose(`Closing ${this.cursors.length} open cursors.`);
             await Promise.all(this.cursors.map(async it => it.close()));
-            if (this.rollback) {
+            if (this.options.rollback) {
                 this.logger.verbose(
                     `Transaction: ${this.description} successful, but is marked ROLLBACK. Rolling back.`
                 );
@@ -94,11 +97,13 @@ export class Transaction {
         }
     }
 
-    /**
-     * Manually signify that this transaction should be rolled back.
-     */
-    markAsRollback(): void {
-        this.rollback = true;
+    get options(): TransactionOptions {
+        return this._options;
+    }
+
+    set options(options: TransactionOptions) {
+        // assert(this.callStack.isEmpty(), `Can't set options if the transaction is already in flight`);
+        this._options = options;
     }
 
     private async connectionFor(database: string): Promise<Connection> {

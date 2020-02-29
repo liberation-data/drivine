@@ -5,11 +5,12 @@ import { ConnectionPropertiesFromEnv } from '@/connection/ConnectionProperties';
 export class DatabaseRegistry {
     private static instance: DatabaseRegistry;
 
-    readonly providers: Map<string, ConnectionProvider>;
+    private _providers: Map<string, ConnectionProvider>;
 
     static buildOrResolveFromEnv(name?: string): ConnectionProvider {
         return DatabaseRegistry.getInstance()
-            .builder().withProperties(ConnectionPropertiesFromEnv(name))
+            .builder()
+            .withProperties(ConnectionPropertiesFromEnv(name))
             .buildOrResolve(name);
     }
 
@@ -21,7 +22,11 @@ export class DatabaseRegistry {
     }
 
     private constructor() {
-        this.providers = new Map<string, ConnectionProvider>();
+        this._providers = new Map<string, ConnectionProvider>();
+    }
+
+    get providers(): ConnectionProvider[] {
+        return Array.from(this._providers.values());
     }
 
     builder(): ConnectionProviderBuilder {
@@ -30,12 +35,12 @@ export class DatabaseRegistry {
 
     connectionProvider(name: string = 'default'): ConnectionProvider | undefined {
         if (name === 'default') {
-            return this.providers.values().next().value;
+            return this._providers.values().next().value;
         }
-        return this.providers.get(name);
+        return this._providers.get(name);
     }
 
     register(connectionProvider: ConnectionProvider): void {
-        this.providers.set(connectionProvider.name, connectionProvider);
+        this._providers.set(connectionProvider.name, connectionProvider);
     }
 }

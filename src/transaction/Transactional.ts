@@ -8,32 +8,46 @@ export interface TransactionOptions {
     propagation?: Propagation;
 }
 
-export function Transactional(transactionOptions?: TransactionOptions): MethodDecorator {
+export function Transactional(options?: TransactionOptions): MethodDecorator {
     return (target: any, methodName: string | symbol, descriptor: TypedPropertyDescriptor<any>) => {
-        const contextHolder = TransactionContextHolder.getInstance();
-        const options = optionsWithDefaults(transactionOptions);
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            const transaction = contextHolder.currentTransaction || new Transaction(options.rollback!, contextHolder);
-
-            try {
-                await transaction.pushContext(methodName);
-                const result = await originalMethod.apply(this, [...args]);
-                await transaction.popContext();
-                return result;
-            } catch (e) {
-                await transaction.popContextWithError(e);
-                throw e;
+            if (TransactionContextHolder.getInstance().inContext) {
+                return runInTransaction(originalMethod.bind(this), options, args);
+            } else {
+                return originalMethod.bind(this)(...args);
             }
         };
     };
+}
+
+export type AsyncFunction = (...args: any[]) => Promise<any>;
+
+export async function runInTransaction(
+    fn: AsyncFunction,
+    transactionOptions?: TransactionOptions,
+    args: any[] = []
+): Promise<any> {
+    const options = optionsWithDefaults(transactionOptions);
+    const contextHolder = TransactionContextHolder.getInstance();
+    const transaction = contextHolder.currentTransaction || new Transaction(options, contextHolder);
+
+    try {
+        await transaction.pushContext(fn.name || `[anonymous function]`);
+        const result = await fn(...args);
+        await transaction.popContext();
+        return result;
+    } catch (e) {
+        await transaction.popContextWithError(e);
+        throw e;
+    }
 }
 
 /**
  * Replaces null values on transaction options with defaults.
  * @param options
  */
-function optionsWithDefaults(options: TransactionOptions | undefined): TransactionOptions {
+export function optionsWithDefaults(options: TransactionOptions | undefined): TransactionOptions {
     if (options && options.propagation && options.propagation !== Propagation.REQUIRED) {
         throw new DrivineError(`Only REQUIRED level of propagation is currently supported`);
     }

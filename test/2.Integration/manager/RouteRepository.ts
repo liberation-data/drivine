@@ -6,13 +6,13 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { Cursor } from '@/cursor/Cursor';
 import { InjectCypher, InjectPersistenceManager } from '@/DrivineInjectionDecorators';
 import { PersistenceManager } from '@/manager/PersistenceManager';
+import { CypherStatement } from '@/query/Statement';
 
 @Injectable()
 export class RouteRepository {
-
     constructor(
         @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
-        @InjectCypher(__dirname + '/routesBetween') readonly routesBetween: string
+        @InjectCypher(__dirname + '/routesBetween') readonly routesBetween: CypherStatement
     ) {}
 
     @Transactional()

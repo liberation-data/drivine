@@ -5,9 +5,7 @@ import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 
 describe('PersistenceManagerFactory', () => {
-
     it('should build or return default PersistenceManager', () => {
-
         const registry: DatabaseRegistry = mock<DatabaseRegistry>();
         const provider: ConnectionProvider = mock<ConnectionProvider>();
         const transactionContextHolder = mock(TransactionContextHolder);
@@ -22,5 +20,4 @@ describe('PersistenceManagerFactory', () => {
         factory.buildOrResolve('default');
         expect(factory.managers.size).toEqual(1);
     });
-
 });

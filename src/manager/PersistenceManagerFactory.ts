@@ -20,7 +20,7 @@ export class PersistenceManagerFactory {
 
     constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {}
 
-    buildOrResolve(database: string = 'default', type?: PersistenceManagerType): PersistenceManager {
+    buildOrResolve(database: string = 'default', type: PersistenceManagerType = 'DELEGATING'): PersistenceManager {
         if (!this.managers.get(database)) {
             this.register(database);
         }
@@ -29,8 +29,10 @@ export class PersistenceManagerFactory {
                 return this.managers.get(database)!.transactional;
             case 'NON_TRANSACTIONAL':
                 return this.managers.get(database)!.nonTransactional;
-            default:
+            case 'DELEGATING':
                 return this.managers.get(database)!.delegating;
+            default:
+                throw new DrivineError(`Invalid PersistenceManagerType: ${type}`);
         }
     }
 

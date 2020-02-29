@@ -2,7 +2,6 @@ import { ClassType } from 'class-transformer/ClassTransformer';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { Statement } from '@/query/Statement';
-import { QueryLanguage } from '@/query/QueryLanguage';
 import * as assert from 'assert';
 
 export class QuerySpecification<T> {
@@ -23,7 +22,7 @@ export class QuerySpecification<T> {
     withStatement(statement: string | Statement): this {
         if (typeof statement === 'string') {
             // TODO: Resolve default QueryLanguage from bootstrap params
-            this.statement = <Statement>{ text: statement, language: QueryLanguage.CYPHER };
+            this.statement = <Statement>{ text: statement, language: 'CYPHER' };
         } else {
             assert(statement.text, 'statement text is required');
             assert(statement.language, 'statement language is require');
@@ -80,18 +79,15 @@ export class QuerySpecification<T> {
     mapParameters(type: DatabaseType): any {
         const params = this.parameters ? this.parameters : [];
         if (type == DatabaseType.AGENS_GRAPH) {
-            if (this.statement.language === QueryLanguage.CYPHER) {
+            if (this.statement.language === 'CYPHER') {
                 return params.map(it => JSON.stringify(it));
-            } else if (this.statement.language === QueryLanguage.SQL) {
+            } else if (this.statement.language === 'SQL') {
                 return params;
             } else {
                 throw new DrivineError(`${this.statement.language} is not supported on AgensGraph`);
             }
         } else if (type == DatabaseType.NEO4J) {
-            assert(
-                this.statement.language === QueryLanguage.CYPHER,
-                `${this.statement.language} is not supported on Neo4j.`
-            );
+            assert(this.statement.language === 'CYPHER', `${this.statement.language} is not supported on Neo4j.`);
             const mapped = params.map((it, index) => ({ [index + 1]: it }));
             return Object.assign({}, ...mapped);
         } else {
@@ -101,7 +97,7 @@ export class QuerySpecification<T> {
 
     private skipClause(): string {
         if (this._skip) {
-            return `${this.statement.language === QueryLanguage.CYPHER ? `SKIP` : `OFFSET`} ${this._skip}`;
+            return `${this.statement.language === 'CYPHER' ? `SKIP` : `OFFSET`} ${this._skip}`;
         }
         return ``;
     }
