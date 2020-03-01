@@ -296,7 +296,7 @@
                 <p class="testimonial-content mobile-four">It is the job of the persistence manager to obtain a
                     connection, using database details that are registered when
                     the library is bootstrapped. It will use pooling if this entails a performance benefit on the given database platform.
-                    There are two implementations of the interface - a transactional version and a non-transactional version.</p>
+                </p>
             </div>
 
 
@@ -316,9 +316,9 @@
 
             <div class="code-sample"><pre><code>@Injectable()
 export class HealthRepository {
-    public constructor(public readonly persistenceManager: NonTransactionalPersistenceManager) {}
+    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
 
-    public async countAllVertices(): Promise&lt;number&gt; {
+    async countAllVertices(): Promise&lt;number&gt; {
 
         return this.persistenceManager.getOne&lt;number&gt;(
             new QuerySpecification(`match (n) return count(n) as count`)
@@ -344,34 +344,22 @@ export class HealthRepository {
                         href="https://www.typescriptlang.org/docs/handbook/decorators.html" target="_blank" rel="noopener">Decorators</a>,
                     a kind of <a href="https://en.wikipedia.org/wiki/Higher-order_function" target="_blank" rel="noopener">higher-order
                         function</a> that wraps the original function, in our case with transactional concerns applied.</p>
-               <p class="testimonial-content mobile-four">In the context of a web application we register a middleware that tracks transaction information for a given
-                    request:</p>
-            </div>
 
-            <div class="code-sample"><pre><code>export class AppModule implements NestModule {
-
-    public configure(consumer: MiddlewareConsumer): any {
-        consumer.apply(TransactionContextMiddleware)
-            .forRoutes('**/**');
-    }
-}
-            </code></pre>
             </div>
 
             <div class="twelve columns page-content no-top-margin">
-                <p class="testimonial-content mobile-four">And then simply apply the <code>Transactional()</code> decorator to any transactional methods.</p>
+                <p class="testimonial-content mobile-four">Apply the <code>Transactional()</code> decorator to transactional methods.</p>
             </div>
 
             <div class="code-sample"><pre><code>@Injectable()
 export class RouteRepository {
 
-    public constructor(
-        public readonly persistenceManager: TransactionalPersistenceManager,
-        @InjectCypher('@/traffic/routesBetween')
-        public readonly routesBetween: string) {}
+    constructor(
+        @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
+        @InjectCypher('@/traffic/routesBetween') readonly routesBetween: CypherStatement) {}
 
     @Transactional()
-    public async findFastestBetween(start: string,destination: string): Promise&lt;Route&gt; {
+    async findFastestBetween(start: string,destination: string): Promise&lt;Route&gt; {
         return this.persistenceManager.getOne(
             new QuerySpecification&lt;Route&gt;()
                 .withStatement(this.routesBetween)
@@ -393,11 +381,11 @@ export class RouteRepository {
 
             <div class="code-sample"><pre><code>export class TransferService {
 
-    constructor(public readonly accountRepo: AccountRepository) {}
+    constructor(readonly accountRepo: AccountRepository) {}
 
 
     @Transactional()
-    public async transfer(sourceId: string, targetId: string, amount: number): Promise&lt;void&gt; {
+    async transfer(sourceId: string, targetId: string, amount: number): Promise&lt;void&gt; {
 
         const sourceAccount = await this.accountRepo.findById(sourceId);
         sourceAccount.deductFunds(amount);
@@ -431,7 +419,7 @@ export class RouteRepository {
             </div>
 
             <div class="code-sample"><pre><code>@Transactional()
-public async findRoutesBetween(start: string, destination: string): Promise&lt;Cursor&lt;Route&gt;&gt; {
+async findRoutesBetween(start: string, destination: string): Promise&lt;Cursor&lt;Route&gt;&gt; {
     return this.persistenceManager.openCursor(
         new CursorSpecification&lt;Route&gt;()
             .withStatement(this.routesBetween)
@@ -568,16 +556,16 @@ await StreamUtils.untilClosed(fileStream);
             </div>
 
             <div class="code-sample"><pre><code>export class Route {
-    public readonly start: string;
-    public readonly destination: string;
-    public readonly metros: string[];
+    readonly start: string;
+    readonly destination: string;
+    readonly metros: string[];
     @Expose({ name: 'travel_time' })
-    public readonly travelTime: number;
+    readonly travelTime: number;
 
     @Type(() =&gt; Photo)
-    public readonly significantSites: Photo[];
+    readonly significantSites: Photo[];
 
-    public constructor(start: string, destination: string, metros: string[], travelTime: number) {
+    constructor(start: string, destination: string, metros: string[], travelTime: number) {
         this.start = start;
         this.destination = destination;
         this.metros = metros;
@@ -587,7 +575,7 @@ await StreamUtils.untilClosed(fileStream);
     /**
      * Returns metros omitting the start and destination.
      */
-    public intermediateMetros(): string[] {
+    intermediateMetros(): string[] {
         const result = [...this.metros];
         result.shift();
         result.pop();
@@ -602,14 +590,12 @@ await StreamUtils.untilClosed(fileStream);
             <div class="twelve columns page-content">
                 <h3 class="about-us-title">Testing:</h3>
 
-                <p class="testimonial-content mobile-four">Drivine supports the creation of integration and end-to-end tests
-                    that <strong>run inside a roll-back transaction</strong>. This is useful when testing against shared data and/or
-                when testing transactional database operations in parallel. Within the test it is possible to read and
-                make assertions upon uncommitted data, after which it is rolled back, restoring the database to a clean state. Here's how: </p>
+                <p class="testimonial-content mobile-four">To test transactional methods, we need to initialize the Drivine within the
+                    test context. Here's how: </p>
             </div>
 
             <div class="code-sample"><pre><code>it('should return the fastest route between start and dest ', async () => {
-    return inTestContext().run(async () => {
+    return inDrivineContext().withTransaction({rollback: true}).run(async () => {
         const result = await request(app.getHttpServer())
             .get('/routes/between/Pigalle/NYC')
             .expect(HttpStatus.OK);
@@ -620,16 +606,43 @@ await StreamUtils.untilClosed(fileStream);
 </code></pre>
             </div>
 
-            <div class="twelve columns page-content no-top-margin">
-                <p class="testimonial-content mobile-four">In the event of trouble-shooting, if we would like to explore
-                what actually happened in the database, we can use:</p>
+            <p class="testimonial-content mobile-four">Optionally, we can run integration and end-to-end tests
+                <strong>run inside a roll-back transaction</strong>. This is useful when testing against shared data and/or
+                when testing transactional database operations in parallel. Within the test it is possible to read and
+                make assertions upon uncommitted data, after which it is rolled back, restoring the database to a clean state.</p>
+
+            <div class="twelve columns page-content">
+
+                <h3 class="about-us-title">Bootsrapping All Tests:</h3>
+
+                <p class="testimonial-content mobile-four">Avoid repetition. It is possible to run all tests for a given spec with Drivine,
+                    by adding <code>RunWithDrivine()</code> at the top of the spec:
+                </p>
             </div>
 
-            <div class="code-sample"><pre><code>return inTestContext().withRollback(false).run(async () => {
-    // Now the transaction will be committed.
+            <div class="code-sample"><pre><code>RunWithDrivine();
+describe('RouteRepository', () => {
+    let repo: RouteRepository;
+
+    beforeAll(async () => {
+        const app: TestingModule = await Test.createTestingModule({
+            imports: [AppModule],
+            providers: [RouteRepository],
+            controllers: []
+        }).compile();
+        repo = app.get(RouteRepository);
+    });
+
+    it('should find routes between two cities, ordered by most expedient', async () => {
+        const results = await repo.findRoutesBetween('Cavite Island', 'NYC');
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].travelTime).toEqual(26);
+    });
+
 });
-            </code></pre>
+</code></pre>
             </div>
+
 
             <!---- FEATURES AND DESIGN GOALS -->
             <div class="twelve columns page-section hide-for-760" id="features">
