@@ -7,9 +7,8 @@ export interface DrivineRunnerOptions {
 
 export const RunWithDrivine = (options?: DrivineRunnerOptions): void => {
     if (!global['$$runWithDrivine$$']) {
-
-        const testMethodsToOverride = [ 'it', 'test' ];
-        const lifecycleMethodsToOverride = [ 'beforeAll', 'beforeEach', 'afterAll', 'afterEach' ];
+        const testMethodsToOverride = ['it', 'test'];
+        const lifecycleMethodsToOverride = ['beforeAll', 'beforeEach', 'afterAll', 'afterEach'];
 
         const drivineContext = inDrivineContext();
         if (options && options.transaction) {
@@ -20,7 +19,7 @@ export const RunWithDrivine = (options?: DrivineRunnerOptions): void => {
             const original = global[methodName];
             global[methodName] = (name: string, fn?: any, timeout?: number) => {
                 original(name, async () => drivineContext.run(fn), timeout);
-            }
+            };
         });
         global['$$runWithDrivine$$'] = true;
     }

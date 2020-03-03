@@ -8,17 +8,9 @@ import { inDrivineContext } from '@/context/DrivineContext';
 export class TransactionContextMiddleware implements NestMiddleware {
     constructor(readonly transactionContext: TransactionContextHolder, readonly databaseRegistry: DatabaseRegistry) {}
 
-    use(req: express.Request, res: express.Response, next: express.NextFunction): any {
+    async use(req: express.Request, res: express.Response, next: express.NextFunction): Promise<any> {
         return inDrivineContext().run(async () => {
             this.transactionContext.databaseRegistry = this.databaseRegistry;
-            res.on('close', () => {
-                if (!res.finished) {
-                    const transaction = this.transactionContext.currentTransaction;
-                    if (transaction) {
-                        transaction.markAsRollback();
-                    }
-                }
-            });
             return Promise.resolve(next());
         });
     }
