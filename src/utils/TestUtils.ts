@@ -23,7 +23,7 @@ function hookLifecycleMethods(drivineContext: DrivineContext): void {
     const lifecycleMethodsToOverride = ['beforeAll', 'beforeEach', 'afterAll', 'afterEach'];
     lifecycleMethodsToOverride.forEach(methodName => {
         const original = global[methodName];
-        global[methodName] = (fn?: any, timeout?: number)  => {
+        global[methodName] = (fn?: any, timeout?: number) => {
             original(async () => drivineContext.run(fn), timeout);
         };
     });
