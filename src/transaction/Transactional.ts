@@ -12,11 +12,13 @@ export function Transactional(options?: TransactionOptions): MethodDecorator {
     return (target: any, methodName: string | symbol, descriptor: TypedPropertyDescriptor<any>) => {
         const originalMethod = descriptor.value;
         descriptor.value = async function(...args: any[]) {
-            if (TransactionContextHolder.getInstance().drivineContext) {
-                return runInTransaction(originalMethod.bind(this), options, args);
-            } else {
-                return originalMethod.bind(this)(...args);
-            }
+            return runInTransaction(originalMethod.bind(this), options, args);
+            // TODO: Revert this and add logging when not running transacitonally
+            // if (TransactionContextHolder.getInstance().drivineContext) {
+            //     return runInTransaction(originalMethod.bind(this), options, args);
+            // } else {
+            //     return originalMethod.bind(this)(...args);
+            // }
         };
     };
 }
