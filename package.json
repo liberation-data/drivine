@@ -33,9 +33,7 @@
         "format:src:check": "prettier --check \"src/**/*.ts\"",
         "format:test": "prettier --write \"test/**/*.ts\"",
         "format:check:test": "prettier --test \"src/**/*.ts\"",
-        "start": "ts-node -r tsconfig-paths/register test/sample/main.ts",
-        "start:async": "ts-node -r tsconfig-paths/register src/async/main.ts",
-        "start-dist": "ts-node -r tsconfig-paths/register dist/main.js",
+        "start-test-app": "ts-node -r tsconfig-paths/register test/3.EndToEnd/main-web-app.ts",
         "start:dev": "nodemon",
         "start:debug": "nodemon --config nodemon-debug.json",
         "start:gc": "node -r ts-node/register -r tsconfig-paths/register --trace-gc dist/main.js",
@@ -52,9 +50,9 @@
     },
     "dependencies": {
         "@liberation-data/agensgraph": "^0.1.0-rc",
-        "@nestjs/common": "^6.11.8",
-        "@nestjs/core": "^6.11.8",
-        "@nestjs/platform-express": "^6.11.8",
+        "@nestjs/common": "6.8.3",
+        "@nestjs/core": "6.8.3",
+        "@nestjs/platform-express": "6.8.3",
         "class-transformer": "^0.2.3",
         "class-validator": "^0.11.0",
         "cls-hooked": "^4.2.2",
@@ -76,7 +74,7 @@
         "uuid": "^3.3.2"
     },
     "devDependencies": {
-        "@nestjs/testing": "^6.11.8",
+        "@nestjs/testing": "6.8.3",
         "@types/cls-hooked": "^4.3.0",
         "@types/express": "^4.17.0",
         "@types/jest": "^24.0.15",
