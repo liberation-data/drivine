@@ -40,7 +40,7 @@ export class DrivineModule implements DynamicModule, NestModule, OnModuleDestroy
     constructor(readonly registry: DatabaseRegistry) {}
 
     configure(consumer: MiddlewareConsumer): any {
-        consumer.apply(TransactionContextMiddleware).forRoutes('**/**');
+        consumer.apply(TransactionContextMiddleware).forRoutes('');
     }
 
     async onModuleDestroy(): Promise<any> {
