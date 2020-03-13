@@ -3,7 +3,7 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineError } from '@/DrivineError';
-import { Session, Transaction } from 'neo4j-driver/types/v1';
+import { Session, Transaction } from 'neo4j-driver';
 import { Logger } from '@nestjs/common';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { DatabaseType } from '@/connection/DatabaseType';
@@ -60,10 +60,6 @@ export class Neo4jConnection implements Connection {
         if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }
-        return new Promise(resolve => {
-            this.session.close(() => {
-                resolve();
-            });
-        });
+        return this.session.close();
     }
 }

@@ -1,10 +1,10 @@
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { Driver } from 'neo4j-driver/types/v1';
+import { Driver } from 'neo4j-driver';
 import { Connection } from '@/connection/Connection';
 import { Neo4jConnection } from '@/connection/Neo4jConnection';
 import { Neo4jResultMapper } from '@/mapper/Neo4jResultMapper';
 
-const neo = require('neo4j-driver').v1;
+const neo = require('neo4j-driver');
 import shortId = require('shortid');
 
 export class Neo4jConnectionProvider implements ConnectionProvider {

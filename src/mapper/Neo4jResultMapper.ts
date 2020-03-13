@@ -1,6 +1,6 @@
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { Integer } from 'neo4j-driver/types/v1';
+import { Integer } from 'neo4j-driver';
 import { plainToClass } from 'class-transformer';
 
 const neo4j = require('neo4j-driver');
@@ -35,16 +35,16 @@ const toNative = (val: any): any => {
     if (val == undefined) {
         return val;
     }
-    if (val instanceof neo4j.v1.types.Node) {
+    if (val instanceof neo4j.types.Node) {
         return toNative(val.properties);
     }
-    if (val instanceof neo4j.v1.types.Relationship) {
+    if (val instanceof neo4j.types.Relationship) {
         return toNative(val.properties);
     }
-    if (val instanceof neo4j.v1.types.Point) {
+    if (val instanceof neo4j.types.Point) {
         return val;
     }
-    if (neo4j.v1.isInt(val)) {
+    if (neo4j.isInt(val)) {
         return toNumberOrThrow(<Integer>val);
     }
     if (Array.isArray(val)) {
