@@ -29,6 +29,6 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
     }
 
     async end(): Promise<void> {
-        return Promise.resolve();
+        return this.driver.close();
     }
 }
