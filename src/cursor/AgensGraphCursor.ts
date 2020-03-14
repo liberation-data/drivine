@@ -1,14 +1,14 @@
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
-import { Cursor } from '@/cursor/Cursor';
+import { AbstractCursor } from '@/cursor/AbstractCursor';
 
-export class AgensGraphCursor<T> extends Cursor<T> implements AsyncIterable<T> {
+export class AgensGraphCursor<T> extends AbstractCursor<T> implements AsyncIterable<T> {
+
     constructor(
         sessionId: string,
         spec: CursorSpecification<T>,
         private readonly pgCursor: any,
-        private readonly resultMapper: ResultMapper
-    ) {
+        private readonly resultMapper: ResultMapper) {
         super(sessionId, spec);
     }
 

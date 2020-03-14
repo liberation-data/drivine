@@ -55,7 +55,7 @@
         "@typescript-eslint/ban-types": ["off"],
         // Need to have camelcase off because off our legacy snake case for API
         "@typescript-eslint/camelcase": ["off"],
-        "@typescript-eslint/consistent-type-assertions": ["error", { "assertionStyle": "angle-bracket" }],
+        "@typescript-eslint/consistent-type-assertions": "off",
         "@typescript-eslint/consistent-type-definitions": ["error", "interface"],
         // Note: if we ever use this config to lint js files the following rule needs
         // to be off and an override added specifically for ts files

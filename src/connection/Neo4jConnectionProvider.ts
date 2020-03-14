@@ -22,7 +22,7 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
     }
 
     async connect(): Promise<Connection> {
-        const session = this.driver.session();
+        const session = this.driver.rxSession();
         session['sessionId'] = shortId.generate();
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());
         return Promise.resolve(connection);
