@@ -316,6 +316,7 @@
 
             <div class="code-sample"><pre><code>@Injectable()
 export class HealthRepository {
+                
     constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
 
     async countAllVertices(): Promise&lt;number&gt; {
