@@ -18,7 +18,7 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         readonly password: string | undefined
     ) {
         const authToken = neo.auth.basic(this.user, this.password);
-        this.driver = neo.driver(`bolt://${this.host}:${this.port}`, authToken);
+        this.driver = neo.driver(`neo4j://${this.host}:${this.port}`, authToken);
     }
 
     async connect(): Promise<Connection> {
