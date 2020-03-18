@@ -29,7 +29,7 @@ Start creating repositories like the one below. Follow the **<a href="https://gi
 export class RouteRepository {
     constructor(
         @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
-        @InjectCypher('@/traffic/routesBetween') readonly routesBetween CypherStatement) {
+        @InjectCypher('@/traffic/routesBetween') readonly routesBetween: CypherStatement) {
     }
 
     @Transactional() // Has default Propagation.REQUIRED - partipicate in a current txn, or start one.
