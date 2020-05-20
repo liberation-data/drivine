@@ -24,8 +24,8 @@
     "files": [
         "**/*"
     ],
-    "main": "dist/DrivineModule.js",
-    "types": "dist/DrivineModule.d.ts",
+    "main": "index.js",
+    "types": "index.d.ts",
     "scripts": {
         "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && tscpaths -p tsconfig.dist.json -s ./dist -o ./dist && cp package.json dist/ && cp README.md dist/",
         "format": "npm run format:src && npm run format:test",
@@ -40,7 +40,7 @@
         "lint": "npm run lint:src && npm run lint:test",
         "lint:src": "eslint src --ext .ts",
         "lint:test": "eslint test --ext .ts",
-        "test": "preview && jest",
+        "test": "jest",
         "test:watch": "jest --watch",
         "test:cov": "jest --coverage",
         "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register/transpile-only node_modules/.bin/jest --runInBand --detectOpenHandles",
@@ -121,6 +121,9 @@
             "json",
             "ts"
         ],
+        "setupFiles": ["./test/jest-setup.ts"],
+        "globalSetup": "./test/jest-global-setup.ts",
+        "globalTeardown": "./test/jest-global-teardown.ts",
         "rootDir": "./",
         "testRegex": ".spec.ts$",
         "transform": {

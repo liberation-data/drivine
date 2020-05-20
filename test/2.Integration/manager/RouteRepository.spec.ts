@@ -46,7 +46,7 @@ describe('RouteRepository', () => {
             expect(item).toBeInstanceOf(Route);
         }
 
-        const fileStream = fs.createWriteStream('routes.txt', { flags: 'w' });
+        const fileStream = fs.createWriteStream('test/routes.txt', { flags: 'w' });
         const cursor2 = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
         cursor2.asStream({ transform: route => route.toString() }).pipe(fileStream);
         await StreamUtils.untilClosed(fileStream);

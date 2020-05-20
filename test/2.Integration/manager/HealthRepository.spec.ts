@@ -25,8 +25,7 @@ describe('HealthRepository', () => {
     });
 
     it('should count all nodes', async () => {
-            const results = await repo.countAllVertices();
-            expect(results).toBeGreaterThan(0);
-            console.log(`Got results: ${results}`);
+        const results = await repo.countAllVertices();
+        expect(results).toBe(23);
     });
 });
