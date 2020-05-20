@@ -21,6 +21,7 @@ coverage
 
 public
 dist
+tools
 
 # For debugging purposes
 private
