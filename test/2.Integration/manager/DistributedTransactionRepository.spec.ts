@@ -1,9 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { DistributedTransactionRepository } from './DistributedTransactionRepository';
-import { RunWithDrivine } from '@/utils/TestUtils';
-import { runInTransaction } from '@/transaction/Transactional';
+import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, runInTransaction, RunWithDrivine } from '@liberation-data/drivine';
 
 RunWithDrivine();
 describe('DistributedTransactionRepository', () => {

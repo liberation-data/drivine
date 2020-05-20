@@ -1,8 +1,6 @@
-import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { instance, mock, when } from 'ts-mockito';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
-import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
+import { TransactionContextHolder, ConnectionProvider, DatabaseRegistry } from '@liberation-data/drivine';
 
 describe('PersistenceManagerFactory', () => {
     it('should build or return default PersistenceManager', () => {

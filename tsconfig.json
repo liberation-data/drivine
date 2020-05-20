@@ -14,10 +14,11 @@
         "outDir": "./dist",
         "baseUrl": "./",
         "paths": {
+            "@liberation-data/drivine": ["src/index.ts"],
             "@/*": ["src/*"],
             "*": ["node_modules/*", "src/typings/*"]
         },
         "strict": true
     },
-    "exclude": ["node_modules", "aurora", "build", "src/driver/agensgraph/**/*"]
+    "exclude": ["node_modules", "dist", "aurora", "build", "src/driver/agensgraph/**/*"]
 }

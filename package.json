@@ -152,6 +152,7 @@
         "setupFilesAfterEnv": [],
         "testEnvironment": "node",
         "moduleNameMapper": {
+            "@liberation-data/drivine": "<rootDir>/src/index.ts",
             "@/(.*)$": "<rootDir>/src/$1"
         }
     }
