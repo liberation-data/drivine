@@ -5,9 +5,10 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine} 
 RunWithDrivine()
 describe('HealthRepository', () => {
     let repo: HealthRepository;
+    let app: TestingModule
 
     beforeAll(async () => {
-        const app: TestingModule = await Test.createTestingModule({
+        app = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [
@@ -20,6 +21,9 @@ describe('HealthRepository', () => {
             controllers: []
         }).compile();
         repo = app.get(HealthRepository);
+    });
+    afterAll(async () => {
+        await app.close();
     });
 
     it('should count all nodes', async () => {

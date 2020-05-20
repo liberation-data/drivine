@@ -5,9 +5,10 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, runInTransaction
 RunWithDrivine();
 describe('DistributedTransactionRepository', () => {
     let repo: DistributedTransactionRepository;
+    let app: TestingModule;
 
     beforeAll(async () => {
-        const app: TestingModule = await Test.createTestingModule({
+        app = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [
@@ -20,6 +21,9 @@ describe('DistributedTransactionRepository', () => {
             controllers: []
         }).compile();
         repo = app.get(DistributedTransactionRepository);
+    });
+    afterAll(async () => {
+        await app.close();
     });
 
     it('should run transactions across multiple databases', async () => {
