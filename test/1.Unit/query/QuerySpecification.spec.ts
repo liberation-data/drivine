@@ -1,5 +1,5 @@
-import { QuerySpecification } from '@/query/QuerySpecification';
-import { DatabaseType } from '@/connection/DatabaseType';
+
+import { DatabaseType, QuerySpecification } from '@liberation-data/drivine';
 
 describe('QuerySpecification', () => {
     describe('When binding parameters', () => {

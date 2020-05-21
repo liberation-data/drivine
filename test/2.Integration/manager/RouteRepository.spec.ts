@@ -2,18 +2,16 @@ import { StreamUtils } from '@/utils/StreamUtils';
 import { RouteRepository } from './RouteRepository';
 import { Route } from './Route';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { RunWithDrivine } from '@/utils/TestUtils';
+import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
 
 const fs = require('fs');
 
 RunWithDrivine({ transaction: { rollback: true } });
 describe('RouteRepository', () => {
     let repo: RouteRepository;
-
+    let app: TestingModule
     beforeAll(async () => {
-        const app: TestingModule = await Test.createTestingModule({
+        app = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
@@ -23,6 +21,9 @@ describe('RouteRepository', () => {
             controllers: []
         }).compile();
         repo = app.get(RouteRepository);
+    });
+    afterAll(async () => {
+        await app.close();
     });
 
     it('should find routes between two cities, ordered by most expedient', async () => {
@@ -46,7 +47,7 @@ describe('RouteRepository', () => {
             expect(item).toBeInstanceOf(Route);
         }
 
-        const fileStream = fs.createWriteStream('routes.txt', { flags: 'w' });
+        const fileStream = fs.createWriteStream('test/routes.txt', { flags: 'w' });
         const cursor2 = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
         cursor2.asStream({ transform: route => route.toString() }).pipe(fileStream);
         await StreamUtils.untilClosed(fileStream);

@@ -1,15 +1,14 @@
 import { HealthRepository } from './HealthRepository';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, DrivineModuleOptions } from '@/DrivineModule';
-import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { RunWithDrivine } from '@/utils/TestUtils';
+import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine} from '@liberation-data/drivine';
 
 RunWithDrivine()
 describe('HealthRepository', () => {
     let repo: HealthRepository;
+    let app: TestingModule
 
     beforeAll(async () => {
-        const app: TestingModule = await Test.createTestingModule({
+        app = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [
@@ -23,10 +22,12 @@ describe('HealthRepository', () => {
         }).compile();
         repo = app.get(HealthRepository);
     });
+    afterAll(async () => {
+        await app.close();
+    });
 
     it('should count all nodes', async () => {
-            const results = await repo.countAllVertices();
-            expect(results).toBeGreaterThan(0);
-            console.log(`Got results: ${results}`);
+        const results = await repo.countAllVertices();
+        expect(results).toBe(23);
     });
 });
