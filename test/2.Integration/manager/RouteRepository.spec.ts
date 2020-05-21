@@ -9,9 +9,9 @@ const fs = require('fs');
 RunWithDrivine({ transaction: { rollback: true } });
 describe('RouteRepository', () => {
     let repo: RouteRepository;
-
+    let app: TestingModule
     beforeAll(async () => {
-        const app: TestingModule = await Test.createTestingModule({
+        app = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
@@ -21,6 +21,9 @@ describe('RouteRepository', () => {
             controllers: []
         }).compile();
         repo = app.get(RouteRepository);
+    });
+    afterAll(async () => {
+        await app.close();
     });
 
     it('should find routes between two cities, ordered by most expedient', async () => {
