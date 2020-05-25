@@ -1,3 +1,6 @@
+//Create User
+MERGE (u:User {id: 1, name: 'Piotr'})
+
 //Create Metros
 MERGE (cavite:Metro {name: 'Cavite Island'})
 MERGE (stGermain:Metro {name: 'St Germain'})
