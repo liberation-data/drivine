@@ -3,12 +3,12 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { AbstractCursor } from '@/cursor/AbstractCursor';
 
 export class AgensGraphCursor<T> extends AbstractCursor<T> implements AsyncIterable<T> {
-
     constructor(
         sessionId: string,
         spec: CursorSpecification<T>,
         private readonly pgCursor: any,
-        private readonly resultMapper: ResultMapper) {
+        private readonly resultMapper: ResultMapper
+    ) {
         super(sessionId, spec);
     }
 
@@ -28,7 +28,7 @@ export class AgensGraphCursor<T> extends AbstractCursor<T> implements AsyncItera
     }
 
     async close(): Promise<void> {
-        return new Promise(resolve => {
+        return new Promise((resolve) => {
             this.pgCursor.close(() => {
                 resolve();
             });

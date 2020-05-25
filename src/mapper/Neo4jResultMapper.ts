@@ -11,7 +11,7 @@ export class Neo4jResultMapper implements ResultMapper {
         if (spec.transformType) {
             return plainToClass(spec.transformType, results);
         } else if (spec.mapper) {
-            return results.map(it => spec.mapper!(it));
+            return results.map((it) => spec.mapper!(it));
         }
         return results;
     }
@@ -48,7 +48,7 @@ const toNative = (val: any): any => {
         return toNumberOrThrow(<Integer>val);
     }
     if (Array.isArray(val)) {
-        return val.map(a => toNative(a));
+        return val.map((a) => toNative(a));
     }
     if (isRecord(val)) {
         return toNative(recordToNative(val));
@@ -71,7 +71,7 @@ const isRecord = (obj: any): boolean => typeof obj._fields !== 'undefined' && ty
 
 const mapObj = (fn: Function, obj: any): any => {
     const out = {};
-    Object.keys(obj).forEach(key => {
+    Object.keys(obj).forEach((key) => {
         out[key] = fn(obj[key]);
     });
     return out;

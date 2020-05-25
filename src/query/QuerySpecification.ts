@@ -80,7 +80,7 @@ export class QuerySpecification<T> {
         const params = this.parameters ? this.parameters : [];
         if (type == DatabaseType.AGENS_GRAPH) {
             if (this.statement.language === 'CYPHER') {
-                return params.map(it => JSON.stringify(it));
+                return params.map((it) => JSON.stringify(it));
             } else if (this.statement.language === 'SQL') {
                 return params;
             } else {

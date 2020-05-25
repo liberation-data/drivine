@@ -44,6 +44,6 @@ export class DrivineModule implements DynamicModule, NestModule, OnModuleDestroy
     }
 
     async onModuleDestroy(): Promise<any> {
-        await Promise.all(this.registry.providers.map(async it => it.end()));
+        await Promise.all(this.registry.providers.map(async (it) => it.end()));
     }
 }

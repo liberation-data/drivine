@@ -4,7 +4,7 @@ import { User } from './User';
 
 @Injectable()
 export class HealthRepository {
-    constructor(@InjectPersistenceManager('TRAFFIC') readonly persistenceManager: PersistenceManager) {}
+    constructor(@InjectPersistenceManager('NEO') readonly persistenceManager: PersistenceManager) {}
 
     async countAllMetros(): Promise<number> {
         const results = await this.persistenceManager.query<any>(
@@ -15,11 +15,7 @@ export class HealthRepository {
 
     @Transactional()
     async findById(id:number): Promise<User> {
-        const statement = `
-            MATCH (u:User)
-            WHERE u.id = $1
-            RETURN u
-        `;
+        const statement = `MATCH (u:Employee) WHERE u.id = $1 RETURN u`;
         return this.persistenceManager.query(
             new QuerySpecification<User>()
                 .withStatement(statement)
@@ -31,7 +27,7 @@ export class HealthRepository {
     @Transactional()
     async create(user: User): Promise<User> {
         const statement = `
-            CREATE (u:User $1)
+            CREATE (u:Employee $1)
             RETURN u {.*}
         `;
         return this.persistenceManager.getOne(
@@ -48,7 +44,7 @@ export class HealthRepository {
     async update(user: Partial<User>): Promise<User> {
 
         const statement = `
-            MATCH (u:User {id: $1})
+            MATCH (u:Employee {id: $1})
             SET u += $2
             RETURN u
         `;

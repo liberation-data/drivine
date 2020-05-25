@@ -6,7 +6,7 @@ export class StreamUtils {
             stream.on('close', () => {
                 resolve();
             });
-            stream.on('error', e => {
+            stream.on('error', (e) => {
                 reject(e);
             });
         });

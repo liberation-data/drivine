@@ -3,19 +3,17 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineError } from '@/DrivineError';
+import { Session, Transaction } from 'neo4j-driver';
 import { Logger } from '@nestjs/common';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { Neo4jCursor } from '@/cursor/Neo4jCursor';
-import RxSession from 'neo4j-driver/types/session-rx';
-import RxTransaction from 'neo4j-driver/types/transaction-rx';
-import RxResult from 'neo4j-driver/types/result-rx';
 
 export class Neo4jConnection implements Connection {
     private logger = new Logger(Neo4jConnection.name);
-    private transaction?: RxTransaction;
+    private transaction?: Transaction;
 
-    constructor(readonly session: RxSession, readonly resultMapper: ResultMapper) {}
+    constructor(readonly session: Session, readonly resultMapper: ResultMapper) {}
 
     sessionId(): string {
         return this.session['sessionId'];
@@ -25,17 +23,14 @@ export class Neo4jConnection implements Connection {
         spec.finalize();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
-
-        let results;
+        let result;
         if (!this.transaction) {
-            const observable = this.session.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
-            results = await this.toRecords(observable);
+            result = await this.session.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
         } else {
-            const observable = this.transaction.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
-            results = await this.toRecords(observable);
+            result = await this.transaction.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
         }
         logger.log(spec, hrStart);
-        return this.resultMapper.mapQueryResults<T>(results, spec);
+        return this.resultMapper.mapQueryResults<T>(result.records, spec);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<Neo4jCursor<T>> {
@@ -43,7 +38,7 @@ export class Neo4jConnection implements Connection {
     }
 
     async startTransaction(): Promise<void> {
-        this.transaction = await (this.session.beginTransaction().toPromise());
+        this.transaction = this.session.beginTransaction();
         return Promise.resolve();
     }
 
@@ -65,18 +60,6 @@ export class Neo4jConnection implements Connection {
         if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }
-        return this.session.close().toPromise();
+        return this.session.close();
     }
-
-    private async toRecords(observable: RxResult): Promise<Record<string, any>[]> {
-        const results: Record<string, any>[] = [];
-        return new Promise((resolve, reject) => {
-            observable.records().subscribe({
-                next: (data) => results.push(data),
-                complete: () => resolve(results),
-                error: error => reject(error)
-            });
-        });
-    }
-
 }

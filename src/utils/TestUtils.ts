@@ -21,7 +21,7 @@ export const RunWithDrivine = (options?: DrivineRunnerOptions): void => {
 
 function hookLifecycleMethods(drivineContext: DrivineContext): void {
     const lifecycleMethodsToOverride = ['beforeAll', 'beforeEach', 'afterAll', 'afterEach'];
-    lifecycleMethodsToOverride.forEach(methodName => {
+    lifecycleMethodsToOverride.forEach((methodName) => {
         const original = global[methodName];
         global[methodName] = (fn?: any, timeout?: number) => {
             original(async () => drivineContext.run(fn), timeout);
@@ -31,7 +31,7 @@ function hookLifecycleMethods(drivineContext: DrivineContext): void {
 
 function hookTestMethods(drivineContext: DrivineContext): void {
     const testMethodsToOverride = ['it', 'test'];
-    testMethodsToOverride.forEach(methodName => {
+    testMethodsToOverride.forEach((methodName) => {
         const original = global[methodName];
         global[methodName] = (name: string, fn?: any, timeout?: number) => {
             original(name, async () => drivineContext.run(fn), timeout);

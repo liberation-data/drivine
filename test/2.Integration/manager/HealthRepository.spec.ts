@@ -4,7 +4,7 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine} 
 
 // NOTICE
 // before running the tests, add new records from test/moon-town.cypher
-// or manually run: MERGE (u:User {id: 1, name: 'Piotr'})
+// or manually run: MERGE (u:Employee {id: 1, name: 'Piotr'})
 // TODO later we should add it inside of tests in beforeAll hook
 
 RunWithDrivine({
@@ -20,7 +20,8 @@ describe('HealthRepository', () => {
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [
                         DatabaseRegistry.buildOrResolveFromEnv(),
-                        DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC')
+                        DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC'),
+                        DatabaseRegistry.buildOrResolveFromEnv('NEO')
                     ]
                 })
             ],
@@ -46,7 +47,7 @@ describe('HealthRepository', () => {
     it('should not find any user & reject', () => {
         return expect(repo.findById(234234234)).rejects.toBeInstanceOf(Error)
     });
-    
+
     it('should create new user', async () => {
         const data = {id: 2, name: 'Jasper'};
         // create user
@@ -55,9 +56,9 @@ describe('HealthRepository', () => {
         // find created user
         const user2 = await repo.findById(data.id);
         expect(user2).toMatchObject(data)
-  
+
       });
-    
+
     it('should update user', async () => {
         const data = {id: 3, name: 'Adam'};
         const data2 = {id: 3, name: 'Eve'};
@@ -70,7 +71,7 @@ describe('HealthRepository', () => {
         // find updated user
         const user3 = await repo.findById(data.id);
         expect(user3).toMatchObject(data2)
-  
+
       });
 
 });

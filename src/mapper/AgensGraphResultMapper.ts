@@ -7,7 +7,7 @@ export class AgensGraphResultMapper implements ResultMapper {
         if (spec.transformType) {
             return plainToClass(spec.transformType, results);
         } else if (spec.mapper) {
-            return results.map(it => spec.mapper!(it));
+            return results.map((it) => spec.mapper!(it));
         }
         return results;
     }

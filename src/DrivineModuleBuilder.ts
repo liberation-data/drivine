@@ -50,7 +50,7 @@ export class DrivineModuleBuilder {
     }
 
     persistenceManagers(): Provider[] {
-        return persistenceManagerInjections.map(database => {
+        return persistenceManagerInjections.map((database) => {
             return <Provider>{
                 provide: `PersistenceManager:${database}`,
                 inject: [PersistenceManagerFactory],
@@ -62,7 +62,7 @@ export class DrivineModuleBuilder {
     }
 
     fileResourceProviders(): Provider[] {
-        return fileContentInjections.map(path => {
+        return fileContentInjections.map((path) => {
             const token = `FileContents:${path}`;
             return <Provider>{
                 provide: token,
@@ -74,7 +74,7 @@ export class DrivineModuleBuilder {
     }
 
     cypherStatementProviders(): Provider[] {
-        return cypherInjections.map(path => {
+        return cypherInjections.map((path) => {
             const token = `CYPHER:${path}`;
             return <Provider>{
                 provide: token,
@@ -84,7 +84,7 @@ export class DrivineModuleBuilder {
     }
 
     sqlStatementProviders(): Provider[] {
-        return sqlInjections.map(path => {
+        return sqlInjections.map((path) => {
             const token = `SQL:${path}`;
             return <Provider>{
                 provide: token,
