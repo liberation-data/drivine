@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<!-- paulirish.com/2008/conditional-stylesheets-vs-css-hacks-answer-neither/ -->
+<!--[if IE 8]>
+<html class="no-js lt-ie9" lang="en"> <![endif]-->
+<!--[if gt IE 8]>
+<!-->
+<html class="no-js" lang="en"><!--<![endif]-->
+<head>
+    <meta charset="utf-8"/>
+
+
+    <title>Drivine - Graph Database Client for Node.js &amp; TypeScript</title>
+    <meta name="description" content="Drivine - Graph Database Client for Node.js &amp; TypeScript">
+
+    <!-- mobile stuff -->
+    <meta name="viewport" content="width=device-width"/>
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-touch-fullscreen" content="yes"/>
+
+    <link rel="apple-touch-icon-precomposed" sizes="144x144" href="apple-touch-icon-144x144-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" sizes="114x114" href="apple-touch-icon-114x114-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" sizes="72x72" href="apple-touch-icon-72x72-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" href="apple-touch-icon-57x57-precomposed.png">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="shortcut icon" href="favicon.ico"/>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/styles/zenburn.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <!-- This script prevents links from opening in Mobile Safari. https://gist.github.com/1042026 -->
+    <script>(function (a, b, c) {
+        if (c in b && b[c]) {
+            var d, e = a.location, f = /^(a|html)$/i;
+            a.addEventListener("click", function (a) {
+                d = a.target;
+                while (!f.test(d.nodeName)) d = d.parentNode;
+                "href" in d && (d.href.indexOf("http") || ~d.href.indexOf(e.host)) && (a.preventDefault(), e.href = d.href)
+            }, !1)
+        }
+    })(document, window.navigator, "standalone")</script>
+
+    <!-- Included CSS Files -->
+    <link rel="stylesheet" href="style.css?v=1.0.1">
+    <link rel="stylesheet" href="stylesheets/portfolio.css">
+    <link rel="stylesheet" href="stylesheets/foundation.css">
+    <link rel="stylesheet" href="stylesheets/normalize.css">
+    <link rel="stylesheet" href="stylesheets/supersized.css" type="text/css" media="screen"/>
+    <link rel="stylesheet" href="stylesheets/supersized.shutter.css" type="text/css" media="screen"/>
+    <link rel="stylesheet" href="stylesheets/prettyPhoto.css" type="text/css" media="screen"
+          title="prettyPhoto main stylesheet"/>
+
+    <!-- Google Web Fonts -->
+    <link href='stylesheets/fonts.css' rel='stylesheet' type='text/css'>
+
+    <!-- Included JS Files -->
+    <script src="javascripts/modernizr.foundation.js"></script>
+    <script src="javascripts/jquery.js"></script>
+    <script src="javascripts/custom.js"></script>
+    <script src="javascripts/raphael.js" type="text/javascript"></script>
+    <script src="javascripts/init.js" type="text/javascript"></script>
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+            $('.content-container').css("margin-top", $(window).height());
+
+            $("a[rel^='prettyPhoto']").prettyPhoto();
+
+            var windowsize = $(window).width();
+
+            $(window).resize(function () {
+                var windowsize = $(window).width();
+            });
+
+            if (windowsize > 1024) {
+                //if the window is greater than 1024px wide then load one orbit settings
+                //.parallax(xPosition, speedFactor, outerHeight) options:
+                //xPosition - Horizontal position of the element
+                //inertia - speed to move relative to vertical scroll. Example: 0.1 is one tenth the speed of scrolling, 2 is twice the speed of scrolling
+                //outerHeight (true/false) - Whether or not jQuery should use it's outerHeight option to determine when a section is in the viewport
+                $('.parallax-two').parallax("50%", 0.5);
+                $('.parallax-three').parallax("50%", 0.5);
+                $('.parallax-contributors').parallax("50%", 0.5);
+                $('.parallax-four').parallax("50%", 0.5);
+                $('.parallax-five').parallax("50%", 0.5);
+                $('.parallax-six').parallax("50%", 0.5);
+            }
+
+        })
+    </script>
+
+    <!-- Hook up the Loader -->
+    <script type="text/javascript">
+        $(window).load(function () {
+            $("#loading").fadeOut("1000", function () {
+                // Animation complete
+                $('#loading img').css("display", "none");
+                $('#loading').css("display", "none");
+                $('#loading').css("background", "none");
+                $('#loading').css("width", "0");
+                $('#loading').css("height", "0");
+            });
+        });
+    </script>
+
+    <style>
+        h3.faq-on {
+            border-radius: 8px 8px 0 0;
+            color: #38361E;
+            margin-bottom: 0;
+            text-decoration: none;
+            background: none repeat scroll 0 0 #FFFFFF;
+            padding: 20px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        span.notetick {
+            display: block;
+            height: 40px;
+
+        }
+
+        p.answer {
+            background: none repeat scroll 0 0 #FFFFFF;
+            border-radius: 0 0 8px 8px;
+            margin: 0 !important;
+            padding: 0 20px 20px;
+            display: none;
+        }
+    </style>
+    <script>
+
+        function showhide(id) {
+            $('#' + id).slideToggle();
+        }
+
+    </script>
+</head>
+<body id="homepage">
+
+<!-- Loader -->
+<div id="loading">
+    <img src="images/loader.gif" alt="Website Loader"/>
+</div>
+
+<!-- Slideshow Pattern & Overlay -->
+<div class="slideshow-pattern"></div>
+<div class="slideshow-overlay"></div>
+
+<div class="triangle-top"></div>
+<div class="triangle-bottom"></div>
+
+<div class="header-container">
+
+    <a href="https://github.com/liberation-data/drivine"><img style="position: absolute; top: 0; right: 0; border: 0; width: 149px" src="images/ribbon.png" alt="Fork me on GitHub"></a>
+
+    <!-- Basic Needs -->
+    <div class="row">
+
+        <nav class="top-bar">
+
+            <ul>
+                <li class="logo" style="height: 100%; padding-top: 3px"><img src="images/divineCow2.png"/></li>
+                <li class="logo">DRIVINE</li>
+            </ul>
+
+            <section class="hide-for-small">
+                <ul class="right">
+                    <li><a href="#homepage">Home</a></li>
+                    <li><a href="#about-us">Description</a></li>
+                    <li><a href="#portfolio">Quick Start</a></li>
+                    <li><a href="#our-team">The Community</a></li>
+                    <li><a href="#faq">FAQ</a></li>
+                    <li><a href="https://github.com/liberation-data/drivine/wiki/Drivine">User Guide</a>
+                    </li>
+                    <!--                    <li><a href="docs/index.html">API</a>-->
+                    </li>
+                </ul>
+            </section>
+
+            <select class="responsive-nav show-for-small" onchange="moveTo(this.value)" onFocus="moveTo(this.value)"
+                    style="width: 200px; position: absolute; right: 140px">
+                <option value="" selected="">Main Navigation</option>
+                <option value="#homepage">Home</option>
+                <option value="#about-us">Description</option>
+                <option value="#portfolio">Quick Start</option>
+                <option value="#our-team">The Community</option>
+                <option value="#faq">FAQ</option>
+                <option value="https://github.com/liberation-data/drivine/wiki/Drivine">User Guide
+                </option>
+            </select>
+        </nav>
+    </div>
+</div>
+
+<div class="homepage-text">
+    <div class="top-icon">
+        <a href="https://www.npmjs.com/package/@liberation-data/drivine" target="_blank"><img
+                src="images/homepage-text-top-icon.png" alt="Homepage Top Icon"></a>
+    </div>
+    <div class="top-divider"></div>
+    <h1>Drivine</h1>
+
+    <div class="bottom-divider"></div>
+    <h2>Graph Database Client for Node.js &amp; TypeScript</h2>
+
+    <h3>Community project by <a style="color: #ff6644" href="https://liberation-data.com">Liberation Data.</a></h3>
+
+    <div class="bottom-icon">
+        <a href="#about-us"><img src="images/homepage-text-bottom-icon.png" alt="Homepage Bottom Icon"></a>
+    </div>
+</div>
+
+<!-- Main Content Starts HERE -->
+<div class="content-container">
+
+
+    <!-- Parallax Two - Content -->
+    <div class="parallax-two">
+        <div class="quote-pattern"></div>
+        <div class="row">
+            <div class="twelve columns parallax-container">
+                <h1 class="parallax-title">THE DIVINE DRIVER</h1>
+
+                <div class="parallax-divider">
+                    <img src="images/icons/60px/white/appbar.book.open.writing.png" alt="Read More About Us">
+                </div>
+                <h2 class="parallax-subtitle">Get Ready! <br/>You're about to obtain supernatural graph database powers.
+                </h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- About Us Page -->
+    <ul class="bullet-list"></ul>
+    <div class="page-container pattern-1" id="about-us">
+
+        <div class="row">
+
+            <div class="twelve columns page-content">
+                <h1 class="page-title">Description</h1>
+            </div>
+            <img src="images/about-us/1.png" alt="holy cow" style="padding-top: 10px">
+
+            <h2 class="page-subtitle">What is <span>Drivine</span>?</h2>
+
+            <div class="twelve columns page-content">
+                <p class="testimonial-content mobile-four">
+                    Drivine is a graph database driver for Node.js and TypeScript implemented on top of the <a
+                        href="https://nestjs.com/" target="_blank" rel="noopener">NestJS</a> platform. It is designed to
+                    support
+                    multiple graph databases (simultaneously, if you wish) and to scale to hundreds or thousands of
+                    transactions per
+                    second. It allows you to meet these goals without compromising architectural integrity.</p>
+                <p class="testimonial-content mobile-four">Drivine provides a sweet-spot level of abstraction, with
+                    management and object to graph mapping (OGM) features. This includes the following:</p>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <ul class="testimonial-content bullet-list mobile-four">
+                    <li>Manages infrastructure concerns, such as obtaining and releasing connections and sessions.</li>
+                    <li>Facilitates implementation of repositories, which can be injected into services. Your code adheres to
+                        single responsibility principle (SRP).
+                    </li>
+                    <li>Supports declarative, decorator-driven transactions.</li>
+                    <li>Supports streaming.</li>
+                    <li>Maps and transforms query results onto typed entities or models. Drivine makes an important
+                        distinction with regards to its mapping approach. This will be detailed below.
+                    </li>
+                </ul>
+            </div>
+
+
+
+            <!-- Connection Management -->
+            <div class="twelve columns page-content">
+                <h3 class="about-us-title">Connection Management:</h3>
+                <p class="testimonial-content mobile-four">The library contains a persistence manager interface:</p>
+
+                <div class="code-sample"><pre><code>export interface PersistenceManager {
+
+    query&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;T[]&gt;;
+
+    getOne&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;T&gt;;
+
+    maybeGetOne&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;T | undefined&gt;;
+
+    openCursor&lt;T&gt;(spec: QuerySpecification&lt;T&gt;): Promise&lt;Cursor&lt;T&gt;&gt;;
+}
+                </code></pre>
+                </div>
+
+                <p class="testimonial-content mobile-four">It is the job of the persistence manager to obtain a
+                    connection, using database details that are registered when
+                    the library is bootstrapped. It will use pooling if this entails a performance benefit on the given database platform.
+                </p>
+            </div>
+
+
+            <div class="eight columns mobile-four hide-for-760" style="display:none;">
+                <div id="diagram" class="" style="display:none;"></div>
+            </div>
+
+            <!-- REPOSITORIES -->
+            <div class="twelve columns page-content">
+                <h3 class="about-us-title">Repositories:</h3>
+                <p class="testimonial-content mobile-four">Repositories are a common pattern of structuring
+                    object-oriented code, in order to adhere to single responsibility
+                    principle (SRP). They logically group database operations for a particular type of entity.</p>
+                <p class="testimonial-content mobile-four">Simply by using composition, the
+                    <code>PersistenceManager</code> can be used to implement repositories. Here is an example:</p>
+            </div>
+
+            <div class="code-sample"><pre><code>@Injectable()
+export class HealthRepository {
+
+    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
+
+    async countAllVertices(): Promise&lt;number&gt; {
+
+        return this.persistenceManager.getOne&lt;number&gt;(
+            new QuerySpecification(`match (n) return count(n) as count`)
+                .map((it) => it.count);
+        );
+    }
+}
+            </code></pre>
+            </div>
+
+            <!-- TRANSACTIONS -->
+            <div class="twelve columns page-content" style="margin-top: 40px">
+                <h3 class="about-us-title">Transactions:</h3>
+               <p class="testimonial-content mobile-four">Just as repositories can be composed using a <code>PersistenceManager</code>, so services can be composed using
+                    repositories. But what about transactions? When analyzing the functional and non-functional requirements of a system, transactions fall under what is known
+                    as a <a href="https://en.wikipedia.org/wiki/Cross-cutting_concern" target="_blank" rel="noopener">cross-cutting
+                        concern</a>. They are called as such because they’re required in many places. In other words, they <em>cut across</em>
+                    many modules.</p>
+               <p class="testimonial-content mobile-four">Requirements like these don’t fit well with pure object-oriented programming because they can compromise efforts to adhere to SRP. Imagine implementing a service method that is all about transferring funds, and then adding
+                    transaction behaviors. Now add security. And then audit. Before too long, the class that neatly represented a
+                    single role has become a mess.</p>
+               <p class="testimonial-content mobile-four">Fortunately, transactional concerns can easily be modularized in TypeScript using <a
+                        href="https://www.typescriptlang.org/docs/handbook/decorators.html" target="_blank" rel="noopener">Decorators</a>,
+                    a kind of <a href="https://en.wikipedia.org/wiki/Higher-order_function" target="_blank" rel="noopener">higher-order
+                        function</a> that wraps the original function, in our case with transactional concerns applied.</p>
+
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">Apply the <code>Transactional()</code> decorator to transactional methods.</p>
+            </div>
+
+            <div class="code-sample"><pre><code>@Injectable()
+export class RouteRepository {
+
+    constructor(
+        @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
+        @InjectCypher('@/traffic/routesBetween') readonly routesBetween: CypherStatement) {}
+
+    @Transactional()
+    async findFastestBetween(start: string,destination: string): Promise&lt;Route&gt; {
+        return this.persistenceManager.getOne(
+            new QuerySpecification&lt;Route&gt;()
+                .withStatement(this.routesBetween)
+                .bind([start, destination])
+                .limit(1)
+                .transform(Route)
+        );
+    }
+}
+            </code></pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">By <a href="https://github.com/liberation-data/drivine/blob/master/src/transaction/Propagation.ts">default</a> the decorator will start a new transaction if one does not exist. Otherwise it will participate in an existing
+                    transaction. When the outermost transactional method completes, the entire stack will be committed. Meanwhile,
+                    if an error is thrown, the transaction is rolled back.</p>
+                <p class="testimonial-content mobile-four">We can now compose transactional services from one or more repositories as follows:</p>
+            </div>
+
+            <div class="code-sample"><pre><code>export class TransferService {
+
+    constructor(readonly accountRepo: AccountRepository) {}
+
+
+    @Transactional()
+    async transfer(sourceId: string, targetId: string, amount: number): Promise&lt;void&gt; {
+
+        const sourceAccount = await this.accountRepo.findById(sourceId);
+        sourceAccount.deductFunds(amount);
+        await this.accountRepo.update(sourceAccount);
+
+        // Throws Error! Invalid Id!
+        const targetAccount = await this.accountRepo.findById(targetId);
+        targetAccount.depositFunds(amount);
+        await this.accountRepo.update(targetRepo);
+    }
+}
+            </code></pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">In the above example, if the <code>targetId</code> is invalid, all data operations are rolled back. Otherwise a
+                    commit is performed when the outermost transactional method completes. Note that we used normal error handling - implementing boiler-plate code was not required and code clearly represented a single task.</p>
+            </div>
+
+
+            <!-- STREAMING -->
+            <div class="twelve columns page-content" style="margin-top: 40px">
+                <h3 class="about-us-title">Streaming:</h3>
+
+                <p class="testimonial-content mobile-four">It is well and good to assemble an application where transactional services are made up from an aggregate of
+                    repositories. However, for some use-cases the volume of data is too large to be buffered in a single result set.</p>
+                <p class="testimonial-content mobile-four">Fortunately the <code>PersistenceManager</code> that we saw earlier provides the ability to open a <code>Cursor&lt;T&gt;</code>, which provides two kinds of streaming capabilities.</p>
+
+                <p class="testimonial-content mobile-four">Let’s explore. In the example below, the repository method promises to return a <code>Cursor</code> for a <code>Route</code>.</p>
+
+            </div>
+
+            <div class="code-sample"><pre><code>@Transactional()
+async findRoutesBetween(start: string, destination: string): Promise&lt;Cursor&lt;Route&gt;&gt; {
+    return this.persistenceManager.openCursor(
+        new CursorSpecification&lt;Route&gt;()
+            .withStatement(this.routesBetween)
+            .bind([start, destination])
+            .batchSize(5)
+            .transform(Route)
+    );
+}
+            </code></pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <h3 class="about-us-title">Cursors are AsyncIterable</h3>
+                <p class="testimonial-content mobile-four"><code>Cursor&lt;T&gt;</code> implements <code>AsyncIterable</code>. This means that it can be used with a '<code>for
+                    await...of</code>' statement. During the execution of the loop, results will be pullled in batches, until the
+                    upstream is depleted.</p>
+            </div>
+
+            <div class="code-sample"><pre><code>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
+for await (const item of cursor) {
+    // The cursor will read more results, executing
+    // database reads, until the stream is consumed.
+}
+            </code></pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <h3 class="about-us-title">Cursors can pose as a Readable stream</h3>
+                <p class="testimonial-content mobile-four">Besides <code>AsyncIterable</code> cursors turn themselves into a <code>Readable</code> stream. Why would we need this? <code>AsyncIterable</code> is helpful, but it may lead to problems when a tight loop is pushing data into a stream, such as a file-stream. Even though data is pulled in batches, pushing too quickly into a stream will cause problems. The following example could potentially crash:</p>
+            </div>
+
+            <div class="code-sample"><pre><code>const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
+for await (const item of cursor) {
+    const result = fs.write(item);
+}
+            </code></pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">Don't overload stream buffers - this is signified when <code>fs.write(item)</code> returns
+                    false. If you ignore this warning and continue, your application can crash. The solution is as follows:</p>
+            </div>
+
+            <div class="code-sample"><pre><code>cursor.asStream().pipe(fileStream);
+await StreamUtils.untilClosed(fileStream);
+</code></pre>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">Now new information will be pulled from the cursor as needed. It is the sink stream (filestream) that will
+                    coordinate this, and at the rate at which it can handle.</p>
+            </div>
+
+
+            <!-- Object Mapping -->
+            <div class="twelve columns page-content" style="margin-top: 40px">
+                <h3 class="about-us-title">Object Mapping:</h3>
+
+                <p class="testimonial-content mobile-four">Drivine provides graph-to-object mapping facilities, however, as described in the introduction, due to its design
+                    goal of <strong>optimal performance</strong> it differentiates from the most typical approaches.</p>
+                <p class="testimonial-content mobile-four">In a typical application that uses an ORM or OGM:</p>
+
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <ul class="testimonial-content bullet-list mobile-four">
+                    <li>Generalised <em>entities</em> - a network of classes that represent things in our domain are defined.</li>
+                    <li>Instances of these domain entities are loaded. The OGM tool generates queries for this on our behalf.</li>
+                    <li>Having loaded instances of our generalised entities, information is plucked and mapped onto <em>use-case</em>
+                        specific payload objects.
+                    </li>
+                </ul>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <h3 class="about-us-title">Trouble Ahead:</h3>
+                <p class="testimonial-content mobile-four">The approach can work, however when an application needs to be highly scaleable, several problems are
+                    entailed:</p>
+
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <ul class="testimonial-content bullet-list mobile-four no-top-margin">
+                    <li>There is an overhead to the mapping, both in terms of implementation effort as well as runtime performance
+                        cost.
+                    </li>
+                    <li>Because the queries are system-generated, there is limited opportunity to efficiently undertake performance
+                        tuning.
+                    </li>
+                    <li>Similarly, because the entities are generalized, <strong>it is unlikely that the the generated queries will be the
+                        optimal ones for a <em>specific use-case</em></strong>.
+                    </li>
+                    <li>Finally, it is an unfortunate truth that the main <em>benefit</em> of generalised entities, a rich set of
+                        expressive objects is usually forgone. We end up with an <strong>Anemic Domain Model</strong>, which
+                        <a href="https://en.wikipedia.org/wiki/Martin_Fowler_(software_engineer)">Martin Fowler</a>
+                         writes about <strong><a href="https://martinfowler.com/bliki/AnemicDomainModel.html" target="_blank"
+                                                                rel="noopener">here</a></strong>.</li>
+                </ul>
+            </div>
+
+            <div class="twelve columns page-content no-top-margin">
+                <p class="testimonial-content mobile-four">In the referenced article, Mr Fowler states that he is not sure <em>why</em> the anemic domain model anti-pattern is so predominant. In my opinion, one
+                    primary cause is that most ORM/OGM tools do not offer to inject service dependencies onto the entities.
+                In order to exhibit richer, more expressive behavior, entities will surely collaborating services to assist in that. To support rich models, the OGM tool can offer to inject registered services, so that this entities have an opportunity to provide expressive <em>behaviors</em> and not just holders of data. A future version of Drivine may offer to do this.</p>
+                <p class="testimonial-content mobile-four">In the meantime, whatever the cause, it still does nothing to address the first four points, so let's explore . . </p>
+                <h3 class="about-us-title">Object Mapping - Drivine Approach:</h3>
+                <p class="testimonial-content mobile-four">In order to benefit from cleanly architected code that can scale to many thousands of transactions per second,
+                    Drivine takes the following approach:</p>
+            </div>
+
+
+            <div class="twelve columns page-content no-top-margin">
+                <ul class="testimonial-content bullet-list mobile-four no-top-margin">
+                    <li>Queries are defined by <em>you</em> in a self-contained file. Because they are self-contained, they can
+                        be modified, formatted, tested and tuned easily using the tool of your choice. I personally like <a
+                                href="https://plugins.jetbrains.com/plugin/8087-graph-database-support" target="_blank"
+                                rel="noopener">IntelliJ’s Graph Database Support</a>.
+                    </li>
+                    <li>Queries are injected to be used in repositories with a <a href="https://github.com/liberation-data/drivine/blob/master/src/DrivineInjectionDecorators.ts">decorator</a>.
+                    </li>
+                    <li>Rather than defining a generalised set of entities, focus on <em>use-case specific scenarios</em>
+                        that project or update a sub-graph from the underlying whole graph. You can
+                        extract generalised entities later on, however avoid <a
+                                href="https://en.wikipedia.org/wiki/Big_Design_Up_Front" target="_blank" rel="noopener">big design
+                            up-front</a>.
+                    </li>
+                </ul>
+            </div>
+
+
+            <div class="twelve columns page-content no-top-margin">
+                <h3 class="about-us-title">What can be mapped:</h3>
+                <p class="testimonial-content mobile-four">We can need perform type-coercion of dates, numbers or enums. We can load a set of related entities into a type. Object mapping is provided by the <a href="https://github.com/typestack/class-transformer">class transformer</a>.</p>
+            </div>
+
+            <div class="code-sample"><pre><code>export class Route {
+    readonly start: string;
+    readonly destination: string;
+    readonly metros: string[];
+    @Expose({ name: 'travel_time' })
+    readonly travelTime: number;
+
+    @Type(() =&gt; Photo)
+    readonly significantSites: Photo[];
+
+    constructor(start: string, destination: string, metros: string[], travelTime: number) {
+        this.start = start;
+        this.destination = destination;
+        this.metros = metros;
+        this.travelTime = travelTime;
+    }
+
+    /**
+     * Returns metros omitting the start and destination.
+     */
+    intermediateMetros(): string[] {
+        const result = [...this.metros];
+        result.shift();
+        result.pop();
+        return result;
+    }
+}
+            </code></pre>
+            </div>
+
+
+            <!-- TESTING -->
+            <div class="twelve columns page-content">
+                <h3 class="about-us-title">Testing:</h3>
+
+                <p class="testimonial-content mobile-four">To test transactional methods, we need to initialize the Drivine within the
+                    test context. Here's how: </p>
+            </div>
+
+            <div class="code-sample"><pre><code>it('should return the fastest route between start and dest ', async () => {
+    return inDrivineContext().withTransaction({rollback: true}).run(async () => {
+        const result = await request(app.getHttpServer())
+            .get('/routes/between/Pigalle/NYC')
+            .expect(HttpStatus.OK);
+
+        expect(result.body[0].travelTime).toEqual(8.5);
+    });
+});
+</code></pre>
+            </div>
+
+            <p class="testimonial-content mobile-four">Optionally, we can run integration and end-to-end tests
+                <strong>run inside a roll-back transaction</strong>. This is useful when testing against shared data and/or
+                when testing transactional database operations in parallel. Within the test it is possible to read and
+                make assertions upon uncommitted data, after which it is rolled back, restoring the database to a clean state.</p>
+
+            <div class="twelve columns page-content">
+
+                <h3 class="about-us-title">Bootsrapping All Tests:</h3>
+
+                <p class="testimonial-content mobile-four">Avoid repetition. It is possible to run all tests for a given spec with Drivine,
+                    by adding <code>RunWithDrivine()</code> at the top of the spec:
+                </p>
+            </div>
+
+            <div class="code-sample"><pre><code>RunWithDrivine();
+describe('RouteRepository', () => {
+    let repo: RouteRepository;
+
+    beforeAll(async () => {
+        const app: TestingModule = await Test.createTestingModule({
+            imports: [AppModule],
+            providers: [RouteRepository],
+            controllers: []
+        }).compile();
+        repo = app.get(RouteRepository);
+    });
+
+    it('should find routes between two cities, ordered by most expedient', async () => {
+        const results = await repo.findRoutesBetween('Cavite Island', 'NYC');
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].travelTime).toEqual(26);
+    });
+
+});
+</code></pre>
+            </div>
+
+
+            <!---- FEATURES AND DESIGN GOALS -->
+            <div class="twelve columns page-section hide-for-760" id="features">
+
+
+                <h1 class="page-title">Design Goals &amp; Features</h1>
+
+            </div>
+
+            <div class="twelve columns hide-for-760">
+                <div class="section-divider">
+                    <img src="images/crown.png" alt="Features">
+                </div>
+            </div>
+
+            <div class="four columns statistics" style="width: 100%; padding-bottom:100px;">
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text">Support <span>multiple graph databases</span> - simultaneously, if you
+                        wish! Currently <a href="https://neo4j.com/"><span>Neo4j</span></a> and
+                        <a href="https://bitnine.net/agensgraph/"><span>AgensGraph</span></a>.
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text">Support <span>distributed transactions</span> - even across different typed databases.
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text"><span>Scale</span> to hundreds and <span>thousands of transactions per second</span>,
+                        without compromising <span>architectural integrity</span>.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text">Facilitates the use of well understood <span>object-oriented</span> and
+                        functional programming <span>patterns</span>.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text">Supports implementation of <span>code that adheres to a single responsibility principle</span>
+                        (SRP).</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text"><span>Takes care of infrastructure concerns</span>, so that you can focus
+                        on <span>making the most of your data.</span>
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text"><span>Removes boiler plate</span> code, especially the <span>tedious and error-prone kind</span>.
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text"><span>Supports streaming</span>, without back-pressure.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text"><span>Large amounts of data</span> can be managed in a <span>timely and memory efficient manner</span>..
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text">Light-weight <span>use-case specific</span> object graph mapping <span>(OGM)</span>.
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text"><span>Battle-tested</span> — used in high-traffic production applications.
+                    </p>
+                </div>
+
+                <h2 class="page-subtitle" style="padding-top: 50px">Drivine helps <span>reduce operational and R&amp;D costs</span> by supporting thousands of transactions per second
+                    on <span>cleanly architected code</span>.
+                </h2>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Parallax Three - Content -->
+    <div class="parallax-three">
+        <div class="quote-pattern"></div>
+        <div class="row">
+            <div class="twelve columns parallax-container">
+                <h1 class="parallax-title">STARTER TEMPLATE</h1>
+
+                <div class="parallax-divider">
+                    <img src="images/icons/60px/white/appbar.camera.png" alt="Read More About Us">
+                </div>
+                <h2 class="parallax-subtitle">Graph database koans, for typical use-cases - recommendations, social
+                    networks, etc
+                    <br/>Each presented in a Drivine style.</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sample app Page -->
+    <div class="page-container pattern-2" id="portfolio">
+
+        <div class="row">
+
+            <div class="twelve columns page-content">
+                <h1 class="page-title">Quick Start</h1>
+
+                <h2 class="page-subtitle" style="padding-bottom:50px;">Have you <span>seen the light?</span><br/> Use this <span><a
+                        href="https://github.com/liberation-data/drivine-inspiration">starter template</a></span> to get
+                    rolling quickly!</h2>
+            </div>
+
+
+            <div class="twelve columns portfolio">
+                <ul class="ourHolder">
+                    <li class="four columns item ">
+                        <div class="portfolio-item">
+                            <div class="portfolio-cat-image">
+                                <img src="images/icons/40px/white/96.png" alt="Portfolio Category Image">
+                            </div>
+                            <div class="portfolio-hover-details hide-for-small">
+                                <div class="open-portfolio">
+                                    <a href="images/portfolio/1.jpg" class="open-portfolio-large" rel="prettyPhoto"></a>
+
+                                </div>
+                            </div>
+                            <a href="images/portfolio/large/1.jpg" class="photo-link" rel="prettyPhoto"><img
+                                    src="images/portfolio/1.jpg" alt="Portfolio Item" class="wide-image"></a>
+
+                            <div class="portfolio-details hide-for-small">
+                                <h4 class="portfolio-title"><a href="#"
+                                                               data-reveal-id="single-project-photo">Bootstrap</a></h4>
+
+                                <div class="portfolio-divider"></div>
+                                <p class="portfolio-categories">Configure connection details</p>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="four columns item ">
+                        <div class="portfolio-item">
+                            <div class="portfolio-cat-image">
+                                <img src="images/icons/40px/white/96.png" alt="Portfolio Category Image">
+                            </div>
+                            <div class="portfolio-hover-details hide-for-small">
+                                <div class="open-portfolio">
+                                    <a href="images/portfolio/2.jpg" class="open-portfolio-large" rel="prettyPhoto"></a>
+
+                                </div>
+                            </div>
+                            <a href="images/portfolio/large/2.jpg" class="photo-link" rel="prettyPhoto"><img
+                                    src="images/portfolio/2.jpg" alt="Portfolio Item" class="wide-image"></a>
+
+                            <div class="portfolio-details hide-for-small">
+                                <h4 class="portfolio-title"><a href="#" data-reveal-id="single-project-video">Define
+                                    Queries</a>
+                                </h4>
+
+                                <div class="portfolio-divider"></div>
+                                <p class="portfolio-categories">Profile and tune for performance</p>
+                            </div>
+                        </div>
+                    </li>
+                    <li class="four columns item ">
+                        <div class="portfolio-item">
+                            <div class="portfolio-cat-image">
+                                <img src="images/icons/40px/white/96.png" alt="Portfolio Category Image">
+                            </div>
+                            <div class="portfolio-hover-details hide-for-small">
+                                <div class="open-portfolio">
+                                    <a href="images/portfolio/3.jpg" class="open-portfolio-large" rel="prettyPhoto"></a>
+
+                                </div>
+                            </div>
+                            <a href="images/portfolio/large/3.jpg" class="photo-link" rel="prettyPhoto"><img
+                                    src="images/portfolio/3.jpg" alt="Portfolio Item" class="wide-image"></a>
+
+                            <div class="portfolio-details hide-for-small">
+                                <h4 class="portfolio-title"><a href="#" data-reveal-id="single-project-photo">Implement
+                                    Repositories</a></h4>
+
+                                <div class="portfolio-divider"></div>
+                                <p class="portfolio-categories">Drivine takes care of boiler-plate code.</p>
+                            </div>
+                        </div>
+                    </li>
+
+                </ul>
+            </div>
+
+
+            <div>
+                <h3 class="about-us-title" style="font-size:20px;">FEATURES</h3>
+            </div>
+
+            <div class="four columns statistics" style="width:100%; padding-bottom:100px;">
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Demonstrates how to <span>bootstrap Drivine</span>.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Shows how Drivine <span>takes care of boiler-plate</span> code.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Demonstrates <span>declarative transaction</span> management.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Shows how to <span>implement repositories</span>, optionally with <span>streaming.</span>
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Contains <span>graph database koans</span> for common use-cases, like
+                        recommendations, routing, social, etc.</p>
+                </div>
+
+                <div>
+                    <h3 class="about-us-title" style="font-size:20px; margin-top: 30px">Running the sample</h3>
+                </div>
+
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Clone <a href="https://github.com/liberation-data/drivine-inspiration">this
+                        repository</a>, open it up in your favourite IDE or editor.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Set up either <a href="https://neo4j.com/developer/">Neo4j</a> or <a href="https://github.com/bitnine-oss/agensgraph">AgensGraph</a>.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers">
+                    <p class="by-numbers-text">First time to use a graph database? You can start testing Drivine right now with <strong><a href="https://neo4j.com/sandbox-v2/">Neo4j sandbox</a></strong>.
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Define a <span>.env</span> file based on <span>.env.example</span> which
+                        contains database authentication credentials.</p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Proceed to <a
+                            href="https://github.com/liberation-data/drivine-inspiration#exercies">the exercises
+                        here</a>.
+                    </p>
+                </div>
+                <div class="twelve columns by-numbers projects-numbers ">
+                    <p class="by-numbers-text">Start using <span>Drivine!</span> Check out the <a
+                            href="https://github.com/liberation-data/drivine/wiki/Drivine">User Guide</a>.</p>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+
+    <!-- Placing the contributors here. -->
+    <!-- Parallax One - Content -->
+
+    <div class="parallax-contributors">
+        <div class="quote-pattern"></div>
+        <div class="row">
+            <div class="twelve columns parallax-container">
+                <h1 class="parallax-title">WHO IS BEHIND IT?</h1>
+
+                <div class="parallax-divider">
+                    <img src="images/icons/60px/white/appbar.people.multiple.png" alt="Read More About Us">
+                </div>
+                <h2 class="parallax-subtitle">" . . . inspired through past experience as a Spring Framework committer,
+                    <br/>including on Spring Data Neo4j” — Jasper Blues</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- Our Team Page -->
+    <div class="page-container pattern-2" id="our-team" style="padding-bottom:100px;">
+
+        <div class="row">
+
+            <div class="twelve columns page-content">
+                <h1 class="page-title">Meet The Contributors</h1>
+
+                <h2 class="page-subtitle" style="padding-top: 20px">The <span>order of the divine driver</span> needs you!
+                    <span>Bayesian inference</span> or other <span>necromancy</span> skills are not required. <span>Supernatural powers will be conferred</span>.</h2>
+            </div>
+
+            <div class="two columns offset-by-one padding-four-columns team-member mobile-four">
+
+                <div class="image-cropper">
+                    <img src="images/team/team-1.jpg" alt="">
+                </div>
+
+                <h3 class="our-team-title">Jasper<br>Blues</h3>
+
+                <h3 class="our-team-subtitle">Prophet</h3>
+
+                <div class="our-team-divider"></div>
+                <p class="our-team-text">Passionate about graph databases and networkscience. Self taught musician &
+                    mathematician. Open-source veteran.</p>
+
+                <!--                <div class="team-hover">-->
+                <!--                    <div class="team-social-media">-->
+                <!--                        <a href="https://twitter.com/doctor_cerulean" class="team-twitter"></a>-->
+                <!--                        <a href="https://ph.linkedin.com/pub/jasper-blues/8/163/778" class="team-linkedin"></a>-->
+                <!--                    </div>-->
+                <!--                </div>-->
+            </div>
+
+            <div class="two columns padding-four-columns team-member mobile-four">
+                <div class="image-cropper">
+                    <img src="images/team/team-priestess.jpg" alt="">
+                </div>
+
+                <h3 class="our-team-title">I Need <br/>You!</h3>
+
+                <h3 class="our-team-subtitle">High Preistess</h3>
+
+                <div class="our-team-divider"></div>
+                <p class="our-team-text">You're a little intimidating, what with the <a
+                        href="https://dictionary.cambridge.org/dictionary/english/rbf">RBF</a> and those arcane spells
+                    and all. And you're way smarter than me. You're on my team!</p>
+
+                <!--                <div class="team-hover">-->
+                <!--                </div>-->
+            </div>
+
+            <div class="two columns padding-four-columns team-member mobile-four">
+                <div class="image-cropper">
+                    <img src="images/team/team-monk.jpg" alt="">
+                </div>
+
+                <h3 class="our-team-title">Not Just<br>Anybody!</h3>
+
+                <h3 class="our-team-subtitle">Monk</h3>
+
+                <div class="our-team-divider"></div>
+                <p class="our-team-text">Life is death. Death is Life. Teach the deserving. Teach with Passion. You will
+                    guide us.</p>
+
+                <!--                <div class="team-hover">-->
+                <!--                    <div class="team-social-media">-->
+                <!--                    </div>-->
+                <!--                </div>-->
+            </div>
+
+
+            <div class="two columns padding-four-columns team-member mobile-four">
+                <div class="image-cropper">
+                    <img src="images/team/team-shaman.jpg" alt="">
+                </div>
+
+                <h3 class="our-team-title">And You<br>Too!</h3>
+
+                <h3 class="our-team-subtitle">Shaman</h3>
+
+                <div class="our-team-divider"></div>
+                <p class="our-team-text">In all honesty, you're a pretty freaky guy. None of your jokes make any sense.
+                    But you get stuff done. We need you and you got the job, Shaman.</p>
+
+                <!--                <div class="team-hover">-->
+                <!--                    <div class="team-social-media">-->
+                <!--                    </div>-->
+                <!--                </div>-->
+            </div>
+
+            <div class="two columns padding-four-columns team-member mobile-four">
+                <div class="image-cropper">
+                    <img src="images/team/team-bard.jpg" alt="">
+                </div>
+
+                <h3 class="our-team-title">I Didn't<br>Forget You!</h3>
+
+                <h3 class="our-team-subtitle">Choir Boy</h3>
+
+                <div class="our-team-divider"></div>
+                <p class="our-team-text">We're putting the band back together. People wonder if the Bard adds all that
+                    much. You and I know that none of this would be possible without you. </p>
+
+                <!--                <div class="team-hover">-->
+                <!--                </div>-->
+            </div>
+
+            <h2 class="page-subtitle"><span>Drivine</span> is sponsored by <span><a
+                    href="https://liberation-data.com">Liberation Data</a></span> and led by <br/><span><a
+                    href="https://www.linkedin.com/in/jasper-blues-7781638/">Jasper Blues</a></span>.</h2>
+
+        </div>
+    </div>
+
+    <!-- Parallax Four - Content -->
+    <div class="parallax-four">
+        <div class="quote-pattern"></div>
+        <div class="row">
+            <div class="twelve columns parallax-container">
+                <h1 class="parallax-title">It’s Q&amp;A Time!</h1>
+
+                <div class="parallax-divider">
+                    <img src="images/icons/60px/white/appbar.cogs.png" alt="Read More About Us">
+                </div>
+                <h2 class="parallax-subtitle">Support multiple graph databases. Simultaneously, if you wish!<br>Currently
+                    <span>Neo4j</span> and <span>AgensGraph</span>.</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- FAQ Page -->
+    <div class="page-container pattern-1" id="faq">
+
+        <div class="row">
+            <div class="twelve columns page-content" style="padding-bottom:50px;">
+                <h1 class="page-title">Frequently Asked Questions</h1>
+
+                <h2 class="page-subtitle">Something’s not clear? <span>Check Below!</span><br>We tried to
+                    <span>answer</span>
+                    any question you might have.</h2>
+            </div>
+
+        </div>
+
+
+        <div class="row">
+            <div class="twelve columns page-content">
+
+
+                <h3 class="faq-on" onclick="showhide('faq-1');">Q. Can I ask questions here?</h3>
+
+                <p id="faq-1" class="answer">
+                    <strong>A.</strong> Yes. <br/><br/>
+                    Please send me a tweet <a href="https://twitter.com/doctor_cerulean">@doctor_cerulean</a> and I will
+                    answer as best as I can.
+                </p>
+
+                <span class="notetick"></span>
+
+                <h3 class="faq-on" onclick="showhide('faq-2');">Q. What license is Drivine released under?</h3>
+
+                <p id="faq-2" class="answer">
+                    <strong>A.</strong> Drivine is released under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU
+                    General Public License</a>
+                    version 3, or later.
+                </p>
+
+                <span class="notetick"></span>
+
+                <h3 class="faq-on" onclick="showhide('faq-3');">Q. Do you offer commercial support?</h3>
+
+                <p id="faq-3" class="answer">
+                    <strong>A.</strong> Not at the present time. Drivine, however, has been deployed in highly demanding
+                    production systems,
+                    and we'd be happy to advise on how to achieve the same.
+                </p>
+
+                <span class="notetick"></span>
+
+            </div>
+        </div>
+
+
+        <div class="footer-container">
+            <div class="row">
+                <div class="four columns first-column hide-for-small">
+                    <p class="footer-left">ALL RIGHTS RESERVED 2019</p>
+                </div>
+                <div class="four columns middle-column back-to-top hide-for-small">
+                    <a href="#homepage"><img src="images/back-to-top.png" alt="Go Back To Top"></a>
+                </div>
+                <div class="four columns mobile-four">
+                    <p class="footer-right"><span>Drivine</span> is sponsored and led by <a
+                            href="https://liberation-data.com">Liberation Data</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Included JS Files (Uncompressed) -->
+    <!--
+    <script src="javascripts/jquery.js"></script>
+    <script src="javascripts/jquery.foundation.mediaQueryToggle.js"></script>
+    <script src="javascripts/jquery.foundation.forms.js"></script>
+    <script src="javascripts/jquery.foundation.navigation.js"></script>
+    <script src="javascripts/jquery.foundation.buttons.js"></script>
+    <script src="javascripts/jquery.foundation.accordion.js"></script>
+    <script src="javascripts/jquery.placeholder.js"></script>
+    <script src="javascripts/jquery.foundation.alerts.js"></script>
+    <script src="javascripts/jquery.foundation.topbar.js"></script>
+    <script src="javascripts/jquery.foundation.joyride.js"></script>
+    <script src="javascripts/jquery.foundation.clearing.js"></script>
+    <script src="javascripts/jquery.foundation.magellan.js"></script>
+    -->
+
+    <!-- Included JS Files (Compressed) -->
+    <script src="javascripts/foundation.min.js"></script>
+
+    <!-- Parallax JS File -->
+    <script language="JavaScript">
+        if (screen && screen.width >= 1024) {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-parallax/1.1.3/jquery-parallax-min.js" type="text/javascript" ><\/script>');
+        }
+
+    </script>
+
+
+    <!-- prettyPhoto JS File -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prettyPhoto/3.1.6/js/jquery.prettyPhoto.min.js" type="text/javascript"></script>
+
+    <!-- Portfolio Filter JS FIles -->
+    <script type="text/javascript" src="javascripts/jquery.easing.min.js"></script>
+    <script type="text/javascript" src="javascripts/portfolio.js"></script>
+    <script type="text/javascript" src="javascripts/jquery.quicksand.js"></script>
+    <script type="text/javascript" src="javascripts/jquery-css-transform.js"></script>
+
+    <!-- Supersized JS Files -->
+    <script type="text/javascript" src="javascripts/supersized.3.2.7.min.js"></script>
+    <script type="text/javascript" src="javascripts/supersized.shutter.min.js"></script>
+
+    <script type="text/javascript">
+        function initSlideShow() {
+            jQuery(function ($) {
+                $.supersized({
+                    // Functionality
+                    slideshow: 1,			// Slideshow on/off
+                    autoplay: 1,			// Slideshow starts playing automatically
+                    start_slide: 1,			// Start slide (0 is random)
+                    stop_loop: 0,			// Pauses slideshow on last slide
+                    random: 0,			// Randomize slide order (Ignores start slide)
+                    slide_interval: 3000,		// Length between transitions
+                    transition: 1, 			// 0-None, 1-Fade, 2-Slide Top, 3-Slide Right, 4-Slide Bottom, 5-Slide Left, 6-Carousel Right, 7-Carousel Left
+                    transition_speed: 1500,		// Speed of transition
+                    new_window: 1,			// Image links open in new window/tab
+                    pause_hover: 0,			// Pause slideshow on hover
+                    keyboard_nav: 1,			// Keyboard navigation on/off
+                    performance: 1,			// 0-Normal, 1-Hybrid speed/quality, 2-Optimizes image quality, 3-Optimizes transition speed // (Only works for Firefox/IE, not Webkit)
+                    image_protect: 1,			// Disables image dragging and right click with Javascript
+                    // Size & Position
+                    min_width: 0,			// Min width allowed (in pixels)
+                    min_height: 0,			// Min height allowed (in pixels)
+                    vertical_center: 1,			// Vertically center background
+                    horizontal_center: 1,			// Horizontally center background
+                    fit_always: 0,			// Image will never exceed browser width or height (Ignores min. dimensions)
+                    fit_portrait: 0,			// Portrait images will not exceed browser height
+                    fit_landscape: 0,			// Landscape images will not exceed browser width
+                    // Components
+                    slide_links: 'blank',	// Individual links for each slide (Options: false, 'num', 'name', 'blank')
+                    thumb_links: 1,			// Individual thumb links for each slide
+                    thumbnail_navigation: 0,			// Thumbnail navigation
+                    slides: [			// Slideshow Images
+                        {
+                            image: 'images/homepage-slideshow/1.jpg',
+                            title: 'Drivine - Graph Database Client for Node.js and TypeScript'
+                        },
+                        {
+                            image: 'images/homepage-slideshow/2.jpg',
+                            title: 'Drivine - Graph Database Client for Node.js and TypeScript'
+                        }
+
+                    ],
+
+                    // Theme Options
+                    progress_bar: 0,			// Timer for each slide
+                    mouse_scrub: 0
+
+                });
+            });
+        }
+
+        if (screen && screen.width >= 1024) {
+            initSlideShow();
+        }
+
+
+    </script>
+
+    <!-- Initialize JS Plugins -->
+    <script src="javascripts/app.js"></script>
+    <script src="javascripts/jquery.foundation.tooltips.js"></script>
+    <script src="javascripts/jquery.foundation.reveal.js"></script>
+    <script src="javascripts/jquery.foundation.tabs.js"></script>
+
+    <!-- Initialize Orbit -->
+    <script src="javascripts/jquery.foundation.orbit.js"></script>
+    <script type='text/javascript'>
+        $(window).load(function () {
+            var windowsize = $(window).width();
+
+            $(window).resize(function () {
+                var windowsize = $(window).width();
+            });
+
+            if (windowsize > 1024) {
+                //if the window is greater than 1024px wide then load one orbit settings
+                $('#contact-slider').orbit({
+                    fluid: '16x5',
+                    timer: false,
+                    directionalNav: false,
+                    bullets: true,
+                    bulletThumbs: true,
+                    bulletThumbLocation: ''
+                });
+                $('#news-slider').orbit({
+                    fluid: '16x12',
+                    timer: false,
+                    directionalNav: false,
+                    bullets: true,
+                    bulletThumbs: true,
+                    bulletThumbLocation: ''
+                });
+            } else {
+                if (windowsize > 765) {
+                    $('#contact-slider').orbit({
+                        fluid: '16x6',
+                        timer: false,
+                        directionalNav: false,
+                        bullets: true,
+                        bulletThumbs: true,
+                        bulletThumbLocation: ''
+                    });
+                    $('#news-slider').orbit({
+                        fluid: '16x23',
+                        timer: false,
+                        directionalNav: false,
+                        bullets: true,
+                        bulletThumbs: true,
+                        bulletThumbLocation: ''
+                    });
+                }
+            }
+        });
+    </script>
+
+    <script type="text/javascript" charset="utf-8">
+        $(document).ready(function () {
+            $("a[rel^='prettyPhoto']").prettyPhoto();
+        });
+    </script>
+
+    <!-- Initialize FitVids Script -->
+    <script src="javascripts/jquery.fitvids.js"></script>
+    <script>
+        $(".single-project-image-video").fitVids();
+    </script>
+
+</body>
+</html>
