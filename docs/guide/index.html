@@ -7,12 +7,65 @@
   <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify/themes/vue.css">
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app" data-app>Loading...</div>
+  
+  <script src="//unpkg.com/docsify-edit-on-github/index.js"></script>
   <script>
     window.$docsify = {
-      //...
+      repo: 'liberation-data/drivine',
+      maxLevel: 3,
+      loadSidebar: true,
+      // autoHeader: true,
+      subMaxLevel: 2,
+      auto2top: true,
+      basePath: '/guide/',
+      logo: '/assets/divineCowBlack.png',
+      name: 'Drivine',
+      nameLink: '/',
+      themeColor: '#3F51B5',
+      mergeNavbar: true,
+      noCompileLinks: ['/api', '/api/.*'],
+      plugins: [
+        EditOnGithubPlugin.create('https://github.com/liberation-data/drivine/blob/master/docs/guide/'),
+        function (hook) {
+          const footer = `
+          <footer>
+            <hr>
+            <span>&copy;2020 <a href="https://drivine.org">Drivine</a> </span><br>
+          </footer>
+          `
+
+          hook.afterEach(function (html) {
+            return html + footer
+          })
+        },
+      ]
     }
   </script>
   <script src="//cdn.jsdelivr.net/npm/docsify/lib/docsify.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs/components/prism-typescript.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs/components/prism-bash.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify-pagination/dist/docsify-pagination.min.js"></script>
+  <style>
+    .sidebar {
+      padding-top: 5px;
+    }
+    .app-name img {
+      height: 50px;
+    }
+    footer {
+      text-align: center;
+    }
+    .content {
+      padding-top: 0;
+    }
+    div[style="overflow: auto"] {
+      float:right;
+    }
+    div[style="overflow: auto"] p {
+      margin-top: 7px;
+    }
+  </style>
 </body>
 </html>
