@@ -1,0 +1,5 @@
+export enum TransactionContextKeys {
+    DRIVINE_CONTEXT = 'DRIVINE_CONTEXT',
+    TRANSACTION = 'TRANSACTION',
+    DATABASE_REGISTRY = 'DATABASE_REGISTRY'
+}

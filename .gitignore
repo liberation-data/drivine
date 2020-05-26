@@ -21,6 +21,8 @@ coverage
 
 public
 dist
+tools
+test/routes.txt
 
 # For debugging purposes
 private
