@@ -14,7 +14,7 @@ export class HealthRepository {
     }
 
     @Transactional()
-    async findById(id:number): Promise<User> {
+    async findById(id: number): Promise<User> {
         const statement = `MATCH (u:Employee) WHERE u.id = $1 RETURN u`;
         return this.persistenceManager.query(
             new QuerySpecification<User>()
