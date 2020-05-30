@@ -53,7 +53,7 @@ The sample app contains a basic starter template. Also, so that you can get roll
 
 ## Detailed Documentation
 
-Detailed documentation **[is here](https://github.com/liberation-data/drivine/wiki/Drivine)**.
+Detailed documentation **[is here](https://drivine.org/guide/#/)**.
 
 ---------------------------------------
 
