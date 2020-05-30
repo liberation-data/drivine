@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later",
@@ -52,13 +52,13 @@
         "@nestjs/common": ">= 6 <= 7",
         "@nestjs/core": ">= 6 <= 7",
         "@nestjs/platform-express": ">= 6 <= 7",
-        "class-transformer": "^0.2.3",
         "class-validator": "^0.11.0",
         "neo4j-driver": "^4.0.1",
         "reflect-metadata": "^0.1.13"
     },
     "dependencies": {
         "@liberation-data/agensgraph": "^0.1.0-rc",
+        "class-transformer": "^0.2.3",
         "cls-hooked": "^4.2.2",
         "dotenv": "^8.2.0",
         "find-config": "^1.0.0",
