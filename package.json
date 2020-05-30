@@ -49,16 +49,16 @@
         "test:e2e": "jest --coverage --testPathPattern '3[.]EndToEnd[/]'"
     },
     "peerDependencies": {
+        "@liberation-data/agensgraph": "^0.1.0-rc",
         "@nestjs/common": ">= 6 <= 7",
         "@nestjs/core": ">= 6 <= 7",
         "@nestjs/platform-express": ">= 6 <= 7",
         "class-validator": "^0.11.0",
+        "class-transformer": "^0.2.3",
         "neo4j-driver": "^4.0.1",
         "reflect-metadata": "^0.1.13"
     },
     "dependencies": {
-        "@liberation-data/agensgraph": "^0.1.0-rc",
-        "class-transformer": "^0.2.3",
         "cls-hooked": "^4.2.2",
         "dotenv": "^8.2.0",
         "find-config": "^1.0.0",

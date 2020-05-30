@@ -1,8 +1,9 @@
-import { ClassType } from 'class-transformer/ClassTransformer';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { Statement } from '@/query/Statement';
 import * as assert from 'assert';
+
+export type ClassType<T> = new (...args: any[]) => T;
 
 export class QuerySpecification<T> {
     statement: Statement;
