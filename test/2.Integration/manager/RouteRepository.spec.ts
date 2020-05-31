@@ -9,7 +9,7 @@ const fs = require('fs');
 RunWithDrivine({ transaction: { rollback: true } });
 describe('RouteRepository', () => {
     let repo: RouteRepository;
-    let app: TestingModule
+    let app: TestingModule;
     beforeAll(async () => {
         app = await Test.createTestingModule({
             imports: [
@@ -39,7 +39,6 @@ describe('RouteRepository', () => {
     });
 
     it('should find routes between two cities, returning an async iterable cursor', async () => {
-
         const cursor = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
         for await (const item of cursor) {
             expect(item.travelTime).toBeGreaterThan(0);
@@ -49,8 +48,7 @@ describe('RouteRepository', () => {
 
         const fileStream = fs.createWriteStream('test/routes.txt', { flags: 'w' });
         const cursor2 = await repo.asyncRoutesBetween('Cavite Island', 'NYC');
-        cursor2.asStream({ transform: route => route.toString() }).pipe(fileStream);
+        cursor2.asStream({ transform: (route) => route.toString() }).pipe(fileStream);
         await StreamUtils.untilClosed(fileStream);
-
     });
 });

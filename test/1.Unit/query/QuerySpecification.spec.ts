@@ -1,4 +1,3 @@
-
 import { DatabaseType, QuerySpecification } from '@liberation-data/drivine';
 
 describe('QuerySpecification', () => {

@@ -27,6 +27,4 @@ export async function configureApp(app: INestApplication): Promise<void> {
     providers: [RouteRepository],
     controllers: [RouteController]
 })
-export class AppModule {
-
-}
+export class AppModule {}

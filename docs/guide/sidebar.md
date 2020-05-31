@@ -4,6 +4,7 @@
   - [Persistence Manager](persistence-manager)
   - [Repositories](repositories)
   - [Transactions](transactions)
+  - [Injection Decorators](injection-decorators)
   - [Cursors](cursors)
   - [Object Mapping](object-mapping)
 - [Testing](testing)

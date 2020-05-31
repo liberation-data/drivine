@@ -28,8 +28,8 @@ export async function configureApp(app: INestApplication): Promise<void> {
 }
 
 createApp()
-    .then(async app => configureApp(app))
+    .then(async (app) => configureApp(app))
     .then(() => logger.log(`Bootstrap configuration complete.`))
-    .catch(e => {
+    .catch((e) => {
         throw e;
     });

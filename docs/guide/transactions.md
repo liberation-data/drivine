@@ -23,7 +23,7 @@ And then simply apply the Transactional() decorator to any transactional methods
 export class RouteRepository {
     constructor(
         @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
-        @InjectCypher('@/traffic/routesBetween') readonly routesBetween: string
+        @InjectCypher(__dirname, 'routesBetween') readonly routesBetween: string
     ) {}
 
     @Transactional()

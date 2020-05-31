@@ -39,7 +39,6 @@ describe('HealthRepository', () => {
         expect(results).toBe(23);
     });
 
-
     it('should find one User', async () => {
         return expect(repo.findById(1)).resolves.toMatchObject({ id: 1, name: 'Piotr' });
     });
@@ -56,7 +55,6 @@ describe('HealthRepository', () => {
         // find created user
         const user2 = await repo.findById(data.id);
         expect(user2).toMatchObject(data);
-
     });
 
     it('should update user', async () => {
@@ -71,7 +69,5 @@ describe('HealthRepository', () => {
         // find updated user
         const user3 = await repo.findById(data.id);
         expect(user3).toMatchObject(data2);
-
     });
-
 });

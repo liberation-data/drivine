@@ -12,7 +12,7 @@ import { CypherStatement } from '@/query/Statement';
 export class RouteRepository {
     constructor(
         @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
-        @InjectCypher(__dirname + '/routesBetween') readonly routesBetween: CypherStatement
+        @InjectCypher(__dirname, '/routesBetween') readonly routesBetween: CypherStatement
     ) {}
 
     @Transactional()
