@@ -4,7 +4,7 @@ import { Transaction } from '@/transaction/Transaction';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { Namespace } from 'cls-hooked';
 import { DrivineContext } from '@/context/DrivineContext';
-const cls = require('cls-hooked');
+import * as cls  from 'cls-hooked';
 
 /**
  * Wrap local storage to make it injectable.
@@ -20,6 +20,11 @@ export class TransactionContextHolder {
             TransactionContextHolder.instance = new TransactionContextHolder();
         }
         return TransactionContextHolder.instance;
+    }
+
+    static tearDown(): void {
+        TransactionContextHolder.instance.tearDown();
+        delete TransactionContextHolder.instance;
     }
 
     constructor() {
@@ -69,5 +74,10 @@ export class TransactionContextHolder {
 
     private set<T>(key: string, object: T): void {
         this.namespace.set(key, object);
+    }
+
+    private tearDown(): void {
+        const namespaceName = this.namespace['name'];
+        cls.destroyNamespace(namespaceName);
     }
 }

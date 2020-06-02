@@ -21,6 +21,10 @@ export class DatabaseRegistry {
         return DatabaseRegistry.instance;
     }
 
+    static tearDown(): void {
+        delete DatabaseRegistry.instance;
+    }
+
     private constructor() {
         this._providers = new Map<string, ConnectionProvider>();
     }
