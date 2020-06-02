@@ -12,6 +12,7 @@ import {
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
+import { TransactionContextHolder } from './transaction';
 
 require('dotenv').config({
     path: process.env.DOTENV_CONFIG_PATH || require('find-config')('.env')
@@ -35,6 +36,11 @@ export class DrivineModule implements DynamicModule, NestModule, OnModuleDestroy
             providers: builder.providers,
             exports: builder.providers
         };
+    }
+
+    static tearDownStaticData(): void {
+        TransactionContextHolder.tearDown();
+        DatabaseRegistry.tearDown();
     }
 
     constructor(readonly registry: DatabaseRegistry) {}
