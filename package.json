@@ -59,7 +59,7 @@
         "reflect-metadata": "^0.1.13"
     },
     "dependencies": {
-        "cls-hooked": "^4.2.2",
+        "cls-hooked": "github:alexgarbarev/cls-hooked",
         "dotenv": "^8.2.0",
         "find-config": "^1.0.0",
         "lodash": "^4.17.15",
