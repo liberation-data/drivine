@@ -42,7 +42,6 @@ export class DrivineModuleBuilder {
             <Provider>{ provide: DatabaseRegistry, useFactory: () => DatabaseRegistry.getInstance() },
             <Provider>{ provide: TransactionContextHolder, useFactory: () => TransactionContextHolder.getInstance() },
             PersistenceManagerFactory,
-            TransactionContextHolder,
             TransactionContextMiddleware,
             TransactionalPersistenceManager,
             NonTransactionalPersistenceManager

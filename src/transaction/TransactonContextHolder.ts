@@ -77,6 +77,12 @@ export class TransactionContextHolder {
     }
 
     private tearDown(): void {
+        /**
+         * Zeroing _contexts as heaviest part of namespace in case we 
+         * have leak and Namespace or ContextHolder is not released, even we manually called "tearDown"
+         */
+        this.namespace['_contexts'] = null;
+
         const namespaceName = this.namespace['name'];
         cls.destroyNamespace(namespaceName);
     }
