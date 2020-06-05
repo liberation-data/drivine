@@ -81,7 +81,7 @@ The ideas behind this library were developed while developing graph-powered appl
 
 #### I'm not sure how to do [xyz]
 
-> If you can't find what you need in the Quick Start or User Guides above, please get in touch. 
+> If you can't find what you need in the Quick Start or User Guides, please [post a question on StackOverflow](https://stackoverflow.com/questions/tagged/drivine?sort=newest&pageSize=15), using the Drivine tag. 
 
 #### Interested in contributing?
 
