@@ -18,8 +18,8 @@ describe('DistributedTransactionRepository', () => {
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [
-                        DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC'),
-                        DatabaseRegistry.buildOrResolveFromEnv('NEO')
+                        DatabaseRegistry.buildOrResolveFromEnv(),
+                        DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC')
                     ]
                 })
             ],
@@ -34,7 +34,7 @@ describe('DistributedTransactionRepository', () => {
 
     it('should run transactions across multiple databases', async () => {
         await runInTransaction(async () => {
-            await repo.createNodes(new Date().valueOf());
+            await repo.createNodes();
         });
     });
 });

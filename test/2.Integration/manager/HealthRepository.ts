@@ -9,7 +9,7 @@ import { User } from './User';
 
 @Injectable()
 export class HealthRepository {
-    constructor(@InjectPersistenceManager('NEO') readonly persistenceManager: PersistenceManager) {}
+    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
 
     async countAllMetros(): Promise<number> {
         const results = await this.persistenceManager.query<any>(
