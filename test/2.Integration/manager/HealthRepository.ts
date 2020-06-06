@@ -35,7 +35,7 @@ export class HealthRepository {
     async create(user: User): Promise<User> {
         const statement = `
             CREATE (u:Employee $1)
-            RETURN u {.*}
+            RETURN u
         `;
         return this.persistenceManager.getOne(
             new QuerySpecification<User>()

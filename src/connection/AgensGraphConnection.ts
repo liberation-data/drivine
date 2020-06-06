@@ -2,7 +2,6 @@ import { Connection } from '@/connection/Connection';
 import { PoolClient } from 'pg';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
-import { AgensGraphResultMapper } from '@/mapper/AgensGraphResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { AgensGraphCursor } from '@/cursor/AgensGraphCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
@@ -15,7 +14,6 @@ export class AgensGraphConnection implements Connection {
     private logger = new Logger(AgensGraphConnection.name);
 
     constructor(readonly client: PoolClient, readonly resultMapper: ResultMapper) {
-        this.resultMapper = new AgensGraphResultMapper();
     }
 
     sessionId(): string {
