@@ -7,9 +7,7 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine }
 // or manually run: MERGE (u:Employee {id: 1, name: 'Piotr'})
 // TODO later we should add it inside of tests in beforeAll hook
 
-RunWithDrivine({
-    // transaction:{rollback: true}
-});
+RunWithDrivine({rollback: true})
 describe('HealthRepository', () => {
     let repo: HealthRepository;
     let app: TestingModule;
