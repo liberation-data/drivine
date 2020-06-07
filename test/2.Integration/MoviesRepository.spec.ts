@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
 import { MovieRepository } from './MovieRepository';
 
-RunWithDrivine({ transaction: { rollback: false } });
+RunWithDrivine({ rollback: false });
 describe('MoviesRepository', () => {
     let repo: MovieRepository;
     let app: TestingModule;

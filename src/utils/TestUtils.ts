@@ -1,16 +1,10 @@
 import { DrivineContext, inDrivineContext } from '@/context/DrivineContext';
 import { TransactionOptions } from '@/transaction/Transactional';
 
-export interface DrivineRunnerOptions {
-    transaction?: TransactionOptions;
-}
-
-export const RunWithDrivine = (options?: DrivineRunnerOptions): void => {
+export const RunWithDrivine = (options?: TransactionOptions): void => {
     if (!global['$$runWithDrivine$$']) {
         const drivineContext = inDrivineContext();
-        if (options && options.transaction) {
-            drivineContext.withTransaction(options.transaction);
-        }
+        drivineContext.withTransaction(options);
 
         hookLifecycleMethods(drivineContext);
         hookTestMethods(drivineContext);
