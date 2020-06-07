@@ -10,6 +10,12 @@ export interface PersistenceManager {
     query<T>(spec: QuerySpecification<T>): Promise<T[]>;
 
     /**
+     * Execute a statement, and disregard any results that are returned.
+     * @param spec
+     */
+    execute(spec: QuerySpecification<void>): Promise<void>;
+
+    /**
      * Queries for a single result according to the supplied specification. Expects exactly one result or throws.
      * @param spec
      * @throws DrivineError.

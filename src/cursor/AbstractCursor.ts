@@ -1,15 +1,15 @@
 import * as assert from 'assert';
-import { Logger } from '@nestjs/common';
 import { Duplex, Readable } from 'stream';
 import { CursorStreamOptions } from '@/cursor/CursorStreamOptions';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { Cursor } from '@/cursor/Cursor';
+import { DrivineLogger } from '@/logger';
 
 const miss = require('mississippi');
 
 export abstract class AbstractCursor<T> implements Cursor<T> {
-    protected logger = new Logger(AbstractCursor.name);
+    protected logger = new DrivineLogger(AbstractCursor.name);
     protected currentBatch: T[] = [];
     protected currentIndex: number = 0;
     protected stream?: Readable = undefined;

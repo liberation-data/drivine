@@ -1,8 +1,8 @@
-import { Logger } from '@nestjs/common';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { DrivineLogger } from '@/logger/DrivineLogger';
 
 export class StatementLogger {
-    private logger = new Logger(StatementLogger.name);
+    private logger = new DrivineLogger(StatementLogger.name);
 
     constructor(readonly sessionId: string) {}
 

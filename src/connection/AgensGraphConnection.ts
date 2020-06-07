@@ -5,13 +5,13 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { AgensGraphCursor } from '@/cursor/AgensGraphCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
-import { Logger } from '@nestjs/common';
 import { DatabaseType } from '@/connection/DatabaseType';
+import { DrivineLogger } from '@/logger';
 
 const PgCursor = require('pg-cursor');
 
 export class AgensGraphConnection implements Connection {
-    private logger = new Logger(AgensGraphConnection.name);
+    private logger = new DrivineLogger(AgensGraphConnection.name);
 
     constructor(readonly client: PoolClient, readonly resultMapper: ResultMapper) {
     }

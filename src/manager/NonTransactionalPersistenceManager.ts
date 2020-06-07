@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import { DrivineError } from '@/DrivineError';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -6,9 +5,10 @@ import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
+import { DrivineLogger } from '@/logger';
 
 export class NonTransactionalPersistenceManager implements PersistenceManager {
-    private logger = new Logger(NonTransactionalPersistenceManager.name);
+    private logger = new DrivineLogger(NonTransactionalPersistenceManager.name);
     private finderOperations: FinderOperations;
 
     constructor(readonly connectionProvider: ConnectionProvider) {
@@ -24,6 +24,10 @@ export class NonTransactionalPersistenceManager implements PersistenceManager {
         } finally {
             await connection.release();
         }
+    }
+
+    async execute(spec: QuerySpecification<void>): Promise<void> {
+        await this.query(spec);
     }
 
     async getOne<T>(spec: QuerySpecification<T>): Promise<T> {

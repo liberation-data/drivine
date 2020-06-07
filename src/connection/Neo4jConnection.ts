@@ -4,13 +4,13 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineError } from '@/DrivineError';
 import { Session, Transaction } from 'neo4j-driver';
-import { Logger } from '@nestjs/common';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { Neo4jCursor } from '@/cursor/Neo4jCursor';
+import { DrivineLogger } from '@/logger';
 
 export class Neo4jConnection implements Connection {
-    private logger = new Logger(Neo4jConnection.name);
+    private logger = new DrivineLogger(Neo4jConnection.name);
     private transaction?: Transaction;
 
     constructor(readonly session: Session, readonly resultMapper: ResultMapper) {}
