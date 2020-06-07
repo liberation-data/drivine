@@ -1,3 +1,3 @@
-export * from './AgensGraphResultMapper';
-export * from './Neo4jResultMapper';
-export * from './ResultMapper';
+export * from './agens-graph-result-mapper';
+export * from './neo4j-result-mapper';
+export * from './result-mapper';

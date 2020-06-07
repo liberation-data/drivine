@@ -1,5 +1,5 @@
 import { instance, mock, when } from 'ts-mockito';
-import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
+import { PersistenceManagerFactory } from '@/manager';
 import { TransactionContextHolder, ConnectionProvider, DatabaseRegistry } from '@liberation-data/drivine';
 
 describe('PersistenceManagerFactory', () => {

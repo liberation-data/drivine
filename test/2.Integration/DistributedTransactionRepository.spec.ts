@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DistributedTransactionRepository } from './DistributedTransactionRepository';
 import {
     DrivineModule,
     DrivineModuleOptions,
@@ -7,6 +6,7 @@ import {
     runInTransaction,
     RunWithDrivine
 } from '@liberation-data/drivine';
+import { DistributedTransactionRepository } from './DistributedTransactionRepository';
 
 RunWithDrivine();
 describe('DistributedTransactionRepository', () => {

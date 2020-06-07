@@ -1,3 +1,3 @@
-export * from './QueryLanguage';
-export * from './QuerySpecification';
-export * from './Statement';
+export * from './query-language';
+export * from './query-specification';
+export * from './statement';

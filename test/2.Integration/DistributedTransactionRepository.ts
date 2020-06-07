@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { InjectPersistenceManager } from '@/DrivineInjectionDecorators';
-import { PersistenceManager } from '@/manager/PersistenceManager';
-import { Transactional } from '@/transaction/Transactional';
-import { QuerySpecification } from '@/query/QuerySpecification';
+import { InjectPersistenceManager } from '@liberation-data/drivine';
+import { PersistenceManager } from '@liberation-data/drivine';
+import { Transactional } from '@liberation-data/drivine';
+import { QuerySpecification } from '@liberation-data/drivine';
 const faker = require('faker');
 
 @Injectable()

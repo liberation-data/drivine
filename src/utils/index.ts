@@ -1,2 +1,2 @@
-export * from './StreamUtils';
-export * from './TestUtils';
+export * from './stream-utils';
+export * from './test-utils';

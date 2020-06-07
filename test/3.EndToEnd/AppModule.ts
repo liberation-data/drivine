@@ -3,6 +3,7 @@ import { RouteRepository } from '../2.Integration/RouteRepository';
 import { Reflector } from '@nestjs/core';
 import { RouteController } from './RouteController';
 import { DrivineModule, DrivineModuleOptions, DatabaseRegistry } from '@liberation-data/drivine';
+import { MovieRepository } from '../2.Integration/MovieRepository';
 
 export async function configureApp(app: INestApplication): Promise<void> {
     app.useGlobalPipes(
@@ -24,7 +25,7 @@ export async function configureApp(app: INestApplication): Promise<void> {
             ]
         })
     ],
-    providers: [RouteRepository],
+    providers: [RouteRepository, MovieRepository],
     controllers: [RouteController]
 })
 export class AppModule {}

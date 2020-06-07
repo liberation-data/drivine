@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Route } from './models/Route';
 import { Transactional } from '@/transaction/Transactional';
-import { QuerySpecification } from '@/query/QuerySpecification';
-import { CursorSpecification } from '@/cursor/CursorSpecification';
+import { QuerySpecification } from '@liberation-data/drivine';
+import { CursorSpecification } from '@liberation-data/drivine';
 import { Cursor } from '@/cursor/Cursor';
-import { InjectCypher, InjectPersistenceManager } from '@/DrivineInjectionDecorators';
-import { PersistenceManager } from '@/manager/PersistenceManager';
+import { InjectCypher, InjectPersistenceManager } from '@liberation-data/drivine';
+import { PersistenceManager } from '@liberation-data/drivine';
 import { CypherStatement } from '@/query/Statement';
 
 @Injectable()
