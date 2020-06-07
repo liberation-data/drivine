@@ -2,7 +2,6 @@ import { LogLevel } from '@/logger/LogLevel';
 import { LogMessage } from '@/logger/LogMessage';
 
 export class DrivineLogger {
-
     private readonly enabledLevel: LogLevel;
 
     constructor(readonly context: string) {
@@ -35,7 +34,6 @@ export class DrivineLogger {
     }
 
     private printMessage(message: any, level: LogLevel, context: string = ''): void {
-
         if (level.value >= this.enabledLevel.value) {
             // TODO: LocalStorage.namespace is used here instead of injecting LocalStorage - which didn't work. Why?
             const logMessage = new LogMessage(level, new Date(), message, context);
@@ -50,5 +48,4 @@ export class DrivineLogger {
         process.stdout.write(trace);
         process.stdout.write(`\n`);
     }
-
 }

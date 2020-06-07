@@ -14,7 +14,6 @@ export class DistributedTransactionRepository {
 
     @Transactional()
     async createNodes(): Promise<void> {
-
         const spec1 = new QuerySpecification()
             .withStatement(`merge (p:Person {firstName: $1, lastName: $2})`)
             .bind([faker.name.firstName(), faker.name.lastName()]);

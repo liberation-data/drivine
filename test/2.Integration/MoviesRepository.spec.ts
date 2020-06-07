@@ -4,7 +4,6 @@ import { MovieRepository } from './MovieRepository';
 
 RunWithDrivine({ transaction: { rollback: false } });
 describe('MoviesRepository', () => {
-
     let repo: MovieRepository;
     let app: TestingModule;
 
@@ -33,7 +32,4 @@ describe('MoviesRepository', () => {
         const results = await repo.listMoviesForActor('Tom Hanks');
         console.log(JSON.stringify(results));
     });
-
-
-
 });

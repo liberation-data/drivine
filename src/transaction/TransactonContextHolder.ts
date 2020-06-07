@@ -4,7 +4,7 @@ import { Transaction } from '@/transaction/Transaction';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { Namespace } from 'cls-hooked';
 import { DrivineContext } from '@/context/DrivineContext';
-import * as cls  from 'cls-hooked';
+import * as cls from 'cls-hooked';
 
 /**
  * Wrap local storage to make it injectable.
@@ -78,7 +78,7 @@ export class TransactionContextHolder {
 
     private tearDown(): void {
         /**
-         * Zeroing _contexts as heaviest part of namespace in case we 
+         * Zeroing _contexts as heaviest part of namespace in case we
          * have leak and Namespace or ContextHolder is not released, even we manually called "tearDown"
          */
         this.namespace['_contexts'] = null;

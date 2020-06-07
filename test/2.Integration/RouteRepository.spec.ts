@@ -8,7 +8,6 @@ const fs = require('fs');
 
 RunWithDrivine({ transaction: { rollback: true } });
 describe('RouteRepository', () => {
-
     let repo: RouteRepository;
     let app: TestingModule;
 
@@ -55,5 +54,4 @@ describe('RouteRepository', () => {
         cursor2.asStream({ transform: (route) => route.toString() }).pipe(fileStream);
         await StreamUtils.untilClosed(fileStream);
     });
-
 });

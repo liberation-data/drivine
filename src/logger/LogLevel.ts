@@ -4,7 +4,6 @@ import { Cacheable } from 'typescript-cacheable';
 import * as assert from 'assert';
 
 export class LogLevel {
-
     static VERBOSE = new LogLevel('VERBOSE', 0, 'VERBOSE', clc.cyanBright);
     static DEBUG = new LogLevel('DEBUG', 1, ' DEBUG ', clc.magentaBright);
     static INFO = new LogLevel('INFO', 2, ' INFO  ', clc.green);
@@ -13,7 +12,7 @@ export class LogLevel {
     static NONE = new LogLevel('NONE', 9, '', clc.redBright);
 
     @Cacheable()
-    public static from(name: string = 'ERROR'): LogLevel {
+    static from(name: string = 'ERROR'): LogLevel {
         assert(name, `Log level name is required`);
         const result = LogLevel[name];
         if (result) {
