@@ -4,12 +4,12 @@ import { DrivineError } from '@/DrivineError';
 import { Neo4jConnectionProvider } from '@/connection/Neo4jConnectionProvider';
 import * as assert from 'assert';
 import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
-import { Logger } from '@nestjs/common';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
+import { DrivineLogger } from '@/logger';
 
 export class ConnectionProviderBuilder {
-    private logger = new Logger(ConnectionProviderBuilder.name);
+    private logger = new DrivineLogger(ConnectionProviderBuilder.name);
 
     // Common properties
     private _type: DatabaseType;

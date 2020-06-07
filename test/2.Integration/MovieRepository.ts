@@ -8,7 +8,7 @@ export class MovieRepository {
 
     constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
                 @InjectCypher(__dirname, 'movies') readonly testData: CypherStatement,
-                @InjectCypher(__dirname, 'moviesForActor-NEO4J') readonly moviesForActor: CypherStatement) {
+                @InjectCypher(__dirname, 'moviesForActor') readonly moviesForActor: CypherStatement) {
     }
 
     async loadTestData(): Promise<void> {

@@ -1,14 +1,14 @@
 import Stack from 'ts-data.stack';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { Logger } from '@nestjs/common';
 import * as assert from 'assert';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
 import { Cursor } from '@/cursor/Cursor';
 import { Connection } from '@/connection/Connection';
-import shortId = require('shortid');
 import { TransactionOptions } from '@/transaction/Transactional';
+import { DrivineLogger } from '@/logger';
+import shortId = require('shortid');
 
 export class Transaction {
     readonly id: string;
@@ -16,7 +16,7 @@ export class Transaction {
     readonly connectionRegistry: Map<string, Connection>;
     readonly cursors: Cursor<any>[];
 
-    private readonly logger = new Logger(Transaction.name);
+    private readonly logger = new DrivineLogger(Transaction.name);
     private _options: TransactionOptions;
 
     constructor(options: TransactionOptions, readonly contextHolder: TransactionContextHolder) {

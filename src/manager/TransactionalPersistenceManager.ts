@@ -19,6 +19,10 @@ export class TransactionalPersistenceManager implements PersistenceManager {
         return transaction.query(spec, this.database);
     }
 
+    async execute(spec: QuerySpecification<void>): Promise<void> {
+        await this.query(spec);
+    }
+
     async getOne<T>(spec: QuerySpecification<T>): Promise<T> {
         return await this.finderOperations.getOne(spec);
     }

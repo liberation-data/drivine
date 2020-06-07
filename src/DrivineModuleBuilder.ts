@@ -1,4 +1,4 @@
-import { Logger, Provider } from '@nestjs/common';
+import { Provider } from '@nestjs/common';
 import { DrivineModuleOptions } from '@/DrivineModule';
 import {
     cypherInjections,
@@ -15,11 +15,12 @@ import { Cacheable } from 'typescript-cacheable';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { PersistenceManager } from '@/manager/PersistenceManager';
+import { DrivineLogger } from '@/logger';
 
 const fs = require('fs');
 
 export class DrivineModuleBuilder {
-    private logger = new Logger(DrivineModuleBuilder.name);
+    private logger = new DrivineLogger(DrivineModuleBuilder.name);
     private _providers: Provider[];
 
     constructor(readonly options: DrivineModuleOptions) {}

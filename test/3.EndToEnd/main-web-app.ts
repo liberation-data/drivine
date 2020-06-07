@@ -4,7 +4,7 @@ import { ClassSerializerInterceptor, INestApplication, Logger, ValidationPipe } 
 
 require('dotenv').config({ path: require('find-config')('.env') });
 
-const logger = new Logger('main');
+const logger = new DrivineLogger('main');
 
 export async function createApp(): Promise<INestApplication> {
     return NestFactory.create(AppModule);

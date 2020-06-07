@@ -3,15 +3,15 @@ import { TransactionContextHolder } from '@/transaction/TransactonContextHolder'
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
-import { Logger } from '@nestjs/common';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
+import { DrivineLogger } from '@/logger';
 
 /**
  * Delegates to NonTransactional or TransactionalPersistenceManger, depending on whether there is a transaction in
  * flight.
  */
 export class DelegatingPersistenceManager implements PersistenceManager {
-    private logger = new Logger(DelegatingPersistenceManager.name);
+    private logger = new DrivineLogger(DelegatingPersistenceManager.name);
 
     constructor(
         readonly database: string,
@@ -33,6 +33,10 @@ export class DelegatingPersistenceManager implements PersistenceManager {
 
     async query<T>(spec: QuerySpecification<T>): Promise<T[]> {
         return this.persistenceManager().query(spec);
+    }
+
+    async execute(spec: QuerySpecification<void>): Promise<void> {
+        return this.persistenceManager().execute(spec);
     }
 
     private persistenceManager(): PersistenceManager {
