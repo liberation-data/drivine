@@ -12,10 +12,9 @@ export class HealthRepository {
     constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
 
     async countAllMetros(): Promise<number> {
-        const results = await this.persistenceManager.query<any>(
-            new QuerySpecification(`match (n:Metro) with count(n) as count return {count: count}`)
-        );
-        return results[0].count;
+        return this.persistenceManager.getOne<any>(
+            new QuerySpecification(`match (n:Metro) return count(n) as count`)
+        )
     }
 
     @Transactional()
