@@ -15,13 +15,25 @@ export class AgensGraphResultMapper implements ResultMapper {
     }
 
     private mapToNative(records: any[]): any[] {
-        return records.map((record) => {
-            const item = {};
-            Object.keys(record).forEach(key => {
-                item[key] = toNative(record[key]);
-            });
-            return item;
-        });
+        const data = new Array(records.length);
+        for (let i = 0; i < records.length; i++) {
+            const record = records[i];
+
+            let item;
+            const keys = Object.keys(record);
+            if (keys.length === 1) {
+                item = toNative(record[keys[0]])
+            }
+            else {
+                item = new Array(keys.length);
+                for (let j = 0; j < keys.length; j++) {
+                    const key = keys[j];
+                    item[j] = toNative(record[key])
+                }
+            }
+            data[i] = item
+        }
+        return data
     }
 
 }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Route } from './Route';
+import { Route } from './models/Route';
 import { Transactional } from '@/transaction/Transactional';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CursorSpecification } from '@/cursor/CursorSpecification';

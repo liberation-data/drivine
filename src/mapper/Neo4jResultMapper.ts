@@ -21,15 +21,22 @@ export class Neo4jResultMapper implements ResultMapper {
         const data = new Array(records.length);
         for (let i = 0; i < records.length; i++) {
             const record = records[i];
-            const item = {};
-            for (let j = 0; j < record.keys.length; j++) {
-                const key = record.keys[j];
-                item[key] = toNative(record.get(j));
+
+            let item;
+            if (record.keys.length === 1) {
+                item = toNative(record.get(0))
             }
-            data[i] = item;
+            else {
+                item = new Array(records.keys.length);
+                for (let j = 0; j < record.keys.length; j++) {
+                    item[j] = toNative(record.get(j))
+                }
+            }
+            data[i] = item
         }
-        return data;
+        return data
     }
+
 }
 
 const toNative = (val: any): any => {

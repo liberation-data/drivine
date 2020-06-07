@@ -1,6 +1,6 @@
 import { Controller, Get, Param } from '@nestjs/common';
-import { RouteRepository } from '../2.Integration/manager/RouteRepository';
-import { Route } from '../2.Integration/manager/Route';
+import { RouteRepository } from '../2.Integration/RouteRepository';
+import { Route } from '../2.Integration/models/Route';
 
 export interface RecommendedRouteDto {
     start: string;
