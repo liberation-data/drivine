@@ -7,11 +7,7 @@ require('source-map-support').install({
 });
 
 export class LogMessage {
-    constructor(
-        readonly level: LogLevel,
-        readonly time: Date,
-        readonly message: any,
-        readonly context?: string) {}
+    constructor(readonly level: LogLevel, readonly time: Date, readonly message: any, readonly context?: string) {}
 
     write(stream: Writable): void {
         stream.write(this.toConsole());

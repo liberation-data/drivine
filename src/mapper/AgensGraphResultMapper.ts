@@ -3,7 +3,6 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { plainToClass } from 'class-transformer';
 
 export class AgensGraphResultMapper implements ResultMapper {
-
     mapQueryResults<T>(records: any[], spec: QuerySpecification<T>): T[] {
         const results = this.mapToNative(records);
         if (spec.transformType) {
@@ -22,20 +21,18 @@ export class AgensGraphResultMapper implements ResultMapper {
             let item;
             const keys = Object.keys(record);
             if (keys.length === 1) {
-                item = toNative(record[keys[0]])
-            }
-            else {
+                item = toNative(record[keys[0]]);
+            } else {
                 item = new Array(keys.length);
                 for (let j = 0; j < keys.length; j++) {
                     const key = keys[j];
-                    item[j] = toNative(record[key])
+                    item[j] = toNative(record[key]);
                 }
             }
-            data[i] = item
+            data[i] = item;
         }
-        return data
+        return data;
     }
-
 }
 
 const toNative = (val: any): any => {

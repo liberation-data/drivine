@@ -12,20 +12,14 @@ export class HealthRepository {
     constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
 
     async countAllMetros(): Promise<number> {
-        return this.persistenceManager.getOne<any>(
-            new QuerySpecification(`match (n:Metro) return count(n) as count`)
-        )
+        return this.persistenceManager.getOne<any>(new QuerySpecification(`match (n:Metro) return count(n) as count`));
     }
 
     @Transactional()
     async findById(id: number): Promise<User> {
         const statement = `MATCH (u:Employee) WHERE u.id = $1 RETURN u`;
         return this.persistenceManager
-            .query(
-                new QuerySpecification<User>()
-                    .withStatement(statement)
-                    .bind([id])
-            )
+            .query(new QuerySpecification<User>().withStatement(statement).bind([id]))
             .then((rows) => (rows[0] ? rows[0] : Promise.reject(new Error('404 Not Found'))));
     }
 
@@ -33,9 +27,7 @@ export class HealthRepository {
     async save(user: User): Promise<User> {
         const statement = `MERGE (u:Employee {id: $1}) set u += $2 RETURN u`;
         return this.persistenceManager.getOne(
-            new QuerySpecification<User>()
-                .withStatement(statement)
-                .bind([user.id, user])
+            new QuerySpecification<User>().withStatement(statement).bind([user.id, user])
         );
     }
 
@@ -47,9 +39,7 @@ export class HealthRepository {
             RETURN u
         `;
         return this.persistenceManager.getOne(
-            new QuerySpecification<User>()
-                .withStatement(statement)
-                .bind([user.id, user])
+            new QuerySpecification<User>().withStatement(statement).bind([user.id, user])
         );
     }
 }

@@ -6,7 +6,6 @@ import { plainToClass } from 'class-transformer';
 const neo4j = require('neo4j-driver');
 
 export class Neo4jResultMapper implements ResultMapper {
-
     mapQueryResults<T>(records: any[], spec: QuerySpecification<T>): T[] {
         const results = this.mapToNative(records);
         if (spec.transformType) {
@@ -24,19 +23,17 @@ export class Neo4jResultMapper implements ResultMapper {
 
             let item;
             if (record.keys.length === 1) {
-                item = toNative(record.get(0))
-            }
-            else {
+                item = toNative(record.get(0));
+            } else {
                 item = new Array(records.keys.length);
                 for (let j = 0; j < record.keys.length; j++) {
-                    item[j] = toNative(record.get(j))
+                    item[j] = toNative(record.get(j));
                 }
             }
-            data[i] = item
+            data[i] = item;
         }
-        return data
+        return data;
     }
-
 }
 
 const toNative = (val: any): any => {
