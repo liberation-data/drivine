@@ -1,5 +1,5 @@
 import { ClassSerializerInterceptor, INestApplication, Module, ValidationPipe } from '@nestjs/common';
-import { RouteRepository } from '../2.Integration/manager/RouteRepository';
+import { RouteRepository } from '../2.Integration/RouteRepository';
 import { Reflector } from '@nestjs/core';
 import { RouteController } from './RouteController';
 import { DrivineModule, DrivineModuleOptions, DatabaseRegistry } from '@liberation-data/drivine';

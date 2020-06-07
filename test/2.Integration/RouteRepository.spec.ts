@@ -1,6 +1,6 @@
 import { StreamUtils } from '@/utils/StreamUtils';
 import { RouteRepository } from './RouteRepository';
-import { Route } from './Route';
+import { Route } from './models/Route';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
 
@@ -8,8 +8,10 @@ const fs = require('fs');
 
 RunWithDrivine({ transaction: { rollback: true } });
 describe('RouteRepository', () => {
+
     let repo: RouteRepository;
     let app: TestingModule;
+
     beforeAll(async () => {
         app = await Test.createTestingModule({
             imports: [
@@ -22,6 +24,7 @@ describe('RouteRepository', () => {
         }).compile();
         repo = app.get(RouteRepository);
     });
+
     afterAll(async () => {
         await app.close();
     });
@@ -36,6 +39,7 @@ describe('RouteRepository', () => {
         const result = await repo.findFastestBetween('Cavite Island', 'NYC');
         expect(result).toBeDefined();
         expect(result.travelTime).toEqual(26);
+        console.log(JSON.stringify(result));
     });
 
     it('should find routes between two cities, returning an async iterable cursor', async () => {
@@ -51,4 +55,5 @@ describe('RouteRepository', () => {
         cursor2.asStream({ transform: (route) => route.toString() }).pipe(fileStream);
         await StreamUtils.untilClosed(fileStream);
     });
+
 });

@@ -46,10 +46,10 @@ describe('HealthRepository', () => {
         return expect(repo.findById(234234234)).rejects.toBeInstanceOf(Error);
     });
 
-    it('should create new user', async () => {
+    it('should save a user', async () => {
         const data = { id: 2, name: 'Jasper' };
         // create user
-        const user = await repo.create(data);
+        const user = await repo.save(data);
         expect(user).toMatchObject(data);
         // find created user
         const user2 = await repo.findById(data.id);
@@ -60,7 +60,7 @@ describe('HealthRepository', () => {
         const data = { id: 3, name: 'Adam' };
         const data2 = { id: 3, name: 'Eve' };
         // create user
-        const user = await repo.create(data);
+        const user = await repo.save(data);
         expect(user).toMatchObject(data);
         // update user
         const user2 = await repo.update(data2);
