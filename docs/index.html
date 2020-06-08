@@ -321,7 +321,7 @@ export class HealthRepository {
 
     async countAllVertices(): Promise&lt;number&gt; {
 
-        return this.persistenceManager.getOne&lt;number&gt;(new QuerySpecification(`match (n) return count(n) as count`));
+        return this.persistenceManager.getOne&lt;number&gt;(new QuerySpecification(`match (n) return count(n)`));
     }
 }
             </code></pre>
