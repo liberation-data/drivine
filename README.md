@@ -20,6 +20,8 @@ With regards to the second point on scaleability, let's break that down into com
 * <a href="https://drivine.org/guide/#/cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
 * Light-weight _use-case specific_ <a href="https://drivine.org/guide/#/object-mapping">object graph mapping (OGM)</a>.
 
+----
+
 ## Quick Start
 
 Follow the **<a href="https://drivine.org/guide/#/quick-start">Quick Start</a>** section in our **<a href="https://drivine.org/guide/#/quick-start">User Guide</a>**. 
@@ -47,6 +49,8 @@ export class RouteRepository {
 }
 ```
 
+----
+
 ## Example Applications
 
 If you use `Drivine` and your code is public, feel free to make [PR](https://github.com/liberation-data/drivine/pulls) and add yourself to the list.
@@ -70,6 +74,8 @@ Repository: [github.com/SlackMap/slackmap](https://github.com/SlackMap/slackmap)
 
 * **master** branch - not released yet
 * **develop** branch - has all the current work
+
+----
 
 ## Documentation
 
