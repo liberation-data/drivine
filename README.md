@@ -22,8 +22,10 @@ With regards to the second point on scaleability, let's break that down into com
 
 ## Quick Start
 
-Start creating repositories like the one below. Follow the **<a href="https://github.com/liberation-data/drivine/wiki/Quick-Start">Quick Start</a>** guide **<a href="https://github.com/liberation-data/drivine/wiki/Quick-Start">here</a>**. 
+Follow the **<a href="https://drivine.org/guide/#/quick-start">Quick Start</a>** section in our **<a href="https://drivine.org/guide/#/quick-start">User Guide</a>**. 
 
+
+Start creating repositories like the one below. 
 ```typescript
 @Injectable()
 export class RouteRepository {
@@ -45,15 +47,31 @@ export class RouteRepository {
 }
 ```
 
-## Quickest Start
+## Example Applications
 
-Clone the **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
+If you use `Drivine` and your code is public, feel free to make `PR` and add yourself to the list.
 
-The sample app contains a basic starter template. Also, so that you can get rolling as quickly as possible, a number a graph database koans, for typical use-cases - recommendations, social networks, etc, each presented in a Drivine style.  
+### Quick Start Template
 
-## Detailed Documentation
+Clone the official **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
 
-Detailed documentation **[is here](https://drivine.org/guide/#/)**.
+This sample is a basic starter template, with some tutorials. It has some endpoints for traffic routing, movies/films and other typical use-cases. Rather than start from scratch, choose the one that closely matches yours, and modify. 
+
+### SlackMap
+
+New version of [slackmap.com](https://slackmap.com) is full rewrite with technology update.
+The `OrientDB` was replaced with `Neo4j` and we choose `Drivine` as the way to work with the database.
+
+Check out how `Drivine` supports `Neo4j` in `Full Stack JavaScript App` using `Angular` + `Nest` + `Nx Workspace Monorepo`.
+
+Repository: [github.com/SlackMap/slackmap](https://github.com/SlackMap/slackmap) 
+
+* **master** branch - not released yet
+* **develop** branch - has all the current work
+
+## Documentation
+
+Best way to learn Drivine is with our [User Guide](https://drivine.org/guide/#/).
 
 ---------------------------------------
 
@@ -93,7 +111,7 @@ The ideas behind this library were developed while developing graph-powered appl
 
 ## License
 
-Copyright (c) 2019 Liberation Data
+Copyright (c) 2020 Liberation Data
 
 Drivine is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License
 as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
