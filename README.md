@@ -55,7 +55,7 @@ If you use `Drivine` and your code is public, feel free to make [PR](https://git
 
 Clone the official **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
 
-Repository: [github.com/liberation-data/drivine-inspiration)](https://github.com/liberation-data/drivine-inspiration) 
+Repository: [github.com/liberation-data/drivine-inspiration](https://github.com/liberation-data/drivine-inspiration) 
 
 This sample is a basic starter template, with some tutorials. It has some endpoints for traffic routing, movies/films and other typical use-cases. Rather than start from scratch, choose the one that closely matches yours, and modify. 
 
