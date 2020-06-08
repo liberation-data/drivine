@@ -49,7 +49,7 @@ export class RouteRepository {
 
 ## Example Applications
 
-If you use `Drivine` and your code is public, feel free to make `PR` and add yourself to the list.
+If you use `Drivine` and your code is public, feel free to make [PR](https://github.com/liberation-data/drivine/pulls) and add yourself to the list.
 
 ### Quick Start Template
 
