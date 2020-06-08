@@ -51,11 +51,11 @@ export class RouteRepository {
 
 If you use `Drivine` and your code is public, feel free to make `PR` and add yourself to the list.
 
-### Sample Application
+### Quick Start Template
 
 Clone the official **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
 
-The sample app contains a basic starter template. Also, so that you can get rolling as quickly as possible, a number a graph database koans, for typical use-cases - recommendations, social networks, etc, each presented in a Drivine style.  
+This sample is a basic starter template, with some tutorials. It has some endpoints for traffic routing, movies/films and other typical use-cases. Rather than start from scratch, choose the one that closely matches yours, and modify. 
 
 ### SlackMap
 
