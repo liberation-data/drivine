@@ -1,4 +1,4 @@
-<a href="https://drivine.org"> ![DrivineSplash](https://liberation-data.com/images/drivine.jpg)</a>
+<a href="https://drivine.org"> ![DrivineSplash](https://raw.githubusercontent.com/liberation-data/drivine/master/docs/images/splash.jpg)</a>
 # <a href="https://drivine.org">drivine.org</a>                                       
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
@@ -54,6 +54,8 @@ If you use `Drivine` and your code is public, feel free to make `PR` and add you
 ### Quick Start Template
 
 Clone the official **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
+
+Repository: [github.com/liberation-data/drivine-inspiration)](https://github.com/liberation-data/drivine-inspiration) 
 
 This sample is a basic starter template, with some tutorials. It has some endpoints for traffic routing, movies/films and other typical use-cases. Rather than start from scratch, choose the one that closely matches yours, and modify. 
 
