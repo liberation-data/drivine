@@ -49,6 +49,8 @@ export class RouteRepository {
 
 ## Example Applications
 
+If you use `Drivine` and your code is public, feel free to make `PR` and add yourself to the list.
+
 ### Sample Application
 
 Clone the official **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
