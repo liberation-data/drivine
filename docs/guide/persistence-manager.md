@@ -16,4 +16,4 @@ export interface PersistenceManager {
 }
 ```
 
-It is the job of the persistence manager to obtain a connection, using database details that are registered when the library is bootstrapped. It will use pooling if this entails a performance benefit on the given database platform. There are two implementations of the interface - a transactional version and a non-transactional version.
+It is the job of the persistence manager to obtain a connection, using database details that are registered when the library is boot-strapped, or at runtime. It will use pooling if this entails a performance benefit on the given database platform. There are two implementations of the interface - a transactional version and a non-transactional version.
