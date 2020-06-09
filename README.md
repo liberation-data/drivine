@@ -101,7 +101,7 @@ the creator of a popular iOS library called [Typhoon](https://github.com/appsqui
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
 AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
 
-Drivine is based on an architecture that I put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times want from just under 2000ms seconds to 63ms. 
+Drivine is based on an architecture that I put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. 
 
 I got the idea to try such an architecture while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a>, which serve hundres/thousands of thransactions per second. I wanted to demonstrate how to use clean architecture patterns, and tools that remove boiler-plate, without sacrificing performance. 
 
