@@ -123,7 +123,7 @@ The ideas behind this library were developed while developing graph-powered appl
 
 Are you using Drivine and would like to support free & open-source software? Send us an email or PR to add your logo here. 
 
-<a href="https://liberation-data.com"> ![Liberation Data Logo](https://drivine.org/images/logos/liberation-data.png)</a> <a href="http://www.mobbizsolutions.com"> ![Mobbiz Solutions Logo](https://drivine.org/images/logos/mobbiz-logo.png)</a>
+<a href="http://www.slackmap.com"> ![Slackmap Logo](https://drivine.org/images/logos/slackmap-logo.png)</a> <a href="https://liberation-data.com"> ![Liberation Data Logo](https://drivine.org/images/logos/liberation-data.png)</a> <a href="http://www.mobbizsolutions.com"> ![Mobbiz Solutions Logo](https://drivine.org/images/logos/mobbiz-logo.png)</a> 
 
 
 ----
