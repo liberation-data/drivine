@@ -107,7 +107,7 @@ I got the idea to try such an architecture while building <a href="https://apps.
 
 Experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools.  I believe that Drivine proves that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
 
-So that's how it happened. 
+So that's how it happened 👍. 
 
 ## Feedback 
 
