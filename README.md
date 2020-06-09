@@ -128,6 +128,14 @@ Are you using Drivine and would like to support free & open-source software? Sen
 
 ----
 
+### Have you seen the light? 
+
+Drivine is a non-profit, community driven project. We only ask that if you've found it useful to star us on Github or send a tweet mentioning us (<a href="https://twitter.com/doctor_cerulean">@doctor_cerulean</a>). If you've written a Drivine related blog or tutorial, or published a new Drivine-powered app, we'd certainly be happy to hear about that too. 
+
+Drivine is sponsored and led by <a href="https://liberaiton-data.com">Liberation Data</a> with <a href="https://github.com/liberation-data/Drivine/graphs/contributors">contributions from around the world</a>. 
+ 
+---------------------------------------
+
 ## License
 
 Copyright (c) 2020 Liberation Data
