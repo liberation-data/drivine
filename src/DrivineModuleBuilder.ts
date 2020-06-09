@@ -50,7 +50,8 @@ export class DrivineModuleBuilder {
     }
 
     persistenceManagers(): Provider[] {
-        return persistenceManagerInjections.map((database) => {
+        const providers = DatabaseRegistry.getInstance().providers.map(provider => provider.name);
+        return providers.map((database) => {
             return <Provider>{
                 provide: `PersistenceManager:${database}`,
                 inject: [PersistenceManagerFactory],
