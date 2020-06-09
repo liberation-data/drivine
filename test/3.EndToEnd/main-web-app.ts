@@ -1,10 +1,10 @@
 import { NestFactory, Reflector } from '@nestjs/core';
-import { AppModule } from './AppModule';
+import { AppModule } from './app.module';
 import { ClassSerializerInterceptor, INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 
 require('dotenv').config({ path: require('find-config')('.env') });
 
-const logger = new DrivineLogger('main');
+const logger = new Logger('main');
 
 export async function createApp(): Promise<INestApplication> {
     return NestFactory.create(AppModule);

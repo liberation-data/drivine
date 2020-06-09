@@ -1,12 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Route } from './models/Route';
-import { Transactional } from '@/transaction/Transactional';
-import { QuerySpecification } from '@/query/QuerySpecification';
-import { CursorSpecification } from '@/cursor/CursorSpecification';
-import { Cursor } from '@/cursor/Cursor';
-import { InjectCypher, InjectPersistenceManager } from '@/DrivineInjectionDecorators';
-import { PersistenceManager } from '@/manager/PersistenceManager';
-import { CypherStatement } from '@/query/Statement';
+import { InjectPersistenceManager, PersistenceManager, InjectCypher, CypherStatement, Transactional, QuerySpecification, Cursor, CursorSpecification } from '@liberation-data/drivine';
 
 @Injectable()
 export class RouteRepository {
@@ -14,7 +8,7 @@ export class RouteRepository {
         @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
         @InjectCypher(__dirname, '/routesBetween') readonly routesBetween: CypherStatement
     ) {}
-
+ 
     @Transactional()
     async findFastestBetween(start: string, destination: string): Promise<Route> {
         return this.persistenceManager.getOne(
