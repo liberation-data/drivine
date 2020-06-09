@@ -94,7 +94,7 @@ Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_c
 
 ---------------------------------------
 
-## This is too awesome! How did it even . . ?
+## How it Happened
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
 the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from 
@@ -107,7 +107,6 @@ I got the idea to try such an architecture while building <a href="https://apps.
 
 Experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools.  I believe that Drivine proves that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
 
-So that's how it happened 👍. 
 
 ## Feedback 
 
