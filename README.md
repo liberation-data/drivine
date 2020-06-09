@@ -24,7 +24,7 @@ With regards to the second point on scaleability, let's break that down into com
 
 ## Quick Start
 
-Follow the **<a href="https://drivine.org/guide/#/quick-start">Quick Start</a>** section in our **<a href="https://drivine.org/guide/#/quick-start">User Guide</a>**. 
+Follow the **<a href="https://drivine.org/guide/#/quick-start">Quick Start</a>** section in our **<a href="https://drivine.org/guide/#/quick-start">User Guide</a>** or clone the **<a href="https://github.com/liberation-data/drivine-inspiration">sample app</a>** and use it as a starter template. 
 
 
 Start creating repositories like the one below. 
@@ -94,18 +94,19 @@ Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_c
 
 ---------------------------------------
 
-## About
+## How it Happened
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
-the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from 
-[AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
-AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
+the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon), a library that is included in thousands of iOS apps including Audible.com, AMEX, Etihad Airlines, Singapore Airlines and others.
 
-Drivine is based on an architecture that I put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. 
+This library is based on an architecture that was put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. 
 
-I got the idea to try such an architecture while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a>, which serve hundres/thousands of thransactions per second. I wanted to demonstrate how to use clean architecture patterns, and tools that remove boiler-plate, without sacrificing performance. 
+The ideas were ruminated upon while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a> - a growing social network for musicans that needs to serve hundreds of transactions per second. Clean architecture and performance are often competing concerns, so how would one go about getting the best of both worlds?
 
-Experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools.  I believe that Drivine proves that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
+Experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools. Early experiements with such tools resulted in unsatisfactory performance. Subsequent endeavors resulted in satisfactory performance, but difficult to maintain code. 
+
+Finally, Drivine shows that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
+
 
 ## Feedback 
 
@@ -134,7 +135,8 @@ Are you using Drivine and would like to support free & open-source software? Sen
 
 ### Have you seen the light? 
 
-Drivine is a non-profit, community driven project. We only ask that if you've found it useful to star us on Github or send a tweet mentioning us (<a href="https://twitter.com/doctor_cerulean">@doctor_cerulean</a>). If you've written a Drivine related blog or tutorial, or published a new Drivine-powered app, we'd certainly be happy to hear about that too. 
+Drivine is a non-profit, community driven project. We only ask that if you've found it useful to star us on Github or send a tweet mentioning us (<a href="https://twitter.com/@liberation_data">@liberation_data
+</a>). If you've written a Drivine related blog or tutorial, or published a new Drivine-powered app, we'd certainly be happy to hear about that too. 
 
 Drivine is sponsored and led by <a href="https://liberation-data.com">Liberation Data</a> with <a href="https://github.com/liberation-data/Drivine/graphs/contributors">contributions from around the world</a>. 
  

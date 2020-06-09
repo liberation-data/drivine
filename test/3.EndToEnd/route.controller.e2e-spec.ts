@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import * as request from 'supertest';
 import { HttpStatus, INestApplication } from '@nestjs/common';
-import { AppModule, configureApp } from './AppModule';
+import { AppModule, configureApp } from './app.module';
 
 describe('RouteController (e2e)', () => {
     let app: INestApplication;
