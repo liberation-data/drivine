@@ -1,4 +1,4 @@
-<a href="https://drivine.org"> ![DrivineSplash](https://liberation-data.com/images/drivine.jpg)</a>
+<a href="https://drivine.org"> ![DrivineSplash](https://raw.githubusercontent.com/liberation-data/drivine/master/docs/images/splash.jpg)</a>
 # <a href="https://drivine.org">drivine.org</a>                                       
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
@@ -19,6 +19,8 @@ With regards to the second point on scaleability, let's break that down into com
 * <a href="https://drivine.org/guide/#/transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. 
 * <a href="https://drivine.org/guide/#/cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
 * Light-weight _use-case specific_ <a href="https://drivine.org/guide/#/object-mapping">object graph mapping (OGM)</a>.
+
+----
 
 ## Quick Start
 
@@ -47,13 +49,17 @@ export class RouteRepository {
 }
 ```
 
+----
+
 ## Example Applications
 
-If you use `Drivine` and your code is public, feel free to make `PR` and add yourself to the list.
+If you use `Drivine` and your code is public, feel free to make [PR](https://github.com/liberation-data/drivine/pulls) and add yourself to the list.
 
 ### Quick Start Template
 
 Clone the official **[sample app](https://github.com/liberation-data/drivine-inspiration)** and start hacking. 
+
+Repository: [github.com/liberation-data/drivine-inspiration](https://github.com/liberation-data/drivine-inspiration) 
 
 This sample is a basic starter template, with some tutorials. It has some endpoints for traffic routing, movies/films and other typical use-cases. Rather than start from scratch, choose the one that closely matches yours, and modify. 
 
@@ -68,6 +74,8 @@ Repository: [github.com/SlackMap/slackmap](https://github.com/SlackMap/slackmap)
 
 * **master** branch - not released yet
 * **develop** branch - has all the current work
+
+----
 
 ## Documentation
 
