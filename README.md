@@ -94,18 +94,20 @@ Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_c
 
 ---------------------------------------
 
-## About
+## This is too awesome! How did it even . . ?
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
 the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon) from 
 [AppsQuick.ly](https://appsquick.ly). Typhoon is included in thousands of iOS apps including Audible.com, 
 AMEX, Etihad Airlines, Singapore Airlines and others, so you're in good hands. 
 
-Drivine is based on an architecture that I put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. 
+This library is based on an architecture that I put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. A result!
 
 I got the idea to try such an architecture while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a>, which serve hundres/thousands of thransactions per second. I wanted to demonstrate how to use clean architecture patterns, and tools that remove boiler-plate, without sacrificing performance. 
 
 Experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools.  I believe that Drivine proves that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
+
+So that's how it happened. 
 
 ## Feedback 
 
