@@ -4,9 +4,6 @@ import { plainToClass } from 'class-transformer';
 
 export abstract class AbstractGraphResultMapper implements ResultMapper {
 
-    protected constructor() {
-    }
-
     mapQueryResults<T>(records: any[], spec: QuerySpecification<T>): T[] {
         let results = this.mapToNative(records);
         if (spec.mapper) {
