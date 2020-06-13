@@ -1,46 +1,24 @@
-import { ResultMapper } from '@/mapper/ResultMapper';
-import { QuerySpecification } from '@/query/QuerySpecification';
-import { plainToClass } from 'class-transformer';
+import { AbstractGraphResultMapper } from '@/mapper/AbstractGraphResultMapper';
 
-export class AgensGraphResultMapper implements ResultMapper {
-    mapQueryResults<T>(records: any[], spec: QuerySpecification<T>): T[] {
-        const results = this.mapToNative(records);
-        if (spec.transformType) {
-            return plainToClass(spec.transformType, results);
-        } else if (spec.mapper) {
-            return results.map((it) => spec.mapper!(it));
-        }
-        return results;
+export class AgensGraphResultMapper extends AbstractGraphResultMapper {
+
+    keys(record: any): string[] {
+        return Object.keys(record);
     }
 
-    private mapToNative(records: any[]): any[] {
-        const data = new Array(records.length);
-        for (let i = 0; i < records.length; i++) {
-            const record = records[i];
-
-            let item;
-            const keys = Object.keys(record);
-            if (keys.length === 1) {
-                item = toNative(record[keys[0]]);
-            } else {
-                item = new Array(keys.length);
-                for (let j = 0; j < keys.length; j++) {
-                    const key = keys[j];
-                    item[j] = toNative(record[key]);
-                }
-            }
-            data[i] = item;
-        }
-        return data;
+    itemAtIndex(record: any, index: number): any {
+        return record[this.keys(record)[index]];
     }
-}
 
-const toNative = (val: any): any => {
-    if (val == undefined) {
+    toNative(val: any): any {
+        if (val == undefined) {
+            return val;
+        }
+        else if (val.constructor && val.constructor.name === 'Vertex' || val.constructor.name === 'Edge') {
+            return val.props;
+        }
         return val;
     }
-    if (val.constructor && val.constructor.name === 'Vertex') {
-        return val.props;
-    }
-    return val;
-};
+
+}
+
