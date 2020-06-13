@@ -38,6 +38,7 @@ describe('RouteRepository', () => {
         const result = await repo.findFastestBetween('Cavite Island', 'NYC');
         expect(result).toBeDefined();
         expect(result.travelTime).toEqual(26);
+        console.log(JSON.stringify(result));
     });
 
     it('should find routes between two cities, returning an async iterable cursor', async () => {
