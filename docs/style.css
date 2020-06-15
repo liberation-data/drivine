@@ -135,28 +135,30 @@ a.facebook-header:hover, a.twitter-header:hover {
 }
 
 .top-icon {
-    width: 100px;
-    height: 100px;
+    width: 120px;
+    height: 120px;
     margin: 0 auto;
     padding: 3px;
-    border: 3px #ffffff solid;
-    -webkit-border-radius: 50px;
-    -moz-border-radius: 50px;
-    border-radius: 50px;
-    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+    /*border: 3px #ffffff solid;*/
+    /*-webkit-border-radius: 50px;*/
+    /*-moz-border-radius: 50px;*/
+    /*border-radius: 50px;*/
+    /*z-index: 100;*/
+    /*box-shadow: 2px 2px 6px rgba(0,0,0,0.3);*/
 }
 
-.top-icon img {
-    width: 88px;
-    height: 88px;
-    margin: 0 auto;
-    padding: 6px;
-    border: 2px #fff dotted;
-    -webkit-border-radius: 49px;
-    -moz-border-radius: 49px;
-    border-radius: 49px;
-    box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
-}
+/*.top-icon img {*/
+/*    width: 88px;*/
+/*    height: 88px;*/
+/*    margin: 0 auto;*/
+/*    padding: 6px;*/
+/*    !*border: 2px #fff dashed;*!*/
+/*    !*-webkit-border-radius: 49px;*!*/
+/*    !*-moz-border-radius: 49px;*!*/
+/*    !*border-radius: 49px;*!*/
+/*    !*z-index: 100;*!*/
+/*    !*box-shadow: 2px 2px 6px rgba(0,0,0,0.3);*!*/
+/*}*/
 
 .top-divider {
     width: 750px;
