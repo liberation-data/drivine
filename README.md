@@ -94,7 +94,7 @@ Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_c
 
 ---------------------------------------
 
-## How it Happened
+## About
 
 Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
 the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon), a library that is included in thousands of iOS apps including Audible.com, AMEX, Etihad Airlines, Singapore Airlines and others.
