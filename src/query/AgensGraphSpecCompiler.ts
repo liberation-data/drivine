@@ -6,22 +6,39 @@ const assert = require('assert');
 // TODO: Map named parameters to index parameters.
 export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
 
+    private paramKeys: string[] = [];
+    /**
+     * Params from the specification converted to an indexed array, if necessary.
+     */
+    private readonly indexParams: any[];
+
     constructor(spec: QuerySpecification<any>) {
         super(spec);
         assert(['CYPHER', 'SQL'].includes(this.spec.statement.language),
             `${this.spec.statement.language} is not supported on AgensGraph.`);
+
+        if (!Array.isArray(this.spec.parameters)) {
+            this.paramKeys = Object.keys(this.spec.parameters).sort();
+            this.indexParams = this.paramKeys.map((it) => this.spec.parameters[it]);
+        } else {
+            this.indexParams = this.spec.parameters;
+        }
     }
 
     formattedStatement(): string {
-        return this.appliedStatement();
+        let result = this.appliedStatement();
+        for (let i = 0; i < this.paramKeys.length; i++) {
+            const key = this.paramKeys[i];
+            result = result.replace(`$${key}`, `$${i+1}`)
+        }
+        return result;
     }
 
     formattedParams(): any {
-        assert(Array.isArray(this.spec.parameters), `Named parameters on AgensGraph are not supported in this version`);
         if (this.spec.statement.language === 'CYPHER') {
-            return this.spec.parameters.map((it) => JSON.stringify(it));
+            return this.indexParams.map((it) => JSON.stringify(it));
         } else if (this.spec.statement.language === 'SQL') {
-            return this.spec.parameters;
+            return this.indexParams;
         } else {
             throw new DrivineError(`${this.spec.statement.language} is not supported on AgensGraph`);
         }
