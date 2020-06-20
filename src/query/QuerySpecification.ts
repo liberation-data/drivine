@@ -7,11 +7,11 @@ export type ClassType<T> = new (...args: any[]) => T;
 
 export class QuerySpecification<T> {
     statement: Statement;
-    parameters: any[];
+    parameters: any[] = [];
     mapper?: (result: any) => T;
     transformType?: ClassType<T>;
-    private _skip: number;
-    private _limit: number;
+    _skip: number;
+    _limit: number;
 
     constructor(statement?: string | Statement) {
         this.parameters = [];
@@ -68,42 +68,4 @@ export class QuerySpecification<T> {
         return this;
     }
 
-    appliedStatement(): string {
-        return `${this.statement.text} ${this.skipClause()} ${this.limitClause()}`;
-    }
-
-    /**
-     * Returns parameters in the format of a supported database type.
-     * @param type
-     */
-    // TODO: Replace with polymorphism
-    mapParameters(type: DatabaseType): any {
-        const params = this.parameters ? this.parameters : [];
-        if (type == DatabaseType.AGENS_GRAPH) {
-            if (this.statement.language === 'CYPHER') {
-                return params.map((it) => JSON.stringify(it));
-            } else if (this.statement.language === 'SQL') {
-                return params;
-            } else {
-                throw new DrivineError(`${this.statement.language} is not supported on AgensGraph`);
-            }
-        } else if (type == DatabaseType.NEO4J) {
-            assert(this.statement.language === 'CYPHER', `${this.statement.language} is not supported on Neo4j.`);
-            const mapped = params.map((it, index) => ({ [index + 1]: it }));
-            return Object.assign({}, ...mapped);
-        } else {
-            throw new DrivineError(`Database type ${type} is not supported.`);
-        }
-    }
-
-    private skipClause(): string {
-        if (this._skip) {
-            return `${this.statement.language === 'CYPHER' ? `SKIP` : `OFFSET`} ${this._skip}`;
-        }
-        return ``;
-    }
-
-    private limitClause(): string {
-        return this._limit ? `LIMIT ${this._limit}` : ``;
-    }
 }

@@ -104,6 +104,9 @@ export class ConnectionProviderBuilder {
         if (!this._port) {
             this._port = 5432;
         }
+        if (this._port !== 5432) {
+            this.logger.warn(`${this._port} is a non-standard port for AgensGraph`);
+        }
         if (!this._idleTimeout) {
             this._idleTimeout = 500;
         }
@@ -127,12 +130,11 @@ export class ConnectionProviderBuilder {
         if (this._idleTimeout) {
             this.logger.warn(`idleTimeout is not supported by Neo4j`);
         }
-        if (this._name) {
-            this.logger.warn(`Database name is not supported by Neo4j`);
-        }
-
         if (!this._port) {
             this._port = 7687;
+        }
+        if (this._port !== 7687) {
+            this.logger.warn(`${this._port} is a non-standard port for Neo4j`);
         }
 
         return new Neo4jConnectionProvider(name, this._host, this._port, this._userName!, this._password, this._name);
