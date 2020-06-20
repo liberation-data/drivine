@@ -28,4 +28,10 @@ describe('WineRepository', () => {
         const results = await repo.listProlificWineTasters();
         console.log(JSON.stringify(results));
     });
+
+    it('should list return a taster\'s profile', async () => {
+        const results = await repo.getTasterProfile('Christina Pickard');
+        console.log(JSON.stringify(results));
+    });
+
 });
