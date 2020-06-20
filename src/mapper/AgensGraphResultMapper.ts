@@ -1,6 +1,6 @@
-import { AbstractGraphResultMapper } from '@/mapper/AbstractGraphResultMapper';
+import { ResultMapper } from '@/mapper/ResultMapper';
 
-export class AgensGraphResultMapper extends AbstractGraphResultMapper {
+export class AgensGraphResultMapper extends ResultMapper {
 
     keys(record: any): string[] {
         return Object.keys(record);
