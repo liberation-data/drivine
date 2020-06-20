@@ -3,11 +3,12 @@ import { CompiledQuerySpecification } from '@/query/CompiledQuerySpecification';
 
 export abstract class QuerySpecificationCompiler {
 
-    constructor(readonly spec: QuerySpecification<any>) {
+    protected constructor(readonly spec: QuerySpecification<any>) {
+        this.spec.finalize();
     }
 
     compile(): CompiledQuerySpecification {
-        this.spec.finalize();
+
         return <CompiledQuerySpecification> {
             statement: this.formattedStatement(),
             parameters: this.formattedParams()
