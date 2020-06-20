@@ -1,9 +1,9 @@
 import { Integer } from 'neo4j-driver';
-import { AbstractGraphResultMapper } from '@/mapper/AbstractGraphResultMapper';
+import { ResultMapper } from '@/mapper/ResultMapper';
 
 const neo4j = require('neo4j-driver');
 
-export class Neo4jResultMapper extends AbstractGraphResultMapper {
+export class Neo4jResultMapper extends ResultMapper {
 
     keys(record: any): string[] {
         return record.keys;
