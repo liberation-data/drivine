@@ -34,10 +34,11 @@ export class QuerySpecification<T> {
 
     /**
      * Bind parameters to the query.
-     * @param parameters. If parameters are undefined or empty, does nothing.
+     * @param parameters. If parameters are an array, index parameters are assumed. If an object, then named params.
+     * If undefined or empty, does nothing.
      */
-    bind(parameters?: any[]): this {
-        if (parameters && parameters.length > 0) {
+    bind(parameters?: any[] | any): this {
+        if (parameters) {
             this.parameters = parameters;
         }
         return this;
