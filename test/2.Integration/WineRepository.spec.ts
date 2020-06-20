@@ -24,7 +24,7 @@ describe('WineRepository', () => {
         await app.close();
     });
 
-    it('should load list the movies for an actor', async () => {
+    it('should list prolific wine tasters', async () => {
         const results = await repo.listProlificWineTasters();
         console.log(JSON.stringify(results));
     });
