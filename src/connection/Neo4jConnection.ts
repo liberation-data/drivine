@@ -5,9 +5,9 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineError } from '@/DrivineError';
 import { Session, Transaction } from 'neo4j-driver';
 import { ResultMapper } from '@/mapper/ResultMapper';
-import { DatabaseType } from '@/connection/DatabaseType';
 import { Neo4jCursor } from '@/cursor/Neo4jCursor';
 import { DrivineLogger } from '@/logger';
+import { Neo4jSpecCompiler } from '@/query/Neo4jSpecCompiler';
 
 export class Neo4jConnection implements Connection {
     private logger = new DrivineLogger(Neo4jConnection.name);
@@ -20,14 +20,14 @@ export class Neo4jConnection implements Connection {
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
-        spec.finalize();
+        const compiledSpec = new Neo4jSpecCompiler(spec).compile();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
         let result;
         if (!this.transaction) {
-            result = await this.session.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
+            result = await this.session.run(compiledSpec.statement, compiledSpec.parameters);
         } else {
-            result = await this.transaction.run(spec.appliedStatement(), spec.mapParameters(DatabaseType.NEO4J));
+            result = await this.transaction.run(compiledSpec.statement, compiledSpec.parameters);
         }
         logger.log(spec, hrStart);
         return this.resultMapper.mapQueryResults<T>(result.records, spec);

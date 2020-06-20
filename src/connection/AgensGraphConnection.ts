@@ -5,8 +5,8 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { AgensGraphCursor } from '@/cursor/AgensGraphCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
-import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineLogger } from '@/logger';
+import { AgensGraphSpecCompiler } from '@/query/AgensGraphSpecCompiler';
 
 const PgCursor = require('pg-cursor');
 
@@ -20,16 +20,17 @@ export class AgensGraphConnection implements Connection {
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
-        spec.finalize();
+        const compiledSpec = new AgensGraphSpecCompiler(spec).compile();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
-        const result = await this.client.query(spec.appliedStatement(), spec.mapParameters(DatabaseType.AGENS_GRAPH));
+        const result = await this.client.query(compiledSpec.statement, compiledSpec.parameters);
         logger.log(spec, hrStart);
         return this.resultMapper.mapQueryResults<T>(result.rows, spec);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<AgensGraphCursor<T>> {
-        const pgCursorSpec = new PgCursor(spec.appliedStatement(), spec.mapParameters(DatabaseType.AGENS_GRAPH));
+        const compiledSpec = new AgensGraphSpecCompiler(spec).compile();
+        const pgCursorSpec = new PgCursor(compiledSpec.statement, compiledSpec.parameters);
         const pgCursor = await this.client.query(pgCursorSpec);
         return new AgensGraphCursor<T>(this.sessionId(), spec, pgCursor, this.resultMapper);
     }
