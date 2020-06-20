@@ -135,6 +135,6 @@ export class ConnectionProviderBuilder {
             this._port = 7687;
         }
 
-        return new Neo4jConnectionProvider(name, this._host, this._port, this._userName!, this._password);
+        return new Neo4jConnectionProvider(name, this._host, this._port, this._userName!, this._password, this._name);
     }
 }
