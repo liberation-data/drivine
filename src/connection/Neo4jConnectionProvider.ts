@@ -15,14 +15,17 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         readonly host: string,
         readonly port: number,
         readonly user: string,
-        readonly password: string | undefined
+        readonly password: string | undefined,
+        readonly database: string | undefined
     ) {
         const authToken = neo.auth.basic(this.user, this.password);
         this.driver = neo.driver(`bolt://${this.host}:${this.port}`, authToken);
     }
 
     async connect(): Promise<Connection> {
-        const session = this.driver.session();
+        const session = this.driver.session({
+            database: this.database
+        });
         session['sessionId'] = shortId.generate();
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());
         return Promise.resolve(connection);

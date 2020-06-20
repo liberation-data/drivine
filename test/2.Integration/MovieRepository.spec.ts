@@ -3,7 +3,7 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine }
 import { MovieRepository } from './MovieRepository';
 
 RunWithDrivine({ rollback: false });
-describe('MoviesRepository', () => {
+describe('MovieRepository', () => {
     let repo: MovieRepository;
     let app: TestingModule;
 
