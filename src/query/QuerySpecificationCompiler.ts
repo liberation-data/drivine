@@ -1,5 +1,5 @@
 import { QuerySpecification } from '@/query/index';
-import { CompiledQuerySpecification } from '@/query/CompiledQuerySpecification';
+import { CompiledQuery } from '@/query/CompiledQuery';
 
 export abstract class QuerySpecificationCompiler {
 
@@ -7,9 +7,9 @@ export abstract class QuerySpecificationCompiler {
         this.spec.finalize();
     }
 
-    compile(): CompiledQuerySpecification {
+    compile(): CompiledQuery {
 
-        return <CompiledQuerySpecification> {
+        return <CompiledQuery> {
             statement: this.formattedStatement(),
             parameters: this.formattedParams()
         }

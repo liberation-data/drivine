@@ -6,7 +6,8 @@ const assert = require('assert');
 // TODO: Map named parameters to index parameters.
 export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
 
-    private paramKeys: string[] = [];
+    private readonly paramKeys: string[] = [];
+
     /**
      * Params from the specification converted to an indexed array, if necessary.
      */
@@ -43,7 +44,4 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
             throw new DrivineError(`${this.spec.statement.language} is not supported on AgensGraph`);
         }
     }
-
-
-
 }
