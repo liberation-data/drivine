@@ -63,151 +63,105 @@
 <div class="container container-main">
 	<div class="row">
 		<div class="col-8 col-content">
-			<div class="tsd-panel tsd-typography">
-				<p><a href="https://drivine.org"> <img src="https://raw.githubusercontent.com/liberation-data/drivine/master/docs/images/splash.jpg" alt="DrivineSplash"></a></p>
-				<a href="#drivineorg" id="drivineorg" style="color: inherit; text-decoration: none;">
-					<h1><a href="https://drivine.org">drivine.org</a></h1>
-				</a>
-				<p>Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: </p>
-				<ul>
-					<li>Support multiple graph databases (simultaneously, if you wish). Currently <a href="https://bitnine.net/agensgraph/">AgensGraph</a> and
-					<a href="https://neo4j.com/neo4j-graph-database/">Neo4j</a>. </li>
-					<li><strong>Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.</strong></li>
-				</ul>
-				<hr>
-				<p>With regards to the second point on scaleability, let&#39;s break that down into component facets. </p>
-				<a href="#features" id="features" style="color: inherit; text-decoration: none;">
-					<h2>Features</h2>
-				</a>
-				<ul>
-					<li>Facilitates the use of <a href="https://drivine.org/guide/#/repositories">well understood object-oriented</a> and functional programming patterns. </li>
-					<li>Supports implementation of code that adheres to a single responsibility principle (SRP). <a href="https://nestjs.com/">NestJS</a> will be optional, but is recommended. </li>
-					<li>Takes care of <a href="https://drivine.org/guide/#/persistence-manager">infrastructure concerns</a>, so that you can focus on making the most of your data. </li>
-					<li><a href="https://drivine.org/guide/#/transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. </li>
-					<li><a href="https://drivine.org/guide/#/cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. </li>
-					<li>Light-weight <em>use-case specific</em> <a href="https://drivine.org/guide/#/object-mapping">object graph mapping (OGM)</a>.</li>
-				</ul>
-				<hr>
-				<a href="#quick-start" id="quick-start" style="color: inherit; text-decoration: none;">
-					<h2>Quick Start</h2>
-				</a>
-				<p>Follow the <strong><a href="https://drivine.org/guide/#/quick-start">Quick Start</a></strong> section in our <strong><a href="https://drivine.org/guide/#/quick-start">User Guide</a></strong> or clone the <strong><a href="https://github.com/liberation-data/drivine-inspiration">sample app</a></strong> and use it as a starter template. </p>
-				<p>Start creating repositories like the one below. </p>
-				<pre><code class="language-typescript"><span class="hljs-meta">@Injectable</span>()
-<span class="hljs-keyword">export</span> <span class="hljs-keyword">class</span> RouteRepository {
-    <span class="hljs-keyword">constructor</span>(<span class="hljs-params">
-        <span class="hljs-meta">@InjectPersistenceManager</span>() <span class="hljs-keyword">readonly</span> persistenceManager: PersistenceManager,
-        <span class="hljs-meta">@InjectCypher</span>(<span class="hljs-string">&#x27;@/traffic/routesBetween&#x27;</span>) <span class="hljs-keyword">readonly</span> routesBetween: CypherStatement</span>) {
-    }
-
-    <span class="hljs-meta">@Transactional</span>() <span class="hljs-comment">// Has default Propagation.REQUIRED - partipicate in a current txn, or start one.</span>
-    <span class="hljs-keyword">public</span> <span class="hljs-keyword">async</span> findFastestBetween(start: <span class="hljs-built_in">string</span>, destination: <span class="hljs-built_in">string</span>): <span class="hljs-built_in">Promise</span>&lt;Route&gt; {
-        <span class="hljs-keyword">return</span> <span class="hljs-built_in">this</span>.persistenceManager.getOne(
-            <span class="hljs-keyword">new</span> QuerySpecification&lt;Route&gt;()
-                .withStatement(<span class="hljs-built_in">this</span>.routesBetween)
-                .bind([start, destination])
-                .limit(<span class="hljs-number">1</span>)
-                .transform(Route)
-        );
-    }
-}</code></pre>
-				<hr>
-				<a href="#example-applications" id="example-applications" style="color: inherit; text-decoration: none;">
-					<h2>Example Applications</h2>
-				</a>
-				<p>If you use <code>Drivine</code> and your code is public, feel free to make <a href="https://github.com/liberation-data/drivine/pulls">PR</a> and add yourself to the list.</p>
-				<a href="#quick-start-template" id="quick-start-template" style="color: inherit; text-decoration: none;">
-					<h3>Quick Start Template</h3>
-				</a>
-				<p>Clone the official <strong><a href="https://github.com/liberation-data/drivine-inspiration">sample app</a></strong> and start hacking. </p>
-				<p>Repository: <a href="https://github.com/liberation-data/drivine-inspiration">github.com/liberation-data/drivine-inspiration</a> </p>
-				<p>This sample is a basic starter template, with some tutorials. It has some endpoints for traffic routing, movies/films and other typical use-cases. Rather than start from scratch, choose the one that closely matches yours, and modify. </p>
-				<a href="#slackmap" id="slackmap" style="color: inherit; text-decoration: none;">
-					<h3>SlackMap</h3>
-				</a>
-				<p>New version of <a href="https://slackmap.com">slackmap.com</a> is full rewrite with technology update.
-				The <code>OrientDB</code> was replaced with <code>Neo4j</code> and we choose <code>Drivine</code> as the way to work with the database.</p>
-				<p>Check out how <code>Drivine</code> supports <code>Neo4j</code> in <code>Full Stack JavaScript App</code> using <code>Angular</code> + <code>Nest</code> + <code>Nx Workspace Monorepo</code>.</p>
-				<p>Repository: <a href="https://github.com/SlackMap/slackmap">github.com/SlackMap/slackmap</a> </p>
-				<ul>
-					<li><strong>master</strong> branch - not released yet</li>
-					<li><strong>develop</strong> branch - has all the current work</li>
-				</ul>
-				<hr>
-				<a href="#documentation" id="documentation" style="color: inherit; text-decoration: none;">
-					<h2>Documentation</h2>
-				</a>
-				<p>Best way to learn Drivine is with our <a href="https://drivine.org/guide/#/">User Guide</a>.</p>
-				<hr>
-				<a href="#tutorials" id="tutorials" style="color: inherit; text-decoration: none;">
-					<h2>Tutorials</h2>
-				</a>
-				<p>New to graph databases? Read some tutorials. </p>
-				<ul>
-					<li><a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock &amp; Roll Traffic Routing, with Neo4j</a> </li>
-					<li><a href="https://liberation-data.com/saxeburg-series/2018/12/05/rock-n-roll-traffic-routing.html">Rock &amp; Roll Traffic Routing, with Neo4j, Chapter Two</a> </li>
-				</ul>
-				<p>Have a tutorial you&#39;d like to share? <a href="https://twitter.com/doctor_cerulean">Get in touch</a> with me. </p>
-				<hr>
-				<a href="#about" id="about" style="color: inherit; text-decoration: none;">
-					<h2>About</h2>
-				</a>
-				<p>Drivine was created by <a href="https://www.linkedin.com/in/jasper-blues-7781638">Jasper Blues</a> (that&#39;s me), who is also
-				the creator of a popular iOS library called <a href="https://github.com/appsquickly/typhoon">Typhoon</a>, a library that is included in thousands of iOS apps including Audible.com, AMEX, Etihad Airlines, Singapore Airlines and others.</p>
-				<p>This library is based on an architecture that was put in place for <a href="https://www.msts.com/resource-center/insights/whats-new-in-b2b-payments-credit-as-a-service/">MSTS</a>, after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. </p>
-				<p>The ideas were ruminated upon while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a> - a growing social network for musicans that needs to serve hundreds of transactions per second. Clean architecture and performance are often competing concerns, so how would one go about getting the best of both worlds?</p>
-				<p>Experience as a past committer to the <a href="https://spring.io/">Spring Framework</a> including on <a href="https://spring.io/projects/spring-data-neo4j">Spring Data Neo4j</a> helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools. Early experiements with such tools resulted in unsatisfactory performance. Subsequent endeavors resulted in satisfactory performance, but difficult to maintain code. </p>
-				<p>Finally, Drivine shows that it is not necessary to forego clean architecture in order to achieve scaleability goals. </p>
-				<a href="#feedback" id="feedback" style="color: inherit; text-decoration: none;">
-					<h2>Feedback</h2>
-				</a>
-				<a href="#i39m-not-sure-how-to-do-xyz" id="i39m-not-sure-how-to-do-xyz" style="color: inherit; text-decoration: none;">
-					<h4>I&#39;m not sure how to do [xyz]</h4>
-				</a>
-				<blockquote>
-					<p>If you can&#39;t find what you need in the Quick Start or User Guides, please <a href="https://stackoverflow.com/questions/tagged/drivine?sort=newest&amp;pageSize=15">post a question on StackOverflow</a>, using the Drivine tag. </p>
-				</blockquote>
-				<a href="#interested-in-contributing" id="interested-in-contributing" style="color: inherit; text-decoration: none;">
-					<h4>Interested in contributing?</h4>
-				</a>
-				<blockquote>
-					<p>Great! A contribution guide, along with detailed documentation will be published in the coming days. </p>
-				</blockquote>
-				<a href="#i39ve-found-a-bug-or-have-a-feature-request" id="i39ve-found-a-bug-or-have-a-feature-request" style="color: inherit; text-decoration: none;">
-					<h4>I&#39;ve found a bug, or have a feature request</h4>
-				</a>
-				<blockquote>
-					<p>Please raise a <a href="https://github.com/liberation-data/drivine/issues">GitHub</a> issue.</p>
-				</blockquote>
-				<hr>
-				<a href="#who-is-using-it" id="who-is-using-it" style="color: inherit; text-decoration: none;">
-					<h2>Who is using it?</h2>
-				</a>
-				<p>Are you using Drivine and would like to support free &amp; open-source software? Send us an email or PR to add your logo here. </p>
-				<p><a href="http://www.slackmap.com"> <img src="https://drivine.org/images/logos/slackmap-logo.png" alt="Slackmap Logo"></a> <a href="https://liberation-data.com"> <img src="https://drivine.org/images/logos/liberation-data.png" alt="Liberation Data Logo"></a> <a href="http://www.mobbizsolutions.com"> <img src="https://drivine.org/images/logos/mobbiz-logo.png" alt="Mobbiz Solutions Logo"></a> <a href="https://bitnine.net/agensgraph/"> <img src="https://drivine.org/images/logos/agensgraph.png" alt="Slackmap Logo"></a></p>
-				<hr>
-				<a href="#have-you-seen-the-light" id="have-you-seen-the-light" style="color: inherit; text-decoration: none;">
-					<h3>Have you seen the light?</h3>
-				</a>
-				<p>Drivine is a non-profit, community driven project. We only ask that if you&#39;ve found it useful to star us on Github or send a tweet mentioning us (<a href="https://twitter.com/@doctor_cerulean">@doctor_cerulean</a>). If you&#39;ve written a Drivine related blog or tutorial, or published a new Drivine-powered app, we&#39;d certainly be happy to hear about that too. </p>
-				<p>Drivine is sponsored and led by <a href="https://liberation-data.com">Liberation Data</a> with <a href="https://github.com/liberation-data/Drivine/graphs/contributors">contributions from around the world</a>. </p>
-				<hr>
-				<a href="#license" id="license" style="color: inherit; text-decoration: none;">
-					<h2>License</h2>
-				</a>
-				<p>Copyright (c) 2020 Liberation Data</p>
-				<p>Drivine is free software: you can redistribute it and/or modify it under the terms of the APACHE LICENSE, VERSION 2.0
-					as published by the Apache Software Foundation, either version 2 of the License, or (at your option) any later version.
-					This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
-					warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the Apache Software License, Version 2.0 for more details.
-					You should have received a copy of the Apache Software License along with this program.
-				If not, see <a href="http://www.apache.org/licenses/">http://www.apache.org/licenses/</a>.</p>
-			</div>
+			<section class="tsd-panel-group tsd-index-group">
+				<h2>Index</h2>
+				<section class="tsd-panel tsd-index-panel">
+					<div class="tsd-index-content">
+						<section class="tsd-index-section ">
+							<h3>Modules</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-module"><a href="modules/_src_drivineerror_.html" class="tsd-kind-icon">&quot;src/<wbr>Drivine<wbr>Error&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_drivineinjectiondecorators_.html" class="tsd-kind-icon">&quot;src/<wbr>Drivine<wbr>Injection<wbr>Decorators&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_drivinemodule_.html" class="tsd-kind-icon">&quot;src/<wbr>Drivine<wbr>Module&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_drivinemodulebuilder_.html" class="tsd-kind-icon">&quot;src/<wbr>Drivine<wbr>Module<wbr>Builder&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_agensgraphconnection_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Agens<wbr>Graph<wbr>Connection&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_agensgraphconnectionprovider_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Agens<wbr>Graph<wbr>Connection<wbr>Provider&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_connection_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Connection&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_connectionproperties_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Connection<wbr>Properties&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_connectionprovider_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Connection<wbr>Provider&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_connectionproviderbuilder_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Connection<wbr>Provider<wbr>Builder&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_databaseregistry_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Database<wbr>Registry&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_databasetype_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Database<wbr>Type&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_neo4jconnection_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Neo4j<wbr>Connection&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_neo4jconnectionprovider_.html" class="tsd-kind-icon">&quot;src/connection/<wbr>Neo4j<wbr>Connection<wbr>Provider&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_connection_index_.html" class="tsd-kind-icon">&quot;src/connection/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_context_drivinecontext_.html" class="tsd-kind-icon">&quot;src/context/<wbr>Drivine<wbr>Context&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_context_index_.html" class="tsd-kind-icon">&quot;src/context/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_abstractcursor_.html" class="tsd-kind-icon">&quot;src/cursor/<wbr>Abstract<wbr>Cursor&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_agensgraphcursor_.html" class="tsd-kind-icon">&quot;src/cursor/<wbr>Agens<wbr>Graph<wbr>Cursor&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_cursor_.html" class="tsd-kind-icon">&quot;src/cursor/<wbr>Cursor&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_cursorspecification_.html" class="tsd-kind-icon">&quot;src/cursor/<wbr>Cursor<wbr>Specification&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_cursorstreamoptions_.html" class="tsd-kind-icon">&quot;src/cursor/<wbr>Cursor<wbr>Stream<wbr>Options&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_neo4jcursor_.html" class="tsd-kind-icon">&quot;src/cursor/<wbr>Neo4j<wbr>Cursor&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_cursor_index_.html" class="tsd-kind-icon">&quot;src/cursor/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_index_.html" class="tsd-kind-icon">&quot;src/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_logger_drivinelogger_.html" class="tsd-kind-icon">&quot;src/logger/<wbr>Drivine<wbr>Logger&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_logger_loglevel_.html" class="tsd-kind-icon">&quot;src/logger/<wbr>Log<wbr>Level&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_logger_logmessage_.html" class="tsd-kind-icon">&quot;src/logger/<wbr>Log<wbr>Message&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_logger_statementlogger_.html" class="tsd-kind-icon">&quot;src/logger/<wbr>Statement<wbr>Logger&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_logger_index_.html" class="tsd-kind-icon">&quot;src/logger/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_delegatingpersistencemanager_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Delegating<wbr>Persistence<wbr>Manager&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_finderoperations_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Finder<wbr>Operations&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_nontransactionalpersistencemanager_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Non<wbr>Transactional<wbr>Persistence<wbr>Manager&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_persistencemanager_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Persistence<wbr>Manager&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_persistencemanagerfactory_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Persistence<wbr>Manager<wbr>Factory&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_persistencemanagertype_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Persistence<wbr>Manager<wbr>Type&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_transactionalpersistencemanager_.html" class="tsd-kind-icon">&quot;src/manager/<wbr>Transactional<wbr>Persistence<wbr>Manager&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_manager_index_.html" class="tsd-kind-icon">&quot;src/manager/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_mapper_agensgraphresultmapper_.html" class="tsd-kind-icon">&quot;src/mapper/<wbr>Agens<wbr>Graph<wbr>Result<wbr>Mapper&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_mapper_neo4jresultmapper_.html" class="tsd-kind-icon">&quot;src/mapper/<wbr>Neo4j<wbr>Result<wbr>Mapper&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_mapper_resultmapper_.html" class="tsd-kind-icon">&quot;src/mapper/<wbr>Result<wbr>Mapper&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_mapper_index_.html" class="tsd-kind-icon">&quot;src/mapper/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_agensgraphspeccompiler_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Agens<wbr>Graph<wbr>Spec<wbr>Compiler&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_compiledquery_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Compiled<wbr>Query&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_neo4jspeccompiler_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Neo4j<wbr>Spec<wbr>Compiler&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_querylanguage_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Query<wbr>Language&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_queryspecification_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Query<wbr>Specification&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_queryspecificationcompiler_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Query<wbr>Specification<wbr>Compiler&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_statement_.html" class="tsd-kind-icon">&quot;src/query/<wbr>Statement&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_query_index_.html" class="tsd-kind-icon">&quot;src/query/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_propagation_.html" class="tsd-kind-icon">&quot;src/transaction/<wbr>Propagation&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_transaction_.html" class="tsd-kind-icon">&quot;src/transaction/<wbr>Transaction&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_transactioncontextkeys_.html" class="tsd-kind-icon">&quot;src/transaction/<wbr>Transaction<wbr>Context<wbr>Keys&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_transactioncontextmiddleware_.html" class="tsd-kind-icon">&quot;src/transaction/<wbr>Transaction<wbr>Context<wbr>Middleware&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_transactional_.html" class="tsd-kind-icon">&quot;src/transaction/<wbr>Transactional&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_transactoncontextholder_.html" class="tsd-kind-icon">&quot;src/transaction/<wbr>Transacton<wbr>Context<wbr>Holder&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_transaction_index_.html" class="tsd-kind-icon">&quot;src/transaction/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_utils_streamutils_.html" class="tsd-kind-icon">&quot;src/utils/<wbr>Stream<wbr>Utils&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_utils_testutils_.html" class="tsd-kind-icon">&quot;src/utils/<wbr>Test<wbr>Utils&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_src_utils_index_.html" class="tsd-kind-icon">&quot;src/utils/index&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_1_unit_manager_persistencemanagerfactory_spec_.html" class="tsd-kind-icon">&quot;test/1.<wbr>Unit/manager/<wbr>Persistence<wbr>Manager<wbr>Factory.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_1_unit_query_agensgraphspeccompiler_spec_.html" class="tsd-kind-icon">&quot;test/1.<wbr>Unit/query/<wbr>Agens<wbr>Graph<wbr>Spec<wbr>Compiler.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_1_unit_query_neo4jspeccompiler_spec_.html" class="tsd-kind-icon">&quot;test/1.<wbr>Unit/query/<wbr>Neo4j<wbr>Spec<wbr>Compiler.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_distributedtransactionrepository_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Distributed<wbr>Transaction<wbr>Repository&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_distributedtransactionrepository_spec_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Distributed<wbr>Transaction<wbr>Repository.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_healthrepository_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Health<wbr>Repository&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_healthrepository_spec_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Health<wbr>Repository.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_movierepository_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Movie<wbr>Repository&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_movierepository_spec_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Movie<wbr>Repository.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_routerepository_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Route<wbr>Repository&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_routerepository_spec_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Route<wbr>Repository.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_winerepository_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Wine<wbr>Repository&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_winerepository_spec_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/<wbr>Wine<wbr>Repository.spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_models_route_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/models/<wbr>Route&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_2_integration_models_user_.html" class="tsd-kind-icon">&quot;test/2.<wbr>Integration/models/<wbr>User&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_3_endtoend_appmodule_.html" class="tsd-kind-icon">&quot;test/3.<wbr>End<wbr>ToEnd/<wbr>App<wbr>Module&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_3_endtoend_routecontroller_.html" class="tsd-kind-icon">&quot;test/3.<wbr>End<wbr>ToEnd/<wbr>Route<wbr>Controller&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_3_endtoend_routecontroller_e2e_spec_.html" class="tsd-kind-icon">&quot;test/3.<wbr>End<wbr>ToEnd/<wbr>Route<wbr>Controller.e2e-<wbr>spec&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_3_endtoend_main_web_app_.html" class="tsd-kind-icon">&quot;test/3.<wbr>End<wbr>ToEnd/main-<wbr>web-<wbr>app&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_jest_global_setup_.html" class="tsd-kind-icon">&quot;test/jest-<wbr>global-<wbr>setup&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_jest_global_teardown_.html" class="tsd-kind-icon">&quot;test/jest-<wbr>global-<wbr>teardown&quot;</a></li>
+								<li class="tsd-kind-module"><a href="modules/_test_jest_setup_.html" class="tsd-kind-icon">&quot;test/jest-<wbr>setup&quot;</a></li>
+							</ul>
+						</section>
+					</div>
+				</section>
+			</section>
 		</div>
 		<div class="col-4 col-menu menu-sticky-wrap menu-highlight">
 			<nav class="tsd-navigation primary">
 				<ul>
-					<li class="globals  ">
+					<li class="globals current ">
 						<a href="globals.html"><em>Globals</em></a>
 					</li>
 					<li class=" tsd-kind-module">
