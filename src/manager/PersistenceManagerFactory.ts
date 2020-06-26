@@ -20,7 +20,14 @@ export class PersistenceManagerFactory {
 
     constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {}
 
-    buildOrResolve(database: string = 'default', type: PersistenceManagerType = 'DELEGATING'): PersistenceManager {
+    /**
+     * Returns a PersistenceManager for the database registered under the specified name.
+     * @param database Unique name for the registered database.
+     * @param type Either TRANSACTIONAL, NON_TRANSACTION or (default) delegating persistence manager. The latter
+     * will decide at runtime, depending whether a transaction is in flight, ie whether the current context of execution
+     * is @Transactional().
+     */
+    get(database: string = 'default', type: PersistenceManagerType = 'DELEGATING'): PersistenceManager {
         if (!this.managers.get(database)) {
             this.register(database);
         }

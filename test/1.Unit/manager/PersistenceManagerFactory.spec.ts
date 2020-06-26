@@ -11,11 +11,11 @@ describe('PersistenceManagerFactory', () => {
 
         const factory = new PersistenceManagerFactory(instance(registry), instance(transactionContextHolder));
 
-        const result = factory.buildOrResolve('default');
+        const result = factory.get('default');
         expect(result).toBeDefined();
         expect(factory.managers.size).toEqual(1);
 
-        factory.buildOrResolve('default');
+        factory.get('default');
         expect(factory.managers.size).toEqual(1);
     });
 });
