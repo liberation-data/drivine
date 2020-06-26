@@ -11,7 +11,7 @@ export class DatabaseRegistry {
         return DatabaseRegistry.getInstance()
             .builder()
             .withProperties(ConnectionPropertiesFromEnv(name))
-            .buildOrResolve(name);
+            .register(name);
     }
 
     static getInstance(): DatabaseRegistry {

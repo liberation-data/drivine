@@ -82,7 +82,12 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
-    buildOrResolve(name: string = 'default'): ConnectionProvider {
+    /**
+     * Registers a database details with the specified properties. If a database is already registered under the
+     * specified name, the connection properties will be updated.
+     * @param name A unique name for the database.
+     */
+    register(name: string = 'default'): ConnectionProvider {
         const retained = this.registry.connectionProvider(name);
         if (retained != undefined) {
             return retained;

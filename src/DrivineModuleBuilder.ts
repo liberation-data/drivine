@@ -56,7 +56,7 @@ export class DrivineModuleBuilder {
                 provide: `PersistenceManager:${database}`,
                 inject: [PersistenceManagerFactory],
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
-                    return persistenceManagerFactory.buildOrResolve(database);
+                    return persistenceManagerFactory.get(database);
                 }
             };
         });
