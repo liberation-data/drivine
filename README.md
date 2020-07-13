@@ -128,7 +128,7 @@ Finally, Drivine shows that it is not necessary to forego clean architecture in 
 
 Are you using Drivine and would like to support free & open-source software? Send us an email or PR to add your logo here. 
 
-<a href="http://www.slackmap.com"> ![Slackmap Logo](https://drivine.org/images/logos/slackmap-logo.png)</a> <a href="https://liberation-data.com"> ![Liberation Data Logo](https://drivine.org/images/logos/liberation-data.png)</a> <a href="http://www.mobbizsolutions.com"> ![Mobbiz Solutions Logo](https://drivine.org/images/logos/mobbiz-logo.png)</a> <a href="https://bitnine.net/agensgraph/"> ![Slackmap Logo](https://drivine.org/images/logos/agensgraph.png)</a> <a href="https://neo4j.com/blog/introducing-drivine-graph-database-client-for-node-js-and-typescript/"> ![Neo4j Logo](https://drivine.org/images/logos/neo4j_logo.png)</a>
+<a href="http://www.slackmap.com"> ![Slackmap Logo](https://drivine.org/images/logos/slackmap-logo.png)</a> <a href="https://liberation-data.com"> ![Liberation Data Logo](https://drivine.org/images/logos/liberation-data.png)</a> <a href="http://www.mobbizsolutions.com"> ![Mobbiz Solutions Logo](https://drivine.org/images/logos/mobbiz-logo.png)</a> <a href="https://bitnine.net/agensgraph/"> ![Slackmap Logo](https://drivine.org/images/logos/agensgraph.png)</a> <a href="https://neo4j.com/blog/introducing-drivine-graph-database-client-for-node-js-and-typescript/"> ![Neo4j Logo](https://drivine.org/images/logos/neo4j_logo2.png)</a>
 
 ----
 
