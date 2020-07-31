@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "2.0.9",
+    "version": "2.0.10",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later",
@@ -62,6 +62,7 @@
         "cli-color": "^2.0.0",
         "cls-hooked": "github:alexgarbarev/cls-hooked",
         "dotenv": "^8.2.0",
+        "dot-prop": "^5.2.0",
         "find-config": "^1.0.0",
         "kind-of": ">=6.0.3",
         "lodash": "^4.17.15",
