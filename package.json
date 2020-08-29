@@ -62,7 +62,7 @@
         "cli-color": "^2.0.0",
         "cls-hooked": "github:alexgarbarev/cls-hooked",
         "dotenv": "^8.2.0",
-        "dot-prop": "^5.2.0",
+        "dot-prop": "^4.2.1",
         "find-config": "^1.0.0",
         "kind-of": ">=6.0.3",
         "lodash": "^4.17.15",
