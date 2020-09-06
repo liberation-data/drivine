@@ -21,8 +21,7 @@ export class Neo4jCursor<T> extends AbstractCursor<T> {
                 .skip(count * this.page)
                 .limit(count)
                 .bind(this.spec.parameters)
-                .transform(this.spec.transformType!)
-                .map(this.spec.mapper!)
+                .addPostProcessors(...this.spec.postProcessors)
         );
         this.page++;
         return results;
