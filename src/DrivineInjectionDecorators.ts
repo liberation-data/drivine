@@ -9,8 +9,8 @@ export const InjectPersistenceManager = (database: string = 'default'): any => {
 };
 
 export const fileContentInjections: string[] = [];
-export const InjectFileContents = (dirNameOrPath: string, directory?: string): any => {
-    const filename = fileNameFor(dirNameOrPath, undefined, directory);
+export const InjectFileContents = (dirNameOrPath: string, resource?: string): any => {
+    const filename = fileNameFor(dirNameOrPath, undefined, resource);
     if (!fileContentInjections.includes(filename)) {
         fileContentInjections.push(filename);
     }
@@ -18,8 +18,8 @@ export const InjectFileContents = (dirNameOrPath: string, directory?: string): a
 };
 
 export const cypherInjections: string[] = [];
-export const InjectCypher = (dirNameOrPath: string, directory?: string): any => {
-    const filename = fileNameFor(dirNameOrPath, 'cypher', directory);
+export const InjectCypher = (dirNameOrPath: string, resource?: string): any => {
+    const filename = fileNameFor(dirNameOrPath, 'cypher', resource);
     if (!cypherInjections.includes(filename)) {
         cypherInjections.push(filename);
     }
@@ -27,8 +27,8 @@ export const InjectCypher = (dirNameOrPath: string, directory?: string): any => 
 };
 
 export const sqlInjections: string[] = [];
-export const InjectSql = (dirNameOrPath: string, directory?: string): any => {
-    const filename = fileNameFor(dirNameOrPath, 'sql', directory);
+export const InjectSql = (dirNameOrPath: string, resource?: string): any => {
+    const filename = fileNameFor(dirNameOrPath, 'sql', resource);
     if (!sqlInjections.includes(filename)) {
         sqlInjections.push(filename);
     }

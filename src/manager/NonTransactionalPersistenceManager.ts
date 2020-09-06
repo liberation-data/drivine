@@ -6,12 +6,15 @@ import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineLogger } from '@/logger';
+import { DatabaseType } from '@/connection';
 
 export class NonTransactionalPersistenceManager implements PersistenceManager {
     private logger = new DrivineLogger(NonTransactionalPersistenceManager.name);
     private finderOperations: FinderOperations;
 
-    constructor(readonly connectionProvider: ConnectionProvider) {
+    constructor(readonly connectionProvider: ConnectionProvider,
+                readonly database: string,
+                readonly type: DatabaseType) {
         this.finderOperations = new FinderOperations(this);
     }
 

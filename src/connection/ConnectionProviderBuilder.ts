@@ -119,6 +119,7 @@ export class ConnectionProviderBuilder {
 
         return new AgensGraphConnectionProvider(
             name,
+            this._type,
             this._host,
             this._userName,
             this._password,
@@ -142,6 +143,12 @@ export class ConnectionProviderBuilder {
             this.logger.warn(`${this._port} is a non-standard port for Neo4j`);
         }
 
-        return new Neo4jConnectionProvider(name, this._host, this._port, this._userName!, this._password, this._name);
+        return new Neo4jConnectionProvider(name,
+            this._type,
+            this._host,
+            this._port,
+            this._userName!,
+            this._password,
+            this._name);
     }
 }
