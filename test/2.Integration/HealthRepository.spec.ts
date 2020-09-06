@@ -67,4 +67,10 @@ describe('HealthRepository', () => {
         const user3 = await repo.findById(data.id);
         expect(user3).toMatchObject(data2);
     });
+
+    it('should filter results', async () => {
+        const results = await repo.filterTest();
+        expect(results).toEqual([2, 4, 6, 8]);
+    })
+
 });

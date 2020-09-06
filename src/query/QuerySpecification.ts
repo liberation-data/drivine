@@ -1,20 +1,26 @@
-import { DatabaseType } from '@/connection/DatabaseType';
-import { DrivineError } from '@/DrivineError';
 import { Statement } from '@/query/Statement';
 import * as assert from 'assert';
+import { ResultPostProcessor } from '@/mapper/ResultPostProcessor';
+import { MapPostProcessor } from '@/mapper/MapPostProcessor';
+import { TransformPostProcessor } from '@/mapper/TransformPostProcessor';
+import { FilterPostProcessor } from '@/mapper/FilterPostProcessor';
 
 export type ClassType<T> = new (...args: any[]) => T;
 
 export class QuerySpecification<T> {
     statement: Statement;
-    parameters: any[] = [];
-    mapper?: (result: any) => T;
-    transformType?: ClassType<T>;
+    parameters: any[];
+    postProcessors: ResultPostProcessor[];
     _skip: number;
     _limit: number;
 
+    static withStatement<T>(statement?: string | Statement): QuerySpecification<T> {
+        return new QuerySpecification<T>(statement);
+    }
+
     constructor(statement?: string | Statement) {
         this.parameters = [];
+        this.postProcessors = [];
         if (statement) {
             this.withStatement(statement);
         }
@@ -44,13 +50,25 @@ export class QuerySpecification<T> {
         return this;
     }
 
+    addPostProcessors(...postProcessors: ResultPostProcessor[]): this {
+        postProcessors.forEach(processor => {
+            this.postProcessors.push(processor);
+        });
+        return this;
+    }
+
     map(mapper: (result: any) => T): this {
-        this.mapper = mapper;
+        this.postProcessors.push(new MapPostProcessor(mapper));
         return this;
     }
 
     transform(type: ClassType<T>): this {
-        this.transformType = type;
+        this.postProcessors.push(new TransformPostProcessor(type));
+        return this;
+    }
+
+    filter(filter: (results: any) => boolean): this {
+        this.postProcessors.push(new FilterPostProcessor(filter));
         return this;
     }
 

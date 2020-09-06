@@ -9,7 +9,8 @@ import { User } from './models/User';
 
 @Injectable()
 export class HealthRepository {
-    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {}
+    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {
+    }
 
     async countAllMetros(): Promise<number> {
         return this.persistenceManager.getOne<any>(new QuerySpecification(`match (n:Metro) return count(n) as count`));
@@ -41,5 +42,11 @@ export class HealthRepository {
         return this.persistenceManager.getOne(
             new QuerySpecification<User>().withStatement(statement).bind([user.id, user])
         );
+    }
+
+    async filterTest(): Promise<number[]> {
+        const spec = new QuerySpecification<number>(`unwind [1, 2, 3, 4, 5, 6, 7, 8, 9] as num return num`)
+            .filter((it: number) => it % 2 == 0);
+        return this.persistenceManager.query(spec);
     }
 }

@@ -1,16 +1,14 @@
 import { QuerySpecification } from '@/query';
-import { plainToClass } from 'class-transformer';
+import { ResultPostProcessor } from '@/mapper/ResultPostProcessor';
 
 export abstract class ResultMapper {
 
     mapQueryResults<T>(records: any[], spec: QuerySpecification<T>): T[] {
+        // TODO: The default mapper(s) can be a result post processor too - then users can specify own, if desired.
         let results = this.mapToNative(records);
-        if (spec.mapper) {
-            results = results.map((it) => spec.mapper!(it));
-        }
-        if (spec.transformType) {
-            results = plainToClass(spec.transformType, results);
-        }
+        spec.postProcessors.forEach((processor: ResultPostProcessor) => {
+            results = processor.apply(results);
+        });
         return results;
     }
 
