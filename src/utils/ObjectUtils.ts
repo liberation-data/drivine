@@ -14,8 +14,9 @@ export class ObjectUtils {
         const props = {};
         if (object) {
             const source = options.classToPlain ? classToPlain(object) : object
-            Object.keys(source).forEach((key: string) => {
-                const candidate = object[key];
+            const strings = Object.keys(source);
+            strings.forEach((key: string) => {
+                const candidate = source[key];
                 // Array of primitives
                 if (candidate != undefined && candidate.constructor === Array
                     && candidate.filter((it: any) => typeof (it) === 'object').length === 0) {
