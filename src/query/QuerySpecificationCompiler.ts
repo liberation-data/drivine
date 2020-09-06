@@ -10,7 +10,7 @@ export abstract class QuerySpecificationCompiler {
     compile(): CompiledQuery {
 
         return <CompiledQuery> {
-            statement: this.formattedStatement(),
+            statement: this.formattedStatement().trim(),
             parameters: this.formattedParams()
         }
     }
