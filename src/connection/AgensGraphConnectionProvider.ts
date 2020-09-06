@@ -1,3 +1,5 @@
+import { DatabaseType } from '@/connection/DatabaseType';
+
 const AgensGraph = require('@liberation-data/agensgraph/lib');
 import { PoolClient } from 'pg';
 import { Connection } from '@/connection/Connection';
@@ -10,6 +12,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
 
     constructor(
         readonly name: string,
+        readonly type: DatabaseType,
         readonly host: string,
         readonly user: string | undefined,
         readonly password: string | undefined,

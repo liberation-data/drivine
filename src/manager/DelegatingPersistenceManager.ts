@@ -5,6 +5,7 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineLogger } from '@/logger';
+import { DatabaseType } from '@/connection';
 
 /**
  * Delegates to NonTransactional or TransactionalPersistenceManger, depending on whether there is a transaction in
@@ -15,6 +16,7 @@ export class DelegatingPersistenceManager implements PersistenceManager {
 
     constructor(
         readonly database: string,
+        readonly type: DatabaseType,
         readonly contextHolder: TransactionContextHolder,
         readonly factory: PersistenceManagerFactory
     ) {}

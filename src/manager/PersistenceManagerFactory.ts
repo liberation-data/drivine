@@ -50,9 +50,9 @@ export class PersistenceManagerFactory {
         }
 
         this.managers.set(name, <PersistenceManagerEntry>{
-            transactional: new TransactionalPersistenceManager(this.contextHolder, name),
-            nonTransactional: new NonTransactionalPersistenceManager(connectionProvider),
-            delegating: new DelegatingPersistenceManager(name, this.contextHolder, this)
+            transactional: new TransactionalPersistenceManager(this.contextHolder, name, connectionProvider.type),
+            nonTransactional: new NonTransactionalPersistenceManager(connectionProvider, name, connectionProvider.type),
+            delegating: new DelegatingPersistenceManager(name, connectionProvider.type, this.contextHolder, this)
         });
     }
 }

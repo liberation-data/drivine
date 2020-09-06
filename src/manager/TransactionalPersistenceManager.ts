@@ -6,11 +6,14 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
+import { DatabaseType } from '@/connection';
 
 export class TransactionalPersistenceManager implements PersistenceManager {
     private finderOperations: FinderOperations;
 
-    constructor(readonly contextHolder: TransactionContextHolder, readonly database: string) {
+    constructor(readonly contextHolder: TransactionContextHolder,
+                readonly database: string,
+                readonly type: DatabaseType) {
         this.finderOperations = new FinderOperations(this);
     }
 
