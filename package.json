@@ -22,7 +22,7 @@
         "client"
     ],
     "files": [
-        "dist/**/*"
+        "**/*"
     ],
     "main": "index.js",
     "types": "index.d.ts",
@@ -47,7 +47,7 @@
         "test:unit": "jest --coverage --testPathPattern '1[.]Unit[/]'",
         "test:integration": "jest --coverage --testPathPattern '2[.]Integration[/]'",
         "test:e2e": "jest --coverage --testPathPattern '3[.]EndToEnd[/]'",
-        "prepare": "npm run build"
+        "prepare": "npm run build && mkdir original && find . -maxdepth 1 | grep -v -e dist -e original -e node_modules -e '^.$' | xargs -i mv {} ./original && mv dist/* ."
     },
     "peerDependencies": {
         "@liberation-data/agensgraph": "^0.1.0-rc",
