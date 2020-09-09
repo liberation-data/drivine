@@ -23,6 +23,10 @@ export class LocalStorageClsHooked implements LocalStorage {
         return this.namespace.runPromise(fn);
     }
 
+    isInsideRun(): boolean {
+        return !!this.namespace.active;
+    }
+
     get<T>(key: string): T {
         return this.namespace.get(key);
     }

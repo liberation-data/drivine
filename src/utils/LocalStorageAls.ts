@@ -29,11 +29,18 @@ export class LocalStorageAls implements LocalStorage {
         return result as any;
     }
 
+    isInsideRun(): boolean {
+        return this.asyncLocalStorage.getStore() !== undefined;
+    }
+
     get<T>(key: string): T {
         return this.asyncLocalStorage.getStore()?.get(key)
     }
 
     set<T>(key: string, object: T): void {
+        if (!this.isInsideRun()) {
+            throw new Error(`Trying to write to LocalStorage outside "run" method. Use LocalStorage inside "run" methods, or check and ignore this write using "isInsideRun()".`)
+        }
         const store = this.asyncLocalStorage.getStore();
         // eslint-disable-next-line no-unused-expressions
         store?.set(key, object);
