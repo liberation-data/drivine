@@ -22,7 +22,7 @@
         "client"
     ],
     "files": [
-        "**/*"
+        "dist/**/*"
     ],
     "main": "index.js",
     "types": "index.d.ts",
