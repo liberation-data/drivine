@@ -1,14 +1,15 @@
 import { LocalStorage } from "./LocalStorage";
 import { Namespace } from "cls-hooked";
 import * as cls  from 'cls-hooked';
+import { v4 } from 'uuid';
 
 export class LocalStorageClsHooked implements LocalStorage {
 
     readonly namespace: Namespace;
 
     constructor() {
-        const namespaceName = '__transaction_context_holder__';
-        this.namespace = cls.getNamespace(namespaceName) || cls.createNamespace(namespaceName);
+        const namespaceName = `__local_storage_${v4()}__`;
+        this.namespace = cls.createNamespace(namespaceName);
     }
 
     run(fn: (...args: any[]) => void): void {
