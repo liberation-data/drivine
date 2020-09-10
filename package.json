@@ -46,8 +46,7 @@
         "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register/transpile-only node_modules/.bin/jest --runInBand --detectOpenHandles",
         "test:unit": "jest --coverage --testPathPattern '1[.]Unit[/]'",
         "test:integration": "jest --coverage --testPathPattern '2[.]Integration[/]'",
-        "test:e2e": "jest --coverage --testPathPattern '3[.]EndToEnd[/]'",
-        "prepare": "npm run build"
+        "test:e2e": "jest --coverage --testPathPattern '3[.]EndToEnd[/]'"
     },
     "peerDependencies": {
         "@liberation-data/agensgraph": "^0.1.0-rc",
