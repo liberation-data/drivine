@@ -2,9 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Transaction } from '@/transaction/Transaction';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { Namespace } from 'cls-hooked';
 import { DrivineContext } from '@/context/DrivineContext';
-import * as cls from 'cls-hooked';
+import { MakeLocalStorage } from '@/utils/LocalStorageFactory';
 
 /**
  * Wrap local storage to make it injectable.
@@ -13,7 +12,7 @@ import * as cls from 'cls-hooked';
 export class TransactionContextHolder {
     static instance: TransactionContextHolder;
 
-    readonly namespace: Namespace;
+    readonly localStorage = MakeLocalStorage()
 
     static getInstance(): TransactionContextHolder {
         if (!TransactionContextHolder.instance) {
@@ -27,63 +26,43 @@ export class TransactionContextHolder {
         delete TransactionContextHolder.instance;
     }
 
-    constructor() {
-        const namespaceName = '__transaction_context_holder__';
-        this.namespace = cls.getNamespace(namespaceName) || cls.createNamespace(namespaceName);
-    }
-
     run(fn: (...args: any[]) => void): void {
-        return this.namespace.run(fn);
+        return this.localStorage.run(fn);
     }
 
     runAndReturn<T>(fn: (...args: any[]) => T): T {
-        return this.namespace.runAndReturn(fn);
+        return this.localStorage.runAndReturn(fn);
     }
 
     async runPromise<T>(fn: (...args: any[]) => Promise<T>): Promise<T> {
-        return this.namespace.runPromise(fn);
+        return this.localStorage.runPromise(fn);
     }
 
     get drivineContext(): DrivineContext | undefined {
-        return this.get<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT);
+        return this.localStorage.get<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT);
     }
 
     set drivineContext(context: DrivineContext | undefined) {
-        this.set<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT, context);
+        this.localStorage.set<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT, context);
     }
 
     get currentTransaction(): Transaction | undefined {
-        return this.get<Transaction>(TransactionContextKeys.TRANSACTION);
+        return this.localStorage.get<Transaction>(TransactionContextKeys.TRANSACTION);
     }
 
     set currentTransaction(transaction: Transaction | undefined) {
-        this.set<Transaction | undefined>(TransactionContextKeys.TRANSACTION, transaction);
+        this.localStorage.set<Transaction | undefined>(TransactionContextKeys.TRANSACTION, transaction);
     }
 
     get databaseRegistry(): DatabaseRegistry {
-        return this.get<DatabaseRegistry>(TransactionContextKeys.DATABASE_REGISTRY);
+        return this.localStorage.get<DatabaseRegistry>(TransactionContextKeys.DATABASE_REGISTRY);
     }
 
     set databaseRegistry(registry: DatabaseRegistry) {
-        this.set<DatabaseRegistry>(TransactionContextKeys.DATABASE_REGISTRY, registry);
-    }
-
-    private get<T>(key: string): T {
-        return this.namespace.get(key);
-    }
-
-    private set<T>(key: string, object: T): void {
-        this.namespace.set(key, object);
+        this.localStorage.set<DatabaseRegistry>(TransactionContextKeys.DATABASE_REGISTRY, registry);
     }
 
     private tearDown(): void {
-        /**
-         * Zeroing _contexts as heaviest part of namespace in case we
-         * have leak and Namespace or ContextHolder is not released, even we manually called "tearDown"
-         */
-        this.namespace['_contexts'] = null;
-
-        const namespaceName = this.namespace['name'];
-        cls.destroyNamespace(namespaceName);
+        this.localStorage.tearDown();
     }
 }
