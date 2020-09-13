@@ -14,7 +14,7 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
     private readonly indexParams: any[];
 
     constructor(spec: QuerySpecification<any>) {
-        super(spec.finalizedCopy('CYPHER'));
+        super(spec);
         assert(['CYPHER', 'SQL'].includes(this.spec.statement.language),
             `${this.spec.statement.language} is not supported on AgensGraph.`);
 

@@ -20,7 +20,8 @@ export class Neo4jConnection implements Connection {
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
-        const compiledSpec = new Neo4jSpecCompiler(spec).compile();
+        const finalizedSpec = spec.finalizedCopy('CYPHER');
+        const compiledSpec = new Neo4jSpecCompiler(finalizedSpec).compile();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
         let result;
@@ -30,11 +31,11 @@ export class Neo4jConnection implements Connection {
             result = await this.transaction.run(compiledSpec.statement, compiledSpec.parameters);
         }
         logger.log(spec, hrStart);
-        return this.resultMapper.mapQueryResults<T>(result.records, spec);
+        return this.resultMapper.mapQueryResults<T>(result.records, finalizedSpec);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<Neo4jCursor<T>> {
-        return Promise.resolve(new Neo4jCursor<T>(this.sessionId(), spec, this));
+        return Promise.resolve(new Neo4jCursor<T>(this.sessionId(), spec.finalizedCopy('CYPHER'), this));
     }
 
     async startTransaction(): Promise<void> {

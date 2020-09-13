@@ -1,14 +1,13 @@
 import { DatabaseType } from '@/connection/DatabaseType';
-
-const AgensGraph = require('@liberation-data/agensgraph/lib');
 import { PoolClient } from 'pg';
 import { Connection } from '@/connection/Connection';
 import { AgensGraphConnection } from '@/connection/AgensGraphConnection';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { AgensGraphResultMapper } from '@/mapper/AgensGraphResultMapper';
-import { ResultMapper } from '@/mapper';
-import { PostgresResultMapper } from '@/mapper/PostgresResultMapper';
 import { DrivineError } from '@/DrivineError';
+import { QueryLanguage } from '@/query';
+import { AgensResultMapper } from '@/mapper/AgensResultMapper';
+
+const AgensGraph = require('@liberation-data/agensgraph/lib');
 
 export class AgensGraphConnectionProvider implements ConnectionProvider {
     private readonly pool: any;
@@ -44,7 +43,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         if (this.defaultGraphPath && client['graphPath'] !== this.defaultGraphPath) {
             await this.setGraphPath(client, this.defaultGraphPath);
         }
-        return new AgensGraphConnection(client, this.resultMapperFor(this.type));
+        return new AgensGraphConnection(client, new AgensResultMapper(), this.defaultLanguageFor(this.type));
     }
 
     async end(): Promise<void> {
@@ -65,12 +64,12 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         client['graphPath'] = path;
     }
 
-    private resultMapperFor(database: DatabaseType): ResultMapper {
+    private defaultLanguageFor(database: DatabaseType): QueryLanguage {
         switch (database) {
             case DatabaseType.AGENS_GRAPH:
-                return new AgensGraphResultMapper();
+                return 'CYPHER';
             case DatabaseType.POSTGRES:
-                return new PostgresResultMapper();
+                return 'SQL';
             default:
                 throw new DrivineError(`${database} is not supported by AgensGraphConnectionProvider`);
         }

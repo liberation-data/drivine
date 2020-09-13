@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "2.1.1",
+    "version": "2.1.2",
     "description": "A graph database client for TypeScript and Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later or Apache-2.0",

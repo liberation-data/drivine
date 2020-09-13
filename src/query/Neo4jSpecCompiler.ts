@@ -5,7 +5,7 @@ const assert = require('assert')
 export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
 
     constructor(spec: QuerySpecification<any>) {
-        super(spec.finalizedCopy('CYPHER'));
+        super(spec);
         assert(this.spec.statement.language === 'CYPHER', `${this.spec.statement.language} is not supported on Neo4j.`);
     }
 
