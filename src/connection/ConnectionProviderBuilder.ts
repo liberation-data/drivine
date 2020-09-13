@@ -95,8 +95,8 @@ export class ConnectionProviderBuilder {
 
         assert(this._host, `host config is required`);
 
-        if (this._type === DatabaseType.AGENS_GRAPH) {
-            this.registry.register(this.buildAgensGraphProvider(name));
+        if (this._type === DatabaseType.AGENS_GRAPH || this._type == DatabaseType.POSTGRES) {
+            this.registry.register(this.buildAgensGraphAndPostgresProvider(name));
         } else if (this._type === DatabaseType.NEO4J) {
             this.registry.register(this.buildNeo4jProvider(name));
         } else {
@@ -105,12 +105,12 @@ export class ConnectionProviderBuilder {
         return this.registry.connectionProvider(name)!;
     }
 
-    private buildAgensGraphProvider(name: string): ConnectionProvider {
+    private buildAgensGraphAndPostgresProvider(name: string): ConnectionProvider {
         if (!this._port) {
             this._port = 5432;
         }
         if (this._port !== 5432) {
-            this.logger.warn(`${this._port} is a non-standard port for AgensGraph`);
+            this.logger.warn(`${this._port} is a non-standard port for AgensGraph/Postgres.`);
         }
         if (!this._idleTimeout) {
             this._idleTimeout = 500;

@@ -1,15 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import {
-    Transactional,
-    PersistenceManager,
     InjectPersistenceManager,
-    QuerySpecification
+    PersistenceManager,
+    QuerySpecification,
+    Transactional
 } from '@liberation-data/drivine';
 import { User } from './models/User';
 
 @Injectable()
 export class HealthRepository {
-    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager) {
+    constructor(@InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
+                @InjectPersistenceManager('POSTGRES') readonly pgManager: PersistenceManager) {
     }
 
     async countAllMetros(): Promise<number> {
@@ -45,8 +46,13 @@ export class HealthRepository {
     }
 
     async filterTest(): Promise<number[]> {
-        const spec = new QuerySpecification<number>(`unwind [1, 2, 3, 4, 5, 6, 7, 8, 9] as num return num`)
-            .filter((it: number) => it % 2 == 0);
-        return this.persistenceManager.query(spec);
+        return this.persistenceManager.query(
+            new QuerySpecification<number>(`unwind [1, 2, 3, 4, 5, 6, 7, 8, 9] as num return num`)
+            .filter((it: number) => it % 2 == 0));
+    }
+
+    async pgTables(): Promise<any[]> {
+        return this.pgManager.query(new QuerySpecification(`select * from pg_catalog.pg_tables`));
+
     }
 }

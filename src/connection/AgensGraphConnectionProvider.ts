@@ -6,6 +6,9 @@ import { Connection } from '@/connection/Connection';
 import { AgensGraphConnection } from '@/connection/AgensGraphConnection';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { AgensGraphResultMapper } from '@/mapper/AgensGraphResultMapper';
+import { ResultMapper } from '@/mapper';
+import { PostgresResultMapper } from '@/mapper/PostgresResultMapper';
+import { DrivineError } from '@/DrivineError';
 
 export class AgensGraphConnectionProvider implements ConnectionProvider {
     private readonly pool: any;
@@ -41,7 +44,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         if (this.defaultGraphPath && client['graphPath'] !== this.defaultGraphPath) {
             await this.setGraphPath(client, this.defaultGraphPath);
         }
-        return new AgensGraphConnection(client, new AgensGraphResultMapper());
+        return new AgensGraphConnection(client, this.resultMapperFor(this.type));
     }
 
     async end(): Promise<void> {
@@ -60,5 +63,16 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
     private async setGraphPath(client: PoolClient, path: string): Promise<void> {
         await client.query(`set graph_path = ${path}`);
         client['graphPath'] = path;
+    }
+
+    private resultMapperFor(database: DatabaseType): ResultMapper {
+        switch (database) {
+            case DatabaseType.AGENS_GRAPH:
+                return new AgensGraphResultMapper();
+            case DatabaseType.POSTGRES:
+                return new PostgresResultMapper();
+            default:
+                throw new DrivineError(`${database} is not supported by AgensGraphConnectionProvider`);
+        }
     }
 }
