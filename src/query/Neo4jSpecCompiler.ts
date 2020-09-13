@@ -10,7 +10,6 @@ export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
     }
 
     formattedStatement(): string {
-        // TODO: Map named parameters to index parameters.
         return this.appliedStatement();
     }
 

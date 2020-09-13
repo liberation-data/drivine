@@ -3,7 +3,6 @@ import { DrivineError } from '@/DrivineError';
 import { QuerySpecification } from '@liberation-data/drivine';
 const assert = require('assert');
 
-// TODO: Map named parameters to index parameters.
 export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
 
     private readonly paramKeys: string[] = [];
