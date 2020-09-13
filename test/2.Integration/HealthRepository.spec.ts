@@ -4,8 +4,7 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine }
 
 // NOTICE
 // before running the tests, add new records from test/moon-town.cypher
-// or manually run: MERGE (u:Employee {id: 1, name: 'Piotr'})
-// TODO later we should add it inside of tests in beforeAll hook
+// and manually run: MERGE (u:Employee {id: 1, name: 'Piotr'})
 
 RunWithDrivine({rollback: true})
 describe('HealthRepository', () => {
