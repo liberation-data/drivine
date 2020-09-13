@@ -1,6 +1,7 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { DrivineError } from '@/DrivineError';
 import { QuerySpecification } from '@liberation-data/drivine';
+
 const assert = require('assert');
 
 export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
@@ -13,7 +14,7 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
     private readonly indexParams: any[];
 
     constructor(spec: QuerySpecification<any>) {
-        super(spec);
+        super(spec.finalizedCopy('CYPHER'));
         assert(['CYPHER', 'SQL'].includes(this.spec.statement.language),
             `${this.spec.statement.language} is not supported on AgensGraph.`);
 

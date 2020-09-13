@@ -4,7 +4,6 @@ import { CompiledQuery } from '@/query/CompiledQuery';
 export abstract class QuerySpecificationCompiler {
 
     protected constructor(readonly spec: QuerySpecification<any>) {
-        this.spec.finalize();
     }
 
     compile(): CompiledQuery {
