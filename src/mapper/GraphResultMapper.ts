@@ -22,8 +22,9 @@ export abstract class GraphResultMapper implements ResultMapper {
             if (keys.length === 1) {
                 item = this.toNative(this.itemAtIndex(record,0));
             } else {
-                item = new Array(records.keys.length);
-                for (let j = 0; j < record.keys.length; j++) {
+                const length = this.keys(record).length;
+                item = new Array(length);
+                for (let j = 0; j < length; j++) {
                     item[j] = this.toNative(this.itemAtIndex(record, j));
                 }
             }
