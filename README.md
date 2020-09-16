@@ -103,9 +103,7 @@ This library is based on an architecture that was put in place for <a href="http
 
 The ideas were ruminated upon while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a> - a growing social network for musicans that needs to serve hundreds of transactions per second. Clean architecture and performance are often competing concerns, so how would one go about getting the best of both worlds?
 
-Experience as a past committer to the [Spring Framework](https://spring.io/) including on [Spring Data Neo4j](https://spring.io/projects/spring-data-neo4j) helped, as well as discussion and debate with colleagues, especially among those with experience applying OGM/ORM tools. Early experiements with such tools resulted in unsatisfactory performance. Subsequent endeavors resulted in satisfactory performance, but difficult to maintain code. 
-
-Finally, Drivine shows that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
+Drivine shows that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
 
 
 ## Feedback 
