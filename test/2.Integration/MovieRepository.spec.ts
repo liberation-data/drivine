@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
 import { MovieRepository } from './MovieRepository';
 
-RunWithDrivine({ rollback: false });
+RunWithDrivine();
 describe('MovieRepository', () => {
     let repo: MovieRepository;
     let app: TestingModule;
@@ -11,7 +11,10 @@ describe('MovieRepository', () => {
         app = await Test.createTestingModule({
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
-                    connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
+                    connectionProviders: [
+                        DatabaseRegistry.buildOrResolveFromEnv(),
+                        DatabaseRegistry.buildOrResolveFromEnv('REDIS_GRAPH')
+                    ]
                 })
             ],
             providers: [MovieRepository],
@@ -32,4 +35,10 @@ describe('MovieRepository', () => {
         const results = await repo.listMoviesForActor('Tom Hanks');
         console.log(JSON.stringify(results));
     });
+
+    it ('should list movies for an actor, with client-side mapping', async () => {
+        const results = await repo.listMoviesForActorRaw('Tom Hanks');
+        console.log(JSON.stringify(results));
+    });
+
 });

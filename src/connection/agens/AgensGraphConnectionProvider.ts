@@ -1,19 +1,22 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { PoolClient } from 'pg';
 import { Connection } from '@/connection/Connection';
-import { AgensGraphConnection } from '@/connection/AgensGraphConnection';
+import { AgensGraphConnection } from '@/connection/agens/AgensGraphConnection';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DrivineError } from '@/DrivineError';
 import { QueryLanguage } from '@/query';
 import { AgensResultMapper } from '@/mapper/AgensResultMapper';
+import { ConnectionName } from '@/connection/ConnectionName';
+import { ResultMapper } from '@/mapper';
 
 const AgensGraph = require('@liberation-data/agensgraph/lib');
 
 export class AgensGraphConnectionProvider implements ConnectionProvider {
     private readonly pool: any;
+    private readonly mapper: ResultMapper = new AgensResultMapper();
 
     constructor(
-        readonly name: string,
+        readonly name: ConnectionName,
         readonly type: DatabaseType,
         readonly host: string,
         readonly user: string | undefined,
@@ -43,7 +46,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         if (this.defaultGraphPath && client['graphPath'] !== this.defaultGraphPath) {
             await this.setGraphPath(client, this.defaultGraphPath);
         }
-        return new AgensGraphConnection(client, new AgensResultMapper(), this.defaultLanguageFor(this.type));
+        return new AgensGraphConnection(client, this.mapper, this.defaultLanguageFor(this.type));
     }
 
     async end(): Promise<void> {

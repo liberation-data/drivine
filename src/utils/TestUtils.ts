@@ -4,8 +4,9 @@ import { TransactionOptions } from '@/transaction/Transactional';
 export const RunWithDrivine = (options?: TransactionOptions): void => {
     if (!global['$$runWithDrivine$$']) {
         const drivineContext = inDrivineContext();
-        drivineContext.withTransaction(options);
-
+        if (options) {
+            drivineContext.withTransaction(options);
+        }
         hookLifecycleMethods(drivineContext);
         hookTestMethods(drivineContext);
 

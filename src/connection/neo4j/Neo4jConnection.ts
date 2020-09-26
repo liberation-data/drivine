@@ -8,6 +8,7 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { Neo4jCursor } from '@/cursor/Neo4jCursor';
 import { DrivineLogger } from '@/logger';
 import { Neo4jSpecCompiler } from '@/query/Neo4jSpecCompiler';
+import { Neo4jResultSet } from '@/resultset/Neo4jResultSet';
 
 export class Neo4jConnection implements Connection {
     private logger = new DrivineLogger(Neo4jConnection.name);
@@ -31,7 +32,7 @@ export class Neo4jConnection implements Connection {
             result = await this.transaction.run(compiledSpec.statement, compiledSpec.parameters);
         }
         logger.log(spec, hrStart);
-        return this.resultMapper.mapQueryResults<T>(result.records, finalizedSpec);
+        return this.resultMapper.mapQueryResults<T>(new Neo4jResultSet(result.records), finalizedSpec);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<Neo4jCursor<T>> {

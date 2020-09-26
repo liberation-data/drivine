@@ -1,8 +1,6 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { DrivineError } from '@/DrivineError';
-import { QuerySpecification } from '@liberation-data/drivine';
-
-const assert = require('assert');
+import { QueryLanguage, QuerySpecification } from '@liberation-data/drivine';
 
 export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
 
@@ -15,15 +13,16 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
 
     constructor(spec: QuerySpecification<any>) {
         super(spec);
-        assert(['CYPHER', 'SQL'].includes(this.spec.statement.language),
-            `${this.spec.statement.language} is not supported on AgensGraph.`);
-
         if (!Array.isArray(this.spec.parameters)) {
             this.paramKeys = Object.keys(this.spec.parameters).sort();
             this.indexParams = this.paramKeys.map((it) => this.spec.parameters[it]);
         } else {
             this.indexParams = this.spec.parameters;
         }
+    }
+
+    supportedQueryLanguages(): QueryLanguage[] {
+        return ['CYPHER', 'SQL'];
     }
 
     formattedStatement(): string {

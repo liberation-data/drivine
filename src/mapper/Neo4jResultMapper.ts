@@ -5,14 +5,6 @@ const neo4j = require('neo4j-driver');
 
 export class Neo4jResultMapper extends GraphResultMapper {
 
-    keys(record: any): string[] {
-        return record.keys;
-    }
-
-    itemAtIndex(record: any, index: number): any {
-        return record.get(index);
-    }
-
     toNative(val: any): any {
         if (val == undefined) {
             return val;

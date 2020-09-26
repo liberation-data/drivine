@@ -8,6 +8,7 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { AgensGraphSpecCompiler } from '@/query/AgensGraphSpecCompiler';
 import { QueryLanguage } from '@/query';
+import { AgensGraphResultSet } from '@/resultset/AgensGraphResultSet';
 
 const PgCursor = require('pg-cursor');
 
@@ -29,7 +30,7 @@ export class AgensGraphConnection implements Connection {
         const logger = new StatementLogger(this.sessionId());
         const result = await this.client.query(compiledSpec.statement, compiledSpec.parameters);
         logger.log(spec, hrStart);
-        return this.resultMapper.mapQueryResults<T>(result.rows, finalizedSpec);
+        return this.resultMapper.mapQueryResults<T>(new AgensGraphResultSet(result.rows), finalizedSpec);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<AgensGraphCursor<T>> {

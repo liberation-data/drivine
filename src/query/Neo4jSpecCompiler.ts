@@ -1,12 +1,10 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
-import { QuerySpecification, toPlatformDefault } from '@liberation-data/drivine';
-const assert = require('assert')
+import { QueryLanguage } from '@liberation-data/drivine';
 
 export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
 
-    constructor(spec: QuerySpecification<any>) {
-        super(spec);
-        assert(this.spec.statement.language === 'CYPHER', `${this.spec.statement.language} is not supported on Neo4j.`);
+    supportedQueryLanguages(): QueryLanguage[] {
+        return ['CYPHER'];
     }
 
     formattedStatement(): string {

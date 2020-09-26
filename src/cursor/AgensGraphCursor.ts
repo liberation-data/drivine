@@ -1,6 +1,7 @@
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { AbstractCursor } from '@/cursor/AbstractCursor';
+import { AgensGraphResultSet } from '@/resultset/AgensGraphResultSet';
 
 export class AgensGraphCursor<T> extends AbstractCursor<T> implements AsyncIterable<T> {
     constructor(
@@ -21,7 +22,7 @@ export class AgensGraphCursor<T> extends AbstractCursor<T> implements AsyncItera
                 if (err) {
                     reject(err);
                 } else {
-                    resolve(this.resultMapper.mapQueryResults(results, this.spec));
+                    resolve(this.resultMapper.mapQueryResults(new AgensGraphResultSet(results), this.spec));
                 }
             });
         });

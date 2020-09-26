@@ -1,12 +1,14 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DrivineError } from '@/DrivineError';
-import { Neo4jConnectionProvider } from '@/connection/Neo4jConnectionProvider';
+import { Neo4jConnectionProvider } from '@/connection/neo4j/Neo4jConnectionProvider';
 import * as assert from 'assert';
-import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
+import { AgensGraphConnectionProvider } from '@/connection/agens/AgensGraphConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
+import { ConnectionName } from '@/connection/ConnectionName';
+import { RedisGraphConnectionProvider } from '@/connection/redis/RedisGraphConnectionProvider';
 
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
@@ -87,7 +89,7 @@ export class ConnectionProviderBuilder {
      * specified name, the connection properties will be updated.
      * @param name A unique name for the database.
      */
-    register(name: string = 'default'): ConnectionProvider {
+    register(name: ConnectionName = 'default'): ConnectionProvider {
         const retained = this.registry.connectionProvider(name);
         if (retained != undefined) {
             return retained;
@@ -99,7 +101,10 @@ export class ConnectionProviderBuilder {
             this.registry.register(this.buildAgensGraphAndPostgresProvider(name));
         } else if (this._type === DatabaseType.NEO4J) {
             this.registry.register(this.buildNeo4jProvider(name));
-        } else {
+        } else if (this._type === DatabaseType.REDIS_GRAPH) {
+            this.registry.register(this.buildRedisGraphProvider(name));
+        }
+        else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
         return this.registry.connectionProvider(name)!;
@@ -151,4 +156,29 @@ export class ConnectionProviderBuilder {
             this._password,
             this._name);
     }
+
+    private buildRedisGraphProvider(name: string): ConnectionProvider {
+        assert(this._name, `Database name is required`);
+
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by RedisGraph`);
+        }
+        if (this._userName) {
+            this.logger.warn(`userName is not supported by RedisGraph`);
+        }
+
+        if (!this._port) {
+            this._port = 6379;
+        }
+        if (this._port !== 6379) {
+            this.logger.warn(`${this._port} is a non-standard port for RedisGraph`);
+        }
+
+        if (!this._host) {
+            this._host = '127.0.0.1';
+        }
+
+        return new RedisGraphConnectionProvider(name, this._type, this._name!, this._host, this._port, this._password);
+    }
+
 }

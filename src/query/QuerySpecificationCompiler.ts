@@ -1,9 +1,12 @@
-import { QuerySpecification } from '@/query/index';
+import { QueryLanguage, QuerySpecification } from '@/query/index';
 import { CompiledQuery } from '@/query/CompiledQuery';
+import assert = require('assert');
 
 export abstract class QuerySpecificationCompiler {
 
-    protected constructor(readonly spec: QuerySpecification<any>) {
+    constructor(readonly spec: QuerySpecification<any>) {
+        assert(this.supportedQueryLanguages().includes(this.spec.statement.language),
+            `${this.spec.statement.language} is not supported for ${this.constructor.name}.`);
     }
 
     compile(): CompiledQuery {
@@ -28,6 +31,8 @@ export abstract class QuerySpecificationCompiler {
     protected limitClause(): string {
         return this.spec._limit ? `LIMIT ${this.spec._limit}` : ``;
     }
+
+    abstract supportedQueryLanguages(): QueryLanguage[];
 
     abstract formattedStatement(): string;
 
