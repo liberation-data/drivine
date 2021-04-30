@@ -7,7 +7,7 @@ import { DrivineError } from '@/DrivineError';
 import { QueryLanguage } from '@/query';
 import { AgensResultMapper } from '@/mapper/AgensResultMapper';
 
-const AgensGraph = require('@liberation-data/agensgraph/lib');
+const AgensGraph = require('@bitnine-oss/ag-driver');
 
 export class AgensGraphConnectionProvider implements ConnectionProvider {
     private readonly pool: any;
