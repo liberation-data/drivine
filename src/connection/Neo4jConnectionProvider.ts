@@ -18,10 +18,11 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         readonly port: number,
         readonly user: string,
         readonly password: string | undefined,
-        readonly database: string | undefined
+        readonly database: string | undefined,
+        readonly protocol: string = "bolt",
     ) {
         const authToken = neo.auth.basic(this.user, this.password!);
-        this.driver = neo.driver(`bolt://${this.host}:${this.port}`, authToken);
+        this.driver = neo.driver(`${this.protocol}://${this.host}:${this.port}`, authToken);
     }
 
     async connect(): Promise<Connection> {

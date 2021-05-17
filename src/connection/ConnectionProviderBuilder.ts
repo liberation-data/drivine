@@ -17,6 +17,7 @@ export class ConnectionProviderBuilder {
     private _port?: number;
     private _userName?: string;
     private _password?: string;
+    private _protocol?: string;
 
     // AgensGraph properties
     private _idleTimeout?: number;
@@ -38,6 +39,7 @@ export class ConnectionProviderBuilder {
         this._idleTimeout = properties.idleTimeout;
         this._name = properties.databaseName;
         this._defaultGraphPath = properties.defaultGraphPath;
+        this._protocol = properties.protocol;
         return this;
     }
 
@@ -64,6 +66,11 @@ export class ConnectionProviderBuilder {
 
     password(password: string): this {
         this._password = password;
+        return this;
+    }
+
+    protocol(protocol: string): this {
+        this._protocol = protocol;
         return this;
     }
 
@@ -149,6 +156,7 @@ export class ConnectionProviderBuilder {
             this._port,
             this._userName!,
             this._password,
-            this._name);
+            this._name,
+            this._protocol);
     }
 }
