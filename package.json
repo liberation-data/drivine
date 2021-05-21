@@ -59,6 +59,7 @@
         "reflect-metadata": ">= ^0.1.13"
     },
     "dependencies": {
+        "cli-color": "^2.0.0",
         "cls-hooked": "github:alexgarbarev/cls-hooked",
         "dotenv": "^8.2.0",
         "dot-prop": "^4.2.1",
@@ -80,7 +81,7 @@
     },
     "devDependencies": {
         "@bitnine-oss/ag-driver": "^0.1.0",
-        "@nestjs/common": "^7.4.4",
+        "@nestjs/common": "^7.6.17",
         "@nestjs/core": "^7.4.4",
         "@nestjs/platform-express": "^7.4.4",
         "@nestjs/testing": "^7.4.4",
