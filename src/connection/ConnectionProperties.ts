@@ -10,6 +10,7 @@ export interface ConnectionProperties {
     idleTimeout?: number;
     databaseName?: string;
     defaultGraphPath?: string;
+    protocol?: string;
 }
 
 /**
