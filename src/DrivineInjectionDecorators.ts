@@ -1,4 +1,5 @@
 import { Inject } from '@nestjs/common';
+import { join } from 'path';
 
 export const persistenceManagerInjections: string[] = [];
 export const InjectPersistenceManager = (database: string = 'default'): any => {
@@ -48,7 +49,7 @@ export const InjectSql = (dirNameOrPath: string, resource?: string): any => {
  */
 function fileNameFor(dirNameOrPath: string, extension?: string, resourceName?: string): string {
     if (resourceName) {
-        const path = `${dirNameOrPath}/${resourceName}`;
+        const path = join(`${dirNameOrPath}/${resourceName}`);
         return require.resolve(extension ? `${path}.${extension}` : `${path}`);
     } else {
         return require.resolve(extension ? `${dirNameOrPath}.${extension}` : `${dirNameOrPath}`);
