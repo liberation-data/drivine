@@ -4,17 +4,19 @@
 
 ```
 npm install @liberation-data/drivine
-``` 
+```
 
 ## Define a named connection
 
 #### .env
+
 ```
 NEO_DATABASE_TYPE=NEO4J
 NEO_DATABASE_USER='neo4j'
 NEO_DATABASE_PASSWORD='h4ckM3'
 NEO_DATABASE_HOST='localhost'
 NEO_DATABASE_PORT='7687'
+NEO_DATABASE_PROTOCOL='neo4j+s'
 
 TRAFFIC_DATABASE_TYPE=AGENS_GRAPH
 TRAFFIC_DATABASE_NAME='maps'
@@ -26,21 +28,43 @@ TRAFFIC_DATABASE_IDLE_TIMEOUT=500
 TRAFFIC_DATABASE_DEFAULT_GRAPH_PATH=traffic
 ```
 
-You can also define a default connection with no name prefix. 
+You can also define a default connection with no name prefix.
 
 ## Add the Drivine Module
 
 ```typescript
 @Module({
     imports: [
-        DrivineModule.withOptions(<DrivineModuleOptions> {
-            connectionProviders: [
-                DatabaseRegistry.buildOrResolveFromEnv('NEO')
-            ]
-        }),
+        DrivineModule.withOptions(<DrivineModuleOptions>{
+            connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv('NEO')]
+        })
     ],
     providers: [RouteRepository],
-    controllers: [RouteController],
+    controllers: [RouteController]
+})
+export class AppModule implements NestModule {}
+```
+
+### Using `ConnectionProviderBuilder`
+
+If for some reason, you want to override part of the configuration coming from **Environment Variables**, you can
+use `ConnectionProviderBuilder` Fluent API
+
+```typescript
+@Module({
+    imports: [
+        DrivineModule.withOptions(<DrivineModuleOptions>{
+            connectionProviders: [
+                DatabaseRegistry.getInstance()
+                    .builder()
+                    .withProperties(ConnectionPropertiesFromEnv['NEO'])
+                    .protocol('neo4j+s') // use different protocol than default bolt
+                    .register('NEO')
+            ]
+        })
+    ],
+    providers: [RouteRepository],
+    controllers: [RouteController]
 })
 export class AppModule implements NestModule {}
 ```
@@ -50,11 +74,10 @@ export class AppModule implements NestModule {}
 ```typescript
 @Injectable()
 export class RouteRepository {
-
     constructor(
         @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
-        @InjectCypher('@/traffic/routesBetween') readonly routesBetween: Statement) {
-    }
+        @InjectCypher('@/traffic/routesBetween') readonly routesBetween: Statement
+    ) {}
 
     @Transactional() // Has default Propagation.REQUIRED - so partipicate in a current txn, or start one.
     async findFastestBetween(start: string, destination: string): Promise<Route> {
@@ -71,6 +94,7 @@ export class RouteRepository {
 
 ## Quickest Start
 
-Too much work? Clone the [starter template](https://github.com/liberation-data/drivine-inspiration) and start hacking. 
+Too much work? Clone the [starter template](https://github.com/liberation-data/drivine-inspiration) and start hacking.
 
-This module contains a basic starter template. Also, so that you can get rolling as quickly as possible, a number a graph database koans, for typical use-cases - recommendations, social networks, etc, each presented in a Drivine style.  
+This module contains a basic starter template. Also, so that you can get rolling as quickly as possible, a number a
+graph database koans, for typical use-cases - recommendations, social networks, etc, each presented in a Drivine style.

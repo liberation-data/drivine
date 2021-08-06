@@ -30,6 +30,7 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     const idleTimeout = Number(process.env[`${prefix}DATABASE_IDLE_TIMEOUT`]!);
     const databaseName = process.env[`${prefix}DATABASE_NAME`]!;
     const defaultGraphPath = process.env[`${prefix}DATABASE_DEFAULT_GRAPH_PATH`]!;
+    const protocol = process.env[`${prefix}DATABASE_PROTOCOL`];
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
     assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
@@ -39,13 +40,14 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     }
 
     return <ConnectionProperties>{
-        databaseType: databaseType,
-        host: host,
-        port: port,
-        userName: userName,
-        password: password,
-        idleTimeout: idleTimeout,
-        databaseName: databaseName,
-        defaultGraphPath: defaultGraphPath
+        databaseType,
+        host,
+        port,
+        userName,
+        password,
+        idleTimeout,
+        databaseName,
+        defaultGraphPath,
+        protocol
     };
 }
