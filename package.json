@@ -50,9 +50,9 @@
     },
     "peerDependencies": {
         "@bitnine-oss/ag-driver": "^0.1.0",
-        "@nestjs/common": ">= 6 <= 7",
-        "@nestjs/core": ">= 6 <= 7",
-        "@nestjs/platform-express": ">= 6 <= 7",
+        "@nestjs/common": ">= 6 <= 8",
+        "@nestjs/core": ">= 6 <= 8",
+        "@nestjs/platform-express": ">= 6 <= 8",
         "class-validator": ">= 0.11.0",
         "class-transformer": ">= ^0.3.1",
         "neo4j-driver": ">= ^4.0.1",
