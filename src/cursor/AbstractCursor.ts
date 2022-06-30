@@ -75,7 +75,7 @@ export abstract class AbstractCursor<T> implements Cursor<T> {
         }
     }
 
-    abstract async close(): Promise<void>;
+    abstract close(): Promise<void>;
 
-    abstract async read(count: number): Promise<T[]>;
+    abstract read(count: number): Promise<T[]>;
 }

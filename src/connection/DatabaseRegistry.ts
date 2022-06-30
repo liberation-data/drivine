@@ -3,7 +3,7 @@ import { ConnectionProviderBuilder } from '@/connection/ConnectionProviderBuilde
 import { ConnectionPropertiesFromEnv } from '@/connection/ConnectionProperties';
 
 export class DatabaseRegistry {
-    private static instance: DatabaseRegistry;
+    private static instance: DatabaseRegistry | undefined;
 
     private _providers: Map<string, ConnectionProvider>;
 

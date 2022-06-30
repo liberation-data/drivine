@@ -38,7 +38,7 @@ export async function runInTransaction(
         await transaction.popContext();
         return result;
     } catch (e) {
-        await transaction.popContextWithError(e);
+        await transaction.popContextWithError(e as Error);
         throw e;
     }
 }

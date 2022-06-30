@@ -10,7 +10,7 @@ import { MakeLocalStorage } from '@/utils/LocalStorageFactory';
  */
 @Injectable()
 export class TransactionContextHolder {
-    static instance: TransactionContextHolder;
+    static instance: TransactionContextHolder | undefined;
 
     readonly localStorage = MakeLocalStorage()
 
@@ -22,7 +22,7 @@ export class TransactionContextHolder {
     }
 
     static tearDown(): void {
-        TransactionContextHolder.instance.tearDown();
+        void this.instance?.tearDown();
         delete TransactionContextHolder.instance;
     }
 

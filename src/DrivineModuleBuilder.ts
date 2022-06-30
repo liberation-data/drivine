@@ -3,7 +3,6 @@ import { DrivineModuleOptions } from '@/DrivineModule';
 import {
     cypherInjections,
     fileContentInjections,
-    persistenceManagerInjections,
     sqlInjections
 } from '@/DrivineInjectionDecorators';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';

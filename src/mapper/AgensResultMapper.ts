@@ -2,7 +2,7 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { AgensGraphResultMapper, DrivineError, QuerySpecification } from '@liberation-data/drivine';
 import { AgensRowResultMapper } from '@/mapper/AgensRowResultMapper';
 
-export class AgensResultMapper<T> implements ResultMapper {
+export class AgensResultMapper implements ResultMapper {
 
     private readonly graphMapper: ResultMapper = new AgensGraphResultMapper()
     private readonly rowMapper: ResultMapper = new AgensRowResultMapper();

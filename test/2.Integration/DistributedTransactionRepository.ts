@@ -3,7 +3,6 @@ import { InjectPersistenceManager } from '@/DrivineInjectionDecorators';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { Transactional } from '@/transaction/Transactional';
 import { QuerySpecification } from '@/query/QuerySpecification';
-const faker = require('faker');
 
 @Injectable()
 export class DistributedTransactionRepository {
@@ -16,11 +15,11 @@ export class DistributedTransactionRepository {
     async createNodes(): Promise<void> {
         const spec1 = new QuerySpecification()
             .withStatement(`merge (p:Person {firstName: $1, lastName: $2})`)
-            .bind([faker.name.firstName(), faker.name.lastName()]);
+            .bind(['first 1', 'last 2']);
 
         const spec2 = new QuerySpecification()
             .withStatement(`merge (p:Person {firstName: $1, lastName: $2})`)
-            .bind([faker.name.firstName(), faker.name.lastName()]);
+            .bind(['first 1', 'last 2']);
 
         await this.database1.query(spec1);
         await this.database2.query(spec2);

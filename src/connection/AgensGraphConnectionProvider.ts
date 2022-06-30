@@ -1,5 +1,5 @@
 import { DatabaseType } from '@/connection/DatabaseType';
-import { PoolClient } from 'pg';
+import { Pool, PoolClient, PoolConfig } from 'pg';
 import { Connection } from '@/connection/Connection';
 import { AgensGraphConnection } from '@/connection/AgensGraphConnection';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
@@ -10,29 +10,16 @@ import { AgensResultMapper } from '@/mapper/AgensResultMapper';
 const AgensGraph = require('@bitnine-oss/ag-driver');
 
 export class AgensGraphConnectionProvider implements ConnectionProvider {
-    private readonly pool: any;
+    private readonly pool: Pool;
 
     constructor(
         readonly name: string,
         readonly type: DatabaseType,
-        readonly host: string,
-        readonly user: string | undefined,
-        readonly password: string | undefined,
-        readonly database: string,
-        readonly port: number,
-        readonly idleTimeoutMillis: number,
-        readonly defaultGraphPath: string | undefined
+        readonly defaultGraphPath: string | undefined,
+        readonly connectionProperties: PoolConfig
     ) {
-        this.pool = new AgensGraph.Pool({
-            host: this.host,
-            port: this.port,
-            user: this.user,
-            password: this.password,
-            database: this.database,
-            max: 40,
-            idleTimeoutMillis: this.idleTimeoutMillis,
-            connectionTimeoutMillis: 5000
-        });
+
+        this.pool = new AgensGraph.Pool({...connectionProperties});
     }
 
     async connect(): Promise<Connection> {
