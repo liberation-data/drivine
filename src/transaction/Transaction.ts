@@ -47,7 +47,7 @@ export class Transaction {
             const results = await connection.query(spec);
             return results;
         } catch (e) {
-            throw DrivineError.withRootCause(e, spec);
+            throw DrivineError.withRootCause(e as Error, spec);
         }
     }
 

@@ -1,5 +1,5 @@
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { Driver } from 'neo4j-driver';
+import { Config, Driver } from 'neo4j-driver';
 import { Connection } from '@/connection/Connection';
 import { Neo4jConnection } from '@/connection/Neo4jConnection';
 import { Neo4jResultMapper } from '@/mapper/Neo4jResultMapper';
@@ -20,9 +20,10 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         readonly password: string | undefined,
         readonly database: string | undefined,
         readonly protocol: string = "bolt",
+        readonly config: Config
     ) {
         const authToken = neo.auth.basic(this.user, this.password!);
-        this.driver = neo.driver(`${this.protocol}://${this.host}:${this.port}`, authToken);
+        this.driver = neo.driver(`${this.protocol}://${this.host}:${this.port}`, authToken, {...config});
     }
 
     async connect(): Promise<Connection> {

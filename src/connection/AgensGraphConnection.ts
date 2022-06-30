@@ -14,9 +14,11 @@ const PgCursor = require('pg-cursor');
 export class AgensGraphConnection implements Connection {
     private logger = new DrivineLogger(AgensGraphConnection.name);
 
-    constructor(readonly client: PoolClient,
-                readonly resultMapper: ResultMapper,
-                readonly defaultLanguage: QueryLanguage) {}
+    constructor(
+        readonly client: PoolClient,
+        readonly resultMapper: ResultMapper,
+        readonly defaultLanguage: QueryLanguage
+    ) {}
 
     sessionId(): string {
         return this.client['sessionId'];

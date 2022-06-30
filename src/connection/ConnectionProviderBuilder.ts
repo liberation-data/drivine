@@ -18,9 +18,11 @@ export class ConnectionProviderBuilder {
     private _userName?: string;
     private _password?: string;
     private _protocol?: string;
+    private _poolMax?: number
 
     // AgensGraph properties
     private _idleTimeout?: number;
+    private _connectionTimeout?: number;
     private _name?: string;
     private _defaultGraphPath?: string;
 
@@ -37,9 +39,11 @@ export class ConnectionProviderBuilder {
         this._userName = properties.userName;
         this._password = properties.password;
         this._idleTimeout = properties.idleTimeout;
+        this._connectionTimeout = properties.connectionTimeout ?? 5000;
         this._name = properties.databaseName;
         this._defaultGraphPath = properties.defaultGraphPath;
         this._protocol = properties.protocol;
+        this._poolMax = properties.poolMax ?? 40;
         return this;
     }
 
@@ -127,13 +131,17 @@ export class ConnectionProviderBuilder {
         return new AgensGraphConnectionProvider(
             name,
             this._type,
-            this._host,
-            this._userName,
-            this._password,
-            this._name!,
-            this._port,
-            this._idleTimeout,
-            this._defaultGraphPath
+            this._defaultGraphPath,
+            {
+                host: this._host,
+                user: this._userName,
+                password: this._password,
+                database: this._name!,
+                port: this._port,
+                idleTimeoutMillis: this._idleTimeout,
+                connectionTimeoutMillis: this._connectionTimeout,
+                max: this._poolMax
+            }
         );
     }
 
@@ -157,6 +165,10 @@ export class ConnectionProviderBuilder {
             this._userName!,
             this._password,
             this._name,
-            this._protocol);
+            this._protocol,
+            {
+                connectionTimeout: this._connectionTimeout,
+                maxConnectionPoolSize: this._poolMax,
+            });
     }
 }

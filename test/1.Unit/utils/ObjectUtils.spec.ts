@@ -10,8 +10,8 @@ class Urbanite {
 
     readonly lastName: string;
 
-    @Transform((date: Date) => date.valueOf(), { toPlainOnly: true })
-    @Transform((value: number) => new Date(value), { toClassOnly: true })
+    @Transform((params) => params.value.valueOf(), { toPlainOnly: true })
+    @Transform((params) => new Date(params.value), { toClassOnly: true })
     readonly dateOfBirth: Date;
 
     nonPrimitiveProperty: Date;

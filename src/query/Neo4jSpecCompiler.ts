@@ -1,5 +1,5 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
-import { QuerySpecification, toPlatformDefault } from '@liberation-data/drivine';
+import { QuerySpecification } from '@liberation-data/drivine';
 const assert = require('assert')
 
 export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
