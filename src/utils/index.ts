@@ -1,3 +1,3 @@
 export * from './StreamUtils';
 export * from './TestUtils';
-export * from './ObjectUtils'
+export * from './ObjectUtils';

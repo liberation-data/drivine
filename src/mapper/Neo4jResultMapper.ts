@@ -4,7 +4,6 @@ import { GraphResultMapper } from '@/mapper/GraphResultMapper';
 const neo4j = require('neo4j-driver');
 
 export class Neo4jResultMapper extends GraphResultMapper {
-
     keys(record: any): string[] {
         return record.keys;
     }
@@ -67,6 +66,4 @@ export class Neo4jResultMapper extends GraphResultMapper {
         }
         throw new Error(`${val} is not in safe range to convert to number`);
     }
-
 }
-

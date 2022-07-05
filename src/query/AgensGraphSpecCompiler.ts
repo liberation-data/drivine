@@ -5,7 +5,6 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 const assert = require('assert');
 
 export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
-
     private readonly paramKeys: string[] = [];
 
     /**
@@ -15,8 +14,10 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
 
     constructor(spec: QuerySpecification<any>) {
         super(spec);
-        assert(['CYPHER', 'SQL'].includes(this.spec.statement.language),
-            `${this.spec.statement.language} is not supported on AgensGraph.`);
+        assert(
+            ['CYPHER', 'SQL'].includes(this.spec.statement.language),
+            `${this.spec.statement.language} is not supported on AgensGraph.`
+        );
 
         if (!Array.isArray(this.spec.parameters)) {
             this.paramKeys = Object.keys(this.spec.parameters).sort();
@@ -30,7 +31,7 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
         let result = this.appliedStatement();
         for (let i = 0; i < this.paramKeys.length; i++) {
             const key = this.paramKeys[i];
-            result = result.replace(`$${key}`, `$${i+1}`)
+            result = result.replace(`$${key}`, `$${i + 1}`);
         }
         return result;
     }

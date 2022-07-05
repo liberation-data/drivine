@@ -4,10 +4,8 @@ import { AgensRowResultMapper } from '@/mapper/AgensRowResultMapper';
 import { AgensGraphResultMapper } from '@/mapper/AgensGraphResultMapper';
 import { DrivineError } from '@/DrivineError';
 
-
 export class AgensResultMapper implements ResultMapper {
-
-    private readonly graphMapper: ResultMapper = new AgensGraphResultMapper()
+    private readonly graphMapper: ResultMapper = new AgensGraphResultMapper();
     private readonly rowMapper: ResultMapper = new AgensRowResultMapper();
 
     mapQueryResults<T>(results: any[], spec: QuerySpecification<T>): T[] {
@@ -20,5 +18,4 @@ export class AgensResultMapper implements ResultMapper {
                 throw new DrivineError(`${spec.statement.language} does not have a supported result mapper.`);
         }
     }
-
 }

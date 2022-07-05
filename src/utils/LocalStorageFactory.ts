@@ -1,5 +1,5 @@
-import { LocalStorageAls } from "./LocalStorageAls";
-import {LocalStorage} from "@/utils/LocalStorage";
+import { LocalStorageAls } from './LocalStorageAls';
+import { LocalStorage } from '@/utils/LocalStorage';
 
 /**
  * Keep for backward compatibility

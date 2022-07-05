@@ -3,7 +3,6 @@ import { ObjectUtils } from '@/utils';
 const uuid = require('uuid').v4;
 
 class Urbanite {
-
     readonly id: string;
 
     readonly firstName: string;
@@ -22,13 +21,11 @@ class Urbanite {
         this.lastName = lastName;
         this.dateOfBirth = dateOfBirth;
     }
-
 }
 
 describe('ObjectUtils::primitiveProps', () => {
-
     it('should strip the non-primitive properties from an object', () => {
-        const mg = new Urbanite(uuid(),'Brutus', 'Paramdal', new Date('1984-06-22'));
+        const mg = new Urbanite(uuid(), 'Brutus', 'Paramdal', new Date('1984-06-22'));
         mg.nonPrimitiveProperty = new Date();
         const props = ObjectUtils.primitiveProps(mg);
         expect(props.id).not.toBeNull();
@@ -37,5 +34,4 @@ describe('ObjectUtils::primitiveProps', () => {
         expect(props.dateOfBirth).toEqual(456710400000);
         expect(props.nonPrimitiveProperty).toBeUndefined();
     });
-
 });

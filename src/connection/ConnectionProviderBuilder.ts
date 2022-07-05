@@ -18,7 +18,7 @@ export class ConnectionProviderBuilder {
     private _userName?: string;
     private _password?: string;
     private _protocol?: string;
-    private _poolMax?: number
+    private _poolMax?: number;
 
     // AgensGraph properties
     private _idleTimeout?: number;
@@ -128,21 +128,16 @@ export class ConnectionProviderBuilder {
         }
         assert(this._name, `Database name is required`);
 
-        return new AgensGraphConnectionProvider(
-            name,
-            this._type,
-            this._defaultGraphPath,
-            {
-                host: this._host,
-                user: this._userName,
-                password: this._password,
-                database: this._name!,
-                port: this._port,
-                idleTimeoutMillis: this._idleTimeout,
-                connectionTimeoutMillis: this._connectionTimeout,
-                max: this._poolMax
-            }
-        );
+        return new AgensGraphConnectionProvider(name, this._type, this._defaultGraphPath, {
+            host: this._host,
+            user: this._userName,
+            password: this._password,
+            database: this._name!,
+            port: this._port,
+            idleTimeoutMillis: this._idleTimeout,
+            connectionTimeoutMillis: this._connectionTimeout,
+            max: this._poolMax
+        });
     }
 
     private buildNeo4jProvider(name: string): ConnectionProvider {
@@ -158,7 +153,8 @@ export class ConnectionProviderBuilder {
             this.logger.warn(`${this._port} is a non-standard port for Neo4j`);
         }
 
-        return new Neo4jConnectionProvider(name,
+        return new Neo4jConnectionProvider(
+            name,
             this._type,
             this._host,
             this._port,
@@ -168,7 +164,8 @@ export class ConnectionProviderBuilder {
             this._protocol,
             {
                 connectionTimeout: this._connectionTimeout,
-                maxConnectionPoolSize: this._poolMax,
-            });
+                maxConnectionPoolSize: this._poolMax
+            }
+        );
     }
 }

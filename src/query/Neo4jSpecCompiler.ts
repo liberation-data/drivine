@@ -1,9 +1,8 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
-const assert = require('assert')
+const assert = require('assert');
 
 export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
-
     constructor(spec: QuerySpecification<any>) {
         super(spec);
         assert(this.spec.statement.language === 'CYPHER', `${this.spec.statement.language} is not supported on Neo4j.`);
@@ -20,7 +19,5 @@ export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
         } else {
             return this.spec.parameters;
         }
-
     }
-
 }

@@ -4,7 +4,6 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DatabaseType } from '@/connection';
 
 export interface PersistenceManager {
-
     /**
      * Unique name of the database, as provided when it was enrolled in the {@link DatabaseRegistry}.
      */

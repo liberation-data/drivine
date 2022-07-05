@@ -6,7 +6,7 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine }
 
 const fs = require('fs');
 
-RunWithDrivine( { rollback: true });
+RunWithDrivine({ rollback: true });
 describe('RouteRepository', () => {
     let repo: RouteRepository;
     let app: TestingModule;

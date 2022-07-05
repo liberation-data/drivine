@@ -18,8 +18,7 @@ export class AgensGraphConnectionProvider implements ConnectionProvider {
         readonly defaultGraphPath: string | undefined,
         readonly connectionProperties: PoolConfig
     ) {
-
-        this.pool = new AgensGraph.Pool({...connectionProperties});
+        this.pool = new AgensGraph.Pool({ ...connectionProperties });
     }
 
     async connect(): Promise<Connection> {

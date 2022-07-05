@@ -2,16 +2,13 @@ import { QuerySpecification } from '@/query/index';
 import { CompiledQuery } from '@/query/CompiledQuery';
 
 export abstract class QuerySpecificationCompiler {
-
-    protected constructor(readonly spec: QuerySpecification<any>) {
-    }
+    protected constructor(readonly spec: QuerySpecification<any>) {}
 
     compile(): CompiledQuery {
-
-        return <CompiledQuery> {
+        return <CompiledQuery>{
             statement: this.formattedStatement().trim(),
             parameters: this.formattedParams()
-        }
+        };
     }
 
     protected appliedStatement(): string {
@@ -32,5 +29,4 @@ export abstract class QuerySpecificationCompiler {
     abstract formattedStatement(): string;
 
     abstract formattedParams(): any;
-
 }
