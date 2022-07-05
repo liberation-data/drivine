@@ -1,6 +1,9 @@
 import { ResultMapper } from '@/mapper/ResultMapper';
-import { AgensGraphResultMapper, DrivineError, QuerySpecification } from '@liberation-data/drivine';
+import { QuerySpecification } from '@/query/QuerySpecification';
 import { AgensRowResultMapper } from '@/mapper/AgensRowResultMapper';
+import { AgensGraphResultMapper } from '@/mapper/AgensGraphResultMapper';
+import { DrivineError } from '@/DrivineError';
+
 
 export class AgensResultMapper implements ResultMapper {
 
