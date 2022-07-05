@@ -1,6 +1,6 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { DrivineError } from '@/DrivineError';
-import { QuerySpecification } from '@liberation-data/drivine';
+import { QuerySpecification } from '@/query/QuerySpecification';
 
 const assert = require('assert');
 
