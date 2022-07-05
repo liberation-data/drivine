@@ -3,12 +3,10 @@ import { QuerySpecification } from '@/query';
 import { ResultPostProcessor } from '@/mapper/ResultPostProcessor';
 
 export class AgensRowResultMapper implements ResultMapper {
-
     mapQueryResults<T>(results: any[], spec: QuerySpecification<T>): T[] {
         spec.postProcessors.forEach((processor: ResultPostProcessor) => {
             results = processor.apply(results);
         });
         return results;
     }
-
 }

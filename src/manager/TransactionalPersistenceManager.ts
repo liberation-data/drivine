@@ -11,9 +11,11 @@ import { DatabaseType } from '@/connection';
 export class TransactionalPersistenceManager implements PersistenceManager {
     private finderOperations: FinderOperations;
 
-    constructor(readonly contextHolder: TransactionContextHolder,
-                readonly database: string,
-                readonly type: DatabaseType) {
+    constructor(
+        readonly contextHolder: TransactionContextHolder,
+        readonly database: string,
+        readonly type: DatabaseType
+    ) {
         this.finderOperations = new FinderOperations(this);
     }
 

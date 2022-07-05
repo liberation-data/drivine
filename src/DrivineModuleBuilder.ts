@@ -1,10 +1,6 @@
 import { Provider } from '@nestjs/common';
 import { DrivineModuleOptions } from '@/DrivineModule';
-import {
-    cypherInjections,
-    fileContentInjections,
-    sqlInjections
-} from '@/DrivineInjectionDecorators';
+import { cypherInjections, fileContentInjections, sqlInjections } from '@/DrivineInjectionDecorators';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
@@ -49,7 +45,7 @@ export class DrivineModuleBuilder {
     }
 
     persistenceManagers(): Provider[] {
-        const providers = DatabaseRegistry.getInstance().providers.map(provider => provider.name);
+        const providers = DatabaseRegistry.getInstance().providers.map((provider) => provider.name);
         return providers.map((database) => {
             return <Provider>{
                 provide: `PersistenceManager:${database}`,

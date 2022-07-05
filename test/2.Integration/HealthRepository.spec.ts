@@ -6,7 +6,7 @@ import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine }
 // before running the tests, add new records from test/moon-town.cypher
 // and manually run: MERGE (u:Employee {id: 1, name: 'Piotr'})
 
-RunWithDrivine({rollback: true})
+RunWithDrivine({ rollback: true });
 describe('HealthRepository', () => {
     let repo: HealthRepository;
     let app: TestingModule;
@@ -71,11 +71,10 @@ describe('HealthRepository', () => {
     it('should filter results', async () => {
         const results = await repo.filterTest();
         expect(results).toEqual([2, 4, 6, 8]);
-    })
+    });
 
     it('should return from pg_tables', async () => {
         const results = await repo.pgTables();
         expect(results.length).toBeGreaterThan(0);
     });
-
 });

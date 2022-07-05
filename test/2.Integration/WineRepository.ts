@@ -8,7 +8,8 @@ export class WineRepository {
     constructor(
         @InjectPersistenceManager('WINE') readonly persistenceManager: PersistenceManager,
         @InjectCypher(__dirname, 'listProlificWineTasters') readonly listProlificQuery: CypherStatement,
-        @InjectCypher(__dirname, 'getTasterProfile') readonly getTasterQuery: CypherStatement) {}
+        @InjectCypher(__dirname, 'getTasterProfile') readonly getTasterQuery: CypherStatement
+    ) {}
 
     async listProlificWineTasters(): Promise<any> {
         const spec = new QuerySpecification().withStatement(this.listProlificQuery);
@@ -16,7 +17,7 @@ export class WineRepository {
     }
 
     async getTasterProfile(name: string): Promise<any> {
-        const spec = new QuerySpecification().withStatement(this.getTasterQuery).bind({name: name});
+        const spec = new QuerySpecification().withStatement(this.getTasterQuery).bind({ name: name });
         return this.persistenceManager.query(spec);
     }
 }

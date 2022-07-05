@@ -51,7 +51,7 @@ export class QuerySpecification<T> {
     }
 
     addPostProcessors(...postProcessors: ResultPostProcessor[]): this {
-        postProcessors.forEach(processor => {
+        postProcessors.forEach((processor) => {
             this.postProcessors.push(processor);
         });
         return this;
@@ -87,12 +87,13 @@ export class QuerySpecification<T> {
      * @param language
      */
     finalizedCopy(language: QueryLanguage): QuerySpecification<T> {
-        return Object.freeze(new QuerySpecification<T>()
-            .withStatement(toPlatformDefault(language, this.statement))
-            .skip(this._skip)
-            .limit(this._limit)
-            .bind(this.parameters)
-            .addPostProcessors(...this.postProcessors));
+        return Object.freeze(
+            new QuerySpecification<T>()
+                .withStatement(toPlatformDefault(language, this.statement))
+                .skip(this._skip)
+                .limit(this._limit)
+                .bind(this.parameters)
+                .addPostProcessors(...this.postProcessors)
+        );
     }
-
 }

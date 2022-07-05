@@ -12,7 +12,7 @@ import { MakeLocalStorage } from '@/utils/LocalStorageFactory';
 export class TransactionContextHolder {
     static instance: TransactionContextHolder | undefined;
 
-    readonly localStorage = MakeLocalStorage()
+    readonly localStorage = MakeLocalStorage();
 
     static getInstance(): TransactionContextHolder {
         if (!TransactionContextHolder.instance) {

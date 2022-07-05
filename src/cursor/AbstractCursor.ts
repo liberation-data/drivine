@@ -44,17 +44,14 @@ export abstract class AbstractCursor<T> implements Cursor<T> {
     }
 
     private composeStreamWithOptions(options?: CursorStreamOptions<T>): Readable {
-        const readable = miss.from(
-            { objectMode: true },
-            async (size: number, next: Function): Promise<Function> => {
-                await this.readBatchIfExpired();
-                const done = this.currentBatch.length <= this.currentIndex;
-                if (done) {
-                    return next(null, null);
-                }
-                return next(null, this.currentBatch[this.currentIndex++]);
+        const readable = miss.from({ objectMode: true }, async (size: number, next: Function): Promise<Function> => {
+            await this.readBatchIfExpired();
+            const done = this.currentBatch.length <= this.currentIndex;
+            if (done) {
+                return next(null, null);
             }
-        );
+            return next(null, this.currentBatch[this.currentIndex++]);
+        });
         return options && options.transform
             ? miss.pipeline.obj(readable, this.transformStream(options.transform))
             : readable;

@@ -3,7 +3,6 @@ import { ResultPostProcessor } from '@/mapper/ResultPostProcessor';
 import { ResultMapper } from '@/mapper/ResultMapper';
 
 export abstract class GraphResultMapper implements ResultMapper {
-
     mapQueryResults<T>(records: any[], spec: QuerySpecification<T>): T[] {
         // TODO: The default mapper(s) can be a result post processor too - then users can specify own, if desired.
         let results = this.mapToNative(records);
@@ -20,7 +19,7 @@ export abstract class GraphResultMapper implements ResultMapper {
             const keys = this.keys(record);
             let item;
             if (keys.length === 1) {
-                item = this.toNative(this.itemAtIndex(record,0));
+                item = this.toNative(this.itemAtIndex(record, 0));
             } else {
                 const length = this.keys(record).length;
                 item = new Array(length);
@@ -38,6 +37,4 @@ export abstract class GraphResultMapper implements ResultMapper {
     abstract itemAtIndex(record: any, index: number): any;
 
     abstract toNative(val: any): any;
-
 }
-
