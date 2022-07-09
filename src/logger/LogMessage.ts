@@ -1,8 +1,9 @@
 import { LogLevel } from '@/logger/LogLevel';
 import { Writable } from 'stream';
 import { isObject } from '@nestjs/common/utils/shared.utils';
+import * as SourceMapSupport from 'source-map-support';
 
-require('source-map-support').install({
+SourceMapSupport.install({
     environment: 'node'
 });
 
