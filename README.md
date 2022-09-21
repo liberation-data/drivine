@@ -18,7 +18,7 @@ With regards to the second point on scaleability, let's break that down into com
 * Takes care of <a href="https://drivine.org/guide/#/persistence-manager">infrastructure concerns</a>, so that you can focus on making the most of your data. 
 * <a href="https://drivine.org/guide/#/transactions">Removes boiler plate code</a>, especially the tedious and error-prone kind. 
 * <a href="https://drivine.org/guide/#/cursors">Supports streaming</a>, without back-pressure. Large amounts of data can be managed in a timely and memory efficient manner. 
-* Light-weight _use-case specific_ <a href="https://drivine.org/guide/#/object-mapping">object graph mapping (OGM)</a>.
+* Light-weight _use-case specific_ <a href="https://drivine.org/guide/#/object-mapping">object graph mapping (OGM)</a>. Drivine is NOT an OGM in the traditinoal sense. It is inspired by GraphAware CTO <a href="https://github.com/ikwattro/">Christophe Willemsen's</a> comment that "If you want to be successful at scale with your graph-powered application, then probably don't use an OGM." Instead, with Drivine, your CPYHER queries are king, and each can be performance profiled. The results are then mapped to/from a use-case specific model object. 
 
 ----
 
