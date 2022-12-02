@@ -89,7 +89,6 @@ export class DrivineModuleBuilder {
         });
     }
 
-    @Cacheable()
     private fileContents(path: string): string {
         return fs.readFileSync(path, { encoding: 'UTF8' });
     }

@@ -23,11 +23,12 @@ export class NonTransactionalPersistenceManager implements PersistenceManager {
     async query<T>(spec: QuerySpecification<T>): Promise<T[]> {
         const connection = await this.connectionProvider.connect();
         try {
-            return await connection.query(spec);
-        } catch (e) {
-            throw DrivineError.withRootCause(e as Error, spec);
-        } finally {
+            const result = await connection.query(spec);
             await connection.release();
+            return result;
+        } catch (e) {
+            await connection.release(e as Error)
+            throw DrivineError.withRootCause(e as Error, spec);
         }
     }
 

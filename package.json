@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "2.3.4",
+    "version": "2.3.5",
     "description": "Best and fastest graph database client for TypeScript / Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later or Apache-2.0",
@@ -79,6 +79,7 @@
         "pg-hstore": "^2.3.4",
         "rxjs-stream": "^5.0.0",
         "shortid": "^2.2.16",
+        "short-unique-id": "^4.4.4",
         "source-map-support": "^0.5.21",
         "ts-data.stack": "^1.0.6",
         "typescript-cacheable": "^3.0.3",

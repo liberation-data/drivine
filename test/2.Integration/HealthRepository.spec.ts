@@ -73,8 +73,8 @@ describe('HealthRepository', () => {
         expect(results).toEqual([2, 4, 6, 8]);
     });
 
-    it('should return from pg_tables', async () => {
-        const results = await repo.pgTables();
-        expect(results.length).toBeGreaterThan(0);
-    });
+    // it('should return from pg_tables', async () => {
+    //     const results = await repo.pgTables();
+    //     expect(results.length).toBeGreaterThan(0);
+    // });
 });

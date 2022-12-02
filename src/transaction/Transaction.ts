@@ -8,7 +8,8 @@ import { Cursor } from '@/cursor/Cursor';
 import { Connection } from '@/connection/Connection';
 import { TransactionOptions } from '@/transaction/Transactional';
 import { DrivineLogger } from '@/logger';
-import shortId = require('shortid');
+import ShortUniqueId from "short-unique-id";
+const shortId = new ShortUniqueId({ length: 7 });
 
 export class Transaction {
     readonly id: string;
@@ -20,7 +21,7 @@ export class Transaction {
     private _options: TransactionOptions;
 
     constructor(options: TransactionOptions, readonly contextHolder: TransactionContextHolder) {
-        this.id = shortId.generate();
+        this.id = shortId();
         this.callStack = new Stack<string>();
         this.connectionRegistry = new Map<string, Connection>();
         this.cursors = [];
