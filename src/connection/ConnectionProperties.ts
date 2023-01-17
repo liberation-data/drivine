@@ -24,7 +24,7 @@ export interface ConnectionProperties {
 export function ConnectionPropertiesFromEnv(connectionName?: string): ConnectionProperties {
     const prefix = connectionName ? `${connectionName}_` : '';
 
-    const stringOrFromEnv = (envVar: string): string | undefined => process.env[`${prefix}${envVar}`];
+    const stringFromEnv = (envVar: string): string | undefined => process.env[`${prefix}${envVar}`];
     const numberFromEnv = (envVar: string): number | undefined => {
         const setting = process.env[`${prefix}${envVar}`] as string | undefined;
         if (setting === undefined) {
@@ -37,17 +37,17 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         return number;
     };
 
-    const databaseType = <DatabaseType>stringOrFromEnv('DATABASE_TYPE');
-    const host = stringOrFromEnv('DATABASE_HOST');
+    const databaseType = <DatabaseType>stringFromEnv('DATABASE_TYPE');
+    const host = stringFromEnv('DATABASE_HOST');
     // Optionals
     const port = numberFromEnv('DATABASE_PORT');
-    const userName = stringOrFromEnv('DATABASE_USER');
-    const password = stringOrFromEnv('DATABASE_PASSWORD');
+    const userName = stringFromEnv('DATABASE_USER');
+    const password = stringFromEnv('DATABASE_PASSWORD');
     const idleTimeout = numberFromEnv('DATABASE_IDLE_TIMEOUT');
     const connectionTimeout = numberFromEnv('DATABASE_CONNECTION_TIMEOUT');
-    const databaseName = stringOrFromEnv('DATABASE_NAME');
-    const defaultGraphPath = stringOrFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
-    const protocol = stringOrFromEnv('DATABASE_PROTOCOL');
+    const databaseName = stringFromEnv('DATABASE_NAME');
+    const defaultGraphPath = stringFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
+    const protocol = stringFromEnv('DATABASE_PROTOCOL');
     const poolMax = numberFromEnv('DATABASE_POOL_MAX');
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
