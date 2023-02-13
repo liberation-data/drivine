@@ -122,14 +122,6 @@ Drivine shows that it is not necessary to forego clean architecture in order to 
 
 ----
 
-## Who is using it? 
-
-Are you using Drivine and would like to support free & open-source software? Send us an email or PR to add your logo here. 
-
-<a href="http://www.slackmap.com"> ![Slackmap Logo](https://drivine.org/images/logos/slackmap-logo.png)</a> <a href="https://liberation-data.com"> ![Liberation Data Logo](https://drivine.org/images/logos/liberation-data.png)</a> <a href="http://www.mobbizsolutions.com"> ![Mobbiz Solutions Logo](https://drivine.org/images/logos/mobbiz-logo.png)</a> <a href="https://bitnine.net/agensgraph/"> ![Slackmap Logo](https://drivine.org/images/logos/agensgraph.png)</a> <a href="https://neo4j.com/blog/introducing-drivine-graph-database-client-for-node-js-and-typescript/"> ![Neo4j Logo](https://drivine.org/images/logos/neo4j_logo2.png)</a>
-
-----
-
 ### Have you seen the light? 
 
 Drivine is a non-profit, community driven project. We only ask that if you've found it useful to star us on Github or send a tweet mentioning us (<a href="https://twitter.com/@doctor_cerulean">@doctor_cerulean</a>). If you've written a Drivine related blog or tutorial, or published a new Drivine-powered app, we'd certainly be happy to hear about that too. 
@@ -140,7 +132,7 @@ Drivine is sponsored and led by <a href="https://liberation-data.com">Liberation
 
 ## License
 
-Copyright (c) 2020 Liberation Data
+Copyright (c) 2022 Jasper Blues
 
 Drivine is free software: you can redistribute it and/or modify it under the terms of the APACHE LICENSE, VERSION 2.0
 as published by the Apache Software Foundation, either version 2 of the License, or (at your option) any later version.
