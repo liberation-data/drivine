@@ -1,5 +1,7 @@
 <a href="https://liberation-data.github.io/drivine/"> ![DrivineSplash](https://raw.githubusercontent.com/liberation-data/drivine/master/docs/images/splash.jpg)</a>
-# <a href="https://liberation-data.github.io/drivine/">drivine</a>                                       
+# <a href="https://liberation-data.github.io/drivine/">drivine</a> 
+
+⚠️ **Drivine website has moved: <a href="https://liberation-data.github.io/drivine/">here</a>. Please report any broken links (or, even better a PR is very welcome! 🙏)**
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
