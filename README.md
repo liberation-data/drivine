@@ -2,7 +2,7 @@
 # <a href="https://liberation-data.github.io/drivine/">drivine</a> 
 
 ⚠️ **Drivine website has moved: <a href="https://liberation-data.github.io/drivine/">here</a>.**
-_Please report any broken links. Or, even better, a PR is very welcome! 🙏_
+_Please report any broken links. Even better, a PR is very welcome! 🙏_
 
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
