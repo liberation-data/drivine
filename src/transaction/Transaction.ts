@@ -9,6 +9,8 @@ import { Connection } from '@/connection/Connection';
 import { TransactionOptions } from '@/transaction/Transactional';
 import { DrivineLogger } from '@/logger';
 import ShortUniqueId from "short-unique-id";
+import { Mutex } from "async-mutex";
+
 const shortId = new ShortUniqueId({ length: 7 });
 
 export class Transaction {
@@ -18,6 +20,7 @@ export class Transaction {
     readonly cursors: Cursor<any>[];
 
     private readonly logger = new DrivineLogger(Transaction.name);
+    private readonly connectionMutex = new Mutex();
     private _options: TransactionOptions;
 
     constructor(options: TransactionOptions, readonly contextHolder: TransactionContextHolder) {
@@ -112,17 +115,23 @@ export class Transaction {
     }
 
     private async connectionFor(database: string): Promise<Connection> {
-        if (!this.connectionRegistry.get(database)) {
-            const databaseRegistry = this.contextHolder.databaseRegistry;
-            const connectionProvider = databaseRegistry.connectionProvider(database);
-            if (!connectionProvider) {
-                throw new DrivineError(`There is no database registered with key: ${database}`);
+        const release = await this.connectionMutex.acquire();
+
+        try {
+            if (!this.connectionRegistry.get(database)) {
+                const databaseRegistry = this.contextHolder.databaseRegistry;
+                const connectionProvider = databaseRegistry.connectionProvider(database);
+                if (!connectionProvider) {
+                    throw new DrivineError(`There is no database registered with key: ${database}`);
+                }
+                const connection = await connectionProvider.connect();
+                this.connectionRegistry.set(database, connection);
+                await connection.startTransaction();
             }
-            const connection = await connectionProvider.connect();
-            this.connectionRegistry.set(database, connection);
-            await connection.startTransaction();
+            return this.connectionRegistry.get(database)!;
+        } finally {
+            release();
         }
-        return this.connectionRegistry.get(database)!;
     }
 
     private async releaseClient(error?: Error): Promise<void> {

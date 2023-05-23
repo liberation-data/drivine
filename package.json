@@ -63,6 +63,7 @@
         "reflect-metadata": ">= ^0.1.13"
     },
     "dependencies": {
+        "async-mutex": "^0.4.0",
         "cli-color": "^2.0.2",
         "dot-prop": "^7.2.0",
         "dotenv": "^16.0.3",
