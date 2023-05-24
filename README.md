@@ -97,18 +97,6 @@ Have a tutorial you'd like to share? [Get in touch](https://twitter.com/doctor_c
 
 ---------------------------------------
 
-## About
-
-Drivine was created by [Jasper Blues](https://www.linkedin.com/in/jasper-blues-7781638) (that's me), who is also 
-the creator of a popular iOS library called [Typhoon](https://github.com/appsquickly/typhoon), which is included in thousands of iOS apps including Audible.com, AMEX, Etihad Airlines, Singapore Airlines and others.
-
-This library is based on an architecture that was put in place for <a href="https://www.trevipay.com/">TreviPay</a> (then called MSTS), after the company signed several Fortune 100 clients and needed to scale their payment service. The result was not only an improved architecture, but response times improved dramatically - from just under 2000ms seconds to around 63ms. 
-
-The ideas were ruminated upon while building <a href="https://apps.apple.com/us/app/vampr/id1069819177">Vampr</a> - a growing social network for musicans that needs to serve hundreds of transactions per second. Clean architecture and performance are often competing concerns, so how would one go about getting the best of both worlds?
-
-Drivine shows that it is not necessary to forego clean architecture in order to achieve scaleability goals. 
-
-
 ## Feedback 
 
 #### I'm not sure how to do [xyz]
