@@ -71,9 +71,9 @@ export class Transaction {
         return Promise.resolve();
     }
 
-    async popContext(): Promise<void> {
+    async popContext(isRoot: boolean): Promise<void> {
         this.callStack.pop();
-        if (this.callStack.isEmpty()) {
+        if (isRoot) {
             this.logger.verbose(`Closing ${this.cursors.length} open cursors.`);
             await Promise.all(this.cursors.map(async (it) => it.close()));
             if (this.options.rollback) {
@@ -89,12 +89,9 @@ export class Transaction {
         }
     }
 
-    async popContextWithError(e: Error): Promise<void> {
-        if (this.callStack.isEmpty()) {
-            throw e;
-        }
+    async popContextWithError(e: Error, isRoot: boolean): Promise<void> {
         this.callStack.pop();
-        if (this.callStack.isEmpty()) {
+        if (isRoot) {
             this.logger.verbose(`Rolling back transaction: ${this.description} due to error: ${e.message}.`);
             await Promise.all(this.connections.map(async (it) => it.rollbackTransaction()));
             await this.releaseClient(e);

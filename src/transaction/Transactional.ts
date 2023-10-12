@@ -31,14 +31,14 @@ export async function runInTransaction(
     const options = optionsWithDefaults(transactionOptions);
     const contextHolder = TransactionContextHolder.getInstance();
     const transaction = contextHolder.currentTransaction || new Transaction(options, contextHolder);
-
+    const isRoot = transaction.callStack.isEmpty()
     try {
         await transaction.pushContext(fn.name || `[anonymous function]`);
         const result = await fn(...args);
-        await transaction.popContext();
+        await transaction.popContext(isRoot);
         return result;
     } catch (e) {
-        await transaction.popContextWithError(e as Error);
+        await transaction.popContextWithError(e as Error, isRoot);
         throw e;
     }
 }
