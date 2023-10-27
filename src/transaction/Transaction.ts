@@ -24,7 +24,7 @@ export class Transaction {
     private _options: TransactionOptions;
 
     constructor(options: TransactionOptions, readonly contextHolder: TransactionContextHolder) {
-        this.id = shortId();
+        this.id = shortId.rnd();
         this.callStack = new Stack<string>();
         this.connectionRegistry = new Map<string, Connection>();
         this.cursors = [];
