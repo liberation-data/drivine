@@ -3,9 +3,10 @@ import { Config, Driver } from 'neo4j-driver';
 import { Connection } from '@/connection/Connection';
 import { Neo4jConnection } from '@/connection/Neo4jConnection';
 import { Neo4jResultMapper } from '@/mapper/Neo4jResultMapper';
-const neo = require('neo4j-driver');
+import * as neo from 'neo4j-driver'
 import { DatabaseType } from '@/connection/DatabaseType';
 import ShortUniqueId from "short-unique-id";
+
 const shortId = new ShortUniqueId({ length: 7 });
 
 export class Neo4jConnectionProvider implements ConnectionProvider {
@@ -30,7 +31,7 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         const session = this.driver.session({
             database: this.database
         });
-        session['sessionId'] = shortId();
+        session['sessionId'] = shortId.rnd();
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());
         return Promise.resolve(connection);
     }
