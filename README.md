@@ -27,7 +27,7 @@ With regards to the second point on scaleability, let's break that down into com
 
 ## Quick Start
 
-Follow the **<a href="https://drivine.org/guide/#/quick-start">Quick Start</a>** section in our **<a href="https://drivine.org/guide/#/quick-start">User Guide</a>** or clone the **<a href="https://github.com/liberation-data/drivine-inspiration">sample app</a>** and use it as a starter template. 
+Follow the **<a href="https://github.com/liberation-data/drivine/wiki">Quick Start</a>** section in our **<a href="https://drivine.org/guide/#/quick-start">User Guide</a>** or clone the **<a href="https://github.com/liberation-data/drivine-inspiration">sample app</a>** and use it as a starter template. 
 
 
 Start creating repositories like the one below. 
