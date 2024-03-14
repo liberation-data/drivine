@@ -8,7 +8,9 @@ export class FinderOperations {
 
     async getOne<T>(spec: QuerySpecification<T>): Promise<T> {
         const results = await this.persistenceManager.query(spec);
-        assert(results.length === 1, `Expected exactly one result`);
+        if (results.length != 1) {
+            throw new DrivineError(`Expected exactly one result`, undefined, spec)
+        }
         return results[0];
     }
 

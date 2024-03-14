@@ -1,7 +1,9 @@
-import { classToPlain } from 'class-transformer';
+import { instanceToPlain } from 'class-transformer';
+import neo4j from "neo4j-driver";
 
 export interface PrimitivePropsOptions {
     classToPlain: boolean;
+    neo4jDateToDateTime: boolean;
 }
 
 export class ObjectUtils {
@@ -10,10 +12,13 @@ export class ObjectUtils {
      * @param object
      * @returns {{}}
      */
-    static primitiveProps = (object: any, options: PrimitivePropsOptions = { classToPlain: true }): any => {
+    static primitiveProps = (
+        object: any,
+        options: PrimitivePropsOptions = { classToPlain: true, neo4jDateToDateTime: true }
+    ): any => {
         const props = {};
         if (object) {
-            const source = options.classToPlain ? classToPlain(object) : object;
+            const source = options.classToPlain ? instanceToPlain(object) : object;
             const strings = Object.keys(source);
             strings.forEach((key: string) => {
                 const candidate = source[key];
@@ -24,6 +29,8 @@ export class ObjectUtils {
                     candidate.filter((it: any) => typeof it === 'object').length === 0
                 ) {
                     props[key] = candidate;
+                } else if (candidate != undefined && candidate instanceof Date && options.neo4jDateToDateTime) {
+                    props[key] = neo4j.types.DateTime.fromStandardDate(candidate);
                 } else if (candidate != undefined && typeof candidate !== 'object') {
                     props[key] = candidate;
                 }

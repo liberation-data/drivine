@@ -1,7 +1,6 @@
 import { Integer } from 'neo4j-driver';
 import { GraphResultMapper } from '@/mapper/GraphResultMapper';
-
-const neo4j = require('neo4j-driver');
+import neo4j from "neo4j-driver";
 
 export class Neo4jResultMapper extends GraphResultMapper {
     keys(record: any): string[] {
@@ -33,6 +32,12 @@ export class Neo4jResultMapper extends GraphResultMapper {
         }
         if (this.isRecord(val)) {
             return this.toNative(this.recordToNative(val));
+        }
+        if (val instanceof neo4j.types.Date) {
+            return val.toStandardDate();
+        }
+        if (val instanceof neo4j.types.DateTime) {
+            return val.toStandardDate();
         }
         if (typeof val === 'object') {
             return this.mapObj(this.toNative.bind(this), val);
