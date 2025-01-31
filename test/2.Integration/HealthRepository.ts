@@ -4,12 +4,11 @@ import { InjectPersistenceManager, PersistenceManager, QuerySpecification } from
 @Injectable()
 export class HealthRepository {
     constructor(
-        @InjectPersistenceManager() readonly persistenceManager: PersistenceManager,
-        @InjectPersistenceManager('POSTGRES') readonly pgManager: PersistenceManager
+        @InjectPersistenceManager() readonly persistenceManager: PersistenceManager
     ) {}
 
     async countAllMetros(): Promise<number> {
-        return this.persistenceManager.getOne<any>(new QuerySpecification(`match (n:Metro) return count(n) as count`));
+        return this.persistenceManager.getOne<any>(new QuerySpecification(`match (n) return count(n) as count`));
     }
 
     async filterTest(): Promise<number[]> {
@@ -18,9 +17,5 @@ export class HealthRepository {
                 (it: number) => it % 2 == 0
             )
         );
-    }
-
-    async pgTables(): Promise<any[]> {
-        return this.pgManager.query(new QuerySpecification(`select * from pg_catalog.pg_tables`));
     }
 }

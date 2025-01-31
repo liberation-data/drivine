@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "2.7.0",
+    "version": "2.7.1",
     "description": "Best and fastest graph database client for TypeScript / Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later or Apache-2.0",
@@ -59,11 +59,16 @@
         "@nestjs/platform-express": ">= 6 <= 10",
         "class-transformer": ">= ^0.5.1",
         "class-validator": ">= 0.14.0",
-        "neo4j-driver": ">= ^5.4.0",
+        "neo4j-driver": "^5.27.0",
         "reflect-metadata": ">= ^0.1.13"
     },
     "dependencies": {
+        "@aws-crypto/sha256-js": "^5.2.0",
+        "@aws-sdk/credential-provider-node": "^3.738.0",
+        "@aws-sdk/protocol-http": "^3.370.0",
+        "@aws-sdk/signature-v4": "^3.370.0",
         "async-mutex": "^0.4.0",
+        "aws-sdk": "^2.1692.0",
         "cli-color": "^2.0.3",
         "dot-prop": "^8.0.2",
         "dotenv": "^16.3.1",

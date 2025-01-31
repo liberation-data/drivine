@@ -12,7 +12,7 @@ export class StatementLogger {
         this.logger.verbose({
             ...query,
             sessionId: this.sessionId,
-            elapsed: `${uSec} µsec`
+            elapsed: `${uSec} µsec = ${uSec / 1000} ms`,
         });
     }
 }

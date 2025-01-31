@@ -7,6 +7,7 @@ import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionP
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
+import { NeptuneConnectionProvider } from '@/connection/NeptuneConnectionProvider';
 
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
@@ -110,7 +111,10 @@ export class ConnectionProviderBuilder {
             this.registry.register(this.buildAgensGraphAndPostgresProvider(name));
         } else if (this._type === DatabaseType.NEO4J) {
             this.registry.register(this.buildNeo4jProvider(name));
-        } else {
+        } else if (this._type === DatabaseType.NEPTUNE) {
+            this.registry.register(this.buildNeptuneProvider(name));
+        }
+        else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
         return this.registry.connectionProvider(name)!;
@@ -168,4 +172,35 @@ export class ConnectionProviderBuilder {
             }
         );
     }
+
+    private buildNeptuneProvider(name: string): ConnectionProvider {
+        if (this._userName) {
+            this.logger.warn(`userName is not supported by Neptune`);
+        }
+        if (this._password) {
+            this.logger.warn(`password is not supported by Neptune`);
+        }
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by Neptune`);
+        }
+        if (!this._port) {
+            this._port = 8182;
+        }
+        if (this._port !== 8182) {
+            this.logger.warn(`${this._port} is a non-standard port for Neptune`);
+        }
+
+        return new NeptuneConnectionProvider(
+            name,
+            this._type,
+            this._host,
+            this._port,
+            this._protocol,
+            {
+                connectionTimeout: this._connectionTimeout
+            }
+        );
+    }
+
+
 }

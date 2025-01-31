@@ -12,9 +12,7 @@ describe('HealthRepository', () => {
             imports: [
                 DrivineModule.withOptions(<DrivineModuleOptions>{
                     connectionProviders: [
-                        DatabaseRegistry.buildOrResolveFromEnv(),
-                        DatabaseRegistry.buildOrResolveFromEnv('TRAFFIC'),
-                        DatabaseRegistry.buildOrResolveFromEnv('POSTGRES')
+                        DatabaseRegistry.buildOrResolveFromEnv()
                     ]
                 })
             ],
