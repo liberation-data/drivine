@@ -43,6 +43,7 @@ export class SaveStatementBuilder {
     /** The stamped related fragments, each read before and after the writes: see readStamps. */
     private readonly stamped: StampedNodes[] = [];
     private options: SaveOptions<any> = {};
+    private createOnly = false;
 
     /** What every WITH after the root carries: the root, the stamp it was found with, and related stamps read. */
     private get carry(): string {
@@ -51,9 +52,14 @@ export class SaveStatementBuilder {
 
     constructor(private readonly grammar: CypherGrammar) {}
 
-    build(target: TargetModel, object: any, options: SaveOptions<any> = {}): SaveStatement {
+    /**
+     * @param createOnly write only if the root is not there: a root that is, or that another writer makes at the same
+     * moment, stops the statement before it writes anything, and it returns no row.
+     */
+    build(target: TargetModel, object: any, options: SaveOptions<any> = {}, createOnly: boolean = false): SaveStatement {
         this.bindings._stamp = Stamps.fresh();
         this.options = options;
+        this.createOnly = createOnly;
         if (target.kind === 'NODE_FRAGMENT') {
             if (options.replace === 'all' || options.replace?.length) {
                 throw new DrivineError(`replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`);
@@ -153,6 +159,21 @@ export class SaveStatementBuilder {
         const id = `{${quoteName(idProperty(model))}: $root.id}`;
         const write = [`SET ${restamp('n', changes('n', '$root.props'))}`, 'SET n += $root.props'];
         const expected = model.stampField ? object[model.stampField] : undefined;
+        if (this.createOnly) {
+            if (expected != null) {
+                throw new DrivineError(
+                    `A ${model.type.name} that carries a stamp was loaded, and create makes a node that is not there. Save it, or update it.`
+                );
+            }
+            return [
+                `MERGE (n${labels} ${id}) ON CREATE SET n.${MADE} = true`,
+                // Found rather than made: there already, or made by another writer at the same moment.
+                `WITH n WHERE n.${MADE} IS NOT NULL`,
+                `WITH n, '' AS _found`,
+                ...write,
+                `REMOVE n.${MADE}`
+            ].join('\n');
+        }
         if (expected == null) {
             return [
                 `MERGE (n${labels} ${id}) ON CREATE SET n.${MADE} = true`,

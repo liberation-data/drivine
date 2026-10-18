@@ -2,9 +2,11 @@ import { GraphBackend } from '@/backend/GraphBackend';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
-import { TargetModel } from '@/model/RelationshipModel';
+import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { NullPolicy } from '@/manager/NullPolicy';
+import { ObjectUtils } from '@/utils/ObjectUtils';
 import { whenNotContended } from '@/manager/Contention';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { StaleObjectException } from '@/manager/StaleObjectException';
@@ -21,6 +23,9 @@ import { ClassType } from '@/query/QuerySpecification';
  * A filter is a Cypher predicate over the node, which statements call `n`: `"n.name STARTS WITH $prefix"`. Values
  * go in `bindings`, never into the predicate's text.
  */
+/** How many times `update` loads and applies its change before a stale save is thrown. */
+export const UPDATE_ATTEMPTS = 3;
+
 /** The row a save statement returns: see SaveStatement. */
 interface SaveResult {
     found: string;
@@ -92,7 +97,119 @@ export class StatelessGraphObjectManager {
      * after a pause. Inside one, it fails, and the transaction's owner decides.
      */
     async save<T extends object>(object: T, options: SaveOptions<T> = {}): Promise<T> {
-        const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options);
+        return (await this.write(object, options, false))!;
+    }
+
+    /**
+     * Makes the object's node only if no node has its id, in one statement, as `save` would make it. When one has,
+     * nothing at all is written and undefined is returned: it is then for `update` to merge into what is there.
+     * An object that carries a stamp was loaded, and is refused.
+     */
+    async create<T extends object>(object: T): Promise<T | undefined> {
+        return this.write(object, {}, true);
+    }
+
+    /**
+     * Loads the object, applies `change`, and writes what the change altered: the root's fields that differ, a field
+     * set to null cleared, and for a view each relationship list that lost an item replaced (lists that only grew are
+     * added to). The save is checked against the stamp that was loaded; if the node changed meanwhile, it is loaded
+     * again and the change applied again, `attempts` times in all, then StaleObjectException is thrown. Without a
+     * `@NodeStamp` field a change by another writer is not noticed.
+     *
+     * `change` may change the object it is given or return a copy, but not give it another id or class. Returns the
+     * saved object, or undefined when there is no such node or it is deleted meanwhile. A related node is written
+     * whole, as `save` writes it.
+     */
+    async update<T extends object>(
+        type: ClassType<T>,
+        id: unknown,
+        change: (loaded: T) => T | void | Promise<T | void>,
+        attempts: number = UPDATE_ATTEMPTS
+    ): Promise<T | undefined> {
+        const target = this.modelOf(type);
+        for (let attempt = 1; ; attempt++) {
+            const loaded = await this.load(type, id);
+            if (loaded === undefined) {
+                return undefined;
+            }
+            const before = ObjectUtils.deepCopy(loaded);
+            const changed = ((await change(loaded)) ?? loaded) as T;
+            const options = this.changeOf(target, before, changed);
+            try {
+                return await this.write(changed, options, false);
+            } catch (failure) {
+                if (!(failure instanceof StaleObjectException) || failure.id !== id || attempt >= attempts) {
+                    throw failure;
+                }
+                if (failure.deleted) {
+                    return undefined;
+                }
+            }
+        }
+    }
+
+
+    /**
+     * Deletes the object whose root has the id, with the root's relationships. A view's root is deleted only if it
+     * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
+     * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
+     */
+    async delete(
+        type: ClassType,
+        id: unknown,
+        options: { where?: string; bindings?: Record<string, any>; cascade?: CascadeType } = {}
+    ): Promise<number> {
+        const statement = this.backend.delete(this.modelOf(type), options.where, options.cascade);
+        return this.persistenceManager.getOne<number>(statement.spec({ ...options.bindings, id }));
+    }
+
+    /**
+     * Deletes every object a load with the same filter would find: its root, with the root's relationships. Without a
+     * filter, every one. Returns the number deleted.
+     */
+    async deleteAll(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
+        return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
+    }
+
+    /**
+     * What a change altered, as save options. The stamp the object was loaded with is put back, so the save is checked
+     * against it whatever the change did with the object's.
+     */
+    private changeOf(target: TargetModel, before: any, changed: any): SaveOptions<any> {
+        if (changed?.constructor !== before.constructor) {
+            throw new DrivineError(`An update of a ${before.constructor.name} must leave it one, not a ${changed?.constructor?.name}.`);
+        }
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const [rootBefore, rootAfter] =
+            target.kind === 'GRAPH_VIEW' ? [before[target.model.rootField], changed[target.model.rootField]] : [before, changed];
+        if (rootAfter?.[root.nodeIdField!] !== rootBefore[root.nodeIdField!]) {
+            throw new DrivineError(`An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`);
+        }
+        if (root.stampField) {
+            rootAfter[root.stampField] = rootBefore[root.stampField];
+        }
+        const ignored = new Set([root.nodeIdField, root.stampField, ...root.transientFields]);
+        const fields = new Set([...Object.keys(rootBefore), ...Object.keys(rootAfter)]);
+        const only = [...fields].filter((it) => !ignored.has(it) && !ObjectUtils.deepEqual(rootBefore[it], rootAfter[it]));
+        if (only.some((it) => rootAfter[it] == null)) {
+            for (const it of only) {
+                rootAfter[it] = rootAfter[it] ?? null;
+            }
+        }
+        const replace =
+            target.kind === 'GRAPH_VIEW'
+                ? target.model.relationships
+                      .filter((rel) => {
+                          const after = new Set(relatedIds(rel, changed[rel.field]));
+                          return relatedIds(rel, before[rel.field]).some((it) => !after.has(it));
+                      })
+                      .map((rel) => rel.field)
+                : [];
+        return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}) };
+    }
+
+    private async write<T extends object>(object: T, options: SaveOptions<T>, createOnly: boolean): Promise<T | undefined> {
+        const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options, createOnly);
         const run = async (): Promise<SaveResult[]> => this.persistenceManager.query<SaveResult>(statement.spec());
         let rows: SaveResult[];
         try {
@@ -115,6 +232,9 @@ export class StatelessGraphObjectManager {
             throw failure;
         }
         if (!rows.length) {
+            if (createOnly) {
+                return undefined;
+            }
             throw await this.staleObject(statement);
         }
         const result: SaveResult = rows[0];
@@ -127,28 +247,6 @@ export class StatelessGraphObjectManager {
             );
         }
         return object;
-    }
-
-    /**
-     * Deletes the object whose root has the id, with the root's relationships. A view's root is deleted only if it
-     * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
-     * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
-     */
-    async delete(
-        type: ClassType,
-        id: unknown,
-        options: { where?: string; bindings?: Record<string, any>; cascade?: CascadeType } = {}
-    ): Promise<number> {
-        const statement = this.backend.delete(this.modelOf(type), options.where, options.cascade);
-        return this.persistenceManager.getOne<number>(statement.spec({ ...options.bindings, id }));
-    }
-
-    /**
-     * Deletes every object a load with the same filter would find: its root, with the root's relationships. Without a
-     * filter, every one. Returns the number deleted.
-     */
-    async deleteAll(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
-        return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
     }
 
     /**
@@ -211,4 +309,16 @@ export class StatelessGraphObjectManager {
                 throw new DrivineError(`${type.name} is not a @NodeFragment or @GraphView.`);
         }
     }
+}
+
+/** The ids of the nodes a relationship field's value leads to. */
+function relatedIds(rel: RelationshipModel, value: any): any[] {
+    const related = rel.related;
+    const into = related.kind === 'RELATIONSHIP_FRAGMENT' ? related.model.target : related;
+    const root = into.kind === 'GRAPH_VIEW' ? into.model.root : into.model;
+    return [value ?? []].flat().map((item: any) => {
+        const node = related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[related.model.targetField] : item;
+        const fragment = into.kind === 'GRAPH_VIEW' ? node?.[into.model.rootField] : node;
+        return fragment?.[root.nodeIdField!];
+    });
 }

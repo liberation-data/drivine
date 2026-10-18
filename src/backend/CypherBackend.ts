@@ -96,8 +96,8 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
-    save(target: TargetModel, object: any, options?: SaveOptions<any>): SaveStatement {
-        return new SaveStatementBuilder(this.grammar).build(target, object, options);
+    save(target: TargetModel, object: any, options?: SaveOptions<any>, createOnly?: boolean): SaveStatement {
+        return new SaveStatementBuilder(this.grammar).build(target, object, options, createOnly);
     }
 
     foundStamp(model: FragmentModel): GraphStatement {

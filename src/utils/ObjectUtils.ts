@@ -38,4 +38,44 @@ export class ObjectUtils {
         }
         return props;
     };
+
+    /**
+     * A deep copy of plain data and class instances, each copy keeping its prototype. Dates are copied; functions and
+     * other values are shared. A value met twice is copied once.
+     */
+    static deepCopy<T>(value: T, seen: Map<any, any> = new Map()): T {
+        if (value === null || typeof value !== 'object') {
+            return value;
+        }
+        if (value instanceof Date) {
+            return new Date(value.getTime()) as any;
+        }
+        if (seen.has(value)) {
+            return seen.get(value);
+        }
+        const copy: any = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
+        seen.set(value, copy);
+        for (const key of Object.keys(value)) {
+            copy[key] = ObjectUtils.deepCopy((value as any)[key], seen);
+        }
+        return copy;
+    }
+
+    /** Whether two values hold the same data: equal primitives, dates of one time, or arrays and objects alike. */
+    static deepEqual(a: any, b: any): boolean {
+        if (a === b) {
+            return true;
+        }
+        if (a instanceof Date && b instanceof Date) {
+            return a.getTime() === b.getTime();
+        }
+        if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+            return false;
+        }
+        if (Array.isArray(a) !== Array.isArray(b)) {
+            return false;
+        }
+        const keys = Object.keys(a);
+        return keys.length === Object.keys(b).length && keys.every((key) => ObjectUtils.deepEqual(a[key], b[key]));
+    }
 }

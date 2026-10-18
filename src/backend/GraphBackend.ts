@@ -42,7 +42,7 @@ export interface GraphBackend {
     deleteAll(target: TargetModel, where?: string): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
-    save(target: TargetModel, object: any, options?: SaveOptions<any>): SaveStatement;
+    save(target: TargetModel, object: any, options?: SaveOptions<any>, createOnly?: boolean): SaveStatement;
 
     /** The stamp the node with id `$id` carries ('-' for none); no row when there is no such node. */
     foundStamp(model: FragmentModel): GraphStatement;

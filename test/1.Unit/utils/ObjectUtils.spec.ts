@@ -43,3 +43,41 @@ describe('ObjectUtils::primitiveProps', () => {
         expect(props.citizenShipDate).toBeInstanceOf(neo4j.types.DateTime)
     });
 });
+
+describe('ObjectUtils deepCopy and deepEqual', () => {
+    class Point {
+        constructor(
+            public x: number,
+            public at?: Date
+        ) {}
+        norm(): number {
+            return Math.abs(this.x);
+        }
+    }
+
+    it('should copy deeply, keeping prototypes and copying dates', () => {
+        const at = new Date(0);
+        const source = { p: new Point(-2, at), list: [new Point(1)] };
+        const copy = ObjectUtils.deepCopy(source);
+        expect(copy).not.toBe(source);
+        expect(copy.p).toBeInstanceOf(Point);
+        expect(copy.p.norm()).toEqual(2);
+        expect(copy.p.at).not.toBe(at);
+        expect(copy.p.at!.getTime()).toEqual(0);
+        copy.list[0].x = 5;
+        expect(source.list[0].x).toEqual(1);
+    });
+
+    it('should copy a value met twice once', () => {
+        const shared = new Point(1);
+        const copy = ObjectUtils.deepCopy({ a: shared, b: shared });
+        expect(copy.a).toBe(copy.b);
+    });
+
+    it('should compare data deeply', () => {
+        expect(ObjectUtils.deepEqual([1, { a: new Date(5) }], [1, { a: new Date(5) }])).toBe(true);
+        expect(ObjectUtils.deepEqual({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+        expect(ObjectUtils.deepEqual([1, 2], { 0: 1, 1: 2 })).toBe(false);
+        expect(ObjectUtils.deepEqual(null, undefined)).toBe(false);
+    });
+});
