@@ -159,6 +159,15 @@ export class ModelRegistry {
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
             stampField,
             propertyBags: this.propertyBags(type, properties),
+            vectorFields: new Map(
+                [...properties]
+                    .map(([field, it]) => [field, it.schema?.find((declared) => declared.kind === 'VECTOR')] as const)
+                    .filter(([, declared]) => declared)
+                    .map(([field, declared]) => [
+                        field,
+                        { property: properties.get(field)!.graphProperty ?? field, similarity: declared!.similarity ?? 'COSINE' }
+                    ])
+            ),
             nodeLabels: this.nodeLabels(type, properties, [...labels]),
             ...this.fieldMapping(properties),
             graphProperties

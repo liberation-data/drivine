@@ -6,6 +6,8 @@ import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { Stamps } from '@/model/Stamps';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { CypherGrammar } from '@/backend/CypherGrammar';
+import { splitVectors, vectorClauses } from '@/backend/VectorWrites';
 
 /** The fragments of one class in a batch. */
 export interface FragmentGroup {
@@ -20,14 +22,14 @@ export interface FragmentGroup {
  * of `{id, stamp}`, for the stamps to be handed back.
  */
 export class FragmentBatchStatement {
-    static build(groups: FragmentGroup[], options: SaveOptions<any>): GraphStatement {
+    static build(groups: FragmentGroup[], options: SaveOptions<any>, grammar: CypherGrammar): GraphStatement {
         const bindings: Record<string, any> = { _stamp: Stamps.fresh() };
         const carried: string[] = ['_'];
         const parts = ['WITH 1 AS _'];
         groups.forEach((group, i) => {
             const rows = group.objects.map((it) => ({
                 id: idOf(group.model, it),
-                props: objectProps(group.model, it, options)
+                ...splitVectors(group.model, objectProps(group.model, it, options))
             }));
             bindings[`rows${i}`] = rows;
             bindings[`ids${i}`] = rows.map((it) => it.id);
@@ -36,12 +38,14 @@ export class FragmentBatchStatement {
         });
         groups.forEach((group, i) => {
             const id = quoteName(idProperty(group.model));
+            const vectors = vectorClauses(group.model, grammar, 'n', 'row.vectors');
+            const changed = [changes('n', 'row.props'), ...vectors.changes].join(' OR ');
             parts.push(
                 `FOREACH (row IN $rows${i} | MERGE (n${labelExpression(group.model.labels)} {${id}: row.id}) ` +
                     `SET n.${LOCK} = true REMOVE n.${LOCK} SET ${restamp(
                         'n',
-                        changes('n', 'row.props')
-                    )} SET n += row.props)`
+                        changed
+                    )} SET n += row.props ${vectors.sets.join(' ')})`
             );
         });
         groups.forEach((group, i) => {

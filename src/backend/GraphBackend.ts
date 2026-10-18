@@ -1,4 +1,5 @@
 import { FragmentModel } from '@/model/FragmentModel';
+import { CypherGrammar } from '@/backend/CypherGrammar';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
@@ -13,7 +14,23 @@ import { GraphStatement } from '@/backend/GraphStatement';
  * A load returns one row per object, each a single map: `{ props, labels }` for a fragment, and
  * `{ root, rels }` for a view (see ViewProjector).
  */
+export interface NearestSearch {
+    /** The label whose vector index is searched: the fragment's first, or a partition's. */
+    label: string;
+    property: string;
+    similarity: 'COSINE' | 'EUCLIDEAN';
+    where?: string;
+    threshold?: boolean;
+    /** How many the index is asked for. Written into the statement: an engine takes only an integer, and a JS number is sent as a float. */
+    k: number;
+    /** How many are kept after the filter, if any are trimmed. */
+    limit?: number;
+    depth?: Record<string, number>;
+}
+
 export interface GraphBackend {
+    readonly grammar: CypherGrammar;
+
     /** Loads every node of the fragment, optionally filtered by a predicate over `n`. */
     loadAllFragments(model: FragmentModel, where?: string): GraphStatement;
 
@@ -41,6 +58,13 @@ export interface GraphBackend {
 
     /** Deletes every root a load would find, with its relationships. Returns the number deleted. */
     deleteAll(target: TargetModel, where?: string): GraphStatement;
+
+    /**
+     * Loads the `$_k` nodes nearest `$_vector` by the vector index over a property, as fragments or views, each with its
+     * score: `{value, score}`, nearest first. `threshold`, `where` and the view's requirements filter after the search;
+     * `limit` trims after the filter.
+     */
+    nearest(target: TargetModel, search: NearestSearch): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
     save(

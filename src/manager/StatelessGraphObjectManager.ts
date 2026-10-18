@@ -5,8 +5,10 @@ import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMap
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { NearestOptions, Scored } from '@/manager/Scored';
 import { PatchOptions, PatchResult } from '@/manager/PatchResult';
 import { PatchStatements } from '@/backend/PatchStatements';
+import { splitVectors } from '@/backend/VectorWrites';
 import { propsOf } from '@/backend/SaveStatementBuilder';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { ObjectUtils } from '@/utils/ObjectUtils';
@@ -202,6 +204,44 @@ export class StatelessGraphObjectManager {
     }
 
     /**
+     * The nodes nearest `vector` by the fragment's @VectorIndex field (a view's root's), as fragments or views, each with
+     * its score, nearest first. A view's required relationships, `threshold` and `where` filter after the search, so a
+     * search can return fewer than `topK`: `searchK` widens it.
+     */
+    async loadNearest<T>(type: ClassRef<T>, vector: number[], options: NearestOptions): Promise<Scored<T>[]> {
+        const target = this.modelOf(type);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const { property, similarity }: { property: string; similarity: 'COSINE' | 'EUCLIDEAN' } = this.searchedVector(
+            root,
+            options
+        );
+        const statement = this.backend.nearest(target, {
+            label: options.partitionLabel ?? root.labels[0],
+            property,
+            similarity,
+            where: options.where,
+            threshold: options.threshold !== undefined,
+            k: options.searchK ?? options.topK,
+            limit: options.searchK !== undefined ? options.topK : undefined,
+            depth: options.depth
+        });
+        const rows = await this.persistenceManager.query<{ value: any; score: number }>(
+            statement.spec({
+                ...options.bindings,
+                _vector: vector,
+                _threshold: options.threshold
+            })
+        );
+        return rows.map((row) => ({
+            value:
+                target.kind === 'GRAPH_VIEW'
+                    ? this.mapper.view<T>(target.model, row.value)
+                    : this.mapper.fragment<T>(target.model, row.value),
+            score: row.score
+        }));
+    }
+
+    /**
      * Writes the object as one statement: its root, merged on its id, with every property that is not null, and for a
      * view each related node and the relationship to it. Relationships are added, never removed, except those of the
      * fields named in `options.replace`. Returns the object.
@@ -277,9 +317,12 @@ export class StatelessGraphObjectManager {
             set[root.graphProperties.get(field) ?? field] =
                 value != null && root.jsonPacked.has(field) ? JSON.stringify(value) : value;
         }
-        const statement = PatchStatements.one(root, options.where);
+        const statement = PatchStatements.one(root, this.backend.grammar, options.where);
+        const split = splitVectors(root, set);
         return this.whenUncontended(async () =>
-            this.persistenceManager.getOne<PatchResult>(statement.spec({ ...options.bindings, id, set }))
+            this.persistenceManager.getOne<PatchResult>(
+                statement.spec({ ...options.bindings, id, set: split.props, vectors: split.vectors })
+            )
         );
     }
 
@@ -326,7 +369,7 @@ export class StatelessGraphObjectManager {
                         root.nodeLabels?.field !== field
                 )
             );
-            return { id, props: propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR) };
+            return { id, ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR)) };
         });
         const ids = rows.map((it) => it.id);
         if (new Set(ids).size !== ids.length) {
@@ -341,7 +384,7 @@ export class StatelessGraphObjectManager {
             const chunk = sorted.slice(start, start + PATCH_ROWS);
             const found = await this.whenUncontended(async () =>
                 this.persistenceManager.query<PatchResult & { id: any }>(
-                    PatchStatements.many(root).spec({ rows: chunk })
+                    PatchStatements.many(root, this.backend.grammar).spec({ rows: chunk })
                 )
             );
             found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
@@ -381,7 +424,10 @@ export class StatelessGraphObjectManager {
         }
         const statements: BatchEntry<T>[] = [];
         for (const chunk of chunked([...fragments.values()], BATCH_ROWS)) {
-            statements.push({ spec: FragmentBatchStatement.build(chunk, options), groups: chunk });
+            statements.push({
+                spec: FragmentBatchStatement.build(chunk, options, this.backend.grammar),
+                groups: chunk
+            });
         }
         for (const view of views) {
             const statement = this.backend.save(
@@ -590,6 +636,37 @@ export class StatelessGraphObjectManager {
             throw new DrivineError(`No database is registered under ${this.persistenceManager.database}.`);
         }
         return new SchemaExecutor(provider);
+    }
+
+    /** The @VectorIndex field a nearest search uses, with its options checked. */
+    private searchedVector(
+        root: ReturnType<ModelRegistry['fragment']>,
+        options: NearestOptions
+    ): { property: string; similarity: 'COSINE' | 'EUCLIDEAN' } {
+        const fields = [...root.vectorFields.entries()];
+        const chosen = options.property
+            ? fields.find(([field]) => field === options.property)
+            : fields.length === 1
+            ? fields[0]
+            : undefined;
+        if (!chosen) {
+            throw new DrivineError(
+                fields.length
+                    ? `${root.type.name} declares ${fields.length} @VectorIndex fields; name the one to search with property.`
+                    : `${root.type.name} declares no @VectorIndex field${
+                          options.property ? ` ${options.property}` : ''
+                      } to search.`
+            );
+        }
+        if (!Number.isInteger(options.topK) || options.topK < 1) {
+            throw new DrivineError('topK must be a whole number of at least 1.');
+        }
+        if (options.searchK !== undefined && (!Number.isInteger(options.searchK) || options.searchK < options.topK)) {
+            throw new DrivineError(
+                `searchK must be a whole number of at least topK (${options.topK}): a narrower search only loses hits.`
+            );
+        }
+        return chosen[1];
     }
 
     private assertPatchable(root: ReturnType<ModelRegistry['fragment']>, fields: string[]): void {

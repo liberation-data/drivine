@@ -1,4 +1,4 @@
-import { GraphBackend } from '@/backend/GraphBackend';
+import { GraphBackend, NearestSearch } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
@@ -106,6 +106,39 @@ export class CypherBackend implements GraphBackend {
                 this.rootWhere(target, where),
                 `\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`
             ].join('')
+        );
+    }
+
+    nearest(target: TargetModel, search: NearestSearch): GraphStatement {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const { call, score }: { call: string; score: string } = this.grammar.vectorSearch(
+            search.label,
+            search.property,
+            search.similarity
+        );
+        const filters = [
+            `${NODE_ALIAS}${labelExpression(root.labels)}`,
+            ...(search.threshold ? ['_score >= $_threshold'] : []),
+            ...(search.where ? [`(${search.where})`] : []),
+            ...(target.kind === 'GRAPH_VIEW'
+                ? new ViewProjector(this.grammar, search.depth).requirements(target.model, NODE_ALIAS)
+                : [])
+        ];
+        const projection =
+            target.kind === 'GRAPH_VIEW'
+                ? new ViewProjector(this.grammar, search.depth).project(target.model, NODE_ALIAS)
+                : { calls: [], expression: fragment(NODE_ALIAS) };
+        return new GraphStatement(
+            [
+                call.replace('$_k', String(search.k)),
+                `WITH ${NODE_ALIAS}, ${score} AS _score`,
+                // A MATCH of the bound node holds the filter: Memgraph takes no existence check in a WITH's WHERE.
+                `MATCH (${NODE_ALIAS}) WHERE ${filters.join(' AND ')}`,
+                ...projection.calls,
+                `RETURN {value: ${projection.expression}, score: _score} AS result`,
+                'ORDER BY result.score DESC',
+                ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
+            ].join('\n')
         );
     }
 

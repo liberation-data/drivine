@@ -6,6 +6,8 @@ import { SaveStatement } from '@/backend/SaveStatement';
  */
 export class StaleInBatch extends Error {
     constructor(readonly statement: SaveStatement) {
-        super(`A checked save of a batch found ${statement.root.type.name} '${String(statement.bindings.root.id)}' stale.`);
+        super(
+            `A checked save of a batch found ${statement.root.type.name} '${String(statement.bindings.root.id)}' stale.`
+        );
     }
 }

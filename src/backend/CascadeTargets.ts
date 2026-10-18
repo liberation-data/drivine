@@ -32,7 +32,8 @@ export class CascadeTargets {
             const into = target(rel);
             const hops = into.kind === 'NODE_FRAGMENT' && rel.maxDepth > 1 ? `*1..${rel.maxDepth}` : '';
             const extended = `${chain}${hop(rel, hops)}(${alias}${labelExpression(labelsOf(into))})`;
-            const own = into.kind === 'GRAPH_VIEW' ? new ViewProjector(this.grammar).requirements(into.model, alias) : [];
+            const own =
+                into.kind === 'GRAPH_VIEW' ? new ViewProjector(this.grammar).requirements(into.model, alias) : [];
             const all = [...conditions, ...own];
             const where = all.length ? ` WHERE ${all.join(' AND ')}` : '';
             const here = `[${extended}${where} | ${alias}]`;

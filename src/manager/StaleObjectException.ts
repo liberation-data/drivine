@@ -19,8 +19,12 @@ export class StaleObjectException extends DrivineError {
             deleted
                 ? `${type.name} '${String(id)}' was deleted since it was loaded.`
                 : foundStamp == null
-                  ? `${type.name} '${String(id)}' may have changed since it was loaded: another writer held it each time the save was tried.`
-                  : `${type.name} '${String(id)}' changed since it was loaded: expected stamp ${expectedStamp}, found ${foundStamp}.`,
+                ? `${type.name} '${String(
+                      id
+                  )}' may have changed since it was loaded: another writer held it each time the save was tried.`
+                : `${type.name} '${String(
+                      id
+                  )}' changed since it was loaded: expected stamp ${expectedStamp}, found ${foundStamp}.`,
             cause
         );
         this.name = 'StaleObjectException';

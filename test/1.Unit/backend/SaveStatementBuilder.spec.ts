@@ -40,7 +40,7 @@ describe('SaveStatementBuilder', () => {
         expect(statement.text).toMatch(/^MERGE \(n:Person \{id: \$root.id\}\) ON CREATE SET/);
         expect(statement.text).toContain('SET n += $root.props');
         expect(statement.text).toMatch(/RETURN {found: _found, now: n.`__drivine.stamp`} AS result$/);
-        expect(statement.bindings.root).toEqual({ id: 'p', props: { id: 'p' } });
+        expect(statement.bindings.root).toEqual({ id: 'p', props: { id: 'p' }, vectors: {} });
         expect(statement.bindings._stamp).toMatch(/^[0-9a-f]{16}:[0-9a-f]{16}$/);
         expect(statement.expectedStamp).toBeUndefined();
     });
@@ -73,8 +73,8 @@ describe('SaveStatementBuilder', () => {
         );
         expect(two.text).toEqual(one.text);
         expect(two.bindings.rows1).toEqual([
-            { id: 'a', props: { id: 'a' } },
-            { id: 'b', props: { id: 'b' } }
+            { id: 'a', props: { id: 'a' }, vectors: {} },
+            { id: 'b', props: { id: 'b' }, vectors: {} }
         ]);
     });
 });

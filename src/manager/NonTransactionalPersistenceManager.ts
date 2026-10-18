@@ -27,7 +27,7 @@ export class NonTransactionalPersistenceManager implements PersistenceManager {
             await connection.release();
             return result;
         } catch (e) {
-            await connection.release(e as Error)
+            await connection.release(e as Error);
             throw DrivineError.withRootCause(e as Error, spec);
         }
     }

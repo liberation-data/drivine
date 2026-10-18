@@ -4,6 +4,8 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { Stamps } from '@/model/Stamps';
+import { CypherGrammar } from '@/backend/CypherGrammar';
+import { vectorClauses } from '@/backend/VectorWrites';
 
 /**
  * Statements that write named properties of nodes found by id, making none. Each node found is locked, then found
@@ -13,7 +15,7 @@ import { Stamps } from '@/model/Stamps';
  */
 export class PatchStatements {
     /** Patches one node, the one with id `$id`, setting `$set`. Returns `{found, applied, changed}`. */
-    static one(model: FragmentModel, where?: string): GraphStatement {
+    static one(model: FragmentModel, grammar: CypherGrammar, where?: string): GraphStatement {
         const labels = labelExpression(model.labels);
         const id = `{${quoteName(idProperty(model))}: $id}`;
         return new GraphStatement(
@@ -22,7 +24,7 @@ export class PatchStatements {
                 `SET f.${LOCK} = true REMOVE f.${LOCK}`,
                 'WITH f',
                 `OPTIONAL MATCH (n${labels} ${id})${where ? ` WHERE ${where}` : ''}`,
-                ...PatchStatements.write('$set'),
+                ...PatchStatements.write(model, grammar, '$set', '$vectors'),
                 'RETURN {found: f IS NOT NULL, applied: n IS NOT NULL, changed: changed} AS result'
             ].join('\n'),
             { _stamp: Stamps.fresh() }
@@ -30,7 +32,7 @@ export class PatchStatements {
     }
 
     /** Patches a node per row of `$rows`, `{id, props}`. Returns `{id, found, changed}` per row. */
-    static many(model: FragmentModel): GraphStatement {
+    static many(model: FragmentModel, grammar: CypherGrammar): GraphStatement {
         const labels = labelExpression(model.labels);
         return new GraphStatement(
             [
@@ -38,19 +40,33 @@ export class PatchStatements {
                 `OPTIONAL MATCH (f${labels} {${quoteName(idProperty(model))}: row.id})`,
                 `SET f.${LOCK} = true REMOVE f.${LOCK}`,
                 'WITH row, f, f AS n',
-                ...PatchStatements.write('row.props', 'row'),
+                ...PatchStatements.write(model, grammar, 'row.props', 'row.vectors', 'row'),
                 'RETURN {id: row.id, found: f IS NOT NULL, changed: changed} AS result'
             ].join('\n'),
             { _stamp: Stamps.fresh() }
         );
     }
 
-    private static write(props: string, carry?: string): string[] {
+    /** Writes `props`, and the vectors `vectors` holds in the engine's vector form, where a value differs. */
+    private static write(
+        model: FragmentModel,
+        grammar: CypherGrammar,
+        props: string,
+        vectors: string,
+        carry?: string
+    ): string[] {
         const kept = carry ? `${carry}, ` : '';
+        const changed = [changes('n', props), ...vectorClauses(model, grammar, 'n', vectors).changes].join(' OR ');
+        const sets = vectorClauses(model, grammar, 'x', vectors).sets.join(' ');
         return [
-            `WITH ${kept}f, n, CASE WHEN n IS NULL THEN false ELSE ${changes('n', props)} END AS changed`,
-            `FOREACH (x IN CASE WHEN changed THEN [n] ELSE [] END | SET ${restamp('x', 'true')} SET x += ${props})`,
-            `FOREACH (x IN CASE WHEN f IS NOT NULL AND ${twoTokensOf('f')} IS NULL THEN [f] ELSE [] END | SET x.${STAMP} = ${OFFERED})`
+            `WITH ${kept}f, n, CASE WHEN n IS NULL THEN false ELSE ${changed} END AS changed`,
+            `FOREACH (x IN CASE WHEN changed THEN [n] ELSE [] END | SET ${restamp(
+                'x',
+                'true'
+            )} SET x += ${props} ${sets})`,
+            `FOREACH (x IN CASE WHEN f IS NOT NULL AND ${twoTokensOf(
+                'f'
+            )} IS NULL THEN [f] ELSE [] END | SET x.${STAMP} = ${OFFERED})`
         ];
     }
 }

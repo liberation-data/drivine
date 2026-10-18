@@ -9,6 +9,7 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
+import { splitVectors, vectorClauses } from '@/backend/VectorWrites';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassKind } from '@/annotation/Metadata';
 import { changes, EXPECTED, LOCK, MADE, relink, restamp, STAMP } from '@/backend/CypherStamps';
@@ -178,7 +179,12 @@ export class SaveStatementBuilder {
      * links token too when `replacing`. Otherwise the statement goes no further, having written nothing.
      */
     private root(model: FragmentModel, object: any, replacing: boolean): string {
-        this.bindings.root = { id: idOf(model, object), props: objectProps(model, object, this.options) };
+        const split = splitVectors(model, objectProps(model, object, this.options));
+        this.bindings.root = { id: idOf(model, object), props: split.props, vectors: split.vectors };
+        const cleared = Object.entries(split.vectors)
+            .filter(([, value]) => value === null)
+            .map(([name]) => name);
+        const vectors = vectorClauses(model, this.grammar, 'n', '$root.vectors', cleared);
         const labels = labelExpression(model.labels);
         const id = `{${quoteName(idProperty(model))}: $root.id}`;
         const { only, except }: SaveOptions<any> = this.options;
@@ -196,8 +202,16 @@ export class SaveStatementBuilder {
             model.nodeLabels && keep(model.nodeLabels.field)
                 ? this.labelClauses(model, object, 'n', clear, held)
                 : { sets: [], changes: [] };
-        const changed = [changes('n', '$root.props'), ...bag.changes, ...labelled.changes].join(' OR ');
-        const write = [`SET ${restamp('n', changed)}`, 'SET n += $root.props', ...bag.sets, ...labelled.sets];
+        const changed = [changes('n', '$root.props'), ...vectors.changes, ...bag.changes, ...labelled.changes].join(
+            ' OR '
+        );
+        const write = [
+            `SET ${restamp('n', changed)}`,
+            'SET n += $root.props',
+            ...vectors.sets,
+            ...bag.sets,
+            ...labelled.sets
+        ];
         const expected = model.stampField ? object[model.stampField] : undefined;
         if (this.createOnly) {
             if (expected != null) {
@@ -328,6 +342,7 @@ export class SaveStatementBuilder {
         const into = target(part.rel);
         const root = rootOf(into);
         const merge = `MERGE (${t}${labelExpression(root.labels)} {${quoteName(idProperty(root))}: ${row}.id})`;
+        const rowVectors = vectorClauses(root, this.grammar, t, `${row}.vectors`);
         const isFragment = part.rel.related.kind === 'RELATIONSHIP_FRAGMENT';
         const relChanged = changes(r, `${row}.rel`);
         // A related node of a subclass of the field's target carries its own labels too: a MERGE takes no labels
@@ -341,7 +356,11 @@ export class SaveStatementBuilder {
         const steps =
             pass === 'NODES_AND_EDGES'
                 ? [
-                      `${merge} SET ${restamp(t, changes(t, `${row}.props`))} SET ${t} += ${row}.props`,
+                      `${merge} SET ${restamp(
+                          t,
+                          [changes(t, `${row}.props`), ...rowVectors.changes].join(' OR ')
+                      )} SET ${t} += ${row}.props`,
+                      ...rowVectors.sets,
                       ...subtypeLabels,
                       `MERGE ${pattern(part.rel, parent, '', t)} ON CREATE SET ${relink(parent)}, ${relink(t)}`
                   ]
@@ -373,7 +392,7 @@ export class SaveStatementBuilder {
             const concrete = this.concreteModel(root, nodeObject);
             const row: Record<string, any> = {
                 id: idOf(root, nodeObject),
-                props: propsOf(concrete, nodeObject, stampExcluded(concrete))
+                ...vectorRow(root, propsOf(concrete, nodeObject, stampExcluded(concrete)))
             };
             if (concrete !== root) {
                 row.subtype = this.subtypeIndex(root, concrete);
@@ -712,4 +731,12 @@ function storable(value: any): boolean {
     const scalar = (it: any): boolean =>
         it == null || ['string', 'number', 'boolean', 'bigint'].includes(typeof it) || it instanceof Date;
     return Array.isArray(value) ? value.every((it) => it != null && scalar(it)) : scalar(value);
+}
+
+/** A row's props, with its vector properties apart under `vectors`. */
+function vectorRow(
+    model: FragmentModel,
+    props: Record<string, any>
+): { props: Record<string, any>; vectors: Record<string, any> } {
+    return splitVectors(model, props);
 }

@@ -17,4 +17,5 @@ export * from './PersistenceManagerType';
 export * from './TransactionalPersistenceManager';
 export * from './StatelessGraphObjectManager';
 export * from './SaveOptions';
+export * from './Scored';
 export * from './StaleObjectException';
