@@ -10,6 +10,9 @@ import { Cacheable } from 'typescript-cacheable';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { PersistenceManager } from '@/manager/PersistenceManager';
+import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
+import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
+import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineLogger } from '@/logger';
 
 const fs = require('fs');
@@ -25,6 +28,7 @@ export class DrivineModuleBuilder {
             this._providers = [
                 ...this.infrastructureProviders(),
                 ...this.persistenceManagers(),
+                ...this.graphObjectManagers(),
                 ...this.cypherStatementProviders(),
                 ...this.sqlStatementProviders(),
                 ...this.fileResourceProviders()
@@ -38,6 +42,7 @@ export class DrivineModuleBuilder {
             <Provider>{ provide: DatabaseRegistry, useFactory: () => DatabaseRegistry.getInstance() },
             <Provider>{ provide: TransactionContextHolder, useFactory: () => TransactionContextHolder.getInstance() },
             PersistenceManagerFactory,
+            GraphObjectManagerFactory,
             TransactionContextMiddleware,
             TransactionalPersistenceManager,
             NonTransactionalPersistenceManager
@@ -53,6 +58,26 @@ export class DrivineModuleBuilder {
                 useFactory: (persistenceManagerFactory): PersistenceManager => {
                     return persistenceManagerFactory.get(database);
                 }
+            };
+        });
+    }
+
+    /**
+     * An object manager for each graph database. Postgres is plain SQL, and has none.
+     */
+    graphObjectManagers(): Provider[] {
+        const graphTypes = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB];
+        const registry = DatabaseRegistry.getInstance();
+        const names = registry.providers.filter((it) => graphTypes.includes(it.type)).map((it) => it.name);
+        const defaultProvider = registry.connectionProvider();
+        if (defaultProvider && graphTypes.includes(defaultProvider.type) && !names.includes('default')) {
+            names.push('default');
+        }
+        return names.map((database) => {
+            return <Provider>{
+                provide: `GraphObjectManager:${database}`,
+                inject: [GraphObjectManagerFactory],
+                useFactory: (factory: GraphObjectManagerFactory): StatelessGraphObjectManager => factory.get(database)
             };
         });
     }
