@@ -238,7 +238,7 @@ Mostly reuses the Oracle backend: `GRAPH_TABLE` reads are standard SQL/PGQ (ISO/
 
 ## Open questions
 
-- (none currently)
+- **Whole JS numbers as Bolt integers?** The Neo4j driver sends every JS number as a float, so `LIMIT $n` and `list[$n]` fail on Neo4j and Memgraph, and `range(1, $n)` on Memgraph. Converting safe whole numbers to `neo4j.int` in the Neo4j spec compiler fixes it, but changes what is stored: a number written as `5` becomes an integer property instead of `5.0`. Reads are unchanged (the mapper already turns integers back into numbers), and Cypher compares int and float alike. Opt-in flag, or the default?
 
 ## Resolved
 
@@ -264,4 +264,6 @@ Branch: `drivine4j-parity`. Local test DBs (docker): `drivine-falkordb` (`localh
 - [ ] Tier 1 step 3 — `GraphBackend` + `CypherGrammar`: **moved to the start of Tier 2.** `GraphBackend` produces object-manager statements, and there is no object manager to call it yet; the grammar's differences only matter for generated Cypher. Build it when generation starts, against real engines.
 - [x] **Tier 1 step 4 — FalkorDB.** `src/connection/falkordb/` on the `falkordb` npm client (6.8). `DatabaseType.FALKORDB`; graph name from `databaseName`, default `graph` (as drivine4j); port 6379. Honours `TransactionMode` via `AutoCommitTransactions`. `FalkorDbParameterCoercer`: `Date` → nine-digit ISO text (same as drivine4j, so JVM- and Node-written stores compare alike), `Set` → list, `undefined` → null, and it **refuses map keys / parameter names that aren't plain identifiers** — the client writes params into the statement text with unquoted keys and FalkorDB accepts no quoted form, so such a key could inject Cypher. Positional `$1` → `$p1`. Result mapper returns nodes/relationships as properties and Temporal datetimes/dates as `Date` (UTC). Cursor pages with SKIP/LIMIT. Added `skipLibCheck` to tsconfig (`@redis/client` typings don't compile against our `@types/node`); no published `.d.ts` imports `falkordb`. Test container: `drivine-falkordb` (`localhost:16379`).
   - Follow-ups: `falkordb` is a hard dependency (pulls in the redis client) — consider an optional peer with a lazy `require`. FalkorDB can't store map properties (`@JsonPacked`, step 8). `NonAtomicBatchException` waits for `saveAll`. Native constraint commands wait for schema management (Tier 3).
-- [ ] Tier 1 step 5 — Memgraph
+- [x] **Tier 1 step 5 — Memgraph.** `DatabaseType.MEMGRAPH`, on `Neo4jConnectionProvider` with optional credentials (auth is off in a default Memgraph), as drivine4j does. Integration test covers read/write, rollback and cursors. Test container: `drivine-memgraph` (bolt `localhost:17688`).
+  - Found: the Neo4j driver sends every JS number as a float, so `range(1, $n)`, `list[$n]` and `LIMIT $n` fail with a JS number on Memgraph, and the last two on Neo4j too. Pre-existing; see Open questions.
+- [ ] Tier 1 step 6 — Neptune full (SigV4 + pool)

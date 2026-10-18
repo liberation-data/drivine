@@ -125,6 +125,8 @@ export class ConnectionProviderBuilder {
             this.registry.register(this.buildNeptuneProvider(name));
         } else if (this._type === DatabaseType.FALKORDB) {
             this.registry.register(this.buildFalkorDbProvider(name));
+        } else if (this._type === DatabaseType.MEMGRAPH) {
+            this.registry.register(this.buildMemgraphProvider(name));
         }
         else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
@@ -176,6 +178,37 @@ export class ConnectionProviderBuilder {
             this._port,
             this._userName!,
             this._password,
+            this._name,
+            this._protocol,
+            {
+                connectionTimeout: this._connectionTimeout,
+                maxConnectionPoolSize: this._poolMax
+            }
+        );
+    }
+
+    /**
+     * Memgraph speaks Bolt, so it runs on the Neo4j driver. Auth is off in a default Memgraph, so the credentials are
+     * optional.
+     */
+    private buildMemgraphProvider(name: string): ConnectionProvider {
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by Memgraph`);
+        }
+        if (!this._port) {
+            this._port = 7687;
+        }
+        if (this._port !== 7687) {
+            this.logger.warn(`${this._port} is a non-standard port for Memgraph`);
+        }
+
+        return new Neo4jConnectionProvider(
+            name,
+            this._type,
+            this._host,
+            this._port,
+            this._userName ?? '',
+            this._password ?? '',
             this._name,
             this._protocol,
             {
