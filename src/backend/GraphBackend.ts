@@ -101,11 +101,20 @@ export interface GraphBackend {
     /** Mints the identity stamp keyed `$key` unless it is there: `$storeId`, `$assignedAt`, `$engine`. */
     assignStoreStamp(): GraphStatement;
 
-    /** The version recorded for the schema catalog `$name`, if any. */
-    schemaVersion(): GraphStatement;
+    /**
+     * A property ('version', or 'items', the newline-joined inventory) of the newest schema marker of the owner
+     * `$scope`, as text: one row, or none when there is no marker.
+     */
+    schemaMarker(property: 'version' | 'items'): GraphStatement;
 
-    /** Records `$version` for the schema catalog `$name`. */
-    recordSchemaVersion(): GraphStatement;
+    /** The inventory keys a marker's stored `items` holds; undefined for none recorded (a marker that predates them). */
+    markerItems(stored: string | null | undefined): string[] | undefined;
+
+    /** Writes the owner `$scope`'s marker, making it if it is not there: `$version`, `$items`, and when. */
+    recordSchemaMarker(): GraphStatement;
+
+    /** Removes every marker of the owner `$scope` but the newest: what a race before the marker's constraint left. */
+    pruneSchemaMarkers(): GraphStatement;
 
     /** Loads every node of the fragment, optionally filtered by a predicate over `n`. */
     loadAllFragments(model: FragmentModel, where?: string, page?: Page): GraphStatement;

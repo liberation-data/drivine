@@ -10,6 +10,7 @@ import {
     NodeFragment,
     NodeId,
     PersistenceManager,
+    QuerySpecification,
     rangeIndex,
     StatelessGraphObjectManager,
     uniquenessConstraint
@@ -143,12 +144,22 @@ describeOnOracle('schema on Oracle', () => {
         await notes.clear();
     });
 
-    it("should record and read a schema catalog's version", async () => {
+    it('should keep one schema marker per owner: its version and inventory, an empty one read back empty', async () => {
         const backend = backendFor(DatabaseType.ORACLE);
-        const name = `ora-test-${Date.now()}`;
-        expect(await pm.maybeGetOne(backend.schemaVersion().spec({ name }))).toBeUndefined();
-        await pm.execute(backend.recordSchemaVersion().spec({ name, version: 'v1' }));
-        await pm.execute(backend.recordSchemaVersion().spec({ name, version: 'v2' }));
-        expect(await pm.maybeGetOne(backend.schemaVersion().spec({ name }))).toEqual('v2');
+        const scope = `ora-test-${Date.now()}`;
+        const read = async (property: 'version' | 'items') => {
+            const value = await pm.maybeGetOne<string>(backend.schemaMarker(property).spec({ scope }));
+            return property === 'items' ? backend.markerItems(value) : value;
+        };
+        expect(await read('version')).toBeUndefined();
+        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v1', items: '' }));
+        expect(await read('items')).toEqual([]);
+        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v2', items: 'a\nb' }));
+        expect([await read('version'), await read('items')]).toEqual(['v2', ['a', 'b']]);
+        await pm.execute(
+            new QuerySpecification(`DELETE FROM drivine_node n WHERE JSON_VALUE(n.props, '$.scope') = $scope`).bind({
+                scope
+            })
+        );
     });
 });

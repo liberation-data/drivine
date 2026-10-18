@@ -24,11 +24,18 @@ export class ConstraintManager {
         return this.grammar.listUniques.read(await this.executor.run(this.grammar.listUniques.statement));
     }
 
-    async ensure(spec: UniquenessConstraintSpec): Promise<EnsureResult<UniquenessConstraintSpec>> {
+    /**
+     * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` values held more than
+     * once are reported; 0 skips the check, leaving the engine to refuse a constraint the data breaks.
+     */
+    async ensure(
+        spec: UniquenessConstraintSpec,
+        sampleSize: number = VIOLATION_SAMPLE
+    ): Promise<EnsureResult<UniquenessConstraintSpec>> {
         if (await this.exists(spec)) {
             return { status: 'ALREADY_MATCHING', spec };
         }
-        const sample = await this.conflicts(spec);
+        const sample = sampleSize > 0 ? await this.conflicts(spec, sampleSize) : [];
         if (sample.length) {
             return { status: 'VIOLATION', spec, sample };
         }
@@ -54,8 +61,8 @@ export class ConstraintManager {
         return (await this.list()).some((it) => it.label === spec.label && same(it.properties, spec.properties));
     }
 
-    private async conflicts(spec: UniquenessConstraintSpec): Promise<unknown[]> {
-        return this.executor.run(this.grammar.conflicts(spec, VIOLATION_SAMPLE));
+    private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<unknown[]> {
+        return this.executor.run(this.grammar.conflicts(spec, sampleSize));
     }
 
     /** FalkorDB builds a constraint in the background; wait until it reports it, or says it failed. */

@@ -28,7 +28,7 @@ import { RelateMode } from '@/manager/NodeRef';
 /** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
 const STORE_LABEL = 'DrivineStore';
 
-/** The label of the nodes recording each schema catalog's version. */
+/** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
 const SCHEMA_MARKER = '_DrivineSchema';
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
@@ -242,12 +242,26 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
-    schemaVersion(): GraphStatement {
-        return new GraphStatement(`MATCH (m:${SCHEMA_MARKER} {catalog: $name}) RETURN m.version`);
+    schemaMarker(property: 'version' | 'items'): GraphStatement {
+        return new GraphStatement(
+            `MATCH (m:${SCHEMA_MARKER} {scope: $scope}) RETURN m.${property} ORDER BY m.appliedAt DESC LIMIT 1`
+        );
     }
 
-    recordSchemaVersion(): GraphStatement {
-        return new GraphStatement(`MERGE (m:${SCHEMA_MARKER} {catalog: $name}) SET m.version = $version`);
+    markerItems(stored: string | null | undefined): string[] | undefined {
+        return stored == null ? undefined : stored === '' ? [] : stored.split('\n');
+    }
+
+    recordSchemaMarker(): GraphStatement {
+        return new GraphStatement(
+            `MERGE (m:${SCHEMA_MARKER} {scope: $scope}) SET m.version = $version, m.items = $items, m.appliedAt = timestamp()`
+        );
+    }
+
+    pruneSchemaMarkers(): GraphStatement {
+        return new GraphStatement(
+            `MATCH (m:${SCHEMA_MARKER} {scope: $scope}) WITH m ORDER BY m.appliedAt DESC SKIP 1 DELETE m`
+        );
     }
 
     contended(failure: unknown): boolean {

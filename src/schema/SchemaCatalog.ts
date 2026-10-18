@@ -21,6 +21,9 @@ export type VectorDimensionProvider = (label: string, property: string) => numbe
  * Indexes and constraints to hold on one or more databases, enforced by a SchemaManager. Immutable: each `with`/`for`
  * gives a new catalog.
  */
+/** The owner of an unnamed catalog, as drivine4j names it. */
+export const DEFAULT_SCOPE = 'schema';
+
 export class SchemaCatalog {
     static of(...items: SchemaSpec[]): SchemaCatalog {
         return new SchemaCatalog(items);
@@ -74,15 +77,18 @@ export class SchemaCatalog {
         readonly version?: string,
         /** The databases it applies to; every graph database when undefined. */
         readonly databases?: string[],
-        /** What its version is recorded under. */
-        readonly name: string = 'default'
+        /**
+         * Its owner: what its version and inventory are recorded under, in the owner's marker. Unnamed catalogs share the
+         * owner 'schema', drivine4j's default scope.
+         */
+        readonly name: string = DEFAULT_SCOPE
     ) {}
 
     withVersion(version: string): SchemaCatalog {
         return new SchemaCatalog(this.items, version, this.databases, this.name);
     }
 
-    /** Records its version under this name, so that catalogs version apart. */
+    /** Records its version and inventory under this owner, so that owners version apart. */
     named(name: string): SchemaCatalog {
         return new SchemaCatalog(this.items, this.version, this.databases, name);
     }

@@ -27,8 +27,18 @@ import { Stamps } from '@/model/Stamps';
 /** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
 const STORE_LABEL = 'DrivineStore';
 
-/** The label of the nodes recording each schema catalog's version. */
+/** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
 const SCHEMA_MARKER = '_DrivineSchema';
+
+/** What a marker's inventory is kept behind, as drivine4j keeps it: Oracle has no empty string. */
+const ITEMS_MARK = 'items:';
+
+/** The moment, in milliseconds since the epoch, as the graph engines' timestamp() gives it. */
+const NOW_MILLIS = "ROUND((CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400000)";
+
+/** The newest marker first, then the one made later, so the marker read, written and kept are one. */
+const NEWEST_FIRST = (alias: string): string =>
+    `JSON_VALUE(${alias}.props, '$.appliedAt' RETURNING NUMBER) DESC NULLS LAST, ${alias}.nid DESC`;
 
 /** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
 export const ROW_ALIAS = 'n';
@@ -229,22 +239,51 @@ END;`);
         );
     }
 
-    schemaVersion(): GraphStatement {
+    /** An inventory is kept behind 'items:', so an empty one reads back empty, not absent (drivine4j's mark). */
+    schemaMarker(property: 'version' | 'items'): GraphStatement {
         return new GraphStatement(
-            `SELECT JSON_VALUE(n.props, '$.version') AS "version" FROM ${this.graph.nodes} n ` +
-                `WHERE ${hasLabels('n', [SCHEMA_MARKER])} AND JSON_VALUE(n.props, '$.catalog') = $name`
+            `SELECT JSON_VALUE(n.props, '$.${property}' RETURNING CLOB) AS "value" ` +
+                `FROM ${this.graph.nodes} n WHERE ${this.marker('n')} ORDER BY ${NEWEST_FIRST(
+                    'n'
+                )} FETCH FIRST 1 ROWS ONLY`
         );
     }
 
-    recordSchemaVersion(): GraphStatement {
-        return new GraphStatement(`BEGIN
-    UPDATE ${this.graph.nodes} n SET props = JSON_TRANSFORM(props, SET '$.version' = $version)
-    WHERE ${hasLabels('n', [SCHEMA_MARKER])} AND JSON_VALUE(n.props, '$.catalog') = $name;
-    IF SQL%ROWCOUNT = 0 THEN
-        INSERT INTO ${this.graph.nodes} (labels, props)
-        VALUES (JSON('["${SCHEMA_MARKER}"]'), JSON_OBJECT('catalog' VALUE $name, 'version' VALUE $version));
-    END IF;
-END;`);
+    /** The inventory behind its mark: stripped here, as SQL would make an empty one null. */
+    markerItems(stored: string | null | undefined): string[] | undefined {
+        if (stored == null || !stored.startsWith(ITEMS_MARK)) {
+            return undefined;
+        }
+        const items = stored.slice(ITEMS_MARK.length);
+        return items === '' ? [] : items.split('\n');
+    }
+
+    /**
+     * The marker found by a query and matched by its id: matched by its scope, the MERGE would update the column it
+     * matches on, which Oracle refuses (ORA-38104). Where a race left several, the newest is written.
+     */
+    recordSchemaMarker(): GraphStatement {
+        return new GraphStatement(
+            `MERGE INTO ${this.graph.nodes} n USING (SELECT (SELECT m.nid FROM ${
+                this.graph.nodes
+            } m WHERE ${this.marker('m')} ORDER BY ${NEWEST_FIRST(
+                'm'
+            )} FETCH FIRST 1 ROWS ONLY) AS nid FROM dual) found ON (n.nid = found.nid) ` +
+                `WHEN MATCHED THEN UPDATE SET n.props = JSON_MERGEPATCH(n.props, JSON_OBJECT('version' VALUE $version, ` +
+                `'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ${NOW_MILLIS})) ` +
+                `WHEN NOT MATCHED THEN INSERT (labels, props) VALUES (JSON('["${SCHEMA_MARKER}"]'), JSON_OBJECT('scope' ` +
+                `VALUE $scope, 'version' VALUE $version, 'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ` +
+                `${NOW_MILLIS} ABSENT ON NULL))`
+        );
+    }
+
+    pruneSchemaMarkers(): GraphStatement {
+        return new GraphStatement(
+            `DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM (SELECT n.nid, ROW_NUMBER() OVER (ORDER BY ` +
+                `${NEWEST_FIRST('n')}) AS position FROM ${this.graph.nodes} n WHERE ${this.marker(
+                    'n'
+                )}) WHERE position > 1)`
+        );
     }
 
     /** ORA-00060 (deadlock) and ORA-08177 (serialization) are another writer's doing: running again may succeed. */
@@ -257,6 +296,11 @@ END;`);
             cause = cause.rootCause ?? cause.cause;
         }
         return false;
+    }
+
+    /** The markers of the owner bound as `$scope`. */
+    private marker(alias: string): string {
+        return `${hasLabels(alias, [SCHEMA_MARKER])} AND JSON_VALUE(${alias}.props, '$.scope') = $scope`;
     }
 
     /** A predicate over the root's row and, for a view, the view's requirements. */
