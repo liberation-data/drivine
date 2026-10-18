@@ -96,8 +96,8 @@ describeOnOracle('fragments on Oracle', () => {
     });
 
     it('should say what is not on Oracle yet', async () => {
-        await expect(gom.save(Object.assign(new Ticket(), { id: 'new', title: 'x', number: 1 }))).rejects.toThrow(
-            /Saving is not available on Oracle yet/
+        await expect(gom.saveAll([Object.assign(new Ticket(), { id: 'new', title: 'x', number: 1 })])).rejects.toThrow(
+            /saveAll is not available on Oracle yet/
         );
     });
 });

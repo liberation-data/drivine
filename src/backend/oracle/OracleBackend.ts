@@ -3,6 +3,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
+import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -94,13 +95,13 @@ export class OracleBackend implements GraphBackend {
     }
 
     save(
-        _target: TargetModel,
-        _object: any,
-        _options?: SaveOptions<any>,
-        _createOnly?: boolean,
-        _registry?: ModelRegistry
+        target: TargetModel,
+        object: any,
+        options?: SaveOptions<any>,
+        createOnly?: boolean,
+        registry?: ModelRegistry
     ): SaveStatement {
-        throw this.unsupported('Saving');
+        return new OracleSaveBuilder(this.graph, registry).build(target, object, options, createOnly);
     }
 
     heldProperties(model: FragmentModel): GraphStatement {

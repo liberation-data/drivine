@@ -912,9 +912,10 @@ export class StatelessGraphObjectManager {
     private handBack(object: any, statement: SaveStatement, result: SaveResult): void {
         this.handBackRelated(object, statement, result);
         if (statement.root.stampField) {
+            // A store with no empty string (Oracle) says a node the save made was found as none.
             statement.rootObject[statement.root.stampField] = Stamps.handedBack(
                 statement.expectedStamp,
-                result.found,
+                result.found ?? '',
                 result.now
             );
         }
