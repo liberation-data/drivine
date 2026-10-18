@@ -1,4 +1,5 @@
 export * from './annotation';
+export * from './backend';
 export * from './connection';
 export * from './context';
 export * from './cursor';

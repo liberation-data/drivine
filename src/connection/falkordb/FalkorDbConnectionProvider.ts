@@ -38,10 +38,11 @@ export class FalkorDbConnectionProvider implements ConnectionProvider {
     }
 
     async end(): Promise<void> {
-        if (this.client) {
-            const client = await this.client;
-            this.client = undefined;
-            await client.close();
+        // Cleared before waiting, so a second call made meanwhile doesn't close the client again (which throws).
+        const client = this.client;
+        this.client = undefined;
+        if (client) {
+            await (await client).close();
         }
     }
 

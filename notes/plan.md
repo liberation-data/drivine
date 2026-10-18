@@ -283,7 +283,10 @@ Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as th
   - **`Related<T>`** type alias for a forward reference in the same module, as TypeORM's `Relation<T>`: decorator metadata otherwise reads the class before it's declared and throws.
   - A `@NodeFragment` must have at least one label (no class-name default: minifiers rename classes).
   - `ClassType<T>` in `query/QuerySpecification` gained a default (`T = any`) and is reused.
-- [ ] 2.2 `GraphBackend` + `CypherBackend` + `CypherGrammar` (Neo4j, Memgraph, FalkorDB): `loadAll` / `load` / `count` of a bare fragment
+- [x] 2.2 `GraphBackend` + `CypherBackend` + `CypherGrammar` (Neo4j, Memgraph, FalkorDB): `loadAllFragments` / `loadFragment` / `countFragments`, in `src/backend/`. A fragment row is `{props: properties(n), labels: labels(n)}` (whole node, since TS can't list a class's fields; labels apart, so a property called `labels` can't collide) — verified on all three engines. Labels and property names are backtick-quoted when not plain. `CypherGrammar` holds only the engine name for now; differences get added as statements meet them.
+  - Test support: `test/2.Integration/support/GraphEngines.ts` runs a suite on each configured graph engine (`describe.each(graphEngines())`). Env for the local containers: `source <scratchpad>/test-env.sh` (lists all five connections).
+  - Fixed: `FalkorDbConnectionProvider.end()` closed the client twice when called concurrently (the client throws on a second close).
+  - Note: `DatabaseRegistry.connectionProvider('default')` returns the *first registered* provider, not one named 'default'. Pre-existing; worth knowing.
 - [ ] 2.3 Hydration: result map → class instance; `StatelessGraphObjectManager` read API + Nest injection (`@InjectGraphObjectManager()`)
 - [ ] 2.4 Views: relationships (single / list, direction, optional / required), relationship fragments, nested views
 - [ ] 2.5 String `where` filters, `delete` / `deleteAll`
