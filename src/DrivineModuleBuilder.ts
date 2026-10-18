@@ -13,6 +13,10 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
 import { DatabaseType } from '@/connection/DatabaseType';
+import { SchemaManager } from '@/schema/SchemaManager';
+
+/** The provider that enforces the module's schema at startup. */
+export const SCHEMA_ENFORCED = 'DrivineSchemaEnforced';
 import { DrivineLogger } from '@/logger';
 
 const fs = require('fs');
@@ -29,6 +33,7 @@ export class DrivineModuleBuilder {
                 ...this.infrastructureProviders(),
                 ...this.persistenceManagers(),
                 ...this.graphObjectManagers(),
+                ...this.schemaProviders(),
                 ...this.cypherStatementProviders(),
                 ...this.sqlStatementProviders(),
                 ...this.fileResourceProviders()
@@ -80,6 +85,35 @@ export class DrivineModuleBuilder {
                 useFactory: (factory: GraphObjectManagerFactory): StatelessGraphObjectManager => factory.get(database)
             };
         });
+    }
+
+    /**
+     * The SchemaManager for the module's schema, and a provider that enforces it before the application starts, unless
+     * the schema is disabled.
+     */
+    schemaProviders(): Provider[] {
+        const schema = this.options.schema;
+        if (!schema) {
+            return [];
+        }
+        const providers: Provider[] = [
+            <Provider>{
+                provide: SchemaManager,
+                inject: [GraphObjectManagerFactory],
+                useFactory: (factory: GraphObjectManagerFactory): SchemaManager => new SchemaManager(factory, schema)
+            }
+        ];
+        if (schema.enabled !== false) {
+            providers.push(<Provider>{
+                provide: SCHEMA_ENFORCED,
+                inject: [SchemaManager],
+                useFactory: async (manager: SchemaManager): Promise<boolean> => {
+                    await manager.enforce();
+                    return true;
+                }
+            });
+        }
+        return providers;
     }
 
     fileResourceProviders(): Provider[] {

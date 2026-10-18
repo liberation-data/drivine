@@ -13,5 +13,6 @@ export * from './NodeStamp';
 export * from './PropertyBag';
 export * from './ReadOnly';
 export * from './RelationshipFragment';
+export * from './Schema';
 export * from './Root';
 export * from './TargetNode';

@@ -26,7 +26,8 @@ const MAPPING_KEYS: (keyof PropertyMetadata)[] = [
     'transient',
     'jsonPacked',
     'default',
-    'emptyWhenAbsent'
+    'emptyWhenAbsent',
+    'schema'
 ];
 
 export class ModelRegistry {
@@ -390,7 +391,8 @@ export class ModelRegistry {
             'emptyWhenAbsent',
             'sortedBy',
             'propertyBag',
-            'nodeLabels'
+            'nodeLabels',
+            'schema'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
@@ -495,6 +497,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         sortedBy: '@SortedBy',
         propertyBag: '@PropertyBag',
         nodeLabels: '@NodeLabels',
+        schema: 'a schema decorator',
         designType: ''
     }[key];
 }

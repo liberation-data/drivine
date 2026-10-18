@@ -54,6 +54,7 @@ export interface PropertyMetadata {
     jsonPacked?: boolean;
     propertyBag?: { prefix?: string; delimiter?: string; flat?: boolean };
     nodeLabels?: { members?: string[] };
+    schema?: { kind: 'RANGE' | 'UNIQUE' | 'VECTOR' | 'FULLTEXT'; fields: string[]; similarity?: 'COSINE' | 'EUCLIDEAN'; dimensions?: number }[];
     default?: boolean;
     emptyWhenAbsent?: boolean;
     sortedBy?: { property: string; ascending: boolean };
