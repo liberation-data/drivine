@@ -36,7 +36,7 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
  *
  * Its views are projected with CALL subqueries. On FalkorDB 6.0 a pattern comprehension that names its relationship
  * (`[(n)-[r:R]->(m) | properties(r)]`), as a relationship fragment must, leaves every later comprehension in the same
- * projection empty, without an error.
+ * projection empty, without an error (FalkorDB/FalkorDB#3386, also on edge-rs).
  */
 export const FALKORDB_GRAMMAR: CypherGrammar = {
     engine: 'FalkorDB',
