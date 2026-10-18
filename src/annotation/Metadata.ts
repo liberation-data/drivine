@@ -51,6 +51,7 @@ export interface PropertyMetadata {
     graphProperty?: string;
     transient?: boolean;
     readOnly?: boolean;
+    aggregate?: { function: string; type: string; property?: string; direction?: Direction };
     targetNode?: { target?: ClassThunk };
     /** The property's declared type, from `design:type`. Array for a list. */
     designType?: Function;

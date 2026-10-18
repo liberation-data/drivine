@@ -10,7 +10,7 @@ import {
 import { DrivineError } from '@/DrivineError';
 import { ClassType } from '@/query/QuerySpecification';
 import { FragmentModel } from '@/model/FragmentModel';
-import { GraphViewModel } from '@/model/GraphViewModel';
+import { AggregateModel, GraphViewModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 
@@ -74,21 +74,32 @@ export class ModelRegistry {
             ownClassMetadata(it)?.labels?.forEach((label) => labels.add(label));
         }
         if (labels.size === 0) {
-            throw new DrivineError(`@NodeFragment ${type.name} has no labels. Give it at least one: @NodeFragment({ labels: ['${type.name}'] }).`);
+            throw new DrivineError(
+                `@NodeFragment ${type.name} has no labels. Give it at least one: @NodeFragment({ labels: ['${type.name}'] }).`
+            );
         }
 
         const properties = propertyMetadata(type);
         this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'graphProperty', 'transient'], 'a @NodeFragment');
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
         if (ids.length > 1) {
-            throw new DrivineError(`${type.name} has ${ids.length} @NodeId properties (${ids.join(', ')}). A node has one id.`);
+            throw new DrivineError(
+                `${type.name} has ${ids.length} @NodeId properties (${ids.join(', ')}). A node has one id.`
+            );
         }
         const stamps = [...properties].filter(([, it]) => it.nodeStamp).map(([field]) => field);
         if (stamps.length > 1) {
-            throw new DrivineError(`${type.name} has ${stamps.length} @NodeStamp properties (${stamps.join(', ')}). A node has one stamp.`);
+            throw new DrivineError(
+                `${type.name} has ${stamps.length} @NodeStamp properties (${stamps.join(', ')}). A node has one stamp.`
+            );
         }
         const stampField = stamps[0];
-        if (stampField && (properties.get(stampField)!.graphProperty || properties.get(stampField)!.transient || stampField === ids[0])) {
+        if (
+            stampField &&
+            (properties.get(stampField)!.graphProperty ||
+                properties.get(stampField)!.transient ||
+                stampField === ids[0])
+        ) {
             throw new DrivineError(`@NodeStamp ${type.name}.${stampField} can't carry another mapping decorator.`);
         }
         const graphProperties = this.graphProperties(properties);
@@ -119,7 +130,9 @@ export class ModelRegistry {
         const targetType = this.resolve(type, targetField, metadata.targetNode!.target, metadata);
         const target = this.related(targetType, `${type.name}.${targetField}`);
         if (target.kind === 'RELATIONSHIP_FRAGMENT') {
-            throw new DrivineError(`${type.name}.${targetField} must hold a node fragment or a view, not a relationship fragment.`);
+            throw new DrivineError(
+                `${type.name}.${targetField} must hold a node fragment or a view, not a relationship fragment.`
+            );
         }
         return {
             type,
@@ -133,10 +146,18 @@ export class ModelRegistry {
     private buildView(type: ClassType): GraphViewModel {
         this.assertKind(type, ClassKind.GRAPH_VIEW, '@GraphView');
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['root', 'relationship', 'transient', 'readOnly'], 'a @GraphView');
+        this.assertOnly(
+            type,
+            properties,
+            ['root', 'relationship', 'transient', 'readOnly', 'aggregate'],
+            'a @GraphView'
+        );
         properties.forEach((metadata, field) => {
-            if (metadata.readOnly && !metadata.relationship) {
+            if (metadata.readOnly && !metadata.relationship && !metadata.aggregate) {
                 throw new DrivineError(`@ReadOnly ${type.name}.${field} marks a relationship field; it has none.`);
+            }
+            if (metadata.aggregate && metadata.relationship) {
+                throw new DrivineError(`${type.name}.${field} can't be both a relationship and an aggregate.`);
             }
         });
         const roots = [...properties].filter(([, it]) => it.root);
@@ -146,13 +167,35 @@ export class ModelRegistry {
         const [rootField, rootMetadata] = roots[0];
         const rootType = this.resolve(type, rootField, rootMetadata.root!.target, rootMetadata);
         if (this.kindOf(rootType) !== ClassKind.NODE_FRAGMENT) {
-            throw new DrivineError(`The @Root of ${type.name}, ${rootField}, must be a @NodeFragment. ${rootType.name} is not.`);
+            throw new DrivineError(
+                `The @Root of ${type.name}, ${rootField}, must be a @NodeFragment. ${rootType.name} is not.`
+            );
         }
 
         const relationships = [...properties]
             .filter(([, it]) => it.relationship)
             .map(([field, metadata]) => this.relationship(type, field, metadata));
-        return { type, rootField, root: this.fragment(rootType), relationships };
+        const aggregates = [...properties]
+            .filter(([, it]) => it.aggregate)
+            .map(([field, it]) => {
+                const options = it.aggregate!;
+                if (!options.type) {
+                    throw new DrivineError(`The aggregate ${type.name}.${field} needs a relationship type.`);
+                }
+                if (options.function !== 'COUNT' && !options.property) {
+                    throw new DrivineError(
+                        `The ${options.function} ${type.name}.${field} needs the property it aggregates.`
+                    );
+                }
+                return {
+                    field,
+                    function: options.function as AggregateModel['function'],
+                    type: options.type,
+                    property: options.property,
+                    direction: options.direction ?? Direction.OUTGOING
+                };
+            });
+        return { type, rootField, root: this.fragment(rootType), relationships, aggregates };
     }
 
     private relationship(view: ClassType, field: string, metadata: PropertyMetadata): RelationshipModel {
@@ -216,7 +259,12 @@ export class ModelRegistry {
         }
     }
 
-    private resolve(owner: Function, field: string, thunk: ClassThunk | undefined, metadata: PropertyMetadata): ClassType {
+    private resolve(
+        owner: Function,
+        field: string,
+        thunk: ClassThunk | undefined,
+        metadata: PropertyMetadata
+    ): ClassType {
         const type = thunk ? thunk() : metadata.designType;
         if (typeof type !== 'function' || type === Object || type === Array) {
             throw new DrivineError(
@@ -246,12 +294,15 @@ export class ModelRegistry {
             'graphProperty',
             'transient',
             'targetNode',
-            'readOnly'
+            'readOnly',
+            'aggregate'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
             if (misplaced.length) {
-                throw new DrivineError(`${type.name}.${field}: ${misplaced.map(decoratorName).join(', ')} can't be used on ${what}.`);
+                throw new DrivineError(
+                    `${type.name}.${field}: ${misplaced.map(decoratorName).join(', ')} can't be used on ${what}.`
+                );
             }
         });
     }
@@ -277,6 +328,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         transient: '@GraphTransient',
         targetNode: '@TargetNode',
         readOnly: '@ReadOnly',
+        aggregate: '@Count or @Aggregate',
         designType: ''
     }[key];
 }

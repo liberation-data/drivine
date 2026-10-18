@@ -2,7 +2,7 @@ import { Direction } from '@/annotation/Metadata';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { FragmentModel } from '@/model/FragmentModel';
-import { GraphViewModel } from '@/model/GraphViewModel';
+import { AggregateModel, GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
 /**
@@ -65,6 +65,11 @@ export class ViewProjector {
             calls.push(...projection.calls);
             return `${quoteName(rel.field)}: ${projection.expression}`;
         });
+        for (const aggregate of model.aggregates) {
+            const projection = this.aggregate(aggregate, alias);
+            calls.push(...projection.calls);
+            rels.push(`${quoteName(aggregate.field)}: ${projection.expression}`);
+        }
         return { calls, expression: `{root: ${fragment(alias)}, rels: {${rels.join(', ')}}}` };
     }
 
@@ -111,6 +116,50 @@ export class ViewProjector {
         return { calls: [], expression: rel.isCollection ? comprehension : `head(${comprehension})` };
     }
 
+    /** An aggregate over the nodes one relationship type leads to from `from`. */
+    private aggregate(aggregate: AggregateModel, from: string): ViewProjection {
+        const n = ++this.aliasCount;
+        const x = `t${n}`;
+        const edge = `[:${quoteName(aggregate.type)}]`;
+        const step =
+            aggregate.direction === Direction.INCOMING
+                ? `(${from})<-${edge}-(${x})`
+                : aggregate.direction === Direction.UNDIRECTED
+                ? `(${from})-${edge}-(${x})`
+                : `(${from})-${edge}->(${x})`;
+        const property = aggregate.property ? `${x}.${quoteName(aggregate.property)}` : undefined;
+        if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
+            const value = `v${n}`;
+            const fn =
+                aggregate.function === 'COUNT'
+                    ? `count(${property ?? x})`
+                    : `${aggregate.function.toLowerCase()}(${property})`;
+            return {
+                calls: [`CALL { WITH ${from} OPTIONAL MATCH ${step} RETURN ${fn} AS ${value} }`],
+                expression: value
+            };
+        }
+        const values = property ? `[${step} WHERE ${property} IS NOT NULL | ${property}]` : `[${step} | 1]`;
+        switch (aggregate.function) {
+            case 'COUNT':
+                return { calls: [], expression: `size(${values})` };
+            case 'SUM':
+                return { calls: [], expression: `reduce(s = 0, v IN ${values} | s + v)` };
+            case 'AVG':
+                return {
+                    calls: [],
+                    expression: `CASE WHEN size(${values}) = 0 THEN null ELSE reduce(s = 0.0, v IN ${values} | s + v) / size(${values}) END`
+                };
+            default: {
+                const better = aggregate.function === 'MIN' ? '<' : '>';
+                return {
+                    calls: [],
+                    expression: `reduce(m = null, v IN ${values} | CASE WHEN m IS NULL OR v ${better} m THEN v ELSE m END)`
+                };
+            }
+        }
+    }
+
     /** A list of fragments read over 1 to depth hops, each node once. */
     private multiHopFragments(rel: RelationshipModel, from: string): ViewProjection {
         const n = ++this.aliasCount;
@@ -120,7 +169,11 @@ export class ViewProjector {
             const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
             const value = `v${n}`;
             return {
-                calls: [`CALL { WITH ${from} OPTIONAL MATCH ${match} RETURN ${rel.isCollection ? collected : `head(${collected})`} AS ${value} }`],
+                calls: [
+                    `CALL { WITH ${from} OPTIONAL MATCH ${match} RETURN ${
+                        rel.isCollection ? collected : `head(${collected})`
+                    } AS ${value} }`
+                ],
                 expression: value
             };
         }

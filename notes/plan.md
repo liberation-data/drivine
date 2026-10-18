@@ -308,7 +308,7 @@ Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as th
 - **Tier 2 through 2.8 done.** Next: 2.9 recursive views/paths/aggregates.
 - [ ] 2.9 split into:
   - [x] 2.9a `@ReadOnly` (explicit, or implicit for a fragment list with maxDepth > 1): never written by a save, refused in `replace`, left out of `replace: 'all'`. **Multi-hop fragment lists** (missed in 2.4): read over `*1..maxDepth`, each node once — inline via `reduce` de-dup in the comprehension, CALL form via `collect(DISTINCT …)`; verified on all three; cascades follow them the same way. Relationship fragments refuse maxDepth > 1. **Depth override** per load: `loadAll(type, {where, bindings, depth: {field: n}})` / `load(type, id, {depth})`, by field name as drivine4j's `depth("field", n)`.
-  - [ ] 2.9b `@Count` / `@Aggregate`
+  - [x] 2.9b `@Count(type, direction?)` and `@Aggregate({function, type, property?, direction?})` (options object where drivine4j has positional annotation args): single hop, any target node. Inline engines: `size(...)` / `reduce` over a comprehension (AVG = sum ÷ size, null when empty); FalkorDB: `CALL { … OPTIONAL MATCH … RETURN count/sum/avg/min/max }`. SUM/COUNT of none = 0, AVG/MIN/MAX of none = undefined, on all three. Read-only by nature (not relationship fields, so never saved).
   - [ ] 2.9c `@GraphPath` + `@Hop`
 - [ ] 2.10 Polymorphism: label discrimination, `registerSubtype`, `instanceOf`
 - [ ] 2.11 `@PropertyBag`, `@NodeLabels`, relationships of a runtime type, `@Default`, `@EmptyWhenAbsent`, `@JsonPacked`, `@SortedBy`

@@ -55,6 +55,9 @@ export class GraphObjectMapper {
                   ? undefined
                   : this.related(rel, value);
         }
+        for (const aggregate of model.aggregates) {
+            instance[aggregate.field] = row.rels?.[aggregate.field] ?? undefined;
+        }
         return instance as T;
     }
 
