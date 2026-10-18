@@ -1,4 +1,4 @@
-import { anyOf, StatelessGraphObjectManager } from '@liberation-data/drivine';
+import { anyOf, QueryFn, StatelessGraphObjectManager } from '@liberation-data/drivine';
 import { PersonContext, RaisedAndAssignedIssue } from '../src';
 import { seedIssue } from './support/IssueWorld';
 import { SampleApp, sampleStores, startSample } from './support/SampleApp';
@@ -11,7 +11,7 @@ import { SampleApp, sampleStores, startSample } from './support/SampleApp';
 describe.each(sampleStores())('the DSL on $type', (engine) => {
     let sample: SampleApp;
     let gom: StatelessGraphObjectManager;
-    const issues = async (where: Parameters<typeof gom.loadAll<RaisedAndAssignedIssue>>[1]) =>
+    const issues = async (where: QueryFn<RaisedAndAssignedIssue>): Promise<RaisedAndAssignedIssue[]> =>
         gom.loadAll(RaisedAndAssignedIssue, where);
 
     beforeAll(async () => {
