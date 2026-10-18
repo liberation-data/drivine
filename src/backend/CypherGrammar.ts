@@ -7,11 +7,42 @@ import { DrivineError } from '@/DrivineError';
  */
 export interface CypherGrammar {
     readonly engine: string;
+
+    /**
+     * How a view's relationships are projected: INLINE, as pattern comprehensions within the RETURN, or
+     * CALL_SUBQUERY, each in a `CALL { }` of its own before the RETURN.
+     */
+    readonly viewProjection: 'INLINE' | 'CALL_SUBQUERY';
+
+    /**
+     * A predicate that holds when `pattern` (e.g. `(n)-[:R]->(:T)`) matches at least once.
+     */
+    existenceCheck(pattern: string): string;
 }
 
-export const NEO4J_GRAMMAR: CypherGrammar = { engine: 'Neo4j' };
-export const MEMGRAPH_GRAMMAR: CypherGrammar = { engine: 'Memgraph' };
-export const FALKORDB_GRAMMAR: CypherGrammar = { engine: 'FalkorDB' };
+/** `EXISTS { }` stops at the first match. */
+const existsSubquery = (pattern: string): string => `EXISTS { MATCH ${pattern} }`;
+
+export const NEO4J_GRAMMAR: CypherGrammar = { engine: 'Neo4j', existenceCheck: existsSubquery, viewProjection: 'INLINE' };
+
+export const MEMGRAPH_GRAMMAR: CypherGrammar = {
+    engine: 'Memgraph',
+    existenceCheck: existsSubquery,
+    viewProjection: 'INLINE'
+};
+
+/**
+ * FalkorDB takes neither `EXISTS { }` nor a pattern in `exists()`.
+ *
+ * Its views are projected with CALL subqueries. On FalkorDB 6.0 a pattern comprehension that names its relationship
+ * (`[(n)-[r:R]->(m) | properties(r)]`), as a relationship fragment must, leaves every later comprehension in the same
+ * projection empty, without an error.
+ */
+export const FALKORDB_GRAMMAR: CypherGrammar = {
+    engine: 'FalkorDB',
+    existenceCheck: (pattern: string) => `size([${pattern} | 1]) > 0`,
+    viewProjection: 'CALL_SUBQUERY'
+};
 
 export function cypherGrammarFor(type: DatabaseType): CypherGrammar {
     switch (type) {

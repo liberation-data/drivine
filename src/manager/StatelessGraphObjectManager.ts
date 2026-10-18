@@ -1,7 +1,8 @@
 import { GraphBackend } from '@/backend/GraphBackend';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
-import { FragmentRow, GraphObjectMapper } from '@/mapper/GraphObjectMapper';
+import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
+import { TargetModel } from '@/model/RelationshipModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { ClassType } from '@/query/QuerySpecification';
@@ -28,36 +29,52 @@ export class StatelessGraphObjectManager {
     }
 
     async loadAll<T>(type: ClassType<T>, where?: string, bindings: Record<string, any> = {}): Promise<T[]> {
-        const model = this.fragmentModel(type);
+        const target = this.modelOf(type);
+        if (target.kind === 'GRAPH_VIEW') {
+            const rows = await this.persistenceManager.query<ViewRow>(
+                this.backend.loadAllViews(target.model, where).spec(bindings)
+            );
+            return rows.map((row) => this.mapper.view<T>(target.model, row));
+        }
         const rows = await this.persistenceManager.query<FragmentRow>(
-            this.backend.loadAllFragments(model, where).spec(bindings)
+            this.backend.loadAllFragments(target.model, where).spec(bindings)
         );
-        return rows.map((row) => this.mapper.fragment<T>(model, row));
+        return rows.map((row) => this.mapper.fragment<T>(target.model, row));
     }
 
     async load<T>(type: ClassType<T>, id: unknown): Promise<T | undefined> {
-        const model = this.fragmentModel(type);
-        const rows = await this.persistenceManager.query<FragmentRow>(this.backend.loadFragment(model).spec({ id }));
+        const target = this.modelOf(type);
+        const statement =
+            target.kind === 'GRAPH_VIEW' ? this.backend.loadView(target.model) : this.backend.loadFragment(target.model);
+        const rows = await this.persistenceManager.query<any>(statement.spec({ id }));
         if (rows.length > 1) {
-            throw new DrivineError(`${rows.length} ${type.name} nodes have the id ${String(id)}. An id is one node's.`);
+            throw new DrivineError(`${rows.length} ${type.name} roots have the id ${String(id)}. An id is one node's.`);
         }
-        return rows.length ? this.mapper.fragment<T>(model, rows[0]) : undefined;
+        if (!rows.length) {
+            return undefined;
+        }
+        return target.kind === 'GRAPH_VIEW'
+            ? this.mapper.view<T>(target.model, rows[0])
+            : this.mapper.fragment<T>(target.model, rows[0]);
     }
 
     async count(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
-        return this.persistenceManager.getOne<number>(
-            this.backend.countFragments(this.fragmentModel(type), where).spec(bindings)
-        );
+        const target = this.modelOf(type);
+        const statement =
+            target.kind === 'GRAPH_VIEW'
+                ? this.backend.countViews(target.model, where)
+                : this.backend.countFragments(target.model, where);
+        return this.persistenceManager.getOne<number>(statement.spec(bindings));
     }
 
-    private fragmentModel(type: ClassType): ReturnType<ModelRegistry['fragment']> {
-        const kind = this.registry.kindOf(type);
-        if (kind === ClassKind.NODE_FRAGMENT) {
-            return this.registry.fragment(type);
+    private modelOf(type: ClassType): TargetModel {
+        switch (this.registry.kindOf(type)) {
+            case ClassKind.NODE_FRAGMENT:
+                return { kind: 'NODE_FRAGMENT', model: this.registry.fragment(type) };
+            case ClassKind.GRAPH_VIEW:
+                return { kind: 'GRAPH_VIEW', model: this.registry.view(type) };
+            default:
+                throw new DrivineError(`${type.name} is not a @NodeFragment or @GraphView.`);
         }
-        if (kind === ClassKind.GRAPH_VIEW) {
-            throw new DrivineError(`Loading a @GraphView (${type.name}) is not supported yet.`);
-        }
-        throw new DrivineError(`${type.name} is not a @NodeFragment or @GraphView.`);
     }
 }

@@ -2,13 +2,11 @@ import {
     CypherBackend,
     cypherGrammarFor,
     GraphProperty,
-    GraphView,
     ModelRegistry,
     NodeFragment,
     NodeId,
     PersistenceManager,
     QuerySpecification,
-    Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
@@ -22,11 +20,6 @@ class Hero {
     shout(): string {
         return this.name.toUpperCase();
     }
-}
-
-@GraphView()
-class HeroView {
-    @Root() hero: Hero;
 }
 
 describe.each(graphEngines())('StatelessGraphObjectManager reads on $type', (engine) => {
@@ -70,9 +63,5 @@ describe.each(graphEngines())('StatelessGraphObjectManager reads on $type', (eng
     it('should count', async () => {
         expect(await gom.count(Hero)).toEqual(2);
         expect(await gom.count(Hero, 'n.name = $name', { name: 'Moon Girl' })).toEqual(1);
-    });
-
-    it('should say that views are not loaded yet', async () => {
-        await expect(gom.loadAll(HeroView)).rejects.toThrow(/@GraphView \(HeroView\) is not supported yet/);
     });
 });
