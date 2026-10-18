@@ -6,6 +6,7 @@ describe('whenNotContended', () => {
     const pauses: number[] = [];
     const sleep = async (millis: number): Promise<void> => {
         pauses.push(millis);
+        return Promise.resolve();
     };
 
     beforeEach(() => (pauses.length = 0));
@@ -15,9 +16,9 @@ describe('whenNotContended', () => {
         const result = await whenNotContended(
             async () => {
                 if (++calls < 3) {
-                    throw contended;
+                    return Promise.reject(contended);
                 }
-                return 'done';
+                return Promise.resolve('done');
             },
             isContended,
             sleep
@@ -32,9 +33,7 @@ describe('whenNotContended', () => {
         const first = new Error('first');
         await expect(
             whenNotContended(
-                async () => {
-                    throw ++calls === 1 ? first : contended;
-                },
+                async () => Promise.reject(++calls === 1 ? first : contended),
                 (it) => it === first || it === contended,
                 sleep
             )
@@ -50,7 +49,7 @@ describe('whenNotContended', () => {
             whenNotContended(
                 async () => {
                     calls++;
-                    throw other;
+                    return Promise.reject(other);
                 },
                 isContended,
                 sleep
