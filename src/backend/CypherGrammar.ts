@@ -112,7 +112,7 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
         `CALL text_search.search_all('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
     // Memgraph's similarity is the cosine itself, or already 1 / (1 + d²). Its vector search returns nodes deleted since
     // its last garbage collection, and any read of one fails ('Trying to access labels on a deleted node') until it
-    // collects: FREE MEMORY forces it.
+    // collects: FREE MEMORY forces it (memgraph/memgraph#4975).
     vectorSearch: (label, property, similarity) => ({
         call: `CALL vector_search.search('${vectorIndexName(
             label,

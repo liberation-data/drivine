@@ -74,7 +74,8 @@ export class OracleWrites {
                 "    SELECT JSON_SERIALIZE(JSON_OBJECT('id' VALUE JSON(v_ids(i)), 'found' VALUE v_root IS NOT NULL, " +
                     "'changed' VALUE v_changed)) INTO v_out(v_out.COUNT) FROM dual;",
                 'END LOOP;',
-                // A collection, not JSON_TABLE over the results as text: that dropped the last row (23.26).
+                // Rows from a collection, as text: a returned result set with a JSON column gives only its prefetched rows
+                // (oracle/node-oracledb#1795).
                 'OPEN c FOR SELECT column_value AS "result:json" FROM TABLE(v_out);'
             ]
         );

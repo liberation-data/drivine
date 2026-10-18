@@ -86,8 +86,8 @@ export class OracleConnection implements Connection {
 
 /**
  * The rows a PL/SQL block returned. A block returns JSON as text, in a column named `<name>:json`, which is parsed here
- * and named `<name>`: node-oracledb 7 drops the last row of a returned result set with a JSON column (thin mode,
- * Oracle 23.26).
+ * and named `<name>`: in thin mode, a returned result set with a JSON column gives only its prefetched rows
+ * (oracle/node-oracledb#1795, 7.0.1 and 26.0.0 on Oracle 23.26).
  */
 function implicitRows(rows: any[] | undefined): any[] {
     return (rows ?? []).map((row) => {
