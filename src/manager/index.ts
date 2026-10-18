@@ -4,6 +4,8 @@ export * from './DelegatingPersistenceManager';
 export * from './EdgeOperations';
 export * from './FinderOperations';
 export * from './GraphObjectManagerFactory';
+export * from './GroupOperations';
+export * from './Groups';
 export * from './NodeRef';
 export * from './NonAtomicBatchException';
 export * from './NonTransactionalPersistenceManager';

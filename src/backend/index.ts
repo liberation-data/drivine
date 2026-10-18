@@ -6,6 +6,7 @@ export * from './GraphBackend';
 export * from './EdgeStatements';
 export * from './FragmentBatchStatement';
 export * from './GraphStatement';
+export * from './GroupStatement';
 export * from './PatchStatements';
 export * from './ViewProjector';
 export * from './CascadeTargets';

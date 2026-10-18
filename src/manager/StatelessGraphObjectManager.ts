@@ -23,6 +23,7 @@ import { TransactionMode } from '@/connection/TransactionMode';
 import { NonAtomicBatchException } from '@/manager/NonAtomicBatchException';
 import { StaleInBatch } from '@/manager/StaleInBatch';
 import { EdgeOperations } from '@/manager/EdgeOperations';
+import { GroupOperations } from '@/manager/GroupOperations';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
@@ -103,6 +104,8 @@ function chunked(groups: FragmentGroup[], size: number): FragmentGroup[][] {
 export class StatelessGraphObjectManager {
     /** Relationships on their own, between stored nodes: see EdgeOperations. */
     readonly edges: EdgeOperations;
+    /** Grouped reads: see GroupOperations. */
+    readonly groups: GroupOperations;
 
     private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
     private warnedNonAtomic = false;
@@ -119,6 +122,11 @@ export class StatelessGraphObjectManager {
             registry,
             async <R>(statement: GraphStatement) =>
                 this.whenUncontended(async () => this.persistenceManager.getOne<R>(statement.spec())),
+            async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
+            this.mapper
+        );
+        this.groups = new GroupOperations(
+            registry,
             async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
             this.mapper
         );
