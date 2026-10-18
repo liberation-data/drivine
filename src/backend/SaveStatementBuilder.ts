@@ -154,7 +154,7 @@ export class SaveStatementBuilder {
      * links token too when `replacing`. Otherwise the statement goes no further, having written nothing.
      */
     private root(model: FragmentModel, object: any, replacing: boolean): string {
-        this.bindings.root = { id: idOf(model, object), props: this.rootProps(model, object) };
+        this.bindings.root = { id: idOf(model, object), props: objectProps(model, object, this.options) };
         const labels = labelExpression(model.labels);
         const id = `{${quoteName(idProperty(model))}: $root.id}`;
         const write = [`SET ${restamp('n', changes('n', '$root.props'))}`, 'SET n += $root.props'];
@@ -200,22 +200,6 @@ export class SaveStatementBuilder {
             `WITH n, coalesce(n.${STAMP}, '${Stamps.NEVER_STAMPED}') AS _found`,
             ...write
         ].join('\n');
-    }
-
-    /** The root's properties, as the options' null policy, `only` and `except` say. */
-    private rootProps(model: FragmentModel, object: any): Record<string, any> {
-        const { only, except, nullPolicy }: SaveOptions<any> = this.options;
-        if (only && except) {
-            throw new DrivineError('Give only or except, not both.');
-        }
-        const reserved = [model.nodeIdField, model.stampField].filter((it) => it && only?.includes(it));
-        if (reserved.length) {
-            throw new DrivineError(`only names ${reserved.join(' and ')}, which a save does not write from the object.`);
-        }
-        const props = propsOf(model, object, stampExcluded(model), nullPolicy === NullPolicy.CLEAR);
-        const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
-        const byGraphName = new Map([...model.graphProperties].map(([field, name]) => [name, field]));
-        return Object.fromEntries(Object.entries(props).filter(([name]) => keep(byGraphName.get(name) ?? name)));
     }
 
     private removals(
@@ -415,7 +399,7 @@ function idProperty(model: FragmentModel): string {
     return model.nodeIdProperty;
 }
 
-function idOf(model: FragmentModel, object: any): any {
+export function idOf(model: FragmentModel, object: any): any {
     const id = object?.[model.nodeIdField ?? idProperty(model)];
     if (id == null) {
         throw new DrivineError(`A ${model.type.name} to save has no ${model.nodeIdField}. A save merges on the id.`);
@@ -427,6 +411,22 @@ function idOf(model: FragmentModel, object: any): any {
  * The properties an object writes: its own fields that are not null, under their graph names, leaving out transient
  * ones and those named in `excluded`.
  */
+/** The properties a save writes of an object (of a view, its root), as the options' null policy, `only` and `except` say. */
+export function objectProps(model: FragmentModel, object: any, options: SaveOptions<any>): Record<string, any> {
+    const { only, except, nullPolicy }: SaveOptions<any> = options;
+    if (only && except) {
+        throw new DrivineError('Give only or except, not both.');
+    }
+    const reserved = [model.nodeIdField, model.stampField].filter((it) => it && only?.includes(it));
+    if (reserved.length) {
+        throw new DrivineError(`only names ${reserved.join(' and ')}, which a save does not write from the object.`);
+    }
+    const props = propsOf(model, object, stampExcluded(model), nullPolicy === NullPolicy.CLEAR);
+    const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
+    const byGraphName = new Map([...model.graphProperties].map(([field, name]) => [name, field]));
+    return Object.fromEntries(Object.entries(props).filter(([name]) => keep(byGraphName.get(name) ?? name)));
+}
+
 export function propsOf(
     model: { graphProperties: Map<string, string>; transientFields: Set<string> },
     object: any,

@@ -3,6 +3,7 @@ export * from './CypherBackend';
 export * from './CypherGrammar';
 export * from './CypherStamps';
 export * from './GraphBackend';
+export * from './FragmentBatchStatement';
 export * from './GraphStatement';
 export * from './PatchStatements';
 export * from './ViewProjector';

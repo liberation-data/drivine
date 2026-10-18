@@ -3,6 +3,7 @@ export * from './Contention';
 export * from './DelegatingPersistenceManager';
 export * from './FinderOperations';
 export * from './GraphObjectManagerFactory';
+export * from './NonAtomicBatchException';
 export * from './NonTransactionalPersistenceManager';
 export * from './NullPolicy';
 export * from './PatchResult';

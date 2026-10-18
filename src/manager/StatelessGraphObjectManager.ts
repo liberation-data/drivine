@@ -15,6 +15,14 @@ import { TransactionContextHolder } from '@/transaction/TransactonContextHolder'
 import { StaleObjectException } from '@/manager/StaleObjectException';
 import { Stamps } from '@/model/Stamps';
 import { SaveStatement } from '@/backend/SaveStatement';
+import { FragmentBatchStatement, FragmentGroup } from '@/backend/FragmentBatchStatement';
+import { GraphStatement } from '@/backend/GraphStatement';
+import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
+import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
+import { TransactionMode } from '@/connection/TransactionMode';
+import { NonAtomicBatchException } from '@/manager/NonAtomicBatchException';
+import { StaleInBatch } from '@/manager/StaleInBatch';
+import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { ClassType } from '@/query/QuerySpecification';
@@ -32,6 +40,9 @@ export const UPDATE_ATTEMPTS = 3;
 /** How many rows of a patchAll go to one statement. */
 export const PATCH_ROWS = 1000;
 
+/** How many fragments of a saveAll go to one statement. */
+export const BATCH_ROWS = 1000;
+
 /** The row a save statement returns: see SaveStatement. */
 interface SaveResult {
     found: string;
@@ -39,7 +50,40 @@ interface SaveResult {
     related: { before: { id: any; stamp: string }[]; after: { id: any; stamp: string }[] }[];
 }
 
+/** A statement of a saveAll, and what its result is handed back to. */
+interface BatchEntry<T> {
+    spec: GraphStatement;
+    view?: { object: T; statement: SaveStatement };
+    groups?: FragmentGroup[];
+}
+
+/** The groups of a batch statement, split so that no statement holds more than `size` rows. */
+function chunked(groups: FragmentGroup[], size: number): FragmentGroup[][] {
+    const chunks: FragmentGroup[][] = [];
+    let current: FragmentGroup[] = [];
+    let rows = 0;
+    for (const group of groups) {
+        for (let start = 0; start < group.objects.length; start += size) {
+            const objects = group.objects.slice(start, start + size);
+            if (rows + objects.length > size && current.length) {
+                chunks.push(current);
+                current = [];
+                rows = 0;
+            }
+            current.push({ model: group.model, objects });
+            rows += objects.length;
+        }
+    }
+    if (current.length) {
+        chunks.push(current);
+    }
+    return chunks;
+}
+
 export class StatelessGraphObjectManager {
+    private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
+    private warnedNonAtomic = false;
+
     private readonly mapper = new GraphObjectMapper();
 
     constructor(
@@ -154,7 +198,6 @@ export class StatelessGraphObjectManager {
         }
     }
 
-
     /**
      * Writes named fields of the node with the id, if it meets `options.where`, in one statement, without loading it.
      * It never makes a node, is not checked against a stamp, and hands none back: a node it changed has a new stamp,
@@ -188,7 +231,9 @@ export class StatelessGraphObjectManager {
             return [];
         }
         if (!options.only === !options.except) {
-            throw new DrivineError('patchAll needs only or except, not both. To write every field of an object, save it.');
+            throw new DrivineError(
+                'patchAll needs only or except, not both. To write every field of an object, save it.'
+            );
         }
         const type = objects[0].constructor as ClassType;
         if (objects.some((it) => it.constructor !== type)) {
@@ -218,16 +263,68 @@ export class StatelessGraphObjectManager {
             throw new DrivineError('patchAll takes each id once.');
         }
         // In order of id, so that two calls over the same nodes take their locks in the same order.
-        const sorted = [...rows].sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+        const sorted = [...rows].sort((a, b) =>
+            String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0
+        );
         const results = new Map<any, PatchResult>();
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
             const chunk = sorted.slice(start, start + PATCH_ROWS);
             const found = await this.whenUncontended(async () =>
-                this.persistenceManager.query<PatchResult & { id: any }>(PatchStatements.many(root).spec({ rows: chunk }))
+                this.persistenceManager.query<PatchResult & { id: any }>(
+                    PatchStatements.many(root).spec({ rows: chunk })
+                )
             );
             found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
         }
         return ids.map((id) => results.get(id)!);
+    }
+
+    /**
+     * Saves many objects, fragments and views of any classes, together. Fragments go in one statement (per 1,000),
+     * each merged on its id; a view is a statement of its own, as `save` writes it. Outside a transaction of the
+     * caller's, the statements run in one transaction, so a failure leaves nothing written; inside one, they join it.
+     *
+     * A fragment's stamp is not checked: a batch only adds, and a fragment with a stale stamp is written all the same,
+     * keeping the stamp it had. A view that carries a stamp is checked as `save` checks it, and a stale one throws
+     * StaleObjectException, the batch then writing nothing. FalkorDB has no transactions: a batch of more than one
+     * statement runs statement by statement in WARN mode, and is refused with NonAtomicBatchException in STRICT.
+     *
+     * `replace` applies to views: a batch holding a fragment is refused with it. Returns the objects, in order.
+     */
+    async saveAll<T extends object>(objects: T[], options: SaveOptions<T> = {}): Promise<T[]> {
+        const fragments = new Map<Function, FragmentGroup>();
+        const views: T[] = [];
+        for (const object of objects) {
+            const target = this.modelOf(object.constructor as ClassType);
+            if (target.kind === 'GRAPH_VIEW') {
+                views.push(object);
+            } else {
+                if (options.replace) {
+                    throw new DrivineError(`replace applies to views. The batch holds a ${target.model.type.name}.`);
+                }
+                const group = fragments.get(target.model.type) ?? { model: target.model, objects: [] };
+                group.objects.push(object);
+                fragments.set(target.model.type, group);
+            }
+        }
+        const statements: BatchEntry<T>[] = [];
+        for (const chunk of chunked([...fragments.values()], BATCH_ROWS)) {
+            statements.push({ spec: FragmentBatchStatement.build(chunk, options), groups: chunk });
+        }
+        for (const view of views) {
+            const statement = this.backend.save(this.modelOf(view.constructor as ClassType), view, options, false);
+            statements.push({ spec: statement, view: { object: view, statement } });
+        }
+        const results = await this.runBatch(statements.map((it) => it.spec));
+        results.forEach((rows, i) => {
+            const entry: BatchEntry<T> = statements[i];
+            if (entry.view) {
+                this.handBack(entry.view.object, entry.view.statement, rows[0]);
+            } else {
+                this.handBackFragments(entry.groups!, rows[0]);
+            }
+        });
+        return objects;
     }
 
     /**
@@ -258,20 +355,28 @@ export class StatelessGraphObjectManager {
      */
     private changeOf(target: TargetModel, before: any, changed: any): SaveOptions<any> {
         if (changed?.constructor !== before.constructor) {
-            throw new DrivineError(`An update of a ${before.constructor.name} must leave it one, not a ${changed?.constructor?.name}.`);
+            throw new DrivineError(
+                `An update of a ${before.constructor.name} must leave it one, not a ${changed?.constructor?.name}.`
+            );
         }
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const [rootBefore, rootAfter] =
-            target.kind === 'GRAPH_VIEW' ? [before[target.model.rootField], changed[target.model.rootField]] : [before, changed];
+            target.kind === 'GRAPH_VIEW'
+                ? [before[target.model.rootField], changed[target.model.rootField]]
+                : [before, changed];
         if (rootAfter?.[root.nodeIdField!] !== rootBefore[root.nodeIdField!]) {
-            throw new DrivineError(`An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`);
+            throw new DrivineError(
+                `An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`
+            );
         }
         if (root.stampField) {
             rootAfter[root.stampField] = rootBefore[root.stampField];
         }
         const ignored = new Set([root.nodeIdField, root.stampField, ...root.transientFields]);
         const fields = new Set([...Object.keys(rootBefore), ...Object.keys(rootAfter)]);
-        const only = [...fields].filter((it) => !ignored.has(it) && !ObjectUtils.deepEqual(rootBefore[it], rootAfter[it]));
+        const only = [...fields].filter(
+            (it) => !ignored.has(it) && !ObjectUtils.deepEqual(rootBefore[it], rootAfter[it])
+        );
         if (only.some((it) => rootAfter[it] == null)) {
             for (const it of only) {
                 rootAfter[it] = rootAfter[it] ?? null;
@@ -287,6 +392,97 @@ export class StatelessGraphObjectManager {
                       .map((rel) => rel.field)
                 : [];
         return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}) };
+    }
+
+    /**
+     * Runs statements as one batch: joining the caller's transaction if there is one, otherwise in a transaction of
+     * its own on one connection, rolled back on failure and run again when the engine turns it away for contention.
+     * A checked save that finds its root stale (it returns no row) fails the batch. FalkorDB can't hold a transaction,
+     * so there a batch of more than one statement is run statement by statement, or refused in STRICT mode.
+     */
+    private async runBatch(specs: GraphStatement[]): Promise<any[][]> {
+        if (specs.length === 0) {
+            return [];
+        }
+        const provider = DatabaseRegistry.getInstance().connectionProvider(this.persistenceManager.database);
+        if (specs.length > 1 && provider instanceof FalkorDbConnectionProvider) {
+            if (provider.transactionMode === TransactionMode.STRICT) {
+                throw new NonAtomicBatchException('FalkorDB', specs.length);
+            }
+            this.warnNonAtomic(specs.length);
+        }
+        const runEach = async (query: (spec: GraphStatement) => Promise<any[]>): Promise<any[][]> => {
+            const results: any[][] = [];
+            for (const spec of specs) {
+                const rows = await query(spec);
+                if (spec instanceof SaveStatement && spec.expectedStamp != null && rows.length === 0) {
+                    throw new StaleInBatch(spec);
+                }
+                results.push(rows);
+            }
+            return results;
+        };
+        try {
+            if (TransactionContextHolder.getInstance().currentTransaction || specs.length === 1 || !provider) {
+                return await this.whenUncontended(async () =>
+                    runEach(async (spec) => this.persistenceManager.query(spec.spec()))
+                );
+            }
+            return await this.whenUncontended(async () => {
+                const connection = await provider.connect();
+                try {
+                    await connection.startTransaction();
+                    const results = await runEach(async (spec) => {
+                        try {
+                            return await connection.query(spec.spec());
+                        } catch (e) {
+                            throw DrivineError.withRootCause(e as Error, spec.spec());
+                        }
+                    });
+                    await connection.commitTransaction();
+                    await connection.release();
+                    return results;
+                } catch (e) {
+                    await connection.rollbackTransaction().catch(() => undefined);
+                    await connection.release(e as Error);
+                    throw e;
+                }
+            });
+        } catch (failure) {
+            if (failure instanceof StaleInBatch) {
+                throw await this.staleObject(failure.statement);
+            }
+            throw failure;
+        }
+    }
+
+    private warnNonAtomic(statements: number): void {
+        if (!this.warnedNonAtomic) {
+            this.warnedNonAtomic = true;
+            this.logger.warn(
+                `A batch of ${statements} statements runs statement by statement on FalkorDB, which has no ` +
+                    `multi-statement transactions: a failure part way leaves what ran before it.`
+            );
+        }
+    }
+
+    /** Gives each fragment of a batch the stamp the batch left, as far as it was current. */
+    private handBackFragments(groups: FragmentGroup[], result: { groups: SaveResult['related'] }): void {
+        groups.forEach((group, i) => {
+            if (!group.model.stampField) {
+                return;
+            }
+            const found = new Map(result.groups[i].before.map((it) => [it.id, it.stamp]));
+            const now = new Map(result.groups[i].after.map((it) => [it.id, it.stamp]));
+            for (const object of group.objects) {
+                const id = object[group.model.nodeIdField!];
+                object[group.model.stampField] = Stamps.handedBack(
+                    object[group.model.stampField],
+                    found.get(id) ?? '',
+                    now.get(id)!
+                );
+            }
+        });
     }
 
     private assertPatchable(root: ReturnType<ModelRegistry['fragment']>, fields: string[]): void {
@@ -308,7 +504,11 @@ export class StatelessGraphObjectManager {
             : whenNotContended(statement, (failure) => this.backend.contended(failure));
     }
 
-    private async write<T extends object>(object: T, options: SaveOptions<T>, createOnly: boolean): Promise<T | undefined> {
+    private async write<T extends object>(
+        object: T,
+        options: SaveOptions<T>,
+        createOnly: boolean
+    ): Promise<T | undefined> {
         const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options, createOnly);
         const run = async (): Promise<SaveResult[]> => this.persistenceManager.query<SaveResult>(statement.spec());
         let rows: SaveResult[];
@@ -337,7 +537,12 @@ export class StatelessGraphObjectManager {
             }
             throw await this.staleObject(statement);
         }
-        const result: SaveResult = rows[0];
+        this.handBack(object, statement, rows[0]);
+        return object;
+    }
+
+    /** Gives the object (its root, and its stamped related nodes) the stamps a save left, as far as each was current. */
+    private handBack(object: any, statement: SaveStatement, result: SaveResult): void {
         this.handBackRelated(object, statement, result);
         if (statement.root.stampField) {
             statement.rootObject[statement.root.stampField] = Stamps.handedBack(
@@ -346,7 +551,6 @@ export class StatelessGraphObjectManager {
                 result.now
             );
         }
-        return object;
     }
 
     /**
