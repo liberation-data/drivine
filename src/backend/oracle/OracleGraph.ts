@@ -30,6 +30,32 @@ export class OracleGraph {
         this.catalog = `${name}_schema`;
     }
 
+    /** The table that holds the embeddings a vector index on the label's property is over. */
+    vectors(label: string, property: string): string {
+        return this.objectName('v', [label, property]);
+    }
+
+    /** The table that holds the text a full-text index on the label's properties is over. */
+    texts(label: string, properties: string[]): string {
+        return this.objectName('t', [label, ...properties]);
+    }
+
+    /**
+     * A name for an object of `kind` made for `parts`, as drivine4j names it, so the JVM and Node make one: the graph's
+     * name, the kind, what of the parts reads as a name, and a hash of the parts (Java's String.hashCode), leaving room
+     * for the `_t` or `_i` an object made beside it adds within Oracle's 128.
+     */
+    objectName(kind: string, parts: string[]): string {
+        const hash = (javaHash(parts.join('\u0000')) >>> 0).toString(16);
+        const fixed = `${this.name}_${kind}__${hash}`.length + 2;
+        const room = Math.min(Math.max(128 - fixed, 0), 40);
+        const readable = parts
+            .map((it) => it.replace(/[^A-Za-z0-9]/g, ''))
+            .join('')
+            .slice(0, room);
+        return `${this.name}_${kind}_${readable}_${hash}`;
+    }
+
     /** What makes the store. Each statement may run again. */
     get ddl(): string[] {
         return [
@@ -112,4 +138,13 @@ export function hasLabels(alias: string, labels: string[]): string {
     return labels
         .map((it) => `JSON_EXISTS(${alias}.labels, '$?(@ == "${it.replace(/'/g, "''").replace(/"/g, '\\"')}")')`)
         .join(' AND ');
+}
+
+/** Java's String.hashCode, over UTF-16 code units, as a 32-bit int. */
+function javaHash(text: string): number {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+        hash = (Math.imul(31, hash) + text.charCodeAt(i)) | 0;
+    }
+    return hash;
 }

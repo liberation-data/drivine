@@ -1,5 +1,9 @@
 import {
     backendFor,
+    FullTextIndex,
+    fullTextIndex,
+    VectorIndex,
+    vectorIndex,
     DatabaseRegistry,
     DatabaseType,
     ModelRegistry,
@@ -14,6 +18,13 @@ import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 import { OracleSeed } from '../support/OracleSeed';
 
 jest.setTimeout(60_000);
+
+@NodeFragment({ labels: ['OraSearch'] })
+class Note {
+    @NodeId() id: string;
+    @FullTextIndex() text?: string;
+    @VectorIndex({ dimensions: 2 }) embedding?: number[];
+}
 
 @NodeFragment({ labels: ['OraSchema'] })
 class Account {
@@ -99,6 +110,37 @@ describeOnOracle('schema on Oracle', () => {
         const ids = await Promise.all([1, 2, 3, 4, 5].map(async () => (await manager().storeIdentity()).id));
         expect(new Set(ids).size).toEqual(1);
         expect((await manager().storeIdentity()).engine).toEqual(DatabaseType.ORACLE);
+    });
+
+    it('should search through the tables it makes for vector and full-text indexes, kept in step by triggers', async () => {
+        const vectors = vectorIndex('OraSearch', 'embedding', 2);
+        const texts = fullTextIndex('OraSearch', 'text');
+        const notes = new OracleSeed(pm, 'OraSearch');
+        await notes.clear();
+        await gom.save(Object.assign(new Note(), { id: 'n1', text: 'graph databases', embedding: [1, 0] }));
+        await gom.indexes.ensure(vectors);
+        await gom.indexes.ensure(texts);
+        const backend = backendFor(DatabaseType.ORACLE);
+        const tableOf = async (kind: 'VECTOR' | 'FULLTEXT', properties: string[]) =>
+            pm.maybeGetOne<string>(backend.searchIndexTable!(kind, 'OraSearch', properties).spec());
+        expect(await tableOf('VECTOR', ['embedding'])).toMatch(/^drivine_v_OraSearchembedding_[0-9a-f]+$/);
+        expect(await tableOf('FULLTEXT', ['text'])).toMatch(/^drivine_t_OraSearchtext_[0-9a-f]+$/);
+        // Saved after the index: the trigger puts it in the tables.
+        await gom.save(Object.assign(new Note(), { id: 'n2', text: 'relational tables', embedding: [0, 1] }));
+        expect((await gom.loadNearest(Note, [0, 1], { topK: 1 })).map((it) => it.value.id)).toEqual(['n2']);
+        expect((await gom.loadMatching(Note, '+relational -graph', { topK: 5 })).map((it) => it.value.id)).toEqual([
+            'n2'
+        ]);
+        expect((await gom.loadMatching(Note, 'graph', { topK: 5 })).map((it) => it.value.id)).toEqual(['n1']);
+        await gom.indexes.drop(vectors);
+        await gom.indexes.drop(texts);
+        expect(await tableOf('VECTOR', ['embedding'])).toBeUndefined();
+        // Without the index, every node of the label is read, to the same answer.
+        expect((await gom.loadMatching(Note, '+relational -graph', { topK: 5 })).map((it) => it.value.id)).toEqual([
+            'n2'
+        ]);
+        expect((await gom.loadNearest(Note, [0, 1], { topK: 1 })).map((it) => it.value.id)).toEqual(['n2']);
+        await notes.clear();
     });
 
     it("should record and read a schema catalog's version", async () => {

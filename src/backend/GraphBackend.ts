@@ -32,6 +32,8 @@ export interface NearestSearch {
     /** How many are kept after the filter, if any are trimmed. */
     limit?: number;
     depth?: Record<string, number>;
+    /** The table an index made for the search is over, where the store keeps one (see `searchIndexTable`). */
+    table?: string;
 }
 
 /** How a load's roots are ordered (an order written over the root), and how many are skipped and returned. */
@@ -44,6 +46,10 @@ export interface Page {
 export interface MatchingSearch {
     label: string;
     properties: string[];
+    /** The query text, also bound as `$_text`, for a backend that writes its terms into the statement. */
+    text?: string;
+    /** The table an index made for the search is over, where the store keeps one (see `searchIndexTable`). */
+    table?: string;
     where?: string;
     threshold?: boolean;
     limit: number;
@@ -141,6 +147,13 @@ export interface GraphBackend {
      * relevance scaled so the best hit is 1, most relevant first. Filters apply after the search; `limit` trims.
      */
     matching(target: TargetModel, search: MatchingSearch): GraphStatement;
+
+    /**
+     * Where a store keeps a search index as a table of its own (Oracle): the statement giving that table's name for the
+     * index over the label's properties, one row, or none when the index was not made. Undefined where the store
+     * searches its own index by name.
+     */
+    searchIndexTable?(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
     save(

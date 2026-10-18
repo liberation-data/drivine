@@ -122,6 +122,14 @@ END;`);
         return this.deleting(root, this.rootWhere(target, where));
     }
 
+    searchIndexTable(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement {
+        return new GraphStatement(
+            `SELECT object_name AS "table" FROM ${this.graph.catalog} WHERE kind = $kind AND label = $label ` +
+                `AND properties = $properties AND object_name IS NOT NULL`,
+            { kind, label, properties: JSON.stringify(properties) }
+        );
+    }
+
     nearest(target: TargetModel, search: NearestSearch): GraphStatement {
         return new OracleSearch(this.graph).nearest(target, search);
     }

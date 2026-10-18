@@ -318,8 +318,10 @@ export class StatelessGraphObjectManager {
             root,
             options
         );
+        const label = options.partitionLabel ?? root.labels[0];
         const statement = this.backend.nearest(target, {
-            label: options.partitionLabel ?? root.labels[0],
+            label,
+            table: await this.searchTable('VECTOR', label, [property]),
             property,
             similarity,
             where: filter.where,
@@ -372,6 +374,8 @@ export class StatelessGraphObjectManager {
         const statement = this.backend.matching(target, {
             label: root.labels[0],
             properties: chosen,
+            text,
+            table: await this.searchTable('FULLTEXT', root.labels[0], chosen),
             where: filter.where,
             threshold: options.threshold !== undefined,
             limit: options.topK,
@@ -630,6 +634,21 @@ export class StatelessGraphObjectManager {
         return this.persistenceManager.getOne<number>(
             this.backend.deleteAll(target, filter.where).spec(filter.bindings)
         );
+    }
+
+    /** The table a store keeps a search index in, where it keeps one and the index was made. */
+    private async searchTable(
+        kind: 'VECTOR' | 'FULLTEXT',
+        label: string,
+        properties: string[]
+    ): Promise<string | undefined> {
+        if (!this.backend.searchIndexTable) {
+            return undefined;
+        }
+        const rows = await this.persistenceManager.query<string>(
+            this.backend.searchIndexTable(kind, label, properties).spec()
+        );
+        return rows[0];
     }
 
     /** A condition as Cypher over the root, `n`, with its values: written from the class's references, or as given. */

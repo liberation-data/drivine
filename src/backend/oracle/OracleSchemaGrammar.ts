@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
+import { OracleSideTable } from '@/backend/oracle/OracleSideTable';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import {
     FullTextIndexSpec,
@@ -31,7 +32,7 @@ export class OracleSchemaGrammar implements SchemaGrammar {
         return this.listing('UNIQUE');
     }
 
-    /** Vector and full-text indexes are recorded, not made: a search on Oracle reads every node of the label. */
+    /** Vector and full-text indexes as recorded: each with the table made for it, where one was. */
     get listVectors(): { statement: string; read: (rows: any[]) => SchemaItem[] } {
         return {
             statement:
@@ -68,20 +69,97 @@ export class OracleSchemaGrammar implements SchemaGrammar {
         return [this.drop('UNIQUE', spec.label, spec.properties)];
     }
 
+    /**
+     * A vector index, as drivine4j makes it: Oracle indexes a VECTOR column, and an embedding is a list among a node's
+     * JSON properties, so the label's embeddings are kept in a table beside the nodes, with a vector index over it by
+     * neighbour partitions (which needs no vector memory set aside, as a neighbour graph does). The table is filled
+     * before the index is made, so the partitions are trained on the embeddings there are.
+     */
     createVector(spec: VectorIndexSpec): string[] {
-        return [this.record('VECTOR', spec, { dimensions: spec.dimensions, similarity: spec.similarity })];
+        const property = spec.properties[0];
+        const path = `'$${jsonKey(property)}'`;
+        const side = new OracleSideTable(
+            this.graph.vectors(spec.label, property),
+            this.graph.nodes,
+            'embedding',
+            `VECTOR(${spec.dimensions}, FLOAT32)`,
+            (row) => `TO_VECTOR(JSON_QUERY(${row}.props, ${path} RETURNING CLOB))`,
+            (row) => `${hasLabels(row, [spec.label])} AND JSON_EXISTS(${row}.props, ${path})`,
+            (row) =>
+                `VECTOR_DIMENSION_COUNT(TO_VECTOR(JSON_QUERY(${row}.props, ${path} RETURNING CLOB))) = ${spec.dimensions}`,
+            true
+        );
+        const metric = spec.similarity === 'COSINE' ? 'COSINE' : 'EUCLIDEAN_SQUARED';
+        return [
+            side.create,
+            side.triggerStatement,
+            side.backfill,
+            `CREATE VECTOR INDEX IF NOT EXISTS ${side.index} ON ${side.name} (embedding) ORGANIZATION NEIGHBOR PARTITIONS DISTANCE ${metric}`,
+            this.record('VECTOR', spec, { dimensions: spec.dimensions, similarity: spec.similarity }, side.name)
+        ];
     }
 
     dropVector(spec: VectorIndexSpec): string[] {
-        return [this.unrecord('VECTOR', spec)];
+        return [
+            ...OracleSideTable.dropping(this.graph.vectors(spec.label, spec.properties[0])),
+            this.unrecord('VECTOR', spec)
+        ];
     }
 
+    /**
+     * A full-text index, where the database has Oracle Text: the text of the label's nodes kept in a table beside them,
+     * with a JSON search index over it, kept in step on commit. Not over the node table: once an Oracle Text index is
+     * there, Oracle answers ordinary tests of a JSON property from it, and it holds only what has been committed, so a
+     * save would not find a node it made a moment before (drivine4j's finding). Without Oracle Text (ORA-29833) nothing
+     * is made, the index is recorded, and a search reads the text of every node of the label.
+     */
     createFullText(spec: FullTextIndexSpec): string[] {
-        return [this.record('FULLTEXT', spec, {})];
+        const side = new OracleSideTable(
+            this.graph.texts(spec.label, spec.properties),
+            this.graph.nodes,
+            'doc',
+            'JSON',
+            (row) =>
+                `JSON_OBJECT(${spec.properties
+                    .map((it) => `${sqlText(it)} VALUE JSON_VALUE(${row}.props, '$${jsonKey(it)}' RETURNING CLOB)`)
+                    .join(', ')} ABSENT ON NULL RETURNING JSON)`,
+            (row) => hasLabels(row, [spec.label])
+        );
+        return [
+            `DECLARE
+    v_indexed NUMBER;
+    e_no_text EXCEPTION;
+    e_exists EXCEPTION;
+    PRAGMA EXCEPTION_INIT(e_no_text, -29833);
+    PRAGMA EXCEPTION_INIT(e_exists, -955);
+BEGIN
+    EXECUTE IMMEDIATE ${sqlText(side.create)};
+    SELECT COUNT(*) INTO v_indexed FROM user_indexes WHERE index_name = '${side.index.toUpperCase()}';
+    IF v_indexed = 0 THEN
+        BEGIN
+            EXECUTE IMMEDIATE ${sqlText(
+                `CREATE SEARCH INDEX ${side.index} ON ${side.name} (doc) FOR JSON PARAMETERS ('SYNC (ON COMMIT)')`
+            )};
+        EXCEPTION
+            WHEN e_exists THEN NULL;
+            WHEN e_no_text THEN
+                EXECUTE IMMEDIATE 'DROP TABLE ${side.name} PURGE';
+                ${this.record('FULLTEXT', spec, {}).replace(/^BEGIN\s*|\s*END;$/g, '')}
+                RETURN;
+        END;
+    END IF;
+    EXECUTE IMMEDIATE ${sqlText(side.triggerDdl)};
+    EXECUTE IMMEDIATE ${sqlText(side.backfill)};
+    ${this.record('FULLTEXT', spec, {}, side.name).replace(/^BEGIN\s*|\s*END;$/g, '')}
+END;`
+        ];
     }
 
     dropFullText(spec: FullTextIndexSpec): string[] {
-        return [this.unrecord('FULLTEXT', spec)];
+        return [
+            ...OracleSideTable.dropping(this.graph.texts(spec.label, spec.properties)),
+            this.unrecord('FULLTEXT', spec)
+        ];
     }
 
     conflicts(spec: UniquenessConstraintSpec, limit: number): string {
@@ -145,21 +223,30 @@ END;`;
     }
 
     /** Records an index that is not made: what it is over and how, for drift to be told. */
-    private record(kind: 'VECTOR' | 'FULLTEXT', spec: VectorIndexSpec | FullTextIndexSpec, details: object): string {
+    /** Records an index: what it is over and how, and the table made for it, if one was. */
+    private record(
+        kind: 'VECTOR' | 'FULLTEXT',
+        spec: VectorIndexSpec | FullTextIndexSpec,
+        details: object,
+        objectName?: string
+    ): string {
         const properties = sqlText(JSON.stringify(spec.properties));
         return `BEGIN
     DELETE FROM ${this.graph.catalog} WHERE kind = '${kind}' AND label = ${sqlText(
         spec.label
     )} AND properties = ${properties};
     INSERT INTO ${this.graph.catalog} (kind, label, properties, name, object_name, details)
-        VALUES ('${kind}', ${sqlText(spec.label)}, ${properties}, ${sqlText(itemName(spec))}, NULL, JSON(${sqlText(
-            JSON.stringify(details)
-        )}));
+        VALUES ('${kind}', ${sqlText(spec.label)}, ${properties}, ${sqlText(itemName(spec))}, ${
+            objectName ? sqlText(objectName) : 'NULL'
+        }, JSON(${sqlText(JSON.stringify(details))}));
 END;`;
     }
 
     private unrecord(kind: 'VECTOR' | 'FULLTEXT', spec: VectorIndexSpec | FullTextIndexSpec): string {
-        return `DELETE FROM ${this.graph.catalog} WHERE kind = '${kind}' AND label = ${sqlText(spec.label)}`;
+        return (
+            `DELETE FROM ${this.graph.catalog} WHERE kind = '${kind}' AND label = ${sqlText(spec.label)} ` +
+            `AND properties = ${sqlText(JSON.stringify(spec.properties))}`
+        );
     }
 
     private drop(kind: Kind, label: string, properties: string[]): string {
