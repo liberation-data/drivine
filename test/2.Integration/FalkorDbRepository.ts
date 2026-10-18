@@ -17,13 +17,13 @@ export class FalkorDbRepository {
 
     @Transactional()
     async clear(): Promise<void> {
-        await this.persistenceManager.execute(new QuerySpecification(`MATCH (n:Hero) DETACH DELETE n`));
+        await this.persistenceManager.execute(new QuerySpecification(`MATCH (n:FalkorHero) DETACH DELETE n`));
     }
 
     @Transactional()
     async createHero(name: string, powers: string[], joined: Date): Promise<void> {
         await this.persistenceManager.execute(
-            new QuerySpecification(`CREATE (:Hero {name: $name, powers: $powers, joined: $joined})`).bind({
+            new QuerySpecification(`CREATE (:FalkorHero {name: $name, powers: $powers, joined: $joined})`).bind({
                 name,
                 powers,
                 joined
@@ -34,14 +34,14 @@ export class FalkorDbRepository {
     @Transactional()
     async findHero(name: string): Promise<any> {
         return this.persistenceManager.maybeGetOne(
-            new QuerySpecification(`MATCH (h:Hero) WHERE h.name = $1 RETURN h`).bind([name])
+            new QuerySpecification(`MATCH (h:FalkorHero) WHERE h.name = $1 RETURN h`).bind([name])
         );
     }
 
     @Transactional()
     async heroNamesJoinedAfter(after: Date): Promise<string[]> {
         return this.persistenceManager.query(
-            new QuerySpecification<string>(`MATCH (h:Hero) WHERE h.joined > $after RETURN h.name ORDER BY h.name`).bind(
+            new QuerySpecification<string>(`MATCH (h:FalkorHero) WHERE h.joined > $after RETURN h.name ORDER BY h.name`).bind(
                 { after }
             )
         );
@@ -77,6 +77,6 @@ export class FalkorDbRepository {
 
     @Transactional()
     async countHeroesStrict(): Promise<number> {
-        return this.strictPersistenceManager.getOne(new QuerySpecification(`MATCH (h:Hero) RETURN count(h)`));
+        return this.strictPersistenceManager.getOne(new QuerySpecification(`MATCH (h:FalkorHero) RETURN count(h)`));
     }
 }
