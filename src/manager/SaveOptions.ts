@@ -12,6 +12,8 @@ export enum RemovedTargets {
     DELETE_UNREFERENCED = 'DELETE_UNREFERENCED'
 }
 
+import { NullPolicy } from '@/manager/NullPolicy';
+
 export interface SaveOptions<T> {
     /**
      * Relationship fields of the view whose value is the whole of the relationship: what the store holds and the
@@ -25,4 +27,13 @@ export interface SaveOptions<T> {
     replace?: (keyof T & string)[] | 'all';
     /** What becomes of a target whose relationship `replace` removed. Defaults to KEEP. */
     removedTargets?: RemovedTargets;
+    /** How null fields of the object (of a view, its root) are written. Defaults to IGNORE. */
+    nullPolicy?: NullPolicy;
+    /**
+     * Fields of the object (of a view, its root) to write; every other field of the node is left as the store has it.
+     * A view's relationships are written whatever it names. Not the id or the stamp. Give `only` or `except`, not both.
+     */
+    only?: string[];
+    /** Fields of the object (of a view, its root) not to write. Give `only` or `except`, not both. */
+    except?: string[];
 }

@@ -7,6 +7,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
+import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
 import { changes, EXPECTED, LOCK, MADE, relink, restamp, STAMP } from '@/backend/CypherStamps';
 
@@ -41,6 +42,7 @@ export class SaveStatementBuilder {
     private readonly bindings: Record<string, any> = {};
     /** The stamped related fragments, each read before and after the writes: see readStamps. */
     private readonly stamped: StampedNodes[] = [];
+    private options: SaveOptions<any> = {};
 
     /** What every WITH after the root carries: the root, the stamp it was found with, and related stamps read. */
     private get carry(): string {
@@ -51,6 +53,7 @@ export class SaveStatementBuilder {
 
     build(target: TargetModel, object: any, options: SaveOptions<any> = {}): SaveStatement {
         this.bindings._stamp = Stamps.fresh();
+        this.options = options;
         if (target.kind === 'NODE_FRAGMENT') {
             if (options.replace === 'all' || options.replace?.length) {
                 throw new DrivineError(`replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`);
@@ -145,7 +148,7 @@ export class SaveStatementBuilder {
      * links token too when `replacing`. Otherwise the statement goes no further, having written nothing.
      */
     private root(model: FragmentModel, object: any, replacing: boolean): string {
-        this.bindings.root = { id: idOf(model, object), props: propsOf(model, object, stampExcluded(model)) };
+        this.bindings.root = { id: idOf(model, object), props: this.rootProps(model, object) };
         const labels = labelExpression(model.labels);
         const id = `{${quoteName(idProperty(model))}: $root.id}`;
         const write = [`SET ${restamp('n', changes('n', '$root.props'))}`, 'SET n += $root.props'];
@@ -176,6 +179,22 @@ export class SaveStatementBuilder {
             `WITH n, coalesce(n.${STAMP}, '${Stamps.NEVER_STAMPED}') AS _found`,
             ...write
         ].join('\n');
+    }
+
+    /** The root's properties, as the options' null policy, `only` and `except` say. */
+    private rootProps(model: FragmentModel, object: any): Record<string, any> {
+        const { only, except, nullPolicy }: SaveOptions<any> = this.options;
+        if (only && except) {
+            throw new DrivineError('Give only or except, not both.');
+        }
+        const reserved = [model.nodeIdField, model.stampField].filter((it) => it && only?.includes(it));
+        if (reserved.length) {
+            throw new DrivineError(`only names ${reserved.join(' and ')}, which a save does not write from the object.`);
+        }
+        const props = propsOf(model, object, stampExcluded(model), nullPolicy === NullPolicy.CLEAR);
+        const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
+        const byGraphName = new Map([...model.graphProperties].map(([field, name]) => [name, field]));
+        return Object.fromEntries(Object.entries(props).filter(([name]) => keep(byGraphName.get(name) ?? name)));
     }
 
     private removals(
@@ -390,14 +409,17 @@ function idOf(model: FragmentModel, object: any): any {
 export function propsOf(
     model: { graphProperties: Map<string, string>; transientFields: Set<string> },
     object: any,
-    excluded: string[]
+    excluded: string[],
+    clearNulls: boolean = false
 ): Record<string, any> {
     const props: Record<string, any> = {};
     for (const [field, value] of Object.entries(object ?? {})) {
-        if (value == null || typeof value === 'function' || excluded.includes(field) || model.transientFields.has(field)) {
+        if (typeof value === 'function' || excluded.includes(field) || model.transientFields.has(field)) {
             continue;
         }
-        props[model.graphProperties.get(field) ?? field] = value;
+        if (value != null || clearNulls) {
+            props[model.graphProperties.get(field) ?? field] = value ?? null;
+        }
     }
     return props;
 }

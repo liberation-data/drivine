@@ -299,7 +299,12 @@ Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as th
   - Fixed: contention detection used `neo4j.isRetriableError`, which isn't in the installed driver (5.14) at runtime — every real conflict threw a `TypeError` instead of being retried. Now `Neo4jError.isRetriable`. The 5-writer test is the first to exercise it.
   - Fixed: `FalkorDbRepository.spec` cleared the whole shared graph, racing other suites run in parallel; now scoped to its own label.
 - [x] 2.7b Related nodes of stamped classes are handed the stamp the save left: the statement reads their `{id, stamp}` right after the root check and again at the end (no values come out of a FOREACH), and `Stamps.handedBack` applies per instance (absent before = made by the save). `replace: 'all'` covers every relationship field of the view, refused for an object whose root carries no stamp. An unchecked root write takes the lock too (related nodes don't yet).
-- [ ] 2.8 `update`, `create`, `patch`, `patchAll`, `saveAll` (`only` / `except`; atomic on FalkorDB or `NonAtomicBatchException`), `edges`, `NullPolicy`
+- [ ] 2.8 split into:
+  - [x] 2.8a `NullPolicy` (IGNORE default, CLEAR clears null/undefined own-key fields of the object or a view's root, via `+= {k: null}` — verified on all three; related nodes always IGNORE) and `only` / `except` on `save` (field names of the object / view root; both together refused; id or stamp in `only` refused). Change detection fixed so clearing an absent property isn't a data change. TS limit: a declared-but-never-assigned field isn't an own key, so CLEAR can't see it.
+  - [ ] 2.8b `update` (load, change, checked save; retried when stale) and `create` (only if absent)
+  - [ ] 2.8c `patch` / `patchAll`
+  - [ ] 2.8d `saveAll` (batched `UNWIND` for fragments; atomic on FalkorDB or `NonAtomicBatchException`)
+  - [ ] 2.8e `edges` (relate / unrelate / unrelateAll)
 - [ ] 2.9 Recursive views (`maxDepth`, depth override), `@GraphPath` + `@Hop`, `@Count` / `@Aggregate`, `@ReadOnly`
 - [ ] 2.10 Polymorphism: label discrimination, `registerSubtype`, `instanceOf`
 - [ ] 2.11 `@PropertyBag`, `@NodeLabels`, relationships of a runtime type, `@Default`, `@EmptyWhenAbsent`, `@JsonPacked`, `@SortedBy`

@@ -18,9 +18,15 @@ export function twoTokensOf(alias: string): string {
     return `CASE WHEN size(${alias}.${STAMP}) = ${2 * T + 1} AND substring(${alias}.${STAMP}, ${T}, 1) = ':' THEN ${alias}.${STAMP} ELSE null END`;
 }
 
-/** Whether writing `props` (a map expression) would change a property of the entity `alias`. */
+/**
+ * Whether writing `props` (a map expression) would change a property of the entity `alias`. A null in `props` clears a
+ * property, and changes it only if it is there.
+ */
 export function changes(alias: string, props: string): string {
-    return `any(k IN keys(${props}) WHERE ${alias}[k] IS NULL OR ${alias}[k] <> ${props}[k])`;
+    return (
+        `any(k IN keys(${props}) WHERE CASE WHEN ${props}[k] IS NULL THEN ${alias}[k] IS NOT NULL ` +
+        `ELSE ${alias}[k] IS NULL OR ${alias}[k] <> ${props}[k] END)`
+    );
 }
 
 /** Replaces the node's data token when `condition` holds, or gives it a whole stamp when it has none. */
