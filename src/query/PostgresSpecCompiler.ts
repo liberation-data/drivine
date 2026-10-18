@@ -1,10 +1,9 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
-import { DrivineError } from '@/DrivineError';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
 const assert = require('assert');
 
-export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
+export class PostgresSpecCompiler extends QuerySpecificationCompiler {
     private readonly paramKeys: string[] = [];
 
     /**
@@ -15,8 +14,8 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
     constructor(spec: QuerySpecification<any>) {
         super(spec);
         assert(
-            ['CYPHER', 'SQL'].includes(this.spec.statement.language),
-            `${this.spec.statement.language} is not supported on AgensGraph.`
+            this.spec.statement.language === 'SQL',
+            `${this.spec.statement.language} is not supported on Postgres.`
         );
 
         if (!Array.isArray(this.spec.parameters)) {
@@ -27,22 +26,22 @@ export class AgensGraphSpecCompiler extends QuerySpecificationCompiler {
         }
     }
 
+    /**
+     * Rewrites named parameters ($name) to positional ones ($1). Every occurrence is rewritten, and a name is never
+     * matched as the prefix of a longer one ($id does not match $idList).
+     */
     formattedStatement(): string {
-        let result = this.appliedStatement();
-        for (let i = 0; i < this.paramKeys.length; i++) {
-            const key = this.paramKeys[i];
-            result = result.replace(`$${key}`, `$${i + 1}`);
+        const result = this.appliedStatement();
+        if (this.paramKeys.length === 0) {
+            return result;
         }
-        return result;
+        return result.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, key: string) => {
+            const index = this.paramKeys.indexOf(key);
+            return index >= 0 ? `$${index + 1}` : match;
+        });
     }
 
     formattedParams(): any {
-        if (this.spec.statement.language === 'CYPHER') {
-            return this.indexParams.map((it) => JSON.stringify(it));
-        } else if (this.spec.statement.language === 'SQL') {
-            return this.indexParams;
-        } else {
-            throw new DrivineError(`${this.spec.statement.language} is not supported on AgensGraph`);
-        }
+        return this.indexParams;
     }
 }

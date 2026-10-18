@@ -1,0 +1,262 @@
+# Drivine: Plan to Match drivine4j
+
+Working notes — not a contract. Update as we go.
+
+## Where we are
+
+- Current branch: `master` at v2.8.2
+- Engines on master: AgensGraph, Neo4j (BOLT), Postgres (plain SQL), Neptune (basic — single connection, noted TODO in `2e83e59`)
+- Target: feature parity with **drivine4j 0.1.7** (was 0.0.30 when this plan was first written, 2026-04-26), with Node-appropriate adaptations, for the **graph** engines
+- drivine4j engine set (`DatabaseType`): `NEO4J`, `NEPTUNE`, `FALKORDB`, `MEMGRAPH` (Cypher); `POSTGRES`, `ORACLE` (SQL); `EMBABEL` (in-process)
+- AgensGraph is being retired (has fallen behind upstream); not in the target engine set
+- RedisGraph is dropped from the target: Redis EOL'd it, drivine4j never had it, and FalkorDB is its maintained fork (same wire protocol)
+- Oracle (23ai/26ai, SQL/PGQ) is in the target, as a second, non-Cypher backend for the stateless manager (Tier 5)
+- Postgres is plain SQL — stays on `PersistenceManager` only until Postgres ships SQL/PGQ (Tier 5)
+- `EMBABEL` (in-process engine type) is not needed on Node
+
+One thing the JVM version does NOT have: streaming cursors with no back-pressure. Keep this front-and-centre — it's a genuine Node-side differentiator.
+
+### What changed in drivine4j since 0.0.30 (why this plan was rewritten)
+
+- **`StatelessGraphObjectManager` (0.1.0)** is now the primary API. The stateful `GraphObjectManager` (session snapshot + dirty diffing + `CascadeType`) is **deprecated** — it produced real data-loss bugs whenever anything else wrote to the graph. Saves now depend only on the object and the arguments passed.
+- **`@NodeStamp`** optimistic concurrency: a save is refused when another writer got there first. Every saved node carries `__drivine.stamp`.
+- **New write API**: `save`, `saveAll` (with `only` / `except`, atomic on FalkorDB or refused up front), `update(id) { copy }`, `create` (create-if-absent, first write never overwritten), `patch` / `patchAll` (named fields, conditional on a predicate), `edges`, `Replace(...)` with `RemovedTargets.DELETE_UNREFERENCED`, `NullPolicy`.
+- **Read-only view fields**: `@ReadOnly`, `@GraphPath`, `@Count`, `@Aggregate`, multi-hop lists.
+- **Search**: vector (`loadNearest`, `searchK`, threshold, partitioning, filtered) and full-text (`loadMatching`).
+- **Model**: `@GraphProperty` (name mapping), `@PropertyBag`, `@NodeLabels`, relationships of a runtime type, `@Default`, `@EmptyWhenAbsent`, `@GraphTransient`, `@Hop`, inherited `@NodeId`.
+- **Queries**: `groups` (group by key with aggregates), `any` / `none` over to-many, `hasItem`, dynamic/runtime-key predicates, limit/skip, index-aware keyset pagination, `nullsFirst()` / `nullsLast()`, order by expression over root properties, database-side ordering of nested collections.
+- **Schema management**: `IndexManager`, `ConstraintManager`, `SchemaCatalog`, decorator-declared `@Unique` / `@RangeIndex` / `@VectorIndex` / `@FullTextIndex`, `SchemaManager` runtime enforcement, version-triggered rebuild, per-engine `SchemaGrammar`.
+- **Store identity**: a store has a stable identity independent of its address; a manager can say which store it is on.
+- **Backend abstraction**: `GraphBackend` interface with `CypherBackend` (+ per-engine `CypherGrammar`) and `OracleBackend` (SQL/PGQ). The object manager generates via the backend, not directly as Cypher.
+- **Oracle** SQL/PGQ backend for the stateless manager. Postgres-as-graph (LATERAL + `json_agg`) exists as a proposal only.
+- **Ops**: contended-retry with jitter, in-process engines register their own `ConnectionProvider`, FalkorDB parameterisation + DDL fixes.
+
+## The redis branch — re-evaluated
+
+- Merge base with master: `de6b348`; master is +63 ahead, redis branch +1 (`625ebc6 RedisGraph support`), but cumulative diff is **+9188 / -17920 across 89 files** (dir reorg, Neptune deletion, lockfile churn, test refactor, `resultset/`, `LocalStorageClsHooked.ts`).
+
+**Decision: don't merge, don't cherry-pick, and don't ship RedisGraph.** Use the redis-branch files (`RedisGraphConnection.ts`, `RedisGraphConnectionProvider.ts`, `RedisGraphResultMapper.ts`, `RedisGraphResultSet.ts`) as **reference for the FalkorDB engine**, which speaks the same protocol.
+
+## The transaction-mode decision (locked in)
+
+Still present in drivine4j 0.1.7 (`ConnectionProperties`, `FalkorDbConnection`, `NonAtomicBatchException`). Mirror on Node:
+
+```ts
+type TransactionMode = 'WARN' | 'STRICT'
+
+interface ConnectionProperties {
+  // ...existing fields...
+  transactionMode?: TransactionMode  // default WARN
+}
+```
+
+For engines without multi-statement transactions (FalkorDB):
+- `WARN` (default): `startTransaction` is no-op debug log, `rollback` warns, queries auto-commit
+- `STRICT`: `startTransaction` / `commit` / `rollback` throw; `@Transactional` methods explode
+- A batch that can't be atomic is written as one statement or refused up front (`NonAtomicBatchException` equivalent)
+
+Wire into `Transaction.ts` and `TransactionalPersistenceManager.ts`.
+
+---
+
+## Tier 0 — AgensGraph removal (prep)
+
+Drop `AgensGraphConnection`, `AgensGraphConnectionProvider`, `AgensGraphCursor`, `AgensGraph*ResultMapper`, `AgensGraphSpecCompiler`, `AgensGraphResultSet`, `@bitnine-oss/ag-driver` dep, and all Agens tests. Update `DatabaseRegistry`, `DatabaseType`, README.
+
+Verify Postgres path is fully independent of Agens code (shared `pg` driver, possibly shared plumbing). Untangle in the same PR if needed.
+
+One PR, mechanical, lands before Tier 1.
+
+## Tier 1 — Engines + backend abstraction
+
+Goal: Neo4j 4/5, FalkorDB, Memgraph, Neptune (full IAM SigV4) selectable by config as **graph** engines. Postgres preserved as plain-SQL on `PersistenceManager`.
+
+### Steps
+
+1. **`TransactionMode`** on `ConnectionProperties` + integration into `Transaction.ts` and `TransactionalPersistenceManager.ts`. Tests for both modes.
+
+2. **Connection-dir reorganisation** — `src/connection/<engine>/` (`neo4j/`, `postgres/`, `neptune/`). `git mv`, pure moves + import updates. New engines land directly into the new structure.
+
+3. **`GraphBackend` + `CypherGrammar` abstraction** — mirror drivine4j rather than the earlier ad-hoc `CypherDialect` sketch. `GraphBackend` owns statement generation for load / count / groups / nearest / matching / delete / save, plus capability flags (`supportsOrphanDelete`, `supportsIndexBackedOrdering`, ...). `CypherBackend` is the one implementation for now, parameterised by a per-engine `CypherGrammar` (`EXISTS {}` vs `size()`, APOC vs CALL-subquery sort, pattern comprehension vs CALL prolog, temporal literals, quoting). Keeping the `GraphBackend` seam leaves room for SQL backends later (Tier 5) without rework.
+
+4. **FalkorDB engine** — Redis protocol, built from redis-branch reference. `WARN` default. Every value sent as a parameter (drivine4j #30), nine-digit time precision, quoting of non-plain names in DDL.
+
+5. **Memgraph engine** — Bolt, reuses Neo4j driver stack; grammar differs (no APOC, CALL-subquery sort).
+
+6. **Neptune full** — IAM SigV4 (`NeptuneAuthMode`, token refresh; `@aws-sdk/signature-v4` already in deps) + connection pool for the "1 txn per connection" limit noted in `2e83e59`.
+
+7. **Contended-retry with jitter** — retry transient conflicts with a random pause component so two writers that collided don't retry in lockstep.
+
+8. **`@JsonPacked`** — collection-as-JSON property decorator (Neptune list-property workaround). Cross-engine safe.
+
+### Acceptance
+
+- Engines selectable via `ConnectionProperties.databaseType`: Neo4j, Memgraph, FalkorDB, Neptune (graph); Postgres (SQL)
+- Integration tests pass against each via Testcontainers (where available)
+- Existing Neo4j / Postgres / Neptune-basic tests still pass after AgensGraph removal
+
+---
+
+## Tier 2 — Stateless GraphObjectManager
+
+Goal: decorator-driven object mapping alongside (not replacing) `PersistenceManager`. **Build the stateless manager directly** — skip the deprecated stateful `GraphObjectManager` (session, dirty tracking, `CascadeType`) entirely. Node users have no legacy data to migrate, so none of drivine4j's repair tooling (`RelationshipDirectionRepair`, `PathRelationshipReport`) is needed.
+
+### Decorators (TS decorators + reflect-metadata)
+
+- Class: `@NodeFragment({ labels })`, `@RelationshipFragment`, `@GraphView`
+- Identity/state: `@Root`, `@NodeId` (inheritable), `@NodeStamp`, `@ReadOnly`, `@GraphTransient`
+- Relationships: `@GraphRelationship({ type, direction, maxDepth, required })`, `@GraphPath` + `@Hop`, relationships of a runtime type
+- Derived: `@Count`, `@Aggregate(fn)`
+- Mapping: `@GraphProperty(name)`, `@PropertyBag`, `@NodeLabels`, `@JsonPacked`, `@Default`, `@EmptyWhenAbsent`
+- Ordering: `@SortedBy(propertyPath, ascending?)` (client-side)
+
+### Read API (`GraphObjectOperations`)
+
+```ts
+gom.loadAll(PersonCareer, q?)
+gom.load(PersonCareer, id)
+gom.loadFirst(PersonCareer, q)
+gom.count(PersonCareer, q?)
+gom.groups(Issue, q)            // group by key with aggregates
+gom.delete(PersonCareer, id)
+gom.deleteAll(Issue, q | "n.state = 'closed'")
+```
+
+Filter API is string-based until Tier 4 lands the type-safe DSL.
+
+### Write API (on the manager class itself, no interface — as in drivine4j)
+
+```ts
+gom.save(obj, Replace(View.attachments, { removedTargets: 'DELETE_UNREFERENCED' }))
+gom.saveAll(objs, { only: [...] } | { except: [...] })
+gom.update(PersonCareer, id, p => ({ ...p, title: 'Lead' }))
+gom.create(obj)                 // create-if-absent
+gom.patch(Person, id, { fields }, where?)
+gom.patchAll(Person, q, { fields })
+gom.edges(...)                  // write/remove relationships directly
+```
+
+- `NullPolicy` for how `null` fields are written
+- `@NodeStamp`: every saved node (and each end of a written/removed relationship) carries `__drivine.stamp`; a stale save throws `StaleObjectException`; `save` returns the new stamp
+- Read-only fields (`@GraphPath`, `@Count`, `@Aggregate`, multi-hop lists) are never written
+- `INCOMING` relationships written in their declared direction (drivine4j's pre-0.1.0 bug — don't repeat it)
+
+### Subsystems
+
+- **Statement generation** — walks view metadata → `GraphBackend` (Tier 1). The heart of the work.
+- **Result deserialiser** — single nested-map column → instance. Polymorphism (label discrimination), recursion termination, optional vs required.
+- **Required vs optional** — explicit `required: true` on `@GraphRelationship` (`design:type` can't see `?:`). Required emits an existence filter.
+- **Recursive views** — detect self-reference/cycles, nest to `maxDepth`; terminal collections `[]`, singles `null`. Query-time depth override.
+- **Polymorphism** — no sealed classes in TS: abstract class + decorated subclasses, plus `registerSubtype(parent, labelKey, subtype)` for the interface case; `instanceOf` filter via runtime metadata.
+
+### Acceptance
+
+- `@GraphView` with `@Root`, optional + required + recursive + polymorphic relationships, a `@GraphPath` and a `@Count`
+- Concurrent writers: second stale save refused via `@NodeStamp`
+- `Replace` + `DELETE_UNREFERENCED` keeps shared targets, deletes unreferenced ones
+- `saveAll` atomic on FalkorDB or refused up front
+- Same scenarios leave identical graphs on Neo4j, Memgraph and FalkorDB (drivine4j's comparison-test approach)
+
+---
+
+## Tier 3 — Search + schema management
+
+Split out of Tier 2 because both are sizeable and independently useful (especially for RAG users).
+
+**Search**
+- `loadNearest(View, vector, { topK, threshold, searchK, partitionLabel, where })` — vector search returning `Scored<T>`. Expose `searchK` (effective k) so filtered callers can over-fetch: filters apply after the ANN yield, and HNSW under-recalls at small k on clustered data (see drivine4j `docs/next-feature.md`).
+- `loadMatching(View, text, { topK, threshold, where })` — full-text search.
+- Per-engine vector storage (e.g. FalkorDB `vecf32`).
+
+**Schema**
+- Imperative `IndexManager` / `ConstraintManager`
+- Declarative `SchemaCatalog` provider and decorators: `@Unique`, `@RangeIndex`, `@VectorIndex`, `@FullTextIndex`
+- `SchemaManager` runtime enforcement with `SchemaMode` / `SchemaPolicy`; version-triggered rebuild via a stored schema version
+- Per-engine `SchemaGrammar` (Neo4j, Memgraph, FalkorDB; unsupported → explicit error)
+- Let `@VectorIndex` pin quantization and HNSW params so a declared schema is reproducible across server versions
+- `PersistenceManager.canManageSchema()`
+
+**Store identity** — stable `StoreIdentity` independent of address, safe under concurrent first boots; manager can report its store.
+
+---
+
+## Tier 4 — Type-safe DSL (codegen)
+
+Goal: `loadAll(View, q => q.where(q.person.bio.contains("Lead")))` with autocomplete and compile-time checking.
+
+**Approach: ts-morph build-time codegen.** Ship a CLI (`drivine-codegen`) run as a build step; scans for `@GraphView` / `@NodeFragment` classes and emits `<View>QueryDsl.ts`. Deterministic output, no I/O beyond writing files. (Rejected: TS transformers — fragile tooling; runtime proxies — lose type info when nested.)
+
+Operators: `eq, neq, gt, gte, lt, lte, in, contains, startsWith, endsWith, isNull, isNotNull, hasItem, instanceOf<T>`; `any` / `none` over to-many relationships; dynamic runtime-key predicates.
+
+Composition: chained `where` = AND; `anyOf([...])` = OR. Bare-fragment queries supported.
+
+Ordering & paging: `asc`, `desc`, `nullsFirst()`, `nullsLast()`, order by expression over root properties, database-side ordering of nested collections, `limit` / `skip`, index-aware keyset pagination.
+
+Also drives `groups`, `deleteAll`, `loadNearest` / `loadMatching` filters.
+
+**Defer** until Tier 2 is shipped and stable — the runtime API works without it.
+
+---
+
+## Tier 5 — SQL/PGQ backends
+
+### Oracle (planned)
+
+Port drivine4j's `OracleBackend` (see `drivine4j/docs/oracle-sql-pgq-plan.md`, phases 1–7 done). Target Oracle Database 23ai / 26ai.
+
+- Driver: `node-oracledb` in thin mode (no Instant Client). A generic SQL connection substrate (drivine4j's `JdbcConnection` equivalent) shared with Postgres.
+- Scope: everything on `GraphObjectOperations` plus `save`, `saveAll`, `update`, `edges` on the stateless manager.
+- Reads: `GRAPH_TABLE` queries; path reads from the root; filters on indexed properties go through the index.
+- Writes: one PL/SQL block per save with `FOR UPDATE` (drivine4j's write spike shows dropping it breaks concurrent saves); `@NodeStamp` checks; whole-or-nothing without a transaction.
+- Schema: `OracleSchemaGrammar`, schema marker, Oracle Text full-text with documented differences from Lucene, Oracle vector type.
+- Port the spike tests first (`OracleWriteSpikeTest` scenarios) as acceptance, run in their own CI job (Oracle Free container).
+
+Comes after Tier 2 is stable; it implements the same contract and is the real test of the `GraphBackend` seam.
+
+### Postgres (when SQL/PGQ lands in Postgres)
+
+Mostly reuses the Oracle backend: `GRAPH_TABLE` reads are standard SQL/PGQ (ISO/IEC 9075-16). Needs Postgres equivalents for the Oracle-specific parts: PL/SQL write blocks, Oracle Text, and the vector type (→ pgvector). Supersedes drivine4j's LATERAL + `json_agg` proposal for Node. Reverses the "Postgres is SQL-only" decision once it ships.
+
+---
+
+## Cross-cutting
+
+- **NestJS coupling stays** — mirrors drivine4j, whose core depends on Spring directly.
+- **Testcontainers helper** — equivalent of `@EnableDrivineTestConfig`: spins up the configured engine, with `USE_LOCAL_*` env override.
+- **Docs** — wiki is canonical (`git@github.com:liberation-data/drivine.wiki.git`). Each tier ships a wiki update alongside the code. README stays a high-level pointer.
+- **Backwards compatibility** — additive only at every step (after Tier 0). Existing `PersistenceManager` users untouched.
+- **Sample app** — build in-repo first (`examples/`), then promote to `drivine-inspiration` as a quick-start template. Especially for the Tier 2 `@GraphView` example.
+
+## Sequencing rationale
+
+1. **Tier 0 + Tier 1 steps 1–3**: low risk; the backend/grammar seam is needed before any second Cypher engine.
+2. **Tier 1 steps 4–8**: FalkorDB / Memgraph / Neptune-full fall out of the grammar abstraction.
+3. **Tier 2 after Tier 1 stabilises**: generation depends on `GraphBackend`. Going straight to stateless avoids building (and then deprecating) the session model.
+4. **Tier 3** once Tier 2 reads/writes are solid — search and schema reuse the view metadata.
+5. **Tier 4**: pure UX layer.
+6. **Tier 5 Oracle** after Tier 2 is stable (can run alongside Tiers 3–4); Postgres PGQ when Postgres supports it.
+
+## Open questions
+
+- (none currently)
+
+## Resolved
+
+- **NestJS stays a dependency** (2026-10-18). drivine4j core depends on `spring-boot-starter`, `spring-tx` and `spring-boot-starter-aop` directly; the starter module is only auto-config. No core/nestjs package split for now.
+- **Skip the stateful GraphObjectManager** (2026-10-18). Deprecated in drivine4j 0.1.0; build the stateless manager only.
+- **RedisGraph dropped** (2026-10-18). EOL upstream, absent from drivine4j; FalkorDB covers the protocol.
+- **Oracle is in** (2026-10-18), as Tier 5 via SQL/PGQ. Postgres follows via PGQ once available.
+- **No `EMBABEL` engine type** (2026-10-18). JVM-only concern.
+- **Dialect → `GraphBackend` + `CypherGrammar`** (2026-10-18), matching drivine4j's structure.
+- Wiki is canonical. README stays as a pointer.
+- Sample app: build in-repo first, promote to `drivine-inspiration` once stable.
+- AgensGraph: removed (Tier 0).
+- Connection-dir reorg: yes, Tier 1 step 2.
+- `class-validator` integration: defer past Tier 2; opt-in `validateOnSave` only if real demand surfaces.
+
+## Progress
+
+Branch: `drivine4j-parity`. Local test DBs (docker): `drivine-neo4j` (neo4j:5, bolt `localhost:17687`, `neo4j`/`drivine-test`), `drivine-postgres` (postgres:16, `localhost:15432`, `postgres`/`drivine-test`, db `drivine`). Pass connection settings as env vars; they win over `.env`.
+
+- [x] **Tier 0 — AgensGraph removed.** Postgres untangled onto plain `pg`: `PostgresConnectionProvider`, `PostgresConnection`, `PostgresCursor`, `PostgresResultMapper`, `PostgresSpecCompiler`. The compiler now rewrites every occurrence of a named parameter and never matches a name as the prefix of a longer one (the Agens compiler did both wrong). `ConnectionProperties.defaultGraphPath` removed. Integration test `PostgresRepository.spec.ts` covers named params, rollback and cursors.
+- [ ] Tier 1 step 1 — `TransactionMode`

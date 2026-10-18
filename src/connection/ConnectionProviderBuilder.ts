@@ -3,7 +3,7 @@ import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DrivineError } from '@/DrivineError';
 import { Neo4jConnectionProvider } from '@/connection/Neo4jConnectionProvider';
 import * as assert from 'assert';
-import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
+import { PostgresConnectionProvider } from '@/connection/PostgresConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
@@ -21,11 +21,10 @@ export class ConnectionProviderBuilder {
     private _protocol?: string;
     private _poolMax?: number;
 
-    // AgensGraph properties
+    // Postgres properties
     private _idleTimeout?: number;
     private _connectionTimeout?: number;
     private _name?: string;
-    private _defaultGraphPath?: string;
 
     private registry: DatabaseRegistry;
 
@@ -42,7 +41,6 @@ export class ConnectionProviderBuilder {
         this._idleTimeout = properties.idleTimeout;
         this._connectionTimeout = properties.connectionTimeout ?? 5000;
         this._name = properties.databaseName;
-        this._defaultGraphPath = properties.defaultGraphPath;
         this._protocol = properties.protocol;
         this._poolMax = properties.poolMax ?? 40;
         return this;
@@ -89,11 +87,6 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
-    defaultGraphPath(path: string): this {
-        this._defaultGraphPath = path;
-        return this;
-    }
-
     /**
      * Registers a database details with the specified properties. If a database is already registered under the
      * specified name, the connection properties will be updated.
@@ -107,8 +100,8 @@ export class ConnectionProviderBuilder {
 
         assert(this._host, `host config is required`);
 
-        if (this._type === DatabaseType.AGENS_GRAPH || this._type == DatabaseType.POSTGRES) {
-            this.registry.register(this.buildAgensGraphAndPostgresProvider(name));
+        if (this._type === DatabaseType.POSTGRES) {
+            this.registry.register(this.buildPostgresProvider(name));
         } else if (this._type === DatabaseType.NEO4J) {
             this.registry.register(this.buildNeo4jProvider(name));
         } else if (this._type === DatabaseType.NEPTUNE) {
@@ -120,19 +113,19 @@ export class ConnectionProviderBuilder {
         return this.registry.connectionProvider(name)!;
     }
 
-    private buildAgensGraphAndPostgresProvider(name: string): ConnectionProvider {
+    private buildPostgresProvider(name: string): ConnectionProvider {
         if (!this._port) {
             this._port = 5432;
         }
         if (this._port !== 5432) {
-            this.logger.warn(`${this._port} is a non-standard port for AgensGraph/Postgres.`);
+            this.logger.warn(`${this._port} is a non-standard port for Postgres.`);
         }
         if (!this._idleTimeout) {
             this._idleTimeout = 500;
         }
         assert(this._name, `Database name is required`);
 
-        return new AgensGraphConnectionProvider(name, this._type, this._defaultGraphPath, {
+        return new PostgresConnectionProvider(name, this._type, {
             host: this._host,
             user: this._userName,
             password: this._password,

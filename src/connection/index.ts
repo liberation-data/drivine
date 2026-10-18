@@ -1,5 +1,3 @@
-export * from './AgensGraphConnection';
-export * from './AgensGraphConnectionProvider';
 export * from './Connection';
 export * from './ConnectionProperties';
 export * from './ConnectionProvider';
@@ -8,3 +6,5 @@ export * from './DatabaseRegistry';
 export * from './DatabaseType';
 export * from './Neo4jConnection';
 export * from './Neo4jConnectionProvider';
+export * from './PostgresConnection';
+export * from './PostgresConnectionProvider';

@@ -1,7 +1,7 @@
 import { QuerySpecification } from '@/query';
 import { Neo4jSpecCompiler } from '@/query/Neo4jSpecCompiler';
 
-describe('AgensGraphSpecCompiler', () => {
+describe('Neo4jSpecCompiler', () => {
     const spec = new QuerySpecification().withStatement(`match (n) return count(n)`).bind([1, 'foo', 'bar', false]);
 
     it('should map parameters to Neo4j format', () => {

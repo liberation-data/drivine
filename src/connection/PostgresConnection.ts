@@ -3,21 +3,19 @@ import { PoolClient } from 'pg';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
-import { AgensGraphCursor } from '@/cursor/AgensGraphCursor';
+import { PostgresCursor } from '@/cursor/PostgresCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
-import { AgensGraphSpecCompiler } from '@/query/AgensGraphSpecCompiler';
-import { QueryLanguage } from '@/query';
+import { PostgresSpecCompiler } from '@/query/PostgresSpecCompiler';
 
 const PgCursor = require('pg-cursor');
 
-export class AgensGraphConnection implements Connection {
-    private logger = new DrivineLogger(AgensGraphConnection.name);
+export class PostgresConnection implements Connection {
+    private logger = new DrivineLogger(PostgresConnection.name);
 
     constructor(
         readonly client: PoolClient,
-        readonly resultMapper: ResultMapper,
-        readonly defaultLanguage: QueryLanguage
+        readonly resultMapper: ResultMapper
     ) {}
 
     sessionId(): string {
@@ -25,8 +23,8 @@ export class AgensGraphConnection implements Connection {
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
-        const finalizedSpec = spec.finalizedCopy(this.defaultLanguage);
-        const compiledSpec = new AgensGraphSpecCompiler(finalizedSpec).compile();
+        const finalizedSpec = spec.finalizedCopy('SQL');
+        const compiledSpec = new PostgresSpecCompiler(finalizedSpec).compile();
         const hrStart = process.hrtime();
         const logger = new StatementLogger(this.sessionId());
         const result = await this.client.query(compiledSpec.statement, compiledSpec.parameters);
@@ -34,12 +32,12 @@ export class AgensGraphConnection implements Connection {
         return this.resultMapper.mapQueryResults<T>(result.rows, finalizedSpec);
     }
 
-    async openCursor<T>(spec: CursorSpecification<T>): Promise<AgensGraphCursor<T>> {
-        const finalizedSpec = spec.finalizedCopy(this.defaultLanguage);
-        const compiledSpec = new AgensGraphSpecCompiler(finalizedSpec).compile();
+    async openCursor<T>(spec: CursorSpecification<T>): Promise<PostgresCursor<T>> {
+        const finalizedSpec = spec.finalizedCopy('SQL');
+        const compiledSpec = new PostgresSpecCompiler(finalizedSpec).compile();
         const pgCursorSpec = new PgCursor(compiledSpec.statement, compiledSpec.parameters);
         const pgCursor = await this.client.query(pgCursorSpec);
-        return new AgensGraphCursor<T>(this.sessionId(), finalizedSpec, pgCursor, this.resultMapper);
+        return new PostgresCursor<T>(this.sessionId(), finalizedSpec, pgCursor, this.resultMapper);
     }
 
     async startTransaction(): Promise<void> {

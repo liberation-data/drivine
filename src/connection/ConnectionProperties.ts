@@ -11,7 +11,6 @@ export interface ConnectionProperties {
     connectionTimeout?: number;
     poolMax?: number;
     databaseName?: string;
-    defaultGraphPath?: string;
     protocol?: string;
 }
 
@@ -46,14 +45,13 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     const idleTimeout = numberFromEnv('DATABASE_IDLE_TIMEOUT');
     const connectionTimeout = numberFromEnv('DATABASE_CONNECTION_TIMEOUT');
     const databaseName = stringFromEnv('DATABASE_NAME');
-    const defaultGraphPath = stringFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
     const protocol = stringFromEnv('DATABASE_PROTOCOL');
     const poolMax = numberFromEnv('DATABASE_POOL_MAX');
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
     assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
 
-    if (databaseType === DatabaseType.AGENS_GRAPH) {
+    if (databaseType === DatabaseType.POSTGRES) {
         assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
     }
 
@@ -66,7 +64,6 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         idleTimeout,
         connectionTimeout,
         databaseName,
-        defaultGraphPath,
         protocol,
         poolMax
     };
