@@ -9,6 +9,7 @@ export * from './mapper';
 export * from './model';
 export * from './query';
 export * from './schema';
+export * from './store';
 export * from './utils';
 export * from './transaction';
 export * from './DrivineError';

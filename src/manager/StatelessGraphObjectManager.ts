@@ -30,6 +30,7 @@ import { ConstraintManager } from '@/schema/ConstraintManager';
 import { IndexManager } from '@/schema/IndexManager';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { schemaGrammarFor } from '@/schema/SchemaGrammar';
+import { StoreIdentity, StoreIdentityResolver } from '@/store/StoreIdentity';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
@@ -115,6 +116,7 @@ export class StatelessGraphObjectManager {
 
     private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
     private warnedNonAtomic = false;
+    private identity?: Promise<StoreIdentity>;
 
     private readonly mapper: GraphObjectMapper;
 
@@ -146,6 +148,22 @@ export class StatelessGraphObjectManager {
     /** Uniqueness constraints of this manager's database: made idempotently, outside any transaction. */
     get constraints(): ConstraintManager {
         return new ConstraintManager(this.schemaExecutor(), schemaGrammarFor(this.persistenceManager.type));
+    }
+
+    /**
+     * The stable identity of the store this manager works on, minted in the store on first sight: equal for two
+     * managers when, and only when, they look at the same data. Resolved once per manager.
+     */
+    async storeIdentity(): Promise<StoreIdentity> {
+        if (!this.identity) {
+            this.identity = new StoreIdentityResolver(this.persistenceManager, this.constraints)
+                .resolve()
+                .catch((e) => {
+                    this.identity = undefined;
+                    throw e;
+                });
+        }
+        return this.identity;
     }
 
     /** Which database this manager works on. */
