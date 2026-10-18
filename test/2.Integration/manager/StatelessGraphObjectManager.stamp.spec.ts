@@ -11,6 +11,7 @@ import {
     QuerySpecification,
     Root,
     StaleObjectException,
+    Stamps,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
@@ -42,11 +43,17 @@ describe.each(graphEngines())('@NodeStamp on $type', (engine) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
     const stored = async (id: string): Promise<string> =>
-        pm.getOne<string>(new QuerySpecification('MATCH (n:StampTest {id: $id}) RETURN n.`__drivine.stamp`').bind({ id }));
+        pm.getOne<string>(
+            new QuerySpecification('MATCH (n:StampTest {id: $id}) RETURN n.`__drivine.stamp`').bind({ id })
+        );
 
     beforeAll(() => {
         pm = persistenceManagerFor(engine);
-        gom = new StatelessGraphObjectManager(pm, new CypherBackend(cypherGrammarFor(engine.type)), new ModelRegistry());
+        gom = new StatelessGraphObjectManager(
+            pm,
+            new CypherBackend(cypherGrammarFor(engine.type)),
+            new ModelRegistry()
+        );
     });
 
     beforeEach(async () => {
@@ -139,13 +146,22 @@ describe.each(graphEngines())('@NodeStamp on $type', (engine) => {
     it('should let exactly one of several writers holding the same stamp save', async () => {
         const loaded = (await gom.save(person('moon', 'Moon Girl'))).stamp;
         const writers = [1, 2, 3, 4, 5].map((n) => Object.assign(person('moon', `Writer ${n}`), { stamp: loaded }));
-        const outcomes = await Promise.all(writers.map(async (it) => gom.save(it).then(() => 'saved', (e) => e)));
+        const outcomes = await Promise.all(
+            writers.map(async (it) =>
+                gom.save(it).then(
+                    () => 'saved',
+                    (e) => e
+                )
+            )
+        );
         expect(outcomes.filter((it) => it === 'saved').length).toEqual(1);
         expect(outcomes.filter((it) => it instanceof StaleObjectException).length).toEqual(4);
     });
 
     it('should hand related nodes the stamps the save left', async () => {
-        const saved = await gom.save(Object.assign(new Tagged(), { person: person('moon'), tags: [tag('t1'), tag('t2')] }));
+        const saved = await gom.save(
+            Object.assign(new Tagged(), { person: person('moon'), tags: [tag('t1'), tag('t2')] })
+        );
         expect(saved.tags[0].stamp).toEqual(await stored('t1'));
         expect(saved.tags[1].stamp).toEqual(await stored('t2'));
 
@@ -178,6 +194,47 @@ describe.each(graphEngines())('@NodeStamp on $type', (engine) => {
         loaded.tags = loaded.tags.filter((it) => it.id === 't2');
         await gom.save(loaded, { replace: 'all' });
         expect((await gom.load(Tagged, 'moon'))!.tags.map((it) => it.id)).toEqual(['t2']);
+    });
+
+    it("should notice Cypher of one's own that marks the node with setClause", async () => {
+        const mine = await gom.save(person('moon', 'Moon Girl'));
+        await pm.execute(
+            new QuerySpecification(
+                `MATCH (p:StampTest {id: $id}) SET p.name = 'Theirs', ${Stamps.setClause('p')}`
+            ).bind({
+                id: 'moon'
+            })
+        );
+        const marked = await stored('moon');
+        expect(data(marked)).not.toEqual(data(mine.stamp!));
+        expect(links(marked)).toEqual(links(mine.stamp!));
+        mine.name = 'Mine';
+        expect(await gom.save(mine).catch((e) => e)).toBeInstanceOf(StaleObjectException);
+    });
+
+    it('should stamp a node that had none with setClause', async () => {
+        await pm.execute(
+            new QuerySpecification(`CREATE (p:StampTest:Person {id: 'bare'}) SET ${Stamps.setClause('p')}`)
+        );
+        expect(await stored('bare')).toMatch(/^[0-9a-f]{16}:[0-9a-f]{16}$/);
+    });
+
+    it("should mark both ends of a relationship Cypher of one's own adds with linksClause", async () => {
+        const [a, b] = [await gom.save(person('a')), await gom.save(person('b'))];
+        await pm.execute(
+            new QuerySpecification(
+                'MATCH (a:StampTest {id: $a}), (b:StampTest {id: $b}) CREATE (a)-[:KNOWS]->(b) ' +
+                    `SET ${Stamps.linksClause('a')}, ${Stamps.linksClause('b')}`
+            ).bind({ a: 'a', b: 'b' })
+        );
+        for (const [id, before] of [
+            ['a', a.stamp!],
+            ['b', b.stamp!]
+        ]) {
+            const after = await stored(id);
+            expect([data(after), links(after) === links(before)]).toEqual([data(before), false]);
+            expect(links(after)).toMatch(/^[0-9a-f]{16}$/);
+        }
     });
 
     it('should leave no lock or mark on a node', async () => {

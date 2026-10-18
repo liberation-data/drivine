@@ -1,5 +1,10 @@
 import { randomBytes } from 'crypto';
 
+const QUOTED = '`__drivine.stamp`';
+const TOKEN = 16;
+/** A new token, made by the engine. */
+const ENGINE_TOKEN = `left(replace(randomUUID(), '-', ''), ${TOKEN})`;
+
 /**
  * A node's stamp: two random tokens of 64 bits, `<data>:<links>`, stored under `__drivine.stamp`.
  *
@@ -9,7 +14,7 @@ import { randomBytes } from 'crypto';
  */
 export const Stamps = {
     PROPERTY: '__drivine.stamp',
-    TOKEN: 16,
+    TOKEN,
     /** What a node with no stamp is found to carry. */
     NEVER_STAMPED: '-',
 
@@ -51,5 +56,34 @@ export const Stamps = {
                 ? Stamps.linksToken(now)
                 : Stamps.linksToken(carried);
         return `${data}:${links ?? ''}`;
+    },
+
+    /** The node's stamp, in Cypher, if it is two tokens, as every save leaves it; null otherwise, which counts as none. */
+    twoTokensOf(alias: string): string {
+        return `CASE WHEN size(${alias}.${QUOTED}) = ${
+            2 * TOKEN + 1
+        } AND substring(${alias}.${QUOTED}, ${TOKEN}, 1) = ':' THEN ${alias}.${QUOTED} ELSE null END`;
+    },
+
+    /**
+     * The Cypher `SET` item that marks the node bound to `alias` as changed, for Cypher of your own that changes its
+     * properties or labels: `MATCH (p:Person {id: $id}) SET p.name = $name, ${Stamps.setClause('p')}`. It replaces the
+     * token that speaks for the node's data and keeps the one for its relationships. A node with no stamp is given one.
+     */
+    setClause(alias: string): string {
+        return `${alias}.${QUOTED} = ${ENGINE_TOKEN} + ':' + coalesce(right(${Stamps.twoTokensOf(
+            alias
+        )}, ${TOKEN}), ${ENGINE_TOKEN})`;
+    },
+
+    /**
+     * The Cypher `SET` item that marks the relationships of the node bound to `alias` as changed, for Cypher of your own
+     * that adds or removes a relationship, or changes one's properties. Use it for both ends. It replaces the token
+     * that speaks for the node's relationships and keeps the one for its data. A node with no stamp is given one.
+     */
+    linksClause(alias: string): string {
+        return `${alias}.${QUOTED} = coalesce(left(${Stamps.twoTokensOf(
+            alias
+        )}, ${TOKEN}), ${ENGINE_TOKEN}) + ':' + ${ENGINE_TOKEN}`;
     }
 };

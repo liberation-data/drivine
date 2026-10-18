@@ -15,9 +15,7 @@ const T = Stamps.TOKEN;
 
 /** The node's stamp if it is two tokens, as every save leaves it; null otherwise, which counts as none. */
 export function twoTokensOf(alias: string): string {
-    return `CASE WHEN size(${alias}.${STAMP}) = ${
-        2 * T + 1
-    } AND substring(${alias}.${STAMP}, ${T}, 1) = ':' THEN ${alias}.${STAMP} ELSE null END`;
+    return Stamps.twoTokensOf(alias);
 }
 
 /**
