@@ -7,7 +7,7 @@ _Please report any broken links. Even better, a PR is very welcome! 🙏_
 Drivine is a graph database client for Node.js and TypeScript. It was created with the following design goals: 
 
 * Support multiple graph databases (simultaneously, if you wish). Currently, [Amazon Neptune](https://aws.amazon.com/neptune/) and 
-[Neo4j](https://neo4j.com/neo4j-graph-database/) (or other BOLT compatible graph DBs) are supported, along with plain SQL on Postgres. There is a branch for [FalkorDB](https://www.falkordb.com/) that requires support for transactions to be added. 
+[Neo4j](https://neo4j.com/neo4j-graph-database/) (or other BOLT compatible graph DBs) and [FalkorDB](https://www.falkordb.com/) are supported, along with plain SQL on Postgres. FalkorDB commits each statement as it runs: see `TransactionMode` for how `@Transactional` behaves there. 
 * **Scale to hundreds and thousands of transactions per second, without compromising architectural integrity.**
 
 ---------------------------------------

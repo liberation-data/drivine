@@ -1,5 +1,6 @@
 export enum DatabaseType {
     NEO4J = 'NEO4J',
     POSTGRES = 'POSTGRES',
-    NEPTUNE = 'NEPTUNE'
+    NEPTUNE = 'NEPTUNE',
+    FALKORDB = 'FALKORDB'
 }

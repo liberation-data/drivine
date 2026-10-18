@@ -6,6 +6,7 @@ export * from './ConnectionProviderBuilder';
 export * from './DatabaseRegistry';
 export * from './DatabaseType';
 export * from './TransactionMode';
+export * from './falkordb';
 export * from './neo4j';
 export * from './neptune';
 export * from './postgres';

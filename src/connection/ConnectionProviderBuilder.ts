@@ -9,11 +9,12 @@ import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
 import { NeptuneConnectionProvider } from '@/connection/neptune/NeptuneConnectionProvider';
 import { TransactionMode } from '@/connection/TransactionMode';
+import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
 
 /**
  * Engines without multi-statement transactions, which honour {@link TransactionMode}.
  */
-const AUTO_COMMIT_ENGINES: DatabaseType[] = [];
+const AUTO_COMMIT_ENGINES: DatabaseType[] = [DatabaseType.FALKORDB];
 
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
@@ -122,6 +123,8 @@ export class ConnectionProviderBuilder {
             this.registry.register(this.buildNeo4jProvider(name));
         } else if (this._type === DatabaseType.NEPTUNE) {
             this.registry.register(this.buildNeptuneProvider(name));
+        } else if (this._type === DatabaseType.FALKORDB) {
+            this.registry.register(this.buildFalkorDbProvider(name));
         }
         else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
@@ -211,5 +214,29 @@ export class ConnectionProviderBuilder {
         );
     }
 
+    private buildFalkorDbProvider(name: string): ConnectionProvider {
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by FalkorDB`);
+        }
+        if (!this._port) {
+            this._port = 6379;
+        }
+        if (this._port !== 6379) {
+            this.logger.warn(`${this._port} is a non-standard port for FalkorDB`);
+        }
 
+        return new FalkorDbConnectionProvider(
+            name,
+            this._type,
+            this._name ?? 'graph',
+            {
+                host: this._host,
+                port: this._port,
+                userName: this._userName,
+                password: this._password,
+                connectionTimeout: this._connectionTimeout
+            },
+            this._transactionMode ?? TransactionMode.WARN
+        );
+    }
 }
