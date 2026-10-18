@@ -267,4 +267,23 @@ Branch: `drivine4j-parity`. Local test DBs (docker): `drivine-falkordb` (`localh
 - [x] **Tier 1 step 5 — Memgraph.** `DatabaseType.MEMGRAPH`, on `Neo4jConnectionProvider` with optional credentials (auth is off in a default Memgraph), as drivine4j does. Integration test covers read/write, rollback and cursors. Test container: `drivine-memgraph` (bolt `localhost:17688`).
   - Found: the Neo4j driver sends every JS number as a float, so `range(1, $n)`, `list[$n]` and `LIMIT $n` fail with a JS number on Memgraph, and the last two on Neo4j too. Pre-existing; see Open questions.
 - [ ] Tier 1 step 6 — Neptune full (SigV4 + pool): **deferred** (2026-10-18, user call: low priority). Neptune-basic stays as is.
-- [ ] Tier 1 step 7 — contended-retry with jitter
+- [ ] Tier 1 step 7 — contended-retry with jitter: **moved to Tier 2 (2.6).** In drivine4j it lives in `SaveExecutor.whenNotContended` and asks the backend whether a failure is contention; there are no saves to retry yet, and retrying inside a caller's transaction would be wrong.
+- [ ] Tier 1 step 8 — `@JsonPacked`: **moved to Tier 2 (2.11).** It's a mapping decorator; it needs the object mapping.
+- **Tier 1 done** for everything that can be done before the object manager (Neptune-full deferred).
+
+### Tier 2 steps
+
+Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as the repo and NestJS already use. Each step lands with unit tests plus integration tests on Neo4j, Memgraph and FalkorDB.
+
+- [ ] 2.1 Decorator metadata model — `@NodeFragment`, `@RelationshipFragment`, `@GraphView`, `@Root`, `@NodeId`, `@GraphRelationship`, `@GraphProperty`, `@GraphTransient`; a metadata registry that reads them, with inheritance
+- [ ] 2.2 `GraphBackend` + `CypherBackend` + `CypherGrammar` (Neo4j, Memgraph, FalkorDB): `loadAll` / `load` / `count` of a bare fragment
+- [ ] 2.3 Hydration: result map → class instance; `StatelessGraphObjectManager` read API + Nest injection (`@InjectGraphObjectManager()`)
+- [ ] 2.4 Views: relationships (single / list, direction, optional / required), relationship fragments, nested views
+- [ ] 2.5 String `where` filters, `delete` / `deleteAll`
+- [ ] 2.6 Stateless `save` of fragments and views; `Replace` + `RemovedTargets.DELETE_UNREFERENCED`; contended retry with jitter
+- [ ] 2.7 `@NodeStamp` and `StaleObjectException`
+- [ ] 2.8 `update`, `create`, `patch`, `patchAll`, `saveAll` (`only` / `except`; atomic on FalkorDB or `NonAtomicBatchException`), `edges`, `NullPolicy`
+- [ ] 2.9 Recursive views (`maxDepth`, depth override), `@GraphPath` + `@Hop`, `@Count` / `@Aggregate`, `@ReadOnly`
+- [ ] 2.10 Polymorphism: label discrimination, `registerSubtype`, `instanceOf`
+- [ ] 2.11 `@PropertyBag`, `@NodeLabels`, relationships of a runtime type, `@Default`, `@EmptyWhenAbsent`, `@JsonPacked`, `@SortedBy`
+- [ ] 2.12 `groups`
