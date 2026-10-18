@@ -3,5 +3,6 @@ export enum DatabaseType {
     POSTGRES = 'POSTGRES',
     NEPTUNE = 'NEPTUNE',
     FALKORDB = 'FALKORDB',
-    MEMGRAPH = 'MEMGRAPH'
+    MEMGRAPH = 'MEMGRAPH',
+    ORACLE = 'ORACLE'
 }

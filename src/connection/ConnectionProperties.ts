@@ -61,7 +61,7 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         `${prefix}DATABASE_TRANSACTION_MODE must be one of: ${Object.values(TransactionMode).join(', ')}.`
     );
 
-    if (databaseType === DatabaseType.POSTGRES) {
+    if (databaseType === DatabaseType.POSTGRES || databaseType === DatabaseType.ORACLE) {
         assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
     }
 

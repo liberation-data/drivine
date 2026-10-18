@@ -10,3 +10,4 @@ export * from './falkordb';
 export * from './neo4j';
 export * from './neptune';
 export * from './postgres';
+export * from './oracle';

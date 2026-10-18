@@ -10,6 +10,7 @@ import { DrivineLogger } from '@/logger';
 import { NeptuneConnectionProvider } from '@/connection/neptune/NeptuneConnectionProvider';
 import { TransactionMode } from '@/connection/TransactionMode';
 import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
+import { OracleConnectionProvider } from '@/connection/oracle/OracleConnectionProvider';
 
 /**
  * Engines without multi-statement transactions, which honour {@link TransactionMode}.
@@ -127,8 +128,9 @@ export class ConnectionProviderBuilder {
             this.registry.register(this.buildFalkorDbProvider(name));
         } else if (this._type === DatabaseType.MEMGRAPH) {
             this.registry.register(this.buildMemgraphProvider(name));
-        }
-        else {
+        } else if (this._type === DatabaseType.ORACLE) {
+            this.registry.register(this.buildOracleProvider(name));
+        } else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
         return this.registry.connectionProvider(name)!;
@@ -155,6 +157,21 @@ export class ConnectionProviderBuilder {
             idleTimeoutMillis: this._idleTimeout,
             connectionTimeoutMillis: this._connectionTimeout,
             max: this._poolMax
+        });
+    }
+
+    /** Oracle's database name is its service, as in `host:1521/FREEPDB1`. */
+    private buildOracleProvider(name: string): ConnectionProvider {
+        assert(this._name, `Oracle requires a database name: the service, e.g. FREEPDB1`);
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by Oracle`);
+        }
+        return new OracleConnectionProvider(name, this._type, {
+            user: this._userName,
+            password: this._password,
+            connectString: `${this._host}:${this._port ?? 1521}/${this._name}`,
+            poolMax: this._poolMax,
+            connectTimeout: this._connectionTimeout ? Math.ceil(this._connectionTimeout / 1000) : undefined
         });
     }
 
