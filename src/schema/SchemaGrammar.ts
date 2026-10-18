@@ -1,5 +1,7 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
+import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
+import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import {
     FullTextIndexSpec,
@@ -45,6 +47,19 @@ export interface SchemaGrammar {
     createFullText(spec: FullTextIndexSpec): string[];
     /** Drops the full-text index; `name` is the engine's name for it, where the engine names items. */
     dropFullText(spec: FullTextIndexSpec, name?: string): string[];
+    /** A statement giving up to `limit` values that more than one of the label's nodes hold, one per row. */
+    conflicts(spec: UniquenessConstraintSpec, limit: number): string;
+}
+
+/** Duplicate values over the properties, in Cypher. */
+function cypherConflicts(spec: UniquenessConstraintSpec, limit: number): string {
+    const values = spec.properties.map((it) => `n.${quoteName(it)}`);
+    const present = values.map((it) => `${it} IS NOT NULL`).join(' AND ');
+    const key = values.length === 1 ? values[0] : `[${values.join(', ')}]`;
+    return (
+        `MATCH (n${labelExpression([spec.label])}) WHERE ${present} WITH ${key} AS value, count(*) AS holders ` +
+        `WHERE holders > 1 RETURN value LIMIT ${limit}`
+    );
 }
 
 /** A command for the engine's driver, rather than a Cypher statement. */
@@ -58,6 +73,7 @@ const pattern = (spec: { label: string }): string => `(n${labelExpression([spec.
 const props = (spec: { properties: string[] }): string => spec.properties.map((it) => `n.${quoteName(it)}`).join(', ');
 
 export const NEO4J_SCHEMA: SchemaGrammar = {
+    conflicts: cypherConflicts,
     listVectors: {
         statement:
             "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options WHERE type = 'VECTOR' AND entityType = 'NODE' " +
@@ -119,6 +135,7 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
 };
 
 export const MEMGRAPH_SCHEMA: SchemaGrammar = {
+    conflicts: cypherConflicts,
     fullTextOverLabel: true,
     listVectors: {
         // Columns: index_name, label (as ':Label'), property, capacity, dimension, metric, ...
@@ -187,6 +204,7 @@ export const MEMGRAPH_SCHEMA: SchemaGrammar = {
  * when each is. Its uniqueness constraints are a Redis command, and need a range index over their properties.
  */
 export const FALKORDB_SCHEMA: SchemaGrammar = {
+    conflicts: cypherConflicts,
     engine: 'FalkorDB',
     rangesPerProperty: true,
     uniqueNeedsRange: true,
@@ -263,6 +281,8 @@ export function schemaGrammarFor(type: DatabaseType): SchemaGrammar {
             return MEMGRAPH_SCHEMA;
         case DatabaseType.FALKORDB:
             return FALKORDB_SCHEMA;
+        case DatabaseType.ORACLE:
+            return new OracleSchemaGrammar(new OracleGraph());
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }

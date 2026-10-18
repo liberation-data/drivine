@@ -22,6 +22,12 @@ import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
 import { Stamps } from '@/model/Stamps';
 
+/** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
+const STORE_LABEL = 'DrivineStore';
+
+/** The label of the nodes recording each schema catalog's version. */
+const SCHEMA_MARKER = '_DrivineSchema';
+
 /** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
 export const ROW_ALIAS = 'n';
 
@@ -194,19 +200,41 @@ END;`);
     }
 
     storeStamps(): GraphStatement {
-        return this.notYet('The store identity');
+        return new GraphStatement(
+            `SELECT JSON_OBJECT('id' VALUE JSON_VALUE(n.props, '$.storeId'), 'assignedAt' VALUE JSON_VALUE(n.props, '$.assignedAt') ` +
+                `RETURNING JSON) AS "stamp" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [STORE_LABEL])} ` +
+                `ORDER BY JSON_VALUE(n.props, '$.assignedAt'), JSON_VALUE(n.props, '$.storeId')`
+        );
     }
 
+    /** Mints the stamp unless it is there; the uniqueness constraint on its key turns away a racing writer's. */
     assignStoreStamp(): GraphStatement {
-        return this.notYet('The store identity');
+        return new GraphStatement(
+            `INSERT INTO ${this.graph.nodes} (labels, props) SELECT JSON('["${STORE_LABEL}"]'), ` +
+                `JSON_OBJECT('key' VALUE $key, 'storeId' VALUE $storeId, 'assignedAt' VALUE $assignedAt, 'engine' VALUE $engine) ` +
+                `FROM dual WHERE NOT EXISTS (SELECT 1 FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [
+                    STORE_LABEL
+                ])} ` +
+                `AND JSON_VALUE(n.props, '$.key') = $key)`
+        );
     }
 
     schemaVersion(): GraphStatement {
-        return this.notYet('The schema marker');
+        return new GraphStatement(
+            `SELECT JSON_VALUE(n.props, '$.version') AS "version" FROM ${this.graph.nodes} n ` +
+                `WHERE ${hasLabels('n', [SCHEMA_MARKER])} AND JSON_VALUE(n.props, '$.catalog') = $name`
+        );
     }
 
     recordSchemaVersion(): GraphStatement {
-        return this.notYet('The schema marker');
+        return new GraphStatement(`BEGIN
+    UPDATE ${this.graph.nodes} n SET props = JSON_TRANSFORM(props, SET '$.version' = $version)
+    WHERE ${hasLabels('n', [SCHEMA_MARKER])} AND JSON_VALUE(n.props, '$.catalog') = $name;
+    IF SQL%ROWCOUNT = 0 THEN
+        INSERT INTO ${this.graph.nodes} (labels, props)
+        VALUES (JSON('["${SCHEMA_MARKER}"]'), JSON_OBJECT('catalog' VALUE $name, 'version' VALUE $version));
+    END IF;
+END;`);
     }
 
     /** ORA-00060 (deadlock) and ORA-08177 (serialization) are another writer's doing: running again may succeed. */

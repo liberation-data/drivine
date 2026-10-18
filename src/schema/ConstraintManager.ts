@@ -1,5 +1,4 @@
 import { DrivineError } from '@/DrivineError';
-import { labelExpression, quoteName } from '@/backend/Cypher';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import { EnsureResult, rangeIndex, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
@@ -56,14 +55,7 @@ export class ConstraintManager {
     }
 
     private async conflicts(spec: UniquenessConstraintSpec): Promise<unknown[]> {
-        const values = spec.properties.map((it) => `n.${quoteName(it)}`);
-        const present = values.map((it) => `${it} IS NOT NULL`).join(' AND ');
-        const key = values.length === 1 ? values[0] : `[${values.join(', ')}]`;
-        const rows = await this.executor.run(
-            `MATCH (n${labelExpression([spec.label])}) WHERE ${present} WITH ${key} AS value, count(*) AS holders ` +
-                `WHERE holders > 1 RETURN value LIMIT ${VIOLATION_SAMPLE}`
-        );
-        return rows;
+        return this.executor.run(this.grammar.conflicts(spec, VIOLATION_SAMPLE));
     }
 
     /** FalkorDB builds a constraint in the background; wait until it reports it, or says it failed. */
