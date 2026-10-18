@@ -1,7 +1,8 @@
 import { GraphBackend, Page } from '@/backend/GraphBackend';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { NODE_ALIAS } from '@/backend/CypherBackend';
-import { QueryRenderer } from '@/dsl/QueryRenderer';
+import { QueryRenderer, RenderedQuery } from '@/dsl/QueryRenderer';
+import { IndexAdvicePolicy, QueryIndexAdvisor } from '@/dsl/QueryIndexAdvisor';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
@@ -64,14 +65,15 @@ function loadOptions<T>(
     bindings: Record<string, any>,
     target: TargetModel,
     grammar: CypherGrammar
-): Required<LoadOptions> & { page: Page } {
+): Required<LoadOptions> & { page: Page; query?: RenderedQuery } {
     if (typeof where === 'function') {
         const query = QueryRenderer.render(where, target, grammar, NODE_ALIAS);
         return {
             where: query.where as string,
             bindings: query.bindings,
             depth: checkedDepth(query.depth),
-            page: { orderBy: query.orderBy, skip: query.skip, limit: query.limit }
+            page: { orderBy: query.orderBy, skip: query.skip, limit: query.limit },
+            query
         };
     }
     const options = typeof where === 'object' ? where : { where, bindings };
@@ -104,8 +106,8 @@ function filterOnly<T>(
         return { where, bindings };
     }
     const options = loadOptions(where, bindings, target, grammar);
-    if (Object.values(options.page).some((it) => it !== undefined)) {
-        throw new DrivineError(`A ${what} takes a query's where, not an order, skip or limit.`);
+    if (options.query?.paged) {
+        throw new DrivineError(`A ${what} takes a query's where, not an order, skip, limit or seek.`);
     }
     return options;
 }
@@ -162,6 +164,11 @@ export class StatelessGraphObjectManager {
     /** Grouped reads: see GroupOperations. */
     readonly groups: GroupOperations;
 
+    /** What an ordered query with no range index to seek into does: see IndexAdvicePolicy. */
+    indexAdvice: IndexAdvicePolicy = 'WARN';
+    /** Checks ordered queries for a range index; `refresh` it after making indexes as the application runs. */
+    readonly indexAdvisor: QueryIndexAdvisor;
+
     private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
     private warnedNonAtomic = false;
     private identity?: Promise<StoreIdentity>;
@@ -174,6 +181,11 @@ export class StatelessGraphObjectManager {
         readonly registry: ModelRegistry
     ) {
         this.mapper = new GraphObjectMapper(registry);
+        this.indexAdvisor = new QueryIndexAdvisor(
+            () => this.indexes,
+            () => this.constraints,
+            !!schemaGrammarFor(persistenceManager.type).rangesPerProperty
+        );
         this.edges = new EdgeOperations(
             registry,
             async <R>(statement: GraphStatement) =>
@@ -226,6 +238,15 @@ export class StatelessGraphObjectManager {
     async loadAll<T>(type: ClassRef<T>, where?: Filter<T>, bindings: Record<string, any> = {}): Promise<T[]> {
         const target = this.modelOf(type);
         const options = loadOptions(where, bindings, target, this.backend.grammar);
+        if (options.query?.ordered.length) {
+            await this.indexAdvisor.check(
+                this.indexAdvice,
+                target.kind === 'GRAPH_VIEW' ? target.model.root : target.model,
+                options.query.ordered,
+                options.query.seeks ? 'seek' : 'orderBy',
+                options.query.pinned
+            );
+        }
         if (target.kind === 'GRAPH_VIEW') {
             const rows = await this.persistenceManager.query<ViewRow>(
                 this.backend

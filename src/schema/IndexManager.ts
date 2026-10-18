@@ -67,9 +67,25 @@ export class IndexManager {
     }
 
     private async create(spec: IndexSpec): Promise<void> {
-        for (const statement of this.statements(spec, 'create')) {
+        const missing = await this.missing(spec);
+        if (!missing.properties.length) {
+            return;
+        }
+        for (const statement of this.statements(missing, 'create')) {
             await this.executor.run(statement);
         }
+    }
+
+    /**
+     * The part of the spec the engine doesn't hold. On an engine that indexes properties one by one, a composite index's
+     * properties that are indexed already are left out: it refuses to index one twice.
+     */
+    private async missing(spec: IndexSpec): Promise<IndexSpec> {
+        if (spec.kind !== 'RANGE' || !this.grammar.rangesPerProperty) {
+            return spec;
+        }
+        const held = (await this.list('RANGE')).filter((it) => it.label === spec.label).flatMap((it) => it.properties);
+        return { ...spec, properties: spec.properties.filter((it) => !held.includes(it)) };
     }
 
     private statements(spec: IndexSpec, action: 'create' | 'drop'): string[] {

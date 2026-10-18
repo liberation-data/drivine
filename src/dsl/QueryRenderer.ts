@@ -4,7 +4,7 @@ import { labelsOf, pattern, target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
 import { Scope, scopeOf, Step, step } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
-import { allOfOne, Condition, Operator, OrderTerm, Query, QueryFn, Test, WhereFn } from '@/dsl/Refs';
+import { allOfOne, Condition, Operator, OrderTerm, Query, QueryFn, SeekValue, Test, WhereFn } from '@/dsl/Refs';
 import { classLabels } from '@/model/InstanceOf';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
@@ -16,6 +16,14 @@ export interface RenderedQuery {
     skip?: number;
     depth: Record<string, number>;
     bindings: Record<string, any>;
+    /** The stored names of the root properties ordered by, in order. */
+    ordered: string[];
+    /** The root properties the condition holds equal to a value at its top level. */
+    pinned: string[];
+    /** Whether the query orders, skips, limits or seeks. */
+    paged: boolean;
+    /** Whether it continues after a cursor. */
+    seeks: boolean;
 }
 
 /** The aliases a path's conditions are written against: the node, and the relationship a relationship fragment holds. */
@@ -51,15 +59,25 @@ export class QueryRenderer {
         const scope = scopeOf(model);
         const query: Query = fn(rootRefs<T>(scope));
         const renderer = new QueryRenderer(grammar, query.depth ?? {});
-        const where = query.where !== undefined ? renderer.where(allOfOne(query.where), scope, alias) : undefined;
-        const terms = query.orderBy === undefined ? [] : ([query.orderBy].flat() as OrderTerm[]);
+        const condition = query.where !== undefined ? allOfOne(query.where) : undefined;
+        const filter = condition ? renderer.where(condition, scope, alias) : undefined;
+        const terms = listOf<OrderTerm>(query.orderBy);
+        const keys = terms.map((it) => ({ term: it, property: rootProperty(it.path, scope, 'An order') }));
+        const seek = listOf<SeekValue>(query.seek);
+        const keyset = query.seek !== undefined ? renderer.keyset(keys, seek, query, alias) : undefined;
         return {
-            where,
-            orderBy: terms.length ? terms.map((it) => renderer.order(it, scope, alias)).join(', ') : undefined,
+            where: [filter, keyset].filter((it) => it !== undefined).join(' AND ') || undefined,
+            orderBy: keys.length
+                ? keys.map((it) => order(it.term, `${alias}.${quoteName(it.property)}`)).join(', ')
+                : undefined,
             limit: count('limit', query.limit),
             skip: count('skip', query.skip),
             depth: query.depth ?? {},
-            bindings: renderer.bindings
+            bindings: renderer.bindings,
+            ordered: keys.map((it) => it.property),
+            pinned: condition ? pinnedProperties(condition, scope) : [],
+            seeks: query.seek !== undefined,
+            paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined)
         };
     }
 
@@ -72,28 +90,58 @@ export class QueryRenderer {
         return this.condition(condition, scope, { node: alias });
     }
 
-    order(term: OrderTerm, scope: Scope, alias: string): string {
-        let at = scope;
-        let expression: string | undefined;
-        term.path.forEach((name, i) => {
-            const next = step(at, name);
-            if (next.kind === 'SAME_NODE') {
-                at = next.scope;
-            } else if (next.kind === 'PROPERTY' && next.on === 'NODE' && i === term.path.length - 1) {
-                expression = `${alias}.${quoteName(next.property)}`;
-            } else {
-                throw new DrivineError(`An order is by a property of the root; ${term.path.join('.')} is not one.`);
+    /**
+     * The predicate that continues after a cursor. For `a DESC, b DESC` after `(A, B)`:
+     * `a <= $A AND (a < $A OR (a = $A AND b < $B))`, each key first held not null where the engine wants it. The
+     * leading bound, redundant beside the branches, gives the planner a range to seek on, as a top-level OR does not.
+     */
+    private keyset(
+        keys: { term: OrderTerm; property: string }[],
+        seek: SeekValue[],
+        query: Query,
+        alias: string
+    ): string {
+        if (!keys.length) {
+            throw new DrivineError('seek continues an order: give orderBy, with a cursor value for each of its terms.');
+        }
+        if (keys.length !== seek.length) {
+            throw new DrivineError(`seek has ${seek.length} cursor values for ${keys.length} orderBy terms.`);
+        }
+        if (query.skip !== undefined) {
+            throw new DrivineError('seek and skip are two ways to page: give one.');
+        }
+        keys.forEach((key, i) => {
+            if (key.term.nulls) {
+                throw new DrivineError(
+                    `${key.term.path.join('.')} places its nulls, which no cursor reaches: a cursor does not say ` +
+                        'which side of the nulls it is on.'
+                );
+            }
+            if (key.term.path.join('.') !== seek[i].path.join('.')) {
+                throw new DrivineError(
+                    `seek value ${i + 1} is of ${seek[i].path.join('.')}, but orderBy term ${i + 1} is ` +
+                        `${key.term.path.join('.')}.`
+                );
             }
         });
-        if (!expression) {
-            throw new DrivineError(`An order is by a property of the root; ${term.path.join('.')} is not one.`);
-        }
-        const key = `${expression}${term.direction === 'DESC' ? ' DESC' : ''}`;
-        // A placement as its own key, before the property: false sorts before true on every engine.
-        if (term.nulls === 'FIRST') {
-            return `${expression} IS NULL DESC, ${key}`;
-        }
-        return term.nulls === 'LAST' ? `${expression} IS NULL, ${key}` : key;
+        const expression = (i: number): string => `${alias}.${quoteName(keys[i].property)}`;
+        const values = seek.map((it) => this.bind(it.value));
+        const compare = (i: number, strict: boolean): string => {
+            const ascending = keys[i].term.direction === 'ASC';
+            return `${expression(i)} ${ascending ? '>' : '<'}${strict ? '' : '='} ${values[i]}`;
+        };
+        const branches = keys.map((_, i) => {
+            const prefix = keys.slice(0, i).map((__, j) => `${expression(j)} = ${values[j]}`);
+            const branch = [...prefix, compare(i, true)].join(' AND ');
+            return i === 0 ? branch : `(${branch})`;
+        });
+        // Joined by AND with no parentheses around the whole: in them, FalkorDB 6 scans the label rather than
+        // seeking on the bound (FalkorDB/FalkorDB#3331).
+        return [
+            ...(this.grammar.keysetNullGuard ? keys.map((_, i) => `${expression(i)} IS NOT NULL`) : []),
+            ...(keys.length > 1 ? [compare(0, false)] : []),
+            branches.length > 1 ? `(${branches.join(' OR ')})` : branches[0]
+        ].join(' AND ');
     }
 
     private condition(condition: Condition, scope: Scope, aliases: Aliases): string {
@@ -254,6 +302,50 @@ const BINARY: Partial<Record<Operator, string>> = {
     ENDS_WITH: 'ENDS WITH',
     MATCHES: '=~'
 };
+
+function listOf<T>(value: T | readonly T[] | undefined): T[] {
+    return value === undefined ? [] : ([value].flat() as T[]);
+}
+
+/** The stored name of the root property a path leads to; `what` names what wants one. */
+function rootProperty(path: readonly string[], scope: Scope, what: string): string {
+    let at = scope;
+    for (const [i, name] of path.entries()) {
+        const next = step(at, name);
+        if (next.kind === 'SAME_NODE') {
+            at = next.scope;
+        } else if (next.kind === 'PROPERTY' && next.on === 'NODE' && i === path.length - 1) {
+            return next.property;
+        } else {
+            break;
+        }
+    }
+    throw new DrivineError(`${what} is by a property of the root; ${path.join('.')} is not one.`);
+}
+
+function order(term: OrderTerm, expression: string): string {
+    const key = `${expression}${term.direction === 'DESC' ? ' DESC' : ''}`;
+    // A placement as its own key, before the property: false sorts before true on every engine.
+    if (term.nulls === 'FIRST') {
+        return `${expression} IS NULL DESC, ${key}`;
+    }
+    return term.nulls === 'LAST' ? `${expression} IS NULL, ${key}` : key;
+}
+
+/** The root properties a condition holds equal to a value at its top level: an equality within anyOf holds none. */
+function pinnedProperties(condition: Condition, scope: Scope): string[] {
+    if (condition.kind === 'AND') {
+        return condition.conditions.flatMap((it) => pinnedProperties(it, scope));
+    }
+    if (condition.kind !== 'PATH' || condition.test.kind !== 'COMPARE' || condition.test.operator !== 'EQ') {
+        return [];
+    }
+    try {
+        return [rootProperty(condition.path, scope, 'A pin')];
+    } catch {
+        return [];
+    }
+}
 
 /** Joined, in parentheses when there is more than one (or always, when `always`). */
 function group(parts: string[], separator: string, always: boolean = false): string {

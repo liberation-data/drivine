@@ -98,6 +98,12 @@ function propertyRef(path: string[]): any {
         hasItem: compare('HAS_ITEM'),
         isNull: () => at(path, { kind: 'COMPARE', operator: 'IS_NULL' }),
         isNotNull: () => at(path, { kind: 'COMPARE', operator: 'IS_NOT_NULL' }),
+        after: (value: unknown) => {
+            if (value == null) {
+                throw new DrivineError(`A cursor holds a value of ${described(path)}, not ${value}.`);
+            }
+            return { path, value };
+        },
         asc: () => order(path, 'ASC'),
         desc: () => order(path, 'DESC')
     };

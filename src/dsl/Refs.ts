@@ -62,6 +62,14 @@ export interface ValueRef<V> {
     isNotNull(): Condition;
     asc(): OrderTerm;
     desc(): OrderTerm;
+    /** The property's value at the end of the last page: a keyset cursor's component, for `seek`. */
+    after(value: V): SeekValue;
+}
+
+/** A property and its value at the end of the last page. */
+export interface SeekValue {
+    readonly path: readonly string[];
+    readonly value: unknown;
 }
 
 export interface ComparableRef<V> extends ValueRef<V> {
@@ -163,6 +171,13 @@ export interface Query {
     limit?: number;
     /** Leaves out this many objects first. */
     skip?: number;
+    /**
+     * Continues after a keyset cursor: one value per term of `orderBy`, of the same properties in the same order. Each
+     * page starts strictly after the last row of the one before, by the order's directions. Rows whose ordered
+     * properties are null are on no page after the first, so order by properties every row holds, ending with a unique
+     * one (normally the id). Not with `skip`, nor with an order that places nulls.
+     */
+    seek?: SeekValue | readonly SeekValue[];
     /** maxDepth overrides for recursive relationships, by field name. */
     depth?: Record<string, number>;
 }

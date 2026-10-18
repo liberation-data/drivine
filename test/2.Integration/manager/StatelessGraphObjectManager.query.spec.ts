@@ -98,6 +98,7 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             new CypherBackend(cypherGrammarFor(engine.type)),
             new ModelRegistry()
         );
+        gom.indexAdvice = 'OFF';
         await pm.execute(new QuerySpecification('MATCH (n:QueryTest) DETACH DELETE n'));
         await pm.execute(
             new QuerySpecification(
@@ -211,6 +212,61 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             expect(twoKeys.map((it) => it.id)).toEqual(['i2', 'i1', 'i4', 'i3']);
         });
 
+        it('should page after a cursor on one key', async () => {
+            const first = await gom.loadAll(Issue, (q) => ({ orderBy: q.number.asc(), limit: 2 }));
+            expect(first.map((it) => it.id)).toEqual(['i1', 'i2']);
+            const next = await gom.loadAll(Issue, (q) => ({
+                orderBy: q.number.asc(),
+                seek: q.number.after(first[1].number),
+                limit: 2
+            }));
+            expect(next.map((it) => it.id)).toEqual(['i3', 'i4']);
+        });
+
+        it('should page after a compound cursor, through ties, in either direction', async () => {
+            // state DESC ties i1/i2 (open) and i3/i4 (closed); number breaks them.
+            const all: string[] = [];
+            let last: Issue | undefined;
+            for (let page = 0; page < 5; page++) {
+                const cursor = last;
+                const rows = await gom.loadAll(Issue, (q) => ({
+                    orderBy: [q.state.desc(), q.number.desc()],
+                    seek: cursor ? [q.state.after(cursor.state), q.number.after(cursor.number)] : undefined,
+                    limit: 1
+                }));
+                if (!rows.length) {
+                    break;
+                }
+                all.push(rows[0].id);
+                last = rows[0];
+            }
+            expect(all).toEqual(['i2', 'i1', 'i4', 'i3']);
+            const ascending = await gom.loadAll(Issue, (q) => ({
+                orderBy: [q.state.asc(), q.number.asc()],
+                seek: [q.state.after('closed'), q.number.after(103)]
+            }));
+            expect(ascending.map((it) => it.id)).toEqual(['i4', 'i1', 'i2']);
+        });
+
+        it('should refuse a cursor that does not fit the order', async () => {
+            await expect(gom.loadAll(Issue, (q) => ({ seek: q.number.after(1) }))).rejects.toThrow(/give orderBy/);
+            await expect(
+                gom.loadAll(Issue, (q) => ({ orderBy: [q.state.asc(), q.number.asc()], seek: q.state.after('open') }))
+            ).rejects.toThrow(/1 cursor values for 2 orderBy terms/);
+            await expect(
+                gom.loadAll(Issue, (q) => ({ orderBy: q.number.asc(), seek: q.priority.after(1) }))
+            ).rejects.toThrow(/seek value 1 is of priority, but orderBy term 1 is number/);
+            await expect(
+                gom.loadAll(Issue, (q) => ({ orderBy: q.number.asc(), seek: q.number.after(1), skip: 1 }))
+            ).rejects.toThrow(/seek and skip/);
+            await expect(
+                gom.loadAll(Issue, (q) => ({ orderBy: q.priority.asc().nullsLast(), seek: q.priority.after(1) }))
+            ).rejects.toThrow(/places its nulls/);
+            await expect(
+                gom.count(Issue, (q) => ({ orderBy: q.number.asc(), seek: q.number.after(1) }))
+            ).rejects.toThrow(/not an order, skip, limit or seek/);
+        });
+
         it('should place the rows with no value', async () => {
             const first = await gom.loadAll(Issue, (q) => ({ orderBy: q.priority.asc().nullsFirst() }));
             expect(first.map((it) => it.id)).toEqual(['i3', 'i1', 'i4', 'i2']);
@@ -227,7 +283,7 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
         });
 
         it('should refuse an order or limit on a count', async () => {
-            await expect(gom.count(Issue, (_q) => ({ limit: 1 }))).rejects.toThrow(/not an order, skip or limit/);
+            await expect(gom.count(Issue, (_q) => ({ limit: 1 }))).rejects.toThrow(/not an order, skip, limit or seek/);
         });
 
         it('should refuse fields it cannot query, naming them', async () => {
@@ -314,6 +370,16 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             );
             expect(await gom.delete(IssueView, 'tmp', { where: (q) => q.issue.state.eq('closed') })).toBe(0);
             expect(await gom.delete(IssueView, 'tmp', { where: (q) => q.issue.state.eq('open') })).toBe(1);
+        });
+
+        it('should page views after a cursor', async () => {
+            const next = await gom.loadAll(IssueView, (q) => ({
+                where: q.issue.state.eq('open'),
+                orderBy: q.issue.number.desc(),
+                seek: q.issue.number.after(102)
+            }));
+            expect(next.map((it) => it.issue.id)).toEqual(['i1']);
+            expect(next[0].assignees).toHaveLength(2);
         });
 
         it('should count views a query finds', async () => {

@@ -26,6 +26,12 @@ export interface CypherGrammar {
      */
     readonly viewProjection: 'INLINE' | 'CALL_SUBQUERY';
 
+    /**
+     * Whether a keyset predicate constrains each key with `IS NOT NULL`: where indexes leave out null-valued nodes
+     * (Neo4j), that is what lets a composite index serve the page. On Memgraph it costs the range bound.
+     */
+    readonly keysetNullGuard: boolean;
+
     /** Why the engine can't delete with CascadeType.DELETE_ORPHAN; undefined when it can. */
     readonly orphanDeleteLimit?: string;
 
@@ -80,6 +86,7 @@ const plainVector = (expression: string): string => expression;
 
 export const NEO4J_GRAMMAR: CypherGrammar = {
     engine: 'Neo4j',
+    keysetNullGuard: true,
     vectorValue: plainVector,
     fullTextSearch: (label, properties) =>
         `CALL db.index.fulltext.queryNodes('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
@@ -99,6 +106,7 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
 
 export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     engine: 'Memgraph',
+    keysetNullGuard: false,
     vectorValue: plainVector,
     fullTextSearch: (label, properties) =>
         `CALL text_search.search_all('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
@@ -128,6 +136,7 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
  */
 export const FALKORDB_GRAMMAR: CypherGrammar = {
     engine: 'FalkorDB',
+    keysetNullGuard: false,
     // FalkorDB indexes only its own vector type: a list stored as a list is never found by a vector search.
     vectorValue: (expression: string) => `vecf32(${expression})`,
     // One full-text index to a label, found by the label.
