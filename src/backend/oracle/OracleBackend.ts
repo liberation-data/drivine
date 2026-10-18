@@ -6,6 +6,7 @@ import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
 import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
 import { OracleWrites } from '@/backend/oracle/OracleWrites';
 import { OracleSearch } from '@/backend/oracle/OracleSearch';
+import { OracleGroups } from '@/backend/oracle/OracleGroups';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -35,7 +36,7 @@ export const ROW_ALIAS = 'n';
 /**
  * Statements for Oracle, over the tables of an OracleGraph. A load returns the rows the graph engines do, `{props,
  * labels}` for a fragment, as JSON. A raw `where` is an SQL predicate over the node's row, `n` (its `labels`, `props`
- * and `stamp`). What isn't written for Oracle yet says so.
+ * and `stamp`).
  */
 export class OracleBackend implements GraphBackend {
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
@@ -174,8 +175,8 @@ END;`);
         return new OracleWrites(this.graph).fragmentBatch(groups, options);
     }
 
-    groups(_model: FragmentModel, _query: GroupQuery<any, any>, _targets: Map<string, FragmentModel>): GraphStatement {
-        return this.notYet('A grouped read');
+    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+        return new OracleGroups(this.graph).build(model, query, pathTargets);
     }
 
     related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement {
@@ -298,13 +299,5 @@ END;`);
             ...(page.skip !== undefined ? [`OFFSET ${page.skip} ROWS`] : []),
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];
-    }
-
-    private notYet(what: string): GraphStatement {
-        throw this.unsupported(what);
-    }
-
-    private unsupported(what: string): DrivineError {
-        return new DrivineError(`${what} is not available on Oracle yet.`);
     }
 }

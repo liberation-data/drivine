@@ -2,8 +2,8 @@ import {
     anyOf,
     avg,
     count,
-    CypherBackend,
-    cypherGrammarFor,
+    backendFor,
+    DatabaseType,
     Direction,
     hop,
     key,
@@ -18,7 +18,8 @@ import {
     StatelessGraphObjectManager,
     sum
 } from '@liberation-data/drivine';
-import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { OracleSeed } from '../support/OracleSeed';
 
 @NodeFragment({ labels: ['GroupTest', 'Feedback'] })
 class Feedback {
@@ -41,18 +42,23 @@ class User {
     username?: string;
 }
 
-describe.each(graphEngines())('groups on $type', (engine) => {
+describe.each(allStores())('groups on $type', (engine) => {
+    const oracle = engine.type === DatabaseType.ORACLE;
+    /** A raw filter in the store's own language: Cypher over n, or SQL over the row n. */
+    const raw = (cypher: string, sql: string): string => (oracle ? sql : cypher);
+    const hasPage = raw('n.page IS NOT NULL', "JSON_EXISTS(n.props, '$.page')");
+    const helpful = raw('n.helpful = true', "JSON_EXISTS(n.props, '$?(@.helpful == true)')");
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
 
     beforeAll(async () => {
         pm = persistenceManagerFor(engine);
-        gom = new StatelessGraphObjectManager(
-            pm,
-            new CypherBackend(cypherGrammarFor(engine.type)),
-            new ModelRegistry()
-        );
-        await pm.execute(new QuerySpecification('MATCH (n:GroupTest) DETACH DELETE n'));
+        gom = new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
+        await clearLabels(pm, engine, 'GroupTest');
+        if (oracle) {
+            await seedOracle(new OracleSeed(pm, 'GroupTest'));
+            return;
+        }
         await pm.execute(
             new QuerySpecification(
                 "CREATE (:GroupTest:Feedback {id: 'f1', page: '/install', helpful: true, month: 1, score: 5}), " +
@@ -73,7 +79,7 @@ describe.each(graphEngines())('groups on $type', (engine) => {
     });
 
     afterAll(async () => {
-        await pm.execute(new QuerySpecification('MATCH (n:GroupTest) DETACH DELETE n'));
+        await clearLabels(pm, engine, 'GroupTest');
         await closeGraphEngines();
     });
 
@@ -90,26 +96,32 @@ describe.each(graphEngines())('groups on $type', (engine) => {
 
     it('should give several numbers per group, and keep the three filters apart', async () => {
         const all = await gom.groups.load(Feedback, {
-            where: 'n.page IS NOT NULL',
+            where: hasPage,
             keys: { page: key('page') },
-            aggregates: { votes: count(), likes: count('n.helpful = true') }
+            aggregates: { votes: count(), likes: count(helpful) }
         });
         expect(all).toEqual([
             { page: '/agents', votes: 2, likes: 1 },
             { page: '/install', votes: 3, likes: 2 }
         ]);
         const march = await gom.groups.load(Feedback, {
-            where: 'n.page IS NOT NULL AND n.month >= $march',
+            where: raw(
+                'n.page IS NOT NULL AND n.month >= $march',
+                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= $m)' PASSING $march AS "m")`
+            ),
             bindings: { march: 3 },
             keys: { page: key('page') },
-            aggregates: { votes: count(), likes: count('n.helpful = true') }
+            aggregates: { votes: count(), likes: count(helpful) }
         });
         expect(march).toEqual([
             { page: '/agents', votes: 2, likes: 1 },
             { page: '/install', votes: 2, likes: 1 }
         ]);
         const busy = await gom.groups.load(Feedback, {
-            where: 'n.page IS NOT NULL AND n.month >= 3',
+            where: raw(
+                'n.page IS NOT NULL AND n.month >= 3',
+                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= 3)')`
+            ),
             keys: { page: key('page') },
             aggregates: { votes: count() },
             having: [['votes', 'gte', 3]]
@@ -119,15 +131,21 @@ describe.each(graphEngines())('groups on $type', (engine) => {
 
     it('should sum, average and find extremes, skipping missing values', async () => {
         const stats = await gom.groups.load(Feedback, {
-            where: 'n.page IS NOT NULL',
+            where: hasPage,
             keys: { page: key('page') },
             aggregates: {
                 total: sum('score'),
                 mean: avg('score'),
                 low: min('score'),
                 high: max('score'),
-                helpfulTotal: sum('score', 'n.helpful = true AND n.month > 5'),
-                helpfulMean: avg('score', 'n.helpful = true AND n.month > 5')
+                helpfulTotal: sum(
+                    'score',
+                    raw('n.helpful = true AND n.month > 5', `${helpful} AND JSON_EXISTS(n.props, '$?(@.month > 5)')`)
+                ),
+                helpfulMean: avg(
+                    'score',
+                    raw('n.helpful = true AND n.month > 5', `${helpful} AND JSON_EXISTS(n.props, '$?(@.month > 5)')`)
+                )
             }
         });
         expect(stats).toEqual([
@@ -195,3 +213,34 @@ describe.each(graphEngines())('groups on $type', (engine) => {
         ]);
     });
 });
+
+/** The graph the Cypher seed writes, written into Oracle's tables. */
+async function seedOracle(seed: OracleSeed): Promise<void> {
+    const feedback: [string, Record<string, any>][] = [
+        ['f1', { page: '/install', helpful: true, month: 1, score: 5 }],
+        ['f2', { page: '/install', helpful: true, month: 3, score: 4 }],
+        ['f3', { page: '/install', helpful: false, month: 3 }],
+        ['f4', { page: '/agents', helpful: true, month: 3, score: 2 }],
+        ['f5', { page: '/agents', helpful: false, month: 3, score: 1 }],
+        ['f6', { helpful: false, month: 3 }]
+    ];
+    for (const [id, props] of feedback) {
+        await seed.node(['Feedback'], { id, ...props });
+    }
+    await seed.node(['User'], { id: 'ada', username: 'Ada' });
+    await seed.node(['User'], { id: 'bob' });
+    await seed.node(['User'], { id: 'cy' });
+    for (const id of ['s1', 's2', 's3']) {
+        await seed.node(['ChatSession'], { id });
+    }
+    await seed.node(['Message'], { id: 'm1', tokens: 10 });
+    await seed.node(['Message'], { id: 'm2', tokens: 5 });
+    await seed.node(['Message'], { id: 'm3', tokens: 7 });
+    await seed.edge('s1', 'OWNED_BY', 'ada');
+    await seed.edge('s2', 'OWNED_BY', 'ada');
+    await seed.edge('s3', 'OWNED_BY', 'bob');
+    await seed.edge('s1', 'HAS_MESSAGE', 'm1');
+    await seed.edge('s2', 'HAS_MESSAGE', 'm1');
+    await seed.edge('s1', 'HAS_MESSAGE', 'm2');
+    await seed.edge('s3', 'HAS_MESSAGE', 'm3');
+}

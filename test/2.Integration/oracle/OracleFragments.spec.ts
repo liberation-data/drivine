@@ -94,10 +94,4 @@ describeOnOracle('fragments on Oracle', () => {
         const typed = await gom.loadAll(Ticket, (q) => ({ where: q.number.gte(102), orderBy: q.number.desc() }));
         expect(typed.map((it) => it.id)).toEqual(['t3', 't2']);
     });
-
-    it('should say what is not on Oracle yet', async () => {
-        await expect(gom.groups.countBy(Ticket, 'title')).rejects.toThrow(
-            /A grouped read is not available on Oracle yet/
-        );
-    });
 });

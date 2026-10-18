@@ -4,12 +4,12 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GroupAggregate, GroupKey, GroupQuery } from '@/manager/Groups';
-import { CypherGrammar } from '@/backend/CypherGrammar';
 import { NODE_ALIAS } from '@/backend/CypherBackend';
 import { scopeOf } from '@/dsl/ModelScope';
 import { REF_PATH } from '@/dsl/OrderExpressions';
-import { QueryRenderer, rootProperty } from '@/dsl/QueryRenderer';
-import { allOfOne, Where } from '@/dsl/Refs';
+import { rootProperty } from '@/dsl/QueryRenderer';
+import { Scope } from '@/dsl/ModelScope';
+import { allOfOne, Condition, Where } from '@/dsl/Refs';
 
 const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
 
@@ -18,11 +18,24 @@ const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<='
  * each group it reaches, however many ways lead there. Returns a row per group, `{k0, k1, ..., a0, a1, ...}`, a path
  * key as a fragment row. References and conditions in the query have been written as Cypher already (GroupOperations).
  */
+/** What writes a group query's conditions: Cypher's QueryRenderer, or a store's own. */
+export interface ConditionWriter {
+    readonly boundValues: Record<string, any>;
+    where(condition: Condition, scope: Scope, alias: string): string;
+}
+
 export class GroupStatement {
     /** The query with its references as stored names and its conditions as Cypher over `n`, values bound. */
-    static resolved(model: FragmentModel, query: GroupQuery<any, any>, grammar: CypherGrammar): GroupQuery<any, any> {
+    /**
+     * The query with its references as stored names and its conditions written by `renderer` over the node `n`, their
+     * values bound: Cypher by default, or the store's own.
+     */
+    static resolved(
+        model: FragmentModel,
+        query: GroupQuery<any, any>,
+        renderer: ConditionWriter
+    ): GroupQuery<any, any> {
         const scope = scopeOf({ kind: 'NODE_FRAGMENT', model });
-        const renderer = new QueryRenderer(grammar);
         const name = (property: unknown, what: string): string =>
             typeof property === 'string' ? property : rootProperty(pathOf(property), scope, what);
         const cypher = (where: string | Where | undefined): string | undefined =>

@@ -83,6 +83,16 @@ export class OracleQueryRenderer {
         this.views = views;
     }
 
+    /** The values the conditions written so far bind, by parameter name. */
+    get boundValues(): Record<string, any> {
+        return { ...this.bindings };
+    }
+
+    /** A condition over the node row `alias`. */
+    where(condition: Condition, scope: Scope, alias: string): string {
+        return this.condition(condition, scope, { node: alias });
+    }
+
     private condition(condition: Condition, scope: Scope, rows: Rows): string {
         const all = (it: readonly Condition[]): string[] => it.map((c) => this.condition(c, scope, rows));
         switch (condition.kind) {

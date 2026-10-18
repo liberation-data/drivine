@@ -201,7 +201,11 @@ export class CypherBackend implements GraphBackend {
     }
 
     groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
-        return GroupStatement.build(model, GroupStatement.resolved(model, query, this.grammar), pathTargets);
+        return GroupStatement.build(
+            model,
+            GroupStatement.resolved(model, query, new QueryRenderer(this.grammar)),
+            pathTargets
+        );
     }
 
     related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement {
