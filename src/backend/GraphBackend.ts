@@ -28,6 +28,13 @@ export interface NearestSearch {
     depth?: Record<string, number>;
 }
 
+/** How a load's roots are ordered (an order written over the root), and how many are skipped and returned. */
+export interface Page {
+    orderBy?: string;
+    skip?: number;
+    limit?: number;
+}
+
 export interface MatchingSearch {
     label: string;
     properties: string[];
@@ -41,7 +48,7 @@ export interface GraphBackend {
     readonly grammar: CypherGrammar;
 
     /** Loads every node of the fragment, optionally filtered by a predicate over `n`. */
-    loadAllFragments(model: FragmentModel, where?: string): GraphStatement;
+    loadAllFragments(model: FragmentModel, where?: string, page?: Page): GraphStatement;
 
     /** Loads the node of the fragment whose id is the parameter `id`. */
     loadFragment(model: FragmentModel): GraphStatement;
@@ -50,7 +57,7 @@ export interface GraphBackend {
     countFragments(model: FragmentModel, where?: string): GraphStatement;
 
     /** Loads every view whose root meets the view's requirements and, optionally, a predicate over `n`. */
-    loadAllViews(model: GraphViewModel, where?: string, depth?: Record<string, number>): GraphStatement;
+    loadAllViews(model: GraphViewModel, where?: string, depth?: Record<string, number>, page?: Page): GraphStatement;
 
     /** Loads the view whose root's id is the parameter `id`. */
     loadView(model: GraphViewModel, depth?: Record<string, number>): GraphStatement;

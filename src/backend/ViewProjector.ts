@@ -229,17 +229,17 @@ export function fragment(alias: string): string {
 }
 
 /** The node a relationship field leads to: for a relationship fragment, its target. */
-function target(rel: RelationshipModel): TargetModel {
+export function target(rel: RelationshipModel): TargetModel {
     const related = rel.related;
     return related.kind === 'RELATIONSHIP_FRAGMENT' ? related.model.target : related;
 }
 
-function labelsOf(into: TargetModel): string {
+export function labelsOf(into: TargetModel): string {
     const model: FragmentModel = into.kind === 'GRAPH_VIEW' ? into.model.root : into.model;
     return labelExpression(model.labels).slice(1);
 }
 
-function pattern(rel: RelationshipModel, from: string, relAlias: string, to: string, hops: string = ''): string {
+export function pattern(rel: RelationshipModel, from: string, relAlias: string, to: string, hops: string = ''): string {
     const edge = `[${relAlias}:${quoteName(rel.type)}${hops}]`;
     switch (rel.direction) {
         case Direction.INCOMING:

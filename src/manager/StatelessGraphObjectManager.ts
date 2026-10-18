@@ -1,4 +1,8 @@
-import { GraphBackend } from '@/backend/GraphBackend';
+import { GraphBackend, Page } from '@/backend/GraphBackend';
+import { CypherGrammar } from '@/backend/CypherGrammar';
+import { NODE_ALIAS } from '@/backend/CypherBackend';
+import { QueryRenderer } from '@/dsl/QueryRenderer';
+import { QueryFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
@@ -52,14 +56,58 @@ export interface LoadOptions {
     depth?: Record<string, number>;
 }
 
-function loadOptions(where: string | LoadOptions | undefined, bindings: Record<string, any>): Required<LoadOptions> {
+/** A filter as a load takes it: a Cypher predicate over `n`, LoadOptions, or a query over the class's references. */
+export type Filter<T> = string | LoadOptions | QueryFn<T>;
+
+function loadOptions<T>(
+    where: Filter<T> | undefined,
+    bindings: Record<string, any>,
+    target: TargetModel,
+    grammar: CypherGrammar
+): Required<LoadOptions> & { page: Page } {
+    if (typeof where === 'function') {
+        const query = QueryRenderer.render(where, target, grammar, NODE_ALIAS);
+        return {
+            where: query.where as string,
+            bindings: query.bindings,
+            depth: checkedDepth(query.depth),
+            page: { orderBy: query.orderBy, skip: query.skip, limit: query.limit }
+        };
+    }
     const options = typeof where === 'object' ? where : { where, bindings };
-    for (const [field, depth] of Object.entries(options.depth ?? {})) {
-        if (!Number.isInteger(depth) || depth < 1) {
+    return {
+        where: options.where as string,
+        bindings: options.bindings ?? {},
+        depth: checkedDepth(options.depth ?? {}),
+        page: {}
+    };
+}
+
+function checkedDepth(depth: Record<string, number>): Record<string, number> {
+    for (const [field, it] of Object.entries(depth)) {
+        if (!Number.isInteger(it) || it < 1) {
             throw new DrivineError(`The depth of ${field} must be a whole number of at least 1.`);
         }
     }
-    return { where: options.where as string, bindings: options.bindings ?? {}, depth: options.depth ?? {} };
+    return depth;
+}
+
+/** A filter for a statement that neither orders nor pages: a count, a delete. */
+function filterOnly<T>(
+    where: string | QueryFn<T> | undefined,
+    bindings: Record<string, any>,
+    target: TargetModel,
+    grammar: CypherGrammar,
+    what: string
+): { where?: string; bindings: Record<string, any> } {
+    if (typeof where !== 'function') {
+        return { where, bindings };
+    }
+    const options = loadOptions(where, bindings, target, grammar);
+    if (Object.values(options.page).some((it) => it !== undefined)) {
+        throw new DrivineError(`A ${what} takes a query's where, not an order, skip or limit.`);
+    }
+    return options;
 }
 
 /** How many times `update` loads and applies its change before a stale save is thrown. */
@@ -175,21 +223,19 @@ export class StatelessGraphObjectManager {
      * Loads every object of the class, optionally filtered: `where` is a Cypher predicate over the root, `n`, with
      * values in `bindings`. Give a LoadOptions instead to override a recursive relationship's maxDepth for this load.
      */
-    async loadAll<T>(
-        type: ClassRef<T>,
-        where?: string | LoadOptions,
-        bindings: Record<string, any> = {}
-    ): Promise<T[]> {
-        const options = loadOptions(where, bindings);
+    async loadAll<T>(type: ClassRef<T>, where?: Filter<T>, bindings: Record<string, any> = {}): Promise<T[]> {
         const target = this.modelOf(type);
+        const options = loadOptions(where, bindings, target, this.backend.grammar);
         if (target.kind === 'GRAPH_VIEW') {
             const rows = await this.persistenceManager.query<ViewRow>(
-                this.backend.loadAllViews(target.model, options.where, options.depth).spec(options.bindings)
+                this.backend
+                    .loadAllViews(target.model, options.where, options.depth, options.page)
+                    .spec(options.bindings)
             );
             return rows.map((row) => this.mapper.view<T>(target.model, row));
         }
         const rows = await this.persistenceManager.query<FragmentRow>(
-            this.backend.loadAllFragments(target.model, options.where).spec(options.bindings)
+            this.backend.loadAllFragments(target.model, options.where, options.page).spec(options.bindings)
         );
         return rows.map((row) => this.mapper.fragment<T>(target.model, row));
     }
@@ -212,13 +258,18 @@ export class StatelessGraphObjectManager {
             : this.mapper.fragment<T>(target.model, rows[0]);
     }
 
-    async count(type: ClassRef, where?: string, bindings: Record<string, any> = {}): Promise<number> {
+    async count<T>(
+        type: ClassRef<T>,
+        where?: string | QueryFn<T>,
+        bindings: Record<string, any> = {}
+    ): Promise<number> {
         const target = this.modelOf(type);
+        const filter = filterOnly(where, bindings, target, this.backend.grammar, 'count');
         const statement =
             target.kind === 'GRAPH_VIEW'
-                ? this.backend.countViews(target.model, where)
-                : this.backend.countFragments(target.model, where);
-        return this.persistenceManager.getOne<number>(statement.spec(bindings));
+                ? this.backend.countViews(target.model, filter.where)
+                : this.backend.countFragments(target.model, filter.where);
+        return this.persistenceManager.getOne<number>(statement.spec(filter.bindings));
     }
 
     /**
@@ -531,8 +582,16 @@ export class StatelessGraphObjectManager {
      * Deletes every object a load with the same filter would find: its root, with the root's relationships. Without a
      * filter, every one. Returns the number deleted.
      */
-    async deleteAll(type: ClassRef, where?: string, bindings: Record<string, any> = {}): Promise<number> {
-        return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
+    async deleteAll<T>(
+        type: ClassRef<T>,
+        where?: string | QueryFn<T>,
+        bindings: Record<string, any> = {}
+    ): Promise<number> {
+        const target = this.modelOf(type);
+        const filter = filterOnly(where, bindings, target, this.backend.grammar, 'delete');
+        return this.persistenceManager.getOne<number>(
+            this.backend.deleteAll(target, filter.where).spec(filter.bindings)
+        );
     }
 
     /**

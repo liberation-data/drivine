@@ -1,4 +1,4 @@
-import { GraphBackend, MatchingSearch, NearestSearch } from '@/backend/GraphBackend';
+import { GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
@@ -22,8 +22,10 @@ export const NODE_ALIAS = 'n';
 export class CypherBackend implements GraphBackend {
     constructor(readonly grammar: CypherGrammar) {}
 
-    loadAllFragments(model: FragmentModel, where?: string): GraphStatement {
-        return new GraphStatement([this.match(model), this.where(where), this.projectFragment()].join(''));
+    loadAllFragments(model: FragmentModel, where?: string, page: Page = {}): GraphStatement {
+        return new GraphStatement(
+            [this.match(model), this.where(where), this.projectFragment(), this.page(page)].join('')
+        );
     }
 
     loadFragment(model: FragmentModel): GraphStatement {
@@ -36,14 +38,20 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
-    loadAllViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
+    loadAllViews(
+        model: GraphViewModel,
+        where?: string,
+        depth: Record<string, number> = {},
+        page: Page = {}
+    ): GraphStatement {
         const projection = new ViewProjector(this.grammar, depth).project(model, NODE_ALIAS);
         return new GraphStatement(
             [
                 this.match(model.root),
                 this.viewWhere(model, where, depth),
                 ...projection.calls.map((it) => `\n${it}`),
-                `\nRETURN ${projection.expression} AS result`
+                `\nRETURN ${projection.expression} AS result`,
+                this.page(page)
             ].join('')
         );
     }
@@ -212,6 +220,15 @@ export class CypherBackend implements GraphBackend {
         }
         // Parentheses only where needed: FalkorDB 6 plans a WHERE worse with ones it doesn't need.
         return this.where([...(where ? [`(${where})`] : []), ...requirements].join(' AND '));
+    }
+
+    /** The order, written over the root, and the counts as literals: a JS number goes over Bolt as a float. */
+    private page(page: Page): string {
+        return [
+            page.orderBy ? `\nORDER BY ${page.orderBy}` : '',
+            page.skip !== undefined ? `\nSKIP ${page.skip}` : '',
+            page.limit !== undefined ? `\nLIMIT ${page.limit}` : ''
+        ].join('');
     }
 
     private match(model: FragmentModel): string {

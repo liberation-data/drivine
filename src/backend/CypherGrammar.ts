@@ -48,6 +48,13 @@ export interface CypherGrammar {
     existenceCheck(pattern: string): string;
 
     /**
+     * A predicate that holds when at least one match of `pattern`, which binds its far node to `node` (and its
+     * relationship to `rel`, unless that is ''), meets the predicate `where` writes. `where` is given the expression the
+     * relationship's properties are read through, `<it>.<property>`.
+     */
+    someMatch(pattern: string, node: string, rel: string, where: (relProperties: string) => string): string;
+
+    /**
      * Whether the engine turned a statement away because another writer held what it writes, so that running it again
      * may succeed. `failure` is the driver's own error.
      */
@@ -55,7 +62,15 @@ export interface CypherGrammar {
 }
 
 /** `EXISTS { }` stops at the first match. */
-const existsSubquery = (pattern: string): string => `EXISTS { MATCH ${pattern} }`;
+const existsSubquery = (pattern: string, where?: string): string =>
+    `EXISTS { MATCH ${pattern}${where ? ` WHERE ${where}` : ''} }`;
+
+const someMatchSubquery = (
+    pattern: string,
+    node: string,
+    rel: string,
+    where: (relProperties: string) => string
+): string => existsSubquery(pattern, where(rel));
 
 /** A transient error over Bolt: a deadlock on Neo4j, a conflicting transaction on Memgraph. */
 const transientOverBolt = (failure: unknown): boolean =>
@@ -77,6 +92,7 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
         score: '_raw'
     }),
     existenceCheck: existsSubquery,
+    someMatch: someMatchSubquery,
     viewProjection: 'INLINE',
     contended: transientOverBolt
 };
@@ -97,6 +113,7 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
         score: similarity === 'COSINE' ? '(1 + _raw) / 2.0' : '_raw'
     }),
     existenceCheck: existsSubquery,
+    someMatch: someMatchSubquery,
     viewProjection: 'INLINE',
     contended: transientOverBolt,
     orphanDeleteLimit: 'Memgraph takes an existence check only in a WHERE clause, not in the list of nodes to delete'
@@ -121,6 +138,18 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
         score: similarity === 'COSINE' ? '1 - _raw / 2.0' : '1.0 / (1 + _raw * _raw)'
     }),
     existenceCheck: (pattern: string) => `size([${pattern} | 1]) > 0`,
+    // Not as a comprehension's WHERE: two comprehensions of one pattern, each with a WHERE, in one predicate match
+    // nothing (FalkorDB/FalkorDB#3392). Nor with the relationship itself in the list: its properties, as #3386 needs.
+    someMatch: (pattern, node, rel, where) => {
+        if (!rel) {
+            return `any(${node} IN [${pattern} | ${node}] WHERE ${where('')})`;
+        }
+        const it = `${node}_e`;
+        return (
+            `any(${it} IN [${pattern} | {node: ${node}, rel: properties(${rel})}] ` +
+            `WHERE any(${node} IN [${it}.node] WHERE ${where(`${it}.rel`)}))`
+        );
+    },
     viewProjection: 'CALL_SUBQUERY',
     // FalkorDB runs one query at a time, but turns a write away while another is in progress, as its constraint
     // commands do under load.

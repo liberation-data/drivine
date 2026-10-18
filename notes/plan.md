@@ -184,15 +184,23 @@ Split out of Tier 2 because both are sizeable and independently useful (especial
 
 Goal: `loadAll(View, q => q.where(q.person.bio.contains("Lead")))` with autocomplete and compile-time checking.
 
-**Approach: ts-morph build-time codegen.** Ship a CLI (`drivine-codegen`) run as a build step; scans for `@GraphView` / `@NodeFragment` classes and emits `<View>QueryDsl.ts`. Deterministic output, no I/O beyond writing files. (Rejected: TS transformers — fragile tooling; runtime proxies — lose type info when nested.)
+**Approach (changed in 4.1): typed references from the model classes, no codegen.** A query is a function of references derived from the class's own type with mapped types (`Refs<T>`): a string field offers string tests, a number or Date ordering, a list `hasItem`, an object (a view's root, a relationship's nodes, a property bag's entries) its own fields. At run time a Proxy walks the model as fields are reached, so a field the model can't query fails naming it. This gives drivine4j's generated-DSL typing (autocomplete, compile errors) without a build step or generated files to keep in step. (Was: ts-morph codegen, rejected then on the belief that runtime proxies lose nested types — mapped types keep them.)
 
-Operators: `eq, neq, gt, gte, lt, lte, in, contains, startsWith, endsWith, isNull, isNotNull, hasItem, instanceOf<T>`; `any` / `none` over to-many relationships; dynamic runtime-key predicates.
+```ts
+gom.loadAll(IssueView, (q) => ({
+    where: [q.issue.state.eq('open'), q.assignees.any((a) => [a.role.eq('lead'), a.person.name.eq('Kent')])],
+    orderBy: [q.issue.priority.desc().nullsLast(), q.issue.id.asc()],
+    limit: 20
+}))
+```
 
-Composition: chained `where` = AND; `anyOf([...])` = OR. Bare-fragment queries supported.
+Operators: `eq, neq, gt, gte, lt, lte, in, notIn, contains, startsWith, endsWith, matches, containsIgnoreCase, eqIgnoreCase, isNull, isNotNull, hasItem, instanceOf`; `any` / `none` over to-many relationships; dynamic runtime-key predicates.
+
+Composition: a `where` array = AND; `anyOf(...)` = OR; `allOf(...)`; `not(...)`. Bare-fragment queries supported.
 
 Ordering & paging: `asc`, `desc`, `nullsFirst()`, `nullsLast()`, order by expression over root properties, database-side ordering of nested collections, `limit` / `skip`, index-aware keyset pagination.
 
-Also drives `groups`, `deleteAll`, `loadNearest` / `loadMatching` filters.
+Also drives `groups`, `deleteAll`, `loadNearest` / `loadMatching` filters, `patch` conditions.
 
 **Defer** until Tier 2 is shipped and stable — the runtime API works without it.
 
@@ -332,4 +340,13 @@ Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as th
   - **Second Memgraph bug found (not yet reported — ask the user):** a text index over several properties (`CREATE TEXT INDEX i ON :L(a, b)`) indexes only the first — `b` is never matched though SHOW INDEX INFO lists both and counts the node. Workaround: on Memgraph a multi-property full-text index is made label-wide (`ON :L`), which indexes every property (a search can then match the label's other text too); drift treats a label-wide index as covering; drops use the engine's index name.
   - Test infra: suites that run schema DDL run in band after the rest (`gate.sh`), since parallel DDL on one Neo4j queues on the schema lock until hooks time out.
 - [x] 3.6 `gom.storeIdentity()` → `{id, engine, assignedAt}`, cached per manager, from `(:DrivineStore {key: 'singleton', storeId, assignedAt, engine})` — drivine4j's node and keys, so JVM and Node agree on one identity. Uniqueness constraint `DrivineStore(key)` ensured first; a lost MERGE race (constraint error, or FalkorDB's write-in-progress) backs off 50·2ⁿ ms and merges onto the winner; existing duplicates → oldest wins, logged. Verified: 5 concurrent first resolves agree on all three engines.
-- **Tier 3 complete.** Next: Tier 4 (type-safe DSL via codegen), Tier 5 (Oracle).
+- **Tier 3 complete.** Next: Tier 4 (type-safe DSL), Tier 5 (Oracle).
+
+### Tier 4 steps
+
+- [x] 4.1 Typed query references (`src/dsl/`: `Refs<T>` mapped types, `QueryRefs` Proxy over `ModelScope`, `QueryRenderer`) on `loadAll`, `count`, `deleteAll` (`Filter<T> = string | LoadOptions | QueryFn<T>`; count/delete refuse order/skip/limit). Conditions on root properties (graph names, JSON-packed values packed, property-bag entries `q.metadata.source`, `@NodeLabels` `hasItem` → label test), across relationships (flat = some related node meets it; `any` = one node meets all; `none`), relationship-fragment properties (read from the relationship) and targets, nested views' relationships, multi-hop fragment lists (`*1..d`, depth overrides), `instanceOf` on the root and related nodes. Values always bound (`$_q0…`). Order by root properties with null placement as its own key (`x IS NULL [DESC]`, verified on all three); `skip`/`limit` as literals after the order; for a view, roots are paged with their relationships whole. Verified on all three engines (63 tests) plus renderer unit tests with `@ts-expect-error` type checks.
+  - **New FalkorDB bug, reported: FalkorDB/FalkorDB#3392** — two pattern comprehensions over one pattern, each with a WHERE, joined by AND match no rows (6.0.0 and edge-rs). FalkorDB's form is now `any(x IN [pattern | x] WHERE …)`, with a relationship fragment's properties carried as `properties(r)` in a map (#3386); new `CypherGrammar.someMatch`.
+- [ ] 4.2 The DSL on `loadNearest` / `loadMatching` filters, `delete(type, id, {where})`, `patch` conditions; dynamic property predicates (`q.$prop(name)` style, for bags without a typed Record and runtime keys).
+- [ ] 4.3 Keyset `seek` (after a cursor, from the order's directions) + index-aware advice.
+- [ ] 4.4 Order by expression (drivine4j 0.1.7 `OrderExpressions`); database-side ordering of nested collections.
+- [ ] 4.5 Typed `groups` DSL over the same references.

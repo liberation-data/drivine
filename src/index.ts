@@ -3,6 +3,7 @@ export * from './backend';
 export * from './connection';
 export * from './context';
 export * from './cursor';
+export * from './dsl';
 export * from './logger';
 export * from './manager';
 export * from './mapper';
