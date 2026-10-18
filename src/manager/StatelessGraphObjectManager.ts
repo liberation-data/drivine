@@ -3,6 +3,7 @@ import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
 import { TargetModel } from '@/model/RelationshipModel';
+import { CascadeType } from '@/manager/CascadeType';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { ClassType } from '@/query/QuerySpecification';
@@ -65,6 +66,28 @@ export class StatelessGraphObjectManager {
                 ? this.backend.countViews(target.model, where)
                 : this.backend.countFragments(target.model, where);
         return this.persistenceManager.getOne<number>(statement.spec(bindings));
+    }
+
+    /**
+     * Deletes the object whose root has the id, with the root's relationships. A view's root is deleted only if it
+     * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
+     * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
+     */
+    async delete(
+        type: ClassType,
+        id: unknown,
+        options: { where?: string; bindings?: Record<string, any>; cascade?: CascadeType } = {}
+    ): Promise<number> {
+        const statement = this.backend.delete(this.modelOf(type), options.where, options.cascade);
+        return this.persistenceManager.getOne<number>(statement.spec({ ...options.bindings, id }));
+    }
+
+    /**
+     * Deletes every object a load with the same filter would find: its root, with the root's relationships. Without a
+     * filter, every one. Returns the number deleted.
+     */
+    async deleteAll(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
+        return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
     }
 
     private modelOf(type: ClassType): TargetModel {

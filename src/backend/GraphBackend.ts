@@ -1,5 +1,7 @@
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
+import { TargetModel } from '@/model/RelationshipModel';
+import { CascadeType } from '@/manager/CascadeType';
 import { GraphStatement } from '@/backend/GraphStatement';
 
 /**
@@ -26,4 +28,14 @@ export interface GraphBackend {
 
     /** Counts the views {@link loadAllViews} would load. Returns one number. */
     countViews(model: GraphViewModel, where?: string): GraphStatement;
+
+    /**
+     * Deletes the root whose id is the parameter `id`, if it meets the optional predicate (and, for a view, the view's
+     * requirements), with its relationships. A cascade, for a view only, deletes nodes the view reaches too. Returns
+     * the number of roots deleted.
+     */
+    delete(target: TargetModel, where?: string, cascade?: CascadeType): GraphStatement;
+
+    /** Deletes every root a load would find, with its relationships. Returns the number deleted. */
+    deleteAll(target: TargetModel, where?: string): GraphStatement;
 }

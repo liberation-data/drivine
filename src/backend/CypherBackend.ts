@@ -6,6 +6,9 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { fragment, ViewProjector } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
+import { TargetModel } from '@/model/RelationshipModel';
+import { CascadeType } from '@/manager/CascadeType';
+import { CascadeTargets } from '@/backend/CascadeTargets';
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
 export const NODE_ALIAS = 'n';
@@ -45,6 +48,51 @@ export class CypherBackend implements GraphBackend {
         return new GraphStatement(
             [this.match(model.root), this.viewWhere(model, where), `\nRETURN count(${NODE_ALIAS}) AS count`].join('')
         );
+    }
+
+    delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const id = this.idPredicate(root);
+        const filter = where ? `${id} AND (${where})` : id;
+        const head = [this.match(root), this.rootWhere(target, filter)].join('');
+        if (cascade === CascadeType.NONE) {
+            return new GraphStatement(`${head}\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`);
+        }
+        if (target.kind !== 'GRAPH_VIEW') {
+            throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
+        }
+        if (cascade === CascadeType.DELETE_ORPHAN && this.grammar.orphanDeleteLimit) {
+            throw new DrivineError(`CascadeType.DELETE_ORPHAN is not available on ${this.grammar.engine}: ${this.grammar.orphanDeleteLimit}.`);
+        }
+        const targets = new CascadeTargets(this.grammar).of(target.model, NODE_ALIAS);
+        const deletable =
+            cascade === CascadeType.DELETE_ALL
+                ? 'targets'
+                : `[x IN targets WHERE NOT ${this.grammar.existenceCheck('(x)--()')}]`;
+        return new GraphStatement(
+            [
+                head,
+                // WITH before the list: FalkorDB errors on a WHERE and a projection that both hold comprehensions
+                // (FalkorDB/FalkorDB#3387).
+                `\nWITH ${NODE_ALIAS}`,
+                `\nWITH ${NODE_ALIAS}, ${targets} AS targets`,
+                `\nDETACH DELETE ${NODE_ALIAS}`,
+                `\nWITH targets`,
+                `\nFOREACH (t IN ${deletable} | DETACH DELETE t)`,
+                `\nRETURN count(*) AS deleted`
+            ].join('')
+        );
+    }
+
+    deleteAll(target: TargetModel, where?: string): GraphStatement {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        return new GraphStatement(
+            [this.match(root), this.rootWhere(target, where), `\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`].join('')
+        );
+    }
+
+    private rootWhere(target: TargetModel, where?: string): string {
+        return target.kind === 'GRAPH_VIEW' ? this.viewWhere(target.model, where) : this.where(where);
     }
 
     private viewWhere(model: GraphViewModel, where?: string): string {

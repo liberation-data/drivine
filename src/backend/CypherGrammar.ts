@@ -14,6 +14,9 @@ export interface CypherGrammar {
      */
     readonly viewProjection: 'INLINE' | 'CALL_SUBQUERY';
 
+    /** Why the engine can't delete with CascadeType.DELETE_ORPHAN; undefined when it can. */
+    readonly orphanDeleteLimit?: string;
+
     /**
      * A predicate that holds when `pattern` (e.g. `(n)-[:R]->(:T)`) matches at least once.
      */
@@ -28,7 +31,8 @@ export const NEO4J_GRAMMAR: CypherGrammar = { engine: 'Neo4j', existenceCheck: e
 export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     engine: 'Memgraph',
     existenceCheck: existsSubquery,
-    viewProjection: 'INLINE'
+    viewProjection: 'INLINE',
+    orphanDeleteLimit: 'Memgraph takes an existence check only in a WHERE clause, not in the list of nodes to delete'
 };
 
 /**

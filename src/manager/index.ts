@@ -1,3 +1,4 @@
+export * from './CascadeType';
 export * from './DelegatingPersistenceManager';
 export * from './FinderOperations';
 export * from './GraphObjectManagerFactory';
