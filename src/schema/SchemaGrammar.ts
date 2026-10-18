@@ -1,13 +1,22 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { labelExpression, quoteName } from '@/backend/Cypher';
-import { itemName, RangeIndexSpec, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
+import {
+    FullTextIndexSpec,
+    itemName,
+    RangeIndexSpec,
+    SimilarityFunction,
+    UniquenessConstraintSpec,
+    VectorIndexSpec
+} from '@/schema/SchemaSpecs';
 
 /** What an engine reports of an item: its label and properties, and its name where it names items. */
 export interface SchemaItem {
     label: string;
     properties: string[];
     name?: string;
+    dimensions?: number;
+    similarity?: SimilarityFunction;
 }
 
 /**
@@ -23,10 +32,16 @@ export interface SchemaGrammar {
     /** A statement listing range indexes, and how to read its rows. */
     listRanges: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listUniques: { statement: string; read: (rows: any[]) => SchemaItem[] };
+    listVectors: { statement: string; read: (rows: any[]) => SchemaItem[] };
+    listFullTexts: { statement: string; read: (rows: any[]) => SchemaItem[] };
     createRange(spec: RangeIndexSpec): string[];
     dropRange(spec: RangeIndexSpec): string[];
     createUnique(spec: UniquenessConstraintSpec): (string | NativeOperation)[];
     dropUnique(spec: UniquenessConstraintSpec): (string | NativeOperation)[];
+    createVector(spec: VectorIndexSpec): string[];
+    dropVector(spec: VectorIndexSpec): string[];
+    createFullText(spec: FullTextIndexSpec): string[];
+    dropFullText(spec: FullTextIndexSpec): string[];
 }
 
 /** A command for the engine's driver, rather than a Cypher statement. */
@@ -40,6 +55,38 @@ const pattern = (spec: { label: string }): string => `(n${labelExpression([spec.
 const props = (spec: { properties: string[] }): string => spec.properties.map((it) => `n.${quoteName(it)}`).join(', ');
 
 export const NEO4J_SCHEMA: SchemaGrammar = {
+    listVectors: {
+        statement:
+            "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options WHERE type = 'VECTOR' AND entityType = 'NODE' " +
+            'RETURN {name: name, labels: labelsOrTypes, properties: properties, config: options.indexConfig}',
+        read: (rows) =>
+            rows.map((it) => ({
+                label: it.labels[0],
+                properties: it.properties,
+                name: it.name,
+                dimensions: Number(it.config?.['vector.dimensions']),
+                similarity: String(it.config?.['vector.similarity_function']).toUpperCase() as SimilarityFunction
+            }))
+    },
+    listFullTexts: {
+        statement:
+            "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties WHERE type = 'FULLTEXT' AND entityType = 'NODE' " +
+            'RETURN {name: name, labels: labelsOrTypes, properties: properties}',
+        read: (rows) => rows.map((it) => ({ label: it.labels[0], properties: it.properties, name: it.name }))
+    },
+    createVector: (spec) => [
+        `CREATE VECTOR INDEX ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(
+            spec
+        )}) OPTIONS {indexConfig: ` +
+            `{\`vector.dimensions\`: ${
+                spec.dimensions
+            }, \`vector.similarity_function\`: '${spec.similarity.toLowerCase()}'}}`
+    ],
+    dropVector: (spec) => [`DROP INDEX ${itemName(spec)} IF EXISTS`],
+    createFullText: (spec) => [
+        `CREATE FULLTEXT INDEX ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} ON EACH [${props(spec)}]`
+    ],
+    dropFullText: (spec) => [`DROP INDEX ${itemName(spec)} IF EXISTS`],
     engine: 'Neo4j',
     createRange: (spec) => [`CREATE INDEX ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(spec)})`],
     dropRange: (spec) => [`DROP INDEX ${itemName(spec)} IF EXISTS`],
@@ -63,6 +110,41 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
 };
 
 export const MEMGRAPH_SCHEMA: SchemaGrammar = {
+    listVectors: {
+        // Columns: index_name, label (as ':Label'), property, capacity, dimension, metric, ...
+        statement: 'SHOW VECTOR INDEX INFO',
+        read: (rows) =>
+            rows.map((it) => ({
+                name: it[0],
+                label: String(it[1]).replace(/^:/, ''),
+                properties: [it[2]],
+                dimensions: Number(it[4]),
+                similarity: it[5] === 'cos' ? 'COSINE' : 'EUCLIDEAN'
+            }))
+    },
+    listFullTexts: {
+        // A text index is a SHOW INDEX INFO row of type 'label_text (name: <name>)'.
+        statement: 'SHOW INDEX INFO',
+        read: (rows) =>
+            rows
+                .filter((it) => String(it[0]).startsWith('label_text'))
+                .map((it) => ({ name: /name: ([^)]+)/.exec(it[0])?.[1], label: it[1], properties: [it[2]].flat() }))
+    },
+    createVector: (spec) => [
+        `CREATE VECTOR INDEX ${itemName(spec)} ON ${labelExpression([spec.label])}(${quoteName(
+            spec.properties[0]
+        )}) WITH CONFIG ` +
+            `{"dimension": ${spec.dimensions}, "capacity": ${spec.capacity ?? 1024}, "metric": "${
+                spec.similarity === 'COSINE' ? 'cos' : 'l2sq'
+            }"}`
+    ],
+    dropVector: (spec) => [`DROP VECTOR INDEX ${itemName(spec)}`],
+    createFullText: (spec) => [
+        `CREATE TEXT INDEX ${itemName(spec)} ON ${labelExpression([spec.label])}(${spec.properties
+            .map(quoteName)
+            .join(', ')})`
+    ],
+    dropFullText: (spec) => [`DROP TEXT INDEX ${itemName(spec)}`],
     engine: 'Memgraph',
     createRange: (spec) => [
         `CREATE INDEX ON ${labelExpression([spec.label])}(${spec.properties.map(quoteName).join(', ')})`
@@ -94,6 +176,47 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     engine: 'FalkorDB',
     rangesPerProperty: true,
     uniqueNeedsRange: true,
+    listVectors: {
+        statement:
+            "CALL db.indexes() YIELD label, properties, types, options, entitytype WHERE entitytype = 'NODE' " +
+            'RETURN {label: label, properties: properties, types: types, options: options}',
+        read: (rows) =>
+            rows.flatMap((it) =>
+                (it.properties as string[])
+                    .filter((property) => (it.types?.[property] ?? []).includes('VECTOR'))
+                    .map((property) => ({
+                        label: it.label,
+                        properties: [property],
+                        dimensions: Number(it.options?.[property]?.dimension),
+                        similarity: String(
+                            it.options?.[property]?.similarityFunction
+                        ).toUpperCase() as SimilarityFunction
+                    }))
+            )
+    },
+    listFullTexts: {
+        // One full-text index per label, over the properties that have one.
+        statement:
+            "CALL db.indexes() YIELD label, properties, types, entitytype WHERE entitytype = 'NODE' " +
+            'RETURN {label: label, properties: properties, types: types}',
+        read: (rows) =>
+            rows
+                .map((it) => ({
+                    label: it.label,
+                    properties: (it.properties as string[]).filter((property) =>
+                        (it.types?.[property] ?? []).includes('FULLTEXT')
+                    )
+                }))
+                .filter((it) => it.properties.length)
+    },
+    createVector: (spec) => [
+        `CREATE VECTOR INDEX FOR ${pattern(spec)} ON (${props(spec)}) OPTIONS ` +
+            `{dimension: ${spec.dimensions}, similarityFunction: '${spec.similarity.toLowerCase()}'}`
+    ],
+    dropVector: (spec) => [`DROP VECTOR INDEX FOR ${pattern(spec)} ON (${props(spec)})`],
+    createFullText: (spec) => [`CREATE FULLTEXT INDEX FOR ${pattern(spec)} ON (${props(spec)})`],
+    dropFullText: (spec) =>
+        spec.properties.map((it) => `DROP FULLTEXT INDEX FOR ${pattern(spec)} ON (n.${quoteName(it)})`),
     createRange: (spec) => [`CREATE INDEX FOR ${pattern(spec)} ON (${props(spec)})`],
     dropRange: (spec) => spec.properties.map((it) => `DROP INDEX FOR ${pattern(spec)} ON (n.${quoteName(it)})`),
     listRanges: {
