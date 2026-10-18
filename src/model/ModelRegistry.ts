@@ -10,7 +10,7 @@ import {
 } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
-import { FragmentModel, PropertyBagModel } from '@/model/FragmentModel';
+import { FragmentModel, NodeLabelsModel, PropertyBagModel } from '@/model/FragmentModel';
 import { FieldMapping } from '@/model/FieldMapping';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
@@ -127,7 +127,7 @@ export class ModelRegistry {
         }
 
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'propertyBag', ...MAPPING_KEYS], 'a @NodeFragment');
+        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'propertyBag', 'nodeLabels', ...MAPPING_KEYS], 'a @NodeFragment');
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
         if (ids.length > 1) {
             throw new DrivineError(
@@ -158,6 +158,7 @@ export class ModelRegistry {
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
             stampField,
             propertyBags: this.propertyBags(type, properties),
+            nodeLabels: this.nodeLabels(type, properties, [...labels]),
             ...this.fieldMapping(properties),
             graphProperties
         };
@@ -388,7 +389,8 @@ export class ModelRegistry {
             'default',
             'emptyWhenAbsent',
             'sortedBy',
-            'propertyBag'
+            'propertyBag',
+            'nodeLabels'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
@@ -398,6 +400,28 @@ export class ModelRegistry {
                 );
             }
         });
+    }
+
+    private nodeLabels(type: Function, properties: Map<string, PropertyMetadata>, own: string[]): NodeLabelsModel | undefined {
+        const fields = [...properties].filter(([, it]) => it.nodeLabels);
+        if (fields.length > 1) {
+            throw new DrivineError(`${type.name} has ${fields.length} @NodeLabels fields; a fragment may have one.`);
+        }
+        if (!fields.length) {
+            return undefined;
+        }
+        const [field, metadata] = fields[0];
+        const members = metadata.nodeLabels!.members;
+        const fixed = members?.filter((it) => own.includes(it)) ?? [];
+        if (fixed.length) {
+            throw new DrivineError(
+                `@NodeLabels ${type.name}.${field} names ${fixed.join(', ')}, the fragment's own label: those are fixed.`
+            );
+        }
+        if (members?.some((it) => it.startsWith('__drivine.'))) {
+            throw new DrivineError(`@NodeLabels ${type.name}.${field} names a label beginning '__drivine.', which is reserved.`);
+        }
+        return { field, members, isSet: metadata.designType === Set, recordProperty: `__drivine.labels.${field}` };
     }
 
     private propertyBags(type: Function, properties: Map<string, PropertyMetadata>): PropertyBagModel[] {
@@ -470,6 +494,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         emptyWhenAbsent: '@EmptyWhenAbsent',
         sortedBy: '@SortedBy',
         propertyBag: '@PropertyBag',
+        nodeLabels: '@NodeLabels',
         designType: ''
     }[key];
 }

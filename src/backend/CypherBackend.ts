@@ -119,9 +119,9 @@ export class CypherBackend implements GraphBackend {
         return new SaveStatementBuilder(this.grammar, registry).build(target, object, options, createOnly);
     }
 
-    heldKeys(model: FragmentModel): GraphStatement {
+    heldProperties(model: FragmentModel): GraphStatement {
         return new GraphStatement(
-            `${this.match(model)}\nWHERE ${this.idPredicate(model)}\nRETURN keys(${NODE_ALIAS}) AS keys`
+            `${this.match(model)}\nWHERE ${this.idPredicate(model)}\nRETURN properties(${NODE_ALIAS}) AS props`
         );
     }
 

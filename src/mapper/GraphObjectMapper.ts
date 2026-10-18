@@ -50,6 +50,13 @@ export class GraphObjectMapper {
         if (model.stampField) {
             instance[model.stampField] = row.props?.[Stamps.PROPERTY] ?? undefined;
         }
+        if (model.nodeLabels) {
+            const field = model.nodeLabels;
+            const labels = (row.labels ?? []).filter((it) =>
+                field.members ? field.members.includes(it) : !model.labels.includes(it)
+            );
+            instance[field.field] = field.isSet ? new Set(labels) : labels;
+        }
         return instance as T;
     }
 

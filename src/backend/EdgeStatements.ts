@@ -71,6 +71,26 @@ export class EdgeStatements {
         );
     }
 
+    /** The nodes of `target` joined to `from` by the type in the direction, each once, as fragment rows. */
+    static related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement {
+        assertType(type);
+        const edge = `[:${quoteName(type)}]`;
+        const arrow =
+            direction === Direction.INCOMING
+                ? `<-${edge}-`
+                : direction === Direction.UNDIRECTED
+                ? `-${edge}-`
+                : `-${edge}->`;
+        return new GraphStatement(
+            [
+                `MATCH ${pattern('a', from, '$_fromId')}${arrow}(n${labelExpression(target.labels)})`,
+                'WITH DISTINCT n',
+                'RETURN {props: properties(n), labels: labels(n)} AS result'
+            ].join('\n'),
+            { _fromId: from.id }
+        );
+    }
+
     /** Removes every relationship of the type `from` has in the direction. Returns how many there were. */
     static unrelateAll(from: MatchedNode, type: string, direction: Direction): GraphStatement {
         assertType(type);

@@ -3,6 +3,8 @@ import { EdgeStatements, MatchedNode } from '@/backend/EdgeStatements';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { NodeRef, RelateMode } from '@/manager/NodeRef';
+import { GraphObjectMapper } from '@/mapper/GraphObjectMapper';
+import { ClassRef, ClassType } from '@/query/QuerySpecification';
 
 /**
  * Relationships on their own, between stored nodes matched by id: neither node is loaded or created, and neither's
@@ -13,8 +15,25 @@ import { NodeRef, RelateMode } from '@/manager/NodeRef';
 export class EdgeOperations {
     constructor(
         private readonly registry: ModelRegistry,
-        private readonly run: <R>(statement: GraphStatement) => Promise<R>
+        private readonly run: <R>(statement: GraphStatement) => Promise<R>,
+        private readonly query: (statement: GraphStatement) => Promise<any[]>,
+        private readonly mapper: GraphObjectMapper
     ) {}
+
+    /**
+     * The nodes joined to `from` by a relationship of the type in the direction (OUTGOING by default), each once, as
+     * the target fragment class (or the subtype of it whose labels each carries).
+     */
+    async loadRelated<T>(
+        from: NodeRef,
+        type: string,
+        direction: Direction = Direction.OUTGOING,
+        target: ClassRef<T>
+    ): Promise<T[]> {
+        const model = this.registry.fragment(target as ClassType);
+        const rows = await this.query(EdgeStatements.related(this.node(from), type, direction, model));
+        return rows.map((row) => this.mapper.fragment<T>(model, row));
+    }
 
     /**
      * Joins `from` to `to` with a relationship of the type. Under MERGE (the default) one is made only when there is

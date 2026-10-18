@@ -115,8 +115,12 @@ export class StatelessGraphObjectManager {
         readonly registry: ModelRegistry
     ) {
         this.mapper = new GraphObjectMapper(registry);
-        this.edges = new EdgeOperations(registry, async <R>(statement: GraphStatement) =>
-            this.whenUncontended(async () => this.persistenceManager.getOne<R>(statement.spec()))
+        this.edges = new EdgeOperations(
+            registry,
+            async <R>(statement: GraphStatement) =>
+                this.whenUncontended(async () => this.persistenceManager.getOne<R>(statement.spec())),
+            async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
+            this.mapper
         );
     }
 
@@ -296,7 +300,8 @@ export class StatelessGraphObjectManager {
                         keep(field) &&
                         field !== root.nodeIdField &&
                         field !== root.stampField &&
-                        !root.propertyBags.some((bag) => bag.field === field)
+                        !root.propertyBags.some((bag) => bag.field === field) &&
+                        root.nodeLabels?.field !== field
                 )
             );
             return { id, props: propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR) };
@@ -341,7 +346,7 @@ export class StatelessGraphObjectManager {
             const target = this.modelOf(object.constructor as ClassType);
             // A view, or a fragment with a property bag, whose entries no row of a batch can carry, is a statement of
             // its own.
-            if (target.kind === 'GRAPH_VIEW' || target.model.propertyBags.length) {
+            if (target.kind === 'GRAPH_VIEW' || target.model.propertyBags.length || target.model.nodeLabels) {
                 views.push(object);
             } else {
                 if (options.replace) {
@@ -547,13 +552,14 @@ export class StatelessGraphObjectManager {
         const target = this.modelOf(object.constructor as ClassRef);
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const rootObject: any = target.kind === 'GRAPH_VIEW' ? (object as any)[target.model.rootField] : object;
-        if (!root.propertyBags.length || rootObject?.[root.nodeIdField!] == null) {
+        const reads = root.propertyBags.length || (root.nodeLabels && !root.nodeLabels.members);
+        if (!reads || rootObject?.[root.nodeIdField!] == null) {
             return options;
         }
-        const held = await this.persistenceManager.query<string[]>(
-            this.backend.heldKeys(root).spec({ id: rootObject[root.nodeIdField!] })
+        const held = await this.persistenceManager.query<Record<string, any>>(
+            this.backend.heldProperties(root).spec({ id: rootObject[root.nodeIdField!] })
         );
-        return { ...options, heldKeys: held[0] ?? [] };
+        return { ...options, heldProperties: held[0] ?? {} };
     }
 
     private assertPatchable(root: ReturnType<ModelRegistry['fragment']>, fields: string[]): void {
@@ -562,7 +568,8 @@ export class StatelessGraphObjectManager {
                 it === root.nodeIdField ||
                 it === root.stampField ||
                 root.transientFields.has(it) ||
-                root.propertyBags.some((bag) => bag.field === it)
+                root.propertyBags.some((bag) => bag.field === it) ||
+                root.nodeLabels?.field === it
         );
         if (refused.length) {
             throw new DrivineError(`A patch can't write ${refused.join(', ')} of ${root.type.name}.`);

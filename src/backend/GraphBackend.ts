@@ -51,8 +51,8 @@ export interface GraphBackend {
         registry?: ModelRegistry
     ): SaveStatement;
 
-    /** The property keys of the node with id `$id`: one row, or none when there is no such node. */
-    heldKeys(model: FragmentModel): GraphStatement;
+    /** The properties of the node with id `$id`: one row, or none when there is no such node. */
+    heldProperties(model: FragmentModel): GraphStatement;
 
     /** The stamp the node with id `$id` carries ('-' for none); no row when there is no such node. */
     foundStamp(model: FragmentModel): GraphStatement;

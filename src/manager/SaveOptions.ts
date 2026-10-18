@@ -36,6 +36,9 @@ export interface SaveOptions<T> {
     only?: string[];
     /** Fields of the object (of a view, its root) not to write. Give `only` or `except`, not both. */
     except?: string[];
-    /** Internal: the keys the root holds, read first under CLEAR to remove property-bag entries a map no longer has. */
-    heldKeys?: string[];
+    /**
+     * Internal: the root's properties, read first under CLEAR to remove property-bag entries a map no longer has and
+     * labels a @NodeLabels field no longer holds.
+     */
+    heldProperties?: Record<string, any>;
 }

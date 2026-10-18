@@ -8,6 +8,7 @@ export * from './Mapping';
 export * from './Metadata';
 export * from './NodeFragment';
 export * from './NodeId';
+export * from './NodeLabels';
 export * from './NodeStamp';
 export * from './PropertyBag';
 export * from './ReadOnly';

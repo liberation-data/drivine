@@ -44,7 +44,7 @@ export class SaveStatementBuilder {
     /** The stamped related fragments, each read before and after the writes: see readStamps. */
     private readonly stamped: StampedNodes[] = [];
     /** Related nodes with property bags, each written by a part of the statement of its own after the FOREACHes. */
-    private readonly bagged: { model: FragmentModel; id: any; entries: Map<string, any> }[] = [];
+    private readonly bagged: { model: FragmentModel; id: any; object: any }[] = [];
     /** For each target fragment of the save, the subclasses of it the object holds, in the order rows name them. */
     private readonly subtypes = new Map<FragmentModel, FragmentModel[]>();
     private options: SaveOptions<any> = {};
@@ -182,18 +182,22 @@ export class SaveStatementBuilder {
         const labels = labelExpression(model.labels);
         const id = `{${quoteName(idProperty(model))}: $root.id}`;
         const { only, except }: SaveOptions<any> = this.options;
-        const written = model.propertyBags.filter((it) =>
-            only ? only.includes(it.field) : !except?.includes(it.field)
-        );
+        const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
+        const clear = this.options.nullPolicy === NullPolicy.CLEAR;
+        const held = this.options.heldProperties ?? {};
         const entries = bagEntries(
-            { ...model, propertyBags: written },
+            { ...model, propertyBags: model.propertyBags.filter((it) => keep(it.field)) },
             object,
-            this.options.heldKeys,
-            this.options.nullPolicy === NullPolicy.CLEAR
+            Object.keys(held),
+            clear
         );
         const bag = this.bagSets('n', 'rootBag', entries);
-        const changed = [changes('n', '$root.props'), ...bag.changes].join(' OR ');
-        const write = [`SET ${restamp('n', changed)}`, 'SET n += $root.props', ...bag.sets];
+        const labelled =
+            model.nodeLabels && keep(model.nodeLabels.field)
+                ? this.labelClauses(model, object, 'n', clear, held)
+                : { sets: [], changes: [] };
+        const changed = [changes('n', '$root.props'), ...bag.changes, ...labelled.changes].join(' OR ');
+        const write = [`SET ${restamp('n', changed)}`, 'SET n += $root.props', ...bag.sets, ...labelled.sets];
         const expected = model.stampField ? object[model.stampField] : undefined;
         if (this.createOnly) {
             if (expected != null) {
@@ -374,8 +378,8 @@ export class SaveStatementBuilder {
             if (concrete !== root) {
                 row.subtype = this.subtypeIndex(root, concrete);
             }
-            if (concrete.propertyBags.length) {
-                this.bagged.push({ model: concrete, id: row.id, entries: bagEntries(concrete, nodeObject) });
+            if (concrete.propertyBags.length || concrete.nodeLabels) {
+                this.bagged.push({ model: concrete, id: row.id, object: nodeObject });
             }
             if (rel.related.kind === 'RELATIONSHIP_FRAGMENT') {
                 const model = rel.related.model;
@@ -388,22 +392,75 @@ export class SaveStatementBuilder {
         });
     }
 
+    /** A related node with property bags or node labels, written as under IGNORE, by a part of its own. */
     private baggedParts(): string[] {
-        return this.bagged
-            .filter((it) => it.entries.size)
-            .flatMap((it, i) => {
-                const alias = `b${i}`;
-                this.bindings[`bagId${i}`] = it.id;
-                const bag = this.bagSets(alias, `bag${i}_`, it.entries);
-                return [
-                    `WITH ${this.carry}`,
-                    `MATCH (${alias}${labelExpression(it.model.labels)} {${quoteName(
-                        idProperty(it.model)
-                    )}: $bagId${i}})`,
-                    `SET ${restamp(alias, bag.changes.join(' OR '))}`,
-                    ...bag.sets
-                ];
-            });
+        return this.bagged.flatMap((it, i) => {
+            const alias = `b${i}`;
+            const bag = this.bagSets(alias, `bag${i}_`, bagEntries(it.model, it.object));
+            const labelled = it.model.nodeLabels
+                ? this.labelClauses(it.model, it.object, alias, false)
+                : { sets: [], changes: [] };
+            const changed = [...bag.changes, ...labelled.changes];
+            if (!changed.length && !labelled.sets.length) {
+                return [];
+            }
+            this.bindings[`bagId${i}`] = it.id;
+            return [
+                `WITH ${this.carry}`,
+                `MATCH (${alias}${labelExpression(it.model.labels)} {${quoteName(idProperty(it.model))}: $bagId${i}})`,
+                ...(changed.length ? [`SET ${restamp(alias, changed.join(' OR '))}`] : []),
+                ...bag.sets,
+                ...labelled.sets
+            ];
+        });
+    }
+
+    /**
+     * Clauses that give a node the labels its @NodeLabels field holds, and under `clear` remove those it owns and no
+     * longer holds: for a closed field, its other members; for an open one, the labels it recorded writing (from
+     * `held`, the node's properties read first). An open field records what it wrote.
+     */
+    private labelClauses(
+        model: FragmentModel,
+        object: any,
+        alias: string,
+        clear: boolean,
+        held: Record<string, any> = {}
+    ): { sets: string[]; changes: string[] } {
+        const field = model.nodeLabels!;
+        const labels = [...new Set([...((object?.[field.field] as Iterable<string>) ?? [])])];
+        const outside = field.members ? labels.filter((it) => !field.members!.includes(it)) : [];
+        if (outside.length) {
+            throw new DrivineError(
+                `${model.type.name}.${field.field} holds ${outside.join(', ')}, which its labels don't include.`
+            );
+        }
+        if (labels.some((it) => typeof it !== 'string' || it.startsWith('__drivine.'))) {
+            throw new DrivineError(
+                `${model.type.name}.${field.field} holds a label that isn't a name, or begins '__drivine.'.`
+            );
+        }
+        const owned: string[] = field.members ?? (held[field.recordProperty] as string[] | undefined) ?? [];
+        const removed = clear ? owned.filter((it) => !labels.includes(it) && !model.labels.includes(it)) : [];
+        const sets = [
+            ...labels.map((it) => `SET ${alias}:${quoteName(it)}`),
+            ...removed.map((it) => `REMOVE ${alias}:${quoteName(it)}`)
+        ];
+        const changed = [
+            ...labels.map((it) => `NOT ${alias}:${quoteName(it)}`),
+            ...removed.map((it) => `${alias}:${quoteName(it)}`)
+        ];
+        if (!field.members) {
+            const name = `labels${this.count}_${alias}`;
+            this.bindings[name] = labels;
+            const record = `${alias}.${quoteName(field.recordProperty)}`;
+            sets.push(
+                clear
+                    ? `SET ${record} = $${name}`
+                    : `SET ${record} = [x IN coalesce(${record}, []) WHERE NOT x IN $${name}] + $${name}`
+            );
+        }
+        return { sets, changes: changed };
     }
 
     /**
@@ -559,6 +616,7 @@ export function propsOf(
         transientFields: Set<string>;
         jsonPacked?: Set<string>;
         propertyBags?: PropertyBagModel[];
+        nodeLabels?: { field: string };
     },
     object: any,
     excluded: string[],
@@ -638,14 +696,15 @@ export function bagEntries(
 }
 
 function skipped(
-    model: { transientFields: Set<string>; propertyBags?: PropertyBagModel[] },
+    model: { transientFields: Set<string>; propertyBags?: PropertyBagModel[]; nodeLabels?: { field: string } },
     field: string,
     excluded: string[]
 ): boolean {
     return (
         excluded.includes(field) ||
         model.transientFields.has(field) ||
-        !!model.propertyBags?.some((it) => it.field === field)
+        !!model.propertyBags?.some((it) => it.field === field) ||
+        model.nodeLabels?.field === field
     );
 }
 
