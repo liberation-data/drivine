@@ -266,4 +266,5 @@ Branch: `drivine4j-parity`. Local test DBs (docker): `drivine-falkordb` (`localh
   - Follow-ups: `falkordb` is a hard dependency (pulls in the redis client) — consider an optional peer with a lazy `require`. FalkorDB can't store map properties (`@JsonPacked`, step 8). `NonAtomicBatchException` waits for `saveAll`. Native constraint commands wait for schema management (Tier 3).
 - [x] **Tier 1 step 5 — Memgraph.** `DatabaseType.MEMGRAPH`, on `Neo4jConnectionProvider` with optional credentials (auth is off in a default Memgraph), as drivine4j does. Integration test covers read/write, rollback and cursors. Test container: `drivine-memgraph` (bolt `localhost:17688`).
   - Found: the Neo4j driver sends every JS number as a float, so `range(1, $n)`, `list[$n]` and `LIMIT $n` fail with a JS number on Memgraph, and the last two on Neo4j too. Pre-existing; see Open questions.
-- [ ] Tier 1 step 6 — Neptune full (SigV4 + pool)
+- [ ] Tier 1 step 6 — Neptune full (SigV4 + pool): **deferred** (2026-10-18, user call: low priority). Neptune-basic stays as is.
+- [ ] Tier 1 step 7 — contended-retry with jitter
