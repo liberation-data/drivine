@@ -1,8 +1,13 @@
 import { createHash } from 'crypto';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
-import { DrivineError } from '@/DrivineError';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
-import { FullTextIndexSpec, RangeIndexSpec, UniquenessConstraintSpec, VectorIndexSpec } from '@/schema/SchemaSpecs';
+import {
+    FullTextIndexSpec,
+    itemName,
+    RangeIndexSpec,
+    UniquenessConstraintSpec,
+    VectorIndexSpec
+} from '@/schema/SchemaSpecs';
 
 type Kind = 'RANGE' | 'UNIQUE';
 
@@ -26,12 +31,25 @@ export class OracleSchemaGrammar implements SchemaGrammar {
         return this.listing('UNIQUE');
     }
 
+    /** Vector and full-text indexes are recorded, not made: a search on Oracle reads every node of the label. */
     get listVectors(): { statement: string; read: (rows: any[]) => SchemaItem[] } {
-        return { statement: 'SELECT 1 FROM dual WHERE 1 = 0', read: () => [] };
+        return {
+            statement:
+                `SELECT JSON_OBJECT('label' VALUE c.label, 'properties' VALUE JSON(c.properties), 'name' VALUE c.name, ` +
+                `'details' VALUE c.details RETURNING JSON) AS "item" FROM ${this.graph.catalog} c WHERE c.kind = 'VECTOR'`,
+            read: (rows) =>
+                rows.map((it) => ({
+                    label: it.label,
+                    properties: it.properties,
+                    name: it.name,
+                    dimensions: it.details.dimensions,
+                    similarity: it.details.similarity
+                }))
+        };
     }
 
     get listFullTexts(): { statement: string; read: (rows: any[]) => SchemaItem[] } {
-        return { statement: 'SELECT 1 FROM dual WHERE 1 = 0', read: () => [] };
+        return this.listing('FULLTEXT', false);
     }
 
     createRange(spec: RangeIndexSpec): string[] {
@@ -50,20 +68,20 @@ export class OracleSchemaGrammar implements SchemaGrammar {
         return [this.drop('UNIQUE', spec.label, spec.properties)];
     }
 
-    createVector(_spec: VectorIndexSpec): string[] {
-        throw new DrivineError('A vector index is not available on Oracle yet.');
+    createVector(spec: VectorIndexSpec): string[] {
+        return [this.record('VECTOR', spec, { dimensions: spec.dimensions, similarity: spec.similarity })];
     }
 
-    dropVector(_spec: VectorIndexSpec): string[] {
-        throw new DrivineError('A vector index is not available on Oracle yet.');
+    dropVector(spec: VectorIndexSpec): string[] {
+        return [this.unrecord('VECTOR', spec)];
     }
 
-    createFullText(_spec: FullTextIndexSpec): string[] {
-        throw new DrivineError('A full-text index is not available on Oracle yet.');
+    createFullText(spec: FullTextIndexSpec): string[] {
+        return [this.record('FULLTEXT', spec, {})];
     }
 
-    dropFullText(_spec: FullTextIndexSpec): string[] {
-        throw new DrivineError('A full-text index is not available on Oracle yet.');
+    dropFullText(spec: FullTextIndexSpec): string[] {
+        return [this.unrecord('FULLTEXT', spec)];
     }
 
     conflicts(spec: UniquenessConstraintSpec, limit: number): string {
@@ -88,12 +106,15 @@ export class OracleSchemaGrammar implements SchemaGrammar {
         return `${this.graph.name}_${kind === 'RANGE' ? 'r' : 'u'}_${hash}`.toUpperCase();
     }
 
-    private listing(kind: Kind): { statement: string; read: (rows: any[]) => SchemaItem[] } {
+    private listing(
+        kind: Kind | 'FULLTEXT',
+        made: boolean = true
+    ): { statement: string; read: (rows: any[]) => SchemaItem[] } {
+        const exists = made ? ` AND EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = c.object_name)` : '';
         return {
             statement:
                 `SELECT JSON_OBJECT('label' VALUE c.label, 'properties' VALUE JSON(c.properties), 'name' VALUE c.name ` +
-                `RETURNING JSON) AS "item" FROM ${this.graph.catalog} c WHERE c.kind = '${kind}' AND EXISTS ` +
-                `(SELECT 1 FROM user_indexes i WHERE i.index_name = c.object_name)`,
+                `RETURNING JSON) AS "item" FROM ${this.graph.catalog} c WHERE c.kind = '${kind}'${exists}`,
             read: (rows) => rows.map((it) => ({ label: it.label, properties: it.properties, name: it.name }))
         };
     }
@@ -121,6 +142,24 @@ export class OracleSchemaGrammar implements SchemaGrammar {
             name
         )}, '${object}', JSON('{}'));
 END;`;
+    }
+
+    /** Records an index that is not made: what it is over and how, for drift to be told. */
+    private record(kind: 'VECTOR' | 'FULLTEXT', spec: VectorIndexSpec | FullTextIndexSpec, details: object): string {
+        const properties = sqlText(JSON.stringify(spec.properties));
+        return `BEGIN
+    DELETE FROM ${this.graph.catalog} WHERE kind = '${kind}' AND label = ${sqlText(
+        spec.label
+    )} AND properties = ${properties};
+    INSERT INTO ${this.graph.catalog} (kind, label, properties, name, object_name, details)
+        VALUES ('${kind}', ${sqlText(spec.label)}, ${properties}, ${sqlText(itemName(spec))}, NULL, JSON(${sqlText(
+            JSON.stringify(details)
+        )}));
+END;`;
+    }
+
+    private unrecord(kind: 'VECTOR' | 'FULLTEXT', spec: VectorIndexSpec | FullTextIndexSpec): string {
+        return `DELETE FROM ${this.graph.catalog} WHERE kind = '${kind}' AND label = ${sqlText(spec.label)}`;
     }
 
     private drop(kind: Kind, label: string, properties: string[]): string {

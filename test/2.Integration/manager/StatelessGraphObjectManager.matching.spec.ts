@@ -1,6 +1,5 @@
 import {
-    CypherBackend,
-    cypherGrammarFor,
+    backendFor,
     DatabaseRegistry,
     DatabaseType,
     fullTextIndex,
@@ -20,7 +19,7 @@ import {
     StatelessGraphObjectManager,
     TransactionContextHolder
 } from '@liberation-data/drivine';
-import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
 jest.setTimeout(30_000);
@@ -54,22 +53,18 @@ class ChunkInSection {
 const chunk = (id: string, body: string, sectionId = 's1'): Chunk =>
     Object.assign(new Chunk(), { id, body, sectionId });
 
-describe.each(graphEngines())('loadMatching on $type', (engine) => {
+describe.each(allStores())('loadMatching on $type', (engine) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
     const specs = [fullTextIndex('MatchTest', 'body'), fullTextIndex('MatchArticle', ['title', 'summary'])];
 
     beforeAll(async () => {
         pm = persistenceManagerFor(engine);
-        gom = new StatelessGraphObjectManager(
-            pm,
-            new CypherBackend(cypherGrammarFor(engine.type)),
-            new ModelRegistry()
-        );
+        gom = new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
-        await pm.execute(new QuerySpecification('MATCH (n) WHERE n:MatchTest OR n:MatchArticle DETACH DELETE n'));
+        await clearLabels(pm, engine, 'MatchTest', 'MatchArticle');
         const factory = new GraphObjectManagerFactory(
             new PersistenceManagerFactory(DatabaseRegistry.getInstance(), TransactionContextHolder.getInstance())
         );
@@ -95,7 +90,7 @@ describe.each(graphEngines())('loadMatching on $type', (engine) => {
     });
 
     afterAll(async () => {
-        await pm.execute(new QuerySpecification('MATCH (n) WHERE n:MatchTest OR n:MatchArticle DETACH DELETE n'));
+        await clearLabels(pm, engine, 'MatchTest', 'MatchArticle');
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
@@ -120,7 +115,10 @@ describe.each(graphEngines())('loadMatching on $type', (engine) => {
         expect((await gom.loadMatching(Chunk, 'graph', { topK: 1 })).length).toEqual(1);
         const scoped = await gom.loadMatching(Chunk, 'graph', {
             topK: 10,
-            where: 'n.sectionId = $s',
+            where:
+                engine.type === DatabaseType.ORACLE
+                    ? "JSON_VALUE(n.props, '$.sectionId') = $s"
+                    : 'n.sectionId = $s',
             bindings: { s: 's2' }
         });
         expect(scoped.map((it) => it.value.id)).toEqual(['c2']);

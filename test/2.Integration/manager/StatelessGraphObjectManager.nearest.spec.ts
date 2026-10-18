@@ -1,6 +1,5 @@
 import {
-    CypherBackend,
-    cypherGrammarFor,
+    backendFor,
     DatabaseRegistry,
     DatabaseType,
     GraphObjectManagerFactory,
@@ -21,7 +20,7 @@ import {
     VectorIndex,
     vectorIndex
 } from '@liberation-data/drivine';
-import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
 jest.setTimeout(30_000);
@@ -55,22 +54,18 @@ class PropositionView {
 const proposition = (id: string, embedding: number[], contextId = 'a'): Proposition =>
     Object.assign(new Proposition(), { id, text: id, contextId, embedding });
 
-describe.each(graphEngines())('loadNearest on $type', (engine) => {
+describe.each(allStores())('loadNearest on $type', (engine) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
     const specs = [vectorIndex('NearestTest', 'embedding', 3), vectorIndex('NearestTest', 'position', 2, 'EUCLIDEAN')];
 
     beforeAll(async () => {
         pm = persistenceManagerFor(engine);
-        gom = new StatelessGraphObjectManager(
-            pm,
-            new CypherBackend(cypherGrammarFor(engine.type)),
-            new ModelRegistry()
-        );
+        gom = new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
-        await pm.execute(new QuerySpecification('MATCH (n:NearestTest) DETACH DELETE n'));
+        await clearLabels(pm, engine, 'NearestTest');
         if (engine.type === DatabaseType.MEMGRAPH) {
             // Memgraph's vector search returns nodes deleted since its last garbage collection, and fails on them.
             await pm.execute(new QuerySpecification('FREE MEMORY'));
@@ -101,7 +96,7 @@ describe.each(graphEngines())('loadNearest on $type', (engine) => {
     });
 
     afterAll(async () => {
-        await pm.execute(new QuerySpecification('MATCH (n:NearestTest) DETACH DELETE n'));
+        await clearLabels(pm, engine, 'NearestTest');
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
@@ -135,7 +130,10 @@ describe.each(graphEngines())('loadNearest on $type', (engine) => {
         const scoped = await gom.loadNearest(Proposition, [1, 0.1, 0], {
             topK: 1,
             searchK: 4,
-            where: 'n.contextId = $context',
+            where:
+                engine.type === DatabaseType.ORACLE
+                    ? "JSON_VALUE(n.props, '$.contextId') = $context"
+                    : 'n.contextId = $context',
             bindings: { context: 'b' }
         });
         expect(scoped.map((it) => it.value.id)).toEqual(['east']);

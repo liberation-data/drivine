@@ -17,7 +17,7 @@ export interface SchemaOptions {
     enabled?: boolean;
 }
 
-const GRAPH_TYPES = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB];
+const GRAPH_TYPES = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB, DatabaseType.ORACLE];
 
 const keyOf = (spec: SchemaSpec): string => `${spec.kind}:${spec.label}:${[...spec.properties].sort().join(',')}`;
 

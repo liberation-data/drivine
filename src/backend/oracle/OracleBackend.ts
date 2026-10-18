@@ -5,6 +5,7 @@ import { OracleViews } from '@/backend/oracle/OracleViews';
 import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
 import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
 import { OracleWrites } from '@/backend/oracle/OracleWrites';
+import { OracleSearch } from '@/backend/oracle/OracleSearch';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -120,12 +121,12 @@ END;`);
         return this.deleting(root, this.rootWhere(target, where));
     }
 
-    nearest(_target: TargetModel, _search: NearestSearch): GraphStatement {
-        return this.notYet('loadNearest');
+    nearest(target: TargetModel, search: NearestSearch): GraphStatement {
+        return new OracleSearch(this.graph).nearest(target, search);
     }
 
-    matching(_target: TargetModel, _search: MatchingSearch): GraphStatement {
-        return this.notYet('loadMatching');
+    matching(target: TargetModel, search: MatchingSearch): GraphStatement {
+        return new OracleSearch(this.graph).matching(target, search);
     }
 
     save(

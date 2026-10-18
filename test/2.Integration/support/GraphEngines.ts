@@ -3,6 +3,7 @@ import {
     DatabaseType,
     PersistenceManager,
     PersistenceManagerFactory,
+    QuerySpecification,
     TransactionContextHolder
 } from '@liberation-data/drivine';
 
@@ -25,8 +26,9 @@ const GRAPH_TYPES = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FAL
  * runs on each describes them with `describe.each(graphEngines())`.
  */
 export function graphEngines(): GraphEngine[] {
-    const engines = CANDIDATES.filter((it) => GRAPH_TYPES.includes(process.env[`${it.prefix}DATABASE_TYPE`] as DatabaseType))
-        .map((it) => ({ name: it.name, type: process.env[`${it.prefix}DATABASE_TYPE`] as DatabaseType }));
+    const engines = CANDIDATES.filter((it) =>
+        GRAPH_TYPES.includes(process.env[`${it.prefix}DATABASE_TYPE`] as DatabaseType)
+    ).map((it) => ({ name: it.name, type: process.env[`${it.prefix}DATABASE_TYPE`] as DatabaseType }));
     if (engines.length === 0) {
         throw new Error('No graph engine is configured. Set DATABASE_*, MEMGRAPH_DATABASE_* or FALKORDB_DATABASE_*.');
     }
@@ -47,4 +49,26 @@ export function persistenceManagerFor(engine: GraphEngine): PersistenceManager {
 export async function closeGraphEngines(): Promise<void> {
     await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
     DatabaseRegistry.tearDown();
+}
+
+/**
+ * Every store a suite that holds to the object manager's contract runs on: the graph engines, and Oracle when
+ * ORACLE_DATABASE_* configures it.
+ */
+export function allStores(): GraphEngine[] {
+    return [
+        ...graphEngines(),
+        ...(process.env.ORACLE_DATABASE_TYPE === 'ORACLE' ? [{ name: 'ORACLE', type: DatabaseType.ORACLE }] : [])
+    ];
+}
+
+/** Deletes every node carrying any of the labels, with its relationships, in the store's own language. */
+export async function clearLabels(pm: PersistenceManager, engine: GraphEngine, ...labels: string[]): Promise<void> {
+    const statement =
+        engine.type === DatabaseType.ORACLE
+            ? `DELETE FROM drivine_node n WHERE ${labels
+                  .map((it) => `JSON_EXISTS(n.labels, '$?(@ == "${it}")')`)
+                  .join(' OR ')}`
+            : `MATCH (n) WHERE ${labels.map((it) => `n:${it}`).join(' OR ')} DETACH DELETE n`;
+    await pm.execute(new QuerySpecification(statement));
 }
