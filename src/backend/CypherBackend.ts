@@ -33,25 +33,25 @@ export class CypherBackend implements GraphBackend {
         return new GraphStatement([this.match(model), this.where(where), `\nRETURN count(${NODE_ALIAS}) AS count`].join(''));
     }
 
-    loadAllViews(model: GraphViewModel, where?: string): GraphStatement {
-        const projection = new ViewProjector(this.grammar).project(model, NODE_ALIAS);
+    loadAllViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
+        const projection = new ViewProjector(this.grammar, depth).project(model, NODE_ALIAS);
         return new GraphStatement(
             [
                 this.match(model.root),
-                this.viewWhere(model, where),
+                this.viewWhere(model, where, depth),
                 ...projection.calls.map((it) => `\n${it}`),
                 `\nRETURN ${projection.expression} AS result`
             ].join('')
         );
     }
 
-    loadView(model: GraphViewModel): GraphStatement {
-        return this.loadAllViews(model, this.idPredicate(model.root));
+    loadView(model: GraphViewModel, depth: Record<string, number> = {}): GraphStatement {
+        return this.loadAllViews(model, this.idPredicate(model.root), depth);
     }
 
-    countViews(model: GraphViewModel, where?: string): GraphStatement {
+    countViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
         return new GraphStatement(
-            [this.match(model.root), this.viewWhere(model, where), `\nRETURN count(${NODE_ALIAS}) AS count`].join('')
+            [this.match(model.root), this.viewWhere(model, where, depth), `\nRETURN count(${NODE_ALIAS}) AS count`].join('')
         );
     }
 
@@ -122,8 +122,8 @@ export class CypherBackend implements GraphBackend {
         return target.kind === 'GRAPH_VIEW' ? this.viewWhere(target.model, where) : this.where(where);
     }
 
-    private viewWhere(model: GraphViewModel, where?: string): string {
-        const requirements = new ViewProjector(this.grammar).requirements(model, NODE_ALIAS);
+    private viewWhere(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): string {
+        const requirements = new ViewProjector(this.grammar, depth).requirements(model, NODE_ALIAS);
         if (!requirements.length) {
             return this.where(where);
         }

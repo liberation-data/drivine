@@ -23,13 +23,13 @@ export interface GraphBackend {
     countFragments(model: FragmentModel, where?: string): GraphStatement;
 
     /** Loads every view whose root meets the view's requirements and, optionally, a predicate over `n`. */
-    loadAllViews(model: GraphViewModel, where?: string): GraphStatement;
+    loadAllViews(model: GraphViewModel, where?: string, depth?: Record<string, number>): GraphStatement;
 
     /** Loads the view whose root's id is the parameter `id`. */
-    loadView(model: GraphViewModel): GraphStatement;
+    loadView(model: GraphViewModel, depth?: Record<string, number>): GraphStatement;
 
     /** Counts the views {@link loadAllViews} would load. Returns one number. */
-    countViews(model: GraphViewModel, where?: string): GraphStatement;
+    countViews(model: GraphViewModel, where?: string, depth?: Record<string, number>): GraphStatement;
 
     /**
      * Deletes the root whose id is the parameter `id`, if it meets the optional predicate (and, for a view, the view's

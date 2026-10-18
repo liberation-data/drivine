@@ -133,7 +133,12 @@ export class ModelRegistry {
     private buildView(type: ClassType): GraphViewModel {
         this.assertKind(type, ClassKind.GRAPH_VIEW, '@GraphView');
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['root', 'relationship', 'transient'], 'a @GraphView');
+        this.assertOnly(type, properties, ['root', 'relationship', 'transient', 'readOnly'], 'a @GraphView');
+        properties.forEach((metadata, field) => {
+            if (metadata.readOnly && !metadata.relationship) {
+                throw new DrivineError(`@ReadOnly ${type.name}.${field} marks a relationship field; it has none.`);
+            }
+        });
         const roots = [...properties].filter(([, it]) => it.root);
         if (roots.length !== 1) {
             throw new DrivineError(`@GraphView ${type.name} needs exactly one @Root property. It has ${roots.length}.`);
@@ -166,8 +171,15 @@ export class ModelRegistry {
         if (!Number.isInteger(maxDepth) || maxDepth < 1) {
             throw new DrivineError(`maxDepth on ${view.name}.${field} must be a whole number of at least 1.`);
         }
-        const resolveRelated = (): RelatedModel =>
-            this.related(this.resolve(view, field, options.target, metadata), `${view.name}.${field}`);
+        const resolveRelated = (): RelatedModel => {
+            const resolved = this.related(this.resolve(view, field, options.target, metadata), `${view.name}.${field}`);
+            if (resolved.kind === 'RELATIONSHIP_FRAGMENT' && maxDepth > 1) {
+                throw new DrivineError(
+                    `${view.name}.${field} holds relationship fragments, which are one relationship each: maxDepth can't be above 1.`
+                );
+            }
+            return resolved;
+        };
         let related: RelatedModel | undefined;
         return {
             field,
@@ -178,6 +190,9 @@ export class ModelRegistry {
             isCollection,
             get related(): RelatedModel {
                 return related ?? (related = resolveRelated());
+            },
+            get readOnly(): boolean {
+                return !!metadata.readOnly || (this.related.kind === 'NODE_FRAGMENT' && maxDepth > 1);
             }
         };
     }
@@ -230,7 +245,8 @@ export class ModelRegistry {
             'relationship',
             'graphProperty',
             'transient',
-            'targetNode'
+            'targetNode',
+            'readOnly'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
@@ -260,6 +276,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         graphProperty: '@GraphProperty',
         transient: '@GraphTransient',
         targetNode: '@TargetNode',
+        readOnly: '@ReadOnly',
         designType: ''
     }[key];
 }

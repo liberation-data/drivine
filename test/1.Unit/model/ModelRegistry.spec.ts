@@ -8,6 +8,7 @@ import {
     ModelRegistry,
     NodeFragment,
     NodeId,
+    ReadOnly,
     Related,
     RelationshipFragment,
     Root,
@@ -252,7 +253,9 @@ describe('ModelRegistry', () => {
             class Misplaced {
                 @Root() root: Person;
             }
-            expect(() => registry.fragment(Misplaced)).toThrow(/Misplaced.root: @Root can't be used on a @NodeFragment/);
+            expect(() => registry.fragment(Misplaced)).toThrow(
+                /Misplaced.root: @Root can't be used on a @NodeFragment/
+            );
         });
 
         it('a relationship fragment without exactly one target node', () => {
@@ -262,5 +265,31 @@ describe('ModelRegistry', () => {
             }
             expect(() => registry.relationshipFragment(NoTargetNode)).toThrow(/exactly one @TargetNode/);
         });
+    });
+});
+
+describe('ModelRegistry read-only fields', () => {
+    it('should refuse @ReadOnly without a relationship, and maxDepth on relationship fragments', () => {
+        @NodeFragment({ labels: ['P'] })
+        class P {
+            @NodeId() id: string;
+        }
+        @GraphView()
+        class BadReadOnly {
+            @Root() p: P;
+            @ReadOnly() name: string;
+        }
+        expect(() => new ModelRegistry().view(BadReadOnly)).toThrow(/marks a relationship field; it has none/);
+
+        @RelationshipFragment()
+        class Edge {
+            @TargetNode() p: P;
+        }
+        @GraphView()
+        class DeepEdges {
+            @Root() p: P;
+            @GraphRelationship({ type: 'R', target: () => Edge, maxDepth: 2 }) edges: Edge[];
+        }
+        expect(() => new ModelRegistry().view(DeepEdges)).toThrow(/can't be above 1/);
     });
 });

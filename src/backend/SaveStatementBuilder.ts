@@ -113,7 +113,7 @@ export class SaveStatementBuilder {
                     `its defaults, not what the store holds. Load it first, or name the fields to replace.`
             );
         }
-        return view.relationships.map((it) => it.field);
+        return view.relationships.filter((it) => !it.readOnly).map((it) => it.field);
     }
 
     /**
@@ -215,6 +215,9 @@ export class SaveStatementBuilder {
             if (!rel) {
                 throw new DrivineError(`replace names ${field}, which is not a relationship field of ${view.type.name}.`);
             }
+            if (rel.readOnly) {
+                throw new DrivineError(`replace names ${view.type.name}.${field}, which is read-only: a save never writes it.`);
+            }
             const value = object[field];
             if (rel.isCollection && value == null) {
                 throw new DrivineError(
@@ -255,7 +258,7 @@ export class SaveStatementBuilder {
 
     private writeParts(view: GraphViewModel, path: RelationshipModel[]): WritePart[] {
         return view.relationships
-            .filter((rel) => path.filter((it) => it === rel).length < rel.maxDepth)
+            .filter((rel) => !rel.readOnly && path.filter((it) => it === rel).length < rel.maxDepth)
             .map((rel) => {
                 const into = target(rel);
                 return {

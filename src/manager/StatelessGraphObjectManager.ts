@@ -35,6 +35,25 @@ import { ClassType } from '@/query/QuerySpecification';
  * A filter is a Cypher predicate over the node, which statements call `n`: `"n.name STARTS WITH $prefix"`. Values
  * go in `bindings`, never into the predicate's text.
  */
+/** How a load filters, and how deep it follows recursive relationships. */
+export interface LoadOptions {
+    /** A Cypher predicate over the root, `n`. */
+    where?: string;
+    bindings?: Record<string, any>;
+    /** maxDepth overrides for this load, by relationship field name. */
+    depth?: Record<string, number>;
+}
+
+function loadOptions(where: string | LoadOptions | undefined, bindings: Record<string, any>): Required<LoadOptions> {
+    const options = typeof where === 'object' ? where : { where, bindings };
+    for (const [field, depth] of Object.entries(options.depth ?? {})) {
+        if (!Number.isInteger(depth) || depth < 1) {
+            throw new DrivineError(`The depth of ${field} must be a whole number of at least 1.`);
+        }
+    }
+    return { where: options.where as string, bindings: options.bindings ?? {}, depth: options.depth ?? {} };
+}
+
 /** How many times `update` loads and applies its change before a stale save is thrown. */
 export const UPDATE_ATTEMPTS = 3;
 
@@ -105,25 +124,30 @@ export class StatelessGraphObjectManager {
         return this.persistenceManager.database;
     }
 
-    async loadAll<T>(type: ClassType<T>, where?: string, bindings: Record<string, any> = {}): Promise<T[]> {
+    /**
+     * Loads every object of the class, optionally filtered: `where` is a Cypher predicate over the root, `n`, with
+     * values in `bindings`. Give a LoadOptions instead to override a recursive relationship's maxDepth for this load.
+     */
+    async loadAll<T>(type: ClassType<T>, where?: string | LoadOptions, bindings: Record<string, any> = {}): Promise<T[]> {
+        const options = loadOptions(where, bindings);
         const target = this.modelOf(type);
         if (target.kind === 'GRAPH_VIEW') {
             const rows = await this.persistenceManager.query<ViewRow>(
-                this.backend.loadAllViews(target.model, where).spec(bindings)
+                this.backend.loadAllViews(target.model, options.where, options.depth).spec(options.bindings)
             );
             return rows.map((row) => this.mapper.view<T>(target.model, row));
         }
         const rows = await this.persistenceManager.query<FragmentRow>(
-            this.backend.loadAllFragments(target.model, where).spec(bindings)
+            this.backend.loadAllFragments(target.model, options.where).spec(options.bindings)
         );
         return rows.map((row) => this.mapper.fragment<T>(target.model, row));
     }
 
-    async load<T>(type: ClassType<T>, id: unknown): Promise<T | undefined> {
+    async load<T>(type: ClassType<T>, id: unknown, options: Pick<LoadOptions, 'depth'> = {}): Promise<T | undefined> {
         const target = this.modelOf(type);
         const statement =
             target.kind === 'GRAPH_VIEW'
-                ? this.backend.loadView(target.model)
+                ? this.backend.loadView(target.model, options.depth)
                 : this.backend.loadFragment(target.model);
         const rows = await this.persistenceManager.query<any>(statement.spec({ id }));
         if (rows.length > 1) {

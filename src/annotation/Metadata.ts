@@ -50,6 +50,7 @@ export interface PropertyMetadata {
     relationship?: RelationshipOptions;
     graphProperty?: string;
     transient?: boolean;
+    readOnly?: boolean;
     targetNode?: { target?: ClassThunk };
     /** The property's declared type, from `design:type`. Array for a list. */
     designType?: Function;

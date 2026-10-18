@@ -30,7 +30,8 @@ export class CascadeTargets {
             }
             const alias = `c${++this.aliasCount}`;
             const into = target(rel);
-            const extended = `${chain}${hop(rel)}(${alias}${labelExpression(labelsOf(into))})`;
+            const hops = into.kind === 'NODE_FRAGMENT' && rel.maxDepth > 1 ? `*1..${rel.maxDepth}` : '';
+            const extended = `${chain}${hop(rel, hops)}(${alias}${labelExpression(labelsOf(into))})`;
             const own = into.kind === 'GRAPH_VIEW' ? new ViewProjector(this.grammar).requirements(into.model, alias) : [];
             const all = [...conditions, ...own];
             const where = all.length ? ` WHERE ${all.join(' AND ')}` : '';
@@ -51,8 +52,8 @@ function labelsOf(into: TargetModel): string[] {
     return into.kind === 'GRAPH_VIEW' ? into.model.root.labels : into.model.labels;
 }
 
-function hop(rel: RelationshipModel): string {
-    const edge = `[:${quoteName(rel.type)}]`;
+function hop(rel: RelationshipModel, hops: string): string {
+    const edge = `[:${quoteName(rel.type)}${hops}]`;
     switch (rel.direction) {
         case Direction.INCOMING:
             return `<-${edge}-`;

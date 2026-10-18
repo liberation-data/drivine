@@ -25,7 +25,13 @@ export interface ViewProjection {
 export class ViewProjector {
     private aliasCount = 0;
 
-    constructor(private readonly grammar: CypherGrammar) {}
+    /**
+     * @param depth maxDepth overrides for this query, by relationship field name.
+     */
+    constructor(
+        private readonly grammar: CypherGrammar,
+        private readonly depth: Record<string, number> = {}
+    ) {}
 
     project(model: GraphViewModel, alias: string): ViewProjection {
         return this.view(model, alias, []);
@@ -37,7 +43,19 @@ export class ViewProjector {
     requirements(model: GraphViewModel, alias: string): string[] {
         return model.relationships
             .filter((it) => it.required)
-            .map((it) => this.grammar.existenceCheck(pattern(it, alias, '', `:${labelsOf(target(it))}`)));
+            .map((it) =>
+                this.grammar.existenceCheck(pattern(it, alias, '', `:${labelsOf(target(it))}`, this.hops(it)))
+            );
+    }
+
+    /** How deep a relationship goes for this query. */
+    private depthOf(rel: RelationshipModel): number {
+        return this.depth[rel.field] ?? rel.maxDepth;
+    }
+
+    /** Whether a relationship is read over several hops: a list of fragments with a depth above 1. */
+    private multiHop(rel: RelationshipModel): boolean {
+        return rel.related.kind === 'NODE_FRAGMENT' && this.depthOf(rel) > 1;
     }
 
     private view(model: GraphViewModel, alias: string, path: RelationshipModel[]): ViewProjection {
@@ -50,8 +68,16 @@ export class ViewProjector {
         return { calls, expression: `{root: ${fragment(alias)}, rels: {${rels.join(', ')}}}` };
     }
 
+    /** The hops a relationship's pattern spans: '' for one, `*1..k` for a fragment list read over several. */
+    private hops(rel: RelationshipModel): string {
+        return this.multiHop(rel) ? `*1..${this.depthOf(rel)}` : '';
+    }
+
     private relationship(rel: RelationshipModel, from: string, path: RelationshipModel[]): ViewProjection {
-        if (path.filter((it) => it === rel).length >= rel.maxDepth) {
+        if (this.multiHop(rel)) {
+            return this.multiHopFragments(rel, from);
+        }
+        if (path.filter((it) => it === rel).length >= this.depthOf(rel)) {
             return { calls: [], expression: rel.isCollection ? '[]' : 'null' };
         }
         const n = ++this.aliasCount;
@@ -84,6 +110,24 @@ export class ViewProjector {
         const comprehension = `[${match} | ${item}]`;
         return { calls: [], expression: rel.isCollection ? comprehension : `head(${comprehension})` };
     }
+
+    /** A list of fragments read over 1 to depth hops, each node once. */
+    private multiHopFragments(rel: RelationshipModel, from: string): ViewProjection {
+        const n = ++this.aliasCount;
+        const t = `t${n}`;
+        const match = pattern(rel, from, '', `${t}:${labelsOf(target(rel))}`, this.hops(rel));
+        if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
+            const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
+            const value = `v${n}`;
+            return {
+                calls: [`CALL { WITH ${from} OPTIONAL MATCH ${match} RETURN ${rel.isCollection ? collected : `head(${collected})`} AS ${value} }`],
+                expression: value
+            };
+        }
+        const distinct = `reduce(acc = [], y IN [${match} | ${t}] | CASE WHEN y IN acc THEN acc ELSE acc + y END)`;
+        const list = `[x${n} IN ${distinct} | ${fragment(`x${n}`)}]`;
+        return { calls: [], expression: rel.isCollection ? list : `head(${list})` };
+    }
 }
 
 export function fragment(alias: string): string {
@@ -101,8 +145,8 @@ function labelsOf(into: TargetModel): string {
     return labelExpression(model.labels).slice(1);
 }
 
-function pattern(rel: RelationshipModel, from: string, relAlias: string, to: string): string {
-    const edge = `[${relAlias}:${quoteName(rel.type)}]`;
+function pattern(rel: RelationshipModel, from: string, relAlias: string, to: string, hops: string = ''): string {
+    const edge = `[${relAlias}:${quoteName(rel.type)}${hops}]`;
     switch (rel.direction) {
         case Direction.INCOMING:
             return `(${from})<-${edge}-(${to})`;
