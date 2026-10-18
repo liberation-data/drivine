@@ -1,6 +1,6 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
-import { isRetriableError } from 'neo4j-driver';
+import { Neo4jError } from 'neo4j-driver';
 
 /**
  * Where an engine's Cypher differs from another's. Each difference is added here as the statements that meet it are
@@ -34,7 +34,8 @@ export interface CypherGrammar {
 const existsSubquery = (pattern: string): string => `EXISTS { MATCH ${pattern} }`;
 
 /** A transient error over Bolt: a deadlock on Neo4j, a conflicting transaction on Memgraph. */
-const transientOverBolt = (failure: unknown): boolean => failure instanceof Error && isRetriableError(failure);
+const transientOverBolt = (failure: unknown): boolean =>
+    failure instanceof Neo4jError && Neo4jError.isRetriable(failure);
 
 export const NEO4J_GRAMMAR: CypherGrammar = {
     engine: 'Neo4j',

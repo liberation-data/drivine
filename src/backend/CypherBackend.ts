@@ -10,6 +10,9 @@ import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { CascadeTargets } from '@/backend/CascadeTargets';
 import { SaveStatementBuilder } from '@/backend/SaveStatementBuilder';
+import { SaveStatement } from '@/backend/SaveStatement';
+import { STAMP } from '@/backend/CypherStamps';
+import { Stamps } from '@/model/Stamps';
 import { SaveOptions } from '@/manager/SaveOptions';
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
@@ -93,8 +96,14 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
-    save(target: TargetModel, object: any, options?: SaveOptions<any>): GraphStatement {
+    save(target: TargetModel, object: any, options?: SaveOptions<any>): SaveStatement {
         return new SaveStatementBuilder(this.grammar).build(target, object, options);
+    }
+
+    foundStamp(model: FragmentModel): GraphStatement {
+        return new GraphStatement(
+            `${this.match(model)}\nWHERE ${this.idPredicate(model)}\nRETURN coalesce(${NODE_ALIAS}.${STAMP}, '${Stamps.NEVER_STAMPED}') AS found`
+        );
     }
 
     contended(failure: unknown): boolean {

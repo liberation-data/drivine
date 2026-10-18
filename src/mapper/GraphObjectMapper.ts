@@ -1,4 +1,5 @@
 import { plainToInstance } from 'class-transformer';
+import { Stamps } from '@/model/Stamps';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
@@ -36,7 +37,11 @@ export interface RelationshipRow {
  */
 export class GraphObjectMapper {
     fragment<T>(model: FragmentModel, row: FragmentRow): T {
-        return this.properties(model.type, model.graphProperties, model.transientFields, row.props) as T;
+        const instance: any = this.properties(model.type, model.graphProperties, model.transientFields, row.props);
+        if (model.stampField) {
+            instance[model.stampField] = row.props?.[Stamps.PROPERTY] ?? undefined;
+        }
+        return instance as T;
     }
 
     view<T>(model: GraphViewModel, row: ViewRow): T {

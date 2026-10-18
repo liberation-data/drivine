@@ -1,12 +1,17 @@
 import { Direction } from '@/annotation/Metadata';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
-import { GraphStatement } from '@/backend/GraphStatement';
+import { SaveStatement } from '@/backend/SaveStatement';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
+import { Stamps } from '@/model/Stamps';
+import { changes, EXPECTED, LOCK, MADE, relink, restamp, STAMP } from '@/backend/CypherStamps';
+
+/** What every WITH after the root carries: the root, and the stamp it was found with. */
+const CARRY = 'n, _found';
 
 /** One FOREACH of the statement: the relationship it writes, and the FOREACHes nested in it for a related view. */
 interface WritePart {
@@ -22,6 +27,10 @@ interface WritePart {
  * written with a FOREACH each, over a parameter holding a row per related node, so the statement's text does not grow
  * with a list. A related view nests its own FOREACHes, as far as the view's maxDepth. Relationships named in
  * `replace` are first trimmed to what the object holds.
+ *
+ * Every node written is stamped (see Stamps): its data token is replaced when its properties change, and the links
+ * token of each end when a relationship is made, removed, or has its properties changed. A root whose object carries a
+ * stamp is checked: its data token, and its links token when relationships are replaced, must be as the object's.
  */
 export class SaveStatementBuilder {
     private count = 0;
@@ -29,22 +38,24 @@ export class SaveStatementBuilder {
 
     constructor(private readonly grammar: CypherGrammar) {}
 
-    build(target: TargetModel, object: any, options: SaveOptions<any> = {}): GraphStatement {
+    build(target: TargetModel, object: any, options: SaveOptions<any> = {}): SaveStatement {
+        this.bindings._stamp = Stamps.fresh();
         if (target.kind === 'NODE_FRAGMENT') {
             if (options.replace?.length) {
                 throw new DrivineError(`replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`);
             }
-            return new GraphStatement(`${this.mergeRoot(target.model, object, [])}\nRETURN count(*) AS saved`, this.bindings);
+            const head = this.root(target.model, object, false);
+            return this.statement([head, `RETURN {found: _found, now: n.${STAMP}} AS result`], target.model, object);
         }
         const view = target.model;
         const root = object[view.rootField];
         if (root == null) {
             throw new DrivineError(`${view.type.name}.${view.rootField}, the root, is ${root}. A view is saved from its root.`);
         }
-        const parts = [this.mergeRoot(view.root, root, [])];
+        const parts = [this.root(view.root, root, !!options.replace?.length)];
         parts.push(...this.removals(view, object, options));
         const writes = this.writeParts(view, []);
-        parts.push('WITH n');
+        parts.push(`WITH ${CARRY}`);
         for (const part of writes) {
             this.bindings[part.key] = this.rows(part, object[part.rel.field]);
             parts.push(this.forEach(part, 'n', `$${part.key}`, 'NODES_AND_EDGES'));
@@ -54,16 +65,51 @@ export class SaveStatementBuilder {
         // relationship does.
         const withProperties = writes.filter(leadsToRelationshipFragment);
         if (withProperties.length) {
-            parts.push('WITH n');
+            parts.push(`WITH ${CARRY}`);
             parts.push(...withProperties.map((part) => this.forEach(part, 'n', `$${part.key}`, 'EDGE_PROPERTIES')));
         }
-        parts.push('RETURN count(*) AS saved');
-        return new GraphStatement(parts.join('\n'), this.bindings);
+        parts.push(`RETURN {found: _found, now: n.${STAMP}} AS result`);
+        return this.statement(parts, view.root, root);
     }
 
-    private mergeRoot(model: FragmentModel, object: any, excluded: string[]): string {
-        this.bindings.root = { id: idOf(model, object), props: propsOf(model, object, excluded) };
-        return `MERGE (n${labelExpression(model.labels)} {${quoteName(idProperty(model))}: $root.id}) SET n += $root.props`;
+    private statement(parts: string[], root: FragmentModel, rootObject: any): SaveStatement {
+        return new SaveStatement(parts.join('\n'), this.bindings, root, rootObject, this.bindings._expected);
+    }
+
+    /**
+     * Writes the root, and binds `_found` to the stamp it carried: '' when the save made it, '-' when it had none.
+     * An object that carries a stamp is checked: the root must be there with the object's data token, and with its
+     * links token too when `replacing`. Otherwise the statement goes no further, having written nothing.
+     */
+    private root(model: FragmentModel, object: any, replacing: boolean): string {
+        this.bindings.root = { id: idOf(model, object), props: propsOf(model, object, stampExcluded(model)) };
+        const labels = labelExpression(model.labels);
+        const id = `{${quoteName(idProperty(model))}: $root.id}`;
+        const write = [`SET ${restamp('n', changes('n', '$root.props'))}`, 'SET n += $root.props'];
+        const expected = model.stampField ? object[model.stampField] : undefined;
+        if (expected == null) {
+            return [
+                `MERGE (n${labels} ${id}) ON CREATE SET n.${MADE} = true`,
+                `WITH n, CASE WHEN n.${MADE} IS NOT NULL THEN '' ELSE coalesce(n.${STAMP}, '${Stamps.NEVER_STAMPED}') END AS _found`,
+                ...write,
+                `REMOVE n.${MADE}`
+            ].join('\n');
+        }
+        this.bindings._expected = expected;
+        const T = Stamps.TOKEN;
+        const ok = [`left(n.${STAMP}, ${T}) = left(${EXPECTED}, ${T})`];
+        if (replacing) {
+            ok.push(`size(${EXPECTED}) = ${2 * T + 1} AND right(n.${STAMP}, ${T}) = right(${EXPECTED}, ${T})`);
+        }
+        return [
+            `MATCH (n${labels} ${id})`,
+            `SET n.${LOCK} = true`,
+            `WITH n, coalesce(${ok.join(' AND ')}, false) AS _ok`,
+            `REMOVE n.${LOCK}`,
+            'WITH n, _ok WHERE _ok',
+            `WITH n, coalesce(n.${STAMP}, '${Stamps.NEVER_STAMPED}') AS _found`,
+            ...write
+        ].join('\n');
     }
 
     private removals(view: GraphViewModel, object: any, options: SaveOptions<any>): string[] {
@@ -89,20 +135,22 @@ export class SaveStatementBuilder {
                 .flatMap((it) => items(it, object[it.field]).map((item) => idOf(rootOf(target(it)), nodeOf(it, item))));
             this.bindings[`keep${k}`] = keep;
             parts.push(
-                'WITH n',
+                `WITH ${CARRY}`,
                 `OPTIONAL MATCH ${pattern(rel, 'n', `d${k}`, `x${k}${labelExpression(rootOf(into).labels)}`)} ` +
                     `WHERE NOT x${k}.${idProp} IN $keep${k}`,
-                `WITH n, collect(d${k}) AS drop${k}, collect(x${k}) AS removed${k}`,
-                `FOREACH (r IN drop${k} | DELETE r)`
+                `WITH ${CARRY}, collect(d${k}) AS drop${k}, collect(x${k}) AS removed${k}`,
+                `FOREACH (r IN drop${k} | DELETE r)`,
+                `FOREACH (x IN removed${k} | SET ${relink('x')})`,
+                `SET ${relink('n', `size(drop${k}) > 0`)}`
             );
             if (options.removedTargets === RemovedTargets.DELETE_UNREFERENCED) {
                 this.bindings.held = held;
                 const y = `y${k}`;
                 parts.push(
-                    `WITH n, removed${k}`,
+                    `WITH ${CARRY}, removed${k}`,
                     `OPTIONAL MATCH (${y}${labelExpression(rootOf(into).labels)}) WHERE ${y} IN removed${k} AND ${y} <> n ` +
                         `AND NOT ${y}.${idProp} IN $held AND NOT ${this.grammar.existenceCheck(referencedAs(rel, y))}`,
-                    `WITH n, collect(${y}) AS unreferenced${k}`,
+                    `WITH ${CARRY}, collect(${y}) AS unreferenced${k}`,
                     `FOREACH (x IN unreferenced${k} | DETACH DELETE x)`
                 );
             }
@@ -132,10 +180,22 @@ export class SaveStatementBuilder {
         const root = rootOf(into);
         const merge = `MERGE (${t}${labelExpression(root.labels)} {${quoteName(idProperty(root))}: ${row}.id})`;
         const isFragment = part.rel.related.kind === 'RELATIONSHIP_FRAGMENT';
+        const relChanged = changes(r, `${row}.rel`);
         const steps =
             pass === 'NODES_AND_EDGES'
-                ? [`${merge} SET ${t} += ${row}.props`, `MERGE ${pattern(part.rel, parent, '', t)}`]
-                : [merge, ...(isFragment ? [`MERGE ${pattern(part.rel, parent, r, t)} SET ${r} += ${row}.rel`] : [])];
+                ? [
+                      `${merge} SET ${restamp(t, changes(t, `${row}.props`))} SET ${t} += ${row}.props`,
+                      `MERGE ${pattern(part.rel, parent, '', t)} ON CREATE SET ${relink(parent)}, ${relink(t)}`
+                  ]
+                : [
+                      merge,
+                      ...(isFragment
+                          ? [
+                                `MERGE ${pattern(part.rel, parent, r, t)} ` +
+                                    `SET ${relink(parent, relChanged)}, ${relink(t, relChanged)} SET ${r} += ${row}.rel`
+                            ]
+                          : [])
+                  ];
         const children = pass === 'NODES_AND_EDGES' ? part.children : part.children.filter(leadsToRelationshipFragment);
         steps.push(...children.map((child) => this.forEach(child, t, `coalesce(${row}.${child.key}, [])`, pass)));
         return `FOREACH (${row} IN ${rows} | ${steps.join(' ')})`;
@@ -151,7 +211,10 @@ export class SaveStatementBuilder {
             }
             const nodeObject = into.kind === 'GRAPH_VIEW' ? node[into.model.rootField] : node;
             const root = rootOf(into);
-            const row: Record<string, any> = { id: idOf(root, nodeObject), props: propsOf(root, nodeObject, []) };
+            const row: Record<string, any> = {
+                id: idOf(root, nodeObject),
+                props: propsOf(root, nodeObject, stampExcluded(root))
+            };
             if (rel.related.kind === 'RELATIONSHIP_FRAGMENT') {
                 const model = rel.related.model;
                 row.rel = propsOf(model, item, [model.targetField]);
@@ -183,6 +246,10 @@ export class SaveStatementBuilder {
         }
         return ids.filter((it) => it != null);
     }
+}
+
+function stampExcluded(model: FragmentModel): string[] {
+    return model.stampField ? [model.stampField] : [];
 }
 
 function leadsToRelationshipFragment(part: WritePart): boolean {

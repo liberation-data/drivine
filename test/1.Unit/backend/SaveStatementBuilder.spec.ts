@@ -37,8 +37,12 @@ describe('SaveStatementBuilder', () => {
             fragment(Person),
             Object.assign(new Person(), { id: 'p', name: undefined })
         );
-        expect(statement.text).toEqual('MERGE (n:Person {id: $root.id}) SET n += $root.props\nRETURN count(*) AS saved');
-        expect(statement.bindings).toEqual({ root: { id: 'p', props: { id: 'p' } } });
+        expect(statement.text).toMatch(/^MERGE \(n:Person \{id: \$root.id\}\) ON CREATE SET/);
+        expect(statement.text).toContain('SET n += $root.props');
+        expect(statement.text).toMatch(/RETURN {found: _found, now: n.`__drivine.stamp`} AS result$/);
+        expect(statement.bindings.root).toEqual({ id: 'p', props: { id: 'p' } });
+        expect(statement.bindings._stamp).toMatch(/^[0-9a-f]{16}:[0-9a-f]{16}$/);
+        expect(statement.expectedStamp).toBeUndefined();
     });
 
     it('should refuse a node without an id', () => {

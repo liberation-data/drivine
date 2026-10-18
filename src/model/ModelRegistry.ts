@@ -78,10 +78,18 @@ export class ModelRegistry {
         }
 
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['nodeId', 'graphProperty', 'transient'], 'a @NodeFragment');
+        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'graphProperty', 'transient'], 'a @NodeFragment');
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
         if (ids.length > 1) {
             throw new DrivineError(`${type.name} has ${ids.length} @NodeId properties (${ids.join(', ')}). A node has one id.`);
+        }
+        const stamps = [...properties].filter(([, it]) => it.nodeStamp).map(([field]) => field);
+        if (stamps.length > 1) {
+            throw new DrivineError(`${type.name} has ${stamps.length} @NodeStamp properties (${stamps.join(', ')}). A node has one stamp.`);
+        }
+        const stampField = stamps[0];
+        if (stampField && (properties.get(stampField)!.graphProperty || properties.get(stampField)!.transient || stampField === ids[0])) {
+            throw new DrivineError(`@NodeStamp ${type.name}.${stampField} can't carry another mapping decorator.`);
         }
         const graphProperties = this.graphProperties(properties);
         const nodeIdField = ids[0];
@@ -90,6 +98,7 @@ export class ModelRegistry {
             labels: [...labels],
             nodeIdField,
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
+            stampField,
             graphProperties,
             transientFields: this.transientFields(properties)
         };
@@ -214,7 +223,15 @@ export class ModelRegistry {
         allowed: (keyof PropertyMetadata)[],
         what: string
     ): void {
-        const mapping: (keyof PropertyMetadata)[] = ['root', 'nodeId', 'relationship', 'graphProperty', 'transient', 'targetNode'];
+        const mapping: (keyof PropertyMetadata)[] = [
+            'root',
+            'nodeId',
+            'nodeStamp',
+            'relationship',
+            'graphProperty',
+            'transient',
+            'targetNode'
+        ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
             if (misplaced.length) {
@@ -238,6 +255,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
     return {
         root: '@Root',
         nodeId: '@NodeId',
+        nodeStamp: '@NodeStamp',
         relationship: '@GraphRelationship',
         graphProperty: '@GraphProperty',
         transient: '@GraphTransient',

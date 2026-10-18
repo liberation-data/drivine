@@ -46,6 +46,7 @@ export interface RelationshipOptions {
 export interface PropertyMetadata {
     root?: { target?: ClassThunk };
     nodeId?: boolean;
+    nodeStamp?: boolean;
     relationship?: RelationshipOptions;
     graphProperty?: string;
     transient?: boolean;

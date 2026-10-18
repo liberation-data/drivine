@@ -3,6 +3,7 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { SaveStatement } from '@/backend/SaveStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 
 /**
@@ -41,7 +42,10 @@ export interface GraphBackend {
     deleteAll(target: TargetModel, where?: string): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
-    save(target: TargetModel, object: any, options?: SaveOptions<any>): GraphStatement;
+    save(target: TargetModel, object: any, options?: SaveOptions<any>): SaveStatement;
+
+    /** The stamp the node with id `$id` carries ('-' for none); no row when there is no such node. */
+    foundStamp(model: FragmentModel): GraphStatement;
 
     /** Whether a cause of the failure is the engine turning a statement away for contention. */
     contended(failure: unknown): boolean;

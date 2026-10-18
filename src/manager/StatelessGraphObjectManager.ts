@@ -7,6 +7,9 @@ import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { whenNotContended } from '@/manager/Contention';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
+import { StaleObjectException } from '@/manager/StaleObjectException';
+import { Stamps } from '@/model/Stamps';
+import { SaveStatement } from '@/backend/SaveStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { ClassType } from '@/query/QuerySpecification';
@@ -81,11 +84,34 @@ export class StatelessGraphObjectManager {
      */
     async save<T extends object>(object: T, options: SaveOptions<T> = {}): Promise<T> {
         const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options);
-        const run = async (): Promise<void> => this.persistenceManager.execute(statement.spec());
-        if (TransactionContextHolder.getInstance().currentTransaction) {
-            await run();
-        } else {
-            await whenNotContended(run, (failure) => this.backend.contended(failure));
+        const run = async (): Promise<{ found: string; now: string }[]> =>
+            this.persistenceManager.query<any>(statement.spec());
+        let rows: { found: string; now: string }[];
+        try {
+            rows = TransactionContextHolder.getInstance().currentTransaction
+                ? await run()
+                : await whenNotContended(run, (failure) => this.backend.contended(failure));
+        } catch (failure) {
+            // Turned away every time while another writer held the node: for a checked save, the answer is the same
+            // as for a stale one. Nothing was written; load again and re-apply.
+            if (statement.expectedStamp != null && this.backend.contended(failure)) {
+                throw new StaleObjectException(
+                    statement.root.type,
+                    statement.bindings.root.id,
+                    statement.expectedStamp,
+                    undefined,
+                    false,
+                    failure as Error
+                );
+            }
+            throw failure;
+        }
+        if (!rows.length) {
+            throw await this.staleObject(statement);
+        }
+        const { found, now }: { found: string; now: string } = rows[0];
+        if (statement.root.stampField) {
+            statement.rootObject[statement.root.stampField] = Stamps.handedBack(statement.expectedStamp, found, now);
         }
         return object;
     }
@@ -110,6 +136,18 @@ export class StatelessGraphObjectManager {
      */
     async deleteAll(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
         return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
+    }
+
+    private async staleObject(statement: SaveStatement): Promise<StaleObjectException> {
+        const id = statement.bindings.root.id;
+        const found = await this.persistenceManager.query<string>(this.backend.foundStamp(statement.root).spec({ id }));
+        return new StaleObjectException(
+            statement.root.type,
+            id,
+            statement.expectedStamp!,
+            found.length ? found[0] : undefined,
+            found.length === 0
+        );
     }
 
     private modelOf(type: ClassType): TargetModel {

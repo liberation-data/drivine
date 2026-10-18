@@ -17,7 +17,7 @@ export class FalkorDbRepository {
 
     @Transactional()
     async clear(): Promise<void> {
-        await this.persistenceManager.execute(new QuerySpecification(`MATCH (n) DELETE n`));
+        await this.persistenceManager.execute(new QuerySpecification(`MATCH (n:Hero) DETACH DELETE n`));
     }
 
     @Transactional()
