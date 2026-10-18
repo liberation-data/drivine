@@ -10,7 +10,7 @@ import {
 import { DrivineError } from '@/DrivineError';
 import { ClassType } from '@/query/QuerySpecification';
 import { FragmentModel } from '@/model/FragmentModel';
-import { AggregateModel, GraphViewModel } from '@/model/GraphViewModel';
+import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 
@@ -149,15 +149,15 @@ export class ModelRegistry {
         this.assertOnly(
             type,
             properties,
-            ['root', 'relationship', 'transient', 'readOnly', 'aggregate'],
+            ['root', 'relationship', 'transient', 'readOnly', 'aggregate', 'path'],
             'a @GraphView'
         );
         properties.forEach((metadata, field) => {
-            if (metadata.readOnly && !metadata.relationship && !metadata.aggregate) {
+            if (metadata.readOnly && !metadata.relationship && !metadata.aggregate && !metadata.path) {
                 throw new DrivineError(`@ReadOnly ${type.name}.${field} marks a relationship field; it has none.`);
             }
-            if (metadata.aggregate && metadata.relationship) {
-                throw new DrivineError(`${type.name}.${field} can't be both a relationship and an aggregate.`);
+            if ([metadata.aggregate, metadata.relationship, metadata.path].filter(Boolean).length > 1) {
+                throw new DrivineError(`${type.name}.${field} can be one of a relationship, a path or an aggregate.`);
             }
         });
         const roots = [...properties].filter(([, it]) => it.root);
@@ -195,7 +195,8 @@ export class ModelRegistry {
                     direction: options.direction ?? Direction.OUTGOING
                 };
             });
-        return { type, rootField, root: this.fragment(rootType), relationships, aggregates };
+        const paths = [...properties].filter(([, it]) => it.path).map(([field, it]) => this.path(type, field, it));
+        return { type, rootField, root: this.fragment(rootType), relationships, aggregates, paths };
     }
 
     private relationship(view: ClassType, field: string, metadata: PropertyMetadata): RelationshipModel {
@@ -240,8 +241,46 @@ export class ModelRegistry {
         };
     }
 
+    private path(view: ClassType, field: string, metadata: PropertyMetadata): PathModel {
+        const options = metadata.path!;
+        if (!options.hops?.length || options.hops.some((it) => !it.type)) {
+            throw new DrivineError(`@GraphPath on ${view.name}.${field} needs at least one hop, each with a type.`);
+        }
+        const isCollection = metadata.designType === Array;
+        if (isCollection && !options.target) {
+            throw new DrivineError(
+                `${view.name}.${field} is a list, and TypeScript does not keep the type of a list's items. Name it: ` +
+                    `@GraphPath([...], { target: () => Item }).`
+            );
+        }
+        let target: FragmentModel | undefined;
+        const resolveTarget = (): FragmentModel => {
+            const type = this.resolve(view, field, options.target, metadata);
+            if (this.kindOf(type) !== ClassKind.NODE_FRAGMENT) {
+                throw new DrivineError(
+                    `The path ${view.name}.${field} must end at a @NodeFragment. ${type.name} is not one.`
+                );
+            }
+            return this.fragment(type);
+        };
+        return {
+            field,
+            hops: options.hops.map((it) => ({
+                type: it.type,
+                direction: it.direction ?? Direction.OUTGOING,
+                label: it.label
+            })),
+            isCollection,
+            required: options.required ?? false,
+            get target(): FragmentModel {
+                return target ?? (target = resolveTarget());
+            }
+        };
+    }
+
     private checkRelationships(view: GraphViewModel): void {
         view.relationships.forEach((it) => it.related);
+        view.paths.forEach((it) => it.target);
     }
 
     private related(type: ClassType, where: string): RelatedModel {
@@ -295,7 +334,8 @@ export class ModelRegistry {
             'transient',
             'targetNode',
             'readOnly',
-            'aggregate'
+            'aggregate',
+            'path'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
@@ -329,6 +369,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         targetNode: '@TargetNode',
         readOnly: '@ReadOnly',
         aggregate: '@Count or @Aggregate',
+        path: '@GraphPath',
         designType: ''
     }[key];
 }

@@ -2,7 +2,7 @@ import { Direction } from '@/annotation/Metadata';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { FragmentModel } from '@/model/FragmentModel';
-import { AggregateModel, GraphViewModel } from '@/model/GraphViewModel';
+import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
 /**
@@ -41,6 +41,13 @@ export class ViewProjector {
      * The predicates a node bound to `alias` must meet to be the root of `model`: each required relationship exists.
      */
     requirements(model: GraphViewModel, alias: string): string[] {
+        const paths = model.paths
+            .filter((it) => it.required)
+            .map((it) => this.grammar.existenceCheck(pathPattern(it, alias, '', true)));
+        return [...this.relationshipRequirements(model, alias), ...paths];
+    }
+
+    private relationshipRequirements(model: GraphViewModel, alias: string): string[] {
         return model.relationships
             .filter((it) => it.required)
             .map((it) =>
@@ -65,6 +72,11 @@ export class ViewProjector {
             calls.push(...projection.calls);
             return `${quoteName(rel.field)}: ${projection.expression}`;
         });
+        for (const path of model.paths) {
+            const projection = this.path(path, alias);
+            calls.push(...projection.calls);
+            rels.push(`${quoteName(path.field)}: ${projection.expression}`);
+        }
         for (const aggregate of model.aggregates) {
             const projection = this.aggregate(aggregate, alias);
             calls.push(...projection.calls);
@@ -114,6 +126,35 @@ export class ViewProjector {
         }
         const comprehension = `[${match} | ${item}]`;
         return { calls: [], expression: rel.isCollection ? comprehension : `head(${comprehension})` };
+    }
+
+    /**
+     * The nodes at the far end of a path, each once. On FalkorDB the far node's labels are tested after the match: with
+     * a label in the pattern, FalkorDB 6 plans the match from that end (FalkorDB/FalkorDB#3332).
+     */
+    private path(path: PathModel, from: string): ViewProjection {
+        const n = ++this.aliasCount;
+        const t = `t${n}`;
+        if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
+            const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
+            const labels = path.target.labels.map((it) => `${t}:${quoteName(it)}`).join(' AND ');
+            const value = `v${n}`;
+            return {
+                calls: [
+                    `CALL { WITH ${from} OPTIONAL MATCH ${pathPattern(path, from, t, false)} WHERE ${labels} ` +
+                        `RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
+                ],
+                expression: value
+            };
+        }
+        const distinct = `reduce(acc = [], y IN [${pathPattern(
+            path,
+            from,
+            t,
+            true
+        )} | ${t}] | CASE WHEN y IN acc THEN acc ELSE acc + y END)`;
+        const list = `[x${n} IN ${distinct} | ${fragment(`x${n}`)}]`;
+        return { calls: [], expression: path.isCollection ? list : `head(${list})` };
     }
 
     /** An aggregate over the nodes one relationship type leads to from `from`. */
@@ -208,4 +249,26 @@ function pattern(rel: RelationshipModel, from: string, relAlias: string, to: str
         default:
             return `(${from})-${edge}->(${to})`;
     }
+}
+
+/** A path from `from` through its hops, the far node bound to `far` (with its labels when `labelled`). */
+function pathPattern(path: PathModel, from: string, far: string, labelled: boolean): string {
+    const steps = path.hops.map((hop, i) => {
+        const last = i === path.hops.length - 1;
+        const edge = `[:${quoteName(hop.type)}]`;
+        const arrow =
+            hop.direction === Direction.INCOMING
+                ? `<-${edge}-`
+                : hop.direction === Direction.UNDIRECTED
+                ? `-${edge}-`
+                : `-${edge}->`;
+        const own = hop.label ? [hop.label] : [];
+        const labels = last
+            ? labelled
+                ? labelExpression([...own, ...path.target.labels])
+                : labelExpression(own)
+            : labelExpression(own);
+        return `${arrow}(${last ? far : ''}${labels})`;
+    });
+    return `(${from})${steps.join('')}`;
 }

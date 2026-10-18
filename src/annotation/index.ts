@@ -1,4 +1,5 @@
 export * from './Aggregate';
+export * from './GraphPath';
 export * from './GraphProperty';
 export * from './GraphRelationship';
 export * from './GraphTransient';

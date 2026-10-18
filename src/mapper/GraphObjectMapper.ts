@@ -52,8 +52,16 @@ export class GraphObjectMapper {
             instance[rel.field] = rel.isCollection
                 ? (value ?? []).map((it: any) => this.related(rel, it))
                 : value == null
-                  ? undefined
-                  : this.related(rel, value);
+                ? undefined
+                : this.related(rel, value);
+        }
+        for (const path of model.paths) {
+            const value = row.rels?.[path.field];
+            instance[path.field] = path.isCollection
+                ? (value ?? []).map((it: FragmentRow) => this.fragment(path.target, it))
+                : value == null
+                ? undefined
+                : this.fragment(path.target, value);
         }
         for (const aggregate of model.aggregates) {
             instance[aggregate.field] = row.rels?.[aggregate.field] ?? undefined;
