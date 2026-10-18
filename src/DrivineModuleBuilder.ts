@@ -47,7 +47,12 @@ export class DrivineModuleBuilder {
             <Provider>{ provide: DatabaseRegistry, useFactory: () => DatabaseRegistry.getInstance() },
             <Provider>{ provide: TransactionContextHolder, useFactory: () => TransactionContextHolder.getInstance() },
             PersistenceManagerFactory,
-            GraphObjectManagerFactory,
+            <Provider>{
+                provide: GraphObjectManagerFactory,
+                inject: [PersistenceManagerFactory],
+                useFactory: (factory: PersistenceManagerFactory) =>
+                    new GraphObjectManagerFactory(factory, this.options.query)
+            },
             TransactionContextMiddleware,
             TransactionalPersistenceManager,
             NonTransactionalPersistenceManager

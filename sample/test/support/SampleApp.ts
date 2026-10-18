@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, PersistenceManager, StatelessGraphObjectManager } from '@liberation-data/drivine';
+import {
+    DrivineModule,
+    DrivineModuleOptions,
+    PersistenceManager,
+    StatelessGraphObjectManager
+} from '@liberation-data/drivine';
 import { SAMPLE_PERSISTENCE_MANAGER, SampleAppModule } from '../../src';
 import { allStores, clearLabels, GraphEngine } from '../../../test/2.Integration/support/GraphEngines';
 
@@ -31,8 +36,14 @@ export interface SampleApp {
     close(): Promise<void>;
 }
 
-export async function startSample(engine: GraphEngine): Promise<SampleApp> {
-    const app = await Test.createTestingModule({ imports: [SampleAppModule.forDatabase(engine.name)] }).compile();
+/** Starts the sample over the engine, with any of Drivine's options besides its connections. */
+export async function startSample(
+    engine: GraphEngine,
+    options: Omit<DrivineModuleOptions, 'connectionProviders'> = {}
+): Promise<SampleApp> {
+    const app = await Test.createTestingModule({
+        imports: [SampleAppModule.forDatabase(engine.name, options)]
+    }).compile();
     const pm = app.get<PersistenceManager>(SAMPLE_PERSISTENCE_MANAGER);
     return {
         app,

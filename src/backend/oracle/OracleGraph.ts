@@ -124,6 +124,16 @@ export function jsonKey(name: string): string {
     return `."${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "''")}"`;
 }
 
+/**
+ * The JSON the property of the node row `alias` is read from: its properties, or, for the stamp, which is a column of
+ * its own, a document of that column under the stamp's property, so a query reads it as any other.
+ */
+export function holding(alias: string, property: string): string {
+    return property === Stamps.PROPERTY
+        ? `JSON_OBJECT(${sqlText(property)} VALUE ${alias}.stamp ABSENT ON NULL RETURNING JSON)`
+        : `${alias}.props`;
+}
+
 /** The map a load returns for the node row `alias`: its properties, its stamp among them, and its labels apart. */
 export function nodeDocument(alias: string): string {
     return (

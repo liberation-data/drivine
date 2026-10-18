@@ -1,4 +1,4 @@
-import { hasLabels, jsonKey, RELATED_SUBQUERY } from '@/backend/oracle/OracleGraph';
+import { hasLabels, holding, jsonKey, RELATED_SUBQUERY } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -124,7 +124,7 @@ export class OracleQueryRenderer {
                 if (!last) {
                     throw new DrivineError(`${path.slice(0, i + 1).join('.')} is a property; it has no fields.`);
                 }
-                const column = `${next.on === 'RELATIONSHIP' ? rows.rel : rows.node}.props`;
+                const column = next.on === 'RELATIONSHIP' ? `${rows.rel}.props` : holding(rows.node, next.property);
                 return this.compare(test, column, next.property, next.jsonPacked, path);
             }
             default:
@@ -278,9 +278,9 @@ export class OracleQueryRenderer {
         });
         const values = seek.map((it) => this.bind(storable(it.value)));
         const test = (i: number, operator: string): string =>
-            `JSON_EXISTS(${alias}.props, '$?(@${jsonKey(keys[i].property!)} ${operator} $v)' PASSING ${
-                values[i]
-            } AS "v")`;
+            `JSON_EXISTS(${holding(alias, keys[i].property!)}, '$?(@${jsonKey(
+                keys[i].property!
+            )} ${operator} $v)' PASSING ${values[i]} AS "v")`;
         const compare = (i: number, strict: boolean): string =>
             test(i, `${keys[i].term.direction === 'ASC' ? '>' : '<'}${strict ? '' : '='}`);
         const branches = keys.map((_, i) => {
@@ -297,7 +297,7 @@ export class OracleQueryRenderer {
     private order(key: RootKey, scope: Scope, alias: string): string {
         const value = key.term.expression
             ? this.expression(key.term.expression, scope, alias, 'NUMBER')
-            : `JSON_QUERY(${alias}.props, '$${jsonKey(key.property!)}' RETURNING JSON)`;
+            : `JSON_QUERY(${holding(alias, key.property!)}, '$${jsonKey(key.property!)}' RETURNING JSON)`;
         const nulls = key.term.nulls ? ` NULLS ${key.term.nulls}` : '';
         return `${value}${key.term.direction === 'DESC' ? ' DESC' : ''}${nulls}`;
     }
@@ -307,10 +307,11 @@ export class OracleQueryRenderer {
         const of = (it: ExpressionNode): string => this.expression(it, scope, alias, 'NUMBER');
         switch (node.kind) {
             case 'PROPERTY': {
-                const k = jsonKey(rootProperty(node.path, scope, 'An expression'));
+                const property = rootProperty(node.path, scope, 'An expression');
+                const k = jsonKey(property);
                 return as === 'NUMBER'
-                    ? `JSON_VALUE(${alias}.props, '$${k}' RETURNING NUMBER)`
-                    : `JSON_VALUE(${alias}.props, '$${k}')`;
+                    ? `JSON_VALUE(${holding(alias, property)}, '$${k}' RETURNING NUMBER)`
+                    : `JSON_VALUE(${holding(alias, property)}, '$${k}')`;
             }
             case 'VALUE':
                 return this.bind(storable(node.value));
@@ -344,9 +345,7 @@ export class OracleQueryRenderer {
             case 'HAS_VALUE': {
                 const tested =
                     node.operand.kind === 'PROPERTY'
-                        ? `JSON_EXISTS(${alias}.props, '$?(@${jsonKey(
-                              rootProperty(node.operand.path, scope, 'An expression')
-                          )} != null)')`
+                        ? this.present(alias, rootProperty(node.operand.path, scope, 'An expression'))
                         : `${this.expression(node.operand, scope, alias, 'NUMBER')} IS NOT NULL`;
                 return node.negate ? `NOT ${tested}` : tested;
             }
@@ -355,6 +354,10 @@ export class OracleQueryRenderer {
             default:
                 return `(${node.conditions.map((it) => this.caseCondition(it, scope, alias)).join(` ${node.kind} `)})`;
         }
+    }
+
+    private present(alias: string, property: string): string {
+        return `JSON_EXISTS(${holding(alias, property)}, '$?(@${jsonKey(property)} != null)')`;
     }
 
     private list(value: unknown, path: readonly string[]): unknown[] {

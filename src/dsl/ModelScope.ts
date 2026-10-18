@@ -1,6 +1,7 @@
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel, PropertyBagModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
+import { Stamps } from '@/model/Stamps';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 
@@ -93,7 +94,8 @@ function fragmentStep(model: FragmentModel, name: string): Step {
     }
     return {
         kind: 'PROPERTY',
-        property: model.graphProperties.get(name) ?? name,
+        // The stamp is stored under the library's property, not the field's name.
+        property: name === model.stampField ? Stamps.PROPERTY : model.graphProperties.get(name) ?? name,
         on: 'NODE',
         jsonPacked: model.jsonPacked.has(name)
     };

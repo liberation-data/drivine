@@ -2,6 +2,7 @@ import { DynamicModule, Module } from '@nestjs/common';
 import {
     DatabaseRegistry,
     DrivineModule,
+    DrivineModuleOptions,
     GraphObjectManagerFactory,
     PersistenceManager,
     PersistenceManagerFactory,
@@ -19,13 +20,17 @@ export const SAMPLE_PERSISTENCE_MANAGER = 'SamplePersistenceManager';
 export class SampleAppModule {
     /**
      * The application over the database the environment configures under `name` ('default' for DATABASE_*, else
-     * `<name>_DATABASE_*`).
+     * `<name>_DATABASE_*`), with any other of Drivine's options: its schema, how it treats queries.
      */
-    static forDatabase(name: string = 'default'): DynamicModule {
+    static forDatabase(
+        name: string = 'default',
+        options: Omit<DrivineModuleOptions, 'connectionProviders'> = {}
+    ): DynamicModule {
         return {
             module: SampleAppModule,
             imports: [
                 DrivineModule.withOptions({
+                    ...options,
                     connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv(name === 'default' ? undefined : name)]
                 })
             ],
