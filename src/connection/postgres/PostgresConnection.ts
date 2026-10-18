@@ -3,10 +3,10 @@ import { PoolClient } from 'pg';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
-import { PostgresCursor } from '@/cursor/PostgresCursor';
+import { PostgresCursor } from '@/connection/postgres/PostgresCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
-import { PostgresSpecCompiler } from '@/query/PostgresSpecCompiler';
+import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
 
 const PgCursor = require('pg-cursor');
 

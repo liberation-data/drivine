@@ -1,5 +1,5 @@
 import { CursorSpecification } from '@/cursor/CursorSpecification';
-import { Neo4jConnection } from '@/connection/Neo4jConnection';
+import { Neo4jConnection } from '@/connection/neo4j/Neo4jConnection';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { AbstractCursor } from '@/cursor/AbstractCursor';
 

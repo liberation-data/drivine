@@ -1,5 +1,5 @@
 import { QuerySpecification } from '@/query';
-import { Neo4jSpecCompiler } from '@/query/Neo4jSpecCompiler';
+import { Neo4jSpecCompiler } from '@/connection/neo4j/Neo4jSpecCompiler';
 
 describe('Neo4jSpecCompiler', () => {
     const spec = new QuerySpecification().withStatement(`match (n) return count(n)`).bind([1, 'foo', 'bar', false]);

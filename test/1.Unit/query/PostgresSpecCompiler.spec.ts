@@ -1,5 +1,5 @@
 import { QuerySpecification } from '@liberation-data/drivine';
-import { PostgresSpecCompiler } from '@/query/PostgresSpecCompiler';
+import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
 
 describe('PostgresSpecCompiler', () => {
     it('should pass positional parameters through unchanged', () => {

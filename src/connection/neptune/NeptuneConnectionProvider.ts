@@ -1,8 +1,8 @@
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { Config, Driver } from 'neo4j-driver';
 import { Connection } from '@/connection/Connection';
-import { Neo4jConnection } from '@/connection/Neo4jConnection';
-import { Neo4jResultMapper } from '@/mapper/Neo4jResultMapper';
+import { Neo4jConnection } from '@/connection/neo4j/Neo4jConnection';
+import { Neo4jResultMapper } from '@/connection/neo4j/Neo4jResultMapper';
 import * as neo from 'neo4j-driver'
 import { DatabaseType } from '@/connection/DatabaseType';
 import ShortUniqueId from 'short-unique-id';

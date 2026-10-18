@@ -5,9 +5,9 @@ import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { DrivineError } from '@/DrivineError';
 import { Session, Transaction } from 'neo4j-driver';
 import { ResultMapper } from '@/mapper/ResultMapper';
-import { Neo4jCursor } from '@/cursor/Neo4jCursor';
+import { Neo4jCursor } from '@/connection/neo4j/Neo4jCursor';
 import { DrivineLogger } from '@/logger';
-import { Neo4jSpecCompiler } from '@/query/Neo4jSpecCompiler';
+import { Neo4jSpecCompiler } from '@/connection/neo4j/Neo4jSpecCompiler';
 
 export class Neo4jConnection implements Connection {
     private logger = new DrivineLogger(Neo4jConnection.name);

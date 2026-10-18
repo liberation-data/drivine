@@ -1,9 +1,9 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import { Connection } from '@/connection/Connection';
-import { PostgresConnection } from '@/connection/PostgresConnection';
+import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
-import { PostgresResultMapper } from '@/mapper/PostgresResultMapper';
+import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 
 export class PostgresConnectionProvider implements ConnectionProvider {
     private readonly pool: Pool;

@@ -1,13 +1,13 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DrivineError } from '@/DrivineError';
-import { Neo4jConnectionProvider } from '@/connection/Neo4jConnectionProvider';
+import { Neo4jConnectionProvider } from '@/connection/neo4j/Neo4jConnectionProvider';
 import * as assert from 'assert';
-import { PostgresConnectionProvider } from '@/connection/PostgresConnectionProvider';
+import { PostgresConnectionProvider } from '@/connection/postgres/PostgresConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
-import { NeptuneConnectionProvider } from '@/connection/NeptuneConnectionProvider';
+import { NeptuneConnectionProvider } from '@/connection/neptune/NeptuneConnectionProvider';
 import { TransactionMode } from '@/connection/TransactionMode';
 
 /**
