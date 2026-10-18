@@ -11,6 +11,9 @@ import {
 } from '@liberation-data/drivine';
 import { Injectable } from '@nestjs/common';
 
+// Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
+jest.setTimeout(30_000);
+
 @Injectable()
 class UsesSchema {
     constructor(

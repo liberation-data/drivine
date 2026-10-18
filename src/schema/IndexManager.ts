@@ -1,6 +1,6 @@
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
-import { EnsureResult, IndexSpec, RangeIndexSpec } from '@/schema/SchemaSpecs';
+import { EnsureResult, IndexSpec, itemName, RangeIndexSpec } from '@/schema/SchemaSpecs';
 
 const same = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it, k) => it === b[k]);
 const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it) => b.includes(it));
@@ -57,9 +57,11 @@ export class IndexManager {
         if (!found) {
             return;
         }
-        // Dropped as it was made: for a drifted full-text index, over the properties the engine holds.
-        const held = { ...spec, properties: found.properties } as IndexSpec;
-        for (const statement of this.statements(held, 'drop')) {
+        // Dropped as it was made: by the engine's name for it where it names items, else over the properties it holds.
+        const held = { ...spec, properties: found.properties.length ? found.properties : spec.properties } as IndexSpec;
+        const statements =
+            held.kind === 'FULLTEXT' ? this.grammar.dropFullText(held, found.name) : this.statements(held, 'drop');
+        for (const statement of statements) {
             await this.executor.run(statement);
         }
     }
@@ -91,7 +93,17 @@ export class IndexManager {
             case 'VECTOR':
                 return items.find((it) => it.properties[0] === spec.properties[0]);
             case 'FULLTEXT':
-                return items[0];
+                // By its name where the engine names items (a label may hold several); FalkorDB holds one to a label.
+                if (!items.some((it) => it.name)) {
+                    return items[0];
+                }
+                // The same properties in another order name the same index; one made over the whole label reports none,
+                // so its name is all there is to go by.
+                return (
+                    items.find((it) => it.name === itemName(spec)) ??
+                    items.find((it) => it.properties.length > 0 && sameSet(it.properties, spec.properties)) ??
+                    items.find((it) => it.name && namesInAnyOrder(spec).has(it.name))
+                );
             default:
                 return this.findRange(spec, items);
         }
@@ -111,9 +123,22 @@ export class IndexManager {
             case 'VECTOR':
                 return found.dimensions === spec.dimensions && found.similarity === spec.similarity;
             case 'FULLTEXT':
-                return sameSet(found.properties, spec.properties);
+                // An index made over the whole label covers any properties of it.
+                return (
+                    sameSet(found.properties, spec.properties) ||
+                    (!!this.grammar.fullTextOverLabel && spec.properties.length > 1 && found.properties.length === 0)
+                );
             default:
                 return true;
         }
     }
+}
+
+/** The names a full-text index over the spec's properties has, whatever their order. */
+function namesInAnyOrder(spec: IndexSpec): Set<string> {
+    const orders = (rest: string[]): string[][] =>
+        rest.length <= 1
+            ? [rest]
+            : rest.flatMap((it, i) => orders([...rest.slice(0, i), ...rest.slice(i + 1)]).map((tail) => [it, ...tail]));
+    return new Set(orders(spec.properties).map((properties) => itemName({ ...spec, properties } as IndexSpec)));
 }

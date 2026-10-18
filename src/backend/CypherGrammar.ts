@@ -2,6 +2,11 @@ import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { itemName } from '@/schema/SchemaSpecs';
 
+/** The full-text index Drivine makes over a label's properties (see fullTextIndex), by the name it gives it. */
+function fullTextIndexName(label: string, properties: string[]): string {
+    return itemName({ kind: 'FULLTEXT', label, properties });
+}
+
 /** The vector index Drivine makes over a label's property (see vectorIndex), by the name it gives it. */
 function vectorIndexName(label: string, property: string): string {
     return itemName({ kind: 'VECTOR', label, properties: [property], dimensions: 1, similarity: 'COSINE' });
@@ -34,6 +39,9 @@ export interface CypherGrammar {
      */
     vectorSearch(label: string, property: string, similarity: 'COSINE' | 'EUCLIDEAN'): { call: string; score: string };
 
+    /** The call that asks the full-text index over a label's properties for nodes matching `$_text`, yielding `node, score`. */
+    fullTextSearch(label: string, properties: string[]): string;
+
     /**
      * A predicate that holds when `pattern` (e.g. `(n)-[:R]->(:T)`) matches at least once.
      */
@@ -58,6 +66,8 @@ const plainVector = (expression: string): string => expression;
 export const NEO4J_GRAMMAR: CypherGrammar = {
     engine: 'Neo4j',
     vectorValue: plainVector,
+    fullTextSearch: (label, properties) =>
+        `CALL db.index.fulltext.queryNodes('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
     // Neo4j's score is already (1 + cos) / 2, or 1 / (1 + d²).
     vectorSearch: (label, property) => ({
         call: `CALL db.index.vector.queryNodes('${vectorIndexName(
@@ -74,6 +84,8 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
 export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     engine: 'Memgraph',
     vectorValue: plainVector,
+    fullTextSearch: (label, properties) =>
+        `CALL text_search.search_all('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
     // Memgraph's similarity is the cosine itself, or already 1 / (1 + d²). Its vector search returns nodes deleted since
     // its last garbage collection, and any read of one fails ('Trying to access labels on a deleted node') until it
     // collects: FREE MEMORY forces it.
@@ -101,6 +113,8 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
     engine: 'FalkorDB',
     // FalkorDB indexes only its own vector type: a list stored as a list is never found by a vector search.
     vectorValue: (expression: string) => `vecf32(${expression})`,
+    // One full-text index to a label, found by the label.
+    fullTextSearch: (label) => `CALL db.idx.fulltext.queryNodes('${label}', $_text) YIELD node, score`,
     // FalkorDB's score is a distance: 1 - cos, or d.
     vectorSearch: (label, property, similarity) => ({
         call: `CALL db.idx.vector.queryNodes('${label}', '${property}', $_k, vecf32($_vector)) YIELD node AS n, score AS _raw`,

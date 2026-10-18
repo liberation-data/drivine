@@ -1,4 +1,4 @@
-import { GraphBackend, NearestSearch } from '@/backend/GraphBackend';
+import { GraphBackend, MatchingSearch, NearestSearch } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
@@ -110,36 +110,27 @@ export class CypherBackend implements GraphBackend {
     }
 
     nearest(target: TargetModel, search: NearestSearch): GraphStatement {
-        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const { call, score }: { call: string; score: string } = this.grammar.vectorSearch(
             search.label,
             search.property,
             search.similarity
         );
-        const filters = [
-            `${NODE_ALIAS}${labelExpression(root.labels)}`,
-            ...(search.threshold ? ['_score >= $_threshold'] : []),
-            ...(search.where ? [`(${search.where})`] : []),
-            ...(target.kind === 'GRAPH_VIEW'
-                ? new ViewProjector(this.grammar, search.depth).requirements(target.model, NODE_ALIAS)
-                : [])
-        ];
-        const projection =
-            target.kind === 'GRAPH_VIEW'
-                ? new ViewProjector(this.grammar, search.depth).project(target.model, NODE_ALIAS)
-                : { calls: [], expression: fragment(NODE_ALIAS) };
-        return new GraphStatement(
-            [
-                call.replace('$_k', String(search.k)),
-                `WITH ${NODE_ALIAS}, ${score} AS _score`,
-                // A MATCH of the bound node holds the filter: Memgraph takes no existence check in a WITH's WHERE.
-                `MATCH (${NODE_ALIAS}) WHERE ${filters.join(' AND ')}`,
-                ...projection.calls,
-                `RETURN {value: ${projection.expression}, score: _score} AS result`,
-                'ORDER BY result.score DESC',
-                ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
-            ].join('\n')
+        return this.scored(
+            target,
+            [call.replace('$_k', String(search.k)), `WITH ${NODE_ALIAS}, ${score} AS _score`],
+            search
         );
+    }
+
+    matching(target: TargetModel, search: MatchingSearch): GraphStatement {
+        // Scaled by the best hit, so the scale is [0, 1] on every engine; a best score of 0 (FalkorDB) gives each 1.
+        const head = [
+            this.grammar.fullTextSearch(search.label, search.properties),
+            'WITH collect({node: node, score: score}) AS _hits, max(score) AS _best',
+            'UNWIND _hits AS _hit',
+            `WITH _hit.node AS ${NODE_ALIAS}, CASE WHEN _best > 0 THEN _hit.score / _best ELSE 1.0 END AS _score`
+        ];
+        return this.scored(target, head, search);
     }
 
     save(
@@ -176,6 +167,38 @@ export class CypherBackend implements GraphBackend {
             cause = cause.rootCause ?? cause.cause;
         }
         return false;
+    }
+
+    /** The tail of a scored search: filter after the search, project, order by score, trim. */
+    private scored(
+        target: TargetModel,
+        head: string[],
+        search: { where?: string; threshold?: boolean; limit?: number; depth?: Record<string, number> }
+    ): GraphStatement {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const filters = [
+            `${NODE_ALIAS}${labelExpression(root.labels)}`,
+            ...(search.threshold ? ['_score >= $_threshold'] : []),
+            ...(search.where ? [`(${search.where})`] : []),
+            ...(target.kind === 'GRAPH_VIEW'
+                ? new ViewProjector(this.grammar, search.depth).requirements(target.model, NODE_ALIAS)
+                : [])
+        ];
+        const projection =
+            target.kind === 'GRAPH_VIEW'
+                ? new ViewProjector(this.grammar, search.depth).project(target.model, NODE_ALIAS)
+                : { calls: [], expression: fragment(NODE_ALIAS) };
+        return new GraphStatement(
+            [
+                ...head,
+                // A MATCH of the bound node holds the filter: Memgraph takes no existence check in a WITH's WHERE.
+                `MATCH (${NODE_ALIAS}) WHERE ${filters.join(' AND ')}`,
+                ...projection.calls,
+                `RETURN {value: ${projection.expression}, score: _score} AS result`,
+                'ORDER BY result.score DESC',
+                ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
+            ].join('\n')
+        );
     }
 
     private rootWhere(target: TargetModel, where?: string): string {

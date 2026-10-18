@@ -32,6 +32,8 @@ export interface FragmentModel extends FieldMapping {
     nodeIdProperty?: string;
     /** The field holding the node's labels beyond the fragment's own, if any. */
     nodeLabels?: NodeLabelsModel;
+    /** The full-text indexes the fragment declares with @FullTextIndex, each by its graph properties. */
+    fullTextIndexes: string[][];
     /** Fields declared @VectorIndex: field → its graph property and similarity. */
     vectorFields: Map<string, { property: string; similarity: 'COSINE' | 'EUCLIDEAN' }>;
     /** Object fields stored as one node property per entry. */

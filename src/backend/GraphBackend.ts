@@ -28,6 +28,15 @@ export interface NearestSearch {
     depth?: Record<string, number>;
 }
 
+export interface MatchingSearch {
+    label: string;
+    properties: string[];
+    where?: string;
+    threshold?: boolean;
+    limit: number;
+    depth?: Record<string, number>;
+}
+
 export interface GraphBackend {
     readonly grammar: CypherGrammar;
 
@@ -65,6 +74,12 @@ export interface GraphBackend {
      * `limit` trims after the filter.
      */
     nearest(target: TargetModel, search: NearestSearch): GraphStatement;
+
+    /**
+     * Loads the nodes matching `$_text` by the full-text index over properties, as fragments or views, each with its
+     * relevance scaled so the best hit is 1, most relevant first. Filters apply after the search; `limit` trims.
+     */
+    matching(target: TargetModel, search: MatchingSearch): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
     save(

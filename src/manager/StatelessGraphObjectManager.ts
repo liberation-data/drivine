@@ -5,7 +5,7 @@ import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMap
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
-import { NearestOptions, Scored } from '@/manager/Scored';
+import { MatchingOptions, NearestOptions, Scored } from '@/manager/Scored';
 import { PatchOptions, PatchResult } from '@/manager/PatchResult';
 import { PatchStatements } from '@/backend/PatchStatements';
 import { splitVectors } from '@/backend/VectorWrites';
@@ -231,6 +231,50 @@ export class StatelessGraphObjectManager {
                 _vector: vector,
                 _threshold: options.threshold
             })
+        );
+        return rows.map((row) => ({
+            value:
+                target.kind === 'GRAPH_VIEW'
+                    ? this.mapper.view<T>(target.model, row.value)
+                    : this.mapper.fragment<T>(target.model, row.value),
+            score: row.score
+        }));
+    }
+
+    /**
+     * The nodes matching `text` by the fragment's @FullTextIndex (a view's root's), as fragments or views, each with its
+     * relevance, scaled so the best hit is 1, most relevant first. The text is the engine's full-text query language
+     * (Lucene on Neo4j), passed as it is: escape user input yourself.
+     */
+    async loadMatching<T>(type: ClassRef<T>, text: string, options: MatchingOptions): Promise<Scored<T>[]> {
+        const target = this.modelOf(type);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const indexes = root.fullTextIndexes;
+        const chosen = options.property
+            ? indexes.find((it) => it.includes(root.graphProperties.get(options.property!) ?? options.property!))
+            : indexes.length === 1
+            ? indexes[0]
+            : undefined;
+        if (!chosen) {
+            throw new DrivineError(
+                indexes.length
+                    ? `${root.type.name} declares ${indexes.length} full-text indexes; name a property of the one to search.`
+                    : `${root.type.name} declares no @FullTextIndex to search.`
+            );
+        }
+        if (!Number.isInteger(options.topK) || options.topK < 1) {
+            throw new DrivineError('topK must be a whole number of at least 1.');
+        }
+        const statement = this.backend.matching(target, {
+            label: root.labels[0],
+            properties: chosen,
+            where: options.where,
+            threshold: options.threshold !== undefined,
+            limit: options.topK,
+            depth: options.depth
+        });
+        const rows = await this.persistenceManager.query<{ value: any; score: number }>(
+            statement.spec({ ...options.bindings, _text: text, _threshold: options.threshold })
         );
         return rows.map((row) => ({
             value:

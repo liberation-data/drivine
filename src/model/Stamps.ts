@@ -47,7 +47,9 @@ export const Stamps = {
         const data =
             Stamps.dataToken(carried) === Stamps.dataToken(found) ? Stamps.dataToken(now) : Stamps.dataToken(carried);
         const links =
-            Stamps.linksToken(carried) === Stamps.linksToken(found) ? Stamps.linksToken(now) : Stamps.linksToken(carried);
+            Stamps.linksToken(carried) === Stamps.linksToken(found)
+                ? Stamps.linksToken(now)
+                : Stamps.linksToken(carried);
         return `${data}:${links ?? ''}`;
     }
 };

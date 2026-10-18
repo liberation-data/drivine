@@ -75,7 +75,6 @@ export interface EnsureResult<S> {
     found?: SchemaItemShape;
 }
 
-/** The name Drivine gives an item on an engine that names them. */
 /** The shape of a vector or full-text index, as an engine reports it. */
 export interface SchemaItemShape {
     properties: string[];
@@ -83,7 +82,11 @@ export interface SchemaItemShape {
     similarity?: SimilarityFunction;
 }
 
+/**
+ * The name Drivine gives an item on an engine that names them: drivine4j's default, `<label>_<properties>_<kind>`, so
+ * that a store written from the JVM and from Node holds one item, not two.
+ */
 export function itemName(spec: IndexSpec | UniquenessConstraintSpec): string {
-    const clean = (it: string): string => it.replace(/[^A-Za-z0-9]/g, '_');
-    return `drivine_${spec.kind.toLowerCase()}_${clean(spec.label)}_${spec.properties.map(clean).join('_')}`;
+    const suffix = { RANGE: 'range', UNIQUE: 'unique', VECTOR: 'vector', FULLTEXT: 'fulltext' }[spec.kind];
+    return `${spec.label}_${spec.properties.join('_')}_${suffix}`;
 }

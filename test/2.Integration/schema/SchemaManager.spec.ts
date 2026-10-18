@@ -12,6 +12,9 @@ import {
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
+jest.setTimeout(30_000);
+
 describe.each(graphEngines())('SchemaManager on $type', (engine) => {
     let factory: GraphObjectManagerFactory;
     const items = [

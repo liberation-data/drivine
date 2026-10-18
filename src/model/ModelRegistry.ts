@@ -10,6 +10,7 @@ import {
 } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
+import { classSchemaDeclarations } from '@/annotation/Schema';
 import { FragmentModel, NodeLabelsModel, PropertyBagModel } from '@/model/FragmentModel';
 import { FieldMapping } from '@/model/FieldMapping';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
@@ -128,7 +129,12 @@ export class ModelRegistry {
         }
 
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'propertyBag', 'nodeLabels', ...MAPPING_KEYS], 'a @NodeFragment');
+        this.assertOnly(
+            type,
+            properties,
+            ['nodeId', 'nodeStamp', 'propertyBag', 'nodeLabels', ...MAPPING_KEYS],
+            'a @NodeFragment'
+        );
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
         if (ids.length > 1) {
             throw new DrivineError(
@@ -159,13 +165,26 @@ export class ModelRegistry {
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
             stampField,
             propertyBags: this.propertyBags(type, properties),
+            fullTextIndexes: [
+                ...[...properties].flatMap(([field, it]) =>
+                    (it.schema ?? []).filter((declared) => declared.kind === 'FULLTEXT').map(() => [field])
+                ),
+                ...classChain(type).flatMap((it) =>
+                    classSchemaDeclarations(it)
+                        .filter((declared) => declared.kind === 'FULLTEXT')
+                        .map((declared) => declared.fields)
+                )
+            ].map((fields) => fields.map((field) => properties.get(field)?.graphProperty ?? field)),
             vectorFields: new Map(
                 [...properties]
                     .map(([field, it]) => [field, it.schema?.find((declared) => declared.kind === 'VECTOR')] as const)
                     .filter(([, declared]) => declared)
                     .map(([field, declared]) => [
                         field,
-                        { property: properties.get(field)!.graphProperty ?? field, similarity: declared!.similarity ?? 'COSINE' }
+                        {
+                            property: properties.get(field)!.graphProperty ?? field,
+                            similarity: declared!.similarity ?? 'COSINE'
+                        }
                     ])
             ),
             nodeLabels: this.nodeLabels(type, properties, [...labels]),
@@ -413,7 +432,11 @@ export class ModelRegistry {
         });
     }
 
-    private nodeLabels(type: Function, properties: Map<string, PropertyMetadata>, own: string[]): NodeLabelsModel | undefined {
+    private nodeLabels(
+        type: Function,
+        properties: Map<string, PropertyMetadata>,
+        own: string[]
+    ): NodeLabelsModel | undefined {
         const fields = [...properties].filter(([, it]) => it.nodeLabels);
         if (fields.length > 1) {
             throw new DrivineError(`${type.name} has ${fields.length} @NodeLabels fields; a fragment may have one.`);
@@ -426,11 +449,15 @@ export class ModelRegistry {
         const fixed = members?.filter((it) => own.includes(it)) ?? [];
         if (fixed.length) {
             throw new DrivineError(
-                `@NodeLabels ${type.name}.${field} names ${fixed.join(', ')}, the fragment's own label: those are fixed.`
+                `@NodeLabels ${type.name}.${field} names ${fixed.join(
+                    ', '
+                )}, the fragment's own label: those are fixed.`
             );
         }
         if (members?.some((it) => it.startsWith('__drivine.'))) {
-            throw new DrivineError(`@NodeLabels ${type.name}.${field} names a label beginning '__drivine.', which is reserved.`);
+            throw new DrivineError(
+                `@NodeLabels ${type.name}.${field} names a label beginning '__drivine.', which is reserved.`
+            );
         }
         return { field, members, isSet: metadata.designType === Set, recordProperty: `__drivine.labels.${field}` };
     }

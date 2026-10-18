@@ -25,3 +25,17 @@ export interface NearestOptions {
     /** maxDepth overrides for a view, by relationship field name. */
     depth?: Record<string, number>;
 }
+
+export interface MatchingOptions {
+    /** How many to return, at most: applied after the filter. */
+    topK: number;
+    /** The least relevance a hit may have, on the [0, 1] scale where the best hit is 1. */
+    threshold?: number;
+    /** A Cypher predicate over the node, `n`, applied after the search. Values go in `bindings`. */
+    where?: string;
+    bindings?: Record<string, any>;
+    /** A property of the full-text index to search: needed only when the fragment declares more than one. */
+    property?: string;
+    /** maxDepth overrides for a view, by relationship field name. */
+    depth?: Record<string, number>;
+}

@@ -23,6 +23,9 @@ import {
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['NearestTest', 'Proposition'] })
 class Proposition {
     @NodeId() id: string;

@@ -27,6 +27,8 @@ export interface SchemaGrammar {
     readonly engine: string;
     /** Whether the engine indexes a label's properties one by one, so that a composite index is one per property. */
     readonly rangesPerProperty?: boolean;
+    /** Whether a full-text index over several properties is made over the whole label, and reported with none. */
+    readonly fullTextOverLabel?: boolean;
     /** Whether a uniqueness constraint needs a range index over its properties, made first. */
     readonly uniqueNeedsRange?: boolean;
     /** A statement listing range indexes, and how to read its rows. */
@@ -41,7 +43,8 @@ export interface SchemaGrammar {
     createVector(spec: VectorIndexSpec): string[];
     dropVector(spec: VectorIndexSpec): string[];
     createFullText(spec: FullTextIndexSpec): string[];
-    dropFullText(spec: FullTextIndexSpec): string[];
+    /** Drops the full-text index; `name` is the engine's name for it, where the engine names items. */
+    dropFullText(spec: FullTextIndexSpec, name?: string): string[];
 }
 
 /** A command for the engine's driver, rather than a Cypher statement. */
@@ -75,21 +78,23 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
         read: (rows) => rows.map((it) => ({ label: it.labels[0], properties: it.properties, name: it.name }))
     },
     createVector: (spec) => [
-        `CREATE VECTOR INDEX ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(
+        `CREATE VECTOR INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(
             spec
         )}) OPTIONS {indexConfig: ` +
             `{\`vector.dimensions\`: ${
                 spec.dimensions
             }, \`vector.similarity_function\`: '${spec.similarity.toLowerCase()}'}}`
     ],
-    dropVector: (spec) => [`DROP INDEX ${itemName(spec)} IF EXISTS`],
+    dropVector: (spec) => [`DROP INDEX ${quoteName(itemName(spec))} IF EXISTS`],
     createFullText: (spec) => [
-        `CREATE FULLTEXT INDEX ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} ON EACH [${props(spec)}]`
+        `CREATE FULLTEXT INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON EACH [${props(spec)}]`
     ],
-    dropFullText: (spec) => [`DROP INDEX ${itemName(spec)} IF EXISTS`],
+    dropFullText: (spec, name) => [`DROP INDEX ${quoteName(name ?? itemName(spec))} IF EXISTS`],
     engine: 'Neo4j',
-    createRange: (spec) => [`CREATE INDEX ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(spec)})`],
-    dropRange: (spec) => [`DROP INDEX ${itemName(spec)} IF EXISTS`],
+    createRange: (spec) => [
+        `CREATE INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(spec)})`
+    ],
+    dropRange: (spec) => [`DROP INDEX ${quoteName(itemName(spec))} IF EXISTS`],
     listRanges: {
         statement:
             "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, owningConstraint WHERE type = 'RANGE' " +
@@ -98,9 +103,13 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
     },
     createUnique: (spec) => {
         const required = spec.properties.length === 1 ? props(spec) : `(${props(spec)})`;
-        return [`CREATE CONSTRAINT ${itemName(spec)} IF NOT EXISTS FOR ${pattern(spec)} REQUIRE ${required} IS UNIQUE`];
+        return [
+            `CREATE CONSTRAINT ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(
+                spec
+            )} REQUIRE ${required} IS UNIQUE`
+        ];
     },
-    dropUnique: (spec) => [`DROP CONSTRAINT ${itemName(spec)} IF EXISTS`],
+    dropUnique: (spec) => [`DROP CONSTRAINT ${quoteName(itemName(spec))} IF EXISTS`],
     listUniques: {
         statement:
             "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties WHERE type IN ['UNIQUENESS', 'NODE_PROPERTY_UNIQUENESS'] " +
@@ -110,6 +119,7 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
 };
 
 export const MEMGRAPH_SCHEMA: SchemaGrammar = {
+    fullTextOverLabel: true,
     listVectors: {
         // Columns: index_name, label (as ':Label'), property, capacity, dimension, metric, ...
         statement: 'SHOW VECTOR INDEX INFO',
@@ -131,20 +141,24 @@ export const MEMGRAPH_SCHEMA: SchemaGrammar = {
                 .map((it) => ({ name: /name: ([^)]+)/.exec(it[0])?.[1], label: it[1], properties: [it[2]].flat() }))
     },
     createVector: (spec) => [
-        `CREATE VECTOR INDEX ${itemName(spec)} ON ${labelExpression([spec.label])}(${quoteName(
+        `CREATE VECTOR INDEX ${quoteName(itemName(spec))} ON ${labelExpression([spec.label])}(${quoteName(
             spec.properties[0]
         )}) WITH CONFIG ` +
             `{"dimension": ${spec.dimensions}, "capacity": ${spec.capacity ?? 1024}, "metric": "${
                 spec.similarity === 'COSINE' ? 'cos' : 'l2sq'
             }"}`
     ],
-    dropVector: (spec) => [`DROP VECTOR INDEX ${itemName(spec)}`],
+    dropVector: (spec) => [`DROP VECTOR INDEX ${quoteName(itemName(spec))}`],
+    // A text index over several properties indexes only the first (Memgraph 3.x), so one over several is made over the
+    // whole label, which indexes every property: a search may then match the label's other text too.
     createFullText: (spec) => [
-        `CREATE TEXT INDEX ${itemName(spec)} ON ${labelExpression([spec.label])}(${spec.properties
-            .map(quoteName)
-            .join(', ')})`
+        spec.properties.length === 1
+            ? `CREATE TEXT INDEX ${quoteName(itemName(spec))} ON ${labelExpression([spec.label])}(${quoteName(
+                  spec.properties[0]
+              )})`
+            : `CREATE TEXT INDEX ${quoteName(itemName(spec))} ON ${labelExpression([spec.label])}`
     ],
-    dropFullText: (spec) => [`DROP TEXT INDEX ${itemName(spec)}`],
+    dropFullText: (spec, name) => [`DROP TEXT INDEX ${name ?? itemName(spec)}`],
     engine: 'Memgraph',
     createRange: (spec) => [
         `CREATE INDEX ON ${labelExpression([spec.label])}(${spec.properties.map(quoteName).join(', ')})`
