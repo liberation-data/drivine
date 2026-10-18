@@ -63,8 +63,9 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
     engine: 'FalkorDB',
     existenceCheck: (pattern: string) => `size([${pattern} | 1]) > 0`,
     viewProjection: 'CALL_SUBQUERY',
-    // FalkorDB runs one write at a time, so a write is never turned away by another.
-    contended: () => false
+    // FalkorDB runs one query at a time, but turns a write away while another is in progress, as its constraint
+    // commands do under load.
+    contended: (failure: unknown) => failure instanceof Error && /another write is in progress/i.test(failure.message)
 };
 
 export function cypherGrammarFor(type: DatabaseType): CypherGrammar {
