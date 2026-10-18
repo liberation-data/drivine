@@ -164,7 +164,8 @@
         ],
         "roots": [
             "<rootDir>/src",
-            "<rootDir>/test"
+            "<rootDir>/test",
+            "<rootDir>/sample"
         ],
         "coverageDirectory": "./coverage",
         "setupFilesAfterEnv": [],
