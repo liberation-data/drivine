@@ -1,5 +1,5 @@
 import { DrivineError } from '@/DrivineError';
-import { Scope, step } from '@/dsl/ModelScope';
+import { Scope, step, storedName } from '@/dsl/ModelScope';
 import { allOfOne, Condition, Operator, OrderTerm, RootRefs, Test, Where } from '@/dsl/Refs';
 import { ClassRef } from '@/query/QuerySpecification';
 
@@ -26,6 +26,16 @@ function nodeRefs(scope: Scope, path: string[], related: boolean): any {
                 if (key === 'instanceOf') {
                     return (type: ClassRef) => at(path, { kind: 'INSTANCE_OF', type });
                 }
+                if (key === 'hasAnyLabel') {
+                    return (...labels: string[]) => at(path, { kind: 'ANY_LABEL', labels });
+                }
+                if (key === 'property') {
+                    return (name: string) => propertyRef([...path, storedName(name)]);
+                }
+                if (key === 'predicate') {
+                    return (name: string, operator: Operator, value?: unknown) =>
+                        propertyRef([...path, storedName(name)]).test(operator, value);
+                }
                 if (key === 'any' || key === 'none') {
                     return (conditions: (node: any) => Where) => {
                         if (!related) {
@@ -35,7 +45,7 @@ function nodeRefs(scope: Scope, path: string[], related: boolean): any {
                                 )} is not one.`
                             );
                         }
-                        const inner = allOfOne(conditions(nodeRefs(scope, [], true)));
+                        const inner = allOfOne(conditions(nodeRefs(scope, [], false)));
                         return at(path, { kind: 'QUANTIFY', negate: key === 'none', conditions: [inner] });
                     };
                 }
@@ -70,6 +80,7 @@ function propertyRef(path: string[]): any {
             return at(path, { kind: 'COMPARE', operator, value });
         };
     return {
+        test: (operator: Operator, value?: unknown) => compare(operator)(value),
         eq: compare('EQ'),
         neq: compare('NEQ'),
         gt: compare('GT'),

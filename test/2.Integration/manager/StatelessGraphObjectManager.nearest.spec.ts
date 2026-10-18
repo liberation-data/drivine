@@ -139,6 +139,12 @@ describe.each(graphEngines())('loadNearest on $type', (engine) => {
             bindings: { context: 'b' }
         });
         expect(scoped.map((it) => it.value.id)).toEqual(['east']);
+        const typed = await gom.loadNearest(Proposition, [1, 0.1, 0], {
+            topK: 1,
+            searchK: 4,
+            where: (q) => q.contextId.eq('b')
+        });
+        expect(typed.map((it) => it.value.id)).toEqual(['east']);
         await expect(gom.loadNearest(Proposition, [1, 0, 0], { topK: 3, searchK: 2 })).rejects.toThrow(
             /searchK must be/
         );

@@ -2,7 +2,7 @@ import { GraphBackend, Page } from '@/backend/GraphBackend';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { NODE_ALIAS } from '@/backend/CypherBackend';
 import { QueryRenderer } from '@/dsl/QueryRenderer';
-import { QueryFn } from '@/dsl/Refs';
+import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
@@ -277,8 +277,9 @@ export class StatelessGraphObjectManager {
      * its score, nearest first. A view's required relationships, `threshold` and `where` filter after the search, so a
      * search can return fewer than `topK`: `searchK` widens it.
      */
-    async loadNearest<T>(type: ClassRef<T>, vector: number[], options: NearestOptions): Promise<Scored<T>[]> {
+    async loadNearest<T>(type: ClassRef<T>, vector: number[], options: NearestOptions<T>): Promise<Scored<T>[]> {
         const target = this.modelOf(type);
+        const filter = this.condition(target, options.where, options.bindings);
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const { property, similarity }: { property: string; similarity: 'COSINE' | 'EUCLIDEAN' } = this.searchedVector(
             root,
@@ -288,7 +289,7 @@ export class StatelessGraphObjectManager {
             label: options.partitionLabel ?? root.labels[0],
             property,
             similarity,
-            where: options.where,
+            where: filter.where,
             threshold: options.threshold !== undefined,
             k: options.searchK ?? options.topK,
             limit: options.searchK !== undefined ? options.topK : undefined,
@@ -296,7 +297,7 @@ export class StatelessGraphObjectManager {
         });
         const rows = await this.persistenceManager.query<{ value: any; score: number }>(
             statement.spec({
-                ...options.bindings,
+                ...filter.bindings,
                 _vector: vector,
                 _threshold: options.threshold
             })
@@ -315,8 +316,9 @@ export class StatelessGraphObjectManager {
      * relevance, scaled so the best hit is 1, most relevant first. The text is the engine's full-text query language
      * (Lucene on Neo4j), passed as it is: escape user input yourself.
      */
-    async loadMatching<T>(type: ClassRef<T>, text: string, options: MatchingOptions): Promise<Scored<T>[]> {
+    async loadMatching<T>(type: ClassRef<T>, text: string, options: MatchingOptions<T>): Promise<Scored<T>[]> {
         const target = this.modelOf(type);
+        const filter = this.condition(target, options.where, options.bindings);
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const indexes = root.fullTextIndexes;
         const chosen = options.property
@@ -337,13 +339,13 @@ export class StatelessGraphObjectManager {
         const statement = this.backend.matching(target, {
             label: root.labels[0],
             properties: chosen,
-            where: options.where,
+            where: filter.where,
             threshold: options.threshold !== undefined,
             limit: options.topK,
             depth: options.depth
         });
         const rows = await this.persistenceManager.query<{ value: any; score: number }>(
-            statement.spec({ ...options.bindings, _text: text, _threshold: options.threshold })
+            statement.spec({ ...filter.bindings, _text: text, _threshold: options.threshold })
         );
         return rows.map((row) => ({
             value:
@@ -419,8 +421,9 @@ export class StatelessGraphObjectManager {
      * It never makes a node, is not checked against a stamp, and hands none back: a node it changed has a new stamp,
      * so an object loaded before is refused when saved. On a view, the fields are its root's.
      */
-    async patch(type: ClassRef, id: unknown, options: PatchOptions): Promise<PatchResult> {
+    async patch<T>(type: ClassRef<T>, id: unknown, options: PatchOptions<T>): Promise<PatchResult> {
         const target = this.modelOf(type);
+        const filter = this.condition(target, options.where, options.bindings);
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const set: Record<string, any> = {};
         const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
@@ -430,11 +433,11 @@ export class StatelessGraphObjectManager {
             set[root.graphProperties.get(field) ?? field] =
                 value != null && root.jsonPacked.has(field) ? JSON.stringify(value) : value;
         }
-        const statement = PatchStatements.one(root, this.backend.grammar, options.where);
+        const statement = PatchStatements.one(root, this.backend.grammar, filter.where);
         const split = splitVectors(root, set);
         return this.whenUncontended(async () =>
             this.persistenceManager.getOne<PatchResult>(
-                statement.spec({ ...options.bindings, id, set: split.props, vectors: split.vectors })
+                statement.spec({ ...filter.bindings, id, set: split.props, vectors: split.vectors })
             )
         );
     }
@@ -569,13 +572,15 @@ export class StatelessGraphObjectManager {
      * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
      * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
      */
-    async delete(
-        type: ClassType,
+    async delete<T>(
+        type: ClassRef<T>,
         id: unknown,
-        options: { where?: string; bindings?: Record<string, any>; cascade?: CascadeType } = {}
+        options: { where?: string | WhereFn<T>; bindings?: Record<string, any>; cascade?: CascadeType } = {}
     ): Promise<number> {
-        const statement = this.backend.delete(this.modelOf(type), options.where, options.cascade);
-        return this.persistenceManager.getOne<number>(statement.spec({ ...options.bindings, id }));
+        const target = this.modelOf(type);
+        const filter = this.condition(target, options.where, options.bindings);
+        const statement = this.backend.delete(target, filter.where, options.cascade);
+        return this.persistenceManager.getOne<number>(statement.spec({ ...filter.bindings, id }));
     }
 
     /**
@@ -592,6 +597,18 @@ export class StatelessGraphObjectManager {
         return this.persistenceManager.getOne<number>(
             this.backend.deleteAll(target, filter.where).spec(filter.bindings)
         );
+    }
+
+    /** A condition as Cypher over the root, `n`, with its values: written from the class's references, or as given. */
+    private condition<T>(
+        target: TargetModel,
+        where: string | WhereFn<T> | undefined,
+        bindings: Record<string, any> = {}
+    ): { where?: string; bindings: Record<string, any> } {
+        if (typeof where !== 'function') {
+            return { where, bindings };
+        }
+        return QueryRenderer.renderWhere(where, target, this.backend.grammar, NODE_ALIAS);
     }
 
     /**
@@ -762,7 +779,7 @@ export class StatelessGraphObjectManager {
     /** The @VectorIndex field a nearest search uses, with its options checked. */
     private searchedVector(
         root: ReturnType<ModelRegistry['fragment']>,
-        options: NearestOptions
+        options: Omit<NearestOptions, 'where'>
     ): { property: string; similarity: 'COSINE' | 'EUCLIDEAN' } {
         const fields = [...root.vectorFields.entries()];
         const chosen = options.property

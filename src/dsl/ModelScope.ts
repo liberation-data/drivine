@@ -35,7 +35,23 @@ export function scopeOf(related: RelatedModel): Scope {
     }
 }
 
+/** What a path holds for a property named at run time, by its stored name, rather than a field. */
+const STORED = '\u0000';
+
+export function storedName(name: string): string {
+    return `${STORED}${name}`;
+}
+
 export function step(scope: Scope, name: string): Step {
+    if (name.startsWith(STORED)) {
+        const property = name.slice(STORED.length);
+        return {
+            kind: 'PROPERTY',
+            property,
+            on: scope.kind === 'REL_FRAGMENT' ? 'RELATIONSHIP' : 'NODE',
+            jsonPacked: false
+        };
+    }
     switch (scope.kind) {
         case 'VIEW':
             return viewStep(scope.model, name);

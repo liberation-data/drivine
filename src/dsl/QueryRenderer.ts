@@ -4,7 +4,7 @@ import { labelsOf, pattern, target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
 import { Scope, scopeOf, Step, step } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
-import { allOfOne, Condition, Operator, OrderTerm, Query, QueryFn, Test } from '@/dsl/Refs';
+import { allOfOne, Condition, Operator, OrderTerm, Query, QueryFn, Test, WhereFn } from '@/dsl/Refs';
 import { classLabels } from '@/model/InstanceOf';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
@@ -32,6 +32,19 @@ interface Aliases {
 export class QueryRenderer {
     private readonly bindings: Record<string, any> = {};
     private aliasCount = 0;
+
+    /** Asks the condition of the class's references and writes it, with the values it binds. */
+    static renderWhere<T>(
+        fn: WhereFn<T>,
+        model: TargetModel,
+        grammar: CypherGrammar,
+        alias: string
+    ): { where: string; bindings: Record<string, any> } {
+        const scope = scopeOf(model);
+        const renderer = new QueryRenderer(grammar);
+        const where = renderer.where(allOfOne(fn(rootRefs<T>(scope))), scope, alias);
+        return { where, bindings: renderer.bindings };
+    }
 
     /** Asks the query of the class's references and writes what it gives. */
     static render<T>(fn: QueryFn<T>, model: TargetModel, grammar: CypherGrammar, alias: string): RenderedQuery {
@@ -170,6 +183,8 @@ export class QueryRenderer {
         switch (test.kind) {
             case 'INSTANCE_OF':
                 return `${aliases.node}${labelExpression(classLabels(test.type))}`;
+            case 'ANY_LABEL':
+                return `any(_l IN labels(${aliases.node}) WHERE _l IN ${this.bind([...test.labels])})`;
             case 'QUANTIFY':
                 throw new DrivineError(`any and none follow a relationship; ${where} is not one.`);
             default:

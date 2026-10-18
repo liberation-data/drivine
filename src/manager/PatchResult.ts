@@ -1,3 +1,5 @@
+import { WhereFn } from '@/dsl/Refs';
+
 /**
  * What a patch did to one node. A patch holds nothing afterwards, so it hands back no stamp.
  */
@@ -10,15 +12,16 @@ export interface PatchResult {
     changed: boolean;
 }
 
-export interface PatchOptions {
+export interface PatchOptions<T = any> {
     /** Fields of the object (of a view, its root) to set, by field name. A null value clears the field. */
     set?: Record<string, any>;
     /** Fields to remove. */
     clear?: string[];
     /**
-     * A Cypher predicate over the node, `n`, that must hold for the patch to be applied: read under the node's lock.
-     * On a view it may name the view's relationships, as a pattern from `n`. Values go in `bindings`.
+     * What must hold for the patch to be applied, read under the node's lock: a condition over the class's references
+     * (on a view, it may test the view's relationships), or a Cypher predicate over the node, `n`, with its values in
+     * `bindings`.
      */
-    where?: string;
+    where?: string | WhereFn<T>;
     bindings?: Record<string, any>;
 }

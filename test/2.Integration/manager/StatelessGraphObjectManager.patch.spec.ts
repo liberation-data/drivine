@@ -1,4 +1,6 @@
 import {
+    anyOf,
+    RootRefs,
     CypherBackend,
     cypherGrammarFor,
     GraphProperty,
@@ -145,6 +147,28 @@ describe.each(graphEngines())('patch and patchAll on $type', (engine) => {
                 changed: false
             });
             expect((await gom.load(Message, 'm1'))!.narration).toEqual('Once upon a time');
+        });
+
+        it('should patch where a condition over the references holds', async () => {
+            const advanceTo = (to: number) => ({
+                set: { lastActivity: to },
+                where: (q: RootRefs<Session>) => anyOf(q.lastActivity.isNull(), q.lastActivity.lt(to))
+            });
+            expect((await gom.patch(Session, 's1', advanceTo(200))).applied).toBe(true);
+            expect((await gom.patch(Session, 's1', advanceTo(150))).applied).toBe(false);
+            expect((await gom.load(Session, 's1'))!.lastActivity).toEqual(200);
+            await gom.save(
+                Object.assign(new MessageInSession(), {
+                    message: Object.assign(new Message(), { id: 'm1' }),
+                    session: Object.assign(new Session(), { id: 's1' })
+                })
+            );
+            const narrate = (session: string) => ({
+                set: { narration: 'Told' },
+                where: (q: RootRefs<MessageInSession>) => q.session.id.eq(session)
+            });
+            expect((await gom.patch(MessageInSession, 'm1', narrate('s2'))).applied).toBe(false);
+            expect((await gom.patch(MessageInSession, 'm1', narrate('s1'))).applied).toBe(true);
         });
     });
 

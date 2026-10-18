@@ -30,11 +30,27 @@ export type RefOf<V> = [V] extends [string]
     ? NodeRefs<V>
     : ValueRef<V>;
 
-/** The references of the class a query loads, and a test of the root's class. */
-export type RootRefs<T> = Refs<T> & {
-    /** The root is of the class, or a subclass: it carries all of the class's labels. */
+/**
+ * What every node's references offer beside its fields. A field named as one of these is reached through `property`.
+ */
+export interface NodeTests {
+    /** The node is of the class, or a subclass: it carries all of the class's labels. */
     instanceOf(type: ClassRef): Condition;
-};
+    /** The node carries at least one of the labels. */
+    hasAnyLabel(...labels: string[]): Condition;
+    /**
+     * A property by the name it is stored under, known only at run time: a bag entry's whole name
+     * (`metadata.source`), say. Of a relationship fragment, the relationship's property.
+     */
+    property(name: string): ComparableRef<any>;
+    /** A test of a property by its stored name, from an operator known only at run time. */
+    predicate(name: string, operator: Operator, value?: unknown): Condition;
+}
+
+type NodeTestName = keyof NodeTests;
+
+/** The references of the class a query loads, and the tests of its root. */
+export type RootRefs<T> = Omit<Refs<T>, NodeTestName> & NodeTests;
 
 /** A property: compared to values, and ordered by. */
 export interface ValueRef<V> {
@@ -77,11 +93,11 @@ export interface ListRef<U> {
  * meets it: `q.assignees.name.eq('Kent')`. `any` holds when one node meets all of a set of conditions together, `none`
  * when no node meets them.
  */
-export type NodeRefs<V> = Refs<V> & {
-    any(conditions: (node: Refs<V>) => Where): Condition;
-    none(conditions: (node: Refs<V>) => Where): Condition;
-    instanceOf(type: ClassRef): Condition;
-};
+export type NodeRefs<V> = Omit<Refs<V>, NodeTestName | 'any' | 'none'> &
+    NodeTests & {
+        any(conditions: (node: NodeRefs<V>) => Where): Condition;
+        none(conditions: (node: NodeRefs<V>) => Where): Condition;
+    };
 
 /** A condition, or several, all of which must hold. */
 export type Where = Condition | readonly Condition[];
@@ -123,7 +139,8 @@ export type Operator =
 export type Test =
     | { readonly kind: 'COMPARE'; readonly operator: Operator; readonly value?: unknown }
     | { readonly kind: 'QUANTIFY'; readonly negate: boolean; readonly conditions: readonly Condition[] }
-    | { readonly kind: 'INSTANCE_OF'; readonly type: ClassRef };
+    | { readonly kind: 'INSTANCE_OF'; readonly type: ClassRef }
+    | { readonly kind: 'ANY_LABEL'; readonly labels: readonly string[] };
 
 /** One term of an order, by a property of the root. */
 export interface OrderTerm {
@@ -149,6 +166,9 @@ export interface Query {
     /** maxDepth overrides for recursive relationships, by field name. */
     depth?: Record<string, number>;
 }
+
+/** A condition written against the references of the class: `q => q.person.name.eq('Kent')`. */
+export type WhereFn<T> = (q: RootRefs<T>) => Where;
 
 /** A query written against the references of the class it loads: `q => ({where: q.person.name.eq('Kent')})`. */
 export type QueryFn<T> = (q: RootRefs<T>) => Query;

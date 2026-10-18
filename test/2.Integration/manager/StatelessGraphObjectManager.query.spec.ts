@@ -182,6 +182,26 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             expect(ids(await gom.loadAll(Issue, (q) => ({ where: not(q.instanceOf(Bug)) })))).toEqual(['i1', 'i3']);
         });
 
+        it('should test properties named at run time, and any of some labels', async () => {
+            expect(
+                ids(await gom.loadAll(Issue, (q) => ({ where: q.property('metadata.source').eq('github') })))
+            ).toEqual(['i1']);
+            expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.property('issue_no').gte(103) })))).toEqual([
+                'i3',
+                'i4'
+            ]);
+            expect(
+                ids(await gom.loadAll(Issue, (q) => ({ where: q.predicate('title', 'STARTS_WITH', 'Typo') })))
+            ).toEqual(['i3']);
+            expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.predicate('priority', 'IS_NULL') })))).toEqual([
+                'i3'
+            ]);
+            expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.hasAnyLabel('Bug', 'Feature') })))).toEqual([
+                'i2',
+                'i4'
+            ]);
+        });
+
         it('should order, skip and limit', async () => {
             const byNumber = await gom.loadAll(Issue, (q) => ({ orderBy: q.number.desc() }));
             expect(byNumber.map((it) => it.id)).toEqual(['i4', 'i3', 'i2', 'i1']);
@@ -281,6 +301,19 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             const page = await gom.loadAll(IssueView, (q) => ({ orderBy: q.issue.number.asc(), limit: 1 }));
             expect(page.map((it) => it.issue.id)).toEqual(['i1']);
             expect(page[0].assignees.map((it) => it.person.id).sort()).toEqual(['ada', 'kent']);
+        });
+
+        it("should test a relationship's properties named at run time", async () => {
+            const leads = await gom.loadAll(IssueView, (q) => ({ where: q.assignees.property('since_year').lt(2021) }));
+            expect(viewIds(leads)).toEqual(['i1']);
+        });
+
+        it('should delete by id where a condition holds', async () => {
+            await pm.execute(
+                new QuerySpecification("CREATE (:QueryTest:Issue {id: 'tmp', title: 't', state: 'open', issue_no: 9})")
+            );
+            expect(await gom.delete(IssueView, 'tmp', { where: (q) => q.issue.state.eq('closed') })).toBe(0);
+            expect(await gom.delete(IssueView, 'tmp', { where: (q) => q.issue.state.eq('open') })).toBe(1);
         });
 
         it('should count views a query finds', async () => {
