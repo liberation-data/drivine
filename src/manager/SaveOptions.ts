@@ -18,8 +18,11 @@ export interface SaveOptions<T> {
      * field does not is removed. Without it, a save only adds. An empty list removes every relationship of the field;
      * a single-valued field that is null or undefined removes its relationship. A list field to replace must not be
      * null or undefined.
+     *
+     * 'all' replaces every relationship field of the view itself. It is refused for an object whose root carries no
+     * stamp. The lists of a view nested in the one saved only add.
      */
-    replace?: (keyof T & string)[];
+    replace?: (keyof T & string)[] | 'all';
     /** What becomes of a target whose relationship `replace` removed. Defaults to KEEP. */
     removedTargets?: RemovedTargets;
 }

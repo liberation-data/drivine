@@ -21,6 +21,13 @@ import { ClassType } from '@/query/QuerySpecification';
  * A filter is a Cypher predicate over the node, which statements call `n`: `"n.name STARTS WITH $prefix"`. Values
  * go in `bindings`, never into the predicate's text.
  */
+/** The row a save statement returns: see SaveStatement. */
+interface SaveResult {
+    found: string;
+    now: string;
+    related: { before: { id: any; stamp: string }[]; after: { id: any; stamp: string }[] }[];
+}
+
 export class StatelessGraphObjectManager {
     private readonly mapper = new GraphObjectMapper();
 
@@ -52,7 +59,9 @@ export class StatelessGraphObjectManager {
     async load<T>(type: ClassType<T>, id: unknown): Promise<T | undefined> {
         const target = this.modelOf(type);
         const statement =
-            target.kind === 'GRAPH_VIEW' ? this.backend.loadView(target.model) : this.backend.loadFragment(target.model);
+            target.kind === 'GRAPH_VIEW'
+                ? this.backend.loadView(target.model)
+                : this.backend.loadFragment(target.model);
         const rows = await this.persistenceManager.query<any>(statement.spec({ id }));
         if (rows.length > 1) {
             throw new DrivineError(`${rows.length} ${type.name} roots have the id ${String(id)}. An id is one node's.`);
@@ -84,9 +93,8 @@ export class StatelessGraphObjectManager {
      */
     async save<T extends object>(object: T, options: SaveOptions<T> = {}): Promise<T> {
         const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options);
-        const run = async (): Promise<{ found: string; now: string }[]> =>
-            this.persistenceManager.query<any>(statement.spec());
-        let rows: { found: string; now: string }[];
+        const run = async (): Promise<SaveResult[]> => this.persistenceManager.query<SaveResult>(statement.spec());
+        let rows: SaveResult[];
         try {
             rows = TransactionContextHolder.getInstance().currentTransaction
                 ? await run()
@@ -109,9 +117,14 @@ export class StatelessGraphObjectManager {
         if (!rows.length) {
             throw await this.staleObject(statement);
         }
-        const { found, now }: { found: string; now: string } = rows[0];
+        const result: SaveResult = rows[0];
+        this.handBackRelated(object, statement, result);
         if (statement.root.stampField) {
-            statement.rootObject[statement.root.stampField] = Stamps.handedBack(statement.expectedStamp, found, now);
+            statement.rootObject[statement.root.stampField] = Stamps.handedBack(
+                statement.expectedStamp,
+                result.found,
+                result.now
+            );
         }
         return object;
     }
@@ -136,6 +149,44 @@ export class StatelessGraphObjectManager {
      */
     async deleteAll(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
         return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
+    }
+
+    /**
+     * Gives each related node of a stamped class the stamp the save left, as far as it was current: see
+     * Stamps.handedBack. A node the save made (absent before) is handed its whole stamp.
+     */
+    private handBackRelated(object: any, statement: SaveStatement, result: SaveResult): void {
+        statement.stampedModels.forEach((model, index) => {
+            const { before, after }: SaveResult['related'][number] = result.related[index];
+            const found = new Map(before.map((it) => [it.id, it.stamp]));
+            const now = new Map(after.map((it) => [it.id, it.stamp]));
+            for (const node of this.nodesOf(object, model)) {
+                const id = node[model.nodeIdField!];
+                if (now.has(id)) {
+                    node[model.stampField!] = Stamps.handedBack(
+                        node[model.stampField!],
+                        found.get(id) ?? '',
+                        now.get(id)!
+                    );
+                }
+            }
+        });
+    }
+
+    /** The instances of a fragment class the object holds, at any depth, the root included. */
+    private nodesOf(object: any, model: ReturnType<ModelRegistry['fragment']>, seen: Set<any> = new Set()): any[] {
+        if (object == null || typeof object !== 'object' || seen.has(object)) {
+            return [];
+        }
+        seen.add(object);
+        if (object instanceof model.type) {
+            return [object];
+        }
+        return Object.values(object).flatMap((value) =>
+            Array.isArray(value)
+                ? value.flatMap((it) => this.nodesOf(it, model, seen))
+                : this.nodesOf(value, model, seen)
+        );
     }
 
     private async staleObject(statement: SaveStatement): Promise<StaleObjectException> {

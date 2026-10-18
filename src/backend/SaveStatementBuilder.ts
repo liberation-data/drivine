@@ -10,8 +10,12 @@ import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { Stamps } from '@/model/Stamps';
 import { changes, EXPECTED, LOCK, MADE, relink, restamp, STAMP } from '@/backend/CypherStamps';
 
-/** What every WITH after the root carries: the root, and the stamp it was found with. */
-const CARRY = 'n, _found';
+
+/** A stamped fragment among the related nodes a save writes, and its place in the statement. */
+interface StampedNodes {
+    index: number;
+    model: FragmentModel;
+}
 
 /** One FOREACH of the statement: the relationship it writes, and the FOREACHes nested in it for a related view. */
 interface WritePart {
@@ -35,13 +39,20 @@ interface WritePart {
 export class SaveStatementBuilder {
     private count = 0;
     private readonly bindings: Record<string, any> = {};
+    /** The stamped related fragments, each read before and after the writes: see readStamps. */
+    private readonly stamped: StampedNodes[] = [];
+
+    /** What every WITH after the root carries: the root, the stamp it was found with, and related stamps read. */
+    private get carry(): string {
+        return ['n', '_found', ...this.stamped.map((it) => `before${it.index}`)].join(', ');
+    }
 
     constructor(private readonly grammar: CypherGrammar) {}
 
     build(target: TargetModel, object: any, options: SaveOptions<any> = {}): SaveStatement {
         this.bindings._stamp = Stamps.fresh();
         if (target.kind === 'NODE_FRAGMENT') {
-            if (options.replace?.length) {
+            if (options.replace === 'all' || options.replace?.length) {
                 throw new DrivineError(`replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`);
             }
             const head = this.root(target.model, object, false);
@@ -52,12 +63,16 @@ export class SaveStatementBuilder {
         if (root == null) {
             throw new DrivineError(`${view.type.name}.${view.rootField}, the root, is ${root}. A view is saved from its root.`);
         }
-        const parts = [this.root(view.root, root, !!options.replace?.length)];
-        parts.push(...this.removals(view, object, options));
+        const replace = this.replacedFields(view, object, options);
+        const parts = [this.root(view.root, root, replace.length > 0)];
         const writes = this.writeParts(view, []);
-        parts.push(`WITH ${CARRY}`);
         for (const part of writes) {
             this.bindings[part.key] = this.rows(part, object[part.rel.field]);
+        }
+        parts.push(...this.readStamps('before'));
+        parts.push(...this.removals(view, object, replace, options.removedTargets));
+        parts.push(`WITH ${this.carry}`);
+        for (const part of writes) {
             parts.push(this.forEach(part, 'n', `$${part.key}`, 'NODES_AND_EDGES'));
         }
         // Relationship properties are set in a second pass, after a WITH. FalkorDB can't bind a relationship merged
@@ -65,15 +80,63 @@ export class SaveStatementBuilder {
         // relationship does.
         const withProperties = writes.filter(leadsToRelationshipFragment);
         if (withProperties.length) {
-            parts.push(`WITH ${CARRY}`);
+            parts.push(`WITH ${this.carry}`);
             parts.push(...withProperties.map((part) => this.forEach(part, 'n', `$${part.key}`, 'EDGE_PROPERTIES')));
         }
-        parts.push(`RETURN {found: _found, now: n.${STAMP}} AS result`);
+        parts.push(...this.readStamps('after'));
+        const related = this.stamped.map((it) => `{before: before${it.index}, after: after${it.index}}`);
+        parts.push(`RETURN {found: _found, now: n.${STAMP}, related: [${related.join(', ')}]} AS result`);
         return this.statement(parts, view.root, root);
     }
 
+    /**
+     * The relationship fields to trim: those named, or every one of the view's for 'all', which needs an object that
+     * carries a stamp, since the lists of an object built from scratch are its defaults and not what the store holds.
+     */
+    private replacedFields(view: GraphViewModel, object: any, options: SaveOptions<any>): string[] {
+        if (options.replace !== 'all') {
+            return options.replace ?? [];
+        }
+        const root = object[view.rootField];
+        if (!view.root.stampField || root?.[view.root.stampField] == null) {
+            throw new DrivineError(
+                `replace: 'all' needs a ${view.type.name} whose root carries a stamp: an object built from scratch holds ` +
+                    `its defaults, not what the store holds. Load it first, or name the fields to replace.`
+            );
+        }
+        return view.relationships.map((it) => it.field);
+    }
+
+    /**
+     * Reads the stamp of each stamped related node the save writes, as `{id, stamp}` maps: `before` the writes, into
+     * `before<i>`, carried to the end, and `after`, into `after<i>`. A node missing from `before` is one the save made.
+     */
+    private readStamps(when: 'before' | 'after'): string[] {
+        return this.stamped.flatMap((it) => {
+            const a = `s${when[0]}${it.index}`;
+            // Before, only the reads made so far are there to carry.
+            const carried =
+                when === 'before'
+                    ? ['n', '_found', ...this.stamped.slice(0, it.index).map((done) => `before${done.index}`)].join(', ')
+                    : this.carry;
+            return [
+                `WITH ${carried}`,
+                `OPTIONAL MATCH (${a}${labelExpression(it.model.labels)}) WHERE ${a}.${quoteName(idProperty(it.model))} IN $stampIds${it.index}`,
+                `WITH ${carried}, collect(CASE WHEN ${a} IS NOT NULL THEN {id: ${a}.${quoteName(idProperty(it.model))}, ` +
+                    `stamp: coalesce(${a}.${STAMP}, '${Stamps.NEVER_STAMPED}')} END) AS ${when}${it.index}`
+            ];
+        });
+    }
+
     private statement(parts: string[], root: FragmentModel, rootObject: any): SaveStatement {
-        return new SaveStatement(parts.join('\n'), this.bindings, root, rootObject, this.bindings._expected);
+        return new SaveStatement(
+            parts.join('\n'),
+            this.bindings,
+            root,
+            rootObject,
+            this.bindings._expected,
+            this.stamped.map((it) => it.model)
+        );
     }
 
     /**
@@ -90,6 +153,9 @@ export class SaveStatementBuilder {
         if (expected == null) {
             return [
                 `MERGE (n${labels} ${id}) ON CREATE SET n.${MADE} = true`,
+                // The lock is taken unchecked too, so that what the save says it changed is true while another writer
+                // is changing the same node.
+                `SET n.${LOCK} = true REMOVE n.${LOCK}`,
                 `WITH n, CASE WHEN n.${MADE} IS NOT NULL THEN '' ELSE coalesce(n.${STAMP}, '${Stamps.NEVER_STAMPED}') END AS _found`,
                 ...write,
                 `REMOVE n.${MADE}`
@@ -112,10 +178,15 @@ export class SaveStatementBuilder {
         ].join('\n');
     }
 
-    private removals(view: GraphViewModel, object: any, options: SaveOptions<any>): string[] {
+    private removals(
+        view: GraphViewModel,
+        object: any,
+        replace: string[],
+        removedTargets: RemovedTargets | undefined
+    ): string[] {
         const parts: string[] = [];
         const held = this.heldIds(view, object);
-        for (const field of options.replace ?? []) {
+        for (const field of replace) {
             const rel = view.relationships.find((it) => it.field === field);
             if (!rel) {
                 throw new DrivineError(`replace names ${field}, which is not a relationship field of ${view.type.name}.`);
@@ -135,22 +206,22 @@ export class SaveStatementBuilder {
                 .flatMap((it) => items(it, object[it.field]).map((item) => idOf(rootOf(target(it)), nodeOf(it, item))));
             this.bindings[`keep${k}`] = keep;
             parts.push(
-                `WITH ${CARRY}`,
+                `WITH ${this.carry}`,
                 `OPTIONAL MATCH ${pattern(rel, 'n', `d${k}`, `x${k}${labelExpression(rootOf(into).labels)}`)} ` +
                     `WHERE NOT x${k}.${idProp} IN $keep${k}`,
-                `WITH ${CARRY}, collect(d${k}) AS drop${k}, collect(x${k}) AS removed${k}`,
+                `WITH ${this.carry}, collect(d${k}) AS drop${k}, collect(x${k}) AS removed${k}`,
                 `FOREACH (r IN drop${k} | DELETE r)`,
                 `FOREACH (x IN removed${k} | SET ${relink('x')})`,
                 `SET ${relink('n', `size(drop${k}) > 0`)}`
             );
-            if (options.removedTargets === RemovedTargets.DELETE_UNREFERENCED) {
+            if (removedTargets === RemovedTargets.DELETE_UNREFERENCED) {
                 this.bindings.held = held;
                 const y = `y${k}`;
                 parts.push(
-                    `WITH ${CARRY}, removed${k}`,
+                    `WITH ${this.carry}, removed${k}`,
                     `OPTIONAL MATCH (${y}${labelExpression(rootOf(into).labels)}) WHERE ${y} IN removed${k} AND ${y} <> n ` +
                         `AND NOT ${y}.${idProp} IN $held AND NOT ${this.grammar.existenceCheck(referencedAs(rel, y))}`,
-                    `WITH ${CARRY}, collect(${y}) AS unreferenced${k}`,
+                    `WITH ${this.carry}, collect(${y}) AS unreferenced${k}`,
                     `FOREACH (x IN unreferenced${k} | DETACH DELETE x)`
                 );
             }
@@ -211,6 +282,7 @@ export class SaveStatementBuilder {
             }
             const nodeObject = into.kind === 'GRAPH_VIEW' ? node[into.model.rootField] : node;
             const root = rootOf(into);
+            this.stampedIds(root, idOf(root, nodeObject));
             const row: Record<string, any> = {
                 id: idOf(root, nodeObject),
                 props: propsOf(root, nodeObject, stampExcluded(root))
@@ -224,6 +296,22 @@ export class SaveStatementBuilder {
             }
             return row;
         });
+    }
+
+    private stampedIds(model: FragmentModel, id: any): void {
+        if (!model.stampField) {
+            return;
+        }
+        let stamped = this.stamped.find((it) => it.model === model);
+        if (!stamped) {
+            stamped = { index: this.stamped.length, model };
+            this.stamped.push(stamped);
+            this.bindings[`stampIds${stamped.index}`] = [];
+        }
+        const ids: any[] = this.bindings[`stampIds${stamped.index}`];
+        if (!ids.includes(id)) {
+            ids.push(id);
+        }
     }
 
     /** The ids of every node the object holds, at any depth. */

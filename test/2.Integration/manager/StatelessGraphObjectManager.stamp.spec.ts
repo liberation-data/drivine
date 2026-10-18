@@ -143,4 +143,52 @@ describe.each(graphEngines())('@NodeStamp on $type', (engine) => {
         expect(outcomes.filter((it) => it === 'saved').length).toEqual(1);
         expect(outcomes.filter((it) => it instanceof StaleObjectException).length).toEqual(4);
     });
+
+    it('should hand related nodes the stamps the save left', async () => {
+        const saved = await gom.save(Object.assign(new Tagged(), { person: person('moon'), tags: [tag('t1'), tag('t2')] }));
+        expect(saved.tags[0].stamp).toEqual(await stored('t1'));
+        expect(saved.tags[1].stamp).toEqual(await stored('t2'));
+
+        const loaded = (await gom.load(Tagged, 'moon'))!;
+        await gom.save(loaded);
+        for (const it of loaded.tags) {
+            expect(it.stamp).toEqual(await stored(it.id));
+        }
+    });
+
+    it('should leave a related node its old data token when another writer changed it', async () => {
+        await gom.save(Object.assign(new Tagged(), { person: person('moon'), tags: [tag('t1')] }));
+        const mine = (await gom.load(Tagged, 'moon'))!;
+        const carried = mine.tags[0].stamp!;
+        const theirs = (await gom.load(Tag, 't1'))!;
+        await gom.save(Object.assign(theirs, { colour: 'red' }));
+
+        await gom.save(mine);
+        expect(data(mine.tags[0].stamp!)).toEqual(data(carried));
+        await expect(gom.save(mine.tags[0])).rejects.toBeInstanceOf(StaleObjectException);
+    });
+
+    it('should replace every relationship field with all, but only for an object that carries a stamp', async () => {
+        await gom.save(Object.assign(new Tagged(), { person: person('moon'), tags: [tag('t1'), tag('t2')] }));
+        await expect(
+            gom.save(Object.assign(new Tagged(), { person: person('moon'), tags: [] }), { replace: 'all' })
+        ).rejects.toThrow(/replace: 'all' needs a Tagged whose root carries a stamp/);
+
+        const loaded = (await gom.load(Tagged, 'moon'))!;
+        loaded.tags = loaded.tags.filter((it) => it.id === 't2');
+        await gom.save(loaded, { replace: 'all' });
+        expect((await gom.load(Tagged, 'moon'))!.tags.map((it) => it.id)).toEqual(['t2']);
+    });
+
+    it('should leave no lock or mark on a node', async () => {
+        await gom.save(Object.assign(new Tagged(), { person: person('moon'), tags: [tag('t1')] }));
+        const loaded = (await gom.load(Tagged, 'moon'))!;
+        await gom.save(loaded, { replace: ['tags'] });
+        const leftovers = await pm.query(
+            new QuerySpecification(
+                'MATCH (n:StampTest) WHERE n.`__drivine.lock` IS NOT NULL OR n.`__drivine.made` IS NOT NULL RETURN n.id'
+            )
+        );
+        expect(leftovers).toEqual([]);
+    });
 });

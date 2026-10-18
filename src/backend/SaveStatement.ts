@@ -3,8 +3,9 @@ import { FragmentModel } from '@/model/FragmentModel';
 
 /**
  * A save statement, and what the manager needs to read its result: whether the root was checked against a stamp,
- * and which stamp. The statement returns one row, the map `{found, now}`, the root's stamp before and after; a checked save
- * that found the root changed or gone returns none, having written nothing.
+ * and which stamp. The statement returns one row, the map `{found, now, related}`: the root's stamp before and after,
+ * and for each of `stampedModels` the `{id, stamp}` of its nodes before and after. A checked save that found the root
+ * changed or gone returns none, having written nothing.
  */
 export class SaveStatement extends GraphStatement {
     constructor(
@@ -12,7 +13,8 @@ export class SaveStatement extends GraphStatement {
         bindings: Record<string, any>,
         readonly root: FragmentModel,
         readonly rootObject: any,
-        readonly expectedStamp?: string
+        readonly expectedStamp?: string,
+        readonly stampedModels: FragmentModel[] = []
     ) {
         super(text, bindings);
     }
