@@ -275,7 +275,14 @@ Branch: `drivine4j-parity`. Local test DBs (docker): `drivine-falkordb` (`localh
 
 Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as the repo and NestJS already use. Each step lands with unit tests plus integration tests on Neo4j, Memgraph and FalkorDB.
 
-- [ ] 2.1 Decorator metadata model — `@NodeFragment`, `@RelationshipFragment`, `@GraphView`, `@Root`, `@NodeId`, `@GraphRelationship`, `@GraphProperty`, `@GraphTransient`; a metadata registry that reads them, with inheritance
+- [x] 2.1 Decorator metadata model — `src/annotation/` (decorators, metadata storage) and `src/model/` (`FragmentModel`, `RelationshipFragmentModel`, `GraphViewModel`, `RelationshipModel`, `ModelRegistry`). Models are built lazily on first use and cached, so self- and mutually-referencing views resolve; a view that fails its checks isn't cached. Labels are inherited (own first); decorated properties are inherited, a subclass's replacing its superclass's. TS-driven differences from drivine4j:
+  - **Plain properties need no decorator.** Loads will project `n {.*}` and saves will take the instance's own enumerable properties; only special properties are decorated.
+  - **Targets are thunks** (`target: () => Issue`): required for lists (`design:type` is just `Array`), optional for singles (falls back to `design:type`).
+  - **`@TargetNode()`** marks the target of a `@RelationshipFragment` (Kotlin finds it by type).
+  - **`required: true`** on `@GraphRelationship` (TS erases `?:`).
+  - **`Related<T>`** type alias for a forward reference in the same module, as TypeORM's `Relation<T>`: decorator metadata otherwise reads the class before it's declared and throws.
+  - A `@NodeFragment` must have at least one label (no class-name default: minifiers rename classes).
+  - `ClassType<T>` in `query/QuerySpecification` gained a default (`T = any`) and is reused.
 - [ ] 2.2 `GraphBackend` + `CypherBackend` + `CypherGrammar` (Neo4j, Memgraph, FalkorDB): `loadAll` / `load` / `count` of a bare fragment
 - [ ] 2.3 Hydration: result map → class instance; `StatelessGraphObjectManager` read API + Nest injection (`@InjectGraphObjectManager()`)
 - [ ] 2.4 Views: relationships (single / list, direction, optional / required), relationship fragments, nested views

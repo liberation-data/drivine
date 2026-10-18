@@ -6,7 +6,7 @@ import { TransformPostProcessor } from '@/mapper/TransformPostProcessor';
 import { FilterPostProcessor } from '@/mapper/FilterPostProcessor';
 import { QueryLanguage } from '@/query/QueryLanguage';
 
-export type ClassType<T> = new (...args: any[]) => T;
+export type ClassType<T = any> = new (...args: any[]) => T;
 
 export class QuerySpecification<T> {
     statement: Statement;
