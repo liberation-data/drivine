@@ -319,3 +319,12 @@ Legacy TS decorators (`experimentalDecorators` + `emitDecoratorMetadata`), as th
 - **Tier 2 done** (except 2.12 `groups`).
 - [x] 2.12 `gom.groups.load(Source, {where, bindings, keys, aggregates, having, orderBy, limit, skip})` → typed rows keyed by the names given (a spec object where drivine4j has a DSL block; Tier 4 can add the typed DSL). Keys: `key(prop)` or `pathKey(Target, [hop…])` (hydrated as the node, ordered by its id). Aggregates: `count(filter?)`, `sum/avg/min/max(prop, filter?)`; sum over none 0, others undefined. `having` compares aggregates; order ties broken by keys ascending. `WITH DISTINCT n, k…` so a node is once in each group. `gom.groups.countBy(Source, prop)` → Map. Verified on all three engines with drivine4j's own feedback example.
 - **Tier 2 complete.**
+
+### Tier 3 steps
+
+- [x] 3.1 `gom.indexes` / `gom.constraints` (`src/schema/`): `ensure`, `list`, `drop` for `rangeIndex(label, props)` (single / composite) and `uniquenessConstraint(label, props)`. Per-engine `SchemaGrammar` (DDL + introspection: Neo4j `SHOW INDEXES/CONSTRAINTS` wrapped in a map RETURN; Memgraph `SHOW INDEX/CONSTRAINT INFO` read by column position, since it takes no RETURN; FalkorDB `db.indexes()/db.constraints()`). Run on a connection of their own in auto-commit (`SchemaExecutor`). Duplicate check before a constraint → `VIOLATION` with a sample, nothing made. FalkorDB: per-property ranges (composite = each property's); uniqueness via `graph.constraintCreate` (Redis) over a range index ensured first, polled until built. Constraint properties compared as sets (Memgraph reorders them). Items named `drivine_<kind>_<label>_<props>` where the engine names them. Not on PersistenceManager (drivine4j puts them there) — on the object manager, which knows the engine.
+- [ ] 3.2 vector and full-text index specs, drift detection, `recreate`
+- [ ] 3.3 declarative: `@Unique`, `@RangeIndex`, `@VectorIndex`, `@FullTextIndex` on fragments; `SchemaCatalog` applied at startup by a `SchemaManager` (`enforce`, `recreateAll`, version-triggered rebuild via a marker node)
+- [ ] 3.4 `loadNearest` (vector search, `searchK`, threshold, filters, `Scored<T>`)
+- [ ] 3.5 `loadMatching` (full-text search)
+- [ ] 3.6 store identity

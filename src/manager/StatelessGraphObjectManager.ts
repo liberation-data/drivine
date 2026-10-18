@@ -24,6 +24,10 @@ import { NonAtomicBatchException } from '@/manager/NonAtomicBatchException';
 import { StaleInBatch } from '@/manager/StaleInBatch';
 import { EdgeOperations } from '@/manager/EdgeOperations';
 import { GroupOperations } from '@/manager/GroupOperations';
+import { ConstraintManager } from '@/schema/ConstraintManager';
+import { IndexManager } from '@/schema/IndexManager';
+import { SchemaExecutor } from '@/schema/SchemaExecutor';
+import { schemaGrammarFor } from '@/schema/SchemaGrammar';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
@@ -130,6 +134,16 @@ export class StatelessGraphObjectManager {
             async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
             this.mapper
         );
+    }
+
+    /** Range indexes of this manager's database: made idempotently, outside any transaction. */
+    get indexes(): IndexManager {
+        return new IndexManager(this.schemaExecutor(), schemaGrammarFor(this.persistenceManager.type));
+    }
+
+    /** Uniqueness constraints of this manager's database: made idempotently, outside any transaction. */
+    get constraints(): ConstraintManager {
+        return new ConstraintManager(this.schemaExecutor(), schemaGrammarFor(this.persistenceManager.type));
     }
 
     /** Which database this manager works on. */
@@ -568,6 +582,14 @@ export class StatelessGraphObjectManager {
             this.backend.heldProperties(root).spec({ id: rootObject[root.nodeIdField!] })
         );
         return { ...options, heldProperties: held[0] ?? {} };
+    }
+
+    private schemaExecutor(): SchemaExecutor {
+        const provider = DatabaseRegistry.getInstance().connectionProvider(this.persistenceManager.database);
+        if (!provider) {
+            throw new DrivineError(`No database is registered under ${this.persistenceManager.database}.`);
+        }
+        return new SchemaExecutor(provider);
     }
 
     private assertPatchable(root: ReturnType<ModelRegistry['fragment']>, fields: string[]): void {

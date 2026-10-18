@@ -1,4 +1,4 @@
-import { FalkorDB } from 'falkordb';
+import { ConstraintType, EntityType, FalkorDB } from 'falkordb';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { Connection } from '@/connection/Connection';
 import { DatabaseType } from '@/connection/DatabaseType';
@@ -35,6 +35,16 @@ export class FalkorDbConnectionProvider implements ConnectionProvider {
     async connect(): Promise<Connection> {
         const graph = (await this.connectedClient()).selectGraph(this.graphName);
         return new FalkorDbConnection(graph, new FalkorDbResultMapper(), this.transactions, shortId.rnd());
+    }
+
+    /** Creates or drops a uniqueness constraint, a Redis command FalkorDB takes in place of DDL. */
+    async constraint(operation: 'CREATE' | 'DROP', label: string, properties: string[]): Promise<void> {
+        const graph = (await this.connectedClient()).selectGraph(this.graphName);
+        if (operation === 'CREATE') {
+            await graph.constraintCreate(ConstraintType.UNIQUE, EntityType.NODE, label, ...properties);
+        } else {
+            await graph.constraintDrop(ConstraintType.UNIQUE, EntityType.NODE, label, ...properties);
+        }
     }
 
     async end(): Promise<void> {
