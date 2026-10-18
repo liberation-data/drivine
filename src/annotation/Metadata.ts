@@ -1,11 +1,11 @@
 import 'reflect-metadata';
-import { ClassType } from '@/query/QuerySpecification';
+import { ClassRef } from '@/query/QuerySpecification';
 
 /**
  * A function returning a class. Decorators take one, rather than the class, so that two classes that refer to each
  * other can be declared in either order, or in modules that import each other.
  */
-export type ClassThunk<T = any> = () => ClassType<T>;
+export type ClassThunk<T = any> = () => ClassRef<T>;
 
 export enum ClassKind {
     NODE_FRAGMENT = 'NODE_FRAGMENT',
@@ -61,7 +61,22 @@ export interface PropertyMetadata {
 const CLASS_KEY = Symbol('drivine:class');
 const PROPERTIES_KEY = Symbol('drivine:properties');
 
+const SUBTYPES = new Map<Function, Set<Function>>();
+
+/**
+ * The node fragment classes that extend `type`, at any depth, recorded as each is decorated. A subclass is known once
+ * its module has been loaded.
+ */
+export function subtypesOf(type: Function): Function[] {
+    return [...(SUBTYPES.get(type) ?? [])];
+}
+
 export function defineClassMetadata(target: Function, metadata: ClassMetadata): void {
+    if (metadata.kind === ClassKind.NODE_FRAGMENT) {
+        for (const ancestor of classChain(target).slice(1)) {
+            SUBTYPES.set(ancestor, (SUBTYPES.get(ancestor) ?? new Set()).add(target));
+        }
+    }
     const existing = Reflect.getOwnMetadata(CLASS_KEY, target) as ClassMetadata | undefined;
     if (existing && existing.kind !== metadata.kind) {
         throw new Error(`${target.name} can't be both a ${existing.kind} and a ${metadata.kind}.`);

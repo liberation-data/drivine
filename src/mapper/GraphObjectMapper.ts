@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { Stamps } from '@/model/Stamps';
+import { ModelRegistry } from '@/model/ModelRegistry';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
@@ -36,7 +37,14 @@ export interface RelationshipRow {
  * Turns the rows the object manager's statements return into instances of the mapped classes.
  */
 export class GraphObjectMapper {
-    fragment<T>(model: FragmentModel, row: FragmentRow): T {
+    /**
+     * @param registry when given, a node is loaded as the most specific subtype of the expected class whose labels it
+     * carries.
+     */
+    constructor(private readonly registry?: ModelRegistry) {}
+
+    fragment<T>(expected: FragmentModel, row: FragmentRow): T {
+        const model = this.registry && row.labels ? this.registry.fragmentFor(expected, row.labels) : expected;
         const instance: any = this.properties(model.type, model.graphProperties, model.transientFields, row.props);
         if (model.stampField) {
             instance[model.stampField] = row.props?.[Stamps.PROPERTY] ?? undefined;

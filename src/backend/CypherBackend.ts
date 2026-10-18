@@ -14,6 +14,7 @@ import { SaveStatement } from '@/backend/SaveStatement';
 import { STAMP } from '@/backend/CypherStamps';
 import { Stamps } from '@/model/Stamps';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { ModelRegistry } from '@/model/ModelRegistry';
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
 export const NODE_ALIAS = 'n';
@@ -96,8 +97,14 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
-    save(target: TargetModel, object: any, options?: SaveOptions<any>, createOnly?: boolean): SaveStatement {
-        return new SaveStatementBuilder(this.grammar).build(target, object, options, createOnly);
+    save(
+        target: TargetModel,
+        object: any,
+        options?: SaveOptions<any>,
+        createOnly?: boolean,
+        registry?: ModelRegistry
+    ): SaveStatement {
+        return new SaveStatementBuilder(this.grammar, registry).build(target, object, options, createOnly);
     }
 
     foundStamp(model: FragmentModel): GraphStatement {

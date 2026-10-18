@@ -2,13 +2,14 @@ import {
     ClassKind,
     classChain,
     ClassThunk,
+    subtypesOf,
     Direction,
     ownClassMetadata,
     PropertyMetadata,
     propertyMetadata
 } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
-import { ClassType } from '@/query/QuerySpecification';
+import { ClassRef, ClassType } from '@/query/QuerySpecification';
 import { FragmentModel } from '@/model/FragmentModel';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
@@ -22,6 +23,40 @@ export class ModelRegistry {
     private readonly fragments = new Map<Function, FragmentModel>();
     private readonly relationshipFragments = new Map<Function, RelationshipFragmentModel>();
     private readonly views = new Map<Function, GraphViewModel>();
+    private readonly registeredSubtypes = new Map<Function, Set<ClassType>>();
+
+    /**
+     * Registers `subtype` as a kind of `parent` that it does not extend, as an implementation of an interface is: a
+     * node of `parent`'s labels that also carries `subtype`'s is loaded as a `subtype`. A subclass needs no registering.
+     */
+    registerSubtype(parent: ClassRef, subtype: ClassType): void {
+        if (this.kindOf(subtype) !== ClassKind.NODE_FRAGMENT) {
+            throw new DrivineError(`${subtype.name}, registered as a subtype of ${parent.name}, is not a @NodeFragment.`);
+        }
+        this.registeredSubtypes.set(parent, (this.registeredSubtypes.get(parent) ?? new Set()).add(subtype));
+    }
+
+    /** The known subtypes of a fragment class: its subclasses, and those registered for it. */
+    subtypes(type: ClassType): ClassType[] {
+        return [...new Set([...(subtypesOf(type) as ClassType[]), ...(this.registeredSubtypes.get(type) ?? [])])].filter(
+            (it) => this.kindOf(it) === ClassKind.NODE_FRAGMENT
+        );
+    }
+
+    /**
+     * The model to load a node of `model` with, given the node's labels: the most specific of `model` and its subtypes
+     * whose labels the node carries all of.
+     */
+    fragmentFor(model: FragmentModel, labels: string[]): FragmentModel {
+        let best = model;
+        for (const subtype of this.subtypes(model.type)) {
+            const candidate = this.fragment(subtype);
+            if (candidate.labels.length > best.labels.length && candidate.labels.every((it) => labels.includes(it))) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
 
     kindOf(type: Function): ClassKind | undefined {
         for (const it of classChain(type)) {

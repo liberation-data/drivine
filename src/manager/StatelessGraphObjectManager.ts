@@ -26,7 +26,7 @@ import { EdgeOperations } from '@/manager/EdgeOperations';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
-import { ClassType } from '@/query/QuerySpecification';
+import { ClassRef, ClassType } from '@/query/QuerySpecification';
 
 /**
  * Loads, saves and deletes decorated objects. It keeps nothing between calls: what a call does depends only on its
@@ -107,13 +107,14 @@ export class StatelessGraphObjectManager {
     private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
     private warnedNonAtomic = false;
 
-    private readonly mapper = new GraphObjectMapper();
+    private readonly mapper: GraphObjectMapper;
 
     constructor(
         readonly persistenceManager: PersistenceManager,
         readonly backend: GraphBackend,
         readonly registry: ModelRegistry
     ) {
+        this.mapper = new GraphObjectMapper(registry);
         this.edges = new EdgeOperations(registry, async <R>(statement: GraphStatement) =>
             this.whenUncontended(async () => this.persistenceManager.getOne<R>(statement.spec()))
         );
@@ -128,7 +129,11 @@ export class StatelessGraphObjectManager {
      * Loads every object of the class, optionally filtered: `where` is a Cypher predicate over the root, `n`, with
      * values in `bindings`. Give a LoadOptions instead to override a recursive relationship's maxDepth for this load.
      */
-    async loadAll<T>(type: ClassType<T>, where?: string | LoadOptions, bindings: Record<string, any> = {}): Promise<T[]> {
+    async loadAll<T>(
+        type: ClassRef<T>,
+        where?: string | LoadOptions,
+        bindings: Record<string, any> = {}
+    ): Promise<T[]> {
         const options = loadOptions(where, bindings);
         const target = this.modelOf(type);
         if (target.kind === 'GRAPH_VIEW') {
@@ -143,7 +148,7 @@ export class StatelessGraphObjectManager {
         return rows.map((row) => this.mapper.fragment<T>(target.model, row));
     }
 
-    async load<T>(type: ClassType<T>, id: unknown, options: Pick<LoadOptions, 'depth'> = {}): Promise<T | undefined> {
+    async load<T>(type: ClassRef<T>, id: unknown, options: Pick<LoadOptions, 'depth'> = {}): Promise<T | undefined> {
         const target = this.modelOf(type);
         const statement =
             target.kind === 'GRAPH_VIEW'
@@ -161,7 +166,7 @@ export class StatelessGraphObjectManager {
             : this.mapper.fragment<T>(target.model, rows[0]);
     }
 
-    async count(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
+    async count(type: ClassRef, where?: string, bindings: Record<string, any> = {}): Promise<number> {
         const target = this.modelOf(type);
         const statement =
             target.kind === 'GRAPH_VIEW'
@@ -203,7 +208,7 @@ export class StatelessGraphObjectManager {
      * whole, as `save` writes it.
      */
     async update<T extends object>(
-        type: ClassType<T>,
+        type: ClassRef<T>,
         id: unknown,
         change: (loaded: T) => T | void | Promise<T | void>,
         attempts: number = UPDATE_ATTEMPTS
@@ -235,7 +240,7 @@ export class StatelessGraphObjectManager {
      * It never makes a node, is not checked against a stamp, and hands none back: a node it changed has a new stamp,
      * so an object loaded before is refused when saved. On a view, the fields are its root's.
      */
-    async patch(type: ClassType, id: unknown, options: PatchOptions): Promise<PatchResult> {
+    async patch(type: ClassRef, id: unknown, options: PatchOptions): Promise<PatchResult> {
         const target = this.modelOf(type);
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const set: Record<string, any> = {};
@@ -344,7 +349,13 @@ export class StatelessGraphObjectManager {
             statements.push({ spec: FragmentBatchStatement.build(chunk, options), groups: chunk });
         }
         for (const view of views) {
-            const statement = this.backend.save(this.modelOf(view.constructor as ClassType), view, options, false);
+            const statement = this.backend.save(
+                this.modelOf(view.constructor as ClassType),
+                view,
+                options,
+                false,
+                this.registry
+            );
             statements.push({ spec: statement, view: { object: view, statement } });
         }
         const results = await this.runBatch(statements.map((it) => it.spec));
@@ -377,7 +388,7 @@ export class StatelessGraphObjectManager {
      * Deletes every object a load with the same filter would find: its root, with the root's relationships. Without a
      * filter, every one. Returns the number deleted.
      */
-    async deleteAll(type: ClassType, where?: string, bindings: Record<string, any> = {}): Promise<number> {
+    async deleteAll(type: ClassRef, where?: string, bindings: Record<string, any> = {}): Promise<number> {
         return this.persistenceManager.getOne<number>(this.backend.deleteAll(this.modelOf(type), where).spec(bindings));
     }
 
@@ -541,7 +552,13 @@ export class StatelessGraphObjectManager {
         options: SaveOptions<T>,
         createOnly: boolean
     ): Promise<T | undefined> {
-        const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options, createOnly);
+        const statement = this.backend.save(
+            this.modelOf(object.constructor as ClassType),
+            object,
+            options,
+            createOnly,
+            this.registry
+        );
         const run = async (): Promise<SaveResult[]> => this.persistenceManager.query<SaveResult>(statement.spec());
         let rows: SaveResult[];
         try {
@@ -635,14 +652,16 @@ export class StatelessGraphObjectManager {
         );
     }
 
-    private modelOf(type: ClassType): TargetModel {
+    private modelOf(ref: ClassRef): TargetModel {
+        // The registry models a class as one it can construct; an abstract one is loaded as its subtypes.
+        const type = ref as ClassType;
         switch (this.registry.kindOf(type)) {
             case ClassKind.NODE_FRAGMENT:
                 return { kind: 'NODE_FRAGMENT', model: this.registry.fragment(type) };
             case ClassKind.GRAPH_VIEW:
                 return { kind: 'GRAPH_VIEW', model: this.registry.view(type) };
             default:
-                throw new DrivineError(`${type.name} is not a @NodeFragment or @GraphView.`);
+                throw new DrivineError(`${ref.name} is not a @NodeFragment or @GraphView.`);
         }
     }
 }

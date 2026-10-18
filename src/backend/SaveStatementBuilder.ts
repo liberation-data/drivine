@@ -9,8 +9,9 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
+import { ModelRegistry } from '@/model/ModelRegistry';
+import { ClassKind } from '@/annotation/Metadata';
 import { changes, EXPECTED, LOCK, MADE, relink, restamp, STAMP } from '@/backend/CypherStamps';
-
 
 /** A stamped fragment among the related nodes a save writes, and its place in the statement. */
 interface StampedNodes {
@@ -42,6 +43,8 @@ export class SaveStatementBuilder {
     private readonly bindings: Record<string, any> = {};
     /** The stamped related fragments, each read before and after the writes: see readStamps. */
     private readonly stamped: StampedNodes[] = [];
+    /** For each target fragment of the save, the subclasses of it the object holds, in the order rows name them. */
+    private readonly subtypes = new Map<FragmentModel, FragmentModel[]>();
     private options: SaveOptions<any> = {};
     private createOnly = false;
 
@@ -50,19 +53,29 @@ export class SaveStatementBuilder {
         return ['n', '_found', ...this.stamped.map((it) => `before${it.index}`)].join(', ');
     }
 
-    constructor(private readonly grammar: CypherGrammar) {}
+    constructor(
+        private readonly grammar: CypherGrammar,
+        private readonly registry?: ModelRegistry
+    ) {}
 
     /**
      * @param createOnly write only if the root is not there: a root that is, or that another writer makes at the same
      * moment, stops the statement before it writes anything, and it returns no row.
      */
-    build(target: TargetModel, object: any, options: SaveOptions<any> = {}, createOnly: boolean = false): SaveStatement {
+    build(
+        target: TargetModel,
+        object: any,
+        options: SaveOptions<any> = {},
+        createOnly: boolean = false
+    ): SaveStatement {
         this.bindings._stamp = Stamps.fresh();
         this.options = options;
         this.createOnly = createOnly;
         if (target.kind === 'NODE_FRAGMENT') {
             if (options.replace === 'all' || options.replace?.length) {
-                throw new DrivineError(`replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`);
+                throw new DrivineError(
+                    `replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`
+                );
             }
             const head = this.root(target.model, object, false);
             return this.statement([head, `RETURN {found: _found, now: n.${STAMP}} AS result`], target.model, object);
@@ -70,10 +83,13 @@ export class SaveStatementBuilder {
         const view = target.model;
         const root = object[view.rootField];
         if (root == null) {
-            throw new DrivineError(`${view.type.name}.${view.rootField}, the root, is ${root}. A view is saved from its root.`);
+            throw new DrivineError(
+                `${view.type.name}.${view.rootField}, the root, is ${root}. A view is saved from its root.`
+            );
         }
         const replace = this.replacedFields(view, object, options);
-        const parts = [this.root(view.root, root, replace.length > 0)];
+        // A root of a subclass of the view's root type is written with its own labels.
+        const parts = [this.root(this.concreteModel(view.root, root), root, replace.length > 0)];
         const writes = this.writeParts(view, []);
         for (const part of writes) {
             this.bindings[part.key] = this.rows(part, object[part.rel.field]);
@@ -95,7 +111,7 @@ export class SaveStatementBuilder {
         parts.push(...this.readStamps('after'));
         const related = this.stamped.map((it) => `{before: before${it.index}, after: after${it.index}}`);
         parts.push(`RETURN {found: _found, now: n.${STAMP}, related: [${related.join(', ')}]} AS result`);
-        return this.statement(parts, view.root, root);
+        return this.statement(parts, this.concreteModel(view.root, root), root);
     }
 
     /**
@@ -126,13 +142,18 @@ export class SaveStatementBuilder {
             // Before, only the reads made so far are there to carry.
             const carried =
                 when === 'before'
-                    ? ['n', '_found', ...this.stamped.slice(0, it.index).map((done) => `before${done.index}`)].join(', ')
+                    ? ['n', '_found', ...this.stamped.slice(0, it.index).map((done) => `before${done.index}`)].join(
+                          ', '
+                      )
                     : this.carry;
             return [
                 `WITH ${carried}`,
-                `OPTIONAL MATCH (${a}${labelExpression(it.model.labels)}) WHERE ${a}.${quoteName(idProperty(it.model))} IN $stampIds${it.index}`,
-                `WITH ${carried}, collect(CASE WHEN ${a} IS NOT NULL THEN {id: ${a}.${quoteName(idProperty(it.model))}, ` +
-                    `stamp: coalesce(${a}.${STAMP}, '${Stamps.NEVER_STAMPED}')} END) AS ${when}${it.index}`
+                `OPTIONAL MATCH (${a}${labelExpression(it.model.labels)}) WHERE ${a}.${quoteName(
+                    idProperty(it.model)
+                )} IN $stampIds${it.index}`,
+                `WITH ${carried}, collect(CASE WHEN ${a} IS NOT NULL THEN {id: ${a}.${quoteName(
+                    idProperty(it.model)
+                )}, ` + `stamp: coalesce(${a}.${STAMP}, '${Stamps.NEVER_STAMPED}')} END) AS ${when}${it.index}`
             ];
         });
     }
@@ -213,10 +234,14 @@ export class SaveStatementBuilder {
         for (const field of replace) {
             const rel = view.relationships.find((it) => it.field === field);
             if (!rel) {
-                throw new DrivineError(`replace names ${field}, which is not a relationship field of ${view.type.name}.`);
+                throw new DrivineError(
+                    `replace names ${field}, which is not a relationship field of ${view.type.name}.`
+                );
             }
             if (rel.readOnly) {
-                throw new DrivineError(`replace names ${view.type.name}.${field}, which is read-only: a save never writes it.`);
+                throw new DrivineError(
+                    `replace names ${view.type.name}.${field}, which is read-only: a save never writes it.`
+                );
             }
             const value = object[field];
             if (rel.isCollection && value == null) {
@@ -246,7 +271,9 @@ export class SaveStatementBuilder {
                 const y = `y${k}`;
                 parts.push(
                     `WITH ${this.carry}, removed${k}`,
-                    `OPTIONAL MATCH (${y}${labelExpression(rootOf(into).labels)}) WHERE ${y} IN removed${k} AND ${y} <> n ` +
+                    `OPTIONAL MATCH (${y}${labelExpression(
+                        rootOf(into).labels
+                    )}) WHERE ${y} IN removed${k} AND ${y} <> n ` +
                         `AND NOT ${y}.${idProp} IN $held AND NOT ${this.grammar.existenceCheck(referencedAs(rel, y))}`,
                     `WITH ${this.carry}, collect(${y}) AS unreferenced${k}`,
                     `FOREACH (x IN unreferenced${k} | DETACH DELETE x)`
@@ -269,7 +296,12 @@ export class SaveStatementBuilder {
             });
     }
 
-    private forEach(part: WritePart, parent: string, rows: string, pass: 'NODES_AND_EDGES' | 'EDGE_PROPERTIES'): string {
+    private forEach(
+        part: WritePart,
+        parent: string,
+        rows: string,
+        pass: 'NODES_AND_EDGES' | 'EDGE_PROPERTIES'
+    ): string {
         const k = part.key.slice('rows'.length);
         const row = `row${k}`;
         const t = `t${k}`;
@@ -279,10 +311,19 @@ export class SaveStatementBuilder {
         const merge = `MERGE (${t}${labelExpression(root.labels)} {${quoteName(idProperty(root))}: ${row}.id})`;
         const isFragment = part.rel.related.kind === 'RELATIONSHIP_FRAGMENT';
         const relChanged = changes(r, `${row}.rel`);
+        // A related node of a subclass of the field's target carries its own labels too: a MERGE takes no labels
+        // from a parameter, so each subtype the object holds sets its own, when the row is of it.
+        const subtypeLabels = (this.subtypes.get(root) ?? []).map(
+            (sub, i) =>
+                `FOREACH (_ IN CASE WHEN ${row}.subtype = ${i} THEN [1] ELSE [] END | SET ${t}${labelExpression(
+                    sub.labels
+                )})`
+        );
         const steps =
             pass === 'NODES_AND_EDGES'
                 ? [
                       `${merge} SET ${restamp(t, changes(t, `${row}.props`))} SET ${t} += ${row}.props`,
+                      ...subtypeLabels,
                       `MERGE ${pattern(part.rel, parent, '', t)} ON CREATE SET ${relink(parent)}, ${relink(t)}`
                   ]
                 : [
@@ -310,10 +351,14 @@ export class SaveStatementBuilder {
             const nodeObject = into.kind === 'GRAPH_VIEW' ? node[into.model.rootField] : node;
             const root = rootOf(into);
             this.stampedIds(root, idOf(root, nodeObject));
+            const concrete = this.concreteModel(root, nodeObject);
             const row: Record<string, any> = {
                 id: idOf(root, nodeObject),
-                props: propsOf(root, nodeObject, stampExcluded(root))
+                props: propsOf(concrete, nodeObject, stampExcluded(concrete))
             };
+            if (concrete !== root) {
+                row.subtype = this.subtypeIndex(root, concrete);
+            }
             if (rel.related.kind === 'RELATIONSHIP_FRAGMENT') {
                 const model = rel.related.model;
                 row.rel = propsOf(model, item, [model.targetField]);
@@ -323,6 +368,25 @@ export class SaveStatementBuilder {
             }
             return row;
         });
+    }
+
+    /** The model of the object's own class, where it is a subclass of the field's target. */
+    private concreteModel(target: FragmentModel, object: any): FragmentModel {
+        const type = object?.constructor;
+        if (!this.registry || !type || type === target.type || this.registry.kindOf(type) !== ClassKind.NODE_FRAGMENT) {
+            return target;
+        }
+        return this.registry.fragment(type);
+    }
+
+    private subtypeIndex(target: FragmentModel, concrete: FragmentModel): number {
+        const known = this.subtypes.get(target) ?? [];
+        let index = known.indexOf(concrete);
+        if (index < 0) {
+            index = known.push(concrete) - 1;
+            this.subtypes.set(target, known);
+        }
+        return index;
     }
 
     private stampedIds(model: FragmentModel, id: any): void {
@@ -397,7 +461,9 @@ function items(rel: RelationshipModel, value: any): any[] {
 
 function idProperty(model: FragmentModel): string {
     if (!model.nodeIdProperty) {
-        throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be saved: a save merges on the id.`);
+        throw new DrivineError(
+            `${model.type.name} has no @NodeId property, so it can't be saved: a save merges on the id.`
+        );
     }
     return model.nodeIdProperty;
 }

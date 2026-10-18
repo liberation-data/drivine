@@ -4,6 +4,7 @@ import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { SaveStatement } from '@/backend/SaveStatement';
+import { ModelRegistry } from '@/model/ModelRegistry';
 import { GraphStatement } from '@/backend/GraphStatement';
 
 /**
@@ -42,7 +43,13 @@ export interface GraphBackend {
     deleteAll(target: TargetModel, where?: string): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
-    save(target: TargetModel, object: any, options?: SaveOptions<any>, createOnly?: boolean): SaveStatement;
+    save(
+        target: TargetModel,
+        object: any,
+        options?: SaveOptions<any>,
+        createOnly?: boolean,
+        registry?: ModelRegistry
+    ): SaveStatement;
 
     /** The stamp the node with id `$id` carries ('-' for none); no row when there is no such node. */
     foundStamp(model: FragmentModel): GraphStatement;
