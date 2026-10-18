@@ -1,6 +1,7 @@
 import { GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
+import { OracleViews } from '@/backend/oracle/OracleViews';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -43,29 +44,44 @@ export class OracleBackend implements GraphBackend {
         return new GraphStatement([`SELECT COUNT(*) AS "count"`, this.from(model, where)].join('\n'));
     }
 
-    loadAllViews(_model: GraphViewModel): GraphStatement {
-        return this.notYet('Loading a @GraphView');
+    loadAllViews(
+        model: GraphViewModel,
+        where?: string,
+        depth: Record<string, number> = {},
+        page: Page = {}
+    ): GraphStatement {
+        const views = new OracleViews(this.graph, depth);
+        return new GraphStatement(
+            [
+                `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
+                this.from(model.root, this.viewWhere(model, where, depth)),
+                ...this.page(page)
+            ].join('\n')
+        );
     }
 
-    loadView(_model: GraphViewModel): GraphStatement {
-        return this.notYet('Loading a @GraphView');
+    loadView(model: GraphViewModel, depth: Record<string, number> = {}): GraphStatement {
+        return this.loadAllViews(model, this.idPredicate(model.root), depth);
     }
 
-    countViews(_model: GraphViewModel): GraphStatement {
-        return this.notYet('Counting @GraphViews');
+    countViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
+        return new GraphStatement(
+            [`SELECT COUNT(*) AS "count"`, this.from(model.root, this.viewWhere(model, where, depth))].join('\n')
+        );
     }
 
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
-        const model = this.fragmentOf(target, 'Deleting a @GraphView');
         if (cascade !== CascadeType.NONE) {
             return this.notYet('A cascading delete');
         }
-        const id = this.idPredicate(model);
-        return this.deleting(model, where ? `${id} AND (${where})` : id);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const id = this.idPredicate(root);
+        return this.deleting(root, this.rootWhere(target, where ? `${id} AND (${where})` : id));
     }
 
     deleteAll(target: TargetModel, where?: string): GraphStatement {
-        return this.deleting(this.fragmentOf(target, 'Deleting @GraphViews'), where);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        return this.deleting(root, this.rootWhere(target, where));
     }
 
     nearest(_target: TargetModel, _search: NearestSearch): GraphStatement {
@@ -175,6 +191,19 @@ export class OracleBackend implements GraphBackend {
         return false;
     }
 
+    /** A predicate over the root's row and, for a view, the view's requirements. */
+    private rootWhere(target: TargetModel, where?: string): string | undefined {
+        return target.kind === 'GRAPH_VIEW' ? this.viewWhere(target.model, where) : where;
+    }
+
+    private viewWhere(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): string | undefined {
+        const parts = [
+            ...(where ? [`(${where})`] : []),
+            ...new OracleViews(this.graph, depth).requirements(model, ROW_ALIAS)
+        ];
+        return parts.length ? parts.join(' AND ') : undefined;
+    }
+
     /** The nodes of the fragment's labels that meet `where`, as the row `n`. */
     private from(model: FragmentModel, where?: string): string {
         const labels = hasLabels(ROW_ALIAS, model.labels);
@@ -199,7 +228,9 @@ END;`);
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return `JSON_EXISTS(${ROW_ALIAS}.props, '$?(@${jsonKey(model.nodeIdProperty)} == $id__)' PASSING $id AS "id__")`;
+        return `JSON_EXISTS(${ROW_ALIAS}.props, '$?(@${jsonKey(
+            model.nodeIdProperty
+        )} == $id__)' PASSING $id AS "id__")`;
     }
 
     private page(page: Page): string[] {
@@ -210,13 +241,6 @@ END;`);
             ...(page.skip !== undefined ? [`OFFSET ${page.skip} ROWS`] : []),
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];
-    }
-
-    private fragmentOf(target: TargetModel, what: string): FragmentModel {
-        if (target.kind === 'GRAPH_VIEW') {
-            throw this.unsupported(what);
-        }
-        return target.model;
     }
 
     private notYet(what: string): GraphStatement {

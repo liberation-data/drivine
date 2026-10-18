@@ -73,7 +73,7 @@ export class OracleGraph {
      */
     get ensuring(): string {
         const statements = this.ddl
-            .map((it) => `    BEGIN EXECUTE IMMEDIATE ${literal(it)}; EXCEPTION WHEN e_exists THEN NULL; END;`)
+            .map((it) => `    BEGIN EXECUTE IMMEDIATE ${sqlText(it)}; EXCEPTION WHEN e_exists THEN NULL; END;`)
             .join('\n');
         return `DECLARE
     v_made NUMBER;
@@ -89,7 +89,7 @@ END;`;
 }
 
 /** A string as an SQL literal. */
-export function literal(text: string): string {
+export function sqlText(text: string): string {
     return `'${text.replace(/'/g, "''")}'`;
 }
 
@@ -101,8 +101,9 @@ export function jsonKey(name: string): string {
 /** The map a load returns for the node row `alias`: its properties, its stamp among them, and its labels apart. */
 export function nodeDocument(alias: string): string {
     return (
-        `JSON_OBJECT('props' VALUE JSON_TRANSFORM(${alias}.props, SET '$${jsonKey(Stamps.PROPERTY)}' = ${alias}.stamp ` +
-        `IGNORE ON NULL), 'labels' VALUE ${alias}.labels RETURNING JSON)`
+        `JSON_OBJECT('props' VALUE JSON_TRANSFORM(${alias}.props, SET '$${jsonKey(
+            Stamps.PROPERTY
+        )}' = ${alias}.stamp ` + `IGNORE ON NULL), 'labels' VALUE ${alias}.labels RETURNING JSON)`
     );
 }
 
