@@ -10,7 +10,7 @@ const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<='
 /**
  * One statement that groups the nodes of a fragment by keys and gives numbers about each group. A node is one member of
  * each group it reaches, however many ways lead there. Returns a row per group, `{k0, k1, ..., a0, a1, ...}`, a path
- * key as a fragment row.
+ * key as a fragment row. References and conditions in the query have been written as Cypher already (GroupOperations).
  */
 export class GroupStatement {
     static build(
@@ -42,7 +42,7 @@ export class GroupStatement {
             parts.push(`WITH DISTINCT n, ${pathAliases.join(', ')}`);
         }
         const keyColumns = keys.map(([, key], i) =>
-            key.kind === 'path' ? `k${i}` : `${property(key.property)} AS k${i}`
+            key.kind === 'path' ? `k${i}` : `${property(key.property as string)} AS k${i}`
         );
         const aggregateColumns = aggregates.map(
             ([, aggregate], i) => `${aggregateOf(aggregate as GroupAggregate)} AS a${i}`
@@ -101,7 +101,7 @@ function property(name: string): string {
 }
 
 function aggregateOf(aggregate: GroupAggregate): string {
-    const value = aggregate.property ? property(aggregate.property) : '1';
+    const value = aggregate.property ? property(aggregate.property as string) : '1';
     const filtered = aggregate.filter ? `CASE WHEN ${aggregate.filter} THEN ${value} END` : value;
     switch (aggregate.function) {
         case 'COUNT':

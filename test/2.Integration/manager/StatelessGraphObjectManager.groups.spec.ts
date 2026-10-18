@@ -1,4 +1,5 @@
 import {
+    anyOf,
     avg,
     count,
     CypherBackend,
@@ -164,5 +165,33 @@ describe.each(graphEngines())('groups on $type', (engine) => {
             skip: 1
         });
         expect(second).toEqual([{ helpful: true, votes: 3 }]);
+    });
+
+    it('should take a query over the references: typed keys, aggregates and conditions', async () => {
+        const march = await gom.groups.load(Feedback, (q) => ({
+            where: [q.page.isNotNull(), q.month.gte(3)],
+            keys: { page: key(q.page) },
+            aggregates: {
+                votes: count(),
+                likes: count(q.helpful.eq(true)),
+                best: max(q.score, anyOf(q.helpful.eq(true), q.score.lt(2)))
+            }
+        }));
+        expect(march).toEqual([
+            { page: '/agents', votes: 2, likes: 1, best: 2 },
+            { page: '/install', votes: 2, likes: 1, best: 4 }
+        ]);
+        // The key is typed as its property: a string.
+        const page: string | undefined = march[0].page;
+        expect(page?.startsWith('/')).toBe(true);
+        const tokens = await gom.groups.load(Message, (q) => ({
+            keys: { user: pathKey(User, [hop('HAS_MESSAGE', Direction.INCOMING, 'ChatSession'), hop('OWNED_BY')]) },
+            aggregates: { tokens: sum(q.tokens, q.tokens.gt(6)) },
+            orderBy: [['tokens', 'desc']]
+        }));
+        expect(tokens.map((it) => [it.user.id, it.tokens])).toEqual([
+            ['ada', 10],
+            ['bob', 7]
+        ]);
     });
 });

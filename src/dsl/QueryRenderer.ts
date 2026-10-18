@@ -100,6 +100,11 @@ export class QueryRenderer {
         private readonly depth: Record<string, number> = {}
     ) {}
 
+    /** The values the conditions written so far bind, by parameter name. */
+    get boundValues(): Record<string, any> {
+        return { ...this.bindings };
+    }
+
     where(condition: Condition, scope: Scope, alias: string): string {
         return this.condition(condition, scope, { node: alias });
     }
@@ -421,7 +426,7 @@ function classify(term: OrderTerm, scope: Scope): RootKey | CollectionSort {
 }
 
 /** The stored name of the root property a path leads to; `what` names what wants one. */
-function rootProperty(path: readonly string[], scope: Scope, what: string): string {
+export function rootProperty(path: readonly string[], scope: Scope, what: string): string {
     let at = scope;
     for (const [i, name] of path.entries()) {
         const next = step(at, name);

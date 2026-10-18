@@ -197,7 +197,8 @@ export class StatelessGraphObjectManager {
         this.groups = new GroupOperations(
             registry,
             async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
-            this.mapper
+            this.mapper,
+            backend.grammar
         );
     }
 

@@ -1,10 +1,11 @@
 import { Hop } from '@/annotation/GraphPath';
 import { ClassRef } from '@/query/QuerySpecification';
+import { ComparableRef, ValueRef, Where } from '@/dsl/Refs';
 
-/** Groups by a property of the source node. */
-export interface PropertyKey {
+/** Groups by a property of the source node: by its stored name, or a reference to it. */
+export interface PropertyKey<V = any> {
     kind: 'property';
-    property: string;
+    property: string | ValueRef<V>;
 }
 
 /** Groups by the node of a fragment class the source reaches through the hops. */
@@ -18,14 +19,16 @@ export type GroupKey = PropertyKey | PathKey;
 
 export interface GroupAggregate {
     function: 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
-    /** The property of the source node aggregated; none for COUNT, which counts nodes. */
-    property?: string;
-    /** A Cypher predicate over `n`: only nodes that meet it count toward this number. */
-    filter?: string;
+    /** The property of the source node aggregated (its stored name, or a reference); none for COUNT. */
+    property?: string | ComparableRef<any>;
+    /** Only nodes that meet it count toward this number: a condition over the references, or Cypher over `n`. */
+    filter?: string | Where;
 }
 
-/** Groups by a property of the source node. */
-export function key(property: string): PropertyKey {
+/** Groups by a property of the source node. Given a reference, the key's value is typed as the property is. */
+export function key<V>(property: ValueRef<V>): PropertyKey<V>;
+export function key(property: string): PropertyKey;
+export function key(property: string | ValueRef<any>): PropertyKey {
     return { kind: 'property', property };
 }
 
@@ -35,33 +38,33 @@ export function pathKey<T>(target: ClassRef<T>, hops: Hop[]): PathKey<T> {
 }
 
 /** The number of nodes in the group, or of those that meet `filter`. */
-export function count(filter?: string): GroupAggregate {
+export function count(filter?: string | Where): GroupAggregate {
     return { function: 'COUNT', filter };
 }
 
 /** The sum of a property over the group: 0 over no values. */
-export function sum(property: string, filter?: string): GroupAggregate {
+export function sum(property: string | ComparableRef<any>, filter?: string | Where): GroupAggregate {
     return { function: 'SUM', property, filter };
 }
 
 /** The average of a property over the group: undefined over no values. */
-export function avg(property: string, filter?: string): GroupAggregate {
+export function avg(property: string | ComparableRef<any>, filter?: string | Where): GroupAggregate {
     return { function: 'AVG', property, filter };
 }
 
-export function min(property: string, filter?: string): GroupAggregate {
+export function min(property: string | ComparableRef<any>, filter?: string | Where): GroupAggregate {
     return { function: 'MIN', property, filter };
 }
 
-export function max(property: string, filter?: string): GroupAggregate {
+export function max(property: string | ComparableRef<any>, filter?: string | Where): GroupAggregate {
     return { function: 'MAX', property, filter };
 }
 
 export type Comparison = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
 
 export interface GroupQuery<K extends Record<string, GroupKey>, A extends Record<string, GroupAggregate>> {
-    /** A Cypher predicate over the source node, `n`: which nodes are read at all. */
-    where?: string;
+    /** Which nodes are read at all: a condition over the references, or a Cypher predicate over the node, `n`. */
+    where?: string | Where;
     bindings?: Record<string, any>;
     /** What puts two nodes in one group. Two or more make a compound key. */
     keys: K;
@@ -76,7 +79,7 @@ export interface GroupQuery<K extends Record<string, GroupKey>, A extends Record
 }
 
 /** The value of a key: a property's value, or for a path key the node, mapped. */
-type KeyValue<G> = G extends PathKey<infer T> ? T : any;
+type KeyValue<G> = G extends PathKey<infer T> ? T : G extends PropertyKey<infer V> ? V | undefined : any;
 
 export type GroupRow<K extends Record<string, GroupKey>, A extends Record<string, GroupAggregate>> = {
     [k in keyof K]: KeyValue<K[k]>;
