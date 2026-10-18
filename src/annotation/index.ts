@@ -4,6 +4,7 @@ export * from './GraphProperty';
 export * from './GraphRelationship';
 export * from './GraphTransient';
 export * from './GraphView';
+export * from './Mapping';
 export * from './Metadata';
 export * from './NodeFragment';
 export * from './NodeId';

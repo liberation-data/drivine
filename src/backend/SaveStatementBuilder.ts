@@ -497,7 +497,7 @@ export function objectProps(model: FragmentModel, object: any, options: SaveOpti
 }
 
 export function propsOf(
-    model: { graphProperties: Map<string, string>; transientFields: Set<string> },
+    model: { graphProperties: Map<string, string>; transientFields: Set<string>; jsonPacked?: Set<string> },
     object: any,
     excluded: string[],
     clearNulls: boolean = false
@@ -508,7 +508,8 @@ export function propsOf(
             continue;
         }
         if (value != null || clearNulls) {
-            props[model.graphProperties.get(field) ?? field] = value ?? null;
+            props[model.graphProperties.get(field) ?? field] =
+                value != null && model.jsonPacked?.has(field) ? JSON.stringify(value) : value ?? null;
         }
     }
     return props;

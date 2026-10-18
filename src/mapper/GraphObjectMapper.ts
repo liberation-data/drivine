@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { Stamps } from '@/model/Stamps';
 import { ModelRegistry } from '@/model/ModelRegistry';
+import { FieldMapping } from '@/model/FieldMapping';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
@@ -45,7 +46,7 @@ export class GraphObjectMapper {
 
     fragment<T>(expected: FragmentModel, row: FragmentRow): T {
         const model = this.registry && row.labels ? this.registry.fragmentFor(expected, row.labels) : expected;
-        const instance: any = this.properties(model.type, model.graphProperties, model.transientFields, row.props);
+        const instance: any = this.properties(model.type, model, row.props);
         if (model.stampField) {
             instance[model.stampField] = row.props?.[Stamps.PROPERTY] ?? undefined;
         }
@@ -58,7 +59,10 @@ export class GraphObjectMapper {
         for (const rel of model.relationships) {
             const value = row.rels?.[rel.field];
             instance[rel.field] = rel.isCollection
-                ? (value ?? []).map((it: any) => this.related(rel, it))
+                ? sorted(
+                      (value ?? []).map((it: any) => this.related(rel, it)),
+                      rel.sortedBy
+                  )
                 : value == null
                 ? undefined
                 : this.related(rel, value);
@@ -85,7 +89,7 @@ export class GraphObjectMapper {
     }
 
     private relationshipFragment(model: RelationshipFragmentModel, row: RelationshipRow): any {
-        const instance: any = this.properties(model.type, model.graphProperties, model.transientFields, row.rel);
+        const instance: any = this.properties(model.type, model, row.rel);
         instance[model.targetField] = this.target(model.target, row.target);
         return instance;
     }
@@ -94,23 +98,58 @@ export class GraphObjectMapper {
         return into.kind === 'GRAPH_VIEW' ? this.view(into.model, row) : this.fragment(into.model, row);
     }
 
-    private properties(
-        type: Function,
-        graphProperties: Map<string, string>,
-        transientFields: Set<string>,
-        props: Record<string, any>
-    ): any {
+    private properties(type: Function, mapping: FieldMapping, props: Record<string, any>): any {
         const fields: Record<string, any> = {};
-        const byGraphName = new Map([...graphProperties].map(([field, name]) => [name, field]));
+        const byGraphName = new Map([...mapping.graphProperties].map(([field, name]) => [name, field]));
         for (const [name, value] of Object.entries(props ?? {})) {
             if (name.startsWith(RESERVED_PREFIX)) {
                 continue;
             }
-            const field = byGraphName.get(name) ?? (graphProperties.has(name) ? undefined : name);
-            if (field !== undefined && !transientFields.has(field)) {
-                fields[field] = value;
+            const field = byGraphName.get(name) ?? (mapping.graphProperties.has(name) ? undefined : name);
+            if (
+                field === undefined ||
+                mapping.transientFields.has(field) ||
+                (value == null && mapping.defaults.has(field))
+            ) {
+                continue;
             }
+            fields[field] = mapping.jsonPacked.has(field) ? unpacked(value) : value;
         }
-        return plainToInstance(type as any, fields);
+        const instance = plainToInstance(type as any, fields) as any;
+        mapping.emptyWhenAbsent.forEach((kind, field) => {
+            if (instance[field] == null) {
+                instance[field] = kind === 'array' ? [] : {};
+            }
+        });
+        return instance;
     }
+}
+
+/** A packed JSON value, unpacked; a value that isn't JSON text is left as it is. */
+function unpacked(value: any): any {
+    if (typeof value !== 'string') {
+        return value;
+    }
+    try {
+        return JSON.parse(value);
+    } catch {
+        return value;
+    }
+}
+
+/** The items sorted by a property path, nulls last; as they are without one. */
+function sorted(items: any[], by?: { property: string; ascending: boolean }): any[] {
+    if (!by) {
+        return items;
+    }
+    const path = by.property.split('.');
+    const valueOf = (item: any): any => path.reduce((it, key) => it?.[key], item);
+    const direction = by.ascending ? 1 : -1;
+    return items.sort((a, b) => {
+        const [x, y] = [valueOf(a), valueOf(b)];
+        if (x == null || y == null) {
+            return x == null ? (y == null ? 0 : 1) : -1;
+        }
+        return (x < y ? -1 : x > y ? 1 : 0) * direction;
+    });
 }

@@ -26,4 +26,6 @@ export interface RelationshipModel {
      * relationship a save could write.
      */
     readonly readOnly: boolean;
+    /** How the loaded list is sorted, if at all. */
+    sortedBy?: { property: string; ascending: boolean };
 }

@@ -1,3 +1,4 @@
+export * from './FieldMapping';
 export * from './FragmentModel';
 export * from './GraphViewModel';
 export * from './InstanceOf';

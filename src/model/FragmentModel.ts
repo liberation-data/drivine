@@ -3,7 +3,9 @@ import { ClassType } from '@/query/QuerySpecification';
 /**
  * A node fragment: a class whose properties are a node's properties.
  */
-export interface FragmentModel {
+import { FieldMapping } from '@/model/FieldMapping';
+
+export interface FragmentModel extends FieldMapping {
     type: ClassType;
     /** The class's own labels first, then those it inherits. */
     labels: string[];

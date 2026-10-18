@@ -247,7 +247,9 @@ export class StatelessGraphObjectManager {
         const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
         this.assertPatchable(root, named);
         for (const field of named) {
-            set[root.graphProperties.get(field) ?? field] = options.set?.[field] ?? null;
+            const value = options.set?.[field] ?? null;
+            set[root.graphProperties.get(field) ?? field] =
+                value != null && root.jsonPacked.has(field) ? JSON.stringify(value) : value;
         }
         const statement = PatchStatements.one(root, options.where);
         return this.whenUncontended(async () =>

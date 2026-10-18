@@ -4,7 +4,9 @@ import { TargetModel } from '@/model/RelationshipModel';
 /**
  * A relationship fragment: a class holding a relationship's properties and the node it leads to.
  */
-export interface RelationshipFragmentModel {
+import { FieldMapping } from '@/model/FieldMapping';
+
+export interface RelationshipFragmentModel extends FieldMapping {
     type: ClassType;
     /** The field holding the node the relationship leads to. */
     targetField: string;

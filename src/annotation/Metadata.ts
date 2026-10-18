@@ -51,6 +51,10 @@ export interface PropertyMetadata {
     graphProperty?: string;
     transient?: boolean;
     readOnly?: boolean;
+    jsonPacked?: boolean;
+    default?: boolean;
+    emptyWhenAbsent?: boolean;
+    sortedBy?: { property: string; ascending: boolean };
     aggregate?: { function: string; type: string; property?: string; direction?: Direction };
     path?: { hops: { type: string; direction?: Direction; label?: string }[]; target?: ClassThunk; required?: boolean };
     targetNode?: { target?: ClassThunk };

@@ -11,6 +11,7 @@ import {
 import { DrivineError } from '@/DrivineError';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
 import { FragmentModel } from '@/model/FragmentModel';
+import { FieldMapping } from '@/model/FieldMapping';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
@@ -19,6 +20,15 @@ import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
  * Builds the model of a decorated class from its decorators, once, and checks it. Models are built when first
  * asked for, by which time every class a decorator refers to has been declared.
  */
+/** Decorators that shape how a plain field is stored, allowed on node and relationship fragments. */
+const MAPPING_KEYS: (keyof PropertyMetadata)[] = [
+    'graphProperty',
+    'transient',
+    'jsonPacked',
+    'default',
+    'emptyWhenAbsent'
+];
+
 export class ModelRegistry {
     private readonly fragments = new Map<Function, FragmentModel>();
     private readonly relationshipFragments = new Map<Function, RelationshipFragmentModel>();
@@ -31,16 +41,18 @@ export class ModelRegistry {
      */
     registerSubtype(parent: ClassRef, subtype: ClassType): void {
         if (this.kindOf(subtype) !== ClassKind.NODE_FRAGMENT) {
-            throw new DrivineError(`${subtype.name}, registered as a subtype of ${parent.name}, is not a @NodeFragment.`);
+            throw new DrivineError(
+                `${subtype.name}, registered as a subtype of ${parent.name}, is not a @NodeFragment.`
+            );
         }
         this.registeredSubtypes.set(parent, (this.registeredSubtypes.get(parent) ?? new Set()).add(subtype));
     }
 
     /** The known subtypes of a fragment class: its subclasses, and those registered for it. */
     subtypes(type: ClassType): ClassType[] {
-        return [...new Set([...(subtypesOf(type) as ClassType[]), ...(this.registeredSubtypes.get(type) ?? [])])].filter(
-            (it) => this.kindOf(it) === ClassKind.NODE_FRAGMENT
-        );
+        return [
+            ...new Set([...(subtypesOf(type) as ClassType[]), ...(this.registeredSubtypes.get(type) ?? [])])
+        ].filter((it) => this.kindOf(it) === ClassKind.NODE_FRAGMENT);
     }
 
     /**
@@ -115,7 +127,7 @@ export class ModelRegistry {
         }
 
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'graphProperty', 'transient'], 'a @NodeFragment');
+        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', ...MAPPING_KEYS], 'a @NodeFragment');
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
         if (ids.length > 1) {
             throw new DrivineError(
@@ -145,15 +157,15 @@ export class ModelRegistry {
             nodeIdField,
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
             stampField,
-            graphProperties,
-            transientFields: this.transientFields(properties)
+            ...this.fieldMapping(properties),
+            graphProperties
         };
     }
 
     private buildRelationshipFragment(type: ClassType): RelationshipFragmentModel {
         this.assertKind(type, ClassKind.RELATIONSHIP_FRAGMENT, '@RelationshipFragment');
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['targetNode', 'graphProperty', 'transient'], 'a @RelationshipFragment');
+        this.assertOnly(type, properties, ['targetNode', ...MAPPING_KEYS], 'a @RelationshipFragment');
         const targets = [...properties].filter(([, it]) => it.targetNode);
         if (targets.length !== 1) {
             throw new DrivineError(
@@ -173,8 +185,7 @@ export class ModelRegistry {
             type,
             targetField,
             target,
-            graphProperties: this.graphProperties(properties),
-            transientFields: this.transientFields(properties)
+            ...this.fieldMapping(properties)
         };
     }
 
@@ -184,7 +195,7 @@ export class ModelRegistry {
         this.assertOnly(
             type,
             properties,
-            ['root', 'relationship', 'transient', 'readOnly', 'aggregate', 'path'],
+            ['root', 'relationship', 'transient', 'readOnly', 'aggregate', 'path', 'sortedBy'],
             'a @GraphView'
         );
         properties.forEach((metadata, field) => {
@@ -267,6 +278,7 @@ export class ModelRegistry {
             maxDepth,
             required: options.required ?? false,
             isCollection,
+            sortedBy: metadata.sortedBy,
             get related(): RelatedModel {
                 return related ?? (related = resolveRelated());
             },
@@ -370,7 +382,11 @@ export class ModelRegistry {
             'targetNode',
             'readOnly',
             'aggregate',
-            'path'
+            'path',
+            'jsonPacked',
+            'default',
+            'emptyWhenAbsent',
+            'sortedBy'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
@@ -380,6 +396,23 @@ export class ModelRegistry {
                 );
             }
         });
+    }
+
+    private fieldMapping(properties: Map<string, PropertyMetadata>): FieldMapping {
+        const where = (key: keyof PropertyMetadata): string[] =>
+            [...properties].filter(([, it]) => it[key]).map(([field]) => field);
+        return {
+            graphProperties: this.graphProperties(properties),
+            transientFields: this.transientFields(properties),
+            jsonPacked: new Set(where('jsonPacked')),
+            defaults: new Set(where('default')),
+            emptyWhenAbsent: new Map(
+                where('emptyWhenAbsent').map((field) => [
+                    field,
+                    properties.get(field)!.designType === Array ? 'array' : 'object'
+                ])
+            )
+        };
     }
 
     private graphProperties(properties: Map<string, PropertyMetadata>): Map<string, string> {
@@ -405,6 +438,10 @@ function decoratorName(key: keyof PropertyMetadata): string {
         readOnly: '@ReadOnly',
         aggregate: '@Count or @Aggregate',
         path: '@GraphPath',
+        jsonPacked: '@JsonPacked',
+        default: '@Default',
+        emptyWhenAbsent: '@EmptyWhenAbsent',
+        sortedBy: '@SortedBy',
         designType: ''
     }[key];
 }
