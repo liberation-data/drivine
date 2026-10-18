@@ -1,7 +1,5 @@
 import { GraphBackend, Page } from '@/backend/GraphBackend';
-import { CypherGrammar } from '@/backend/CypherGrammar';
-import { NODE_ALIAS } from '@/backend/CypherBackend';
-import { QueryRenderer, RenderedQuery } from '@/dsl/QueryRenderer';
+import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { sortCollections } from '@/dsl/CollectionSorts';
 import { IndexAdvicePolicy, QueryIndexAdvisor } from '@/dsl/QueryIndexAdvisor';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
@@ -13,7 +11,6 @@ import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { MatchingOptions, NearestOptions, Scored } from '@/manager/Scored';
 import { PatchOptions, PatchResult } from '@/manager/PatchResult';
-import { PatchStatements } from '@/backend/PatchStatements';
 import { splitVectors } from '@/backend/VectorWrites';
 import { propsOf } from '@/backend/SaveStatementBuilder';
 import { NullPolicy } from '@/manager/NullPolicy';
@@ -23,7 +20,7 @@ import { TransactionContextHolder } from '@/transaction/TransactonContextHolder'
 import { StaleObjectException } from '@/manager/StaleObjectException';
 import { Stamps } from '@/model/Stamps';
 import { SaveStatement } from '@/backend/SaveStatement';
-import { FragmentBatchStatement, FragmentGroup } from '@/backend/FragmentBatchStatement';
+import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
@@ -65,10 +62,10 @@ function loadOptions<T>(
     where: Filter<T> | undefined,
     bindings: Record<string, any>,
     target: TargetModel,
-    grammar: CypherGrammar
+    backend: GraphBackend
 ): Required<LoadOptions> & { page: Page; query?: RenderedQuery } {
     if (typeof where === 'function') {
-        const query = QueryRenderer.render(where, target, grammar, NODE_ALIAS);
+        const query = backend.renderQuery(where, target);
         return {
             where: query.where as string,
             bindings: query.bindings,
@@ -100,13 +97,13 @@ function filterOnly<T>(
     where: string | QueryFn<T> | undefined,
     bindings: Record<string, any>,
     target: TargetModel,
-    grammar: CypherGrammar,
+    backend: GraphBackend,
     what: string
 ): { where?: string; bindings: Record<string, any> } {
     if (typeof where !== 'function') {
         return { where, bindings };
     }
-    const options = loadOptions(where, bindings, target, grammar);
+    const options = loadOptions(where, bindings, target, backend);
     if (options.query?.paged) {
         throw new DrivineError(`A ${what} takes a query's where, not an order, skip, limit or seek.`);
     }
@@ -192,13 +189,14 @@ export class StatelessGraphObjectManager {
             async <R>(statement: GraphStatement) =>
                 this.whenUncontended(async () => this.persistenceManager.getOne<R>(statement.spec())),
             async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
-            this.mapper
+            this.mapper,
+            backend
         );
         this.groups = new GroupOperations(
             registry,
             async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
             this.mapper,
-            backend.grammar
+            backend
         );
     }
 
@@ -218,7 +216,7 @@ export class StatelessGraphObjectManager {
      */
     async storeIdentity(): Promise<StoreIdentity> {
         if (!this.identity) {
-            this.identity = new StoreIdentityResolver(this.persistenceManager, this.constraints)
+            this.identity = new StoreIdentityResolver(this.persistenceManager, this.backend, this.constraints)
                 .resolve()
                 .catch((e) => {
                     this.identity = undefined;
@@ -239,7 +237,7 @@ export class StatelessGraphObjectManager {
      */
     async loadAll<T>(type: ClassRef<T>, where?: Filter<T>, bindings: Record<string, any> = {}): Promise<T[]> {
         const target = this.modelOf(type);
-        const options = loadOptions(where, bindings, target, this.backend.grammar);
+        const options = loadOptions(where, bindings, target, this.backend);
         if (options.query?.ordered.length) {
             await this.indexAdvisor.check(
                 this.indexAdvice,
@@ -289,7 +287,7 @@ export class StatelessGraphObjectManager {
         bindings: Record<string, any> = {}
     ): Promise<number> {
         const target = this.modelOf(type);
-        const filter = filterOnly(where, bindings, target, this.backend.grammar, 'count');
+        const filter = filterOnly(where, bindings, target, this.backend, 'count');
         const statement =
             target.kind === 'GRAPH_VIEW'
                 ? this.backend.countViews(target.model, filter.where)
@@ -458,7 +456,7 @@ export class StatelessGraphObjectManager {
             set[root.graphProperties.get(field) ?? field] =
                 value != null && root.jsonPacked.has(field) ? JSON.stringify(value) : value;
         }
-        const statement = PatchStatements.one(root, this.backend.grammar, filter.where);
+        const statement = this.backend.patchOne(root, filter.where);
         const split = splitVectors(root, set);
         return this.whenUncontended(async () =>
             this.persistenceManager.getOne<PatchResult>(
@@ -525,7 +523,7 @@ export class StatelessGraphObjectManager {
             const chunk = sorted.slice(start, start + PATCH_ROWS);
             const found = await this.whenUncontended(async () =>
                 this.persistenceManager.query<PatchResult & { id: any }>(
-                    PatchStatements.many(root, this.backend.grammar).spec({ rows: chunk })
+                    this.backend.patchMany(root).spec({ rows: chunk })
                 )
             );
             found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
@@ -566,7 +564,7 @@ export class StatelessGraphObjectManager {
         const statements: BatchEntry<T>[] = [];
         for (const chunk of chunked([...fragments.values()], BATCH_ROWS)) {
             statements.push({
-                spec: FragmentBatchStatement.build(chunk, options, this.backend.grammar),
+                spec: this.backend.fragmentBatch(chunk, options),
                 groups: chunk
             });
         }
@@ -618,7 +616,7 @@ export class StatelessGraphObjectManager {
         bindings: Record<string, any> = {}
     ): Promise<number> {
         const target = this.modelOf(type);
-        const filter = filterOnly(where, bindings, target, this.backend.grammar, 'delete');
+        const filter = filterOnly(where, bindings, target, this.backend, 'delete');
         return this.persistenceManager.getOne<number>(
             this.backend.deleteAll(target, filter.where).spec(filter.bindings)
         );
@@ -633,7 +631,7 @@ export class StatelessGraphObjectManager {
         if (typeof where !== 'function') {
             return { where, bindings };
         }
-        return QueryRenderer.renderWhere(where, target, this.backend.grammar, NODE_ALIAS);
+        return this.backend.renderWhere(where, target);
     }
 
     /**

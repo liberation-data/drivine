@@ -1,5 +1,4 @@
 import { FragmentModel } from '@/model/FragmentModel';
-import { CypherGrammar } from '@/backend/CypherGrammar';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
@@ -7,6 +6,13 @@ import { SaveOptions } from '@/manager/SaveOptions';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { GraphStatement } from '@/backend/GraphStatement';
+import { RenderedQuery } from '@/dsl/QueryRenderer';
+import { QueryFn, WhereFn } from '@/dsl/Refs';
+import { FragmentGroup } from '@/backend/FragmentBatchStatement';
+import { GroupQuery } from '@/manager/Groups';
+import { MatchedNode } from '@/backend/EdgeStatements';
+import { Direction } from '@/annotation/Metadata';
+import { RelateMode } from '@/manager/NodeRef';
 
 /**
  * Generates the statements the object manager runs. One backend per engine family: Cypher now, SQL/PGQ later.
@@ -44,8 +50,56 @@ export interface MatchingSearch {
     depth?: Record<string, number>;
 }
 
+/**
+ * What the object manager asks of a store: each statement it runs, ready to bind. Cypher engines have one backend, SQL
+ * stores another. A `where` given as a string is a predicate in the store's own language; a query over references is
+ * written by the backend.
+ */
 export interface GraphBackend {
-    readonly grammar: CypherGrammar;
+    /** A query over a class's references, written for the store: its predicate, order and paging, and its values. */
+    renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery;
+
+    /** A condition over a class's references, written for the store, with its values. */
+    renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> };
+
+    /** Writes `$set` (and `$vectors`) to the node with id `$id` if it meets `where`. Returns `{found, applied, changed}`. */
+    patchOne(model: FragmentModel, where?: string): GraphStatement;
+
+    /** Writes each row of `$rows`, `{id, props, vectors}`, to its node. Returns `{id, found, changed}` per row. */
+    patchMany(model: FragmentModel): GraphStatement;
+
+    /** Saves fragments of several classes in one statement; returns the stamps before and after per class. */
+    fragmentBatch(groups: FragmentGroup[], options: SaveOptions<any>): GraphStatement;
+
+    /** A grouped read. The query may hold references and conditions, which the backend writes. */
+    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement;
+
+    /** The nodes joined to a node by a relationship type in a direction, each once. */
+    related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement;
+
+    relate(
+        from: MatchedNode,
+        to: MatchedNode,
+        type: string,
+        properties: Record<string, any>,
+        mode: RelateMode
+    ): GraphStatement;
+
+    unrelate(from: MatchedNode, to: MatchedNode, type: string): GraphStatement;
+
+    unrelateAll(from: MatchedNode, type: string, direction: Direction): GraphStatement;
+
+    /** The store's identity stamps, `{id, assignedAt}`, oldest first. */
+    storeStamps(): GraphStatement;
+
+    /** Mints the identity stamp keyed `$key` unless it is there: `$storeId`, `$assignedAt`, `$engine`. */
+    assignStoreStamp(): GraphStatement;
+
+    /** The version recorded for the schema catalog `$name`, if any. */
+    schemaVersion(): GraphStatement;
+
+    /** Records `$version` for the schema catalog `$name`. */
+    recordSchemaVersion(): GraphStatement;
 
     /** Loads every node of the fragment, optionally filtered by a predicate over `n`. */
     loadAllFragments(model: FragmentModel, where?: string, page?: Page): GraphStatement;

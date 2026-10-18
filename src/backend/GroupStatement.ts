@@ -4,6 +4,12 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GroupAggregate, GroupKey, GroupQuery } from '@/manager/Groups';
+import { CypherGrammar } from '@/backend/CypherGrammar';
+import { NODE_ALIAS } from '@/backend/CypherBackend';
+import { scopeOf } from '@/dsl/ModelScope';
+import { REF_PATH } from '@/dsl/OrderExpressions';
+import { QueryRenderer, rootProperty } from '@/dsl/QueryRenderer';
+import { allOfOne, Where } from '@/dsl/Refs';
 
 const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
 
@@ -13,6 +19,38 @@ const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<='
  * key as a fragment row. References and conditions in the query have been written as Cypher already (GroupOperations).
  */
 export class GroupStatement {
+    /** The query with its references as stored names and its conditions as Cypher over `n`, values bound. */
+    static resolved(model: FragmentModel, query: GroupQuery<any, any>, grammar: CypherGrammar): GroupQuery<any, any> {
+        const scope = scopeOf({ kind: 'NODE_FRAGMENT', model });
+        const renderer = new QueryRenderer(grammar);
+        const name = (property: unknown, what: string): string =>
+            typeof property === 'string' ? property : rootProperty(pathOf(property), scope, what);
+        const cypher = (where: string | Where | undefined): string | undefined =>
+            where === undefined || typeof where === 'string'
+                ? where
+                : renderer.where(allOfOne(where), scope, NODE_ALIAS);
+        const keys = Object.fromEntries(
+            Object.entries(query.keys as Record<string, GroupKey>).map(([it, groupKey]) => [
+                it,
+                groupKey.kind === 'property'
+                    ? { ...groupKey, property: name(groupKey.property, 'A group key') }
+                    : groupKey
+            ])
+        );
+        const aggregates = Object.fromEntries(
+            Object.entries((query.aggregates ?? {}) as Record<string, GroupAggregate>).map(([it, aggregate]) => [
+                it,
+                {
+                    ...aggregate,
+                    property: aggregate.property === undefined ? undefined : name(aggregate.property, 'An aggregate'),
+                    filter: cypher(aggregate.filter)
+                }
+            ])
+        );
+        const where = cypher(query.where);
+        return { ...query, keys, aggregates, where, bindings: { ...query.bindings, ...renderer.boundValues } };
+    }
+
     static build(
         source: FragmentModel,
         query: GroupQuery<any, any>,
@@ -134,4 +172,12 @@ function integer(value: number, what: string): number {
         throw new DrivineError(`${what} must be a whole number of at least 0.`);
     }
     return value;
+}
+
+function pathOf(ref: unknown): readonly string[] {
+    const path = (ref as any)?.[REF_PATH];
+    if (!path) {
+        throw new DrivineError('A group key or aggregate takes a property: its stored name, or a reference to it.');
+    }
+    return path;
 }

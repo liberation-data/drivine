@@ -15,6 +15,21 @@ import { STAMP } from '@/backend/CypherStamps';
 import { Stamps } from '@/model/Stamps';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { ModelRegistry } from '@/model/ModelRegistry';
+import { QueryRenderer, RenderedQuery } from '@/dsl/QueryRenderer';
+import { QueryFn, WhereFn } from '@/dsl/Refs';
+import { PatchStatements } from '@/backend/PatchStatements';
+import { FragmentBatchStatement, FragmentGroup } from '@/backend/FragmentBatchStatement';
+import { GroupStatement } from '@/backend/GroupStatement';
+import { GroupQuery } from '@/manager/Groups';
+import { EdgeStatements, MatchedNode } from '@/backend/EdgeStatements';
+import { Direction } from '@/annotation/Metadata';
+import { RelateMode } from '@/manager/NodeRef';
+
+/** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
+const STORE_LABEL = 'DrivineStore';
+
+/** The label of the nodes recording each schema catalog's version. */
+const SCHEMA_MARKER = '_DrivineSchema';
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
 export const NODE_ALIAS = 'n';
@@ -163,6 +178,72 @@ export class CypherBackend implements GraphBackend {
                 Stamps.NEVER_STAMPED
             }') AS found`
         );
+    }
+
+    renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
+        return QueryRenderer.render(fn, target, this.grammar, NODE_ALIAS);
+    }
+
+    renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
+        return QueryRenderer.renderWhere(fn, target, this.grammar, NODE_ALIAS);
+    }
+
+    patchOne(model: FragmentModel, where?: string): GraphStatement {
+        return PatchStatements.one(model, this.grammar, where);
+    }
+
+    patchMany(model: FragmentModel): GraphStatement {
+        return PatchStatements.many(model, this.grammar);
+    }
+
+    fragmentBatch(groups: FragmentGroup[], options: SaveOptions<any>): GraphStatement {
+        return FragmentBatchStatement.build(groups, options, this.grammar);
+    }
+
+    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+        return GroupStatement.build(model, GroupStatement.resolved(model, query, this.grammar), pathTargets);
+    }
+
+    related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement {
+        return EdgeStatements.related(from, type, direction, target);
+    }
+
+    relate(
+        from: MatchedNode,
+        to: MatchedNode,
+        type: string,
+        properties: Record<string, any>,
+        mode: RelateMode
+    ): GraphStatement {
+        return EdgeStatements.relate(from, to, type, properties, mode);
+    }
+
+    unrelate(from: MatchedNode, to: MatchedNode, type: string): GraphStatement {
+        return EdgeStatements.unrelate(from, to, type);
+    }
+
+    unrelateAll(from: MatchedNode, type: string, direction: Direction): GraphStatement {
+        return EdgeStatements.unrelateAll(from, type, direction);
+    }
+
+    storeStamps(): GraphStatement {
+        return new GraphStatement(
+            `MATCH (s:${STORE_LABEL}) RETURN {id: s.storeId, assignedAt: s.assignedAt} AS stamp ORDER BY stamp.assignedAt, stamp.id`
+        );
+    }
+
+    assignStoreStamp(): GraphStatement {
+        return new GraphStatement(
+            `MERGE (s:${STORE_LABEL} {key: $key}) ON CREATE SET s.storeId = $storeId, s.assignedAt = $assignedAt, s.engine = $engine`
+        );
+    }
+
+    schemaVersion(): GraphStatement {
+        return new GraphStatement(`MATCH (m:${SCHEMA_MARKER} {catalog: $name}) RETURN m.version`);
+    }
+
+    recordSchemaVersion(): GraphStatement {
+        return new GraphStatement(`MERGE (m:${SCHEMA_MARKER} {catalog: $name}) SET m.version = $version`);
     }
 
     contended(failure: unknown): boolean {

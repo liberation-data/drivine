@@ -1,5 +1,6 @@
 import { Direction } from '@/annotation/Metadata';
-import { EdgeStatements, MatchedNode } from '@/backend/EdgeStatements';
+import { MatchedNode } from '@/backend/EdgeStatements';
+import { GraphBackend } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { NodeRef, RelateMode } from '@/manager/NodeRef';
@@ -17,7 +18,8 @@ export class EdgeOperations {
         private readonly registry: ModelRegistry,
         private readonly run: <R>(statement: GraphStatement) => Promise<R>,
         private readonly query: (statement: GraphStatement) => Promise<any[]>,
-        private readonly mapper: GraphObjectMapper
+        private readonly mapper: GraphObjectMapper,
+        private readonly backend: GraphBackend
     ) {}
 
     /**
@@ -31,7 +33,7 @@ export class EdgeOperations {
         target: ClassRef<T>
     ): Promise<T[]> {
         const model = this.registry.fragment(target as ClassType);
-        const rows = await this.query(EdgeStatements.related(this.node(from), type, direction, model));
+        const rows = await this.query(this.backend.related(this.node(from), type, direction, model));
         return rows.map((row) => this.mapper.fragment<T>(model, row));
     }
 
@@ -49,19 +51,19 @@ export class EdgeOperations {
         mode: RelateMode = RelateMode.MERGE
     ): Promise<boolean> {
         const related = await this.run<number>(
-            EdgeStatements.relate(this.node(from), this.node(to), type, properties, mode)
+            this.backend.relate(this.node(from), this.node(to), type, properties, mode)
         );
         return related > 0;
     }
 
     /** Removes every relationship of the type from `from` to `to`, and returns how many there were. */
     async unrelate(from: NodeRef, to: NodeRef, type: string): Promise<number> {
-        return this.run<number>(EdgeStatements.unrelate(this.node(from), this.node(to), type));
+        return this.run<number>(this.backend.unrelate(this.node(from), this.node(to), type));
     }
 
     /** Removes every relationship of the type `from` has in the direction (OUTGOING by default), and returns how many. */
     async unrelateAll(from: NodeRef, type: string, direction: Direction = Direction.OUTGOING): Promise<number> {
-        return this.run<number>(EdgeStatements.unrelateAll(this.node(from), type, direction));
+        return this.run<number>(this.backend.unrelateAll(this.node(from), type, direction));
     }
 
     private node(ref: NodeRef): MatchedNode {

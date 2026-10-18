@@ -1,5 +1,4 @@
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { QuerySpecification } from '@/query/QuerySpecification';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger';
@@ -19,7 +18,6 @@ export interface SchemaOptions {
 }
 
 const GRAPH_TYPES = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB];
-const MARKER = '_DrivineSchema';
 
 const keyOf = (spec: SchemaSpec): string => `${spec.kind}:${spec.label}:${[...spec.properties].sort().join(',')}`;
 
@@ -150,7 +148,9 @@ export class SchemaManager {
     ): Promise<Set<SchemaCatalog>> {
         const changed = new Set<SchemaCatalog>();
         for (const catalog of catalogs.filter((it) => it.version !== undefined)) {
-            const recorded = await gom.persistenceManager.maybeGetOne<string>(markerRead(catalog.name));
+            const recorded = await gom.persistenceManager.maybeGetOne<string>(
+                gom.backend.schemaVersion().spec({ name: catalog.name })
+            );
             if (recorded != null && recorded !== catalog.version) {
                 changed.add(catalog);
             }
@@ -160,18 +160,9 @@ export class SchemaManager {
 
     private async recordVersions(gom: StatelessGraphObjectManager, catalogs: SchemaCatalog[]): Promise<void> {
         for (const catalog of catalogs.filter((it) => it.version !== undefined)) {
-            await gom.persistenceManager.execute(markerWrite(catalog.name, catalog.version!));
+            await gom.persistenceManager.execute(
+                gom.backend.recordSchemaVersion().spec({ name: catalog.name, version: catalog.version! })
+            );
         }
     }
-}
-
-function markerRead(name: string): QuerySpecification<string> {
-    return new QuerySpecification<string>(`MATCH (m:${MARKER} {catalog: $name}) RETURN m.version`).bind({ name });
-}
-
-function markerWrite(name: string, version: string): QuerySpecification<void> {
-    return new QuerySpecification<void>(`MERGE (m:${MARKER} {catalog: $name}) SET m.version = $version`).bind({
-        name,
-        version
-    });
 }

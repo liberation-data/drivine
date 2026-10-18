@@ -3,7 +3,7 @@ import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger';
 import { PersistenceManager } from '@/manager/PersistenceManager';
-import { QuerySpecification } from '@/query/QuerySpecification';
+import { GraphBackend } from '@/backend/GraphBackend';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { uniquenessConstraint } from '@/schema/SchemaSpecs';
 
@@ -42,6 +42,7 @@ export class StoreIdentityResolver {
 
     constructor(
         private readonly persistenceManager: PersistenceManager,
+        private readonly backend: GraphBackend,
         private readonly constraints?: ConstraintManager
     ) {}
 
@@ -50,9 +51,7 @@ export class StoreIdentityResolver {
         for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
             await this.assignIfAbsent(guarded);
             const stamps = await this.persistenceManager.query<{ id: string; assignedAt: string }>(
-                new QuerySpecification(
-                    `MATCH (s:${LABEL}) RETURN {id: s.storeId, assignedAt: s.assignedAt} AS stamp ORDER BY stamp.assignedAt, stamp.id`
-                )
+                this.backend.storeStamps().spec()
             );
             if (stamps.length) {
                 if (stamps.length > 1) {
@@ -99,9 +98,7 @@ export class StoreIdentityResolver {
         for (let attempt = 1; ; attempt++) {
             try {
                 await this.persistenceManager.execute(
-                    new QuerySpecification<void>(
-                        `MERGE (s:${LABEL} {key: $key}) ON CREATE SET s.storeId = $storeId, s.assignedAt = $assignedAt, s.engine = $engine`
-                    ).bind({
+                    this.backend.assignStoreStamp().spec<void>({
                         key: SINGLETON,
                         storeId: randomUUID(),
                         assignedAt: new Date().toISOString(),
