@@ -31,7 +31,9 @@ export class CypherBackend implements GraphBackend {
     }
 
     countFragments(model: FragmentModel, where?: string): GraphStatement {
-        return new GraphStatement([this.match(model), this.where(where), `\nRETURN count(${NODE_ALIAS}) AS count`].join(''));
+        return new GraphStatement(
+            [this.match(model), this.where(where), `\nRETURN count(${NODE_ALIAS}) AS count`].join('')
+        );
     }
 
     loadAllViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
@@ -52,7 +54,11 @@ export class CypherBackend implements GraphBackend {
 
     countViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
         return new GraphStatement(
-            [this.match(model.root), this.viewWhere(model, where, depth), `\nRETURN count(${NODE_ALIAS}) AS count`].join('')
+            [
+                this.match(model.root),
+                this.viewWhere(model, where, depth),
+                `\nRETURN count(${NODE_ALIAS}) AS count`
+            ].join('')
         );
     }
 
@@ -68,7 +74,9 @@ export class CypherBackend implements GraphBackend {
             throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
         }
         if (cascade === CascadeType.DELETE_ORPHAN && this.grammar.orphanDeleteLimit) {
-            throw new DrivineError(`CascadeType.DELETE_ORPHAN is not available on ${this.grammar.engine}: ${this.grammar.orphanDeleteLimit}.`);
+            throw new DrivineError(
+                `CascadeType.DELETE_ORPHAN is not available on ${this.grammar.engine}: ${this.grammar.orphanDeleteLimit}.`
+            );
         }
         const targets = new CascadeTargets(this.grammar).of(target.model, NODE_ALIAS);
         const deletable =
@@ -93,7 +101,11 @@ export class CypherBackend implements GraphBackend {
     deleteAll(target: TargetModel, where?: string): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         return new GraphStatement(
-            [this.match(root), this.rootWhere(target, where), `\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`].join('')
+            [
+                this.match(root),
+                this.rootWhere(target, where),
+                `\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`
+            ].join('')
         );
     }
 
@@ -107,9 +119,17 @@ export class CypherBackend implements GraphBackend {
         return new SaveStatementBuilder(this.grammar, registry).build(target, object, options, createOnly);
     }
 
+    heldKeys(model: FragmentModel): GraphStatement {
+        return new GraphStatement(
+            `${this.match(model)}\nWHERE ${this.idPredicate(model)}\nRETURN keys(${NODE_ALIAS}) AS keys`
+        );
+    }
+
     foundStamp(model: FragmentModel): GraphStatement {
         return new GraphStatement(
-            `${this.match(model)}\nWHERE ${this.idPredicate(model)}\nRETURN coalesce(${NODE_ALIAS}.${STAMP}, '${Stamps.NEVER_STAMPED}') AS found`
+            `${this.match(model)}\nWHERE ${this.idPredicate(model)}\nRETURN coalesce(${NODE_ALIAS}.${STAMP}, '${
+                Stamps.NEVER_STAMPED
+            }') AS found`
         );
     }
 

@@ -52,6 +52,7 @@ export interface PropertyMetadata {
     transient?: boolean;
     readOnly?: boolean;
     jsonPacked?: boolean;
+    propertyBag?: { prefix?: string; delimiter?: string; flat?: boolean };
     default?: boolean;
     emptyWhenAbsent?: boolean;
     sortedBy?: { property: string; ascending: boolean };

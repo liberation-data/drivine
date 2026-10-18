@@ -292,7 +292,11 @@ export class StatelessGraphObjectManager {
             }
             const fields = Object.fromEntries(
                 Object.entries(fragment).filter(
-                    ([field]) => keep(field) && field !== root.nodeIdField && field !== root.stampField
+                    ([field]) =>
+                        keep(field) &&
+                        field !== root.nodeIdField &&
+                        field !== root.stampField &&
+                        !root.propertyBags.some((bag) => bag.field === field)
                 )
             );
             return { id, props: propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR) };
@@ -335,7 +339,9 @@ export class StatelessGraphObjectManager {
         const views: T[] = [];
         for (const object of objects) {
             const target = this.modelOf(object.constructor as ClassType);
-            if (target.kind === 'GRAPH_VIEW') {
+            // A view, or a fragment with a property bag, whose entries no row of a batch can carry, is a statement of
+            // its own.
+            if (target.kind === 'GRAPH_VIEW' || target.model.propertyBags.length) {
                 views.push(object);
             } else {
                 if (options.replace) {
@@ -530,9 +536,33 @@ export class StatelessGraphObjectManager {
         });
     }
 
+    /**
+     * Under NullPolicy.CLEAR, a root with property bags is read first for the keys it holds, so that a save removes the
+     * entries a bag no longer has: one more statement, which writes nothing.
+     */
+    private async withHeldKeys<T extends object>(object: T, options: SaveOptions<T>): Promise<SaveOptions<T>> {
+        if (options.nullPolicy !== NullPolicy.CLEAR) {
+            return options;
+        }
+        const target = this.modelOf(object.constructor as ClassRef);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const rootObject: any = target.kind === 'GRAPH_VIEW' ? (object as any)[target.model.rootField] : object;
+        if (!root.propertyBags.length || rootObject?.[root.nodeIdField!] == null) {
+            return options;
+        }
+        const held = await this.persistenceManager.query<string[]>(
+            this.backend.heldKeys(root).spec({ id: rootObject[root.nodeIdField!] })
+        );
+        return { ...options, heldKeys: held[0] ?? [] };
+    }
+
     private assertPatchable(root: ReturnType<ModelRegistry['fragment']>, fields: string[]): void {
         const refused = fields.filter(
-            (it) => it === root.nodeIdField || it === root.stampField || root.transientFields.has(it)
+            (it) =>
+                it === root.nodeIdField ||
+                it === root.stampField ||
+                root.transientFields.has(it) ||
+                root.propertyBags.some((bag) => bag.field === it)
         );
         if (refused.length) {
             throw new DrivineError(`A patch can't write ${refused.join(', ')} of ${root.type.name}.`);
@@ -551,9 +581,10 @@ export class StatelessGraphObjectManager {
 
     private async write<T extends object>(
         object: T,
-        options: SaveOptions<T>,
+        given: SaveOptions<T>,
         createOnly: boolean
     ): Promise<T | undefined> {
+        const options = await this.withHeldKeys(object, given);
         const statement = this.backend.save(
             this.modelOf(object.constructor as ClassType),
             object,

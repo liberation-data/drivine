@@ -9,6 +9,7 @@ export * from './Metadata';
 export * from './NodeFragment';
 export * from './NodeId';
 export * from './NodeStamp';
+export * from './PropertyBag';
 export * from './ReadOnly';
 export * from './RelationshipFragment';
 export * from './Root';

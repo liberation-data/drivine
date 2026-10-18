@@ -10,7 +10,7 @@ import {
 } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, PropertyBagModel } from '@/model/FragmentModel';
 import { FieldMapping } from '@/model/FieldMapping';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
@@ -127,7 +127,7 @@ export class ModelRegistry {
         }
 
         const properties = propertyMetadata(type);
-        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', ...MAPPING_KEYS], 'a @NodeFragment');
+        this.assertOnly(type, properties, ['nodeId', 'nodeStamp', 'propertyBag', ...MAPPING_KEYS], 'a @NodeFragment');
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
         if (ids.length > 1) {
             throw new DrivineError(
@@ -157,6 +157,7 @@ export class ModelRegistry {
             nodeIdField,
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
             stampField,
+            propertyBags: this.propertyBags(type, properties),
             ...this.fieldMapping(properties),
             graphProperties
         };
@@ -386,7 +387,8 @@ export class ModelRegistry {
             'jsonPacked',
             'default',
             'emptyWhenAbsent',
-            'sortedBy'
+            'sortedBy',
+            'propertyBag'
         ];
         properties.forEach((metadata, field) => {
             const misplaced = mapping.filter((key) => metadata[key] && !allowed.includes(key));
@@ -396,6 +398,31 @@ export class ModelRegistry {
                 );
             }
         });
+    }
+
+    private propertyBags(type: Function, properties: Map<string, PropertyMetadata>): PropertyBagModel[] {
+        const bags = [...properties]
+            .filter(([, it]) => it.propertyBag)
+            .map(([field, it]) => {
+                const options = it.propertyBag!;
+                const flat = options.flat ?? false;
+                return { field, flat, namespace: flat ? '' : `${options.prefix ?? field}${options.delimiter ?? '.'}` };
+            });
+        if (bags.filter((it) => it.flat).length > 1) {
+            throw new DrivineError(`${type.name} has more than one flat @PropertyBag; a fragment may have one.`);
+        }
+        const prefixed = bags.filter((it) => !it.flat);
+        for (const a of prefixed) {
+            for (const b of prefixed) {
+                if (a !== b && b.namespace.startsWith(a.namespace)) {
+                    throw new DrivineError(
+                        `The @PropertyBag namespaces of ${type.name}.${a.field} ('${a.namespace}') and ${b.field} ` +
+                            `('${b.namespace}') overlap: one would read the other's entries.`
+                    );
+                }
+            }
+        }
+        return bags;
     }
 
     private fieldMapping(properties: Map<string, PropertyMetadata>): FieldMapping {
@@ -442,6 +469,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         default: '@Default',
         emptyWhenAbsent: '@EmptyWhenAbsent',
         sortedBy: '@SortedBy',
+        propertyBag: '@PropertyBag',
         designType: ''
     }[key];
 }

@@ -5,6 +5,13 @@ import { ClassType } from '@/query/QuerySpecification';
  */
 import { FieldMapping } from '@/model/FieldMapping';
 
+export interface PropertyBagModel {
+    field: string;
+    /** What every entry's property name starts with: `<prefix><delimiter>`, or '' for a flat bag. */
+    namespace: string;
+    flat: boolean;
+}
+
 export interface FragmentModel extends FieldMapping {
     type: ClassType;
     /** The class's own labels first, then those it inherits. */
@@ -13,6 +20,8 @@ export interface FragmentModel extends FieldMapping {
     nodeIdField?: string;
     /** The name the node id is stored under: the field, unless it has a @GraphProperty. */
     nodeIdProperty?: string;
+    /** Object fields stored as one node property per entry. */
+    propertyBags: PropertyBagModel[];
     /** The property holding the node's stamp, if any. See Stamps. */
     stampField?: string;
     /** Fields stored under another name, field → graph property. Fields not listed are stored under their own. */

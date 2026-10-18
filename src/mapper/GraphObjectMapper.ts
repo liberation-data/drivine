@@ -46,7 +46,7 @@ export class GraphObjectMapper {
 
     fragment<T>(expected: FragmentModel, row: FragmentRow): T {
         const model = this.registry && row.labels ? this.registry.fragmentFor(expected, row.labels) : expected;
-        const instance: any = this.properties(model.type, model, row.props);
+        const instance: any = this.properties(model.type, model, row.props, model);
         if (model.stampField) {
             instance[model.stampField] = row.props?.[Stamps.PROPERTY] ?? undefined;
         }
@@ -81,6 +81,46 @@ export class GraphObjectMapper {
         return instance as T;
     }
 
+    /**
+     * Splits a node's properties between its property bags and its other fields. A prefixed bag takes the properties
+     * in its namespace; a flat bag takes every property no other bag takes and no known field is stored under: a
+     * decorated field, or one the class initializes.
+     */
+    private takeBags(
+        type: Function,
+        mapping: FieldMapping,
+        source: Record<string, any>,
+        fragment?: FragmentModel
+    ): { props: Record<string, any>; bags: Record<string, Record<string, any>> } {
+        if (!fragment?.propertyBags.length) {
+            return { props: source, bags: {} };
+        }
+        const props: Record<string, any> = {};
+        const bags: Record<string, Record<string, any>> = {};
+        fragment.propertyBags.forEach((bag) => (bags[bag.field] = {}));
+        const flat = fragment.propertyBags.find((it) => it.flat);
+        const known = new Set<string>([
+            ...mapping.graphProperties.values(),
+            ...mapping.transientFields,
+            ...mapping.jsonPacked,
+            ...mapping.defaults,
+            ...mapping.emptyWhenAbsent.keys(),
+            ...[fragment.nodeIdProperty, fragment.stampField].filter((it): it is string => !!it),
+            ...(flat ? Object.keys(plainToInstance(type as any, {}) as object) : [])
+        ]);
+        for (const [name, value] of Object.entries(source)) {
+            const bag = fragment.propertyBags.find((it) => !it.flat && name.startsWith(it.namespace));
+            if (bag) {
+                bags[bag.field][name.slice(bag.namespace.length)] = value;
+            } else if (flat && !name.startsWith(RESERVED_PREFIX) && !known.has(name)) {
+                bags[flat.field][name] = value;
+            } else {
+                props[name] = value;
+            }
+        }
+        return { props, bags };
+    }
+
     private related(rel: RelationshipModel, value: any): any {
         const related = rel.related;
         return related.kind === 'RELATIONSHIP_FRAGMENT'
@@ -98,10 +138,22 @@ export class GraphObjectMapper {
         return into.kind === 'GRAPH_VIEW' ? this.view(into.model, row) : this.fragment(into.model, row);
     }
 
-    private properties(type: Function, mapping: FieldMapping, props: Record<string, any>): any {
+    private properties(
+        type: Function,
+        mapping: FieldMapping,
+        source: Record<string, any>,
+        fragment?: FragmentModel
+    ): any {
         const fields: Record<string, any> = {};
+        const { props, bags }: { props: Record<string, any>; bags: Record<string, any> } = this.takeBags(
+            type,
+            mapping,
+            source ?? {},
+            fragment
+        );
+        Object.assign(fields, bags);
         const byGraphName = new Map([...mapping.graphProperties].map(([field, name]) => [name, field]));
-        for (const [name, value] of Object.entries(props ?? {})) {
+        for (const [name, value] of Object.entries(props)) {
             if (name.startsWith(RESERVED_PREFIX)) {
                 continue;
             }
@@ -116,6 +168,7 @@ export class GraphObjectMapper {
             fields[field] = mapping.jsonPacked.has(field) ? unpacked(value) : value;
         }
         const instance = plainToInstance(type as any, fields) as any;
+        fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         mapping.emptyWhenAbsent.forEach((kind, field) => {
             if (instance[field] == null) {
                 instance[field] = kind === 'array' ? [] : {};

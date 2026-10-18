@@ -3,7 +3,7 @@ import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { DrivineError } from '@/DrivineError';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, PropertyBagModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
@@ -43,6 +43,8 @@ export class SaveStatementBuilder {
     private readonly bindings: Record<string, any> = {};
     /** The stamped related fragments, each read before and after the writes: see readStamps. */
     private readonly stamped: StampedNodes[] = [];
+    /** Related nodes with property bags, each written by a part of the statement of its own after the FOREACHes. */
+    private readonly bagged: { model: FragmentModel; id: any; entries: Map<string, any> }[] = [];
     /** For each target fragment of the save, the subclasses of it the object holds, in the order rows name them. */
     private readonly subtypes = new Map<FragmentModel, FragmentModel[]>();
     private options: SaveOptions<any> = {};
@@ -108,6 +110,7 @@ export class SaveStatementBuilder {
             parts.push(`WITH ${this.carry}`);
             parts.push(...withProperties.map((part) => this.forEach(part, 'n', `$${part.key}`, 'EDGE_PROPERTIES')));
         }
+        parts.push(...this.baggedParts());
         parts.push(...this.readStamps('after'));
         const related = this.stamped.map((it) => `{before: before${it.index}, after: after${it.index}}`);
         parts.push(`RETURN {found: _found, now: n.${STAMP}, related: [${related.join(', ')}]} AS result`);
@@ -178,7 +181,19 @@ export class SaveStatementBuilder {
         this.bindings.root = { id: idOf(model, object), props: objectProps(model, object, this.options) };
         const labels = labelExpression(model.labels);
         const id = `{${quoteName(idProperty(model))}: $root.id}`;
-        const write = [`SET ${restamp('n', changes('n', '$root.props'))}`, 'SET n += $root.props'];
+        const { only, except }: SaveOptions<any> = this.options;
+        const written = model.propertyBags.filter((it) =>
+            only ? only.includes(it.field) : !except?.includes(it.field)
+        );
+        const entries = bagEntries(
+            { ...model, propertyBags: written },
+            object,
+            this.options.heldKeys,
+            this.options.nullPolicy === NullPolicy.CLEAR
+        );
+        const bag = this.bagSets('n', 'rootBag', entries);
+        const changed = [changes('n', '$root.props'), ...bag.changes].join(' OR ');
+        const write = [`SET ${restamp('n', changed)}`, 'SET n += $root.props', ...bag.sets];
         const expected = model.stampField ? object[model.stampField] : undefined;
         if (this.createOnly) {
             if (expected != null) {
@@ -359,6 +374,9 @@ export class SaveStatementBuilder {
             if (concrete !== root) {
                 row.subtype = this.subtypeIndex(root, concrete);
             }
+            if (concrete.propertyBags.length) {
+                this.bagged.push({ model: concrete, id: row.id, entries: bagEntries(concrete, nodeObject) });
+            }
             if (rel.related.kind === 'RELATIONSHIP_FRAGMENT') {
                 const model = rel.related.model;
                 row.rel = propsOf(model, item, [model.targetField]);
@@ -368,6 +386,45 @@ export class SaveStatementBuilder {
             }
             return row;
         });
+    }
+
+    private baggedParts(): string[] {
+        return this.bagged
+            .filter((it) => it.entries.size)
+            .flatMap((it, i) => {
+                const alias = `b${i}`;
+                this.bindings[`bagId${i}`] = it.id;
+                const bag = this.bagSets(alias, `bag${i}_`, it.entries);
+                return [
+                    `WITH ${this.carry}`,
+                    `MATCH (${alias}${labelExpression(it.model.labels)} {${quoteName(
+                        idProperty(it.model)
+                    )}: $bagId${i}})`,
+                    `SET ${restamp(alias, bag.changes.join(' OR '))}`,
+                    ...bag.sets
+                ];
+            });
+    }
+
+    /**
+     * SET clauses for property-bag entries, each with a parameter of its own (a parameter map can't hold a dotted key on
+     * every engine), and the conditions that say an entry changes the node.
+     */
+    private bagSets(
+        alias: string,
+        parameter: string,
+        entries: Map<string, any>
+    ): { sets: string[]; changes: string[] } {
+        const sets: string[] = [];
+        const changed: string[] = [];
+        [...entries].forEach(([property, value], i) => {
+            const name = `${parameter}${this.count}_${i}`;
+            this.bindings[name] = value;
+            const target = `${alias}.${quoteName(property)}`;
+            sets.push(`SET ${target} = $${name}`);
+            changed.push(value === null ? `${target} IS NOT NULL` : `(${target} IS NULL OR ${target} <> $${name})`);
+        });
+        return { sets, changes: changed };
     }
 
     /** The model of the object's own class, where it is a subclass of the field's target. */
@@ -497,14 +554,19 @@ export function objectProps(model: FragmentModel, object: any, options: SaveOpti
 }
 
 export function propsOf(
-    model: { graphProperties: Map<string, string>; transientFields: Set<string>; jsonPacked?: Set<string> },
+    model: {
+        graphProperties: Map<string, string>;
+        transientFields: Set<string>;
+        jsonPacked?: Set<string>;
+        propertyBags?: PropertyBagModel[];
+    },
     object: any,
     excluded: string[],
     clearNulls: boolean = false
 ): Record<string, any> {
     const props: Record<string, any> = {};
     for (const [field, value] of Object.entries(object ?? {})) {
-        if (typeof value === 'function' || excluded.includes(field) || model.transientFields.has(field)) {
+        if (typeof value === 'function' || skipped(model, field, excluded)) {
             continue;
         }
         if (value != null || clearNulls) {
@@ -537,4 +599,58 @@ function referencedAs(rel: RelationshipModel, node: string): string {
         default:
             return `(${node})<--()`;
     }
+}
+
+/**
+ * The node properties a fragment's property bags write: each entry under its bag's namespace, and, given the keys the
+ * node holds and `clear`, null for each held key of a bag that the bag no longer has.
+ */
+export function bagEntries(
+    model: FragmentModel,
+    object: any,
+    held: string[] = [],
+    clear: boolean = false
+): Map<string, any> {
+    const entries = new Map<string, any>();
+    for (const bag of model.propertyBags) {
+        const map = object?.[bag.field];
+        if (map != null && (typeof map !== 'object' || Array.isArray(map))) {
+            throw new DrivineError(`The @PropertyBag ${model.type.name}.${bag.field} must hold an object of entries.`);
+        }
+        for (const [key, value] of Object.entries(map ?? {})) {
+            if (!storable(value)) {
+                throw new DrivineError(
+                    `The entry '${key}' of ${model.type.name}.${bag.field} can't be stored as a property: a bag holds ` +
+                        `strings, numbers, booleans, dates, or arrays of them.`
+                );
+            }
+            if (value != null) {
+                entries.set(`${bag.namespace}${key}`, value);
+            }
+        }
+        if (clear && !bag.flat) {
+            held.filter((it) => it.startsWith(bag.namespace) && !entries.has(it)).forEach((it) =>
+                entries.set(it, null)
+            );
+        }
+    }
+    return entries;
+}
+
+function skipped(
+    model: { transientFields: Set<string>; propertyBags?: PropertyBagModel[] },
+    field: string,
+    excluded: string[]
+): boolean {
+    return (
+        excluded.includes(field) ||
+        model.transientFields.has(field) ||
+        !!model.propertyBags?.some((it) => it.field === field)
+    );
+}
+
+function storable(value: any): boolean {
+    const scalar = (it: any): boolean =>
+        it == null || ['string', 'number', 'boolean', 'bigint'].includes(typeof it) || it instanceof Date;
+    return Array.isArray(value) ? value.every((it) => it != null && scalar(it)) : scalar(value);
 }
