@@ -5,6 +5,9 @@ import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMap
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { PatchOptions, PatchResult } from '@/manager/PatchResult';
+import { PatchStatements } from '@/backend/PatchStatements';
+import { propsOf } from '@/backend/SaveStatementBuilder';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 import { whenNotContended } from '@/manager/Contention';
@@ -25,6 +28,9 @@ import { ClassType } from '@/query/QuerySpecification';
  */
 /** How many times `update` loads and applies its change before a stale save is thrown. */
 export const UPDATE_ATTEMPTS = 3;
+
+/** How many rows of a patchAll go to one statement. */
+export const PATCH_ROWS = 1000;
 
 /** The row a save statement returns: see SaveStatement. */
 interface SaveResult {
@@ -150,6 +156,81 @@ export class StatelessGraphObjectManager {
 
 
     /**
+     * Writes named fields of the node with the id, if it meets `options.where`, in one statement, without loading it.
+     * It never makes a node, is not checked against a stamp, and hands none back: a node it changed has a new stamp,
+     * so an object loaded before is refused when saved. On a view, the fields are its root's.
+     */
+    async patch(type: ClassType, id: unknown, options: PatchOptions): Promise<PatchResult> {
+        const target = this.modelOf(type);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const set: Record<string, any> = {};
+        const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
+        this.assertPatchable(root, named);
+        for (const field of named) {
+            set[root.graphProperties.get(field) ?? field] = options.set?.[field] ?? null;
+        }
+        const statement = PatchStatements.one(root, options.where);
+        return this.whenUncontended(async () =>
+            this.persistenceManager.getOne<PatchResult>(statement.spec({ ...options.bindings, id, set }))
+        );
+    }
+
+    /**
+     * Writes named fields of many nodes, each where its node is there, making none. One result per object, in order.
+     * `only` or `except` is required: to write every field, save. Under NullPolicy.IGNORE, the default, a named field
+     * that is null is left as the store has it. For a view the fields are its root's; its relationships aren't written.
+     */
+    async patchAll<T extends object>(
+        objects: T[],
+        options: { only?: string[]; except?: string[]; nullPolicy?: NullPolicy }
+    ): Promise<PatchResult[]> {
+        if (!objects.length) {
+            return [];
+        }
+        if (!options.only === !options.except) {
+            throw new DrivineError('patchAll needs only or except, not both. To write every field of an object, save it.');
+        }
+        const type = objects[0].constructor as ClassType;
+        if (objects.some((it) => it.constructor !== type)) {
+            throw new DrivineError(`patchAll takes objects of one class; the first is a ${type.name}.`);
+        }
+        const target = this.modelOf(type);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        this.assertPatchable(root, options.only ?? []);
+        const fragmentOf = (it: any): any => (target.kind === 'GRAPH_VIEW' ? it[target.model.rootField] : it);
+        const keep = (field: string): boolean =>
+            options.only ? options.only.includes(field) : !options.except!.includes(field);
+        const rows = objects.map((object) => {
+            const fragment = fragmentOf(object);
+            const id = fragment?.[root.nodeIdField!];
+            if (id == null) {
+                throw new DrivineError(`A ${root.type.name} to patch has no ${root.nodeIdField}.`);
+            }
+            const fields = Object.fromEntries(
+                Object.entries(fragment).filter(
+                    ([field]) => keep(field) && field !== root.nodeIdField && field !== root.stampField
+                )
+            );
+            return { id, props: propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR) };
+        });
+        const ids = rows.map((it) => it.id);
+        if (new Set(ids).size !== ids.length) {
+            throw new DrivineError('patchAll takes each id once.');
+        }
+        // In order of id, so that two calls over the same nodes take their locks in the same order.
+        const sorted = [...rows].sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+        const results = new Map<any, PatchResult>();
+        for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
+            const chunk = sorted.slice(start, start + PATCH_ROWS);
+            const found = await this.whenUncontended(async () =>
+                this.persistenceManager.query<PatchResult & { id: any }>(PatchStatements.many(root).spec({ rows: chunk }))
+            );
+            found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
+        }
+        return ids.map((id) => results.get(id)!);
+    }
+
+    /**
      * Deletes the object whose root has the id, with the root's relationships. A view's root is deleted only if it
      * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
      * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
@@ -206,6 +287,25 @@ export class StatelessGraphObjectManager {
                       .map((rel) => rel.field)
                 : [];
         return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}) };
+    }
+
+    private assertPatchable(root: ReturnType<ModelRegistry['fragment']>, fields: string[]): void {
+        const refused = fields.filter(
+            (it) => it === root.nodeIdField || it === root.stampField || root.transientFields.has(it)
+        );
+        if (refused.length) {
+            throw new DrivineError(`A patch can't write ${refused.join(', ')} of ${root.type.name}.`);
+        }
+        if (new Set(fields).size !== fields.length) {
+            throw new DrivineError('A patch names each field once.');
+        }
+    }
+
+    /** Runs a write again when the engine turns it away for contention, unless inside a caller's transaction. */
+    private async whenUncontended<R>(statement: () => Promise<R>): Promise<R> {
+        return TransactionContextHolder.getInstance().currentTransaction
+            ? statement()
+            : whenNotContended(statement, (failure) => this.backend.contended(failure));
     }
 
     private async write<T extends object>(object: T, options: SaveOptions<T>, createOnly: boolean): Promise<T | undefined> {

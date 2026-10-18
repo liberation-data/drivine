@@ -5,6 +5,7 @@ export * from './FinderOperations';
 export * from './GraphObjectManagerFactory';
 export * from './NonTransactionalPersistenceManager';
 export * from './NullPolicy';
+export * from './PatchResult';
 export * from './PersistenceManager';
 export * from './PersistenceManagerFactory';
 export * from './PersistenceManagerType';
