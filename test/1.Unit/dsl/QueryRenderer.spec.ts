@@ -1,5 +1,11 @@
 import {
     anyOf,
+    below,
+    caseOf,
+    div,
+    epochSeconds,
+    hasNoValue,
+    minus,
     FALKORDB_GRAMMAR,
     GraphRelationship,
     GraphView,
@@ -85,6 +91,26 @@ describe('QueryRenderer', () => {
             'any(_x0_e IN [(n)-[_r1:ASSIGNED]->(_x0:Worker) | {node: _x0, rel: properties(_r1)}] ' +
                 'WHERE any(_x0 IN [_x0_e.node] WHERE (_x0_e.rel.role = $_q0 AND _x0.name = $_q1)))'
         );
+    });
+
+    it('should bind every value of an order expression, and divide reals', () => {
+        const asOf = new Date('2040-01-01T00:00:00Z');
+        const query = QueryRenderer.render<Task>(
+            (q) => ({
+                orderBy: caseOf(
+                    [below(q.due, asOf).or(hasNoValue(q.due)).then(0)],
+                    div(minus(epochSeconds(asOf), 7), 86400)
+                ).desc()
+            }),
+            fragment,
+            NEO4J_GRAMMAR,
+            'n'
+        );
+        expect(query.orderBy).toBe(
+            'CASE WHEN (n.due < $_q0 OR n.due IS NULL) THEN $_q1 ELSE (toFloat(($_q2 - $_q3)) / $_q4) END DESC'
+        );
+        expect(query.bindings).toEqual({ _q0: asOf, _q1: 0, _q2: 2208988800, _q3: 7, _q4: 86400 });
+        expect(query.ordered).toEqual([]);
     });
 
     it('should place nulls with a key of their own', () => {

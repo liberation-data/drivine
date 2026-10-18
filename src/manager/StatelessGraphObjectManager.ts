@@ -2,6 +2,7 @@ import { GraphBackend, Page } from '@/backend/GraphBackend';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { NODE_ALIAS } from '@/backend/CypherBackend';
 import { QueryRenderer, RenderedQuery } from '@/dsl/QueryRenderer';
+import { sortCollections } from '@/dsl/CollectionSorts';
 import { IndexAdvicePolicy, QueryIndexAdvisor } from '@/dsl/QueryIndexAdvisor';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
@@ -253,7 +254,9 @@ export class StatelessGraphObjectManager {
                     .loadAllViews(target.model, options.where, options.depth, options.page)
                     .spec(options.bindings)
             );
-            return rows.map((row) => this.mapper.view<T>(target.model, row));
+            const views = rows.map((row) => this.mapper.view<T>(target.model, row));
+            sortCollections(views, options.query?.collectionSorts ?? []);
+            return views;
         }
         const rows = await this.persistenceManager.query<FragmentRow>(
             this.backend.loadAllFragments(target.model, options.where, options.page).spec(options.bindings)

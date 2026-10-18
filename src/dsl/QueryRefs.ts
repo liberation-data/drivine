@@ -1,5 +1,6 @@
 import { DrivineError } from '@/DrivineError';
 import { Scope, step, storedName } from '@/dsl/ModelScope';
+import { REF_PATH } from '@/dsl/OrderExpressions';
 import { allOfOne, Condition, Operator, OrderTerm, RootRefs, Test, Where } from '@/dsl/Refs';
 import { ClassRef } from '@/query/QuerySpecification';
 
@@ -80,6 +81,7 @@ function propertyRef(path: string[]): any {
             return at(path, { kind: 'COMPARE', operator, value });
         };
     return {
+        [REF_PATH]: path,
         test: (operator: Operator, value?: unknown) => compare(operator)(value),
         eq: compare('EQ'),
         neq: compare('NEQ'),

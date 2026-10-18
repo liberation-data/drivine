@@ -4,6 +4,7 @@ import { labelsOf, pattern, target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
 import { Scope, scopeOf, Step, step } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
+import { ConditionNode, ExpressionNode } from '@/dsl/OrderExpressions';
 import { allOfOne, Condition, Operator, OrderTerm, Query, QueryFn, SeekValue, Test, WhereFn } from '@/dsl/Refs';
 import { classLabels } from '@/model/InstanceOf';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
@@ -18,6 +19,8 @@ export interface RenderedQuery {
     bindings: Record<string, any>;
     /** The stored names of the root properties ordered by, in order. */
     ordered: string[];
+    /** Terms that order a list relationship in each object, applied as objects are made. */
+    collectionSorts: CollectionSort[];
     /** The root properties the condition holds equal to a value at its top level. */
     pinned: string[];
     /** Whether the query orders, skips, limits or seeks. */
@@ -61,20 +64,31 @@ export class QueryRenderer {
         const renderer = new QueryRenderer(grammar, query.depth ?? {});
         const condition = query.where !== undefined ? allOfOne(query.where) : undefined;
         const filter = condition ? renderer.where(condition, scope, alias) : undefined;
-        const terms = listOf<OrderTerm>(query.orderBy);
-        const keys = terms.map((it) => ({ term: it, property: rootProperty(it.path, scope, 'An order') }));
+        const terms = listOf<OrderTerm>(query.orderBy).map((it) => classify(it, scope));
+        const keys = terms.filter((it): it is RootKey => it.kind === 'ROOT');
         const seek = listOf<SeekValue>(query.seek);
         const keyset = query.seek !== undefined ? renderer.keyset(keys, seek, query, alias) : undefined;
+        const byExpression = keys.some((it) => it.term.expression);
         return {
             where: [filter, keyset].filter((it) => it !== undefined).join(' AND ') || undefined,
             orderBy: keys.length
-                ? keys.map((it) => order(it.term, `${alias}.${quoteName(it.property)}`)).join(', ')
+                ? keys
+                      .map((it) =>
+                          order(
+                              it.term,
+                              it.term.expression
+                                  ? renderer.expression(it.term.expression, scope, alias)
+                                  : `${alias}.${quoteName(it.property!)}`
+                          )
+                      )
+                      .join(', ')
                 : undefined,
+            collectionSorts: terms.filter((it): it is CollectionSort => it.kind === 'COLLECTION'),
             limit: count('limit', query.limit),
             skip: count('skip', query.skip),
             depth: query.depth ?? {},
             bindings: renderer.bindings,
-            ordered: keys.map((it) => it.property),
+            ordered: byExpression ? [] : keys.map((it) => it.property!),
             pinned: condition ? pinnedProperties(condition, scope) : [],
             seeks: query.seek !== undefined,
             paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined)
@@ -95,12 +109,7 @@ export class QueryRenderer {
      * `a <= $A AND (a < $A OR (a = $A AND b < $B))`, each key first held not null where the engine wants it. The
      * leading bound, redundant beside the branches, gives the planner a range to seek on, as a top-level OR does not.
      */
-    private keyset(
-        keys: { term: OrderTerm; property: string }[],
-        seek: SeekValue[],
-        query: Query,
-        alias: string
-    ): string {
+    private keyset(keys: RootKey[], seek: SeekValue[], query: Query, alias: string): string {
         if (!keys.length) {
             throw new DrivineError('seek continues an order: give orderBy, with a cursor value for each of its terms.');
         }
@@ -111,6 +120,12 @@ export class QueryRenderer {
             throw new DrivineError('seek and skip are two ways to page: give one.');
         }
         keys.forEach((key, i) => {
+            if (key.term.expression) {
+                throw new DrivineError(
+                    "seek can't continue an order by an expression: a cursor holds properties' values, and an " +
+                        "expression's is computed for each row."
+                );
+            }
             if (key.term.nulls) {
                 throw new DrivineError(
                     `${key.term.path.join('.')} places its nulls, which no cursor reaches: a cursor does not say ` +
@@ -124,7 +139,7 @@ export class QueryRenderer {
                 );
             }
         });
-        const expression = (i: number): string => `${alias}.${quoteName(keys[i].property)}`;
+        const expression = (i: number): string => `${alias}.${quoteName(keys[i].property!)}`;
         const values = seek.map((it) => this.bind(it.value));
         const compare = (i: number, strict: boolean): string => {
             const ascending = keys[i].term.direction === 'ASC';
@@ -142,6 +157,47 @@ export class QueryRenderer {
             ...(keys.length > 1 ? [compare(0, false)] : []),
             branches.length > 1 ? `(${branches.join(' OR ')})` : branches[0]
         ].join(' AND ');
+    }
+
+    /** An order expression as Cypher over the root's properties, its values bound. */
+    private expression(node: ExpressionNode, scope: Scope, alias: string): string {
+        const of = (it: ExpressionNode): string => this.expression(it, scope, alias);
+        switch (node.kind) {
+            case 'PROPERTY':
+                return `${alias}.${quoteName(rootProperty(node.path, scope, 'An expression'))}`;
+            case 'VALUE':
+                return this.bind(node.value);
+            case 'ARITHMETIC':
+                // toFloat: Cypher divides two integers as integers.
+                return node.operator === '/'
+                    ? `(toFloat(${of(node.left)}) / ${of(node.right)})`
+                    : `(${of(node.left)} ${node.operator} ${of(node.right)})`;
+            case 'NEGATE':
+                return `(-${of(node.operand)})`;
+            case 'FUNCTION':
+                return `${node.name}(${node.args.map(of).join(', ')})`;
+            default:
+                return `CASE ${node.branches
+                    .map((it) => `WHEN ${this.caseCondition(it.when, scope, alias)} THEN ${of(it.then)}`)
+                    .join(' ')} ELSE ${of(node.otherwise)} END`;
+        }
+    }
+
+    private caseCondition(node: ConditionNode, scope: Scope, alias: string): string {
+        switch (node.kind) {
+            case 'COMPARE':
+                return `${this.expression(node.left, scope, alias)} ${node.operator} ${this.expression(
+                    node.right,
+                    scope,
+                    alias
+                )}`;
+            case 'HAS_VALUE':
+                return `${this.expression(node.operand, scope, alias)} IS ${node.negate ? '' : 'NOT '}NULL`;
+            case 'NOT':
+                return `NOT (${this.caseCondition(node.condition, scope, alias)})`;
+            default:
+                return `(${node.conditions.map((it) => this.caseCondition(it, scope, alias)).join(` ${node.kind} `)})`;
+        }
     }
 
     private condition(condition: Condition, scope: Scope, aliases: Aliases): string {
@@ -305,6 +361,63 @@ const BINARY: Partial<Record<Operator, string>> = {
 
 function listOf<T>(value: T | readonly T[] | undefined): T[] {
     return value === undefined ? [] : ([value].flat() as T[]);
+}
+
+/** A root term of an order: by an expression, or by the root property stored under `property`. */
+interface RootKey {
+    kind: 'ROOT';
+    term: OrderTerm;
+    property?: string;
+}
+
+/**
+ * A term that orders a list relationship in each object, not the roots: the list at `relationship` (field names from
+ * the root, through single relationships on the way), by `key` (field names within each item).
+ */
+export interface CollectionSort {
+    kind: 'COLLECTION';
+    relationship: string[];
+    key: string[];
+    direction: 'ASC' | 'DESC';
+    nulls?: 'FIRST' | 'LAST';
+}
+
+/** Which a term is: of the roots, or of a list in each. */
+function classify(term: OrderTerm, scope: Scope): RootKey | CollectionSort {
+    if (term.expression) {
+        return { kind: 'ROOT', term };
+    }
+    let at = scope;
+    let hops = 0;
+    let lastList = -1;
+    for (const [i, name] of term.path.entries()) {
+        const next = step(at, name);
+        if (next.kind === 'HOP') {
+            hops++;
+            lastList = next.rel.isCollection ? i : lastList;
+        }
+        if (next.kind === 'PROPERTY' || next.kind === 'LABELS') {
+            break;
+        }
+        at = next.scope;
+    }
+    if (!hops) {
+        return { kind: 'ROOT', term, property: rootProperty(term.path, scope, 'An order') };
+    }
+    const key = term.path.slice(lastList + 1);
+    if (lastList < 0 || !key.length || key.some((it) => it.startsWith('\u0000'))) {
+        throw new DrivineError(
+            `An order is by a property of the root, or of the nodes a list relationship leads to (by field); ` +
+                `${term.path.join('.')} is neither.`
+        );
+    }
+    return {
+        kind: 'COLLECTION',
+        relationship: term.path.slice(0, lastList + 1),
+        key,
+        direction: term.direction,
+        nulls: term.nulls
+    };
 }
 
 /** The stored name of the root property a path leads to; `what` names what wants one. */

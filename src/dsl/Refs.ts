@@ -1,4 +1,5 @@
 import { ClassRef } from '@/query/QuerySpecification';
+import type { ExpressionNode } from '@/dsl/OrderExpressions';
 
 /** A value a node property holds, and a query compares. */
 export type Scalar = string | number | bigint | boolean | Date;
@@ -150,9 +151,14 @@ export type Test =
     | { readonly kind: 'INSTANCE_OF'; readonly type: ClassRef }
     | { readonly kind: 'ANY_LABEL'; readonly labels: readonly string[] };
 
-/** One term of an order, by a property of the root. */
+/**
+ * One term of an order: by a property of the root, by an expression over the root's properties, or by a property of
+ * the nodes a list relationship leads to, which orders that list in each object rather than the roots.
+ */
 export interface OrderTerm {
+    /** The property's path; empty for an expression. */
     readonly path: readonly string[];
+    readonly expression?: ExpressionNode;
     readonly direction: 'ASC' | 'DESC';
     /** Where rows with no value go; unset, where the engine puts them. */
     readonly nulls?: 'FIRST' | 'LAST';

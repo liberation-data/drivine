@@ -1,5 +1,19 @@
 import {
+    above,
     allOf,
+    below,
+    caseOf,
+    coalesce,
+    div,
+    equalTo,
+    exp,
+    floor,
+    hasNoValue,
+    minus,
+    negate,
+    param,
+    plus,
+    times,
     anyOf,
     CypherBackend,
     cypherGrammarFor,
@@ -267,6 +281,38 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             ).rejects.toThrow(/not an order, skip, limit or seek/);
         });
 
+        it('should order by expressions: arithmetic, functions and cases', async () => {
+            const product = await gom.loadAll(Issue, (q) => ({
+                orderBy: times(coalesce(q.priority, 0), q.number).desc()
+            }));
+            expect(product.map((it) => it.id)).toEqual(['i2', 'i4', 'i1', 'i3']);
+            // Division is of reals: 101 / 2 floors to 50, not to 50 by integer division of a float.
+            const halves = await gom.loadAll(Issue, (q) => ({
+                orderBy: [floor(div(q.number, 2)).asc(), q.id.desc()]
+            }));
+            expect(halves.map((it) => it.id)).toEqual(['i1', 'i3', 'i2', 'i4']);
+            const closedLast = await gom.loadAll(Issue, (q) => ({
+                orderBy: [caseOf([equalTo(q.state, 'closed').then(0)], q.number).desc(), q.id.asc()]
+            }));
+            expect(closedLast.map((it) => it.id)).toEqual(['i2', 'i1', 'i3', 'i4']);
+            const unprioritisedLast = await gom.loadAll(Issue, (q) => ({
+                orderBy: caseOf([hasNoValue(q.priority).then(99)], q.priority).asc()
+            }));
+            expect(unprioritisedLast.map((it) => it.id)).toEqual(['i1', 'i4', 'i2', 'i3']);
+            const middle = await gom.loadAll(Issue, (q) => ({
+                orderBy: [
+                    caseOf([above(q.number, 101).and(below(q.number, 104)).then(1)], 0).desc(),
+                    negate(minus(q.number, 100)).desc()
+                ]
+            }));
+            expect(middle.map((it) => it.id)).toEqual(['i2', 'i3', 'i1', 'i4']);
+            const decayed = await gom.loadAll(Issue, (q) => ({
+                orderBy: times(exp(negate(q.number)), param(1)).desc(),
+                limit: 1
+            }));
+            expect(decayed.map((it) => it.id)).toEqual(['i1']);
+        });
+
         it('should place the rows with no value', async () => {
             const first = await gom.loadAll(Issue, (q) => ({ orderBy: q.priority.asc().nullsFirst() }));
             expect(first.map((it) => it.id)).toEqual(['i3', 'i1', 'i4', 'i2']);
@@ -386,10 +432,39 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
             expect(await gom.count(IssueView, (q) => ({ where: q.assignees.person.name.eq('Ada') }))).toBe(2);
         });
 
-        it('should refuse an order by a relationship', async () => {
-            await expect(gom.loadAll(IssueView, (q) => ({ orderBy: q.comments.upVotes.desc() }))).rejects.toThrow(
-                /a property of the root/
+        it('should order the lists in each view, by their nodes or their relationships', async () => {
+            const bySince = await gom.loadAll(IssueView, (q) => ({
+                where: q.issue.id.eq('i1'),
+                orderBy: q.assignees.since.desc()
+            }));
+            expect(bySince[0].assignees.map((it) => it.person.id)).toEqual(['ada', 'kent']);
+            const byName = await gom.loadAll(IssueView, (q) => ({
+                orderBy: [q.issue.number.desc(), q.assignees.person.name.asc()]
+            }));
+            expect(byName.map((it) => it.issue.id)).toEqual(['i4', 'i3', 'i2', 'i1']);
+            expect(byName[3].assignees.map((it) => it.person.name)).toEqual(['Ada', 'Kent']);
+            const byRole = await gom.loadAll(IssueView, (q) => ({
+                where: q.issue.id.eq('i1'),
+                orderBy: [q.assignees.role.desc(), q.assignees.since.asc()]
+            }));
+            expect(byRole[0].assignees.map((it) => it.role)).toEqual(['reviewer', 'lead']);
+        });
+
+        it('should order roots by an expression over the root', async () => {
+            const views = await gom.loadAll(IssueView, (q) => ({
+                orderBy: [times(coalesce(q.issue.priority, 0), q.issue.number).desc()],
+                limit: 2
+            }));
+            expect(views.map((it) => it.issue.id)).toEqual(['i2', 'i4']);
+        });
+
+        it('should refuse an order by a single relationship, or a cursor on an expression', async () => {
+            await expect(gom.loadAll(IssueView, (q) => ({ orderBy: q.raisedBy.worksFor.name.desc() }))).rejects.toThrow(
+                /a property of the root, or of the nodes a list relationship leads to/
             );
+            await expect(
+                gom.loadAll(Issue, (q) => ({ orderBy: plus(q.number, 1).asc(), seek: q.number.after(1) }))
+            ).rejects.toThrow(/order by an expression/);
             await expect(gom.loadAll(IssueView, (q) => ({ where: (q.issue as any).any(() => []) }))).rejects.toThrow(
                 /issue is not one/
             );
