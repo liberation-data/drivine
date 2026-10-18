@@ -182,7 +182,7 @@ export class StatelessGraphObjectManager {
         this.indexAdvisor = new QueryIndexAdvisor(
             () => this.indexes,
             () => this.constraints,
-            !!schemaGrammarFor(persistenceManager.type).rangesPerProperty
+            () => !!schemaGrammarFor(persistenceManager.type).rangesPerProperty
         );
         this.edges = new EdgeOperations(
             registry,

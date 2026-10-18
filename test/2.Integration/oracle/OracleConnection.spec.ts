@@ -62,7 +62,7 @@ describeOnOracle('Oracle connection', () => {
                 .skip(1)
                 .limit(2)
         );
-        expect(rows.map((it) => it.n)).toEqual([2, 3]);
+        expect(rows).toEqual([2, 3]);
     });
 
     it('should hand back the rows a PL/SQL block returns', async () => {
@@ -95,7 +95,7 @@ describeOnOracle('Oracle connection', () => {
         const ids = await pm.query<any>(
             new QuerySpecification("SELECT id AS \"id\" FROM drivine_conn_test WHERE id IN ('rolled', 'kept')")
         );
-        expect(ids.map((it) => it.id)).toEqual(['kept']);
+        expect(ids).toEqual(['kept']);
     });
 
     it('should read a cursor in batches', async () => {
@@ -108,7 +108,7 @@ describeOnOracle('Oracle connection', () => {
             );
             const seen: number[] = [];
             for await (const row of cursor) {
-                seen.push(row.n);
+                seen.push(row);
             }
             await cursor.close();
             expect(seen).toEqual([1, 2, 3, 4, 5, 6, 7]);

@@ -26,7 +26,7 @@ export class QueryIndexAdvisor {
         private readonly indexManager: () => IndexManager,
         private readonly constraintManager: () => ConstraintManager,
         /** Whether the engine indexes properties one by one, so an order is served when each is indexed. */
-        private readonly rangesPerProperty: boolean
+        private readonly rangesPerProperty: () => boolean
     ) {}
 
     /**
@@ -76,7 +76,7 @@ export class QueryIndexAdvisor {
 
     private async covered(model: FragmentModel, properties: string[]): Promise<boolean> {
         const items = (await this.indexList()).filter((it) => model.labels.includes(it.label));
-        if (this.rangesPerProperty) {
+        if (this.rangesPerProperty()) {
             return properties.every((property) => items.some((it) => it.properties.includes(property)));
         }
         return items.some((it) => it.properties.join(',') === properties.join(','));

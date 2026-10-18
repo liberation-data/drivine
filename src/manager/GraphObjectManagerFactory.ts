@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CypherBackend } from '@/backend/CypherBackend';
-import { cypherGrammarFor } from '@/backend/CypherGrammar';
+import { backendFor } from '@/backend/Backends';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
@@ -22,7 +21,7 @@ export class GraphObjectManagerFactory {
             const persistenceManager = this.persistenceManagerFactory.get(database);
             manager = new StatelessGraphObjectManager(
                 persistenceManager,
-                new CypherBackend(cypherGrammarFor(persistenceManager.type)),
+                backendFor(persistenceManager.type),
                 this.registry
             );
             this.managers.set(database, manager);

@@ -4,6 +4,7 @@ import { Connection } from '@/connection/Connection';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
+import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle/OracleGraph';
 
 export interface OracleConnectionProperties {
     user?: string;
@@ -12,11 +13,14 @@ export interface OracleConnectionProperties {
     connectString: string;
     poolMax?: number;
     connectTimeout?: number;
+    /** The graph whose tables are made on first connection, when absent. */
+    graph?: string;
 }
 
 /** Connections to Oracle, from a pool of its own, through node-oracledb in thin mode (no Instant Client). */
 export class OracleConnectionProvider implements ConnectionProvider {
     private pool?: Promise<oracledb.Pool>;
+    private ensured?: Promise<void>;
 
     constructor(
         readonly name: string,
@@ -24,8 +28,22 @@ export class OracleConnectionProvider implements ConnectionProvider {
         readonly connectionProperties: OracleConnectionProperties
     ) {}
 
+    /** A connection, the graph's tables made first if this is the first (schema statements commit on their own). */
     async connect(): Promise<Connection> {
         const connection = await (await this.poolOf()).getConnection();
+        this.ensured ??= connection
+            .execute(new OracleGraph(this.connectionProperties.graph ?? DEFAULT_GRAPH).ensuring)
+            .then(() => undefined)
+            .catch((e) => {
+                this.ensured = undefined;
+                throw e;
+            });
+        try {
+            await this.ensured;
+        } catch (e) {
+            await connection.close();
+            throw e;
+        }
         const session = await connection.execute<{ SID: string }>(
             "SELECT SYS_CONTEXT('USERENV', 'SID') AS SID FROM dual",
             {},
