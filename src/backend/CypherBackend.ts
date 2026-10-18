@@ -9,6 +9,8 @@ import { DrivineError } from '@/DrivineError';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { CascadeTargets } from '@/backend/CascadeTargets';
+import { SaveStatementBuilder } from '@/backend/SaveStatementBuilder';
+import { SaveOptions } from '@/manager/SaveOptions';
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
 export const NODE_ALIAS = 'n';
@@ -89,6 +91,22 @@ export class CypherBackend implements GraphBackend {
         return new GraphStatement(
             [this.match(root), this.rootWhere(target, where), `\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`].join('')
         );
+    }
+
+    save(target: TargetModel, object: any, options?: SaveOptions<any>): GraphStatement {
+        return new SaveStatementBuilder(this.grammar).build(target, object, options);
+    }
+
+    contended(failure: unknown): boolean {
+        // The driver's error is the root cause of the DrivineError the persistence manager throws.
+        let cause: any = failure;
+        for (let depth = 0; cause && depth < 10; depth++) {
+            if (this.grammar.contended(cause)) {
+                return true;
+            }
+            cause = cause.rootCause ?? cause.cause;
+        }
+        return false;
     }
 
     private rootWhere(target: TargetModel, where?: string): string {

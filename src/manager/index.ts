@@ -1,4 +1,5 @@
 export * from './CascadeType';
+export * from './Contention';
 export * from './DelegatingPersistenceManager';
 export * from './FinderOperations';
 export * from './GraphObjectManagerFactory';
@@ -8,3 +9,4 @@ export * from './PersistenceManagerFactory';
 export * from './PersistenceManagerType';
 export * from './TransactionalPersistenceManager';
 export * from './StatelessGraphObjectManager';
+export * from './SaveOptions';

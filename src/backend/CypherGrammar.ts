@@ -1,5 +1,6 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
+import { isRetriableError } from 'neo4j-driver';
 
 /**
  * Where an engine's Cypher differs from another's. Each difference is added here as the statements that meet it are
@@ -21,17 +22,32 @@ export interface CypherGrammar {
      * A predicate that holds when `pattern` (e.g. `(n)-[:R]->(:T)`) matches at least once.
      */
     existenceCheck(pattern: string): string;
+
+    /**
+     * Whether the engine turned a statement away because another writer held what it writes, so that running it again
+     * may succeed. `failure` is the driver's own error.
+     */
+    contended(failure: unknown): boolean;
 }
 
 /** `EXISTS { }` stops at the first match. */
 const existsSubquery = (pattern: string): string => `EXISTS { MATCH ${pattern} }`;
 
-export const NEO4J_GRAMMAR: CypherGrammar = { engine: 'Neo4j', existenceCheck: existsSubquery, viewProjection: 'INLINE' };
+/** A transient error over Bolt: a deadlock on Neo4j, a conflicting transaction on Memgraph. */
+const transientOverBolt = (failure: unknown): boolean => failure instanceof Error && isRetriableError(failure);
+
+export const NEO4J_GRAMMAR: CypherGrammar = {
+    engine: 'Neo4j',
+    existenceCheck: existsSubquery,
+    viewProjection: 'INLINE',
+    contended: transientOverBolt
+};
 
 export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     engine: 'Memgraph',
     existenceCheck: existsSubquery,
     viewProjection: 'INLINE',
+    contended: transientOverBolt,
     orphanDeleteLimit: 'Memgraph takes an existence check only in a WHERE clause, not in the list of nodes to delete'
 };
 
@@ -45,7 +61,9 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
 export const FALKORDB_GRAMMAR: CypherGrammar = {
     engine: 'FalkorDB',
     existenceCheck: (pattern: string) => `size([${pattern} | 1]) > 0`,
-    viewProjection: 'CALL_SUBQUERY'
+    viewProjection: 'CALL_SUBQUERY',
+    // FalkorDB runs one write at a time, so a write is never turned away by another.
+    contended: () => false
 };
 
 export function cypherGrammarFor(type: DatabaseType): CypherGrammar {

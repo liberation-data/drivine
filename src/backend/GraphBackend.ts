@@ -2,6 +2,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
+import { SaveOptions } from '@/manager/SaveOptions';
 import { GraphStatement } from '@/backend/GraphStatement';
 
 /**
@@ -38,4 +39,10 @@ export interface GraphBackend {
 
     /** Deletes every root a load would find, with its relationships. Returns the number deleted. */
     deleteAll(target: TargetModel, where?: string): GraphStatement;
+
+    /** Writes the object as one statement: see SaveStatementBuilder. */
+    save(target: TargetModel, object: any, options?: SaveOptions<any>): GraphStatement;
+
+    /** Whether a cause of the failure is the engine turning a statement away for contention. */
+    contended(failure: unknown): boolean;
 }

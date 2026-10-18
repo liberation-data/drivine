@@ -4,6 +4,9 @@ import { DrivineError } from '@/DrivineError';
 import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
+import { SaveOptions } from '@/manager/SaveOptions';
+import { whenNotContended } from '@/manager/Contention';
+import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { ClassType } from '@/query/QuerySpecification';
@@ -66,6 +69,25 @@ export class StatelessGraphObjectManager {
                 ? this.backend.countViews(target.model, where)
                 : this.backend.countFragments(target.model, where);
         return this.persistenceManager.getOne<number>(statement.spec(bindings));
+    }
+
+    /**
+     * Writes the object as one statement: its root, merged on its id, with every property that is not null, and for a
+     * view each related node and the relationship to it. Relationships are added, never removed, except those of the
+     * fields named in `options.replace`. Returns the object.
+     *
+     * Outside a transaction, a save the engine turns away because another writer held what it writes is run again,
+     * after a pause. Inside one, it fails, and the transaction's owner decides.
+     */
+    async save<T extends object>(object: T, options: SaveOptions<T> = {}): Promise<T> {
+        const statement = this.backend.save(this.modelOf(object.constructor as ClassType), object, options);
+        const run = async (): Promise<void> => this.persistenceManager.execute(statement.spec());
+        if (TransactionContextHolder.getInstance().currentTransaction) {
+            await run();
+        } else {
+            await whenNotContended(run, (failure) => this.backend.contended(failure));
+        }
+        return object;
     }
 
     /**
