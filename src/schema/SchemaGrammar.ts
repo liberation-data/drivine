@@ -9,11 +9,13 @@ import {
     RangeIndexSpec,
     SimilarityFunction,
     UniquenessConstraintSpec,
-    VectorIndexSpec
+    VectorIndexSpec,
+    vectorTuning,
+    VectorTuning
 } from '@/schema/SchemaSpecs';
 
 /** What an engine reports of an item: its label and properties, and its name where it names items. */
-export interface SchemaItem {
+export interface SchemaItem extends VectorTuning {
     label: string;
     properties: string[];
     name?: string;
@@ -49,6 +51,16 @@ export interface SchemaGrammar {
     dropFullText(spec: FullTextIndexSpec, name?: string): string[];
     /** A statement giving up to `limit` values that more than one of the label's nodes hold, one per row. */
     conflicts(spec: UniquenessConstraintSpec, limit: number): string;
+    /** The pins of a vector index the engine can't express, by name: reported and logged, never dropped silently. */
+    unsupportedVectorTuning?(spec: VectorIndexSpec): string[];
+}
+
+/** The portable HNSW pins a spec makes, for an engine with no HNSW parameters of its own. */
+function portablePins(spec: VectorIndexSpec): string[] {
+    return [
+        ...(spec.hnswM !== undefined ? ['hnswM'] : []),
+        ...(spec.hnswEfConstruction !== undefined ? ['hnswEfConstruction'] : [])
+    ];
 }
 
 /** Duplicate values over the properties, in Cypher. */
@@ -84,7 +96,10 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
                 properties: it.properties,
                 name: it.name,
                 dimensions: Number(it.config?.['vector.dimensions']),
-                similarity: String(it.config?.['vector.similarity_function']).toUpperCase() as SimilarityFunction
+                similarity: String(it.config?.['vector.similarity_function']).toUpperCase() as SimilarityFunction,
+                quantizationEnabled: it.config?.['vector.quantization.enabled'] ?? undefined,
+                hnswM: numberOrUndefined(it.config?.['vector.hnsw.m']),
+                hnswEfConstruction: numberOrUndefined(it.config?.['vector.hnsw.ef_construction'])
             }))
     },
     listFullTexts: {
@@ -93,14 +108,25 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
             'RETURN {name: name, labels: labelsOrTypes, properties: properties}',
         read: (rows) => rows.map((it) => ({ label: it.labels[0], properties: it.properties, name: it.name }))
     },
-    createVector: (spec) => [
-        `CREATE VECTOR INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(
-            spec
-        )}) OPTIONS {indexConfig: ` +
-            `{\`vector.dimensions\`: ${
-                spec.dimensions
-            }, \`vector.similarity_function\`: '${spec.similarity.toLowerCase()}'}}`
-    ],
+    createVector: (spec) => {
+        const tuning = vectorTuning(spec, 'Neo4j');
+        const config = [
+            `\`vector.dimensions\`: ${spec.dimensions}`,
+            `\`vector.similarity_function\`: '${spec.similarity.toLowerCase()}'`,
+            ...(tuning.quantizationEnabled !== undefined
+                ? [`\`vector.quantization.enabled\`: ${tuning.quantizationEnabled}`]
+                : []),
+            ...(tuning.hnswM !== undefined ? [`\`vector.hnsw.m\`: ${tuning.hnswM}`] : []),
+            ...(tuning.hnswEfConstruction !== undefined
+                ? [`\`vector.hnsw.ef_construction\`: ${tuning.hnswEfConstruction}`]
+                : [])
+        ];
+        return [
+            `CREATE VECTOR INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(spec)}) ` +
+                `OPTIONS {indexConfig: {${config.join(', ')}}}`
+        ];
+    },
+    unsupportedVectorTuning: () => [],
     dropVector: (spec) => [`DROP INDEX ${quoteName(itemName(spec))} IF EXISTS`],
     createFullText: (spec) => [
         `CREATE FULLTEXT INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON EACH [${props(spec)}]`
@@ -166,6 +192,8 @@ export const MEMGRAPH_SCHEMA: SchemaGrammar = {
             }"}`
     ],
     dropVector: (spec) => [`DROP VECTOR INDEX ${quoteName(itemName(spec))}`],
+    // Memgraph's vector index takes no HNSW parameters.
+    unsupportedVectorTuning: portablePins,
     // A text index over several properties indexes only the first (Memgraph 3.x), so one over several is made over the
     // whole label, which indexes every property: a search may then match the label's other text too.
     createFullText: (spec) => [
@@ -222,7 +250,10 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
                         dimensions: Number(it.options?.[property]?.dimension),
                         similarity: String(
                             it.options?.[property]?.similarityFunction
-                        ).toUpperCase() as SimilarityFunction
+                        ).toUpperCase() as SimilarityFunction,
+                        hnswM: numberOrUndefined(it.options?.[property]?.M),
+                        hnswEfConstruction: numberOrUndefined(it.options?.[property]?.efConstruction),
+                        efRuntime: numberOrUndefined(it.options?.[property]?.efRuntime)
                     }))
             )
     },
@@ -241,10 +272,20 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
                 }))
                 .filter((it) => it.properties.length)
     },
-    createVector: (spec) => [
-        `CREATE VECTOR INDEX FOR ${pattern(spec)} ON (${props(spec)}) OPTIONS ` +
-            `{dimension: ${spec.dimensions}, similarityFunction: '${spec.similarity.toLowerCase()}'}`
-    ],
+    // FalkorDB names the HNSW parameters M / efConstruction, adds efRuntime, and accepts any key without complaint, so
+    // the names are the ones it reads back.
+    createVector: (spec) => {
+        const tuning = vectorTuning(spec, 'FalkorDB');
+        const options = [
+            `dimension: ${spec.dimensions}`,
+            `similarityFunction: '${spec.similarity.toLowerCase()}'`,
+            ...(tuning.hnswM !== undefined ? [`M: ${tuning.hnswM}`] : []),
+            ...(tuning.hnswEfConstruction !== undefined ? [`efConstruction: ${tuning.hnswEfConstruction}`] : []),
+            ...(tuning.efRuntime !== undefined ? [`efRuntime: ${tuning.efRuntime}`] : [])
+        ];
+        return [`CREATE VECTOR INDEX FOR ${pattern(spec)} ON (${props(spec)}) OPTIONS {${options.join(', ')}}`];
+    },
+    unsupportedVectorTuning: () => [],
     dropVector: (spec) => [`DROP VECTOR INDEX FOR ${pattern(spec)} ON (${props(spec)})`],
     createFullText: (spec) => [`CREATE FULLTEXT INDEX FOR ${pattern(spec)} ON (${props(spec)})`],
     dropFullText: (spec) =>
@@ -286,4 +327,8 @@ export function schemaGrammarFor(type: DatabaseType): SchemaGrammar {
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+    return value === undefined || value === null ? undefined : Number(value);
 }

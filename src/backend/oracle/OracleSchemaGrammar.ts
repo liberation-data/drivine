@@ -99,6 +99,14 @@ export class OracleSchemaGrammar implements SchemaGrammar {
         ];
     }
 
+    /** Its vector index is by neighbour partitions, which have no HNSW parameters. */
+    unsupportedVectorTuning(spec: VectorIndexSpec): string[] {
+        return [
+            ...(spec.hnswM !== undefined ? ['hnswM'] : []),
+            ...(spec.hnswEfConstruction !== undefined ? ['hnswEfConstruction'] : [])
+        ];
+    }
+
     dropVector(spec: VectorIndexSpec): string[] {
         return [
             ...OracleSideTable.dropping(this.graph.vectors(spec.label, spec.properties[0])),

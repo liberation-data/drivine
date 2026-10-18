@@ -1,6 +1,15 @@
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
-import { EnsureResult, IndexSpec, itemName, RangeIndexSpec } from '@/schema/SchemaSpecs';
+import {
+    EnsureResult,
+    IndexSpec,
+    itemName,
+    RangeIndexSpec,
+    SchemaItemShape,
+    vectorTuning,
+    VectorTuning
+} from '@/schema/SchemaSpecs';
+import { DrivineLogger } from '@/logger';
 
 const same = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it, k) => it === b[k]);
 const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it) => b.includes(it));
@@ -9,7 +18,22 @@ const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && 
  * Range, vector and full-text indexes, made idempotently: `ensure` makes one only when the engine holds none over the
  * label and properties, and reports DRIFT, changing nothing, when it holds one of another shape. `recreate` replaces.
  */
+/** What an engine reports of an index's shape. */
+function shapeOf(found: SchemaItem): SchemaItemShape {
+    return {
+        properties: found.properties,
+        dimensions: found.dimensions,
+        similarity: found.similarity,
+        hnswM: found.hnswM,
+        hnswEfConstruction: found.hnswEfConstruction,
+        quantizationEnabled: found.quantizationEnabled,
+        efRuntime: found.efRuntime
+    };
+}
+
 export class IndexManager {
+    private readonly logger = new DrivineLogger(IndexManager.name);
+
     constructor(
         private readonly executor: SchemaExecutor,
         private readonly grammar: SchemaGrammar
@@ -27,21 +51,15 @@ export class IndexManager {
     }
 
     async ensure<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
+        this.warnUnsupported(spec);
         const found = await this.find(spec);
         if (found) {
             return this.matches(spec, found)
                 ? { status: 'ALREADY_MATCHING', spec }
-                : {
-                      status: 'DRIFT',
-                      spec,
-                      found: {
-                          properties: found.properties,
-                          dimensions: found.dimensions,
-                          similarity: found.similarity
-                      }
-                  };
+                : { status: 'DRIFT', spec, found: shapeOf(found) };
         }
         await this.create(spec);
+        await this.logEffective(spec);
         return { status: 'CREATED', spec };
     }
 
@@ -63,6 +81,33 @@ export class IndexManager {
             held.kind === 'FULLTEXT' ? this.grammar.dropFullText(held, found.name) : this.statements(held, 'drop');
         for (const statement of statements) {
             await this.executor.run(statement);
+        }
+    }
+
+    /** Says which pins of a vector index the engine can't express: they are reported, never dropped silently. */
+    private warnUnsupported(spec: IndexSpec): void {
+        const unsupported = spec.kind === 'VECTOR' ? this.grammar.unsupportedVectorTuning?.(spec) ?? [] : [];
+        if (unsupported.length) {
+            this.logger.warn(
+                `The vector index on ${spec.label}(${spec.properties.join(', ')}) pins ${unsupported.join(
+                    ', '
+                )}, which ` + `${this.grammar.engine} can't express: they are not applied there.`
+            );
+        }
+    }
+
+    /** Logs what the engine chose for a vector index it made, pinned or not, so the value can be told later. */
+    private async logEffective(spec: IndexSpec): Promise<void> {
+        if (spec.kind !== 'VECTOR') {
+            return;
+        }
+        const found = await this.find(spec);
+        if (found) {
+            const shape = Object.entries(shapeOf(found))
+                .filter(([key, value]) => value !== undefined && key !== 'properties')
+                .map(([key, value]) => `${key}=${value}`)
+                .join(', ');
+            this.logger.log(`Vector index ${itemName(spec)} on ${spec.label}[${spec.properties[0]}]: ${shape}`);
         }
     }
 
@@ -136,8 +181,22 @@ export class IndexManager {
 
     private matches(spec: IndexSpec, found: SchemaItem): boolean {
         switch (spec.kind) {
-            case 'VECTOR':
-                return found.dimensions === spec.dimensions && found.similarity === spec.similarity;
+            case 'VECTOR': {
+                // Unpinned is never drift: with no declared value there is nothing for the engine to differ from. A pin
+                // the engine reports otherwise is; one the engine doesn't report, or can't express, is not checked.
+                const pinned = vectorTuning(spec, this.grammar.engine);
+                const unsupported = this.grammar.unsupportedVectorTuning?.(spec) ?? [];
+                const agrees = (key: keyof VectorTuning): boolean =>
+                    pinned[key] === undefined ||
+                    found[key] === undefined ||
+                    unsupported.includes(key) ||
+                    pinned[key] === found[key];
+                return (
+                    found.dimensions === spec.dimensions &&
+                    found.similarity === spec.similarity &&
+                    (['hnswM', 'hnswEfConstruction', 'quantizationEnabled', 'efRuntime'] as const).every(agrees)
+                );
+            }
             case 'FULLTEXT':
                 // An index made over the whole label covers any properties of it.
                 return (

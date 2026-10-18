@@ -10,6 +10,9 @@ export interface SchemaDeclaration {
     fields: string[];
     similarity?: SchemaSimilarity;
     dimensions?: number;
+    /** HNSW pins: portable, so they are the only tuning a decorator carries; engine options go in a catalog spec. */
+    hnswM?: number;
+    hnswEfConstruction?: number;
 }
 
 const SCHEMA_KEY = Symbol('drivine:schema');
@@ -21,7 +24,13 @@ export function classSchemaDeclarations(target: Function): SchemaDeclaration[] {
 
 function declare(
     kind: SchemaDeclaration['kind'],
-    options: { properties?: string[]; similarity?: SchemaSimilarity; dimensions?: number }
+    options: {
+        properties?: string[];
+        similarity?: SchemaSimilarity;
+        dimensions?: number;
+        hnswM?: number;
+        hnswEfConstruction?: number;
+    }
 ) {
     return (target: object, property?: string | symbol): void => {
         if (property === undefined) {
@@ -38,7 +47,14 @@ function declare(
         }
         definePropertyMetadata(target, String(property), {
             schema: [
-                { kind, fields: [String(property)], similarity: options.similarity, dimensions: options.dimensions }
+                {
+                    kind,
+                    fields: [String(property)],
+                    similarity: options.similarity,
+                    dimensions: options.dimensions,
+                    hnswM: options.hnswM,
+                    hnswEfConstruction: options.hnswEfConstruction
+                }
             ]
         });
     };
@@ -63,6 +79,8 @@ export function FullTextIndex(options: { properties?: string[] } = {}): ClassDec
  * A vector index over the field. Its dimensions come from the catalog's dimension provider when the catalog is built
  * (they belong to the embedding model, known at runtime), unless given here. Drives `loadNearest`.
  */
-export function VectorIndex(options: { similarity?: SchemaSimilarity; dimensions?: number } = {}): PropertyDecorator {
+export function VectorIndex(
+    options: { similarity?: SchemaSimilarity; dimensions?: number; hnswM?: number; hnswEfConstruction?: number } = {}
+): PropertyDecorator {
     return declare('VECTOR', options) as PropertyDecorator;
 }

@@ -55,7 +55,10 @@ export class SchemaCatalog {
                                     `or a dimension provider to fromFragments.`
                             );
                         }
-                        return vectorIndex(label, properties[0], size, it.similarity ?? 'COSINE');
+                        return vectorIndex(label, properties[0], size, it.similarity ?? 'COSINE', {
+                            hnswM: it.hnswM,
+                            hnswEfConstruction: it.hnswEfConstruction
+                        });
                     }
                     default:
                         return rangeIndex(label, properties);

@@ -122,23 +122,39 @@ export class SchemaManager {
         return result;
     }
 
-    /** The items of a database's catalogs, identical ones once. Two that differ over the same item fail. */
+    /**
+     * The items of a database's catalogs, each once. Two declarations of one item must agree on everything portable;
+     * where one of them carries engine options it wins whole (a vector index tuned in a catalog spec beside the
+     * @VectorIndex that drives queries), and two that both carry different engine options conflict.
+     */
     private merged(database: string, catalogs: SchemaCatalog[]): [SchemaSpec, SchemaCatalog][] {
         const items = new Map<string, [SchemaSpec, SchemaCatalog]>();
         for (const catalog of catalogs) {
             for (const spec of catalog.items) {
                 const held = items.get(keyOf(spec));
-                if (held && JSON.stringify(held[0]) !== JSON.stringify(spec)) {
-                    throw new DrivineError(
-                        `Two schema catalogs declare the ${spec.kind} on ${spec.label}(${spec.properties.join(
-                            ', '
-                        )}) on ` + `${database} differently.`
-                    );
-                }
-                items.set(keyOf(spec), held ?? [spec, catalog]);
+                const chosen = held ? this.reconciled(database, held[0], spec) : spec;
+                items.set(keyOf(spec), [chosen, chosen === spec ? catalog : held![1]]);
             }
         }
         return [...items.values()];
+    }
+
+    private reconciled(database: string, held: SchemaSpec, spec: SchemaSpec): SchemaSpec {
+        const optionsOf = (it: SchemaSpec): unknown[] => (it.kind === 'VECTOR' ? it.engineOptions ?? [] : []);
+        const portable = (it: SchemaSpec): string => JSON.stringify({ ...it, engineOptions: undefined });
+        const [a, b] = [optionsOf(held), optionsOf(spec)];
+        if (portable(held) === portable(spec)) {
+            if (!b.length || JSON.stringify(a) === JSON.stringify(b)) {
+                return held;
+            }
+            if (!a.length) {
+                return spec;
+            }
+        }
+        throw new DrivineError(
+            `Two schema catalogs declare the ${spec.kind} on ${spec.label}(${spec.properties.join(', ')}) on ` +
+                `${database} differently.`
+        );
     }
 
     /** The versioned catalogs whose recorded version differs from theirs. A first version is adopted, not acted on. */
