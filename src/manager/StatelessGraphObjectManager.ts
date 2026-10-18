@@ -23,6 +23,7 @@ import { SaveStatement } from '@/backend/SaveStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
+import { DatabaseType } from '@/connection/DatabaseType';
 import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
 import { TransactionMode } from '@/connection/TransactionMode';
 import { NonAtomicBatchException } from '@/manager/NonAtomicBatchException';
@@ -110,6 +111,15 @@ function filterOnly<T>(
     return options;
 }
 
+/** Whether the engine indexes properties one by one; false where it has no schema grammar to say. */
+function rangesPerProperty(type: DatabaseType): boolean {
+    try {
+        return !!schemaGrammarFor(type).rangesPerProperty;
+    } catch {
+        return false;
+    }
+}
+
 /** How many times `update` loads and applies its change before a stale save is thrown. */
 export const UPDATE_ATTEMPTS = 3;
 
@@ -182,7 +192,7 @@ export class StatelessGraphObjectManager {
         this.indexAdvisor = new QueryIndexAdvisor(
             () => this.indexes,
             () => this.constraints,
-            () => !!schemaGrammarFor(persistenceManager.type).rangesPerProperty
+            () => rangesPerProperty(persistenceManager.type)
         );
         this.edges = new EdgeOperations(
             registry,

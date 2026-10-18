@@ -18,6 +18,16 @@ export class OracleViews {
         private readonly depth: Record<string, number> = {}
     ) {}
 
+    /** The table of nodes. */
+    get graphNodes(): string {
+        return this.graph.nodes;
+    }
+
+    /** An alias no other part of the statement uses. */
+    nextAlias(prefix: string): string {
+        return `${prefix}${++this.aliasCount}`;
+    }
+
     /** The document of the view whose root is the node row `alias`. */
     document(model: GraphViewModel, alias: string): string {
         return this.view(model, alias, []);
@@ -33,6 +43,47 @@ export class OracleViews {
             });
         const paths = model.paths.filter((it) => it.required).map((path) => `EXISTS (${this.pathNodes(path, alias)})`);
         return [...relationships, ...paths];
+    }
+
+    /**
+     * One relationship of the type from the node row `from`: the clauses `FROM … WHERE …` (ending in an open WHERE to
+     * add to), the edge's and the far node's aliases, and the test of the far node's labels (`1 = 1` for none).
+     */
+    step(
+        type: string,
+        direction: Direction,
+        from: string,
+        labels: string[]
+    ): { from: string; edge: string; node: string; x: string } {
+        const edge = this.alias('e');
+        const node = this.alias('x');
+        const typed = `${edge}.type = ${sqlText(type)}`;
+        const join =
+            direction === Direction.INCOMING
+                ? `${node}.nid = ${edge}.src WHERE ${edge}.dst = ${from}.nid`
+                : direction === Direction.UNDIRECTED
+                ? `((${edge}.src = ${from}.nid AND ${node}.nid = ${edge}.dst) OR (${edge}.dst = ${from}.nid AND ` +
+                  `${node}.nid = ${edge}.src)) WHERE 1 = 1`
+                : `${node}.nid = ${edge}.dst WHERE ${edge}.src = ${from}.nid`;
+        const [on, where] = join.split(' WHERE ');
+        return {
+            from: `FROM ${this.graph.edges} ${edge} JOIN ${this.graph.nodes} ${node} ON ${on}\nWHERE ${where} AND ${typed}`,
+            edge,
+            node,
+            x: labels.length ? hasLabels(node, labels) : '1 = 1'
+        };
+    }
+
+    /** The ids of the nodes 1 to `depth` relationships of the type away from the node row `from`. */
+    reached(type: string, direction: Direction, from: string, depth: number): string {
+        const edges =
+            direction === Direction.UNDIRECTED
+                ? `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)} UNION ALL ` +
+                  `SELECT dst, src FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
+                : direction === Direction.INCOMING
+                ? `(SELECT dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
+                : `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
+        return `SELECT b FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
     }
 
     private view(model: GraphViewModel, alias: string, path: RelationshipModel[]): string {
@@ -126,49 +177,8 @@ export class OracleViews {
         return `(SELECT ${fn} ${step.from})`;
     }
 
-    /**
-     * One relationship of the type from the node row `from`: the clauses `FROM … WHERE …` (ending in an open WHERE to
-     * add to), the edge's and the far node's aliases, and the test of the far node's labels (`1 = 1` for none).
-     */
-    private step(
-        type: string,
-        direction: Direction,
-        from: string,
-        labels: string[]
-    ): { from: string; edge: string; node: string; x: string } {
-        const edge = this.alias('e');
-        const node = this.alias('x');
-        const typed = `${edge}.type = ${sqlText(type)}`;
-        const join =
-            direction === Direction.INCOMING
-                ? `${node}.nid = ${edge}.src WHERE ${edge}.dst = ${from}.nid`
-                : direction === Direction.UNDIRECTED
-                ? `((${edge}.src = ${from}.nid AND ${node}.nid = ${edge}.dst) OR (${edge}.dst = ${from}.nid AND ` +
-                  `${node}.nid = ${edge}.src)) WHERE 1 = 1`
-                : `${node}.nid = ${edge}.dst WHERE ${edge}.src = ${from}.nid`;
-        const [on, where] = join.split(' WHERE ');
-        return {
-            from: `FROM ${this.graph.edges} ${edge} JOIN ${this.graph.nodes} ${node} ON ${on}\nWHERE ${where} AND ${typed}`,
-            edge,
-            node,
-            x: labels.length ? hasLabels(node, labels) : '1 = 1'
-        };
-    }
-
-    /** The ids of the nodes 1 to `depth` relationships of the type away from the node row `from`. */
-    private reached(type: string, direction: Direction, from: string, depth: number): string {
-        const edges =
-            direction === Direction.UNDIRECTED
-                ? `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)} UNION ALL ` +
-                  `SELECT dst, src FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : direction === Direction.INCOMING
-                ? `(SELECT dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
-        return `SELECT b FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
-    }
-
     private alias(prefix: string): string {
-        return `${prefix}${++this.aliasCount}`;
+        return this.nextAlias(prefix);
     }
 }
 

@@ -2,6 +2,7 @@ import { GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/Gra
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
+import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -117,12 +118,12 @@ export class OracleBackend implements GraphBackend {
         );
     }
 
-    renderQuery<T>(_fn: QueryFn<T>, _target: TargetModel): RenderedQuery {
-        throw this.unsupported('The query DSL');
+    renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
+        return OracleQueryRenderer.render(fn, target, (depth) => new OracleViews(this.graph, depth), ROW_ALIAS);
     }
 
-    renderWhere<T>(_fn: WhereFn<T>, _target: TargetModel): { where: string; bindings: Record<string, any> } {
-        throw this.unsupported('The query DSL');
+    renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
+        return OracleQueryRenderer.renderWhere(fn, target, new OracleViews(this.graph), ROW_ALIAS);
     }
 
     patchOne(_model: FragmentModel, _where?: string): GraphStatement {
@@ -234,10 +235,8 @@ END;`);
     }
 
     private page(page: Page): string[] {
-        if (page.orderBy) {
-            throw this.unsupported('An order');
-        }
         return [
+            ...(page.orderBy ? [`ORDER BY ${page.orderBy}`] : []),
             ...(page.skip !== undefined ? [`OFFSET ${page.skip} ROWS`] : []),
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];

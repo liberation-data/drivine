@@ -364,12 +364,12 @@ const BINARY: Partial<Record<Operator, string>> = {
     MATCHES: '=~'
 };
 
-function listOf<T>(value: T | readonly T[] | undefined): T[] {
+export function listOf<T>(value: T | readonly T[] | undefined): T[] {
     return value === undefined ? [] : ([value].flat() as T[]);
 }
 
 /** A root term of an order: by an expression, or by the root property stored under `property`. */
-interface RootKey {
+export interface RootKey {
     kind: 'ROOT';
     term: OrderTerm;
     property?: string;
@@ -388,7 +388,7 @@ export interface CollectionSort {
 }
 
 /** Which a term is: of the roots, or of a list in each. */
-function classify(term: OrderTerm, scope: Scope): RootKey | CollectionSort {
+export function classify(term: OrderTerm, scope: Scope): RootKey | CollectionSort {
     if (term.expression) {
         return { kind: 'ROOT', term };
     }
@@ -451,7 +451,7 @@ function order(term: OrderTerm, expression: string): string {
 }
 
 /** The root properties a condition holds equal to a value at its top level: an equality within anyOf holds none. */
-function pinnedProperties(condition: Condition, scope: Scope): string[] {
+export function pinnedProperties(condition: Condition, scope: Scope): string[] {
     if (condition.kind === 'AND') {
         return condition.conditions.flatMap((it) => pinnedProperties(it, scope));
     }
@@ -466,11 +466,11 @@ function pinnedProperties(condition: Condition, scope: Scope): string[] {
 }
 
 /** Joined, in parentheses when there is more than one (or always, when `always`). */
-function group(parts: string[], separator: string, always: boolean = false): string {
+export function group(parts: string[], separator: string, always: boolean = false): string {
     return parts.length > 1 || always ? `(${parts.join(separator)})` : parts[0];
 }
 
-function count(name: string, value: number | undefined): number | undefined {
+export function count(name: string, value: number | undefined): number | undefined {
     if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
         throw new DrivineError(`${name} is a whole number of objects, not ${value}.`);
     }

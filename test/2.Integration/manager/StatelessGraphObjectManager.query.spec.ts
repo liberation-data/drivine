@@ -1,5 +1,7 @@
 import {
     above,
+    backendFor,
+    DatabaseType,
     allOf,
     below,
     caseOf,
@@ -33,7 +35,9 @@ import {
     StatelessGraphObjectManager,
     TargetNode
 } from '@liberation-data/drivine';
-import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { closeGraphEngines, GraphEngine, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { oracleConfigured, oraclePersistenceManager } from '../support/Oracle';
+import { OracleSeed } from '../support/OracleSeed';
 
 @NodeFragment({ labels: ['QueryTest', 'Issue'] })
 class Issue {
@@ -101,44 +105,127 @@ class IssueView {
 const ids = (items: { id: string }[]): string[] => items.map((it) => it.id).sort();
 const viewIds = (items: IssueView[]): string[] => items.map((it) => it.issue.id).sort();
 
-describe.each(graphEngines())('query DSL on $type', (engine) => {
+/** A store the suite runs on: Cypher on each graph engine, SQL on Oracle, seeded with the same graph. */
+interface Store {
+    name: string;
+    start(): Promise<{ gom: StatelessGraphObjectManager; addIssue(props: Record<string, any>): Promise<void> }>;
+    stop(): Promise<void>;
+}
+
+const cypherStore = (engine: GraphEngine): Store => {
     let pm: PersistenceManager;
+    return {
+        name: engine.type,
+        start: async () => {
+            pm = persistenceManagerFor(engine);
+            const gom = new StatelessGraphObjectManager(
+                pm,
+                new CypherBackend(cypherGrammarFor(engine.type)),
+                new ModelRegistry()
+            );
+            await pm.execute(new QuerySpecification('MATCH (n:QueryTest) DETACH DELETE n'));
+            await pm.execute(
+                new QuerySpecification(
+                    "CREATE (i1:QueryTest:Issue {id: 'i1', title: 'Crash on start', state: 'open', issue_no: 101, " +
+                        "priority: 1, tags: ['crash', 'ui'], `metadata.source`: 'github'}), " +
+                        "(i2:QueryTest:Issue:Bug {id: 'i2', title: 'Slow search', state: 'open', issue_no: 102, priority: 3, " +
+                        "tags: ['perf'], `metadata.source`: 'jira'}), " +
+                        "(i3:QueryTest:Issue {id: 'i3', title: 'Typo in docs', state: 'closed', issue_no: 103}), " +
+                        "(i4:QueryTest:Issue:Bug {id: 'i4', title: 'CRASH when saving', state: 'closed', issue_no: 104, " +
+                        'priority: 2}), ' +
+                        "(kent:QueryTest:Person {id: 'kent', name: 'Kent'}), (ada:QueryTest:Person {id: 'ada', name: 'Ada'}), " +
+                        "(acme:QueryTest:Org {id: 'acme', name: 'Acme'}), (kent)-[:WORKS_FOR]->(acme), " +
+                        "(i1)-[:ASSIGNED_TO {role: 'lead', since_year: 2020}]->(kent), " +
+                        "(i1)-[:ASSIGNED_TO {role: 'reviewer', since_year: 2024}]->(ada), " +
+                        "(i2)-[:ASSIGNED_TO {role: 'reviewer', since_year: 2021}]->(kent), " +
+                        "(i3)-[:ASSIGNED_TO {role: 'lead', since_year: 2022}]->(ada), " +
+                        "(i1)-[:HAS_COMMENT]->(:QueryTest:Comment {id: 'c1', body: 'Seen it too', up_votes: 5}), " +
+                        "(i2)-[:HAS_COMMENT]->(:QueryTest:Comment {id: 'c2', body: 'Fixed in main', up_votes: 1}), " +
+                        '(i1)-[:RAISED_BY]->(kent), (i3)-[:RAISED_BY]->(ada)'
+                )
+            );
+            return {
+                gom,
+                addIssue: async (props) =>
+                    pm.execute(new QuerySpecification('CREATE (n:QueryTest:Issue) SET n += $props').bind({ props }))
+            };
+        },
+        stop: async () => {
+            await pm.execute(new QuerySpecification('MATCH (n:QueryTest) DETACH DELETE n'));
+            await closeGraphEngines();
+        }
+    };
+};
+
+const oracleStore = (): Store => {
+    let seed: OracleSeed;
+    return {
+        name: 'ORACLE',
+        start: async () => {
+            const pm = oraclePersistenceManager();
+            const gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
+            seed = new OracleSeed(pm, 'QueryTest');
+            await seed.clear();
+            const issue = async (labels: string[], props: Record<string, any>): Promise<void> =>
+                seed.node(['Issue', ...labels], props);
+            await issue([], {
+                id: 'i1',
+                title: 'Crash on start',
+                state: 'open',
+                issue_no: 101,
+                priority: 1,
+                tags: ['crash', 'ui'],
+                'metadata.source': 'github'
+            });
+            await issue(['Bug'], {
+                id: 'i2',
+                title: 'Slow search',
+                state: 'open',
+                issue_no: 102,
+                priority: 3,
+                tags: ['perf'],
+                'metadata.source': 'jira'
+            });
+            await issue([], { id: 'i3', title: 'Typo in docs', state: 'closed', issue_no: 103 });
+            await issue(['Bug'], { id: 'i4', title: 'CRASH when saving', state: 'closed', issue_no: 104, priority: 2 });
+            await seed.node(['Person'], { id: 'kent', name: 'Kent' });
+            await seed.node(['Person'], { id: 'ada', name: 'Ada' });
+            await seed.node(['Org'], { id: 'acme', name: 'Acme' });
+            await seed.edge('kent', 'WORKS_FOR', 'acme');
+            await seed.edge('i1', 'ASSIGNED_TO', 'kent', { role: 'lead', since_year: 2020 });
+            await seed.edge('i1', 'ASSIGNED_TO', 'ada', { role: 'reviewer', since_year: 2024 });
+            await seed.edge('i2', 'ASSIGNED_TO', 'kent', { role: 'reviewer', since_year: 2021 });
+            await seed.edge('i3', 'ASSIGNED_TO', 'ada', { role: 'lead', since_year: 2022 });
+            await seed.node(['Comment'], { id: 'c1', body: 'Seen it too', up_votes: 5 });
+            await seed.node(['Comment'], { id: 'c2', body: 'Fixed in main', up_votes: 1 });
+            await seed.edge('i1', 'HAS_COMMENT', 'c1');
+            await seed.edge('i2', 'HAS_COMMENT', 'c2');
+            await seed.edge('i1', 'RAISED_BY', 'kent');
+            await seed.edge('i3', 'RAISED_BY', 'ada');
+            return { gom, addIssue: async (props) => issue([], props) };
+        },
+        stop: async () => {
+            await seed.clear();
+            await closeGraphEngines();
+        }
+    };
+};
+
+const stores: Store[] = [...graphEngines().map(cypherStore), ...(oracleConfigured ? [oracleStore()] : [])];
+
+describe.each(stores)('query DSL on $name', (store) => {
     let gom: StatelessGraphObjectManager;
+    let addIssue: (props: Record<string, any>) => Promise<void>;
 
     beforeAll(async () => {
-        pm = persistenceManagerFor(engine);
-        gom = new StatelessGraphObjectManager(
-            pm,
-            new CypherBackend(cypherGrammarFor(engine.type)),
-            new ModelRegistry()
-        );
+        const started = await store.start();
+        gom = started.gom;
+        addIssue = started.addIssue;
         gom.indexAdvice = 'OFF';
-        await pm.execute(new QuerySpecification('MATCH (n:QueryTest) DETACH DELETE n'));
-        await pm.execute(
-            new QuerySpecification(
-                "CREATE (i1:QueryTest:Issue {id: 'i1', title: 'Crash on start', state: 'open', issue_no: 101, " +
-                    "priority: 1, tags: ['crash', 'ui'], `metadata.source`: 'github'}), " +
-                    "(i2:QueryTest:Issue:Bug {id: 'i2', title: 'Slow search', state: 'open', issue_no: 102, priority: 3, " +
-                    "tags: ['perf'], `metadata.source`: 'jira'}), " +
-                    "(i3:QueryTest:Issue {id: 'i3', title: 'Typo in docs', state: 'closed', issue_no: 103}), " +
-                    "(i4:QueryTest:Issue:Bug {id: 'i4', title: 'CRASH when saving', state: 'closed', issue_no: 104, " +
-                    'priority: 2}), ' +
-                    "(kent:QueryTest:Person {id: 'kent', name: 'Kent'}), (ada:QueryTest:Person {id: 'ada', name: 'Ada'}), " +
-                    "(acme:QueryTest:Org {id: 'acme', name: 'Acme'}), (kent)-[:WORKS_FOR]->(acme), " +
-                    "(i1)-[:ASSIGNED_TO {role: 'lead', since_year: 2020}]->(kent), " +
-                    "(i1)-[:ASSIGNED_TO {role: 'reviewer', since_year: 2024}]->(ada), " +
-                    "(i2)-[:ASSIGNED_TO {role: 'reviewer', since_year: 2021}]->(kent), " +
-                    "(i3)-[:ASSIGNED_TO {role: 'lead', since_year: 2022}]->(ada), " +
-                    "(i1)-[:HAS_COMMENT]->(:QueryTest:Comment {id: 'c1', body: 'Seen it too', up_votes: 5}), " +
-                    "(i2)-[:HAS_COMMENT]->(:QueryTest:Comment {id: 'c2', body: 'Fixed in main', up_votes: 1}), " +
-                    '(i1)-[:RAISED_BY]->(kent), (i3)-[:RAISED_BY]->(ada)'
-            )
-        );
     });
 
     afterAll(async () => {
-        await pm.execute(new QuerySpecification('MATCH (n:QueryTest) DETACH DELETE n'));
-        await closeGraphEngines();
+        await store.stop();
     });
 
     describe('on a fragment', () => {
@@ -323,7 +410,7 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
         it('should count and delete what a query finds', async () => {
             expect(await gom.count(Issue, (q) => ({ where: q.state.eq('open') }))).toBe(2);
             expect(await gom.count(Comment, (q) => ({ where: q.upVotes.gte(5) }))).toBe(1);
-            await pm.execute(new QuerySpecification("CREATE (:QueryTest:Issue {id: 'gone', title: 'x', state: 'x'})"));
+            await addIssue({ id: 'gone', title: 'x', state: 'x' });
             expect(await gom.deleteAll(Issue, (q) => ({ where: q.state.eq('x' as any) }))).toBe(1);
             expect(await gom.count(Issue)).toBe(4);
         });
@@ -411,9 +498,7 @@ describe.each(graphEngines())('query DSL on $type', (engine) => {
         });
 
         it('should delete by id where a condition holds', async () => {
-            await pm.execute(
-                new QuerySpecification("CREATE (:QueryTest:Issue {id: 'tmp', title: 't', state: 'open', issue_no: 9})")
-            );
+            await addIssue({ id: 'tmp', title: 't', state: 'open', issue_no: 9 });
             expect(await gom.delete(IssueView, 'tmp', { where: (q) => q.issue.state.eq('closed') })).toBe(0);
             expect(await gom.delete(IssueView, 'tmp', { where: (q) => q.issue.state.eq('open') })).toBe(1);
         });

@@ -17,23 +17,27 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
         }
     }
 
-    /** Every `$name` the parameters hold becomes `:name`; a name is never matched as the prefix of a longer one. */
+    /**
+     * Every `$name` the parameters hold becomes a bind, `:b0`, `:b1`, … (an Oracle bind name may not begin with `_`, as
+     * Drivine's own parameters do); a name is never matched as the prefix of a longer one.
+     */
     formattedStatement(): string {
-        const names = new Set(Object.keys(this.named()));
-        return this.appliedStatement().replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, name: string) =>
-            names.has(name) ? `:${name}` : match
-        );
+        const names = Object.keys(this.named());
+        return this.appliedStatement().replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, name: string) => {
+            const index = names.indexOf(name);
+            return index >= 0 ? `:b${index}` : match;
+        });
     }
 
     formattedParams(): Record<string, any> {
         const statement = this.spec.statement.text;
         const params: Record<string, any> = {};
-        for (const [name, value] of Object.entries(this.named())) {
+        Object.entries(this.named()).forEach(([name, value], index) => {
             // Oracle refuses a bind the statement doesn't name.
             if (new RegExp(`\\$${name}(?![A-Za-z0-9_])`).test(statement)) {
-                params[name] = bindable(value);
+                params[`b${index}`] = bindable(value);
             }
-        }
+        });
         return params;
     }
 

@@ -106,32 +106,32 @@ describeOnOracle('views on Oracle', () => {
         gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
         seed = new OracleSeed(pm, 'OraView');
         await seed.clear();
-        await seed.node(['Person'], { id: 'ada', name: 'Ada' });
-        await seed.node(['Person', 'Engineer'], { id: 'bob', name: 'Bob' });
-        await seed.node(['Person'], { id: 'cy', name: 'Cy' });
-        await seed.node(['Person'], { id: 'dee', name: 'Dee' });
-        await seed.node(['Org'], { id: 'acme', name: 'Acme' });
-        await seed.node(['Org'], { id: 'globex', name: 'Globex' });
+        await seed.node(['Person'], { id: 'ava', name: 'Ada' });
+        await seed.node(['Person', 'Engineer'], { id: 'ben', name: 'Bob' });
+        await seed.node(['Person'], { id: 'cal', name: 'Cy' });
+        await seed.node(['Person'], { id: 'dot', name: 'Dee' });
+        await seed.node(['Org'], { id: 'initech', name: 'Acme' });
+        await seed.node(['Org'], { id: 'hooli', name: 'Globex' });
         await seed.node(['City'], { id: 'paris', name: 'Paris' });
         await seed.node(['City'], { id: 'oslo', name: 'Oslo' });
         await seed.node(['Movie'], { id: 'm1', score: 4 });
         await seed.node(['Movie'], { id: 'm2', score: 2 });
         await seed.node(['Movie'], { id: 'm3' });
-        await seed.edge('ada', 'WORKS_FOR', 'acme', { role: 'lead', start_year: 2020 });
-        await seed.edge('ada', 'WORKS_FOR', 'globex', { role: 'advisor', start_year: 2024 });
-        await seed.edge('bob', 'WORKS_FOR', 'acme', { role: 'dev', start_year: 2022 });
-        await seed.edge('acme', 'BASED_IN', 'paris');
-        await seed.edge('globex', 'BASED_IN', 'oslo');
-        await seed.edge('ada', 'LIVES_IN', 'paris');
-        await seed.edge('bob', 'LIVES_IN', 'oslo');
-        await seed.edge('ada', 'KNOWS', 'bob');
-        await seed.edge('cy', 'KNOWS', 'ada');
-        await seed.edge('ada', 'MANAGES', 'bob');
-        await seed.edge('bob', 'MANAGES', 'cy');
-        await seed.edge('cy', 'MANAGES', 'dee');
-        await seed.edge('ada', 'RATED', 'm1');
-        await seed.edge('ada', 'RATED', 'm2');
-        await seed.edge('ada', 'RATED', 'm3');
+        await seed.edge('ava', 'WORKS_FOR', 'initech', { role: 'lead', start_year: 2020 });
+        await seed.edge('ava', 'WORKS_FOR', 'hooli', { role: 'advisor', start_year: 2024 });
+        await seed.edge('ben', 'WORKS_FOR', 'initech', { role: 'dev', start_year: 2022 });
+        await seed.edge('initech', 'BASED_IN', 'paris');
+        await seed.edge('hooli', 'BASED_IN', 'oslo');
+        await seed.edge('ava', 'LIVES_IN', 'paris');
+        await seed.edge('ben', 'LIVES_IN', 'oslo');
+        await seed.edge('ava', 'KNOWS', 'ben');
+        await seed.edge('cal', 'KNOWS', 'ava');
+        await seed.edge('ava', 'MANAGES', 'ben');
+        await seed.edge('ben', 'MANAGES', 'cal');
+        await seed.edge('cal', 'MANAGES', 'dot');
+        await seed.edge('ava', 'RATED', 'm1');
+        await seed.edge('ava', 'RATED', 'm2');
+        await seed.edge('ava', 'RATED', 'm3');
         await seed.node(['Category'], { id: 'c1' });
         await seed.node(['Category'], { id: 'c2' });
         await seed.node(['Category'], { id: 'c3' });
@@ -148,9 +148,9 @@ describeOnOracle('views on Oracle', () => {
     });
 
     it('should load a view: relationship fragments, single and undirected relationships', async () => {
-        const ada = (await gom.load(Career, 'ada'))!;
+        const ada = (await gom.load(Career, 'ava'))!;
         expect(ada).toBeInstanceOf(Career);
-        expect(ada.person).toEqual(Object.assign(new Person(), { id: 'ada', name: 'Ada' }));
+        expect(ada.person).toEqual(Object.assign(new Person(), { id: 'ava', name: 'Ada' }));
         expect(ada.city.name).toEqual('Paris');
         const jobs = ada.jobs.map((it) => [it.role, it.startYear, it.org.name]).sort();
         expect(jobs).toEqual([
@@ -158,33 +158,33 @@ describeOnOracle('views on Oracle', () => {
             ['lead', 2020, 'Acme']
         ]);
         expect(ada.jobs[0]).toBeInstanceOf(WorkHistory);
-        expect(ada.friends.map((it) => it.id).sort()).toEqual(['bob', 'cy']);
-        expect(ada.friends.find((it) => it.id === 'bob')).toBeInstanceOf(Engineer);
+        expect(ada.friends.map((it) => it.id).sort()).toEqual(['ben', 'cal']);
+        expect(ada.friends.find((it) => it.id === 'ben')).toBeInstanceOf(Engineer);
     });
 
     it('should read deep fragment lists once each, paths, counts and aggregates', async () => {
-        const ada = (await gom.load(Career, 'ada'))!;
-        expect(ada.reports.map((it) => it.id).sort()).toEqual(['bob', 'cy']);
+        const ada = (await gom.load(Career, 'ava'))!;
+        expect(ada.reports.map((it) => it.id).sort()).toEqual(['ben', 'cal']);
         expect(ada.officeCities.map((it) => it.name).sort()).toEqual(['Oslo', 'Paris']);
         expect([ada.ratings, ada.avgScore, ada.totalScore]).toEqual([3, 3, 6]);
-        const deeper = (await gom.load(Career, 'ada', { depth: { reports: 3 } }))!;
-        expect(deeper.reports.map((it) => it.id).sort()).toEqual(['bob', 'cy', 'dee']);
-        const bob = (await gom.load(Career, 'bob'))!;
+        const deeper = (await gom.load(Career, 'ava', { depth: { reports: 3 } }))!;
+        expect(deeper.reports.map((it) => it.id).sort()).toEqual(['ben', 'cal', 'dot']);
+        const bob = (await gom.load(Career, 'ben'))!;
         expect([bob.ratings, bob.avgScore, bob.totalScore]).toEqual([0, undefined, 0]);
-        expect(bob.friends.map((it) => it.id)).toEqual(['ada']);
+        expect(bob.friends.map((it) => it.id)).toEqual(['ava']);
     });
 
     it('should keep only roots with the required relationships', async () => {
         const careers = await gom.loadAll(Career);
-        expect(careers.map((it) => it.person.id).sort()).toEqual(['ada', 'bob']);
+        expect(careers.map((it) => it.person.id).sort()).toEqual(['ava', 'ben']);
         expect(await gom.count(Career)).toBe(2);
-        expect(await gom.load(Career, 'cy')).toBeUndefined();
+        expect(await gom.load(Career, 'cal')).toBeUndefined();
     });
 
     it('should nest views, and follow a view that holds itself to its maxDepth', async () => {
-        const acme = (await gom.load(Team, 'acme'))!;
-        expect(acme.members.map((it) => it.person.id).sort()).toEqual(['ada', 'bob']);
-        expect(acme.members.find((it) => it.person.id === 'ada')!.city.name).toEqual('Paris');
+        const acme = (await gom.load(Team, 'initech'))!;
+        expect(acme.members.map((it) => it.person.id).sort()).toEqual(['ava', 'ben']);
+        expect(acme.members.find((it) => it.person.id === 'ava')!.city.name).toEqual('Paris');
         const c1 = (await gom.load(Category, 'c1'))!;
         expect(c1.parent!.node.id).toEqual('c2');
         expect(c1.parent!.parent!.node.id).toEqual('c3');
@@ -196,7 +196,7 @@ describeOnOracle('views on Oracle', () => {
             where: "JSON_VALUE(n.props, '$.name') = $name",
             bindings: { name: 'Bob' }
         });
-        expect(named.map((it) => it.person.id)).toEqual(['bob']);
+        expect(named.map((it) => it.person.id)).toEqual(['ben']);
         await seed.node(['Person'], { id: 'tmp', name: 'Tmp' });
         expect(await gom.delete(Career, 'tmp')).toBe(0);
         expect(await gom.delete(Person, 'tmp')).toBe(1);

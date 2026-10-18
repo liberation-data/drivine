@@ -32,7 +32,7 @@ describe.each(graphEngines())('StatelessGraphObjectManager reads on $type', (eng
         await pm.execute(new QuerySpecification('MATCH (n:ReadTest) DETACH DELETE n'));
         await pm.execute(
             new QuerySpecification(
-                "CREATE (:ReadTest:Hero {id: 'h1', name: 'Moon Girl', first_seen: 2015}), " +
+                "CREATE (:ReadTest:Hero {id: 'h1', name: 'Squirrel Girl', first_seen: 2015}), " +
                     "(:ReadTest:Hero {id: 'h2', name: 'Devil Dinosaur', first_seen: 1978})"
             )
         );
@@ -45,7 +45,7 @@ describe.each(graphEngines())('StatelessGraphObjectManager reads on $type', (eng
 
     it('should load all as instances', async () => {
         const heroes = await gom.loadAll(Hero);
-        expect(heroes.map((it) => it.shout()).sort()).toEqual(['DEVIL DINOSAUR', 'MOON GIRL']);
+        expect(heroes.map((it) => it.shout()).sort()).toEqual(['DEVIL DINOSAUR', 'SQUIRREL GIRL']);
         expect(heroes.every((it) => it instanceof Hero)).toBe(true);
     });
 
@@ -56,12 +56,12 @@ describe.each(graphEngines())('StatelessGraphObjectManager reads on $type', (eng
 
     it('should load by id, with renamed fields', async () => {
         const hero = await gom.load(Hero, 'h1');
-        expect(hero).toEqual(Object.assign(new Hero(), { id: 'h1', name: 'Moon Girl', firstSeen: 2015 }));
+        expect(hero).toEqual(Object.assign(new Hero(), { id: 'h1', name: 'Squirrel Girl', firstSeen: 2015 }));
         expect(await gom.load(Hero, 'nobody')).toBeUndefined();
     });
 
     it('should count', async () => {
         expect(await gom.count(Hero)).toEqual(2);
-        expect(await gom.count(Hero, 'n.name = $name', { name: 'Moon Girl' })).toEqual(1);
+        expect(await gom.count(Hero, 'n.name = $name', { name: 'Squirrel Girl' })).toEqual(1);
     });
 });

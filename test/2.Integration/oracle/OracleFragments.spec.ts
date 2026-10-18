@@ -90,9 +90,14 @@ describeOnOracle('fragments on Oracle', () => {
         expect(await gom.count(Ticket)).toBe(3);
     });
 
+    it('should take the query DSL', async () => {
+        const typed = await gom.loadAll(Ticket, (q) => ({ where: q.number.gte(102), orderBy: q.number.desc() }));
+        expect(typed.map((it) => it.id)).toEqual(['t3', 't2']);
+    });
+
     it('should say what is not on Oracle yet', async () => {
-        await expect(gom.loadAll(Ticket, (q) => ({ where: q.title.eq('x') }))).rejects.toThrow(
-            /query DSL is not available on Oracle yet/
+        await expect(gom.save(Object.assign(new Ticket(), { id: 'new', title: 'x', number: 1 }))).rejects.toThrow(
+            /Saving is not available on Oracle yet/
         );
     });
 });
