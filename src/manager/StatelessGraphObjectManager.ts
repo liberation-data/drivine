@@ -33,7 +33,8 @@ import { GroupOperations } from '@/manager/GroupOperations';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { IndexManager } from '@/schema/IndexManager';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
-import { schemaGrammarFor } from '@/schema/SchemaGrammar';
+import { SchemaGrammar, schemaGrammarFor } from '@/schema/SchemaGrammar';
+import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { StoreIdentity, StoreIdentityResolver } from '@/store/StoreIdentity';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
@@ -212,12 +213,12 @@ export class StatelessGraphObjectManager {
 
     /** Range indexes of this manager's database: made idempotently, outside any transaction. */
     get indexes(): IndexManager {
-        return new IndexManager(this.schemaExecutor(), schemaGrammarFor(this.persistenceManager.type));
+        return new IndexManager(this.schemaExecutor(), this.schemaGrammar());
     }
 
     /** Uniqueness constraints of this manager's database: made idempotently, outside any transaction. */
     get constraints(): ConstraintManager {
-        return new ConstraintManager(this.schemaExecutor(), schemaGrammarFor(this.persistenceManager.type));
+        return new ConstraintManager(this.schemaExecutor(), this.schemaGrammar());
     }
 
     /**
@@ -818,6 +819,15 @@ export class StatelessGraphObjectManager {
             this.backend.heldProperties(root).spec({ id: rootObject[root.nodeIdField!] })
         );
         return { ...options, heldProperties: held[0] ?? {} };
+    }
+
+    /** The schema grammar of this manager's store, over the graph its backend works on. */
+    private schemaGrammar(): SchemaGrammar {
+        const backend = this.backend;
+        return schemaGrammarFor(
+            this.persistenceManager.type,
+            backend instanceof OracleBackend ? backend.graph : undefined
+        );
     }
 
     private schemaExecutor(): SchemaExecutor {

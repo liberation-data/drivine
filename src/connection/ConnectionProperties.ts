@@ -17,6 +17,12 @@ export interface ConnectionProperties {
      * For engines without multi-statement transactions. Defaults to WARN. See {@link TransactionMode}.
      */
     transactionMode?: TransactionMode;
+    /**
+     * On Oracle, the graph to work on: it names the property graph and its tables (`<name>_node`, `<name>_edge`,
+     * `<name>_schema`). Letters, digits and underscores, beginning with a letter, at most 114. Defaults to `drivine`.
+     * drivine4j's `default-graph-path`.
+     */
+    defaultGraphPath?: string;
 }
 
 /**
@@ -53,6 +59,7 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     const protocol = stringFromEnv('DATABASE_PROTOCOL');
     const poolMax = numberFromEnv('DATABASE_POOL_MAX');
     const transactionMode = <TransactionMode | undefined>stringFromEnv('DATABASE_TRANSACTION_MODE');
+    const defaultGraphPath = stringFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
     assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
@@ -76,6 +83,7 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         databaseName,
         protocol,
         poolMax,
-        transactionMode
+        transactionMode,
+        defaultGraphPath
     };
 }

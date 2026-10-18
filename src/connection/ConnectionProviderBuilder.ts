@@ -29,6 +29,7 @@ export class ConnectionProviderBuilder {
     private _protocol?: string;
     private _poolMax?: number;
     private _transactionMode?: TransactionMode;
+    private _defaultGraphPath?: string;
 
     // Postgres properties
     private _idleTimeout?: number;
@@ -53,6 +54,7 @@ export class ConnectionProviderBuilder {
         this._protocol = properties.protocol;
         this._poolMax = properties.poolMax ?? 40;
         this._transactionMode = properties.transactionMode;
+        this._defaultGraphPath = properties.defaultGraphPath;
         return this;
     }
 
@@ -92,6 +94,12 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
+    /** On Oracle, the graph to work on: see {@link ConnectionProperties.defaultGraphPath}. */
+    defaultGraphPath(path: string): this {
+        this._defaultGraphPath = path;
+        return this;
+    }
+
     idleTimeout(idleTimeout: number): this {
         this._idleTimeout = idleTimeout;
         return this;
@@ -114,6 +122,9 @@ export class ConnectionProviderBuilder {
         }
 
         assert(this._host, `host config is required`);
+        if (this._defaultGraphPath && this._type !== DatabaseType.ORACLE) {
+            this.logger.warn(`defaultGraphPath is ignored by ${this._type}, which names no graph`);
+        }
         if (this._transactionMode && !AUTO_COMMIT_ENGINES.includes(this._type)) {
             this.logger.warn(`transactionMode is ignored by ${this._type}, which supports transactions`);
         }
@@ -171,7 +182,8 @@ export class ConnectionProviderBuilder {
             password: this._password,
             connectString: `${this._host}:${this._port ?? 1521}/${this._name}`,
             poolMax: this._poolMax,
-            connectTimeout: this._connectionTimeout ? Math.ceil(this._connectionTimeout / 1000) : undefined
+            connectTimeout: this._connectionTimeout ? Math.ceil(this._connectionTimeout / 1000) : undefined,
+            graph: this._defaultGraphPath
         });
     }
 

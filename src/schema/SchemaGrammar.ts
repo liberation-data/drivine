@@ -314,7 +314,8 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     }
 };
 
-export function schemaGrammarFor(type: DatabaseType): SchemaGrammar {
+/** The schema grammar of an engine; on Oracle, over `graph` (the default graph unless given). */
+export function schemaGrammarFor(type: DatabaseType, graph: OracleGraph = new OracleGraph()): SchemaGrammar {
     switch (type) {
         case DatabaseType.NEO4J:
             return NEO4J_SCHEMA;
@@ -323,7 +324,7 @@ export function schemaGrammarFor(type: DatabaseType): SchemaGrammar {
         case DatabaseType.FALKORDB:
             return FALKORDB_SCHEMA;
         case DatabaseType.ORACLE:
-            return new OracleSchemaGrammar(new OracleGraph());
+            return new OracleSchemaGrammar(graph);
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }

@@ -25,4 +25,10 @@ describe('ConnectionPropertiesFromEnv', () => {
         process.env.TM_TEST_DATABASE_TRANSACTION_MODE = 'LOOSE';
         expect(() => ConnectionPropertiesFromEnv('TM_TEST')).toThrow(/must be one of: WARN, STRICT/);
     });
+
+    it('should read the graph an Oracle store works on', () => {
+        expect(ConnectionPropertiesFromEnv('TM_TEST').defaultGraphPath).toBeUndefined();
+        process.env.TM_TEST_DATABASE_DEFAULT_GRAPH_PATH = 'tenant_a';
+        expect(ConnectionPropertiesFromEnv('TM_TEST').defaultGraphPath).toEqual('tenant_a');
+    });
 });

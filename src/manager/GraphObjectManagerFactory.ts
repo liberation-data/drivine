@@ -20,7 +20,10 @@ export class GraphObjectManagerFactory {
     readonly registry = new ModelRegistry();
     private readonly managers = new Map<string, StatelessGraphObjectManager>();
 
-    constructor(readonly persistenceManagerFactory: PersistenceManagerFactory, readonly options: QueryOptions = {}) {}
+    constructor(
+        readonly persistenceManagerFactory: PersistenceManagerFactory,
+        readonly options: QueryOptions = {}
+    ) {}
 
     get(database: string = 'default'): StatelessGraphObjectManager {
         let manager = this.managers.get(database);
@@ -28,7 +31,10 @@ export class GraphObjectManagerFactory {
             const persistenceManager = this.persistenceManagerFactory.get(database);
             manager = new StatelessGraphObjectManager(
                 persistenceManager,
-                backendFor(persistenceManager.type),
+                backendFor(
+                    persistenceManager.type,
+                    this.persistenceManagerFactory.registry.connectionProvider(database)?.graphName
+                ),
                 this.registry
             );
             manager.indexAdvice = this.options.indexAdvice ?? manager.indexAdvice;

@@ -4,7 +4,11 @@ import { Stamps } from '@/model/Stamps';
 /** The graph a manager on Oracle works on when none is named. */
 export const DEFAULT_GRAPH = 'drivine';
 
-const NAME = /^[A-Za-z][A-Za-z0-9_]{0,99}$/;
+/**
+ * A graph's name: the longest leaves room for the longest name it gives an object, a table beside the nodes
+ * (`_v__` and a hash, with nothing readable) and the trigger beside that, within Oracle's 128. drivine4j's rule.
+ */
+const NAME = /^[A-Za-z][A-Za-z0-9_]{0,113}$/;
 
 /**
  * A graph as Oracle keeps it (drivine4j's layout, so a store written from the JVM and from Node is one): a table of
@@ -22,7 +26,7 @@ export class OracleGraph {
         if (!NAME.test(name)) {
             throw new DrivineError(
                 `'${name}' can't name a graph on Oracle: it names tables, so it is letters, digits and underscores, ` +
-                    `beginning with a letter.`
+                    `beginning with a letter, at most 114.`
             );
         }
         this.nodes = `${name}_node`;

@@ -1288,12 +1288,19 @@ DATABASE_PORT=1521          # the default
 DATABASE_NAME=FREEPDB1      # the service: required
 DATABASE_USER=app
 DATABASE_PASSWORD=secret
+DATABASE_DEFAULT_GRAPH_PATH=drivine   # names the property graph and its tables; this is the default
 ```
 
+The graph's name names tables, so it is letters, digits and underscores, begins with a letter, and is at most 114
+characters. In code, it is `defaultGraphPath` on the connection's properties, or on the builder:
+`DatabaseRegistry.getInstance().builder().withProperties(properties).defaultGraphPath('tenant_a').register('TENANT_A')`.
+Two databases over one Oracle service, each naming its own graph, keep apart: each manager reads, writes and indexes
+its own graph's tables alone.
+
 **How a graph is stored.** Two tables and a property graph over them, made when a manager first speaks to the graph:
-`drivine_node (nid, labels, props, stamp)` and `drivine_edge (eid, src, dst, type, props)`, with `labels` and `props`
+`<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
 as JSON. Labels, property names and relationship types are data, so `@NodeLabels`, `@PropertyBag` and `edges` work as
-they do elsewhere. A node's stamp is the `stamp` column. A third table, `drivine_schema`, records the indexes and
+they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>_schema`, records the indexes and
 constraints Drivine made. The layout is drivine4j's, so the JVM and Node read one store.
 
 Notes:

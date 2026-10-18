@@ -26,13 +26,21 @@ export class OracleConnectionProvider implements ConnectionProvider {
         readonly name: string,
         readonly type: DatabaseType,
         readonly connectionProperties: OracleConnectionProperties
-    ) {}
+    ) {
+        // Refuses a name that can't name the graph's tables now, rather than at the first connection.
+        new OracleGraph(this.graphName);
+    }
+
+    /** The graph this store works on, whose tables are made on first connection. */
+    get graphName(): string {
+        return this.connectionProperties.graph ?? DEFAULT_GRAPH;
+    }
 
     /** A connection, the graph's tables made first if this is the first (schema statements commit on their own). */
     async connect(): Promise<Connection> {
         const connection = await (await this.poolOf()).getConnection();
         this.ensured ??= connection
-            .execute(new OracleGraph(this.connectionProperties.graph ?? DEFAULT_GRAPH).ensuring)
+            .execute(new OracleGraph(this.graphName).ensuring)
             .then(() => undefined)
             .catch((e) => {
                 this.ensured = undefined;

@@ -12,6 +12,9 @@ export interface ConnectionProvider {
      */
     type: DatabaseType;
 
+    /** The graph the store names, where it names one: on Oracle, the property graph and its tables. */
+    readonly graphName?: string;
+
     connect(): Promise<Connection>;
 
     end(): Promise<void>;
