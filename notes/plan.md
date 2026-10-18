@@ -52,10 +52,10 @@ interface ConnectionProperties {
 
 For engines without multi-statement transactions (FalkorDB):
 - `WARN` (default): `startTransaction` is no-op debug log, `rollback` warns, queries auto-commit
-- `STRICT`: `startTransaction` / `commit` / `rollback` throw; `@Transactional` methods explode
+- `STRICT`: `startTransaction` throws, so `@Transactional` methods fail at their first statement. `commit` is a no-op and `rollback` only warns: rollback runs on the error path and must not hide the original error (as in drivine4j)
 - A batch that can't be atomic is written as one statement or refused up front (`NonAtomicBatchException` equivalent)
 
-Wire into `Transaction.ts` and `TransactionalPersistenceManager.ts`.
+As in drivine4j, this is a per-connection concern: an auto-commit engine's connection delegates to a shared `AutoCommitTransactions` helper. `Transaction.ts` needs no change.
 
 ---
 
@@ -259,4 +259,5 @@ Mostly reuses the Oracle backend: `GRAPH_TABLE` reads are standard SQL/PGQ (ISO/
 Branch: `drivine4j-parity`. Local test DBs (docker): `drivine-neo4j` (neo4j:5, bolt `localhost:17687`, `neo4j`/`drivine-test`), `drivine-postgres` (postgres:16, `localhost:15432`, `postgres`/`drivine-test`, db `drivine`). Pass connection settings as env vars; they win over `.env`.
 
 - [x] **Tier 0 — AgensGraph removed.** Postgres untangled onto plain `pg`: `PostgresConnectionProvider`, `PostgresConnection`, `PostgresCursor`, `PostgresResultMapper`, `PostgresSpecCompiler`. The compiler now rewrites every occurrence of a named parameter and never matches a name as the prefix of a longer one (the Agens compiler did both wrong). `ConnectionProperties.defaultGraphPath` removed. Integration test `PostgresRepository.spec.ts` covers named params, rollback and cursors.
-- [ ] Tier 1 step 1 — `TransactionMode`
+- [x] **Tier 1 step 1 — `TransactionMode`.** `TransactionMode` enum, `ConnectionProperties.transactionMode` (env `DATABASE_TRANSACTION_MODE`, validated), builder `transactionMode()`, and `AutoCommitTransactions` for connections to auto-commit engines. The builder warns when it's set for an engine that has transactions. Nothing honours it until FalkorDB lands (step 4), which adds itself to `AUTO_COMMIT_ENGINES`. The batch half (`NonAtomicBatchException`) waits for `saveAll` in Tier 2.
+- [ ] Tier 1 step 2 — connection-dir reorganisation

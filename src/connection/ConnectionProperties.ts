@@ -1,5 +1,6 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import * as assert from 'assert';
+import { TransactionMode } from '@/connection/TransactionMode';
 
 export interface ConnectionProperties {
     databaseType: DatabaseType;
@@ -12,6 +13,10 @@ export interface ConnectionProperties {
     poolMax?: number;
     databaseName?: string;
     protocol?: string;
+    /**
+     * For engines without multi-statement transactions. Defaults to WARN. See {@link TransactionMode}.
+     */
+    transactionMode?: TransactionMode;
 }
 
 /**
@@ -47,9 +52,14 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     const databaseName = stringFromEnv('DATABASE_NAME');
     const protocol = stringFromEnv('DATABASE_PROTOCOL');
     const poolMax = numberFromEnv('DATABASE_POOL_MAX');
+    const transactionMode = <TransactionMode | undefined>stringFromEnv('DATABASE_TRANSACTION_MODE');
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
     assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
+    assert(
+        transactionMode === undefined || Object.values(TransactionMode).includes(transactionMode),
+        `${prefix}DATABASE_TRANSACTION_MODE must be one of: ${Object.values(TransactionMode).join(', ')}.`
+    );
 
     if (databaseType === DatabaseType.POSTGRES) {
         assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
@@ -65,6 +75,7 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         connectionTimeout,
         databaseName,
         protocol,
-        poolMax
+        poolMax,
+        transactionMode
     };
 }

@@ -1,3 +1,4 @@
+export * from './AutoCommitTransactions';
 export * from './Connection';
 export * from './ConnectionProperties';
 export * from './ConnectionProvider';
@@ -8,3 +9,4 @@ export * from './Neo4jConnection';
 export * from './Neo4jConnectionProvider';
 export * from './PostgresConnection';
 export * from './PostgresConnectionProvider';
+export * from './TransactionMode';

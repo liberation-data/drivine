@@ -8,6 +8,12 @@ import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
 import { NeptuneConnectionProvider } from '@/connection/NeptuneConnectionProvider';
+import { TransactionMode } from '@/connection/TransactionMode';
+
+/**
+ * Engines without multi-statement transactions, which honour {@link TransactionMode}.
+ */
+const AUTO_COMMIT_ENGINES: DatabaseType[] = [];
 
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
@@ -20,6 +26,7 @@ export class ConnectionProviderBuilder {
     private _password?: string;
     private _protocol?: string;
     private _poolMax?: number;
+    private _transactionMode?: TransactionMode;
 
     // Postgres properties
     private _idleTimeout?: number;
@@ -43,6 +50,7 @@ export class ConnectionProviderBuilder {
         this._name = properties.databaseName;
         this._protocol = properties.protocol;
         this._poolMax = properties.poolMax ?? 40;
+        this._transactionMode = properties.transactionMode;
         return this;
     }
 
@@ -77,6 +85,11 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
+    transactionMode(mode: TransactionMode): this {
+        this._transactionMode = mode;
+        return this;
+    }
+
     idleTimeout(idleTimeout: number): this {
         this._idleTimeout = idleTimeout;
         return this;
@@ -99,6 +112,9 @@ export class ConnectionProviderBuilder {
         }
 
         assert(this._host, `host config is required`);
+        if (this._transactionMode && !AUTO_COMMIT_ENGINES.includes(this._type)) {
+            this.logger.warn(`transactionMode is ignored by ${this._type}, which supports transactions`);
+        }
 
         if (this._type === DatabaseType.POSTGRES) {
             this.registry.register(this.buildPostgresProvider(name));
