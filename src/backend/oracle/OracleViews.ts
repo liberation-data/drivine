@@ -1,5 +1,5 @@
 import { Direction } from '@/annotation/Metadata';
-import { hasLabels, jsonKey, nodeDocument, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
+import { hasLabels, jsonKey, nodeDocument, OracleGraph, RELATED_SUBQUERY, sqlText } from '@/backend/oracle/OracleGraph';
 import { target } from '@/backend/ViewProjector';
 import { FragmentModel } from '@/model/FragmentModel';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
@@ -53,7 +53,7 @@ export class OracleViews {
             .filter((it) => it.required)
             .map((rel) => {
                 const step = this.step(rel.type, rel.direction, alias, labelsOf(target(rel)));
-                return `EXISTS (SELECT 1 ${step.from} AND ${step.x})`;
+                return `EXISTS (${RELATED_SUBQUERY} ${step.from} AND ${step.x})`;
             });
         const paths = model.paths.filter((it) => it.required).map((path) => `EXISTS (${this.pathNodes(path, alias)})`);
         return [...relationships, ...paths];

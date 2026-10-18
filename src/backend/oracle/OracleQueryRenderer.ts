@@ -1,4 +1,4 @@
-import { hasLabels, jsonKey } from '@/backend/oracle/OracleGraph';
+import { hasLabels, jsonKey, RELATED_SUBQUERY } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -163,7 +163,7 @@ export class OracleQueryRenderer {
         const tested = quantified
             ? quantified.conditions.map((it) => this.condition(it, next.scope, inner)).join(' AND ')
             : this.walk(path, i + 1, test, next.scope, inner);
-        const exists = `EXISTS (SELECT 1 ${clause} AND ${tested})`;
+        const exists = `EXISTS (${RELATED_SUBQUERY} ${clause} AND ${tested})`;
         return quantified?.negate ? `NOT ${exists}` : exists;
     }
 
