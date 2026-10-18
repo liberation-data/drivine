@@ -4,6 +4,7 @@ import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
 import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
+import { OracleWrites } from '@/backend/oracle/OracleWrites';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -73,12 +74,39 @@ export class OracleBackend implements GraphBackend {
     }
 
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
-        if (cascade !== CascadeType.NONE) {
-            return this.notYet('A cascading delete');
-        }
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const id = this.idPredicate(root);
-        return this.deleting(root, this.rootWhere(target, where ? `${id} AND (${where})` : id));
+        const filter = this.rootWhere(target, where ? `${id} AND (${where})` : id);
+        if (cascade === CascadeType.NONE) {
+            return this.deleting(root, filter);
+        }
+        if (target.kind !== 'GRAPH_VIEW') {
+            throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
+        }
+        const reached = new OracleViews(this.graph).cascaded(target.model, 'v_roots');
+        const deletable =
+            cascade === CascadeType.DELETE_ORPHAN
+                ? ` AND NOT EXISTS (SELECT 1 FROM ${this.graph.edges} e WHERE e.src = x.nid OR e.dst = x.nid)`
+                : '';
+        return new GraphStatement(`DECLARE
+    v_roots SYS.ODCINUMBERLIST;
+    v_targets SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
+    v_deleted NUMBER;
+    c SYS_REFCURSOR;
+BEGIN
+    SELECT ${ROW_ALIAS}.nid BULK COLLECT INTO v_roots ${this.from(root, filter)};
+    ${
+        reached.length
+            ? `SELECT DISTINCT nid BULK COLLECT INTO v_targets FROM (${reached.join('\n        UNION ALL ')});`
+            : 'NULL;'
+    }
+    DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT column_value FROM TABLE(v_roots));
+    v_deleted := SQL%ROWCOUNT;
+    -- The roots' relationships went with them (the relationship table cascades), so an orphan is now one with none.
+    DELETE FROM ${this.graph.nodes} x WHERE x.nid IN (SELECT column_value FROM TABLE(v_targets))${deletable};
+    OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
+    DBMS_SQL.RETURN_RESULT(c);
+END;`);
     }
 
     deleteAll(target: TargetModel, where?: string): GraphStatement {
@@ -127,42 +155,42 @@ export class OracleBackend implements GraphBackend {
         return OracleQueryRenderer.renderWhere(fn, target, new OracleViews(this.graph), ROW_ALIAS);
     }
 
-    patchOne(_model: FragmentModel, _where?: string): GraphStatement {
-        return this.notYet('patch');
+    patchOne(model: FragmentModel, where?: string): GraphStatement {
+        return new OracleWrites(this.graph).patchOne(model, where);
     }
 
-    patchMany(_model: FragmentModel): GraphStatement {
-        return this.notYet('patchAll');
+    patchMany(model: FragmentModel): GraphStatement {
+        return new OracleWrites(this.graph).patchMany(model);
     }
 
-    fragmentBatch(_groups: FragmentGroup[], _options: SaveOptions<any>): GraphStatement {
-        return this.notYet('saveAll');
+    fragmentBatch(groups: FragmentGroup[], options: SaveOptions<any>): GraphStatement {
+        return new OracleWrites(this.graph).fragmentBatch(groups, options);
     }
 
     groups(_model: FragmentModel, _query: GroupQuery<any, any>, _targets: Map<string, FragmentModel>): GraphStatement {
         return this.notYet('A grouped read');
     }
 
-    related(_from: MatchedNode, _type: string, _direction: Direction, _target: FragmentModel): GraphStatement {
-        return this.notYet('edges.loadRelated');
+    related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement {
+        return new OracleWrites(this.graph).related(from, type, direction, target);
     }
 
     relate(
-        _from: MatchedNode,
-        _to: MatchedNode,
-        _type: string,
-        _props: Record<string, any>,
-        _mode: RelateMode
+        from: MatchedNode,
+        to: MatchedNode,
+        type: string,
+        properties: Record<string, any>,
+        mode: RelateMode
     ): GraphStatement {
-        return this.notYet('edges.relate');
+        return new OracleWrites(this.graph).relate(from, to, type, properties, mode);
     }
 
-    unrelate(_from: MatchedNode, _to: MatchedNode, _type: string): GraphStatement {
-        return this.notYet('edges.unrelate');
+    unrelate(from: MatchedNode, to: MatchedNode, type: string): GraphStatement {
+        return new OracleWrites(this.graph).unrelate(from, to, type);
     }
 
-    unrelateAll(_from: MatchedNode, _type: string, _direction: Direction): GraphStatement {
-        return this.notYet('edges.unrelateAll');
+    unrelateAll(from: MatchedNode, type: string, direction: Direction): GraphStatement {
+        return new OracleWrites(this.graph).unrelateAll(from, type, direction);
     }
 
     storeStamps(): GraphStatement {

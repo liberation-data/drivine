@@ -273,8 +273,8 @@ export class OracleSaveBuilder {
             : `JSON('[]')`;
         const result =
             `SELECT JSON_OBJECT('found' VALUE CASE WHEN v_made THEN NULL ELSE v_found END, ` +
-            `'now' VALUE (SELECT stamp FROM ${this.graph.nodes} WHERE nid = v_root), 'related' VALUE ${related} RETURNING JSON) ` +
-            'AS "result" FROM dual';
+            `'now' VALUE (SELECT stamp FROM ${this.graph.nodes} WHERE nid = v_root), 'related' VALUE ${related} RETURNING CLOB) ` +
+            'AS "result:json" FROM dual';
         const text = `${prelude(this.graph, this.declarations)}
 BEGIN
 ${this.body.map((it) => `    ${it}`).join('\n')}
@@ -405,8 +405,11 @@ END;`;
     }
 }
 
-/** The declarations every save block holds: its state, and the procedures its body calls. */
-function prelude(graph: OracleGraph, declarations: string[]): string {
+/**
+ * The declarations every writing block holds: its state, and the procedures its body calls. The offered stamp is bound
+ * as `$x_stamp`.
+ */
+export function prelude(graph: OracleGraph, declarations: string[]): string {
     const nodes = graph.nodes;
     const edges = graph.edges;
     const T = Stamps.TOKEN;

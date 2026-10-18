@@ -33,6 +33,20 @@ export class OracleViews {
         return this.view(model, alias, []);
     }
 
+    /**
+     * Queries of the ids of the nodes a load of the view from the roots in the PL/SQL collection `roots` reaches: as far
+     * as each relationship's maxDepth, and only into nested views whose requirements a node meets, as a load would.
+     */
+    cascaded(model: GraphViewModel, roots: string): string[] {
+        return this.reachedFrom(
+            model,
+            'n',
+            [],
+            [`FROM ${this.graph.nodes} n`],
+            [`n.nid IN (SELECT column_value FROM TABLE(${roots}))`]
+        );
+    }
+
     /** What the node row `alias` must meet to be the view's root: each required relationship and path is there. */
     requirements(model: GraphViewModel, alias: string): string[] {
         const relationships = model.relationships
@@ -84,6 +98,44 @@ export class OracleViews {
                 ? `(SELECT dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
                 : `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
         return `SELECT b FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
+    }
+
+    private reachedFrom(
+        model: GraphViewModel,
+        from: string,
+        path: RelationshipModel[],
+        froms: string[],
+        wheres: string[]
+    ): string[] {
+        const queries: string[] = [];
+        for (const rel of model.relationships) {
+            const depth = this.depth[rel.field] ?? rel.maxDepth;
+            const into = target(rel);
+            if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
+                const x = this.alias('x');
+                queries.push(
+                    `SELECT ${x}.nid ${froms.join(' ')} CROSS JOIN ${this.graph.nodes} ${x} WHERE ${[
+                        ...wheres,
+                        `${x}.nid IN (${this.reached(rel.type, rel.direction, from, depth)})`,
+                        hasLabels(x, labelsOf(into))
+                    ].join(' AND ')}`
+                );
+                continue;
+            }
+            if (path.filter((it) => it === rel).length >= depth) {
+                continue;
+            }
+            const step = this.step(rel.type, rel.direction, from, labelsOf(into));
+            const [fromClause, whereClause] = step.from.split('\nWHERE ');
+            const nextFroms = [...froms, fromClause.replace(/^FROM /, 'CROSS JOIN ')];
+            const required = into.kind === 'GRAPH_VIEW' ? this.requirements(into.model, step.node) : [];
+            const nextWheres = [...wheres, whereClause, step.x, ...required];
+            queries.push(`SELECT ${step.node}.nid ${nextFroms.join(' ')} WHERE ${nextWheres.join(' AND ')}`);
+            if (into.kind === 'GRAPH_VIEW') {
+                queries.push(...this.reachedFrom(into.model, step.node, [...path, rel], nextFroms, nextWheres));
+            }
+        }
+        return queries;
     }
 
     private view(model: GraphViewModel, alias: string, path: RelationshipModel[]): string {

@@ -42,7 +42,7 @@ export class OracleConnection implements Connection {
             autoCommit: !this.inTransaction
         });
         new StatementLogger(this.sessionId()).log(spec, hrStart);
-        const rows = result.rows ?? (result.implicitResults?.[0] as any[] | undefined) ?? [];
+        const rows = result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined);
         return this.resultMapper.mapQueryResults<T>(rows, finalized);
     }
 
@@ -82,4 +82,23 @@ export class OracleConnection implements Connection {
         }
         await this.connection.close();
     }
+}
+
+/**
+ * The rows a PL/SQL block returned. A block returns JSON as text, in a column named `<name>:json`, which is parsed here
+ * and named `<name>`: node-oracledb 7 drops the last row of a returned result set with a JSON column (thin mode,
+ * Oracle 23.26).
+ */
+function implicitRows(rows: any[] | undefined): any[] {
+    return (rows ?? []).map((row) => {
+        const out: Record<string, any> = {};
+        for (const [key, value] of Object.entries(row)) {
+            if (key.endsWith(':json')) {
+                out[key.slice(0, -':json'.length)] = value == null ? value : JSON.parse(value as string);
+            } else {
+                out[key] = value;
+            }
+        }
+        return out;
+    });
 }
