@@ -22,6 +22,7 @@ import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnec
 import { TransactionMode } from '@/connection/TransactionMode';
 import { NonAtomicBatchException } from '@/manager/NonAtomicBatchException';
 import { StaleInBatch } from '@/manager/StaleInBatch';
+import { EdgeOperations } from '@/manager/EdgeOperations';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
@@ -81,6 +82,9 @@ function chunked(groups: FragmentGroup[], size: number): FragmentGroup[][] {
 }
 
 export class StatelessGraphObjectManager {
+    /** Relationships on their own, between stored nodes: see EdgeOperations. */
+    readonly edges: EdgeOperations;
+
     private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
     private warnedNonAtomic = false;
 
@@ -90,7 +94,11 @@ export class StatelessGraphObjectManager {
         readonly persistenceManager: PersistenceManager,
         readonly backend: GraphBackend,
         readonly registry: ModelRegistry
-    ) {}
+    ) {
+        this.edges = new EdgeOperations(registry, async <R>(statement: GraphStatement) =>
+            this.whenUncontended(async () => this.persistenceManager.getOne<R>(statement.spec()))
+        );
+    }
 
     /** Which database this manager works on. */
     get database(): string {
