@@ -57,7 +57,8 @@
         "class-transformer": ">= ^0.5.1",
         "class-validator": ">= 0.14.0",
         "neo4j-driver": "^5.27.0",
-        "reflect-metadata": ">= ^0.1.13"
+        "reflect-metadata": ">= ^0.1.13",
+        "testcontainers": ">= 10"
     },
     "dependencies": {
         "@aws-crypto/sha256-js": "^5.2.0",
@@ -124,6 +125,7 @@
         "prettier": "^3.0.3",
         "reflect-metadata": "^0.1.13",
         "supertest": "^6.3.3",
+        "testcontainers": "^11.14.0",
         "ts-jest": "^29.1.1",
         "ts-mockito": "^2.6.1",
         "ts-node": "^10.9.1",
@@ -173,6 +175,11 @@
         "moduleNameMapper": {
             "@liberation-data/drivine": "<rootDir>/src/index.ts",
             "@/(.*)$": "<rootDir>/src/$1"
+        }
+    },
+    "peerDependenciesMeta": {
+        "testcontainers": {
+            "optional": true
         }
     }
 }

@@ -37,7 +37,8 @@ describe.each(sampleStores())('loadNearest on $type', (engine) => {
     });
 
     it('should search a view by its root’s vector index, with searchK widening the search', async () => {
-        const [nearest] = await gom.loadNearest(SampleVectorView, [1, 0.1, 0], { topK: 1 });
+        // Vector indexes are approximate: asked for one hit only, Neo4j's can return the second nearest.
+        const [nearest] = await gom.loadNearest(SampleVectorView, [1, 0.1, 0], { topK: 1, searchK: 3 });
         expect(nearest.value).toBeInstanceOf(SampleVectorView);
         expect(nearest.value.doc.id).toEqual('north');
         const close = await gom.loadNearest(SampleVectorView, [1, 0.1, 0], { topK: 2, searchK: 3, threshold: 0.9 });
