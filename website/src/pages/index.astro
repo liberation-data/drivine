@@ -156,6 +156,8 @@ const ktSample = `<span class="a">@NodeFragment</span>
             .feature code { font-size: 14px; }
             .features .row { gap: 24px; }
 
+            .backing { padding: 0 32px 72px; }
+            .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
             .engines { padding: 0 32px 96px; }
             .engines .wrap { display: flex; flex-direction: column; gap: 22px; align-items: center; text-align: center; }
             .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
@@ -301,6 +303,16 @@ const ktSample = `<span class="a">@NodeFragment</span>
                 </div>
             </section>
 
+            <section class="backing">
+                <div class="wrap">
+                    <p>
+                        <strong>Sponsored by Rod Johnson</strong>, creator of the Spring Framework and of
+                        <a href="https://hub.embabel.com">Embabel</a>, the AI agent framework for the JVM, which uses Drivine as its
+                        graph client.
+                    </p>
+                </div>
+            </section>
+
             <section class="engines">
                 <div class="wrap">
                     <p class="eyebrow">ENGINES</p>
@@ -328,7 +340,10 @@ const ktSample = `<span class="a">@NodeFragment</span>
             <div class="wrap">
                 <div class="about">
                     <img src={image('cow-emblem.png')} alt="" width="44" height="44" />
-                    <p>Drivine is a community project by Liberation Data, sponsored and led by Jasper Blues, with contributions from around the world.</p>
+                    <p>
+                        Drivine is a community project by Liberation Data, led by Jasper Blues and sponsored by Liberation Data and
+                        Rod Johnson, creator of the Spring Framework and of Embabel, with contributions from around the world.
+                    </p>
                 </div>
                 <nav aria-label="Footer">
                     <div><span>TypeScript</span><a href="https://github.com/liberation-data/drivine">GitHub</a><a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a></div>

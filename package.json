@@ -45,7 +45,8 @@
         "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register/transpile-only node_modules/.bin/jest --runInBand --detectOpenHandles",
         "test:unit": "jest --coverage --testPathPatterns '1[.]Unit[/]'",
         "test:integration": "jest --coverage --testPathPatterns '2[.]Integration[/]'",
-        "test:e2e": "jest --coverage --testPathPatterns '3[.]EndToEnd[/]'"
+        "test:e2e": "jest --coverage --testPathPatterns '3[.]EndToEnd[/]'",
+        "lint:ci": "eslint src test/1.Unit test/2.Integration/manager test/2.Integration/schema test/2.Integration/backend test/2.Integration/support test/2.Integration/oracle test/2.Integration/testing test/2.Integration/security test/jest-global-setup.ts test/jest-global-teardown.ts test/run-tests.ts test/TestEnvironment.ts test/register-paths.ts sample"
     },
     "peerDependencies": {
         "@nestjs/common": ">= 6 <= 11",

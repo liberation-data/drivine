@@ -17,8 +17,8 @@ describe('DrivineTestContainers', () => {
             ]);
         });
 
-        it('passes over a type that is declared but unset', () => {
-            expect(DrivineTestContainers.datasources({ DATABASE_TYPE: undefined })).toEqual([]);
+        it('passes over a type that is declared but unset, or blank', () => {
+            expect(DrivineTestContainers.datasources({ DATABASE_TYPE: undefined, ORACLE_DATABASE_TYPE: '' })).toEqual([]);
         });
     });
 

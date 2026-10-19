@@ -53,8 +53,8 @@ Each type is chosen alone: a local Neo4j can run beside a FalkorDB container. `<
 | Backend  | Image                             | Container's settings                                         |
 |----------|-----------------------------------|--------------------------------------------------------------|
 | Neo4j    | `neo4j:5.26-community`            | user `neo4j`, password `drivine-test`                        |
-| Memgraph | `memgraph/memgraph:latest`        | no auth                                                      |
-| FalkorDB | `falkordb/falkordb:latest`        | the graph is the datasource's `DATABASE_NAME`                |
+| Memgraph | `memgraph/memgraph:3.12.0`        | no auth                                                      |
+| FalkorDB | `falkordb/falkordb:6.0.0`         | the graph is the datasource's `DATABASE_NAME`                |
 | Postgres | `postgres:16`                     | user `drivine`, password `drivine-test`, the datasource's database |
 | Oracle   | `gvenzl/oracle-free:23-faststart` | user `drivine`, password `drivine-test`, service `FREEPDB1`  |
 

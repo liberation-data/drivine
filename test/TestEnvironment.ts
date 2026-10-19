@@ -20,9 +20,11 @@ export function loadTestEnvironment(): void {
     // DrivineModule loads its .env from here, and not the .env you keep for running the app.
     process.env.DOTENV_CONFIG_PATH = process.env.DOTENV_CONFIG_PATH ?? path.join(ROOT, '.env.test');
     if (process.env.ORACLE_TESTS !== 'true') {
+        // Blanked rather than deleted: DrivineModule loads .env.test again in each test process, and dotenv fills only
+        // what is unset.
         Object.keys(process.env)
             .filter((key) => key.startsWith('ORACLE_DATABASE_'))
-            .forEach((key) => delete process.env[key]);
+            .forEach((key) => (process.env[key] = ''));
     }
 }
 
