@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 /* The landing page's palette: deep teal water, with the sunlit surface's coral as the accent. */
 :root {
     --sl-font: 'Ubuntu', system-ui, sans-serif;

@@ -6,6 +6,10 @@
  *   chrome --headless=new --hide-scrollbars --window-size=1280,640 --screenshot=splash.png http://localhost:4321/splash/
  *   sips -s format jpeg -s formatOptions 82 splash.png --out public/images/splash.jpg
  */
+import '@fontsource/ubuntu/latin-500.css';
+import '@fontsource/ubuntu/latin-700.css';
+import '@fontsource/noto-serif/latin-400-italic.css';
+
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 ---
 
@@ -15,11 +19,6 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
         <meta charset="utf-8" />
         <meta name="robots" content="noindex" />
         <title>Drivine splash</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-            rel="stylesheet"
-            href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@500;700&family=Noto+Serif:ital,wght@1,400&display=swap"
-        />
         <style is:global>
             body { margin: 0; }
             .splash {

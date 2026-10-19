@@ -18,7 +18,16 @@ export default defineConfig({
             favicon: '/favicon.ico',
             // The header's GitHub link follows the open docs: Drivine's repository, or drivine4j's.
             components: { SocialIcons: './src/components/SocialIcons.astro' },
-            customCss: ['./src/styles/custom.css'],
+            // The fonts are served from the site itself (Fontsource), not from Google, and only their Latin subset: the
+            // full stylesheets declare every subset, which grows the CSS a first paint waits on.
+            customCss: [
+                '@fontsource/ubuntu/latin-400.css',
+                '@fontsource/ubuntu/latin-500.css',
+                '@fontsource/ubuntu/latin-700.css',
+                '@fontsource/jetbrains-mono/latin-400.css',
+                '@fontsource/jetbrains-mono/latin-500.css',
+                './src/styles/custom.css'
+            ],
             // drivine4j's README marks Groovy build scripts as gradle.
             expressiveCode: { shiki: { langAlias: { gradle: 'groovy' } } },
             plugins: [
