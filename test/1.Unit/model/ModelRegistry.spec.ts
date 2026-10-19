@@ -1,13 +1,16 @@
 import {
     ClassKind,
     Direction,
+    GraphPath,
     GraphProperty,
     GraphRelationship,
     GraphTransient,
     GraphView,
+    hop,
     ModelRegistry,
     NodeFragment,
     NodeId,
+    pathKey,
     ReadOnly,
     Related,
     RelationshipFragment,
@@ -291,5 +294,29 @@ describe('ModelRegistry read-only fields', () => {
             @GraphRelationship({ type: 'R', target: () => Edge, maxDepth: 2 }) edges: Edge[];
         }
         expect(() => new ModelRegistry().view(DeepEdges)).toThrow(/can't be above 1/);
+    });
+
+    it('should read a path in one order only', () => {
+        @NodeFragment({ labels: ['P'] })
+        class P {
+            @NodeId() id: string;
+        }
+        @GraphView()
+        class OrderedTwice {
+            @Root() p: P;
+            @GraphPath([hop('A', Direction.OUTGOING, undefined, 'x'), hop('B', Direction.OUTGOING, undefined, 'y')], {
+                target: () => P
+            })
+            ps: P[];
+        }
+        expect(() => new ModelRegistry().view(OrderedTwice)).toThrow(/OrderedTwice\.ps.*one order/);
+    });
+
+    it('should refuse an order on a path a group key is read by', () => {
+        @NodeFragment({ labels: ['P'] })
+        class P {
+            @NodeId() id: string;
+        }
+        expect(() => pathKey(P, [hop('A', Direction.OUTGOING, undefined, 'x')])).toThrow(/no order/);
     });
 });

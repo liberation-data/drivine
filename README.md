@@ -332,6 +332,28 @@ Each node at the end is returned once: an actor who made two movies with one dir
 `hop`'s label constrains the node it reaches. `required: true` keeps only the roots the path leads somewhere from. A
 path is read-only.
 
+One hop may name an **order**: a property of the node it reaches, lowest first unless `ascending` is `false`. A list then
+holds its targets in the order of the first node of that hop that leads to each, and a single field holds the target the
+first such node leads to:
+
+```typescript
+@GraphView()
+export class SessionStarter {
+    @Root() session: Session;
+
+    // who wrote the earliest message
+    @GraphPath([hop('HAS_MESSAGE', Direction.OUTGOING, 'Message', 'sentAt'), hop('AUTHORED_BY')], { target: () => Person })
+    startedBy?: Person;
+}
+```
+
+A node of the ordered hop without the property comes last, whichever way the path is read. Targets whose first nodes
+hold equal values come in no set order. The property should hold values of one type: every backend reads the order the
+same way where it does, a text of digits such as `'0100'` is ordered as text, and an empty text is a text, the lowest
+one. Where it holds texts on some nodes and
+numbers on others, every backend reads every text before every number lowest first, and after them highest first, as
+Neo4j's ORDER BY does. A group key's path names no order: `pathKey` refuses one.
+
 #### 6. Aggregates: Counting and Summarising Without Loading
 
 `@Count` and `@Aggregate` compute a number for each root in the query, so you don't load a list just to size it:

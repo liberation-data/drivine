@@ -66,7 +66,11 @@ export interface PropertyMetadata {
     emptyWhenAbsent?: boolean;
     sortedBy?: { property: string; ascending: boolean };
     aggregate?: { function: string; type: string; property?: string; direction?: Direction };
-    path?: { hops: { type: string; direction?: Direction; label?: string }[]; target?: ClassThunk; required?: boolean };
+    path?: {
+        hops: { type: string; direction?: Direction; label?: string; orderBy?: string; ascending?: boolean }[];
+        target?: ClassThunk;
+        required?: boolean;
+    };
     targetNode?: { target?: ClassThunk };
     /** The property's declared type, from `design:type`. Array for a list. */
     designType?: Function;
