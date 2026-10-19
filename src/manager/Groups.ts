@@ -1,3 +1,4 @@
+import { DrivineError } from '@/DrivineError';
 import { Hop } from '@/annotation/GraphPath';
 import { ClassRef } from '@/query/QuerySpecification';
 import { ComparableRef, ValueRef, Where } from '@/dsl/Refs';
@@ -32,8 +33,14 @@ export function key(property: string | ValueRef<any>): PropertyKey {
     return { kind: 'property', property };
 }
 
-/** Groups by the node of `target` the source reaches through the hops. The key comes back as that node, mapped. */
+/**
+ * Groups by the node of `target` the source reaches through the hops. The key comes back as that node, mapped. A key is
+ * the node at the end, which every way to it gives alike, so no hop may name an order.
+ */
 export function pathKey<T>(target: ClassRef<T>, hops: Hop[]): PathKey<T> {
+    if (hops.some((it) => it.orderBy)) {
+        throw new DrivineError('A path a key is read by is read in no order; no hop of it may name one.');
+    }
     return { kind: 'path', target, hops };
 }
 

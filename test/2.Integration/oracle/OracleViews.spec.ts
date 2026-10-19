@@ -83,6 +83,20 @@ class Team {
     members: Career[];
 }
 
+/** The cities of the studios a person funded, in the order the studios were founded. */
+@GraphView()
+class Patron {
+    @Root() person: Person;
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'founded'), hop('LOCATED_IN')], { target: () => City })
+    cities: City[];
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'founded'), hop('LOCATED_IN')], { target: () => City })
+    first?: City;
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'founded', false), hop('LOCATED_IN')], {
+        target: () => City
+    })
+    latest?: City;
+}
+
 @NodeFragment({ labels: ['Category'] })
 class CategoryNode {
     @NodeId() id: string;
@@ -139,6 +153,13 @@ describeOnOracle('views on Oracle', () => {
         await seed.edge('c1', 'PARENT', 'c2');
         await seed.edge('c2', 'PARENT', 'c3');
         await seed.edge('c3', 'PARENT', 'c4');
+        // 999 is first as a number and last as text.
+        await seed.node(['Studio'], { id: 'ufa', founded: 999 });
+        await seed.node(['Studio'], { id: 'pixar', founded: 1986 });
+        await seed.edge('ava', 'FUNDED', 'pixar');
+        await seed.edge('ava', 'FUNDED', 'ufa');
+        await seed.edge('pixar', 'LOCATED_IN', 'paris');
+        await seed.edge('ufa', 'LOCATED_IN', 'oslo');
     });
 
     afterAll(async () => {
@@ -172,6 +193,16 @@ describeOnOracle('views on Oracle', () => {
         const bob = (await gom.load(Career, 'ben'))!;
         expect([bob.ratings, bob.avgScore, bob.totalScore]).toEqual([0, undefined, 0]);
         expect(bob.friends.map((it) => it.id)).toEqual(['ava']);
+    });
+
+    it('should read a path in the order one of its hops names, a number compared as one', async () => {
+        const ada = (await gom.load(Patron, 'ava'))!;
+        expect(ada.cities.map((it) => it.name)).toEqual(['Oslo', 'Paris']);
+        expect(ada.first!.name).toEqual('Oslo');
+        expect(ada.latest!.name).toEqual('Paris');
+        const bob = (await gom.load(Patron, 'ben'))!;
+        expect(bob.cities).toEqual([]);
+        expect(bob.first).toBeUndefined();
     });
 
     it('should keep only roots with the required relationships', async () => {

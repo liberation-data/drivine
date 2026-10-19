@@ -19,7 +19,7 @@ export interface GraphViewModel {
 
 export interface PathModel {
     field: string;
-    hops: { type: string; direction: Direction; label?: string }[];
+    hops: { type: string; direction: Direction; label?: string; orderBy?: string; ascending: boolean }[];
     isCollection: boolean;
     required: boolean;
     /** The final node's fragment. Resolved on first use. */

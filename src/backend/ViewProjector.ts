@@ -135,24 +135,33 @@ export class ViewProjector {
     private path(path: PathModel, from: string): ViewProjection {
         const n = ++this.aliasCount;
         const t = `t${n}`;
+        const order = pathOrder(path, t, n);
         if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
             const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
             const labels = path.target.labels.map((it) => `${t}:${quoteName(it)}`).join(' AND ');
             const value = `v${n}`;
+            // collect(DISTINCT …) keeps each node where it first occurs, so sorting the rows first orders the list.
+            const sorted = order
+                ? ` WITH ${[...new Set([from, t, order.node])].join(', ')} ORDER BY ${order.key} ${order.direction}`
+                : '';
             return {
                 calls: [
-                    `CALL { WITH ${from} OPTIONAL MATCH ${pathPattern(path, from, t, false)} WHERE ${labels} ` +
-                        `RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
+                    `CALL { WITH ${from} OPTIONAL MATCH ${pathPattern(
+                        path,
+                        from,
+                        t,
+                        false,
+                        order?.node
+                    )} WHERE ${labels}` +
+                        `${sorted} RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
                 ],
                 expression: value
             };
         }
-        const distinct = `reduce(acc = [], y IN [${pathPattern(
-            path,
-            from,
-            t,
-            true
-        )} | ${t}] | CASE WHEN y IN acc THEN acc ELSE acc + y END)`;
+        const reached = order
+            ? sortedByKey(`[${pathPattern(path, from, t, true, order.node)} | {k: ${order.key}, n: ${t}}]`, order, n)
+            : `[${pathPattern(path, from, t, true)} | ${t}]`;
+        const distinct = `reduce(acc = [], y IN ${reached} | CASE WHEN y IN acc THEN acc ELSE acc + y END)`;
         const list = `[x${n} IN ${distinct} | ${fragment(`x${n}`)}]`;
         return { calls: [], expression: path.isCollection ? list : `head(${list})` };
     }
@@ -251,8 +260,49 @@ export function pattern(rel: RelationshipModel, from: string, relAlias: string, 
     }
 }
 
-/** A path from `from` through its hops, the far node bound to `far` (with its labels when `labelled`). */
-function pathPattern(path: PathModel, from: string, far: string, labelled: boolean): string {
+/** The order a path is read in, where one of its hops names one: the node that hop reaches, and its key. */
+interface PathOrder {
+    node: string;
+    key: string;
+    direction: 'ASC' | 'DESC';
+    ascending: boolean;
+}
+
+function pathOrder(path: PathModel, far: string, n: number): PathOrder | undefined {
+    const at = path.hops.findIndex((it) => it.orderBy);
+    if (at < 0) {
+        return undefined;
+    }
+    const hop = path.hops[at];
+    const node = at === path.hops.length - 1 ? far : `h${n}`;
+    return {
+        node,
+        key: `${node}.${quoteName(hop.orderBy!)}`,
+        direction: hop.ascending ? 'ASC' : 'DESC',
+        ascending: hop.ascending
+    };
+}
+
+/**
+ * The nodes of `pairs`, a list of `{k, n}`, in the order of `k`, each pair placed after those it does not come before:
+ * an insertion sort, since a pattern comprehension has no ORDER BY and an inline projection has nowhere to put a CALL.
+ * Nulls come last, as ORDER BY puts them, and two keys that do not compare keep the order they were reached in.
+ */
+function sortedByKey(pairs: string, order: PathOrder, n: number): string {
+    const [s, y, a, z] = [`s${n}`, `y${n}`, `a${n}`, `z${n}`];
+    const compares = order.ascending ? `${a}.k <= ${y}.k` : `${a}.k >= ${y}.k`;
+    const before = `${a}.k IS NOT NULL AND (${y}.k IS NULL OR coalesce(${compares}, false))`;
+    const sorted =
+        `reduce(${s} = [], ${y} IN ${pairs} | ` +
+        `[${a} IN ${s} WHERE ${before}] + [${y}] + [${a} IN ${s} WHERE NOT (${before})])`;
+    return `[${z} IN ${sorted} | ${z}.n]`;
+}
+
+/**
+ * A path from `from` through its hops, the far node bound to `far` (with its labels when `labelled`), and the node of
+ * the hop the path is ordered by bound to `ordered`.
+ */
+function pathPattern(path: PathModel, from: string, far: string, labelled: boolean, ordered?: string): string {
     const steps = path.hops.map((hop, i) => {
         const last = i === path.hops.length - 1;
         const edge = `[:${quoteName(hop.type)}]`;
@@ -268,7 +318,8 @@ function pathPattern(path: PathModel, from: string, far: string, labelled: boole
                 ? labelExpression([...own, ...path.target.labels])
                 : labelExpression(own)
             : labelExpression(own);
-        return `${arrow}(${last ? far : ''}${labels})`;
+        const named = last ? far : hop.orderBy && ordered ? ordered : '';
+        return `${arrow}(${named}${labels})`;
     });
     return `(${from})${steps.join('')}`;
 }

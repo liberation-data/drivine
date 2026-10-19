@@ -10,6 +10,12 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
  * correlated subquery over the relationship table, its nodes aggregated with JSON_ARRAYAGG. A relationship is followed
  * as many times as its maxDepth along any one path; past that, a list is empty and a single absent.
  */
+/** The FROM and WHERE of a path, and the row each of its hops reaches. */
+interface PathRows {
+    body: string;
+    nodes: string[];
+}
+
 export class OracleViews {
     private aliasCount = 0;
 
@@ -55,7 +61,7 @@ export class OracleViews {
                 const step = this.step(rel.type, rel.direction, alias, labelsOf(target(rel)));
                 return `EXISTS (${RELATED_SUBQUERY} ${step.from} AND ${step.x})`;
             });
-        const paths = model.paths.filter((it) => it.required).map((path) => `EXISTS (${this.pathNodes(path, alias)})`);
+        const paths = model.paths.filter((it) => it.required).map((path) => `EXISTS (${this.pathIds(path, alias)})`);
         return [...relationships, ...paths];
     }
 
@@ -188,30 +194,69 @@ export class OracleViews {
             : `(SELECT ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
     }
 
-    /** The nodes at the far end of a path, each once. */
+    /** The nodes at the far end of a path, each once: in the order one of its hops names, where one does. */
     private path(path: PathModel, from: string): string {
         const x = this.alias('x');
-        const nodes = `FROM ${this.graph.nodes} ${x} WHERE ${x}.nid IN (${this.pathNodes(path, from)})`;
+        const ordered = path.hops.find((it) => it.orderBy);
+        if (!ordered) {
+            const nodes = `FROM ${this.graph.nodes} ${x} WHERE ${x}.nid IN (${this.pathIds(path, from)})`;
+            return path.isCollection
+                ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes})`
+                : `(SELECT ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
+        }
+        const o = this.alias('o');
+        const direction = ordered.ascending ? 'ASC' : 'DESC';
+        const nodes = `FROM ${this.graph.nodes} ${x} JOIN (${this.orderedPathNodes(
+            path,
+            from,
+            ordered
+        )}) ${o} ON ${o}.nid = ${x}.nid`;
+        const order = `${o}.order_number ${direction} NULLS LAST, ${o}.order_text ${direction}, ${x}.nid`;
         return path.isCollection
-            ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes})`
-            : `(SELECT ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
+            ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} ORDER BY ${order} RETURNING JSON) ${nodes})`
+            : `(SELECT ${nodeDocument(x)} ${nodes} ORDER BY ${order} FETCH FIRST 1 ROW ONLY)`;
+    }
+
+    /**
+     * The nodes at the far end of a path, each with the value the hop the path is ordered by keeps for it: that of the
+     * first node of the hop that leads to it, the lowest or, read highest first, the highest. The node the hop reaches
+     * is mapped to no class, so its property's type is not known: it is read as a number, which is null for a value
+     * that is not one, and as text. Numbers come first, in their order, then the rest in the order of their text.
+     */
+    private orderedPathNodes(path: PathModel, from: string, ordered: PathModel['hops'][number]): string {
+        const { body, nodes }: PathRows = this.pathRows(path, from);
+        const node = nodes[path.hops.indexOf(ordered)];
+        const last = nodes[nodes.length - 1];
+        const keep = ordered.ascending ? 'MIN' : 'MAX';
+        const key = `'$${jsonKey(ordered.orderBy!)}'`;
+        return (
+            `SELECT ${last}.nid AS nid, ` +
+            `${keep}(JSON_VALUE(${node}.props, ${key} RETURNING NUMBER NULL ON ERROR)) AS order_number, ` +
+            `${keep}(JSON_VALUE(${node}.props, ${key})) AS order_text ${body} GROUP BY ${last}.nid`
+        );
     }
 
     /** The ids of the nodes at the far end of a path from the node row `from`, its hops' labels met. */
-    private pathNodes(path: PathModel, from: string): string {
-        let at = from;
+    private pathIds(path: PathModel, from: string): string {
+        const { body, nodes }: PathRows = this.pathRows(path, from);
+        return `SELECT ${nodes[nodes.length - 1]}.nid ${body}`;
+    }
+
+    /** The FROM and WHERE of a path from the node row `from`, its hops' labels met, and the row each hop reaches. */
+    private pathRows(path: PathModel, from: string): PathRows {
         const froms: string[] = [];
         const wheres: string[] = [];
+        const nodes: string[] = [];
         path.hops.forEach((hop, i) => {
             const last = i === path.hops.length - 1;
             const labels = [...(hop.label ? [hop.label] : []), ...(last ? path.target.labels : [])];
-            const step = this.step(hop.type, hop.direction, at, labels);
+            const step = this.step(hop.type, hop.direction, nodes[i - 1] ?? from, labels);
             const [fromClause, whereClause] = step.from.split('\nWHERE ');
             froms.push(i === 0 ? fromClause : fromClause.replace(/^FROM /, 'CROSS JOIN '));
             wheres.push(whereClause, ...(labels.length ? [step.x] : []));
-            at = step.node;
+            nodes.push(step.node);
         });
-        return `SELECT ${at}.nid ${froms.join(' ')} WHERE ${wheres.join(' AND ')}`;
+        return { body: `${froms.join(' ')} WHERE ${wheres.join(' AND ')}`, nodes };
     }
 
     /** An aggregate over the nodes one relationship type leads to: COUNT of relationships, else of property values. */

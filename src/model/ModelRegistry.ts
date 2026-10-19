@@ -324,6 +324,11 @@ export class ModelRegistry {
         if (!options.hops?.length || options.hops.some((it) => !it.type)) {
             throw new DrivineError(`@GraphPath on ${view.name}.${field} needs at least one hop, each with a type.`);
         }
+        if (options.hops.filter((it) => it.orderBy).length > 1) {
+            throw new DrivineError(
+                `@GraphPath on ${view.name}.${field} names an order on more than one hop; a path is read in one order.`
+            );
+        }
         const isCollection = metadata.designType === Array;
         if (isCollection && !options.target) {
             throw new DrivineError(
@@ -346,7 +351,9 @@ export class ModelRegistry {
             hops: options.hops.map((it) => ({
                 type: it.type,
                 direction: it.direction ?? Direction.OUTGOING,
-                label: it.label
+                label: it.label,
+                orderBy: it.orderBy || undefined,
+                ascending: it.ascending ?? true
             })),
             isCollection,
             required: options.required ?? false,

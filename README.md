@@ -332,6 +332,24 @@ Each node at the end is returned once: an actor who made two movies with one dir
 `hop`'s label constrains the node it reaches. `required: true` keeps only the roots the path leads somewhere from. A
 path is read-only.
 
+One hop may name an **order**: a property of the node it reaches, lowest first unless `ascending` is `false`. A list then
+holds its targets in the order of the first node of that hop that leads to each, and a single field holds the target the
+first such node leads to:
+
+```typescript
+@GraphView()
+export class SessionStarter {
+    @Root() session: Session;
+
+    // who wrote the earliest message
+    @GraphPath([hop('HAS_MESSAGE', Direction.OUTGOING, 'Message', 'sentAt'), hop('AUTHORED_BY')], { target: () => Person })
+    startedBy?: Person;
+}
+```
+
+Every backend reads the order the same way. On Oracle the node a hop passes through is mapped to no class, so its
+property is compared as a number where it is one and as text otherwise, numbers first.
+
 #### 6. Aggregates: Counting and Summarising Without Loading
 
 `@Count` and `@Aggregate` compute a number for each root in the query, so you don't load a list just to size it:
