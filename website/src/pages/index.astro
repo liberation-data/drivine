@@ -52,7 +52,7 @@ const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s
 <span class="k">const</span> leads = <span class="k">await</span> gom.loadAll(<span class="t">PersonCareer</span>, (q) =&gt; ({
     where: q.person.bio.contains(<span class="s">'Lead'</span>)
 }));`;
-const ktSample = `<span class="a">@NodeFragment</span>
+const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s">"Person"</span>])
 <span class="k">data class</span> <span class="t">Person</span>(
     <span class="a">@NodeId</span> <span class="k">val</span> uuid: <span class="t">String</span>,
     <span class="k">val</span> name: <span class="t">String</span>,
