@@ -212,6 +212,20 @@ describeOnOracle('views on Oracle', () => {
             await seed.edge('dot', 'FUNDED', studio);
             await seed.edge(studio, 'LOCATED_IN', city);
         }
+        // Cy funded studios whose 'sort key' is a text, one of them "": oslo '' and 'c', lyon 'a', paris 'b', tokyo 'd'.
+        // "" is a text, and the lowest one, so lowest first oslo leads; highest first, oslo keeps 'c'.
+        const texts: [string, string, string][] = [
+            ['empty', '', 'oslo'],
+            ['cee', 'c', 'oslo'],
+            ['ay', 'a', 'lyon'],
+            ['bee', 'b', 'paris'],
+            ['dee', 'd', 'tokyo']
+        ];
+        for (const [studio, key, city] of texts) {
+            await seed.node(['Studio'], { id: studio, 'sort key': key });
+            await seed.edge('cal', 'FUNDED', studio);
+            await seed.edge(studio, 'LOCATED_IN', city);
+        }
     }, 60_000);
 
     afterAll(async () => {
@@ -268,6 +282,12 @@ describeOnOracle('views on Oracle', () => {
         const dee = (await gom.load(RankedPatron, 'dot'))!;
         expect(dee.cities.map((it) => it.name)).toEqual(['Lyon', 'Paris', 'Oslo', 'Tokyo', 'Rome']);
         expect(dee.citiesDescending.map((it) => it.name)).toEqual(['Tokyo', 'Oslo', 'Paris', 'Lyon', 'Rome']);
+    });
+
+    it('should read an empty text as a text, and the lowest one', async () => {
+        const cy = (await gom.load(RankedPatron, 'cal'))!;
+        expect(cy.cities.map((it) => it.name)).toEqual(['Oslo', 'Lyon', 'Paris', 'Tokyo']);
+        expect(cy.citiesDescending.map((it) => it.name)).toEqual(['Tokyo', 'Oslo', 'Paris', 'Lyon']);
     });
 
     it('should read an ordered path of a view nested in another', async () => {

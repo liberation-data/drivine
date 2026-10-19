@@ -15,8 +15,9 @@ export interface Hop {
      * the first node of this hop that leads to each, and a single holds the one the first such node leads to. One hop
      * of a path may name one, and a path a group key is read by may name none. A node without the property comes last
      * whichever way the path is read, and targets whose first nodes hold equal values come in no set order. The
-     * property should hold values of one type. A text of digits is ordered as text. Where some nodes hold a text and
-     * others a number, every backend reads every text before every number lowest first, and after them highest first.
+     * property should hold values of one type. A text of digits is ordered as text, and an empty text is the lowest
+     * text. Where some nodes hold a text and others a number, every backend reads every text before every number lowest
+     * first, and after them highest first.
      */
     orderBy?: string;
     /** Whether `orderBy` reads lowest first. Defaults to true. */

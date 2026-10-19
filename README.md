@@ -349,7 +349,8 @@ export class SessionStarter {
 
 A node of the ordered hop without the property comes last, whichever way the path is read. Targets whose first nodes
 hold equal values come in no set order. The property should hold values of one type: every backend reads the order the
-same way where it does, and a text of digits such as `'0100'` is ordered as text. Where it holds texts on some nodes and
+same way where it does, a text of digits such as `'0100'` is ordered as text, and an empty text is a text, the lowest
+one. Where it holds texts on some nodes and
 numbers on others, every backend reads every text before every number lowest first, and after them highest first, as
 Neo4j's ORDER BY does. A group key's path names no order: `pathKey` refuses one.
 

@@ -134,6 +134,20 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
                     "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'kn'})-[:DIRECTED_BY]->(anon)"
             )
         );
+        // e1 acted in movies whose 'sort key' is a text, one of them "": tarr '' and 'c', ozu 'a', varda 'b', kurosawa
+        // 'd'. "" is a text, and the lowest one, so lowest first tarr leads; highest first, tarr keeps 'c'.
+        await pm.execute(
+            new QuerySpecification(
+                "CREATE (e1:OrderedPathTest:Actor {id: 'e1'}), " +
+                    "(tarr:OrderedPathTest:Director {id: 'tarr'}), (ozu:OrderedPathTest:Director {id: 'ozu'}), " +
+                    "(varda:OrderedPathTest:Director {id: 'varda'}), (kurosawa:OrderedPathTest:Director {id: 'kurosawa'}), " +
+                    "(e1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'e0', `sort key`: ''})-[:DIRECTED_BY]->(tarr), " +
+                    "(e1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'ec', `sort key`: 'c'})-[:DIRECTED_BY]->(tarr), " +
+                    "(e1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'ea', `sort key`: 'a'})-[:DIRECTED_BY]->(ozu), " +
+                    "(e1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'eb', `sort key`: 'b'})-[:DIRECTED_BY]->(varda), " +
+                    "(e1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'ed', `sort key`: 'd'})-[:DIRECTED_BY]->(kurosawa)"
+            )
+        );
     });
 
     afterAll(async () => {
@@ -159,6 +173,12 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
         expect(loaded.directorsDescending.map((it) => it.id)).toEqual(['murnau', 'nolan', 'bigelow', 'lynch', 'anon']);
     });
 
+    it('should read an empty text as a text, and the lowest one', async () => {
+        const loaded = (await gom.load(ActorDirectorsByKey, 'e1'))!;
+        expect(loaded.directors.map((it) => it.id)).toEqual(['tarr', 'ozu', 'varda', 'kurosawa']);
+        expect(loaded.directorsDescending.map((it) => it.id)).toEqual(['kurosawa', 'tarr', 'varda', 'ozu']);
+    });
+
     it('should order by the far node where the last hop names the order', async () => {
         const loaded = (await gom.load(ActorDirectorsByYear, 'o1'))!;
         expect(loaded.movies.map((it) => it.id)).toEqual(['y1', 'y2', 'y3', 'y4', 'y5', 'y0']);
@@ -178,7 +198,7 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
     });
 
     it('should leave out roots without a required ordered path', async () => {
-        expect((await gom.loadAll(CreditedActor)).map((it) => it.actor.id).sort()).toEqual(['k1', 'o1', 'o3']);
+        expect((await gom.loadAll(CreditedActor)).map((it) => it.actor.id).sort()).toEqual(['e1', 'k1', 'o1', 'o3']);
         expect((await gom.load(CreditedActor, 'o3'))!.directors.map((it) => it.id)).toEqual(['nolan']);
     });
 

@@ -221,7 +221,7 @@ export class OracleViews {
         )}) ${o} ON ${o}.nid = ${x}.nid`;
         const order =
             `${o}.order_kind ${direction} NULLS LAST, ${o}.order_number ${direction} NULLS LAST, ` +
-            `${o}.order_text ${direction} NULLS LAST, ${x}.nid`;
+            `${o}.order_text ${direction} NULLS ${ordered.ascending ? 'FIRST' : 'LAST'}, ${x}.nid`;
         return path.isCollection
             ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} ORDER BY ${order} RETURNING JSON) ${nodes})`
             : `(SELECT ${nodeDocument(x)} ${nodes} ORDER BY ${order} FETCH FIRST 1 ROW ONLY)`;
@@ -235,6 +235,8 @@ export class OracleViews {
      * and null for a node without the property, so a text comes before a number read lowest first, as the graph engines
      * order them, and a node without the property last, whichever way the path is read. Only the kind kept is read further: a node
      * reached through a text and a number keeps the text, read lowest first, and the number, read highest first.
+     * `JSON_VALUE` reads a stored `""` as null, so whether the node holds one is read on its own: it is a text, and the
+     * lowest. `order_text` is null for it, and orders first among the texts read lowest first.
      */
     private orderedPathNodes(path: PathModel, from: string, ordered: PathHop): string {
         const { body, nodes }: PathRows = this.pathRows(path, from);
@@ -244,13 +246,18 @@ export class OracleViews {
         const keep = ordered.ascending ? 'MIN' : 'MAX';
         const key = `$${jsonKey(ordered.orderBy!)}`;
         const read = holding(node, ordered.orderBy!);
-        const kind = `${keep}(CASE WHEN ${r}.num IS NOT NULL THEN 1 WHEN ${r}.txt IS NOT NULL THEN 0 END)`;
+        const kind =
+            `${keep}(CASE WHEN ${r}.num IS NOT NULL THEN 1 ` + `WHEN ${r}.txt IS NOT NULL OR ${r}.emp = 1 THEN 0 END)`;
+        const text = `CASE WHEN ${r}.num IS NULL THEN ${r}.txt END`;
+        // Read lowest first, a node that a "" leads to keeps no text, which orders first among the texts.
+        const kept = ordered.ascending ? `CASE WHEN MAX(${r}.emp) IS NULL THEN MIN(${text}) END` : `MAX(${text})`;
         return (
             `SELECT ${r}.nid, ${kind} AS order_kind, ` +
             `CASE WHEN ${kind} = 1 THEN ${keep}(${r}.num) END AS order_number, ` +
-            `CASE WHEN ${kind} = 0 THEN ${keep}(CASE WHEN ${r}.num IS NULL THEN ${r}.txt END) END AS order_text ` +
+            `CASE WHEN ${kind} = 0 THEN ${kept} END AS order_text ` +
             `FROM (SELECT ${last}.nid AS nid, JSON_VALUE(${read}, '${key}.numberOnly()' RETURNING NUMBER) AS num, ` +
-            `JSON_VALUE(${read}, '${key}') AS txt ${body}) ${r} GROUP BY ${r}.nid`
+            `JSON_VALUE(${read}, '${key}') AS txt, ` +
+            `CASE WHEN JSON_EXISTS(${read}, '${key}?(@ == "")') THEN 1 END AS emp ${body}) ${r} GROUP BY ${r}.nid`
         );
     }
 
