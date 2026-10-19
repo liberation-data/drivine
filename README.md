@@ -1590,8 +1590,8 @@ Drivine is a non-profit, community-driven project. If you've found it useful, st
 mentioning us (<a href="https://twitter.com/@doctor_cerulean">@doctor_cerulean</a>). If you've written a Drivine blog or
 tutorial, or published a Drivine-powered app, we'd be happy to hear about that too.
 
-Drivine is led by <a href="https://www.linkedin.com/in/jasper-blues-7781638/">Jasper Blues</a> and sponsored by Liberation
-Data and <a href="https://en.wikipedia.org/wiki/Rod_Johnson_(programmer)">Rod Johnson</a>, creator of the Spring Framework
+Drivine is led by <a href="https://www.linkedin.com/in/jasper-blues-7781638/">Jasper Blues</a> and sponsored by Jasper
+Blues and <a href="https://en.wikipedia.org/wiki/Rod_Johnson_(programmer)">Rod Johnson</a>, creator of the Spring Framework
 and of <a href="https://hub.embabel.com">Embabel</a>, the AI agent framework for the JVM, which uses Drivine, through
 drivine4j, as its graph database client. Contributions come from
 <a href="https://github.com/liberation-data/Drivine/graphs/contributors">around the world</a>.
