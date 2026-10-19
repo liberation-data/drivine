@@ -129,31 +129,28 @@ export class ViewProjector {
     }
 
     /**
-     * The nodes at the far end of a path, each once. On FalkorDB the far node's labels are tested after the match: with
-     * a label in the pattern, FalkorDB 6 plans the match from that end (FalkorDB/FalkorDB#3332).
+     * The nodes at the far end of a path, each once, in the order one of its hops names where one does. On FalkorDB the
+     * far node's labels are tested after the match: with a label in the pattern, FalkorDB 6 plans the match from that
+     * end (FalkorDB/FalkorDB#3332).
      */
     private path(path: PathModel, from: string): ViewProjection {
         const n = ++this.aliasCount;
         const t = `t${n}`;
         const order = pathOrder(path, t, n);
         if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
-            const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
+            const match = pathPattern(path, from, t, false, order?.node);
             const labels = path.target.labels.map((it) => `${t}:${quoteName(it)}`).join(' AND ');
-            const value = `v${n}`;
             // collect(DISTINCT …) keeps each node where it first occurs, so sorting the rows first orders the list.
             const sorted = order
-                ? ` WITH ${[...new Set([from, t, order.node])].join(', ')} ORDER BY ${order.key} ${order.direction}`
+                ? ` WITH ${[...new Set([from, t, order.node])].join(', ')} ORDER BY ${order.key} IS NULL, ` +
+                  `${order.key} ${order.ascending ? 'ASC' : 'DESC'}`
                 : '';
+            const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
+            const value = `v${n}`;
             return {
                 calls: [
-                    `CALL { WITH ${from} OPTIONAL MATCH ${pathPattern(
-                        path,
-                        from,
-                        t,
-                        false,
-                        order?.node
-                    )} WHERE ${labels}` +
-                        `${sorted} RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
+                    `CALL { WITH ${from} OPTIONAL MATCH ${match} WHERE ${labels}${sorted} ` +
+                        `RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
                 ],
                 expression: value
             };
@@ -260,11 +257,13 @@ export function pattern(rel: RelationshipModel, from: string, relAlias: string, 
     }
 }
 
-/** The order a path is read in, where one of its hops names one: the node that hop reaches, and its key. */
+/**
+ * The order a path is read in, where one of its hops names one: the node that hop reaches (the far node when it is the
+ * last hop), the key read from it, and which way.
+ */
 interface PathOrder {
     node: string;
     key: string;
-    direction: 'ASC' | 'DESC';
     ascending: boolean;
 }
 
@@ -275,23 +274,19 @@ function pathOrder(path: PathModel, far: string, n: number): PathOrder | undefin
     }
     const hop = path.hops[at];
     const node = at === path.hops.length - 1 ? far : `h${n}`;
-    return {
-        node,
-        key: `${node}.${quoteName(hop.orderBy!)}`,
-        direction: hop.ascending ? 'ASC' : 'DESC',
-        ascending: hop.ascending
-    };
+    return { node, key: `${node}.${quoteName(hop.orderBy!)}`, ascending: hop.ascending };
 }
 
 /**
- * The nodes of `pairs`, a list of `{k, n}`, in the order of `k`, each pair placed after those it does not come before:
- * an insertion sort, since a pattern comprehension has no ORDER BY and an inline projection has nowhere to put a CALL.
- * Nulls come last, as ORDER BY puts them, and two keys that do not compare keep the order they were reached in.
+ * The nodes of `pairs`, a list of `{k, n}`, in the order of `k`: an insertion sort, since a pattern comprehension has no
+ * ORDER BY and an inline projection has nowhere to put a CALL. Each pair goes after every pair already placed that it
+ * does not come before, so equal keys keep the order they were reached in. A null key comes last whichever way the path
+ * is read, as it does on every backend.
  */
 function sortedByKey(pairs: string, order: PathOrder, n: number): string {
     const [s, y, a, z] = [`s${n}`, `y${n}`, `a${n}`, `z${n}`];
     const compares = order.ascending ? `${a}.k <= ${y}.k` : `${a}.k >= ${y}.k`;
-    const before = `${a}.k IS NOT NULL AND (${y}.k IS NULL OR coalesce(${compares}, false))`;
+    const before = `${y}.k IS NULL OR (${a}.k IS NOT NULL AND coalesce(${compares}, false))`;
     const sorted =
         `reduce(${s} = [], ${y} IN ${pairs} | ` +
         `[${a} IN ${s} WHERE ${before}] + [${y}] + [${a} IN ${s} WHERE NOT (${before})])`;

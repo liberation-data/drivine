@@ -347,8 +347,10 @@ export class SessionStarter {
 }
 ```
 
-Every backend reads the order the same way. On Oracle the node a hop passes through is mapped to no class, so its
-property is compared as a number where it is one and as text otherwise, numbers first.
+Every backend reads the order the same way: equal values in the order they are reached, and a node without the property
+last, read either way. The property should hold values of one type. On Oracle the node a hop passes through is mapped
+to no class, so its property is compared as a number where it is a JSON number and as text otherwise, numbers first. A
+group key's path names no order: `pathKey` refuses one.
 
 #### 6. Aggregates: Counting and Summarising Without Loading
 

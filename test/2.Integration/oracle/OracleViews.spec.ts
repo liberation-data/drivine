@@ -83,7 +83,7 @@ class Team {
     members: Career[];
 }
 
-/** The cities of the studios a person funded, in the order the studios were founded. */
+/** The cities of the studios a person funded, in the order the studios were founded or of their codes. */
 @GraphView()
 class Patron {
     @Root() person: Person;
@@ -95,6 +95,24 @@ class Patron {
         target: () => City
     })
     latest?: City;
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'founded', false), hop('LOCATED_IN')], {
+        target: () => City
+    })
+    latestFirst: City[];
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'code'), hop('LOCATED_IN')], { target: () => City })
+    byCode: City[];
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'code', false), hop('LOCATED_IN')], {
+        target: () => City
+    })
+    byCodeDescending: City[];
+}
+
+/** The patrons a person knows: a path ordered by a hop, in a view nested in another. */
+@GraphView()
+class PatronFriend {
+    @Root() person: Person;
+    @GraphRelationship({ type: 'KNOWS', target: () => Patron })
+    knows: Patron[];
 }
 
 @NodeFragment({ labels: ['Category'] })
@@ -153,11 +171,16 @@ describeOnOracle('views on Oracle', () => {
         await seed.edge('c1', 'PARENT', 'c2');
         await seed.edge('c2', 'PARENT', 'c3');
         await seed.edge('c3', 'PARENT', 'c4');
-        // 999 is first as a number and last as text.
-        await seed.node(['Studio'], { id: 'ufa', founded: 999 });
-        await seed.node(['Studio'], { id: 'pixar', founded: 1986 });
+        // 999 is first as a number and last as text. '0100' is first as text and last as a number. A studio without
+        // founded or code comes last either way.
+        await seed.node(['City'], { id: 'rome', name: 'Rome' });
+        await seed.node(['Studio'], { id: 'ufa', founded: 999, code: '99' });
+        await seed.node(['Studio'], { id: 'pixar', founded: 1986, code: '0100' });
+        await seed.node(['Studio'], { id: 'bare' });
+        await seed.edge('ava', 'FUNDED', 'bare');
         await seed.edge('ava', 'FUNDED', 'pixar');
         await seed.edge('ava', 'FUNDED', 'ufa');
+        await seed.edge('bare', 'LOCATED_IN', 'rome');
         await seed.edge('pixar', 'LOCATED_IN', 'paris');
         await seed.edge('ufa', 'LOCATED_IN', 'oslo');
     });
@@ -197,12 +220,26 @@ describeOnOracle('views on Oracle', () => {
 
     it('should read a path in the order one of its hops names, a number compared as one', async () => {
         const ada = (await gom.load(Patron, 'ava'))!;
-        expect(ada.cities.map((it) => it.name)).toEqual(['Oslo', 'Paris']);
+        expect(ada.cities.map((it) => it.name)).toEqual(['Oslo', 'Paris', 'Rome']);
         expect(ada.first!.name).toEqual('Oslo');
         expect(ada.latest!.name).toEqual('Paris');
+        expect(ada.latestFirst.map((it) => it.name)).toEqual(['Paris', 'Oslo', 'Rome']);
         const bob = (await gom.load(Patron, 'ben'))!;
         expect(bob.cities).toEqual([]);
         expect(bob.first).toBeUndefined();
+    });
+
+    it('should read a text of digits as text, and a node without the property last either way', async () => {
+        const ada = (await gom.load(Patron, 'ava'))!;
+        expect(ada.byCode.map((it) => it.name)).toEqual(['Paris', 'Oslo', 'Rome']);
+        expect(ada.byCodeDescending.map((it) => it.name)).toEqual(['Oslo', 'Paris', 'Rome']);
+    });
+
+    it('should read an ordered path of a view nested in another', async () => {
+        const cy = (await gom.load(PatronFriend, 'cal'))!;
+        expect(cy.knows.map((it) => it.person.id)).toEqual(['ava']);
+        expect(cy.knows[0].cities.map((it) => it.name)).toEqual(['Oslo', 'Paris', 'Rome']);
+        expect(cy.knows[0].latest!.name).toEqual('Paris');
     });
 
     it('should keep only roots with the required relationships', async () => {

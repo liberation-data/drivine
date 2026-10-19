@@ -17,9 +17,19 @@ export interface GraphViewModel {
     paths: PathModel[];
 }
 
+/** A hop of a path: its relationship type and direction, the label the node it reaches carries, and its order. */
+export interface PathHop {
+    type: string;
+    direction: Direction;
+    label?: string;
+    /** A property of the node this hop reaches that the path is read in the order of. */
+    orderBy?: string;
+    ascending: boolean;
+}
+
 export interface PathModel {
     field: string;
-    hops: { type: string; direction: Direction; label?: string; orderBy?: string; ascending: boolean }[];
+    hops: PathHop[];
     isCollection: boolean;
     required: boolean;
     /** The final node's fragment. Resolved on first use. */

@@ -2,20 +2,20 @@ import { Direction } from '@/annotation/Metadata';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph, RELATED_SUBQUERY, sqlText } from '@/backend/oracle/OracleGraph';
 import { target } from '@/backend/ViewProjector';
 import { FragmentModel } from '@/model/FragmentModel';
-import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
+import { AggregateModel, GraphViewModel, PathHop, PathModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
-/**
- * Writes a view as one JSON document per root, `{root, rels}`, as the graph engines return it: each relationship a
- * correlated subquery over the relationship table, its nodes aggregated with JSON_ARRAYAGG. A relationship is followed
- * as many times as its maxDepth along any one path; past that, a list is empty and a single absent.
- */
 /** The FROM and WHERE of a path, and the row each of its hops reaches. */
 interface PathRows {
     body: string;
     nodes: string[];
 }
 
+/**
+ * Writes a view as one JSON document per root, `{root, rels}`, as the graph engines return it: each relationship a
+ * correlated subquery over the relationship table, its nodes aggregated with JSON_ARRAYAGG. A relationship is followed
+ * as many times as its maxDepth along any one path; past that, a list is empty and a single absent.
+ */
 export class OracleViews {
     private aliasCount = 0;
 
@@ -211,7 +211,7 @@ export class OracleViews {
             from,
             ordered
         )}) ${o} ON ${o}.nid = ${x}.nid`;
-        const order = `${o}.order_number ${direction} NULLS LAST, ${o}.order_text ${direction}, ${x}.nid`;
+        const order = `${o}.order_number ${direction} NULLS LAST, ${o}.order_text ${direction} NULLS LAST, ${x}.nid`;
         return path.isCollection
             ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} ORDER BY ${order} RETURNING JSON) ${nodes})`
             : `(SELECT ${nodeDocument(x)} ${nodes} ORDER BY ${order} FETCH FIRST 1 ROW ONLY)`;
@@ -221,18 +221,19 @@ export class OracleViews {
      * The nodes at the far end of a path, each with the value the hop the path is ordered by keeps for it: that of the
      * first node of the hop that leads to it, the lowest or, read highest first, the highest. The node the hop reaches
      * is mapped to no class, so its property's type is not known: it is read as a number, which is null for a value
-     * that is not one, and as text. Numbers come first, in their order, then the rest in the order of their text.
+     * that is not a JSON number (a text of digits included), and as text. Numbers come first, in their order, then the
+     * rest in the order of their text, and a node without the property last, whichever way the path is read.
      */
-    private orderedPathNodes(path: PathModel, from: string, ordered: PathModel['hops'][number]): string {
+    private orderedPathNodes(path: PathModel, from: string, ordered: PathHop): string {
         const { body, nodes }: PathRows = this.pathRows(path, from);
         const node = nodes[path.hops.indexOf(ordered)];
         const last = nodes[nodes.length - 1];
         const keep = ordered.ascending ? 'MIN' : 'MAX';
-        const key = `'$${jsonKey(ordered.orderBy!)}'`;
+        const key = `$${jsonKey(ordered.orderBy!)}`;
         return (
             `SELECT ${last}.nid AS nid, ` +
-            `${keep}(JSON_VALUE(${node}.props, ${key} RETURNING NUMBER NULL ON ERROR)) AS order_number, ` +
-            `${keep}(JSON_VALUE(${node}.props, ${key})) AS order_text ${body} GROUP BY ${last}.nid`
+            `${keep}(JSON_VALUE(${node}.props, '${key}.numberOnly()' RETURNING NUMBER)) AS order_number, ` +
+            `${keep}(JSON_VALUE(${node}.props, '${key}')) AS order_text ${body} GROUP BY ${last}.nid`
         );
     }
 
