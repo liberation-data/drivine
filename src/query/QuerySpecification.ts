@@ -6,7 +6,10 @@ import { TransformPostProcessor } from '@/mapper/TransformPostProcessor';
 import { FilterPostProcessor } from '@/mapper/FilterPostProcessor';
 import { QueryLanguage } from '@/query/QueryLanguage';
 
-export type ClassType<T> = new (...args: any[]) => T;
+export type ClassType<T = any> = new (...args: any[]) => T;
+
+/** A class, abstract or not: what the object manager takes to name a mapped class. */
+export type ClassRef<T = any> = abstract new (...args: any[]) => T;
 
 export class QuerySpecification<T> {
     statement: Statement;

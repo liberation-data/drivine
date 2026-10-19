@@ -1,5 +1,6 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import * as assert from 'assert';
+import { TransactionMode } from '@/connection/TransactionMode';
 
 export interface ConnectionProperties {
     databaseType: DatabaseType;
@@ -11,8 +12,17 @@ export interface ConnectionProperties {
     connectionTimeout?: number;
     poolMax?: number;
     databaseName?: string;
-    defaultGraphPath?: string;
     protocol?: string;
+    /**
+     * For engines without multi-statement transactions. Defaults to WARN. See {@link TransactionMode}.
+     */
+    transactionMode?: TransactionMode;
+    /**
+     * On Oracle, the graph to work on: it names the property graph and its tables (`<name>_node`, `<name>_edge`,
+     * `<name>_schema`). Letters, digits and underscores, beginning with a letter, at most 114. Defaults to `drivine`.
+     * drivine4j's `default-graph-path`.
+     */
+    defaultGraphPath?: string;
 }
 
 /**
@@ -46,14 +56,19 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     const idleTimeout = numberFromEnv('DATABASE_IDLE_TIMEOUT');
     const connectionTimeout = numberFromEnv('DATABASE_CONNECTION_TIMEOUT');
     const databaseName = stringFromEnv('DATABASE_NAME');
-    const defaultGraphPath = stringFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
     const protocol = stringFromEnv('DATABASE_PROTOCOL');
     const poolMax = numberFromEnv('DATABASE_POOL_MAX');
+    const transactionMode = <TransactionMode | undefined>stringFromEnv('DATABASE_TRANSACTION_MODE');
+    const defaultGraphPath = stringFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
     assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
+    assert(
+        transactionMode === undefined || Object.values(TransactionMode).includes(transactionMode),
+        `${prefix}DATABASE_TRANSACTION_MODE must be one of: ${Object.values(TransactionMode).join(', ')}.`
+    );
 
-    if (databaseType === DatabaseType.AGENS_GRAPH) {
+    if (databaseType === DatabaseType.POSTGRES || databaseType === DatabaseType.ORACLE) {
         assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
     }
 
@@ -66,8 +81,9 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         idleTimeout,
         connectionTimeout,
         databaseName,
-        defaultGraphPath,
         protocol,
-        poolMax
+        poolMax,
+        transactionMode,
+        defaultGraphPath
     };
 }

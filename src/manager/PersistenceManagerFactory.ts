@@ -18,7 +18,10 @@ interface PersistenceManagerEntry {
 export class PersistenceManagerFactory {
     readonly managers: Map<string, PersistenceManagerEntry> = new Map<string, PersistenceManagerEntry>();
 
-    constructor(readonly registry: DatabaseRegistry, readonly contextHolder: TransactionContextHolder) {}
+    constructor(
+        readonly registry: DatabaseRegistry,
+        readonly contextHolder: TransactionContextHolder
+    ) {}
 
     /**
      * Returns a PersistenceManager for the database registered under the specified name.

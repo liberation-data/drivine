@@ -1,6 +1,6 @@
 {
     "name": "@liberation-data/drivine",
-    "version": "2.8.2",
+    "version": "3.0.0",
     "description": "Best and fastest graph database client for TypeScript / Node.js. Provides a level of abstraction for building highly scalable applications, without compromising architectural integrity",
     "author": "Jasper Blues | Liberation Data",
     "license": "LGPL-3.0-or-later or Apache-2.0",
@@ -21,8 +21,6 @@
         "driver",
         "client",
         "neo4j",
-        "agensgraph",
-        "AGE",
         "redis"
     ],
     "files": [
@@ -53,14 +51,14 @@
         "test:e2e": "jest --coverage --testPathPattern '3[.]EndToEnd[/]'"
     },
     "peerDependencies": {
-        "@bitnine-oss/ag-driver": "^0.1.0",
         "@nestjs/common": ">= 6 <= 11",
         "@nestjs/core": ">= 6 <= 11",
         "@nestjs/platform-express": ">= 6 <= 11",
         "class-transformer": ">= ^0.5.1",
         "class-validator": ">= 0.14.0",
         "neo4j-driver": "^5.27.0",
-        "reflect-metadata": ">= ^0.1.13"
+        "reflect-metadata": ">= ^0.1.13",
+        "testcontainers": ">= 10"
     },
     "dependencies": {
         "@aws-crypto/sha256-js": "^5.2.0",
@@ -73,12 +71,14 @@
         "dot-prop": "^8.0.2",
         "dotenv": "^16.3.1",
         "es5-ext": "^0.10.53",
+        "falkordb": "^6.8.0",
         "find-config": "^1.0.0",
         "handlebars": "^4.7.8",
         "kind-of": ">=6.0.3",
         "lodash": "^4.17.15",
         "mississippi": "^4.0.0",
         "moment": "^2.29.3",
+        "oracledb": "^7.0.1",
         "pegjs": "^0.10.0",
         "pg": "^8.11.3",
         "pg-cursor": "^2.10.3",
@@ -92,7 +92,6 @@
         "uuid": "^9.0.1"
     },
     "devDependencies": {
-        "@bitnine-oss/ag-driver": "^0.1.0",
         "@nestjs/common": "^10.2.7",
         "@nestjs/core": "^10.2.7",
         "@nestjs/platform-express": "^10.2.7",
@@ -103,6 +102,7 @@
         "@types/jest": "^29.5.6",
         "@types/moment": "^2.13.0",
         "@types/node": "^20.8.9",
+        "@types/oracledb": "^7.0.3",
         "@types/pg": "^8.10.7",
         "@types/shortid": "^0.0.31",
         "@types/source-map-support": "^0.5.9",
@@ -125,6 +125,7 @@
         "prettier": "^3.0.3",
         "reflect-metadata": "^0.1.13",
         "supertest": "^6.3.3",
+        "testcontainers": "^11.14.0",
         "ts-jest": "^29.1.1",
         "ts-mockito": "^2.6.1",
         "ts-node": "^10.9.1",
@@ -165,7 +166,8 @@
         ],
         "roots": [
             "<rootDir>/src",
-            "<rootDir>/test"
+            "<rootDir>/test",
+            "<rootDir>/sample"
         ],
         "coverageDirectory": "./coverage",
         "setupFilesAfterEnv": [],
@@ -173,6 +175,11 @@
         "moduleNameMapper": {
             "@liberation-data/drivine": "<rootDir>/src/index.ts",
             "@/(.*)$": "<rootDir>/src/$1"
+        }
+    },
+    "peerDependenciesMeta": {
+        "testcontainers": {
+            "optional": true
         }
     }
 }

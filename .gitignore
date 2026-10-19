@@ -18,6 +18,7 @@ coverage
 
 # Env
 .env
+.env.test.local
 
 public
 dist

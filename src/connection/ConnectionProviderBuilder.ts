@@ -1,13 +1,21 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DrivineError } from '@/DrivineError';
-import { Neo4jConnectionProvider } from '@/connection/Neo4jConnectionProvider';
+import { Neo4jConnectionProvider } from '@/connection/neo4j/Neo4jConnectionProvider';
 import * as assert from 'assert';
-import { AgensGraphConnectionProvider } from '@/connection/AgensGraphConnectionProvider';
+import { PostgresConnectionProvider } from '@/connection/postgres/PostgresConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { ConnectionProperties } from '@/connection/ConnectionProperties';
 import { DrivineLogger } from '@/logger';
-import { NeptuneConnectionProvider } from '@/connection/NeptuneConnectionProvider';
+import { NeptuneConnectionProvider } from '@/connection/neptune/NeptuneConnectionProvider';
+import { TransactionMode } from '@/connection/TransactionMode';
+import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
+import { OracleConnectionProvider } from '@/connection/oracle/OracleConnectionProvider';
+
+/**
+ * Engines without multi-statement transactions, which honour {@link TransactionMode}.
+ */
+const AUTO_COMMIT_ENGINES: DatabaseType[] = [DatabaseType.FALKORDB];
 
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
@@ -20,12 +28,13 @@ export class ConnectionProviderBuilder {
     private _password?: string;
     private _protocol?: string;
     private _poolMax?: number;
+    private _transactionMode?: TransactionMode;
+    private _defaultGraphPath?: string;
 
-    // AgensGraph properties
+    // Postgres properties
     private _idleTimeout?: number;
     private _connectionTimeout?: number;
     private _name?: string;
-    private _defaultGraphPath?: string;
 
     private registry: DatabaseRegistry;
 
@@ -42,9 +51,10 @@ export class ConnectionProviderBuilder {
         this._idleTimeout = properties.idleTimeout;
         this._connectionTimeout = properties.connectionTimeout ?? 5000;
         this._name = properties.databaseName;
-        this._defaultGraphPath = properties.defaultGraphPath;
         this._protocol = properties.protocol;
         this._poolMax = properties.poolMax ?? 40;
+        this._transactionMode = properties.transactionMode;
+        this._defaultGraphPath = properties.defaultGraphPath;
         return this;
     }
 
@@ -79,6 +89,17 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
+    transactionMode(mode: TransactionMode): this {
+        this._transactionMode = mode;
+        return this;
+    }
+
+    /** On Oracle, the graph to work on: see {@link ConnectionProperties.defaultGraphPath}. */
+    defaultGraphPath(path: string): this {
+        this._defaultGraphPath = path;
+        return this;
+    }
+
     idleTimeout(idleTimeout: number): this {
         this._idleTimeout = idleTimeout;
         return this;
@@ -86,11 +107,6 @@ export class ConnectionProviderBuilder {
 
     databaseName(name: string): this {
         this._name = name;
-        return this;
-    }
-
-    defaultGraphPath(path: string): this {
-        this._defaultGraphPath = path;
         return this;
     }
 
@@ -106,33 +122,44 @@ export class ConnectionProviderBuilder {
         }
 
         assert(this._host, `host config is required`);
+        if (this._defaultGraphPath && this._type !== DatabaseType.ORACLE) {
+            this.logger.warn(`defaultGraphPath is ignored by ${this._type}, which names no graph`);
+        }
+        if (this._transactionMode && !AUTO_COMMIT_ENGINES.includes(this._type)) {
+            this.logger.warn(`transactionMode is ignored by ${this._type}, which supports transactions`);
+        }
 
-        if (this._type === DatabaseType.AGENS_GRAPH || this._type == DatabaseType.POSTGRES) {
-            this.registry.register(this.buildAgensGraphAndPostgresProvider(name));
+        if (this._type === DatabaseType.POSTGRES) {
+            this.registry.register(this.buildPostgresProvider(name));
         } else if (this._type === DatabaseType.NEO4J) {
             this.registry.register(this.buildNeo4jProvider(name));
         } else if (this._type === DatabaseType.NEPTUNE) {
             this.registry.register(this.buildNeptuneProvider(name));
-        }
-        else {
+        } else if (this._type === DatabaseType.FALKORDB) {
+            this.registry.register(this.buildFalkorDbProvider(name));
+        } else if (this._type === DatabaseType.MEMGRAPH) {
+            this.registry.register(this.buildMemgraphProvider(name));
+        } else if (this._type === DatabaseType.ORACLE) {
+            this.registry.register(this.buildOracleProvider(name));
+        } else {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
         return this.registry.connectionProvider(name)!;
     }
 
-    private buildAgensGraphAndPostgresProvider(name: string): ConnectionProvider {
+    private buildPostgresProvider(name: string): ConnectionProvider {
         if (!this._port) {
             this._port = 5432;
         }
         if (this._port !== 5432) {
-            this.logger.warn(`${this._port} is a non-standard port for AgensGraph/Postgres.`);
+            this.logger.warn(`${this._port} is a non-standard port for Postgres.`);
         }
         if (!this._idleTimeout) {
             this._idleTimeout = 500;
         }
         assert(this._name, `Database name is required`);
 
-        return new AgensGraphConnectionProvider(name, this._type, this._defaultGraphPath, {
+        return new PostgresConnectionProvider(name, this._type, {
             host: this._host,
             user: this._userName,
             password: this._password,
@@ -141,6 +168,22 @@ export class ConnectionProviderBuilder {
             idleTimeoutMillis: this._idleTimeout,
             connectionTimeoutMillis: this._connectionTimeout,
             max: this._poolMax
+        });
+    }
+
+    /** Oracle's database name is its service, as in `host:1521/FREEPDB1`. */
+    private buildOracleProvider(name: string): ConnectionProvider {
+        assert(this._name, `Oracle requires a database name: the service, e.g. FREEPDB1`);
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by Oracle`);
+        }
+        return new OracleConnectionProvider(name, this._type, {
+            user: this._userName,
+            password: this._password,
+            connectString: `${this._host}:${this._port ?? 1521}/${this._name}`,
+            poolMax: this._poolMax,
+            connectTimeout: this._connectionTimeout ? Math.ceil(this._connectionTimeout / 1000) : undefined,
+            graph: this._defaultGraphPath
         });
     }
 
@@ -164,6 +207,37 @@ export class ConnectionProviderBuilder {
             this._port,
             this._userName!,
             this._password,
+            this._name,
+            this._protocol,
+            {
+                connectionTimeout: this._connectionTimeout,
+                maxConnectionPoolSize: this._poolMax
+            }
+        );
+    }
+
+    /**
+     * Memgraph speaks Bolt, so it runs on the Neo4j driver. Auth is off in a default Memgraph, so the credentials are
+     * optional.
+     */
+    private buildMemgraphProvider(name: string): ConnectionProvider {
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by Memgraph`);
+        }
+        if (!this._port) {
+            this._port = 7687;
+        }
+        if (this._port !== 7687) {
+            this.logger.warn(`${this._port} is a non-standard port for Memgraph`);
+        }
+
+        return new Neo4jConnectionProvider(
+            name,
+            this._type,
+            this._host,
+            this._port,
+            this._userName ?? '',
+            this._password ?? '',
             this._name,
             this._protocol,
             {
@@ -202,5 +276,29 @@ export class ConnectionProviderBuilder {
         );
     }
 
+    private buildFalkorDbProvider(name: string): ConnectionProvider {
+        if (this._idleTimeout) {
+            this.logger.warn(`idleTimeout is not supported by FalkorDB`);
+        }
+        if (!this._port) {
+            this._port = 6379;
+        }
+        if (this._port !== 6379) {
+            this.logger.warn(`${this._port} is a non-standard port for FalkorDB`);
+        }
 
+        return new FalkorDbConnectionProvider(
+            name,
+            this._type,
+            this._name ?? 'graph',
+            {
+                host: this._host,
+                port: this._port,
+                userName: this._userName,
+                password: this._password,
+                connectionTimeout: this._connectionTimeout
+            },
+            this._transactionMode ?? TransactionMode.WARN
+        );
+    }
 }

@@ -9,6 +9,11 @@ export const InjectPersistenceManager = (database: string = 'default'): any => {
     return Inject(`PersistenceManager:${database}`);
 };
 
+/**
+ * Injects the {@link StatelessGraphObjectManager} for a database.
+ */
+export const InjectGraphObjectManager = (database: string = 'default'): any => Inject(`GraphObjectManager:${database}`);
+
 export const fileContentInjections: string[] = [];
 export const InjectFileContents = (dirNameOrPath: string, resource?: string): any => {
     const filename = fileNameFor(dirNameOrPath, undefined, resource);

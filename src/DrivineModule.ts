@@ -13,6 +13,8 @@ import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
 import { TransactionContextHolder } from './transaction';
+import { SchemaOptions } from '@/schema/SchemaManager';
+import { QueryOptions } from '@/manager/GraphObjectManagerFactory';
 
 require('dotenv').config({
     path: process.env.DOTENV_CONFIG_PATH || require('find-config')('.env')
@@ -20,6 +22,10 @@ require('dotenv').config({
 
 export interface DrivineModuleOptions {
     connectionProviders: ConnectionProvider[];
+    /** Indexes and constraints to hold, enforced at startup (see SchemaManager), and injectable as SchemaManager. */
+    schema?: SchemaOptions;
+    /** How the object managers treat queries, e.g. `{ indexAdvice: 'FAIL' }` in development or CI. */
+    query?: QueryOptions;
 }
 
 @Global()

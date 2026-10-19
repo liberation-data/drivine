@@ -19,7 +19,8 @@
             "@/*": ["src/*"],
             "*": ["node_modules/*", "src/typings/*"]
         },
-        "strict": true
+        "strict": true,
+        "skipLibCheck": true
     },
     "exclude": ["node_modules", "dist", "aurora", "build", "src/driver/agensgraph/**/*"]
 }
