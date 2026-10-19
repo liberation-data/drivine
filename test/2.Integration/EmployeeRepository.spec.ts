@@ -10,8 +10,6 @@ import { EmployeeRepository } from './EmployeeRepository';
 import { Employee } from "./models/Employee";
 import { plainToInstance } from "class-transformer";
 
-const moment = require('moment');
-
 // The tests read Piotr, whom the global setup seeds from test/moon-town.cypher.
 
 RunWithDrivine({ rollback: false });

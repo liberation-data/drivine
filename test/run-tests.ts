@@ -8,6 +8,7 @@
  *
  * `npm test -- <jest arguments>` runs Jest on them alone, in one stage, as `npx jest` does.
  */
+require('./register-paths');
 import { spawnSync } from 'child_process';
 import { DrivineTestContainers } from '../src/testing';
 import { CONTAINERS_STARTED, loadTestEnvironment, seedTestData } from './TestEnvironment';

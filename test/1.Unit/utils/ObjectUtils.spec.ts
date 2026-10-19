@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import { ObjectUtils } from '@/utils';
-const uuid = require('uuid').v4;
+import { randomUUID } from 'crypto';
 import neo4j from "neo4j-driver"
 
 class Foobar {
@@ -31,7 +31,7 @@ class Urbanite {
 
 describe('ObjectUtils::primitiveProps', () => {
     it('should strip the non-primitive properties from an object', () => {
-        const mg = new Urbanite(uuid(), 'Brutus', 'Paramdal', new Date('1984-06-22'));
+        const mg = new Urbanite(randomUUID(), 'Brutus', 'Paramdal', new Date('1984-06-22'));
         mg.nonPrimitiveProperty = new Foobar();
         mg.citizenShipDate = new Date();
         const props = ObjectUtils.primitiveProps(mg);
