@@ -1,0 +1,57 @@
+---
+/**
+ * The landing page's splash alone, at 1280 × 640: the source of the READMEs' splash image. Regenerate the image with
+ * headless Chrome after `npm run build && npx astro preview`:
+ *
+ *   chrome --headless=new --hide-scrollbars --window-size=1280,640 --screenshot=splash.png http://localhost:4321/splash/
+ *   sips -s format jpeg -s formatOptions 82 splash.png --out public/images/splash.jpg
+ */
+const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="robots" content="noindex" />
+        <title>Drivine splash</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@500;700&family=Noto+Serif:ital,wght@1,400&display=swap"
+        />
+        <style is:global>
+            body { margin: 0; }
+            .splash {
+                position: relative; overflow: hidden; width: 1280px; height: 640px; color: #fff;
+                font-family: Ubuntu, sans-serif; display: flex; flex-direction: column; align-items: center;
+                justify-content: center; text-align: center;
+            }
+            .splash::before, .splash::after { content: ''; position: absolute; inset: 0; }
+            .splash::before {
+                background: linear-gradient(rgba(1, 65, 78, 0.55), rgba(1, 65, 78, 0.55)),
+                    url('../assets/hero-ocean.jpg') center 38% / cover;
+            }
+            .splash::after { background: url('../assets/lines.png'); opacity: 0.55; }
+            .splash > * { position: relative; z-index: 1; }
+            .emblem { width: 124px; height: 124px; border: 3px solid #fff; border-radius: 50%; display: grid; place-items: center; box-sizing: border-box; }
+            .emblem > div { width: 104px; height: 104px; border: 2px dotted rgba(255, 255, 255, 0.85); border-radius: 50%; display: grid; place-items: center; box-sizing: border-box; }
+            .rule { height: 2px; background: rgba(255, 255, 255, 0.9); }
+            h1 { margin: 12px 0 8px; font-weight: 700; font-size: 104px; line-height: 1; letter-spacing: 0.05em; text-shadow: 0 2px 18px rgba(0, 30, 40, 0.45); }
+            .subtitle { margin: 20px 0 6px; font-weight: 500; font-size: 32px; letter-spacing: 0.06em; text-transform: uppercase; text-shadow: 0 2px 12px rgba(0, 30, 40, 0.5); }
+            .tagline { margin: 0; font-family: 'Noto Serif', Georgia, serif; font-style: italic; font-size: 24px; color: #eaf4f6; }
+            .url { margin: 26px 0 0; font-weight: 500; font-size: 22px; letter-spacing: 0.08em; padding: 8px 20px; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 999px; background: rgba(2, 28, 38, 0.45); }
+        </style>
+    </head>
+    <body>
+        <div class="splash">
+            <div class="emblem"><div><img src={`${base}images/cow-emblem.png`} alt="" width="70" height="70" /></div></div>
+            <div class="rule" style="width: 700px; margin-top: 28px"></div>
+            <h1>DRIVINE</h1>
+            <div class="rule" style="width: 840px"></div>
+            <p class="subtitle">Graph database client for TypeScript &amp; the JVM</p>
+            <p class="tagline">Community project by Liberation Data.</p>
+            <p class="url">drivine.org</p>
+        </div>
+    </body>
+</html>
