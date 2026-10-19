@@ -1,0 +1,33 @@
+// @ts-check
+import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+import starlightSidebarTopics from 'starlight-sidebar-topics';
+import { readFileSync } from 'node:fs';
+
+// Written by scripts/import-readmes.mjs, which `npm run dev` and `npm run build` run first.
+const sidebar = JSON.parse(readFileSync(new URL('./src/generated/sidebar.json', import.meta.url), 'utf8'));
+
+// Served by GitHub Pages at liberation-data.github.io/drivine. For drivine.org, set site to it and base to '/'.
+export default defineConfig({
+    site: 'https://liberation-data.github.io',
+    base: '/drivine',
+    integrations: [
+        starlight({
+            title: 'Drivine',
+            description: 'Graph database client for TypeScript and the JVM.',
+            logo: { light: './src/assets/cow-black.png', dark: './src/assets/cow-white.png' },
+            favicon: '/favicon.ico',
+            social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/liberation-data/drivine' }],
+            customCss: ['./src/styles/custom.css'],
+            // drivine4j's README marks Groovy build scripts as gradle.
+            expressiveCode: { shiki: { langAlias: { gradle: 'groovy' } } },
+            plugins: [
+                // One sidebar per library, each in its README's order.
+                starlightSidebarTopics([
+                    { label: 'TypeScript', link: '/ts/', items: sidebar.ts },
+                    { label: 'Kotlin & Java', link: '/jvm/', items: sidebar.jvm }
+                ])
+            ]
+        })
+    ]
+});

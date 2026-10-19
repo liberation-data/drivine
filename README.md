@@ -1,8 +1,5 @@
-<a href="https://liberation-data.github.io/drivine/"> ![DrivineSplash](https://raw.githubusercontent.com/liberation-data/drivine/master/docs/images/splash.jpg)</a>
+<a href="https://liberation-data.github.io/drivine/"> ![DrivineSplash](https://raw.githubusercontent.com/liberation-data/drivine/master/website/public/images/splash.jpg)</a>
 # <a href="https://liberation-data.github.io/drivine/">drivine</a>
-
-⚠️ **Drivine website has moved: <a href="https://liberation-data.github.io/drivine/">here</a>.**
-_Please report any broken links. Even better, a PR is very welcome! 🙏_
 
 Drivine is a graph database client for Node.js and TypeScript, built on [NestJS](https://nestjs.com/). It supports
 **Neo4j**, **Memgraph**, **FalkorDB** and **Oracle** (SQL/PGQ) as graph stores, plus Amazon Neptune and plain SQL on

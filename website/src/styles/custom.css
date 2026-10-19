@@ -1,0 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* The landing page's palette: deep teal water, with the sunlit surface's coral as the accent. */
+:root {
+    --sl-font: 'Ubuntu', system-ui, sans-serif;
+    --sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sl-color-accent-low: #02303b;
+    --sl-color-accent: #2a8f9b;
+    --sl-color-accent-high: #bfe6ea;
+}
+
+:root[data-theme='light'] {
+    --sl-color-accent-low: #d4ecef;
+    --sl-color-accent: #0f6e7a;
+    --sl-color-accent-high: #063d45;
+}
+
+/* Code is copied as typed: no => drawn as an arrow. */
+code,
+pre,
+.expressive-code {
+    font-variant-ligatures: none;
+}

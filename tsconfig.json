@@ -20,5 +20,5 @@
         "strict": true,
         "skipLibCheck": true
     },
-    "exclude": ["node_modules", "dist", "aurora", "build", "src/driver/agensgraph/**/*"]
+    "exclude": ["node_modules", "dist", "aurora", "build", "website", "src/driver/agensgraph/**/*"]
 }
