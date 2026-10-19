@@ -3,7 +3,26 @@
  * The landing page: the old site's splash, then a door into each library's docs. The docs themselves are Starlight's,
  * generated from the two READMEs.
  */
+import { getImage } from 'astro:assets';
+import '@fontsource/ubuntu/latin-400.css';
+import '@fontsource/ubuntu/latin-500.css';
+import '@fontsource/ubuntu/latin-700.css';
+import '@fontsource/noto-serif/latin-400-italic.css';
+import '@fontsource/jetbrains-mono/latin-400.css';
+import '@fontsource/jetbrains-mono/latin-500.css';
+import headingFont from '@fontsource/ubuntu/files/ubuntu-latin-700-normal.woff2?url';
+import ocean from '../assets/hero-ocean.jpg';
+
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
+
+// The hero photo as AVIF and WebP, the JPEG as a fallback, and smaller for phones.
+const photo = async (width: number): Promise<string> => {
+    const [avif, webp, jpeg] = await Promise.all(
+        (['avif', 'webp', 'jpeg'] as const).map((format) => getImage({ src: ocean, format, width, quality: format === 'avif' ? 55 : 70 }))
+    );
+    return `image-set(url('${avif.src}') type('image/avif'), url('${webp.src}') type('image/webp'), url('${jpeg.src}') type('image/jpeg'))`;
+};
+const photoVars = `--photo: ${await photo(1920)}; --photo-small: ${await photo(960)};`;
 const ts = `${base}ts/`;
 const jvm = `${base}jvm/`;
 const image = (name: string) => `${base}images/${name}`;
@@ -64,15 +83,12 @@ const ktSample = `<span class="a">@NodeFragment</span>
         <title>Drivine: graph database client for TypeScript and the JVM</title>
         <meta name="description" content="Drivine is a graph database client for TypeScript and the JVM: Neo4j, Memgraph, FalkorDB and Oracle." />
         <link rel="icon" href={`${base}favicon.ico`} />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-            rel="stylesheet"
-            href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Noto+Serif:ital,wght@1,400&family=JetBrains+Mono:wght@400;500&display=swap"
-        />
+        <!-- The heading's font, which the largest paint (DRIVINE) waits for. -->
+        <link rel="preload" href={headingFont} as="font" type="font/woff2" crossorigin />
         <style is:global>
-            /* Relative to this file, so the build rewrites them wherever the stylesheet ends up. */
+            /* Relative to this file, so the build rewrites it wherever the stylesheet ends up. --photo and
+               --photo-small, in AVIF, WebP and JPEG, are set on <body> from the frontmatter. */
             :root {
-                --photo: url('../assets/hero-ocean.jpg');
                 --lines: url('../assets/lines.png');
                 --abyss: #021c26;
                 --ink: #0b2530;
@@ -98,6 +114,10 @@ const ktSample = `<span class="a">@NodeFragment</span>
             .water > * { position: relative; z-index: 1; }
             /* Above the splash that follows it, so the GitHub menu opens over it and takes clicks. */
             .water > .nav { z-index: 3; }
+            @media (max-width: 800px) {
+                .water::before { background-image: linear-gradient(rgba(1, 65, 78, 0.55), rgba(1, 65, 78, 0.55)), var(--photo-small); }
+                .start.water::before { background-image: linear-gradient(rgba(1, 65, 78, 0.82), rgba(1, 65, 78, 0.82)), var(--photo-small); }
+            }
 
             .hero { min-height: 760px; display: flex; flex-direction: column; }
             .nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 24px 32px; }
@@ -201,7 +221,7 @@ const ktSample = `<span class="a">@NodeFragment</span>
             footer a:hover { color: #fff; text-decoration: underline; }
         </style>
     </head>
-    <body>
+    <body style={photoVars}>
         <header class="water hero">
             <nav class="nav wrap" aria-label="Main">
                 <a href={base} class="brand"><img src={image('cow-emblem.png')} alt="" width="36" height="36" /><span>DRIVINE</span></a>
