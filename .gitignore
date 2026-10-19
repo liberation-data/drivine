@@ -21,6 +21,8 @@ coverage
 .env.test.local
 
 public
+# ...but not the website's static files.
+!website/public
 dist
 tools
 test/routes.txt
