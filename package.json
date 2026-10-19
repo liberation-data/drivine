@@ -42,7 +42,7 @@
         "lint": "npm run lint:src && npm run lint:test",
         "lint:src": "eslint src --ext .ts",
         "lint:test": "eslint test --ext .ts",
-        "test": "jest",
+        "test": "ts-node -r tsconfig-paths/register test/run-tests.ts",
         "test:watch": "jest --watch",
         "test:cov": "jest --coverage",
         "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register/transpile-only node_modules/.bin/jest --runInBand --detectOpenHandles",

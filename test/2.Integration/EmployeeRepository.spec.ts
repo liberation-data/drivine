@@ -12,9 +12,7 @@ import { plainToInstance } from "class-transformer";
 
 const moment = require('moment');
 
-// NOTICE
-// before running the tests, add new records from test/moon-town.cypher
-// and manually run: MERGE (u:Employee {id: 1, name: 'Piotr'})
+// The tests read Piotr, whom the global setup seeds from test/moon-town.cypher.
 
 RunWithDrivine({ rollback: false });
 describe('HealthRepository', () => {

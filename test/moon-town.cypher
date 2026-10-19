@@ -1,5 +1,6 @@
 //Create User
 MERGE (u:Employee {id: 1, name: 'Piotr'})
+SET u.joined = coalesce(u.joined, datetime('2019-06-01T00:00:00Z'))
 
 //Create Metros
 MERGE (cavite:Metro {name: 'Cavite Island'})
