@@ -96,6 +96,8 @@ const ktSample = `<span class="a">@NodeFragment</span>
             .water::before { background: linear-gradient(rgba(1, 65, 78, 0.55), rgba(1, 65, 78, 0.55)), var(--photo) center 38% / cover; }
             .water::after { background: var(--lines); opacity: 0.55; }
             .water > * { position: relative; z-index: 1; }
+            /* Above the splash that follows it, so the GitHub menu opens over it and takes clicks. */
+            .water > .nav { z-index: 3; }
 
             .hero { min-height: 760px; display: flex; flex-direction: column; }
             .nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 24px 32px; }
@@ -112,6 +114,7 @@ const ktSample = `<span class="a">@NodeFragment</span>
             .repo-menu .menu a { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 44px; padding: 8px 12px; border-radius: 8px; color: #cfe3e7; }
             .repo-menu .menu a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; text-decoration: none; }
             .repo-menu .menu strong { color: #fff; margin-right: 6px; }
+            .repo-menu .hint { margin: 4px 12px 6px; font-size: 13px; color: #9db8bf; }
             .repo-menu .count { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; }
             .splash { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 24px 96px; }
             .emblem { width: 132px; height: 132px; border: 3px solid #fff; border-radius: 50%; display: grid; place-items: center; }
@@ -216,6 +219,7 @@ const ktSample = `<span class="a">@NodeFragment</span>
                                 <span><strong>{REPOS.jvm.name}</strong> {REPOS.jvm.language}</span>
                                 {jvmStars !== undefined && <span class="count">★ {starLabel(jvmStars)}</span>}
                             </a>
+                            <p class="hint">★ Star them on GitHub: it helps others find Drivine.</p>
                         </div>
                     </details>
                 </div>
