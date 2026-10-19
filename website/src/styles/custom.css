@@ -21,3 +21,12 @@ pre,
 .expressive-code {
     font-variant-ligatures: none;
 }
+
+/* Badges in a README's introduction sit side by side, as GitHub shows them, not stacked as block images. */
+.sl-markdown-content a > img {
+    display: inline-block;
+    vertical-align: middle;
+}
+.sl-markdown-content a:has(> img) + a:has(> img) {
+    margin-inline-start: 0.4rem;
+}
