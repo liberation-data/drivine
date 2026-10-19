@@ -14,7 +14,7 @@ export class LogLevel {
     @Cacheable()
     static from(name: string = 'ERROR'): LogLevel {
         assert(name, `Log level name is required`);
-        const result = LogLevel[name];
+        const result = (LogLevel as unknown as Record<string, LogLevel | undefined>)[name];
         if (result) {
             return result;
         }

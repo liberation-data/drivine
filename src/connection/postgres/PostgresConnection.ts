@@ -19,7 +19,7 @@ export class PostgresConnection implements Connection {
     ) {}
 
     sessionId(): string {
-        return this.client['sessionId'];
+        return (this.client as PoolClient & { sessionId: string }).sessionId;
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {

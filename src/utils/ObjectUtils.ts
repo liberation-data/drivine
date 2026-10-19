@@ -16,7 +16,7 @@ export class ObjectUtils {
         object: any,
         options: PrimitivePropsOptions = { classToPlain: true, neo4jDateToDateTime: true }
     ): any => {
-        const props = {};
+        const props: Record<string, any> = {};
         if (object) {
             const source = options.classToPlain ? instanceToPlain(object) : object;
             const strings = Object.keys(source);

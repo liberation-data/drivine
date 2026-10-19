@@ -35,7 +35,7 @@ export class NeptuneConnectionProvider implements ConnectionProvider {
 
     async connect(): Promise<Connection> {
         const session = this.driver.session();
-        session['sessionId'] = shortId.rnd();
+        Object.assign(session, { sessionId: shortId.rnd() });
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());
         return Promise.resolve(connection);
     }

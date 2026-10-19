@@ -38,7 +38,7 @@ export class FalkorDbResultMapper extends GraphResultMapper {
         if (isNode(val) || isRelationship(val)) {
             return this.toNative(val.properties);
         }
-        const out = {};
+        const out: Record<string, any> = {};
         Object.keys(val).forEach((key) => {
             out[key] = this.toNative(val[key]);
         });

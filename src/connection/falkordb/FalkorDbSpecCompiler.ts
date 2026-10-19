@@ -25,7 +25,7 @@ export class FalkorDbSpecCompiler extends QuerySpecificationCompiler {
      */
     formattedParams(): Record<string, any> {
         if (Array.isArray(this.spec.parameters)) {
-            const named = {};
+            const named: Record<string, any> = {};
             this.spec.parameters.forEach((it, index) => (named[`p${index + 1}`] = it));
             return this.coercer.coerce(named);
         }

@@ -20,7 +20,7 @@ export class PostgresSpecCompiler extends QuerySpecificationCompiler {
 
         if (!Array.isArray(this.spec.parameters)) {
             this.paramKeys = Object.keys(this.spec.parameters).sort();
-            this.indexParams = this.paramKeys.map((it) => this.spec.parameters[it]);
+            this.indexParams = this.paramKeys.map((it) => (this.spec.parameters as Record<string, any>)[it]);
         } else {
             this.indexParams = this.spec.parameters;
         }

@@ -7,8 +7,6 @@
         "emitDecoratorMetadata": true,
         "experimentalDecorators": true,
         "noImplicitThis": false,
-        "suppressImplicitAnyIndexErrors": true,
-        "ignoreDeprecations": "5.0",
         "strictPropertyInitialization": false,
         "target": "es2018",
         "sourceMap": true,
