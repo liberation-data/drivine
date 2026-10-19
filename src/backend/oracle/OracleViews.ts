@@ -1,5 +1,13 @@
 import { Direction } from '@/annotation/Metadata';
-import { hasLabels, jsonKey, nodeDocument, OracleGraph, RELATED_SUBQUERY, sqlText } from '@/backend/oracle/OracleGraph';
+import {
+    hasLabels,
+    holding,
+    jsonKey,
+    nodeDocument,
+    OracleGraph,
+    RELATED_SUBQUERY,
+    sqlText
+} from '@/backend/oracle/OracleGraph';
 import { target } from '@/backend/ViewProjector';
 import { FragmentModel } from '@/model/FragmentModel';
 import { AggregateModel, GraphViewModel, PathHop, PathModel } from '@/model/GraphViewModel';
@@ -211,7 +219,9 @@ export class OracleViews {
             from,
             ordered
         )}) ${o} ON ${o}.nid = ${x}.nid`;
-        const order = `${o}.order_number ${direction} NULLS LAST, ${o}.order_text ${direction} NULLS LAST, ${x}.nid`;
+        const order =
+            `${o}.order_kind ${direction} NULLS LAST, ${o}.order_number ${direction} NULLS LAST, ` +
+            `${o}.order_text ${direction} NULLS LAST, ${x}.nid`;
         return path.isCollection
             ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} ORDER BY ${order} RETURNING JSON) ${nodes})`
             : `(SELECT ${nodeDocument(x)} ${nodes} ORDER BY ${order} FETCH FIRST 1 ROW ONLY)`;
@@ -221,19 +231,26 @@ export class OracleViews {
      * The nodes at the far end of a path, each with the value the hop the path is ordered by keeps for it: that of the
      * first node of the hop that leads to it, the lowest or, read highest first, the highest. The node the hop reaches
      * is mapped to no class, so its property's type is not known: it is read as a number, which is null for a value
-     * that is not a JSON number (a text of digits included), and as text. Numbers come first, in their order, then the
-     * rest in the order of their text, and a node without the property last, whichever way the path is read.
+     * that is not a JSON number (a text of digits included), and as text. `order_kind` is 0 for a text, 1 for a number
+     * and null for a node without the property, so a text comes before a number read lowest first, as the graph engines
+     * order them, and a node without the property last, whichever way the path is read. Only the kind kept is read further: a node
+     * reached through a text and a number keeps the text, read lowest first, and the number, read highest first.
      */
     private orderedPathNodes(path: PathModel, from: string, ordered: PathHop): string {
         const { body, nodes }: PathRows = this.pathRows(path, from);
         const node = nodes[path.hops.indexOf(ordered)];
         const last = nodes[nodes.length - 1];
+        const r = this.alias('r');
         const keep = ordered.ascending ? 'MIN' : 'MAX';
         const key = `$${jsonKey(ordered.orderBy!)}`;
+        const read = holding(node, ordered.orderBy!);
+        const kind = `${keep}(CASE WHEN ${r}.num IS NOT NULL THEN 1 WHEN ${r}.txt IS NOT NULL THEN 0 END)`;
         return (
-            `SELECT ${last}.nid AS nid, ` +
-            `${keep}(JSON_VALUE(${node}.props, '${key}.numberOnly()' RETURNING NUMBER)) AS order_number, ` +
-            `${keep}(JSON_VALUE(${node}.props, '${key}')) AS order_text ${body} GROUP BY ${last}.nid`
+            `SELECT ${r}.nid, ${kind} AS order_kind, ` +
+            `CASE WHEN ${kind} = 1 THEN ${keep}(${r}.num) END AS order_number, ` +
+            `CASE WHEN ${kind} = 0 THEN ${keep}(CASE WHEN ${r}.num IS NULL THEN ${r}.txt END) END AS order_text ` +
+            `FROM (SELECT ${last}.nid AS nid, JSON_VALUE(${read}, '${key}.numberOnly()' RETURNING NUMBER) AS num, ` +
+            `JSON_VALUE(${read}, '${key}') AS txt ${body}) ${r} GROUP BY ${r}.nid`
         );
     }
 

@@ -347,10 +347,11 @@ export class SessionStarter {
 }
 ```
 
-Every backend reads the order the same way: equal values in the order they are reached, and a node without the property
-last, read either way. The property should hold values of one type. On Oracle the node a hop passes through is mapped
-to no class, so its property is compared as a number where it is a JSON number and as text otherwise, numbers first. A
-group key's path names no order: `pathKey` refuses one.
+A node of the ordered hop without the property comes last, whichever way the path is read. Targets whose first nodes
+hold equal values come in no set order. The property should hold values of one type: every backend reads the order the
+same way where it does, and a text of digits such as `'0100'` is ordered as text. Where it holds texts on some nodes and
+numbers on others, every backend reads every text before every number lowest first, and after them highest first, as
+Neo4j's ORDER BY does. A group key's path names no order: `pathKey` refuses one.
 
 #### 6. Aggregates: Counting and Summarising Without Loading
 

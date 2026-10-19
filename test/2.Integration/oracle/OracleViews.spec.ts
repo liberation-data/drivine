@@ -107,6 +107,18 @@ class Patron {
     byCodeDescending: City[];
 }
 
+/** The cities of the studios a person funded, in the order of a key that is a text on some studios and a number on others. */
+@GraphView()
+class RankedPatron {
+    @Root() person: Person;
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'sort key'), hop('LOCATED_IN')], { target: () => City })
+    cities: City[];
+    @GraphPath([hop('FUNDED', Direction.OUTGOING, 'Studio', 'sort key', false), hop('LOCATED_IN')], {
+        target: () => City
+    })
+    citiesDescending: City[];
+}
+
 /** The patrons a person knows: a path ordered by a hop, in a view nested in another. */
 @GraphView()
 class PatronFriend {
@@ -183,7 +195,24 @@ describeOnOracle('views on Oracle', () => {
         await seed.edge('bare', 'LOCATED_IN', 'rome');
         await seed.edge('pixar', 'LOCATED_IN', 'paris');
         await seed.edge('ufa', 'LOCATED_IN', 'oslo');
-    });
+        // Dee funded studios whose 'sort key' is a text or a number: lyon 'a', paris 'b', oslo 'c' and 5, tokyo 10, and
+        // rome none. Lowest first, oslo keeps 'c'; highest first, 5.
+        await seed.node(['City'], { id: 'lyon', name: 'Lyon' });
+        await seed.node(['City'], { id: 'tokyo', name: 'Tokyo' });
+        const keys: [string, string | number | undefined, string][] = [
+            ['gaumont', 'a', 'lyon'],
+            ['pathe', 'b', 'paris'],
+            ['cines', 'c', 'oslo'],
+            ['nordisk', 5, 'oslo'],
+            ['toho', 10, 'tokyo'],
+            ['lux', undefined, 'rome']
+        ];
+        for (const [studio, key, city] of keys) {
+            await seed.node(['Studio'], key === undefined ? { id: studio } : { id: studio, 'sort key': key });
+            await seed.edge('dot', 'FUNDED', studio);
+            await seed.edge(studio, 'LOCATED_IN', city);
+        }
+    }, 60_000);
 
     afterAll(async () => {
         await seed.clear();
@@ -233,6 +262,12 @@ describeOnOracle('views on Oracle', () => {
         const ada = (await gom.load(Patron, 'ava'))!;
         expect(ada.byCode.map((it) => it.name)).toEqual(['Paris', 'Oslo', 'Rome']);
         expect(ada.byCodeDescending.map((it) => it.name)).toEqual(['Oslo', 'Paris', 'Rome']);
+    });
+
+    it('should read a text before a number, lowest first, and a number before a text, highest first', async () => {
+        const dee = (await gom.load(RankedPatron, 'dot'))!;
+        expect(dee.cities.map((it) => it.name)).toEqual(['Lyon', 'Paris', 'Oslo', 'Tokyo', 'Rome']);
+        expect(dee.citiesDescending.map((it) => it.name)).toEqual(['Tokyo', 'Oslo', 'Paris', 'Lyon', 'Rome']);
     });
 
     it('should read an ordered path of a view nested in another', async () => {

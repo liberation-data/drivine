@@ -51,6 +51,19 @@ class ActorDirectorsByYear {
 }
 
 @GraphView()
+class ActorDirectorsByKey {
+    @Root() actor: Actor;
+    @GraphPath([hop('ACTED_IN', Direction.OUTGOING, 'Movie', 'sort key'), hop('DIRECTED_BY')], {
+        target: () => Director
+    })
+    directors: Director[];
+    @GraphPath([hop('ACTED_IN', Direction.OUTGOING, 'Movie', 'sort key', false), hop('DIRECTED_BY')], {
+        target: () => Director
+    })
+    directorsDescending: Director[];
+}
+
+@GraphView()
 class DirectorCast {
     @Root() director: Director;
     @GraphPath([hop('DIRECTED_BY', Direction.INCOMING, 'Movie', 'year', false), hop('ACTED_IN', Direction.INCOMING)], {
@@ -105,6 +118,22 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
                     "(o1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'y2', year: 1986})-[:DIRECTED_BY]->(lynch)"
             )
         );
+        // k1 acted in movies whose 'sort key' is a text or a number: lynch 'a', bigelow 'b', nolan 'c' and 5, murnau
+        // 10, and anon none. Lowest first, nolan keeps 'c'; highest first, 5.
+        await pm.execute(
+            new QuerySpecification(
+                "MATCH (lynch:OrderedPathTest {id: 'lynch'}), (bigelow:OrderedPathTest {id: 'bigelow'}), " +
+                    "(nolan:OrderedPathTest {id: 'nolan'}), (murnau:OrderedPathTest {id: 'murnau'}), " +
+                    "(anon:OrderedPathTest {id: 'anon'}) " +
+                    "CREATE (k1:OrderedPathTest:Actor {id: 'k1'}), " +
+                    "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'ka', `sort key`: 'a'})-[:DIRECTED_BY]->(lynch), " +
+                    "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'kb', `sort key`: 'b'})-[:DIRECTED_BY]->(bigelow), " +
+                    "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'kc', `sort key`: 'c'})-[:DIRECTED_BY]->(nolan), " +
+                    "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'k5', `sort key`: 5})-[:DIRECTED_BY]->(nolan), " +
+                    "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'k10', `sort key`: 10})-[:DIRECTED_BY]->(murnau), " +
+                    "(k1)-[:ACTED_IN]->(:OrderedPathTest:Movie {id: 'kn'})-[:DIRECTED_BY]->(anon)"
+            )
+        );
     });
 
     afterAll(async () => {
@@ -124,6 +153,12 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
         expect(loaded.latestFirst.map((it) => it.id)).toEqual(['nolan', 'bigelow', 'lynch', 'murnau', 'anon']);
     });
 
+    it('should read a text before a number, lowest first, and a number before a text, highest first', async () => {
+        const loaded = (await gom.load(ActorDirectorsByKey, 'k1'))!;
+        expect(loaded.directors.map((it) => it.id)).toEqual(['lynch', 'bigelow', 'nolan', 'murnau', 'anon']);
+        expect(loaded.directorsDescending.map((it) => it.id)).toEqual(['murnau', 'nolan', 'bigelow', 'lynch', 'anon']);
+    });
+
     it('should order by the far node where the last hop names the order', async () => {
         const loaded = (await gom.load(ActorDirectorsByYear, 'o1'))!;
         expect(loaded.movies.map((it) => it.id)).toEqual(['y1', 'y2', 'y3', 'y4', 'y5', 'y0']);
@@ -131,7 +166,8 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
 
     it('should order a path of incoming hops', async () => {
         const nolan = (await gom.load(DirectorCast, 'nolan'))!;
-        expect(nolan.cast.map((it) => it.id)).toEqual(['o1', 'o3']);
+        // o1 by 2010, o3 by 2000, and k1 last: nolan's movies with k1 have no year.
+        expect(nolan.cast.map((it) => it.id)).toEqual(['o1', 'o3', 'k1']);
     });
 
     it('should order a path of a view nested in another', async () => {
@@ -142,7 +178,7 @@ describe.each(graphEngines())('@GraphPath ordered by a hop on $type', (engine) =
     });
 
     it('should leave out roots without a required ordered path', async () => {
-        expect((await gom.loadAll(CreditedActor)).map((it) => it.actor.id).sort()).toEqual(['o1', 'o3']);
+        expect((await gom.loadAll(CreditedActor)).map((it) => it.actor.id).sort()).toEqual(['k1', 'o1', 'o3']);
         expect((await gom.load(CreditedActor, 'o3'))!.directors.map((it) => it.id)).toEqual(['nolan']);
     });
 
