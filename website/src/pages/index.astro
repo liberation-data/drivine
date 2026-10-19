@@ -197,6 +197,16 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
             .feature code { font-size: 14px; }
             .features .row { gap: 24px; }
 
+            .perf { padding: 0 32px 96px; }
+            .perf .wrap { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; background: #e3eff1; border-radius: 16px; padding: 48px; }
+            .perf .text { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+            .perf .text > p:not(.eyebrow) { margin: 0; font-size: 17px; line-height: 1.65; color: #123a45; }
+            .perf .stats { flex: 1 1 300px; min-width: 0; margin: 0; display: grid; gap: 14px; }
+            .perf .stats div { background: #fff; border-radius: 12px; padding: 18px 22px; }
+            .perf dt { font-size: 30px; font-weight: 700; color: var(--ink); }
+            .perf dd { margin: 4px 0 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
+            @media (max-width: 600px) { .perf .wrap { padding: 28px 22px; gap: 28px; } }
+
             .backing { padding: 0 32px 72px; }
             .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
             .engines { padding: 0 32px 96px; }
@@ -354,6 +364,29 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                         <article class="feature"><h3>Schema management</h3><p>Range, uniqueness, vector and full-text indexes declared on your classes, enforced at startup, with drift detection.</p></article>
                         <article class="feature"><h3>Test containers, or yours</h3><p>A container for each datasource in CI. While you iterate, <code>USE_LOCAL_NEO4J=true</code> points tests at your own instance.</p></article>
                     </div>
+                </div>
+            </section>
+
+            <section class="perf">
+                <div class="wrap">
+                    <div class="text">
+                        <p class="eyebrow">PERFORMANCE</p>
+                        <h2>One statement, one round trip.</h2>
+                        <p>
+                            Drivine is built to be fast. There's no lazy loading, no session cache to keep warm and no query
+                            for each relationship. A view, with everything related to it, loads in one statement, and a save
+                            is one statement too.
+                        </p>
+                        <p>
+                            <a href="https://github.com/liberation-data/graph-bench">Graph Bench</a> uses drivine4j to compare
+                            Neo4j, FalkorDB and Oracle on a graph of 1.1 million nodes and 4.5 million relationships, with the
+                            same Kotlin on each.
+                        </p>
+                    </div>
+                    <dl class="stats">
+                        <div><dt>1.5–3.5 ms</dt><dd>to load an issue with its repo, author, assignees, topics and comments, on every engine</dd></div>
+                        <div><dt>1</dt><dd>statement for each load or save, however many relationships it has</dd></div>
+                    </dl>
                 </div>
             </section>
 
