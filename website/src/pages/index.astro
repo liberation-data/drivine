@@ -114,6 +114,8 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
             .water > * { position: relative; z-index: 1; }
             /* Above the splash that follows it, so the GitHub menu opens over it and takes clicks. */
             .water > .nav { z-index: 3; }
+            .water > .graph { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity 1.6s ease; }
+            .water > .graph.on { opacity: 1; }
             @media (max-width: 800px) {
                 .water::before { background-image: linear-gradient(rgba(1, 65, 78, 0.55), rgba(1, 65, 78, 0.55)), var(--photo-small); }
                 .start.water::before { background-image: linear-gradient(rgba(1, 65, 78, 0.82), rgba(1, 65, 78, 0.82)), var(--photo-small); }
@@ -233,6 +235,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
     </head>
     <body style={photoVars}>
         <header class="water hero">
+            <canvas class="graph" aria-hidden="true"></canvas>
             <nav class="nav wrap" aria-label="Main">
                 <a href={base} class="brand"><img src={image('cow-emblem.png')} alt="" width="36" height="36" /><span>DRIVINE</span></a>
                 <div class="nav-links">
@@ -460,6 +463,107 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                     samples.forEach((it) => (it.hidden = it.dataset.lang !== button.dataset.lang));
                 })
             );
+
+            // A faint graph drifting over the water, drawn once the page has loaded so it costs nothing at first paint.
+            // It holds still for visitors who ask for less motion, and stops while the hero is out of sight.
+            const canvas = document.querySelector<HTMLCanvasElement>('.hero .graph');
+            const drawGraph = () => {
+                const context = canvas?.getContext('2d');
+                if (!canvas || !context) return;
+                const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+                const reach = 160;
+                type Node = { x: number; y: number; dx: number; dy: number; r: number; hot: boolean };
+                let nodes: Node[] = [];
+                let width = 0;
+                let height = 0;
+                let pointer: { x: number; y: number } | undefined;
+                let visible = true;
+                let frame = 0;
+
+                const size = () => {
+                    const scale = Math.min(devicePixelRatio || 1, 2);
+                    width = canvas.clientWidth;
+                    height = canvas.clientHeight;
+                    canvas.width = width * scale;
+                    canvas.height = height * scale;
+                    context.setTransform(scale, 0, 0, scale, 0, 0);
+                    const count = Math.min(70, Math.round((width * height) / 20000));
+                    nodes = Array.from({ length: count }, () => ({
+                        x: Math.random() * width,
+                        y: Math.random() * height,
+                        dx: (Math.random() - 0.5) * 0.3,
+                        dy: (Math.random() - 0.5) * 0.3,
+                        r: 1.5 + Math.random() * 2,
+                        hot: Math.random() < 0.08
+                    }));
+                };
+
+                const draw = () => {
+                    context.clearRect(0, 0, width, height);
+                    for (let i = 0; i < nodes.length; i++) {
+                        for (let j = i + 1; j < nodes.length; j++) {
+                            const distance = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
+                            if (distance > reach) continue;
+                            context.strokeStyle = `rgba(255, 255, 255, ${0.32 * (1 - distance / reach)})`;
+                            context.beginPath();
+                            context.moveTo(nodes[i].x, nodes[i].y);
+                            context.lineTo(nodes[j].x, nodes[j].y);
+                            context.stroke();
+                        }
+                    }
+                    for (const node of nodes) {
+                        context.fillStyle = node.hot ? 'rgba(240, 138, 93, 0.85)' : 'rgba(255, 255, 255, 0.6)';
+                        context.beginPath();
+                        context.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+                        context.fill();
+                    }
+                };
+
+                const step = () => {
+                    for (const node of nodes) {
+                        if (pointer) {
+                            const distance = Math.hypot(pointer.x - node.x, pointer.y - node.y);
+                            if (distance < reach && distance > 1) {
+                                node.x += ((pointer.x - node.x) / distance) * 0.25;
+                                node.y += ((pointer.y - node.y) / distance) * 0.25;
+                            }
+                        }
+                        node.x += node.dx;
+                        node.y += node.dy;
+                        if (node.x < 0 || node.x > width) node.dx = -node.dx;
+                        if (node.y < 0 || node.y > height) node.dy = -node.dy;
+                    }
+                    draw();
+                    frame = visible && !document.hidden ? requestAnimationFrame(step) : 0;
+                };
+                const run = () => {
+                    if (!still && !frame && visible && !document.hidden) frame = requestAnimationFrame(step);
+                };
+
+                size();
+                draw();
+                canvas.classList.add('on');
+                addEventListener('resize', () => {
+                    size();
+                    draw();
+                });
+                if (still) return;
+                const hero = canvas.parentElement!;
+                hero.addEventListener('pointermove', (event) => {
+                    const box = canvas.getBoundingClientRect();
+                    pointer = { x: event.clientX - box.left, y: event.clientY - box.top };
+                });
+                hero.addEventListener('pointerleave', () => (pointer = undefined));
+                document.addEventListener('visibilitychange', run);
+                new IntersectionObserver(([entry]) => {
+                    visible = entry.isIntersecting;
+                    run();
+                }).observe(hero);
+                run();
+            };
+            const idle = (window as { requestIdleCallback?: (callback: () => void) => void }).requestIdleCallback ?? ((callback) => setTimeout(callback, 200));
+            if (document.readyState === 'complete') idle(drawGraph);
+            else addEventListener('load', () => idle(drawGraph), { once: true });
         </script>
     </body>
 </html>
