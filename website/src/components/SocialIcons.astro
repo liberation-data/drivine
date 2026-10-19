@@ -1,0 +1,36 @@
+---
+/**
+ * The header's GitHub link, to the repository of the library whose docs are open, with its stars: Drivine's on the
+ * TypeScript pages, drivine4j's on the Kotlin & Java pages. Replaces Starlight's SocialIcons.
+ */
+import { Icon } from '@astrojs/starlight/components';
+import { REPOS, formatStars, repoUrl, stars, type Topic } from '../lib/github';
+
+const topic: Topic = Astro.url.pathname.replace(import.meta.env.BASE_URL, '/').startsWith('/jvm') ? 'jvm' : 'ts';
+const count = await stars(topic);
+const { name } = REPOS[topic];
+---
+
+<a href={repoUrl(topic)} class="sl-flex">
+    <span class="sr-only">{name} on GitHub{count !== undefined ? `, ${count} stars` : ''}: star it there</span>
+    <Icon name="github" />
+    {count !== undefined && <span class="stars" aria-hidden="true">★ {formatStars(count)}</span>}
+</a>
+
+<style>
+    a {
+        align-items: center;
+        gap: 0.4em;
+        color: var(--sl-color-text-accent);
+        padding: 0.5em;
+        margin: -0.5em;
+        text-decoration: none;
+    }
+    a:hover {
+        color: var(--sl-color-white);
+    }
+    .stars {
+        font-size: var(--sl-text-sm);
+        font-weight: 600;
+    }
+</style>

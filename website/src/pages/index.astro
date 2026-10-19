@@ -8,6 +8,11 @@ const ts = `${base}ts/`;
 const jvm = `${base}jvm/`;
 const image = (name: string) => `${base}images/${name}`;
 
+import { REPOS, formatStars, repoUrl, stars } from '../lib/github';
+const tsStars = await stars('ts');
+const jvmStars = await stars('jvm');
+const starLabel = (count: number | undefined) => (count === undefined ? '' : formatStars(count));
+
 // The same view in each language, highlighted by hand: the panel switches between them.
 const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s">'Person'</span>] })
 <span class="k">export class</span> <span class="t">Person</span> {
@@ -98,6 +103,16 @@ const ktSample = `<span class="a">@NodeFragment</span>
             .nav a:hover { color: #fff; text-decoration: underline; }
             .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.12em; font-size: 18px; }
             .nav-links { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; font-size: 16px; }
+            .repo-menu { position: relative; }
+            .repo-menu summary { cursor: pointer; list-style: none; color: #e6f2f4; }
+            .repo-menu summary::-webkit-details-marker { display: none; }
+            .repo-menu summary::after { content: ' ▾'; font-size: 0.8em; }
+            .repo-menu summary:hover { color: #fff; text-decoration: underline; }
+            .repo-menu .menu { position: absolute; right: 0; top: calc(100% + 10px); z-index: 5; min-width: 300px; display: flex; flex-direction: column; padding: 6px; border-radius: 12px; background: #04222c; border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
+            .repo-menu .menu a { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 44px; padding: 8px 12px; border-radius: 8px; color: #cfe3e7; }
+            .repo-menu .menu a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; text-decoration: none; }
+            .repo-menu .menu strong { color: #fff; margin-right: 6px; }
+            .repo-menu .count { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; }
             .splash { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 24px 96px; }
             .emblem { width: 132px; height: 132px; border: 3px solid #fff; border-radius: 50%; display: grid; place-items: center; }
             .emblem > div { width: 112px; height: 112px; border: 2px dotted rgba(255, 255, 255, 0.85); border-radius: 50%; display: grid; place-items: center; }
@@ -125,7 +140,10 @@ const ktSample = `<span class="a">@NodeFragment</span>
             .card p { margin: 0; font-size: 17px; line-height: 1.6; color: var(--muted); }
             .card .eyebrow { letter-spacing: 0.14em; }
             .card > code { font-size: 14px; background: #eef5f6; border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
-            .card .links { display: flex; flex-wrap: wrap; gap: 20px; margin-top: auto; padding-top: 8px; font-size: 16px; font-weight: 500; }
+            .card .links { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin-top: auto; padding-top: 8px; font-size: 16px; font-weight: 500; }
+            .card .star { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 4px 4px 4px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); }
+            .card .star:hover { border-color: var(--teal); color: var(--ink); }
+            .card .star span { font-size: 14px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: #eef5f6; }
             .shared { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; text-align: center; margin-top: 28px; padding: 22px 28px; border-radius: 14px; background: #e3eff1; color: #123a45; font-size: 17px; line-height: 1.5; }
 
             .compose { background: var(--abyss); color: #e6f2f4; padding: 96px 32px; }
@@ -187,7 +205,19 @@ const ktSample = `<span class="a">@NodeFragment</span>
                 <div class="nav-links">
                     <a href={ts}>TypeScript docs</a>
                     <a href={jvm}>Kotlin &amp; Java docs</a>
-                    <a href="https://github.com/liberation-data/drivine">GitHub</a>
+                    <details class="repo-menu">
+                        <summary>GitHub</summary>
+                        <div class="menu">
+                            <a href={repoUrl('ts')}>
+                                <span><strong>{REPOS.ts.name}</strong> {REPOS.ts.language}</span>
+                                {tsStars !== undefined && <span class="count">★ {starLabel(tsStars)}</span>}
+                            </a>
+                            <a href={repoUrl('jvm')}>
+                                <span><strong>{REPOS.jvm.name}</strong> {REPOS.jvm.language}</span>
+                                {jvmStars !== undefined && <span class="count">★ {starLabel(jvmStars)}</span>}
+                            </a>
+                        </div>
+                    </details>
                 </div>
             </nav>
             <div class="splash">
@@ -234,7 +264,7 @@ const ktSample = `<span class="a">@NodeFragment</span>
                             <code>npm install @liberation-data/drivine</code>
                             <div class="links">
                                 <a href={ts}>Read the docs →</a>
-                                <a href="https://github.com/liberation-data/drivine">GitHub</a>
+                                <a href={repoUrl('ts')} class="star">★ Star on GitHub{tsStars !== undefined && <span>{starLabel(tsStars)}</span>}</a>
                                 <a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a>
                             </div>
                         </article>
@@ -248,7 +278,7 @@ const ktSample = `<span class="a">@NodeFragment</span>
                             <code>implementation("org.drivine:drivine4j:&lt;version&gt;")</code>
                             <div class="links">
                                 <a href={jvm}>Read the docs →</a>
-                                <a href="https://github.com/liberation-data/drivine4j">GitHub</a>
+                                <a href={repoUrl('jvm')} class="star">★ Star on GitHub{jvmStars !== undefined && <span>{starLabel(jvmStars)}</span>}</a>
                                 <a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a>
                             </div>
                         </article>
@@ -355,6 +385,16 @@ const ktSample = `<span class="a">@NodeFragment</span>
         </footer>
 
         <script>
+            const menu = document.querySelector<HTMLDetailsElement>('.repo-menu');
+            document.addEventListener('click', (event) => {
+                if (menu?.open && !menu.contains(event.target as Node)) menu.open = false;
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && menu?.open) {
+                    menu.open = false;
+                    menu.querySelector('summary')?.focus();
+                }
+            });
             const buttons = document.querySelectorAll<HTMLButtonElement>('.tabs button');
             const samples = document.querySelectorAll<HTMLElement>('.panel pre');
             buttons.forEach((button) =>
