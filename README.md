@@ -12,9 +12,10 @@ Postgres through the low-level API. It gives you two ways to work with a graph:
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
    query DSL whose references come from the classes themselves.
 
-Drivine is the TypeScript twin of [drivine4j](https://github.com/liberation-data/drivine4j), the graph client for
-[Embabel](https://hub.embabel.com). They share a storage format: a store written by one is read, stamped and checked
-alike by the other.
+> **On the JVM?** [drivine4j](https://github.com/liberation-data/drivine4j) is Drivine's Java and Kotlin twin
+> (`org.drivine:drivine4j`), the graph client for [Embabel](https://hub.embabel.com), with Spring Boot support and a
+> code-generated DSL. The two share a storage format: a store written from Node is read, stamped and checked alike from
+> the JVM, and the other way round.
 
 Its design goals:
 
