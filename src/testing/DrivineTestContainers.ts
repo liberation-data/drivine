@@ -45,7 +45,7 @@ const NEO4J: TestContainerSpec = {
 };
 
 const MEMGRAPH: TestContainerSpec = {
-    image: 'memgraph/memgraph:latest',
+    image: 'memgraph/memgraph:3.12.0',
     port: 7687,
     // Memgraph logs that it is running before Bolt takes connections: wait on the port instead.
     container: (image) => new GenericContainer(image).withExposedPorts(7687).withWaitStrategy(Wait.forListeningPorts()),
@@ -53,7 +53,7 @@ const MEMGRAPH: TestContainerSpec = {
 };
 
 const FALKORDB: TestContainerSpec = {
-    image: 'falkordb/falkordb:latest',
+    image: 'falkordb/falkordb:6.0.0',
     port: 6379,
     container: (image) => new GenericContainer(image).withExposedPorts(6379).withWaitStrategy(Wait.forListeningPorts()),
     connection: (started) => ({ host: started.getHost(), port: started.getMappedPort(6379) })
@@ -140,7 +140,8 @@ export class DrivineTestContainers {
     static datasources(env: Environment = process.env): { prefix: string; type: DatabaseType }[] {
         return Object.keys(env)
             .map((key) => TYPE_KEY.exec(key))
-            .filter((match): match is RegExpExecArray => match != null && env[match[0]] != null)
+            // A blank type is no datasource: a setting cleared so dotenv can't fill it again.
+            .filter((match): match is RegExpExecArray => match != null && !!env[match[0]])
             .map((match) => ({ prefix: match[1] ? `${match[1]}_` : '', type: env[match[0]] as DatabaseType }));
     }
 

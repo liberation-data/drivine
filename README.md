@@ -1591,10 +1591,10 @@ mentioning us (<a href="https://twitter.com/@doctor_cerulean">@doctor_cerulean</
 tutorial, or published a Drivine-powered app, we'd be happy to hear about that too.
 
 Drivine is led by <a href="https://www.linkedin.com/in/jasper-blues-7781638/">Jasper Blues</a> and sponsored by Liberation
-Data and <a href="https://en.wikipedia.org/wiki/Rod_Johnson_(programmer)">Rod Johnson</a>, creator of the Spring Framework,
-with <a href="https://github.com/liberation-data/Drivine/graphs/contributors">contributions from around the world</a>. It
-is the graph database client of <a href="https://hub.embabel.com">Embabel</a>, the agent framework for the JVM, through
-drivine4j.
+Data and <a href="https://en.wikipedia.org/wiki/Rod_Johnson_(programmer)">Rod Johnson</a>, creator of the Spring Framework
+and of <a href="https://hub.embabel.com">Embabel</a>, the AI agent framework for the JVM, which uses Drivine, through
+drivine4j, as its graph database client. Contributions come from
+<a href="https://github.com/liberation-data/Drivine/graphs/contributors">around the world</a>.
 
 ## Building from Source
 
