@@ -89,7 +89,7 @@
         "source-map-support": "^0.5.21",
         "ts-data.stack": "^1.0.6",
         "typescript-cacheable": "^3.0.3",
-        "uuid": "^9.0.1"
+        "uuid": "^14.0.0"
     },
     "devDependencies": {
         "@nestjs/common": "^10.2.7",
