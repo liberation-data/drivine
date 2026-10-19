@@ -16,7 +16,7 @@ export class Neo4jConnection implements Connection {
     constructor(readonly session: Session, readonly resultMapper: ResultMapper) {}
 
     sessionId(): string {
-        return this.session['sessionId'];
+        return (this.session as Session & { sessionId: string }).sessionId;
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {

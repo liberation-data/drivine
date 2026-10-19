@@ -6,6 +6,15 @@ import { TransformPostProcessor } from '@/mapper/TransformPostProcessor';
 import { FilterPostProcessor } from '@/mapper/FilterPostProcessor';
 import { QueryLanguage } from '@/query/QueryLanguage';
 
+/** The count, if it is a whole number of at least 0: a value from a request, say, would otherwise be written as text. */
+function wholeNumber(count: number | undefined, what: string): number | undefined {
+    assert(
+        count === undefined || (Number.isInteger(count) && count >= 0),
+        `${what} must be a whole number of at least 0, not ${String(count)}.`
+    );
+    return count;
+}
+
 export type ClassType<T = any> = new (...args: any[]) => T;
 
 /** A class, abstract or not: what the object manager takes to name a mapped class. */
@@ -15,8 +24,8 @@ export class QuerySpecification<T> {
     statement: Statement;
     parameters: any[];
     postProcessors: ResultPostProcessor[];
-    _skip: number;
-    _limit: number;
+    _skip?: number;
+    _limit?: number;
 
     static withStatement<T>(statement?: string | Statement): QuerySpecification<T> {
         return new QuerySpecification<T>(statement);
@@ -75,13 +84,15 @@ export class QuerySpecification<T> {
         return this;
     }
 
-    skip(results: number): this {
-        this._skip = results;
+    /** Skips the first results. It is written into the statement, so it must be a whole number of at least 0. */
+    skip(results: number | undefined): this {
+        this._skip = wholeNumber(results, 'skip');
         return this;
     }
 
-    limit(results: number): this {
-        this._limit = results;
+    /** Returns at most this many results. It is written into the statement, so it must be a whole number of at least 0. */
+    limit(results: number | undefined): this {
+        this._limit = wholeNumber(results, 'limit');
         return this;
     }
 

@@ -4,7 +4,7 @@
  * When `npm test` has done all this already, for each of its stages, it leaves it be.
  */
 // Jest's globalSetup is outside its module mapping, so the '@/' paths are resolved here.
-require('tsconfig-paths/register');
+require('./register-paths');
 import { drivineGlobalSetup } from '../src/testing';
 import { CONTAINERS_STARTED, loadTestEnvironment, seedTestData } from './TestEnvironment';
 

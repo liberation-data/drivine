@@ -34,6 +34,6 @@ export class PostgresConnectionProvider implements ConnectionProvider {
             from pg_stat_activity
             where pid = pg_backend_pid()`;
         const result = await client.query(statement);
-        client['sessionId'] = result.rows[0].sid;
+        Object.assign(client, { sessionId: result.rows[0].sid });
     }
 }

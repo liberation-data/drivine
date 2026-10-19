@@ -147,7 +147,6 @@ export function nodeDocument(alias: string): string {
     );
 }
 
-/** A predicate that holds when the node row `alias` carries every one of the labels. */
 /**
  * The hint every subquery over related nodes carries. Oracle 23 coalesces two such subqueries ORed together into one,
  * and rewrites the second's label test as a multivalue index lookup that, evaluated as a filter, misses nodes with more
@@ -155,9 +154,20 @@ export function nodeDocument(alias: string): string {
  */
 export const RELATED_SUBQUERY = 'SELECT /*+ NO_COALESCE_SQ */ 1';
 
+/**
+ * A predicate that holds when the node row `alias` carries every one of the labels. A label may come from data (a
+ * `@NodeLabels` filter's value, a search's partition label): it is escaped as `jsonKey` escapes a name, the backslash
+ * first, for the JSON path's string and then the SQL literal around it.
+ */
 export function hasLabels(alias: string, labels: string[]): string {
     return labels
-        .map((it) => `JSON_EXISTS(${alias}.labels, '$?(@ == "${it.replace(/'/g, "''").replace(/"/g, '\\"')}")')`)
+        .map(
+            (it) =>
+                `JSON_EXISTS(${alias}.labels, '$?(@ == "${it
+                    .replace(/\\/g, '\\\\')
+                    .replace(/"/g, '\\"')
+                    .replace(/'/g, "''")}")')`
+        )
         .join(' AND ');
 }
 

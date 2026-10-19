@@ -31,7 +31,7 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
         const session = this.driver.session({
             database: this.database
         });
-        session['sessionId'] = shortId.rnd();
+        Object.assign(session, { sessionId: shortId.rnd() });
         const connection = new Neo4jConnection(session, new Neo4jResultMapper());
         return Promise.resolve(connection);
     }

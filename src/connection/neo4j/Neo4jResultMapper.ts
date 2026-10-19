@@ -46,7 +46,7 @@ export class Neo4jResultMapper extends GraphResultMapper {
     }
 
     private recordToNative(rec: any): any {
-        const out = {};
+        const out: Record<string, any> = {};
         rec.keys.forEach((key: string, index: number) => {
             out[key] = rec._fields[index];
         });
@@ -58,7 +58,7 @@ export class Neo4jResultMapper extends GraphResultMapper {
     }
 
     private mapObj(fn: Function, obj: any): any {
-        const out = {};
+        const out: Record<string, any> = {};
         Object.keys(obj).forEach((key) => {
             out[key] = fn(obj[key]);
         });

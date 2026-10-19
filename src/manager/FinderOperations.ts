@@ -1,6 +1,5 @@
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import * as assert from 'assert';
 import { DrivineError } from '@/DrivineError';
 
 export class FinderOperations {

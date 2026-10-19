@@ -52,7 +52,10 @@
         "complexity": ["error", { "max": 12 }],
         "max-classes-per-file": "error",
 
-        "@typescript-eslint/ban-types": ["off"],
+        // typescript-eslint 8 split ban-types into these three.
+        "@typescript-eslint/no-unsafe-function-type": ["off"],
+        "@typescript-eslint/no-wrapper-object-types": ["off"],
+        "@typescript-eslint/no-empty-object-type": ["off"],
         // Need to have camelcase off because off our legacy snake case for API
         "@typescript-eslint/camelcase": ["off"],
         "@typescript-eslint/consistent-type-assertions": "off",
@@ -132,7 +135,8 @@
         "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
         "@typescript-eslint/no-use-before-define": ["off"],
         "@typescript-eslint/no-useless-constructor": ["error"],
-        "@typescript-eslint/no-var-requires": ["off"],
+        // no-var-requires, in typescript-eslint 8.
+        "@typescript-eslint/no-require-imports": ["off"],
         "@typescript-eslint/prefer-for-of": ["error"],
         "@typescript-eslint/prefer-function-type": ["error"],
         "@typescript-eslint/prefer-string-starts-ends-with": ["error"],

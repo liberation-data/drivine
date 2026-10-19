@@ -6,7 +6,6 @@ import { TransactionContextMiddleware } from '@/transaction/TransactionContextMi
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { cypherStatement, CypherStatement, sqlStatement, SqlStatement } from '@/query/Statement';
-import { Cacheable } from 'typescript-cacheable';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { PersistenceManager } from '@/manager/PersistenceManager';
