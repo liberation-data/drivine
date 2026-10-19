@@ -1,0 +1,25 @@
+# Lints, builds and tests Drivine on every push to master and every pull request. The tests run on test containers
+# (see TEST_CONTAINERS.md): Neo4j, Memgraph, FalkorDB and Postgres. Oracle, whose image is large, runs only when
+# ORACLE_TESTS=true, which CI leaves unset.
+name: CI
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 24
+                  cache: npm
+            - run: npm ci
+            - run: npm run lint:ci
+            - run: npm run build
+            - name: The built package loads
+              run: node -e 'require("./dist/index.js"); require("./dist/testing/index.js")'
+            - run: npm test
