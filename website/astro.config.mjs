@@ -7,10 +7,9 @@ import { readFileSync } from 'node:fs';
 // Written by scripts/import-readmes.mjs, which `npm run dev` and `npm run build` run first.
 const sidebar = JSON.parse(readFileSync(new URL('./src/generated/sidebar.json', import.meta.url), 'utf8'));
 
-// Served by GitHub Pages at liberation-data.github.io/drivine. For drivine.org, set site to it and base to '/'.
+// Served by GitHub Pages at drivine.org; liberation-data.github.io/drivine redirects there.
 export default defineConfig({
-    site: 'https://liberation-data.github.io',
-    base: '/drivine',
+    site: 'https://drivine.org',
     integrations: [
         starlight({
             title: 'Drivine',
