@@ -12,5 +12,8 @@
         "@astrojs/starlight": "^0.42.6",
         "astro": "^7.3.8",
         "starlight-sidebar-topics": "^0.9.0"
+    },
+    "overrides": {
+        "postcss-selector-parser": "^7.1.6"
     }
 }
