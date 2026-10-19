@@ -5,6 +5,7 @@
         "test",
         "sample",
         "**/*spec.ts",
-        "dist"
+        "dist",
+        "website"
     ]
 }

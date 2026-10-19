@@ -1,0 +1,48 @@
+# Builds the website (website/) and publishes it to GitHub Pages. Its docs are generated from this repository's
+# README and drivine4j's, so it also runs daily, to pick up drivine4j's changes.
+name: Website
+
+on:
+    push:
+        branches: [master]
+        paths: ['website/**', 'README.md', '.github/workflows/website.yml']
+    schedule:
+        - cron: '17 3 * * *'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+concurrency:
+    group: pages
+    cancel-in-progress: false
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: npm
+                  cache-dependency-path: website/package-lock.json
+            - run: npm ci
+              working-directory: website
+            - run: npm run build
+              working-directory: website
+            - uses: actions/upload-pages-artifact@v3
+              with:
+                  path: website/dist
+
+    deploy:
+        needs: build
+        runs-on: ubuntu-latest
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - id: deployment
+              uses: actions/deploy-pages@v4

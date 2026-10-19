@@ -1,0 +1,16 @@
+{
+    "name": "drivine-website",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "import-readmes": "node scripts/import-readmes.mjs",
+        "dev": "npm run import-readmes && astro dev",
+        "build": "npm run import-readmes && astro build",
+        "preview": "astro preview"
+    },
+    "dependencies": {
+        "@astrojs/starlight": "^0.42.6",
+        "astro": "^7.3.8",
+        "starlight-sidebar-topics": "^0.9.0"
+    }
+}
