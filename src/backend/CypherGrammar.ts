@@ -1,6 +1,7 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { itemName } from '@/schema/SchemaSpecs';
+import { quoteString } from '@/backend/Cypher';
 
 /** The full-text index Drivine makes over a label's properties (see fullTextIndex), by the name it gives it. */
 function fullTextIndexName(label: string, properties: string[]): string {
@@ -89,13 +90,14 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
     keysetNullGuard: true,
     vectorValue: plainVector,
     fullTextSearch: (label, properties) =>
-        `CALL db.index.fulltext.queryNodes('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
+        `CALL db.index.fulltext.queryNodes(${quoteString(
+            fullTextIndexName(label, properties)
+        )}, $_text) YIELD node, score`,
     // Neo4j's score is already (1 + cos) / 2, or 1 / (1 + d²).
     vectorSearch: (label, property) => ({
-        call: `CALL db.index.vector.queryNodes('${vectorIndexName(
-            label,
-            property
-        )}', $_k, $_vector) YIELD node AS n, score AS _raw`,
+        call: `CALL db.index.vector.queryNodes(${quoteString(
+            vectorIndexName(label, property)
+        )}, $_k, $_vector) YIELD node AS n, score AS _raw`,
         score: '_raw'
     }),
     existenceCheck: existsSubquery,
@@ -109,15 +111,14 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     keysetNullGuard: false,
     vectorValue: plainVector,
     fullTextSearch: (label, properties) =>
-        `CALL text_search.search_all('${fullTextIndexName(label, properties)}', $_text) YIELD node, score`,
+        `CALL text_search.search_all(${quoteString(fullTextIndexName(label, properties))}, $_text) YIELD node, score`,
     // Memgraph's similarity is the cosine itself, or already 1 / (1 + d²). Its vector search returns nodes deleted since
     // its last garbage collection, and any read of one fails ('Trying to access labels on a deleted node') until it
     // collects: FREE MEMORY forces it (memgraph/memgraph#4975).
     vectorSearch: (label, property, similarity) => ({
-        call: `CALL vector_search.search('${vectorIndexName(
-            label,
-            property
-        )}', $_k, $_vector) YIELD node AS n, similarity AS _raw`,
+        call: `CALL vector_search.search(${quoteString(
+            vectorIndexName(label, property)
+        )}, $_k, $_vector) YIELD node AS n, similarity AS _raw`,
         score: similarity === 'COSINE' ? '(1 + _raw) / 2.0' : '_raw'
     }),
     existenceCheck: existsSubquery,
@@ -140,10 +141,12 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
     // FalkorDB indexes only its own vector type: a list stored as a list is never found by a vector search.
     vectorValue: (expression: string) => `vecf32(${expression})`,
     // One full-text index to a label, found by the label.
-    fullTextSearch: (label) => `CALL db.idx.fulltext.queryNodes('${label}', $_text) YIELD node, score`,
+    fullTextSearch: (label) => `CALL db.idx.fulltext.queryNodes(${quoteString(label)}, $_text) YIELD node, score`,
     // FalkorDB's score is a distance: 1 - cos, or d.
     vectorSearch: (label, property, similarity) => ({
-        call: `CALL db.idx.vector.queryNodes('${label}', '${property}', $_k, vecf32($_vector)) YIELD node AS n, score AS _raw`,
+        call: `CALL db.idx.vector.queryNodes(${quoteString(label)}, ${quoteString(
+            property
+        )}, $_k, vecf32($_vector)) YIELD node AS n, score AS _raw`,
         score: similarity === 'COSINE' ? '1 - _raw / 2.0' : '1.0 / (1 + _raw * _raw)'
     }),
     existenceCheck: (pattern: string) => `size([${pattern} | 1]) > 0`,

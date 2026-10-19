@@ -7,6 +7,12 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
+/**
+ * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
+ * give the object it is copied onto a prototype of the store's choosing.
+ */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /** Property names beginning with this are Drivine's own, and are never mapped onto an object. */
 export const RESERVED_PREFIX = '__drivine.';
 
@@ -117,6 +123,9 @@ export class GraphObjectMapper {
         ]);
         for (const [name, value] of Object.entries(source)) {
             const bag = fragment.propertyBags.find((it) => !it.flat && name.startsWith(it.namespace));
+            if (FORBIDDEN_KEYS.has(bag ? name.slice(bag.namespace.length) : name)) {
+                continue;
+            }
             if (bag) {
                 bags[bag.field][name.slice(bag.namespace.length)] = value;
             } else if (flat && !name.startsWith(RESERVED_PREFIX) && !known.has(name)) {
@@ -167,6 +176,7 @@ export class GraphObjectMapper {
             const field = byGraphName.get(name) ?? (mapping.graphProperties.has(name) ? undefined : name);
             if (
                 field === undefined ||
+                FORBIDDEN_KEYS.has(field) ||
                 mapping.transientFields.has(field) ||
                 (value == null && mapping.defaults.has(field))
             ) {
