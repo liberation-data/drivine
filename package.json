@@ -29,7 +29,7 @@
     "main": "index.js",
     "types": "index.d.ts",
     "scripts": {
-        "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && node scripts/rewrite-paths.js dist && cp package.json dist/ && cp README.md dist/",
+        "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && node scripts/rewrite-paths.js dist && cp package.json dist/ && cp README.md LICENSE dist/",
         "format": "npm run format:src && npm run format:test",
         "format:src": "prettier --write \"src/**/*.ts\"",
         "format:src:check": "prettier --check \"src/**/*.ts\"",
