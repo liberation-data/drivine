@@ -33,6 +33,9 @@ jobs:
               working-directory: website
             - run: npm run build
               working-directory: website
+              env:
+                  # For the repositories' star counts, without the anonymous API's rate limit.
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             - uses: actions/upload-pages-artifact@v5
               with:
                   path: website/dist

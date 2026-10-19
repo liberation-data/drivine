@@ -16,7 +16,8 @@ export default defineConfig({
             description: 'Graph database client for TypeScript and the JVM.',
             logo: { light: './src/assets/cow-black.png', dark: './src/assets/cow-white.png' },
             favicon: '/favicon.ico',
-            social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/liberation-data/drivine' }],
+            // The header's GitHub link follows the open docs: Drivine's repository, or drivine4j's.
+            components: { SocialIcons: './src/components/SocialIcons.astro' },
             customCss: ['./src/styles/custom.css'],
             // drivine4j's README marks Groovy build scripts as gradle.
             expressiveCode: { shiki: { langAlias: { gradle: 'groovy' } } },
