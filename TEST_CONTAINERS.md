@@ -10,9 +10,19 @@ No setup is needed beyond Docker running on the host.
 npm test
 ```
 
-The containers start once per run, in Jest's global setup, before any test file. The datasource's host and port, and the
-user, password and database where the container fixes them, are rewritten to reach the container, and the workers Jest
-forks inherit them. They stop in the global teardown; Testcontainers' reaper removes them should the run die.
+`npm test` starts the containers once, makes the Oracle graph's tables, seeds the default Neo4j with moon town (`test/moon-town.cypher`: the metros,
+routes and employee the repository and end-to-end tests read), and runs the suites in three stages, since they share
+each store:
+
+1. everything else, in parallel;
+2. the schema suites, one at a time: schema changes in parallel wait on each other's locks;
+3. the sample app, alone: it clears labels (`Person`, `Organization`, …) other suites write.
+
+Each datasource's host and port, and the user, password and database where the container fixes them, are rewritten to
+reach its container. The containers stop at the end; Testcontainers' reaper removes them should the run die.
+
+`npm test -- <path or pattern>` runs Jest on just those tests, in one stage, as `npx jest` does. Jest's global setup then
+starts the containers and seeds them itself. Running everything that way, outside the stages, makes suites collide.
 
 ## Using a Local Database Instance
 
@@ -22,7 +32,7 @@ beside the flag in `.env.test.local`, which git ignores and which wins over `.en
 
 | Backend  | Flag                      | Settings it uses as they are                                    |
 |----------|---------------------------|-----------------------------------------------------------------|
-| Neo4j    | `USE_LOCAL_NEO4J=true`    | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD` |
+| Neo4j    | `USE_LOCAL_NEO4J=true`    | `DATABASE_*` and `TRAFFIC_DATABASE_*`                           |
 | Memgraph | `USE_LOCAL_MEMGRAPH=true` | `MEMGRAPH_DATABASE_HOST`, `MEMGRAPH_DATABASE_PORT`              |
 | FalkorDB | `USE_LOCAL_FALKORDB=true` | `FALKORDB_DATABASE_HOST`, `FALKORDB_DATABASE_PORT`              |
 | Postgres | `USE_LOCAL_POSTGRES=true` | `POSTGRES_DATABASE_*`                                           |
@@ -32,7 +42,10 @@ beside the flag in `.env.test.local`, which git ignores and which wins over `.en
 # .env.test.local
 USE_LOCAL_NEO4J=true
 DATABASE_PORT=17687
+TRAFFIC_DATABASE_PORT=17687
 ```
+
+A local Neo4j is seeded with moon town too. Every statement merges, so seeding it again changes nothing.
 
 Each type is chosen alone: a local Neo4j can run beside a FalkorDB container. `<TYPE>_TEST_IMAGE` (`NEO4J_TEST_IMAGE`,
 `ORACLE_TEST_IMAGE`, …) picks another image for a type's container.
@@ -51,7 +64,7 @@ The Oracle suites run only with `ORACLE_TESTS=true`, since the image is large an
 memory. Without it the global setup drops the `ORACLE` datasource, and those suites are skipped.
 
 ```bash
-ORACLE_TESTS=true npm test -- oracle
+ORACLE_TESTS=true npm test
 ```
 
 The container is the regular image and not a slim one, which has no Oracle Text: the full-text tests then search
