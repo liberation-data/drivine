@@ -1,6 +1,6 @@
 # The Drivine website
 
-The site at [liberation-data.github.io/drivine](https://liberation-data.github.io/drivine/), built with
+The site at [drivine.org](https://drivine.org/), built with
 [Starlight](https://starlight.astro.build) and published by `.github/workflows/website.yml`.
 
 - `src/pages/index.astro`: the landing page.
@@ -10,7 +10,7 @@ The site at [liberation-data.github.io/drivine](https://liberation-data.github.i
 
 ```bash
 npm install
-npm run dev        # imports the READMEs, then serves the site at localhost:4321/drivine
+npm run dev        # imports the READMEs, then serves the site at localhost:4321
 npm run build      # the same, into dist/
 ```
 
