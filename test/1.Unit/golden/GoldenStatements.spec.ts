@@ -1,6 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+    FALKORDB_SCHEMA,
+    falkorDbVectorOptions,
+    fullTextIndex,
+    MEMGRAPH_SCHEMA,
+    NEO4J_SCHEMA,
+    neo4jVectorOptions,
+    rangeIndex,
+    SchemaGrammar,
+    uniquenessConstraint,
+    vectorIndex,
     avg,
     count,
     hop,
@@ -298,11 +308,50 @@ function saves(
     return cases;
 }
 
+/** The schema DDL drivine-python's golden test writes, written alike, for each engine. */
+function schema(grammar: SchemaGrammar): Record<string, string> {
+    const range = rangeIndex('Session', ['lastActivityAt', 'sessionId']);
+    const unique = uniquenessConstraint('Person', 'uuid');
+    const pair = uniquenessConstraint('Person', ['email', 'tenant']);
+    const vector = vectorIndex('Chunk', 'embedding', 1536, 'COSINE', {
+        hnswM: 16,
+        hnswEfConstruction: 200,
+        engineOptions: [
+            neo4jVectorOptions({ quantizationEnabled: false }),
+            falkorDbVectorOptions({ efRuntime: 10, hnswM: 32 })
+        ]
+    });
+    const plain = vectorIndex('Chunk', 'summary', 384, 'EUCLIDEAN');
+    const text = fullTextIndex('Article', ['title', 'body']);
+    const single = fullTextIndex('Article', 'title');
+    const shown = (statements: unknown[]): string =>
+        statements.map((it) => (typeof it === 'string' ? it : JSON.stringify(it))).join('\n');
+    return {
+        'schema.listRanges': grammar.listRanges.statement,
+        'schema.listUniques': grammar.listUniques.statement,
+        'schema.listVectors': grammar.listVectors.statement,
+        'schema.listFullTexts': grammar.listFullTexts.statement,
+        'schema.createRange': shown(grammar.createRange(range)),
+        'schema.dropRange': shown(grammar.dropRange(range)),
+        'schema.createUnique': shown(grammar.createUnique(unique)),
+        'schema.createUnique.pair': shown(grammar.createUnique(pair)),
+        'schema.dropUnique': shown(grammar.dropUnique(pair)),
+        'schema.createVector': shown(grammar.createVector(vector)),
+        'schema.createVector.plain': shown(grammar.createVector(plain)),
+        'schema.dropVector': shown(grammar.dropVector(vector)),
+        'schema.createFullText': shown(grammar.createFullText(text)),
+        'schema.createFullText.single': shown(grammar.createFullText(single)),
+        'schema.dropFullText': shown(grammar.dropFullText(text)),
+        'schema.dropFullText.named': shown(grammar.dropFullText(text, 'given_name')),
+        'schema.conflicts': grammar.conflicts(pair, 10)
+    };
+}
+
 describe('Golden statements', () => {
     const written = {
-        NEO4J: statements(NEO4J_GRAMMAR),
-        MEMGRAPH: statements(MEMGRAPH_GRAMMAR),
-        FALKORDB: statements(FALKORDB_GRAMMAR)
+        NEO4J: { ...statements(NEO4J_GRAMMAR), ...schema(NEO4J_SCHEMA) },
+        MEMGRAPH: { ...statements(MEMGRAPH_GRAMMAR), ...schema(MEMGRAPH_SCHEMA) },
+        FALKORDB: { ...statements(FALKORDB_GRAMMAR), ...schema(FALKORDB_SCHEMA) }
     };
 
     it('should match the statements drivine-python checks against', () => {
