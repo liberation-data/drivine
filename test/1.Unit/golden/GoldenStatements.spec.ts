@@ -3,18 +3,21 @@ import * as path from 'path';
 import {
     CascadeType,
     CypherBackend,
+    Direction,
     CypherGrammar,
     FALKORDB_GRAMMAR,
     GraphStatement,
     MEMGRAPH_GRAMMAR,
     ModelRegistry,
     NEO4J_GRAMMAR,
+    RelateMode,
     RemovedTargets,
     TargetModel
 } from '@liberation-data/drivine';
 import {
     ActorStats,
     Customer,
+    Dog,
     Location,
     ActorWithLatestMovie,
     ActorWithMovies,
@@ -118,7 +121,47 @@ function saves(
         'PersonCareer.delete.all': backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ALL),
         'LocationHierarchy.delete.all': backend.delete(view(LocationHierarchy), undefined, CascadeType.DELETE_ALL),
         'Person.heldProperties': backend.heldProperties(registry.fragment(Person)),
-        'Person.foundStamp': backend.foundStamp(registry.fragment(Person))
+        'Person.foundStamp': backend.foundStamp(registry.fragment(Person)),
+        'saveAll.fragments': backend.fragmentBatch(
+            [
+                { model: registry.fragment(Person), objects: [ada(), make(Person, { uuid: 'p2', name: 'Grace' })] },
+                { model: registry.fragment(Organization), objects: [make(Organization, { uuid: 'o1', name: 'Acme' })] }
+            ],
+            {}
+        ),
+        'Person.patch': backend.patchOne(registry.fragment(Person)),
+        'Person.patch.where': backend.patchOne(registry.fragment(Person), 'n.name = $name'),
+        'Person.patchAll': backend.patchMany(registry.fragment(Person)),
+        'edges.relate': backend.relate(
+            { model: registry.fragment(Person), id: 'p1' },
+            { model: registry.fragment(Organization), id: 'o1' },
+            'WORKS_FOR',
+            { startDate: '2020', role: 'Lead', note: undefined },
+            RelateMode.MERGE
+        ),
+        'edges.relate.create': backend.relate(
+            { model: registry.fragment(Person), id: 'p1' },
+            { model: registry.fragment(Person), id: 'p2', labels: ['Admin'] },
+            'KNOWS',
+            {},
+            RelateMode.CREATE
+        ),
+        'edges.unrelate': backend.unrelate(
+            { model: registry.fragment(Person), id: 'p1' },
+            { model: registry.fragment(Organization), id: 'o1' },
+            'WORKS_FOR'
+        ),
+        'edges.unrelateAll': backend.unrelateAll(
+            { model: registry.fragment(Person), id: 'p1' },
+            'KNOWS',
+            Direction.INCOMING
+        ),
+        'edges.related': backend.related(
+            { model: registry.fragment(Person), id: 'p1' },
+            'OWNS',
+            Direction.OUTGOING,
+            registry.fragment(Dog)
+        )
     };
     if (!grammar.orphanDeleteLimit) {
         cases['PersonCareer.delete.orphans'] = backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ORPHAN);
