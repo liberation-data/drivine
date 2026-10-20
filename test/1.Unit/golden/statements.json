@@ -47,7 +47,10 @@
     "query.PersonCareer.quantified": "MATCH (n:Person)\nWHERE (EXISTS { MATCH (n)-[_r1:WORKS_FOR]->(_x0:Organization) WHERE (_r1.role = $_q0 AND _x0.name = $_q1) } OR NOT EXISTS { MATCH (n)-[_r3:WORKS_FOR]->(_x2:Organization) WHERE _r3.role = $_q2 })\nRETURN {root: {props: properties(n), labels: labels(n)}, rels: {employmentHistory: [(n)-[r1:WORKS_FOR]->(t1:Organization) | {rel: properties(r1), target: {props: properties(t1), labels: labels(t1)}}]}} AS result\nORDER BY n.name",
     "query.Customer.bags": "MATCH (n:Customer)\nWHERE (n.`metadata.source` = $_q0 AND n.`metadata.score` >= $_q1 AND n.fullName STARTS WITH $_q2 AND n:Gold AND $_q3 IN n.tags AND toLower(n.fullName) CONTAINS $_q4 AND n.LEGACY IS NULL)\nRETURN {props: properties(n), labels: labels(n)} AS result",
     "query.Animal.labels": "MATCH (n:Animal)\nWHERE (n:Puppy:Dog:Animal OR any(_l IN labels(n) WHERE _l IN $_q0))\nRETURN {props: properties(n), labels: labels(n)} AS result",
-    "query.Person.count": "MATCH (n:Person)\nWHERE toLower(n.name) = $_q0\nRETURN count(n) AS count"
+    "query.Person.count": "MATCH (n:Person)\nWHERE toLower(n.name) = $_q0\nRETURN count(n) AS count",
+    "groups.byProperty": "MATCH (n:Movie)\nWITH n.released AS k0, count(n) AS a0\nRETURN {k0: k0, a0: a0} AS row\nORDER BY k0 ASC",
+    "groups.aggregates": "MATCH (n:Movie)\nWHERE n.released > $from\nWITH n.released AS k0, count(n) AS a0, sum(CASE WHEN n.released < 2000 THEN 1 ELSE 0 END) AS a1, coalesce(sum(CASE WHEN n.released > 2000 THEN n.released END), 0) AS a2, avg(n.released) AS a3, max(n.released) AS a4\nWHERE a0 >= $_having0\nRETURN {k0: k0, a0: a0, a1: a1, a2: a2, a3: a3, a4: a4} AS row\nORDER BY a0 DESC, k0 ASC\nSKIP 1\nLIMIT 2",
+    "groups.byPath": "MATCH (n:Movie)\nMATCH (n)-[:DIRECTED_BY]->(k1:Director)\nWITH DISTINCT n, k1\nWITH n.released AS k0, k1, count(n) AS a0\nRETURN {k0: k0, k1: {props: properties(k1), labels: labels(k1)}, a0: a0} AS row\nORDER BY k0 DESC, k1.uuid ASC"
   },
   "MEMGRAPH": {
     "Person.loadAll": "MATCH (n:Person)\nRETURN {props: properties(n), labels: labels(n)} AS result",
@@ -96,7 +99,10 @@
     "query.PersonCareer.quantified": "MATCH (n:Person)\nWHERE (EXISTS { MATCH (n)-[_r1:WORKS_FOR]->(_x0:Organization) WHERE (_r1.role = $_q0 AND _x0.name = $_q1) } OR NOT EXISTS { MATCH (n)-[_r3:WORKS_FOR]->(_x2:Organization) WHERE _r3.role = $_q2 })\nRETURN {root: {props: properties(n), labels: labels(n)}, rels: {employmentHistory: [(n)-[r1:WORKS_FOR]->(t1:Organization) | {rel: properties(r1), target: {props: properties(t1), labels: labels(t1)}}]}} AS result\nORDER BY n.name",
     "query.Customer.bags": "MATCH (n:Customer)\nWHERE (n.`metadata.source` = $_q0 AND n.`metadata.score` >= $_q1 AND n.fullName STARTS WITH $_q2 AND n:Gold AND $_q3 IN n.tags AND toLower(n.fullName) CONTAINS $_q4 AND n.LEGACY IS NULL)\nRETURN {props: properties(n), labels: labels(n)} AS result",
     "query.Animal.labels": "MATCH (n:Animal)\nWHERE (n:Puppy:Dog:Animal OR any(_l IN labels(n) WHERE _l IN $_q0))\nRETURN {props: properties(n), labels: labels(n)} AS result",
-    "query.Person.count": "MATCH (n:Person)\nWHERE toLower(n.name) = $_q0\nRETURN count(n) AS count"
+    "query.Person.count": "MATCH (n:Person)\nWHERE toLower(n.name) = $_q0\nRETURN count(n) AS count",
+    "groups.byProperty": "MATCH (n:Movie)\nWITH n.released AS k0, count(n) AS a0\nRETURN {k0: k0, a0: a0} AS row\nORDER BY k0 ASC",
+    "groups.aggregates": "MATCH (n:Movie)\nWHERE n.released > $from\nWITH n.released AS k0, count(n) AS a0, sum(CASE WHEN n.released < 2000 THEN 1 ELSE 0 END) AS a1, coalesce(sum(CASE WHEN n.released > 2000 THEN n.released END), 0) AS a2, avg(n.released) AS a3, max(n.released) AS a4\nWHERE a0 >= $_having0\nRETURN {k0: k0, a0: a0, a1: a1, a2: a2, a3: a3, a4: a4} AS row\nORDER BY a0 DESC, k0 ASC\nSKIP 1\nLIMIT 2",
+    "groups.byPath": "MATCH (n:Movie)\nMATCH (n)-[:DIRECTED_BY]->(k1:Director)\nWITH DISTINCT n, k1\nWITH n.released AS k0, k1, count(n) AS a0\nRETURN {k0: k0, k1: {props: properties(k1), labels: labels(k1)}, a0: a0} AS row\nORDER BY k0 DESC, k1.uuid ASC"
   },
   "FALKORDB": {
     "Person.loadAll": "MATCH (n:Person)\nRETURN {props: properties(n), labels: labels(n)} AS result",
@@ -146,6 +152,9 @@
     "query.PersonCareer.quantified": "MATCH (n:Person)\nWHERE (any(_x0_e IN [(n)-[_r1:WORKS_FOR]->(_x0:Organization) | {node: _x0, rel: properties(_r1)}] WHERE any(_x0 IN [_x0_e.node] WHERE (_x0_e.rel.role = $_q0 AND _x0.name = $_q1))) OR NOT any(_x2_e IN [(n)-[_r3:WORKS_FOR]->(_x2:Organization) | {node: _x2, rel: properties(_r3)}] WHERE any(_x2 IN [_x2_e.node] WHERE _x2_e.rel.role = $_q2)))\nCALL { WITH n OPTIONAL MATCH (n)-[r1:WORKS_FOR]->(t1:Organization) RETURN collect(CASE WHEN t1 IS NOT NULL THEN {rel: properties(r1), target: {props: properties(t1), labels: labels(t1)}} END) AS v1 }\nRETURN {root: {props: properties(n), labels: labels(n)}, rels: {employmentHistory: v1}} AS result\nORDER BY n.name",
     "query.Customer.bags": "MATCH (n:Customer)\nWHERE (n.`metadata.source` = $_q0 AND n.`metadata.score` >= $_q1 AND n.fullName STARTS WITH $_q2 AND n:Gold AND $_q3 IN n.tags AND toLower(n.fullName) CONTAINS $_q4 AND n.LEGACY IS NULL)\nRETURN {props: properties(n), labels: labels(n)} AS result",
     "query.Animal.labels": "MATCH (n:Animal)\nWHERE (n:Puppy:Dog:Animal OR any(_l IN labels(n) WHERE _l IN $_q0))\nRETURN {props: properties(n), labels: labels(n)} AS result",
-    "query.Person.count": "MATCH (n:Person)\nWHERE toLower(n.name) = $_q0\nRETURN count(n) AS count"
+    "query.Person.count": "MATCH (n:Person)\nWHERE toLower(n.name) = $_q0\nRETURN count(n) AS count",
+    "groups.byProperty": "MATCH (n:Movie)\nWITH n.released AS k0, count(n) AS a0\nRETURN {k0: k0, a0: a0} AS row\nORDER BY k0 ASC",
+    "groups.aggregates": "MATCH (n:Movie)\nWHERE n.released > $from\nWITH n.released AS k0, count(n) AS a0, sum(CASE WHEN n.released < 2000 THEN 1 ELSE 0 END) AS a1, coalesce(sum(CASE WHEN n.released > 2000 THEN n.released END), 0) AS a2, avg(n.released) AS a3, max(n.released) AS a4\nWHERE a0 >= $_having0\nRETURN {k0: k0, a0: a0, a1: a1, a2: a2, a3: a3, a4: a4} AS row\nORDER BY a0 DESC, k0 ASC\nSKIP 1\nLIMIT 2",
+    "groups.byPath": "MATCH (n:Movie)\nMATCH (n)-[:DIRECTED_BY]->(k1:Director)\nWITH DISTINCT n, k1\nWITH n.released AS k0, k1, count(n) AS a0\nRETURN {k0: k0, k1: {props: properties(k1), labels: labels(k1)}, a0: a0} AS row\nORDER BY k0 DESC, k1.uuid ASC"
   }
 }

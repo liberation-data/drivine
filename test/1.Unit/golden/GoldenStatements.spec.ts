@@ -1,6 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+    avg,
+    count,
+    hop,
+    key,
+    max,
+    pathKey,
+    sum,
     above,
     anyOf,
     atMost,
@@ -25,6 +32,7 @@ import {
 import {
     ActorStats,
     Customer,
+    Director,
     Dog,
     Location,
     ActorWithLatestMovie,
@@ -72,7 +80,50 @@ function statements(grammar: CypherGrammar): Record<string, string> {
     };
     Object.assign(cases, saves(grammar, registry, backend));
     Object.assign(cases, queries(registry, backend));
+    Object.assign(cases, groups(registry, backend));
     return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
+}
+
+/** The grouped reads drivine-python's golden test writes, written alike. */
+function groups(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
+    const movie = registry.fragment(Movie);
+    const directors = new Map([['director', registry.fragment(Director)]]);
+    return {
+        'groups.byProperty': backend.groups(
+            movie,
+            { keys: { year: key('released') }, aggregates: { films: count() } },
+            new Map()
+        ),
+        'groups.aggregates': backend.groups(
+            movie,
+            {
+                where: 'n.released > $from',
+                bindings: { from: 1990 },
+                keys: { year: key('released') },
+                aggregates: {
+                    films: count(),
+                    nineties: count('n.released < 2000'),
+                    years: sum('released', 'n.released > 2000'),
+                    average: avg('released'),
+                    last: max('released')
+                },
+                having: [['films', 'gte', 1]],
+                orderBy: [['films', 'desc']],
+                skip: 1,
+                limit: 2
+            },
+            new Map()
+        ),
+        'groups.byPath': backend.groups(
+            movie,
+            {
+                keys: { year: key('released'), director: pathKey(Director, [hop('DIRECTED_BY')]) },
+                aggregates: { films: count() },
+                orderBy: [['year', 'desc']]
+            },
+            directors
+        )
+    };
 }
 
 /** The queries drivine-python's golden test writes, written alike: each load as its statement. */
