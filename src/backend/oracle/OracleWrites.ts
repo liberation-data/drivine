@@ -126,7 +126,10 @@ export class OracleWrites {
         });
         reads('after');
         const result = groups
-            .map((_, i) => `JSON_OBJECT('before' VALUE JSON(v_before${i}), 'after' VALUE JSON(v_after${i}))`)
+            .map(
+                (_, i) =>
+                    `JSON_OBJECT('before' VALUE JSON(v_before${i}), 'after' VALUE JSON(v_after${i}) RETURNING JSON)`
+            )
             .join(', ');
         body.push(
             `OPEN c FOR SELECT JSON_OBJECT('groups' VALUE JSON_ARRAY(${result} RETURNING JSON) RETURNING CLOB) AS "result:json" FROM dual;`

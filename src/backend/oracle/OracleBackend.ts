@@ -158,9 +158,16 @@ END;`);
         return new OracleSaveBuilder(this.graph, registry).build(target, object, options, createOnly);
     }
 
+    /**
+     * Re-encoded with JSON_TRANSFORM: a document updated in place, as every save updates one, comes back as OSON version
+     * 2, which the thin drivers can't read (oracle/node-oracledb#1796, oracle/python-oracledb#622).
+     */
     heldProperties(model: FragmentModel): GraphStatement {
         return new GraphStatement(
-            [`SELECT ${ROW_ALIAS}.props AS "props"`, this.from(model, this.idPredicate(model))].join('\n')
+            [
+                `SELECT JSON_TRANSFORM(${ROW_ALIAS}.props, KEEP '$') AS "props"`,
+                this.from(model, this.idPredicate(model))
+            ].join('\n')
         );
     }
 

@@ -28,6 +28,11 @@ import {
     times,
     CascadeType,
     CypherBackend,
+    DatabaseType,
+    GraphBackend,
+    OracleBackend,
+    OracleGraph,
+    schemaGrammarFor,
     Direction,
     CypherGrammar,
     FALKORDB_GRAMMAR,
@@ -66,47 +71,80 @@ import {
  */
 const GOLDEN = path.join(__dirname, 'statements.json');
 
+/** A filter in the store's own language: Cypher over `n`, or SQL over the node row `n` on Oracle. */
+const CYPHER_WHERE = 'n.name = $name';
+const SQL_WHERE = "JSON_VALUE(n.props, '$.name') = $name";
+
 function statements(grammar: CypherGrammar): Record<string, string> {
+    return written(new CypherBackend(grammar), CYPHER_WHERE, !grammar.orphanDeleteLimit);
+}
+
+/** Oracle's statements: the same cases, a filter in SQL, and the searches through an index's table too. */
+function oracleStatements(): Record<string, string> {
+    const backend = new OracleBackend(new OracleGraph());
     const registry = new ModelRegistry();
-    const backend = new CypherBackend(grammar);
+    const person: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Person) };
+    return {
+        ...written(backend, SQL_WHERE, true),
+        'Person.nearest.indexed': backend.nearest(person, {
+            label: 'Person',
+            property: 'embedding',
+            similarity: 'EUCLIDEAN',
+            k: 20,
+            limit: 5,
+            table: 'drivine_v_Personembedding_1a2b3c'
+        }).text,
+        'Person.matching.indexed': backend.matching(person, {
+            label: 'Person',
+            properties: ['name', 'bio'],
+            text: 'graph -relational',
+            limit: 10,
+            table: 'drivine_t_Personnamebio_4d5e6f'
+        }).text,
+        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text
+    };
+}
+
+function written(backend: GraphBackend, where: string, orphans: boolean): Record<string, string> {
+    const registry = new ModelRegistry();
     const fragment = registry.fragment.bind(registry);
     const view = registry.view.bind(registry);
     const cases: Record<string, GraphStatement> = {
         'Person.loadAll': backend.loadAllFragments(fragment(Person)),
-        'Person.loadAll.where': backend.loadAllFragments(fragment(Person), 'n.name = $name'),
+        'Person.loadAll.where': backend.loadAllFragments(fragment(Person), where),
         'Person.load': backend.loadFragment(fragment(Person)),
-        'Person.count': backend.countFragments(fragment(Person), 'n.name = $name'),
+        'Person.count': backend.countFragments(fragment(Person), where),
         'Puppy.loadAll': backend.loadAllFragments(fragment(Puppy)),
         'PersonCareer.loadAll': backend.loadAllViews(view(PersonCareer)),
         'PersonCareer.load': backend.loadView(view(PersonCareer)),
-        'PersonCareer.count': backend.countViews(view(PersonCareer), 'n.name = $name'),
+        'PersonCareer.count': backend.countViews(view(PersonCareer), where),
         'LocationHierarchy.load': backend.loadView(view(LocationHierarchy)),
         'LocationHierarchy.load.depth': backend.loadView(view(LocationHierarchy), { subLocations: 5 }),
         'LocationAncestors.load': backend.loadView(view(LocationAncestors)),
         'ActorStats.loadAll': backend.loadAllViews(view(ActorStats)),
-        'ActorWithMovies.loadAll.where': backend.loadAllViews(view(ActorWithMovies), 'n.name = $name'),
+        'ActorWithMovies.loadAll.where': backend.loadAllViews(view(ActorWithMovies), where),
         'ActorWithMovies.count': backend.countViews(view(ActorWithMovies)),
         'ActorWithLatestMovie.loadAll': backend.loadAllViews(view(ActorWithLatestMovie))
     };
-    Object.assign(cases, saves(grammar, registry, backend));
+    Object.assign(cases, saves(registry, backend, where, orphans));
     Object.assign(cases, queries(registry, backend));
     Object.assign(cases, groups(registry, backend));
-    Object.assign(cases, searches(registry, backend));
+    Object.assign(cases, searches(registry, backend, where));
     return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
 }
 
 /** The grouped reads drivine-python's golden test writes, written alike. */
-function searches(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
+function searches(registry: ModelRegistry, backend: GraphBackend, where: string): Record<string, GraphStatement> {
     const person: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Person) };
     const career: TargetModel = { kind: 'GRAPH_VIEW', model: registry.view(PersonCareer) };
     const vector = { label: 'Person', property: 'embedding', similarity: 'COSINE' as const, k: 5 };
-    const text = { label: 'Person', properties: ['name', 'bio'], limit: 10 };
+    const text = { label: 'Person', properties: ['name', 'bio'], text: 'graph database', limit: 10 };
     return {
         'Person.nearest': backend.nearest(person, vector),
         'Person.nearest.filtered': backend.nearest(person, {
             ...vector,
             similarity: 'EUCLIDEAN',
-            where: 'n.name = $name',
+            where,
             threshold: true,
             k: 20,
             limit: 5
@@ -116,7 +154,7 @@ function searches(registry: ModelRegistry, backend: CypherBackend): Record<strin
         'Person.matching.filtered': backend.matching(person, {
             ...text,
             properties: ['bio'],
-            where: 'n.name = $name',
+            where,
             threshold: true,
             limit: 3
         }),
@@ -124,7 +162,7 @@ function searches(registry: ModelRegistry, backend: CypherBackend): Record<strin
     };
 }
 
-function groups(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
+function groups(registry: ModelRegistry, backend: GraphBackend): Record<string, GraphStatement> {
     const movie = registry.fragment(Movie);
     const directors = new Map([['director', registry.fragment(Director)]]);
     return {
@@ -166,7 +204,7 @@ function groups(registry: ModelRegistry, backend: CypherBackend): Record<string,
 }
 
 /** The queries drivine-python's golden test writes, written alike: each load as its statement. */
-function queries(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
+function queries(registry: ModelRegistry, backend: GraphBackend): Record<string, GraphStatement> {
     const fragment = (type: any): TargetModel => ({ kind: 'NODE_FRAGMENT', model: registry.fragment(type) });
     const view = (type: any): TargetModel => ({ kind: 'GRAPH_VIEW', model: registry.view(type) });
     const load = (target: TargetModel, fn: (q: any) => any): GraphStatement => {
@@ -236,9 +274,10 @@ function queries(registry: ModelRegistry, backend: CypherBackend): Record<string
 const make = <T extends object>(type: new () => T, values: Partial<T>): T => Object.assign(new type(), values) as T;
 
 function saves(
-    grammar: CypherGrammar,
     registry: ModelRegistry,
-    backend: CypherBackend
+    backend: GraphBackend,
+    where: string,
+    orphans: boolean
 ): Record<string, GraphStatement> {
     const fragment = (type: any): TargetModel => ({ kind: 'NODE_FRAGMENT', model: registry.fragment(type) });
     const view = (type: any): TargetModel => ({ kind: 'GRAPH_VIEW', model: registry.view(type) });
@@ -284,8 +323,8 @@ function saves(
         }),
         'LocationHierarchy.save': save(view(LocationHierarchy), place('l0', place('l1', place('l2')))),
         'Person.delete': backend.delete(fragment(Person)),
-        'Person.deleteAll': backend.deleteAll(fragment(Person), 'n.name = $name'),
-        'PersonCareer.delete.where': backend.delete(view(PersonCareer), 'n.name = $name'),
+        'Person.deleteAll': backend.deleteAll(fragment(Person), where),
+        'PersonCareer.delete.where': backend.delete(view(PersonCareer), where),
         'PersonCareer.delete.all': backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ALL),
         'LocationHierarchy.delete.all': backend.delete(view(LocationHierarchy), undefined, CascadeType.DELETE_ALL),
         'Person.heldProperties': backend.heldProperties(registry.fragment(Person)),
@@ -298,7 +337,7 @@ function saves(
             {}
         ),
         'Person.patch': backend.patchOne(registry.fragment(Person)),
-        'Person.patch.where': backend.patchOne(registry.fragment(Person), 'n.name = $name'),
+        'Person.patch.where': backend.patchOne(registry.fragment(Person), where),
         'Person.patchAll': backend.patchMany(registry.fragment(Person)),
         'edges.relate': backend.relate(
             { model: registry.fragment(Person), id: 'p1' },
@@ -331,7 +370,7 @@ function saves(
             registry.fragment(Dog)
         )
     };
-    if (!grammar.orphanDeleteLimit) {
+    if (orphans) {
         cases['PersonCareer.delete.orphans'] = backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ORPHAN);
     }
     return cases;
@@ -380,7 +419,8 @@ describe('Golden statements', () => {
     const written = {
         NEO4J: { ...statements(NEO4J_GRAMMAR), ...schema(NEO4J_SCHEMA) },
         MEMGRAPH: { ...statements(MEMGRAPH_GRAMMAR), ...schema(MEMGRAPH_SCHEMA) },
-        FALKORDB: { ...statements(FALKORDB_GRAMMAR), ...schema(FALKORDB_SCHEMA) }
+        FALKORDB: { ...statements(FALKORDB_GRAMMAR), ...schema(FALKORDB_SCHEMA) },
+        ORACLE: { ...oracleStatements(), ...schema(schemaGrammarFor(DatabaseType.ORACLE, new OracleGraph())) }
     };
 
     it('should match the statements drivine-python checks against', () => {

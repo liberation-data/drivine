@@ -1,6 +1,6 @@
 import { Direction, ClassKind } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
-import { bagEntries, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
+import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -216,7 +216,7 @@ export class OracleSaveBuilder {
             const keep = view.relationships
                 .filter((it) => it.type === rel.type && it.direction === rel.direction)
                 .flatMap((it) =>
-                    items(it, object[it.field]).map((item) => idOf(rootOf(targetOf(it)), nodeOf(it, item)))
+                    items(it, object[it.field]).map((item) => idOf(rootOf(targetOf(it)), fragmentOf(it, item)))
                 );
             const k = jsonKey(into.nodeIdProperty!);
             const notIn = (list: string): string =>
@@ -268,7 +268,10 @@ export class OracleSaveBuilder {
     private statement(root: FragmentModel, rootObject: any, expected?: string): SaveStatement {
         const related = this.stamped.length
             ? `JSON_ARRAY(${this.stamped
-                  .map((_, i) => `JSON_OBJECT('before' VALUE JSON(v_before${i}), 'after' VALUE JSON(v_after${i}))`)
+                  .map(
+                      (_, i) =>
+                          `JSON_OBJECT('before' VALUE JSON(v_before${i}), 'after' VALUE JSON(v_after${i}) RETURNING JSON)`
+                  )
                   .join(', ')} RETURNING JSON)`
             : `JSON('[]')`;
         const result =
