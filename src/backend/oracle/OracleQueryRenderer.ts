@@ -1,4 +1,4 @@
-import { hasLabels, holding, jsonKey, labelledValue, RELATED_SUBQUERY } from '@/backend/oracle/OracleGraph';
+import { hasLabels, holding, jsonKey, labelledValue, relatedSubquery } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -196,15 +196,14 @@ export class OracleQueryRenderer {
         const labels = (into.kind === 'GRAPH_VIEW' ? into.model.root : (into.model as FragmentModel)).labels;
         const depth = rel.maxDepth;
         let clause: string;
+        let hints: string[] = [];
         let inner: Rows;
         if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
             const node = this.views.nextAlias('x');
-            clause = `FROM ${this.views.graphNodes} ${node} WHERE ${node}.nid IN (${this.views.reached(
-                rel.type,
-                rel.direction,
-                rows.node,
-                depth
-            )}) AND ${hasLabels(node, labels)}`;
+            const reached = this.views.reached(rel.type, rel.direction, rows.node, depth);
+            const nodes = this.views.nodesOf(reached, node);
+            clause = `${nodes.from} WHERE ${hasLabels(node, labels)}`;
+            hints = [nodes.hint];
             inner = { node };
         } else {
             const hop = this.views.step(rel.type, rel.direction, rows.node, labels);
@@ -215,7 +214,7 @@ export class OracleQueryRenderer {
         const tested = quantified
             ? quantified.conditions.map((it) => this.condition(it, next.scope, inner)).join(' AND ')
             : this.walk(path, i + 1, test, next.scope, inner);
-        const exists = `EXISTS (${RELATED_SUBQUERY} ${clause} AND ${tested})`;
+        const exists = `EXISTS (${relatedSubquery(...hints)} ${clause} AND ${tested})`;
         return quantified?.negate ? `NOT ${exists}` : exists;
     }
 

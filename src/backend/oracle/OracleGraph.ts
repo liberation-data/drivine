@@ -148,11 +148,14 @@ export function nodeDocument(alias: string): string {
 }
 
 /**
- * The hint every subquery over related nodes carries. Oracle 23 coalesces two such subqueries ORed together into one,
- * and rewrites the second's label test as a multivalue index lookup that, evaluated as a filter, misses nodes with more
- * than one label: of two roots, one related to each subclass, `instanceOf(A) OR instanceOf(B)` found one.
+ * The SELECT of a subquery over related nodes, with the hint every one carries and any more given. Oracle 23
+ * coalesces two such subqueries ORed together into one, and rewrites the second's label test as a multivalue index
+ * lookup that, evaluated as a filter, misses nodes with more than one label: of two roots, one related to each
+ * subclass, `instanceOf(A) OR instanceOf(B)` found one. NO_COALESCE_SQ prevents it.
  */
-export const RELATED_SUBQUERY = 'SELECT /*+ NO_COALESCE_SQ */ 1';
+export function relatedSubquery(...hints: string[]): string {
+    return `SELECT /*+ ${['NO_COALESCE_SQ', ...hints].join(' ')} */ 1`;
+}
 
 /**
  * A predicate that holds when the node row `alias` carries every one of the labels. A label may come from data (a
