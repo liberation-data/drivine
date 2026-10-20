@@ -91,10 +91,39 @@ function statements(grammar: CypherGrammar): Record<string, string> {
     Object.assign(cases, saves(grammar, registry, backend));
     Object.assign(cases, queries(registry, backend));
     Object.assign(cases, groups(registry, backend));
+    Object.assign(cases, searches(registry, backend));
     return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
 }
 
 /** The grouped reads drivine-python's golden test writes, written alike. */
+function searches(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
+    const person: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Person) };
+    const career: TargetModel = { kind: 'GRAPH_VIEW', model: registry.view(PersonCareer) };
+    const vector = { label: 'Person', property: 'embedding', similarity: 'COSINE' as const, k: 5 };
+    const text = { label: 'Person', properties: ['name', 'bio'], limit: 10 };
+    return {
+        'Person.nearest': backend.nearest(person, vector),
+        'Person.nearest.filtered': backend.nearest(person, {
+            ...vector,
+            similarity: 'EUCLIDEAN',
+            where: 'n.name = $name',
+            threshold: true,
+            k: 20,
+            limit: 5
+        }),
+        'PersonCareer.nearest': backend.nearest(career, { ...vector, depth: {} }),
+        'Person.matching': backend.matching(person, text),
+        'Person.matching.filtered': backend.matching(person, {
+            ...text,
+            properties: ['bio'],
+            where: 'n.name = $name',
+            threshold: true,
+            limit: 3
+        }),
+        'PersonCareer.matching': backend.matching(career, text)
+    };
+}
+
 function groups(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
     const movie = registry.fragment(Movie);
     const directors = new Map([['director', registry.fragment(Director)]]);
