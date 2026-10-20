@@ -44,6 +44,13 @@ class Tag {
     @NodeStamp() stamp?: string;
 }
 
+/** A bag and no @NodeLabels: a save merges its properties in place, as Oracle then keeps them (OSON version 2). */
+@NodeFragment({ labels: ['OraSave', 'Note'] })
+class Note {
+    @NodeId() id: string;
+    @PropertyBag() metadata: Record<string, any> = {};
+}
+
 @NodeFragment({ labels: ['OraSave', 'Org'] })
 class Org {
     @NodeId() id: string;
@@ -111,7 +118,9 @@ describeOnOracle('saves on Oracle', () => {
         expect(changed.stamp!.split(':')[1]).toEqual(ada.stamp!.split(':')[1]);
         const raw = await pm.getOne<any>(
             new QuerySpecification(
-                `SELECT n.props AS "props" FROM drivine_node n WHERE JSON_EXISTS(n.labels, '$?(@ == "OraSave")')`
+                // Re-encoded: the thin driver can't read a document updated in place (oracle/node-oracledb#1796).
+                `SELECT JSON_TRANSFORM(n.props, KEEP '$') AS "props" FROM drivine_node n ` +
+                    `WHERE JSON_EXISTS(n.labels, '$?(@ == "OraSave")')`
             )
         );
         expect(raw).toEqual({
@@ -213,5 +222,28 @@ describeOnOracle('saves on Oracle', () => {
         expect(await gom.load(Tag, 't3')).toBeDefined();
         const stale = career({ person: person('jo', { stamp: loadedStamp }), tagList: [] });
         await expect(gom.save(stale, { replace: ['tagList'] })).rejects.toBeInstanceOf(StaleObjectException);
+    });
+
+    it('should replace a list of views, keeping the views whose roots the list still holds', async () => {
+        const member = (id: string): Career => career({ person: person(id) });
+        const acme = Object.assign(new Org(), { id: 'acme', name: 'Acme' });
+        await gom.save(Object.assign(new Team(), { org: acme, members: [member('lu'), member('mo')] }));
+        const team = (await gom.load(Team, 'acme'))!;
+        team.members = team.members.filter((it) => it.person.id === 'mo');
+        await gom.save(team, { replace: ['members'] });
+        expect((await gom.load(Team, 'acme'))!.members.map((it) => it.person.id)).toEqual(['mo']);
+    });
+
+    it('should save a batch whose stamps run past 4000 characters', async () => {
+        await gom.saveAll(Array.from({ length: 300 }, (_, i) => tag(`t${i}`)));
+        expect(await gom.count(Tag)).toEqual(300);
+    });
+
+    it('should clear under CLEAR a node saved more than once, as Oracle then keeps it', async () => {
+        const note = (metadata: Record<string, any>): Note => Object.assign(new Note(), { id: 'n1', metadata });
+        await gom.save(note({ source: 'wiki', rank: 1 }));
+        await gom.save(note({ source: 'wiki', rank: 2 }));
+        await gom.save(note({ rank: 3 }), { nullPolicy: NullPolicy.CLEAR });
+        expect((await gom.load(Note, 'n1'))!.metadata).toEqual({ rank: 3 });
     });
 });

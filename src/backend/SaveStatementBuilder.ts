@@ -585,7 +585,7 @@ function nodeOf(rel: RelationshipModel, item: any): any {
 }
 
 /** The fragment an item of a relationship field leads to: for a view, its root. */
-function fragmentOf(rel: RelationshipModel, item: any): any {
+export function fragmentOf(rel: RelationshipModel, item: any): any {
     const into = target(rel);
     const node = nodeOf(rel, item);
     return into.kind === 'GRAPH_VIEW' ? node?.[into.model.rootField] : node;
