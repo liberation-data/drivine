@@ -1,6 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+    above,
+    anyOf,
+    atMost,
+    caseOf,
+    coalesce,
+    div,
+    not,
+    times,
     CascadeType,
     CypherBackend,
     Direction,
@@ -21,8 +29,10 @@ import {
     Location,
     ActorWithLatestMovie,
     ActorWithMovies,
+    Animal,
     LocationAncestors,
     LocationHierarchy,
+    Movie,
     Organization,
     Person,
     PersonCareer,
@@ -61,7 +71,75 @@ function statements(grammar: CypherGrammar): Record<string, string> {
         'ActorWithLatestMovie.loadAll': backend.loadAllViews(view(ActorWithLatestMovie))
     };
     Object.assign(cases, saves(grammar, registry, backend));
+    Object.assign(cases, queries(registry, backend));
     return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
+}
+
+/** The queries drivine-python's golden test writes, written alike: each load as its statement. */
+function queries(registry: ModelRegistry, backend: CypherBackend): Record<string, GraphStatement> {
+    const fragment = (type: any): TargetModel => ({ kind: 'NODE_FRAGMENT', model: registry.fragment(type) });
+    const view = (type: any): TargetModel => ({ kind: 'GRAPH_VIEW', model: registry.view(type) });
+    const load = (target: TargetModel, fn: (q: any) => any): GraphStatement => {
+        const rendered = backend.renderQuery(fn, target);
+        const page = { orderBy: rendered.orderBy, skip: rendered.skip, limit: rendered.limit };
+        return target.kind === 'GRAPH_VIEW'
+            ? backend.loadAllViews(target.model, rendered.where, rendered.depth, page)
+            : backend.loadAllFragments(target.model, rendered.where, page);
+    };
+    return {
+        'query.Movie.where': load(fragment(Movie), (q) => ({
+            where: [anyOf(q.released.eq(1999), q.title.startsWith('The')), q.uuid.notIn(['m9']), not(q.title.eq('x'))],
+            orderBy: q.released.desc().nullsLast(),
+            skip: 10,
+            limit: 5
+        })),
+        'query.Movie.seek': load(fragment(Movie), (q) => ({
+            orderBy: [q.released.desc(), q.uuid.asc()],
+            seek: [q.released.after(2000), q.uuid.after('m3')],
+            limit: 3
+        })),
+        'query.Movie.expression': load(fragment(Movie), (q) => ({
+            orderBy: [
+                caseOf(
+                    [above(q.released, 2010).or(atMost(q.released, 1995)).then(0)],
+                    times(coalesce(q.released, 0), div(1, 2))
+                ).desc(),
+                q.title.asc().nullsFirst()
+            ]
+        })),
+        'query.PersonCareer.across': load(view(PersonCareer), (q) => ({
+            where: [
+                q.employmentHistory.target.name.eq('Acme'),
+                q.person.bio.contains('Lead'),
+                q.employmentHistory.role.eq('Lead')
+            ]
+        })),
+        'query.PersonCareer.quantified': load(view(PersonCareer), (q) => ({
+            where: anyOf(
+                q.employmentHistory.any((it: any) => [it.role.eq('Engineer'), it.target.name.eq('Acme')]),
+                q.employmentHistory.none((it: any) => it.role.eq('Lead'))
+            ),
+            orderBy: [q.person.name.asc(), q.employmentHistory.startDate.desc()]
+        })),
+        'query.Customer.bags': load(fragment(Customer), (q) => ({
+            where: [
+                q.metadata.source.eq('wiki'),
+                q.property('metadata.score').gte(3),
+                q.predicate('fullName', 'STARTS_WITH', 'A'),
+                q.tiers.hasItem('Gold'),
+                q.tags.hasItem('vip'),
+                q.fullName.containsIgnoreCase('ad'),
+                q.legacyCode.isNull()
+            ]
+        })),
+        'query.Animal.labels': load(fragment(Animal), (q) => ({
+            where: anyOf(q.instanceOf(Puppy), q.hasAnyLabel('Dog', 'Cat'))
+        })),
+        'query.Person.count': backend.countFragments(
+            registry.fragment(Person),
+            backend.renderWhere((q: any) => q.name.eqIgnoreCase('ada'), fragment(Person)).where
+        )
+    };
 }
 
 /** The objects drivine-python's golden test builds, built alike here: what a statement's text depends on is the same. */
