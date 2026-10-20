@@ -1,23 +1,34 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+    CascadeType,
     CypherBackend,
+    Direction,
     CypherGrammar,
     FALKORDB_GRAMMAR,
     GraphStatement,
     MEMGRAPH_GRAMMAR,
     ModelRegistry,
-    NEO4J_GRAMMAR
+    NEO4J_GRAMMAR,
+    RelateMode,
+    RemovedTargets,
+    TargetModel
 } from '@liberation-data/drivine';
 import {
     ActorStats,
+    Customer,
+    Dog,
+    Location,
     ActorWithLatestMovie,
     ActorWithMovies,
     LocationAncestors,
     LocationHierarchy,
+    Organization,
     Person,
     PersonCareer,
-    Puppy
+    Puppy,
+    Tier,
+    WorkHistory
 } from './GoldenModels';
 
 /**
@@ -49,7 +60,113 @@ function statements(grammar: CypherGrammar): Record<string, string> {
         'ActorWithMovies.count': backend.countViews(view(ActorWithMovies)),
         'ActorWithLatestMovie.loadAll': backend.loadAllViews(view(ActorWithLatestMovie))
     };
+    Object.assign(cases, saves(grammar, registry, backend));
     return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
+}
+
+/** The objects drivine-python's golden test builds, built alike here: what a statement's text depends on is the same. */
+const make = <T extends object>(type: new () => T, values: Partial<T>): T => Object.assign(new type(), values) as T;
+
+function saves(
+    grammar: CypherGrammar,
+    registry: ModelRegistry,
+    backend: CypherBackend
+): Record<string, GraphStatement> {
+    const fragment = (type: any): TargetModel => ({ kind: 'NODE_FRAGMENT', model: registry.fragment(type) });
+    const view = (type: any): TargetModel => ({ kind: 'GRAPH_VIEW', model: registry.view(type) });
+    const save = (target: TargetModel, object: any, options = {}, createOnly = false): GraphStatement =>
+        backend.save(target, object, options, createOnly, registry);
+    const ada = (): Person => make(Person, { uuid: 'p1', name: 'Ada' });
+    const history = (start: string, org: Organization): WorkHistory =>
+        make(WorkHistory, { startDate: start, role: 'Engineer', target: org });
+    const career = (stamp?: string): PersonCareer =>
+        make(PersonCareer, {
+            person: make(Person, { uuid: 'p1', name: 'Ada', stamp }),
+            employmentHistory: [
+                history('2015', make(Organization, { uuid: 'o1', name: 'Acme' })),
+                history('2020', make(Organization, { uuid: 'o2', name: 'Babbage' }))
+            ]
+        });
+    const place = (uuid: string, ...below: LocationHierarchy[]): LocationHierarchy =>
+        make(LocationHierarchy, {
+            location: make(Location, { uuid, name: uuid, type: 'place' }),
+            subLocations: below
+        });
+    const cases: Record<string, GraphStatement> = {
+        'Person.save': save(fragment(Person), ada()),
+        'Person.save.checked': save(
+            fragment(Person),
+            make(Person, { ...ada(), stamp: 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb' })
+        ),
+        'Person.create': save(fragment(Person), ada(), {}, true),
+        'Puppy.save': save(fragment(Puppy), make(Puppy, { uuid: 'a1', name: 'Bit', ageInWeeks: 9 })),
+        'Customer.save': save(
+            fragment(Customer),
+            make(Customer, {
+                uuid: 'c1',
+                fullName: 'Ada',
+                metadata: { source: 'wiki', score: 3 },
+                tiers: new Set([Tier.GOLD])
+            })
+        ),
+        'PersonCareer.save': save(view(PersonCareer), career()),
+        'PersonCareer.save.replace': save(view(PersonCareer), career('aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb'), {
+            replace: ['employmentHistory'],
+            removedTargets: RemovedTargets.DELETE_UNREFERENCED
+        }),
+        'LocationHierarchy.save': save(view(LocationHierarchy), place('l0', place('l1', place('l2')))),
+        'Person.delete': backend.delete(fragment(Person)),
+        'Person.deleteAll': backend.deleteAll(fragment(Person), 'n.name = $name'),
+        'PersonCareer.delete.where': backend.delete(view(PersonCareer), 'n.name = $name'),
+        'PersonCareer.delete.all': backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ALL),
+        'LocationHierarchy.delete.all': backend.delete(view(LocationHierarchy), undefined, CascadeType.DELETE_ALL),
+        'Person.heldProperties': backend.heldProperties(registry.fragment(Person)),
+        'Person.foundStamp': backend.foundStamp(registry.fragment(Person)),
+        'saveAll.fragments': backend.fragmentBatch(
+            [
+                { model: registry.fragment(Person), objects: [ada(), make(Person, { uuid: 'p2', name: 'Grace' })] },
+                { model: registry.fragment(Organization), objects: [make(Organization, { uuid: 'o1', name: 'Acme' })] }
+            ],
+            {}
+        ),
+        'Person.patch': backend.patchOne(registry.fragment(Person)),
+        'Person.patch.where': backend.patchOne(registry.fragment(Person), 'n.name = $name'),
+        'Person.patchAll': backend.patchMany(registry.fragment(Person)),
+        'edges.relate': backend.relate(
+            { model: registry.fragment(Person), id: 'p1' },
+            { model: registry.fragment(Organization), id: 'o1' },
+            'WORKS_FOR',
+            { startDate: '2020', role: 'Lead', note: undefined },
+            RelateMode.MERGE
+        ),
+        'edges.relate.create': backend.relate(
+            { model: registry.fragment(Person), id: 'p1' },
+            { model: registry.fragment(Person), id: 'p2', labels: ['Admin'] },
+            'KNOWS',
+            {},
+            RelateMode.CREATE
+        ),
+        'edges.unrelate': backend.unrelate(
+            { model: registry.fragment(Person), id: 'p1' },
+            { model: registry.fragment(Organization), id: 'o1' },
+            'WORKS_FOR'
+        ),
+        'edges.unrelateAll': backend.unrelateAll(
+            { model: registry.fragment(Person), id: 'p1' },
+            'KNOWS',
+            Direction.INCOMING
+        ),
+        'edges.related': backend.related(
+            { model: registry.fragment(Person), id: 'p1' },
+            'OWNS',
+            Direction.OUTGOING,
+            registry.fragment(Dog)
+        )
+    };
+    if (!grammar.orphanDeleteLimit) {
+        cases['PersonCareer.delete.orphans'] = backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ORPHAN);
+    }
+    return cases;
 }
 
 describe('Golden statements', () => {

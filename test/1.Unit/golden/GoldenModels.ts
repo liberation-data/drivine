@@ -2,15 +2,21 @@ import {
     Aggregate,
     AggregateFunction,
     Count,
+    Default,
     Direction,
+    EmptyWhenAbsent,
     GraphPath,
+    GraphProperty,
     GraphRelationship,
     GraphTransient,
     GraphView,
     hop,
+    JsonPacked,
     NodeFragment,
     NodeId,
+    NodeLabels,
     NodeStamp,
+    PropertyBag,
     RelationshipFragment,
     Root,
     TargetNode
@@ -128,4 +134,23 @@ export class Dog extends Animal {
 @NodeFragment({ labels: ['Puppy'] })
 export class Puppy extends Dog {
     ageInWeeks = 0;
+}
+
+export enum Tier {
+    GOLD = 'Gold',
+    SILVER = 'Silver'
+}
+
+@NodeFragment({ labels: ['Customer'] })
+export class Customer {
+    @NodeId() uuid: string;
+    fullName: string;
+    @Default() status = 'active';
+    @EmptyWhenAbsent() tags: string[] = [];
+    @JsonPacked() preferences: Record<string, any> = {};
+    @PropertyBag() metadata: Record<string, any> = {};
+    @PropertyBag({ flat: true }) extras: Record<string, any> = {};
+    @NodeLabels(Tier) tiers: Set<string> = new Set();
+    @GraphProperty('LEGACY') legacyCode?: string;
+    @GraphTransient() scratch = '';
 }
