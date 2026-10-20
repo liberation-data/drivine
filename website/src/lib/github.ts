@@ -1,9 +1,10 @@
 /**
- * The two libraries' repositories, and their stars as GitHub counts them when the site is built: the daily build keeps
+ * The libraries' repositories, and their stars as GitHub counts them when the site is built: the daily build keeps
  * the counts fresh, and a visitor's browser never calls GitHub. A count that can't be fetched is left out.
  */
 export const REPOS = {
     ts: { name: 'Drivine', language: 'TypeScript', repo: 'liberation-data/drivine' },
+    py: { name: 'drivine-python', language: 'Python', repo: 'liberation-data/drivine-python' },
     jvm: { name: 'drivine4j', language: 'Kotlin & Java', repo: 'liberation-data/drivine4j' }
 } as const;
 

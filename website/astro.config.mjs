@@ -13,10 +13,10 @@ export default defineConfig({
     integrations: [
         starlight({
             title: 'Drivine',
-            description: 'Graph database client for TypeScript and the JVM.',
+            description: 'Graph database client for TypeScript, Python and the JVM.',
             logo: { light: './src/assets/cow-black.png', dark: './src/assets/cow-white.png' },
             favicon: '/favicon.ico',
-            // The header's GitHub link follows the open docs: Drivine's repository, or drivine4j's.
+            // The header's GitHub link follows the open docs: Drivine's repository, drivine-python's, or drivine4j's.
             components: { SocialIcons: './src/components/SocialIcons.astro' },
             // The fonts are served from the site itself (Fontsource), not from Google, and only their Latin subset: the
             // full stylesheets declare every subset, which grows the CSS a first paint waits on.
@@ -34,6 +34,7 @@ export default defineConfig({
                 // One sidebar per library, each in its README's order.
                 starlightSidebarTopics([
                     { label: 'TypeScript', link: '/ts/', items: sidebar.ts },
+                    { label: 'Python', link: '/py/', items: sidebar.py },
                     { label: 'Kotlin & Java', link: '/jvm/', items: sidebar.jvm }
                 ])
             ]

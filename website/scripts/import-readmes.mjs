@@ -1,12 +1,14 @@
 /**
- * Turns the two libraries' READMEs into the site's docs, so the READMEs stay the one source. Each `##` section becomes
- * a page of its library's topic (`src/content/docs/ts/`, `src/content/docs/jvm/`), and the text before the first `##`
+ * Turns the libraries' READMEs into the site's docs, so the READMEs stay the one source. Each `##` section becomes a
+ * page of its library's topic (`src/content/docs/ts/`, `src/content/docs/py/`, `src/content/docs/jvm/`), and the text
+ * before the first `##`
  * its introduction. A long section becomes a group instead: its lead an overview, and each `###` a page of its own.
  * Headings move up to suit, links to the README's own anchors are pointed at the page and heading that now hold them,
  * and links to files in the repository at those files on GitHub. The sidebars, in the READMEs' order, are written to
  * `src/generated/sidebar.json` for astro.config.mjs.
  *
- * drivine4j's README is fetched from GitHub; DRIVINE4J_README=<path> reads a local copy instead.
+ * drivine-python's and drivine4j's READMEs are fetched from GitHub; DRIVINE_PYTHON_README=<path> and
+ * DRIVINE4J_README=<path> read local copies instead.
  */
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
@@ -25,23 +27,33 @@ const SOURCES = [
         read: () => readFile(join(site, '..', 'README.md'), 'utf8')
     },
     {
+        topic: 'py',
+        name: 'drivine-python',
+        repo: 'liberation-data/drivine-python',
+        branch: 'main',
+        read: () => remote('DRIVINE_PYTHON_README', 'liberation-data/drivine-python', 'main')
+    },
+    {
         topic: 'jvm',
         name: 'drivine4j',
         repo: 'liberation-data/drivine4j',
         branch: 'main',
-        read: async () => {
-            if (process.env.DRIVINE4J_README) {
-                return readFile(process.env.DRIVINE4J_README, 'utf8');
-            }
-            const url = 'https://raw.githubusercontent.com/liberation-data/drivine4j/main/README.md';
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Could not fetch ${url}: ${response.status}`);
-            }
-            return response.text();
-        }
+        read: () => remote('DRIVINE4J_README', 'liberation-data/drivine4j', 'main')
     }
 ];
+
+/** A README from GitHub, or from the local copy the environment variable names. */
+async function remote(variable, repo, branch) {
+    if (process.env[variable]) {
+        return readFile(process.env[variable], 'utf8');
+    }
+    const url = `https://raw.githubusercontent.com/${repo}/${branch}/README.md`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Could not fetch ${url}: ${response.status}`);
+    }
+    return response.text();
+}
 
 /** Sections that only list the others, which the sidebar does now. */
 const SKIPPED = /^(table of )?contents$/i;
