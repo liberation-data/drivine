@@ -288,7 +288,9 @@ export class SaveStatementBuilder {
             const idProp = quoteName(idProperty(rootOf(into)));
             const keep = view.relationships
                 .filter((it) => it.type === rel.type && it.direction === rel.direction)
-                .flatMap((it) => items(it, object[it.field]).map((item) => idOf(rootOf(target(it)), nodeOf(it, item))));
+                .flatMap((it) =>
+                    items(it, object[it.field]).map((item) => idOf(rootOf(target(it)), fragmentOf(it, item)))
+                );
             this.bindings[`keep${k}`] = keep;
             parts.push(
                 `WITH ${this.carry}`,
@@ -580,6 +582,13 @@ function rootOf(into: TargetModel): FragmentModel {
 /** The node an item of a relationship field leads to: for a relationship fragment, its target. */
 function nodeOf(rel: RelationshipModel, item: any): any {
     return rel.related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[rel.related.model.targetField] : item;
+}
+
+/** The fragment an item of a relationship field leads to: for a view, its root. */
+function fragmentOf(rel: RelationshipModel, item: any): any {
+    const into = target(rel);
+    const node = nodeOf(rel, item);
+    return into.kind === 'GRAPH_VIEW' ? node?.[into.model.rootField] : node;
 }
 
 function items(rel: RelationshipModel, value: any): any[] {
