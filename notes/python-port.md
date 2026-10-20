@@ -14,7 +14,8 @@ Working design for a Python port. Not a contract: update as we build.
   - Models are Pydantic v2.
   - Python 3.11 or newer.
   - Dependency injection by [pi-pilgrim](https://github.com/liberation-data/pi-pilgrim), with no framework required.
-- **Name:** `drivine` on PyPI, which is free, imported as `drivine`.
+- **Name:** the repository is `liberation-data/drivine-python`, beside `drivine` and `drivine4j`. The package is
+  `drivine` on PyPI, which is free, imported as `drivine`.
 
 ## Goals and Non-goals
 
@@ -152,6 +153,8 @@ class IssueService:
   `inDrivineContext()`, before `@Transactional` makes a transaction. Outside a request its statements run one by one,
   without a transaction. A `ContextVar` is always there, so in Python a `@transactional` method's statements share a
   transaction wherever it is called from: a request, a script, a job or a test.
+- **No transaction you didn't ask for.** Outside a `@transactional` call or `async with transaction()`, each statement
+  runs on its own and commits, as in TypeScript.
 - **Sync methods too.** The decorator sees whether it wraps a coroutine function, and the sync API's transactions use
   the same `ContextVar` (each thread has its own context).
 
@@ -305,13 +308,20 @@ whole declaration:
 
 ### Property names
 
-Python fields are `snake_case`. TypeScript and JVM models usually store `camelCase`. A Python application sharing a
-store with them must write the same names:
+Drivine stores properties in `camelCase`, as TypeScript and JVM models do. Python fields are `snake_case`. So by
+default Drivine stores a field under its camel-case name:
 
-- By default a field is stored under its own name.
-- `property_names="camel"`, a class argument or a global setting, stores `start_date` as `startDate`.
-- `GraphProperty("name")` names one property.
-- The DSL always uses the Python field name, and Drivine maps it, as TypeScript does for `@GraphProperty`.
+- `start_date` is stored as `startDate`. A field with no underscore, such as `name`, is stored as it is.
+- The rule runs one way only, from a field to its property, and never guesses a field from a property. A field
+  whose camel-case name is ambiguous or unwanted, such as `url_v2`, names its property with `GraphProperty("urlV2")`.
+- `property_names="as_written"`, a class argument or a global setting, stores fields under their own names, for a
+  store only Python writes.
+- Every name Drivine writes goes through the same rule: properties, relationship properties, bag keys and
+  `QuerySpecification.transform`. A statement you write yourself names properties as stored, `RETURN p.startDate`,
+  and `transform(Person)` maps them back.
+- The DSL always uses the Python field name, `q.start_date`, and Drivine maps it, as TypeScript does for
+  `@GraphProperty`.
+- Labels and relationship types are written as declared. They aren't field names.
 
 This doesn't use Pydantic's `alias`, which also changes the model's JSON in FastAPI responses, and would tie the API's
 field names to the graph's.
@@ -628,13 +638,8 @@ Each milestone ends with tests passing on every engine it covers, and is releasa
 
 ## Open Questions
 
-- **Where it lives.** Recommended: its own repository, `liberation-data/drivine-py`, with its own CI and releases,
-  and the golden statements published from this repository's CI as an artifact. A directory here would keep the two
-  in one PR, but tie Python's releases to npm's.
 - **Rollback-only on a caught inner error.** Recommended for Python, as above. Should TypeScript change to match? It
   is a behaviour change there, so it would wait for a major version.
-- **Default property naming.** Field names as written (recommended), or camel case by default so a store matches
-  TypeScript's without configuration?
 - **`REQUIRES_NEW`** in the first release, or later?
 - **Validation on load** by default (recommended), or `model_construct` by default for speed?
 - **The stub generator:** a standalone script (recommended: it works with every checker) or a mypy plugin, which
