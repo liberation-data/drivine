@@ -26,6 +26,12 @@ class Team {
     @GraphRelationship({ type: 'HAS', target: () => Person }) members: Person[];
 }
 
+@GraphView()
+class Org {
+    @Root() head: Person;
+    @GraphRelationship({ type: 'RUNS', target: () => Team }) teams: Team[];
+}
+
 describe('SaveStatementBuilder', () => {
     const registry = new ModelRegistry();
     const fragment = (type: any) => ({ kind: 'NODE_FRAGMENT' as const, model: registry.fragment(type) });
@@ -46,7 +52,9 @@ describe('SaveStatementBuilder', () => {
     });
 
     it('should refuse a node without an id', () => {
-        expect(() => new SaveStatementBuilder(NEO4J_GRAMMAR).build(fragment(Person), new Person())).toThrow(/has no id/);
+        expect(() => new SaveStatementBuilder(NEO4J_GRAMMAR).build(fragment(Person), new Person())).toThrow(
+            /has no id/
+        );
         expect(() => new SaveStatementBuilder(NEO4J_GRAMMAR).build(fragment(Anonymous), new Anonymous())).toThrow(
             /Anonymous has no @NodeId property/
         );
@@ -54,12 +62,25 @@ describe('SaveStatementBuilder', () => {
 
     it('should refuse replace on a fragment, of a field that is not a relationship, or of a missing list', () => {
         const builder = (): SaveStatementBuilder => new SaveStatementBuilder(NEO4J_GRAMMAR);
-        expect(() => builder().build(fragment(Person), person('p'), { replace: ['name'] })).toThrow(/is a @NodeFragment/);
+        expect(() => builder().build(fragment(Person), person('p'), { replace: ['name'] })).toThrow(
+            /is a @NodeFragment/
+        );
         const team = Object.assign(new Team(), { lead: person('l'), members: [] });
         expect(() => builder().build(view, team, { replace: ['lead'] })).toThrow(/not a relationship field/);
         expect(() => builder().build(view, { ...team, members: undefined }, { replace: ['members'] })).toThrow(
             /Give an empty list/
         );
+    });
+
+    it('should keep, when replacing a list of views, the views whose roots the object holds', () => {
+        const team = Object.assign(new Team(), { lead: person('t1'), members: [] });
+        const org = Object.assign(new Org(), { head: person('h'), teams: [team] });
+        const statement = new SaveStatementBuilder(NEO4J_GRAMMAR).build(
+            { kind: 'GRAPH_VIEW', model: registry.view(Org) },
+            org,
+            { replace: ['teams'] }
+        );
+        expect(Object.entries(statement.bindings).find(([key]) => key.startsWith('keep'))?.[1]).toEqual(['t1']);
     });
 
     it('should write the rows of a relationship as a parameter, so the text does not grow with the list', () => {
