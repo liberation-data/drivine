@@ -141,8 +141,17 @@ class IssueService:
   - The context is restored when the call ends, so nothing leaks into the next request.
 - **It works on `self` calls.** pi-pilgrim makes plain objects, not proxies, and the decorator wraps the function
   itself. A method calling another `@transactional` method on `self` gets a transaction, unlike under a Spring proxy.
-- **It always works.** TypeScript's `@Transactional` runs without a transaction when no Drivine context is active,
-  outside a request for instance. A `ContextVar` is always there, so Python has no such case and needs no middleware.
+- **Code marked `@transactional` still runs without Drivine.** TypeScript's `@Transactional` runs the method as
+  written when no Drivine context is active, so an application can drop Drivine and keep its services. Python keeps
+  that:
+  - A transaction is nothing but a `ContextVar` until its first statement. Connections are opened, through the
+    registry, only then.
+  - A method that never reaches Drivine, because its collaborators are fakes or Drivine has been removed, costs a
+    `ContextVar` set and reset. It needs no registry, connection or middleware.
+- **Drivine's statements are transactional anywhere.** TypeScript needs a context, from its middleware or
+  `inDrivineContext()`, before `@Transactional` makes a transaction. Outside a request its statements run one by one,
+  without a transaction. A `ContextVar` is always there, so in Python a `@transactional` method's statements share a
+  transaction wherever it is called from: a request, a script, a job or a test.
 - **Sync methods too.** The decorator sees whether it wraps a coroutine function, and the sync API's transactions use
   the same `ContextVar` (each thread has its own context).
 
@@ -582,7 +591,8 @@ An integration test writes with one language and reads with the other, on each e
 
 | | TypeScript | Python |
 |---|---|---|
-| Transaction outside a request | runs without one, silently | always transactional |
+| `@transactional` method that never uses Drivine | runs as written | runs as written |
+| Its statements outside a request | each on its own, without a transaction | one transaction |
 | Inner error caught by the caller | commits | rolls back (rollback-only) |
 | Concurrent statements in a transaction | unguarded | queued, FIFO |
 | `self` call to a `@transactional` method | transactional | transactional |
