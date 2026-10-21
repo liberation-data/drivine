@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DatabaseRegistry, DrivineModule, DrivineModuleOptions, RunWithDrivine } from '@liberation-data/drivine';
+import { DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 import { PostgresRepository } from './PostgresRepository';
 
 // Requires the POSTGRES_* connection in .env (see .env.example).

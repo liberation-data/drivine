@@ -17,10 +17,10 @@ export const CONTAINERS_STARTED = 'DRIVINE_TEST_CONTAINERS_STARTED';
 export function loadTestEnvironment(): void {
     dotenv.config({ path: path.join(ROOT, '.env.test.local') });
     dotenv.config({ path: path.join(ROOT, '.env.test') });
-    // DrivineModule loads its .env from here, and not the .env you keep for running the app.
+    // Drivine loads its .env from here, and not the .env you keep for running the app.
     process.env.DOTENV_CONFIG_PATH = process.env.DOTENV_CONFIG_PATH ?? path.join(ROOT, '.env.test');
     if (process.env.ORACLE_TESTS !== 'true') {
-        // Blanked rather than deleted: DrivineModule loads .env.test again in each test process, and dotenv fills only
+        // Blanked rather than deleted: Drivine loads .env.test again in each test process, and dotenv fills only
         // what is unset.
         Object.keys(process.env)
             .filter((key) => key.startsWith('ORACLE_DATABASE_'))

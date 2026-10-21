@@ -1,11 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import {
-    InjectPersistenceManager,
-    ObjectUtils,
-    PersistenceManager,
-    QuerySpecification,
-    Transactional
-} from '@liberation-data/drivine';
+import { ObjectUtils, PersistenceManager, QuerySpecification, Transactional } from '@liberation-data/drivine';
+import { InjectPersistenceManager } from '@liberation-data/drivine/nest';
 import { Employee } from './models/Employee';
 
 @Injectable()

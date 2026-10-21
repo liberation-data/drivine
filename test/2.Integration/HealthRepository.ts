@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { InjectPersistenceManager, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
+import { PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
+import { InjectPersistenceManager } from '@liberation-data/drivine/nest';
 
 @Injectable()
 export class HealthRepository {

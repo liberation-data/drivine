@@ -161,5 +161,18 @@
         "sourceType": "module",
         "project": "tsconfig.json",
         "createDefaultProgram": true
-    }
+    },
+    "overrides": [
+        {
+            // Drivine is used without Nest: only its integration, under src/nest, may import Nest or Express.
+            "files": ["src/**/*.ts"],
+            "excludedFiles": ["src/nest/**"],
+            "rules": {
+                "no-restricted-imports": [
+                    "error",
+                    { "patterns": [{ "group": ["@nestjs/*", "express"], "message": "Only src/nest may use Nest." }] }
+                ]
+            }
+        }
+    ]
 }

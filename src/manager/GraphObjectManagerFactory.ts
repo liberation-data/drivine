@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { backendFor } from '@/backend/Backends';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
@@ -15,7 +14,6 @@ export interface QueryOptions {
  * Makes one object manager per database. Each runs through the database's delegating persistence manager, so it
  * takes part in a `@Transactional` method's transaction when there is one.
  */
-@Injectable()
 export class GraphObjectManagerFactory {
     readonly registry = new ModelRegistry();
     private readonly managers = new Map<string, StatelessGraphObjectManager>();

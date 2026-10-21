@@ -1,10 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-    DrivineModule,
-    DrivineModuleOptions,
-    PersistenceManager,
-    StatelessGraphObjectManager
-} from '@liberation-data/drivine';
+import { PersistenceManager, StatelessGraphObjectManager } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 import { SAMPLE_PERSISTENCE_MANAGER, SampleAppModule } from '../../src';
 import { allStores, clearLabels, GraphEngine } from '../../../test/2.Integration/support/GraphEngines';
 

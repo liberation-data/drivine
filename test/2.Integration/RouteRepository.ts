@@ -4,7 +4,7 @@ import { Transactional } from '@/transaction/Transactional';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { Cursor } from '@/cursor/Cursor';
-import { InjectCypher, InjectPersistenceManager } from '@/DrivineInjectionDecorators';
+import { InjectCypher, InjectPersistenceManager } from '@liberation-data/drivine/nest';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { CypherStatement } from '@/query/Statement';
 

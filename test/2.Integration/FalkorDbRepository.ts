@@ -1,12 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import {
-    Cursor,
-    CursorSpecification,
-    InjectPersistenceManager,
-    PersistenceManager,
-    QuerySpecification,
-    Transactional
-} from '@liberation-data/drivine';
+import { Cursor, CursorSpecification, PersistenceManager, QuerySpecification, Transactional } from '@liberation-data/drivine';
+import { InjectPersistenceManager } from '@liberation-data/drivine/nest';
 
 @Injectable()
 export class FalkorDbRepository {

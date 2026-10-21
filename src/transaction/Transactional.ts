@@ -2,21 +2,27 @@ import { TransactionContextHolder } from '@/transaction/TransactonContextHolder'
 import { Propagation } from '@/transaction/Propagation';
 import { DrivineError } from '@/DrivineError';
 import { Transaction } from '@/transaction/Transaction';
+import { inDrivineContext } from '@/context/DrivineContext';
 
 export interface TransactionOptions {
     rollback?: boolean;
     propagation?: Propagation;
 }
 
+/**
+ * Runs the method in a transaction: the caller's, or a new one. Outside a Drivine context (Nest's middleware opens one
+ * per request) it opens one, so a job, a CLI command or a test is transactional too.
+ */
 export function Transactional(options?: TransactionOptions): MethodDecorator {
     return (target: any, methodName: string | symbol, descriptor: TypedPropertyDescriptor<any>) => {
         const originalMethod = descriptor.value;
         descriptor.value = async function (...args: any[]) {
             if (TransactionContextHolder.getInstance().drivineContext) {
                 return runInTransaction(originalMethod.bind(this), options, args);
-            } else {
-                return originalMethod.bind(this)(...args);
             }
+            return inDrivineContext()
+                .withTransaction(options)
+                .run(() => originalMethod.apply(this, args));
         };
     };
 }
@@ -31,7 +37,7 @@ export async function runInTransaction(
     const options = optionsWithDefaults(transactionOptions);
     const contextHolder = TransactionContextHolder.getInstance();
     const transaction = contextHolder.currentTransaction || new Transaction(options, contextHolder);
-    const isRoot = transaction.callStack.isEmpty()
+    const isRoot = transaction.callStack.isEmpty();
     try {
         await transaction.pushContext(fn.name || `[anonymous function]`);
         const result = await fn(...args);

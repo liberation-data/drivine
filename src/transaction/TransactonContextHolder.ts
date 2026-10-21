@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { TransactionContextKeys } from '@/transaction/TransactionContextKeys';
 import { Transaction } from '@/transaction/Transaction';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
@@ -6,9 +5,8 @@ import { DrivineContext } from '@/context/DrivineContext';
 import { MakeLocalStorage } from '@/utils/LocalStorageFactory';
 
 /**
- * Wrap local storage to make it injectable.
+ * The context of the running call: its transaction, and the database registry. Wraps local storage.
  */
-@Injectable()
 export class TransactionContextHolder {
     static instance: TransactionContextHolder | undefined;
 
