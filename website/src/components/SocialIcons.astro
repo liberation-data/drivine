@@ -1,12 +1,14 @@
 ---
 /**
  * The header's GitHub link, to the repository of the library whose docs are open, with its stars: Drivine's on the
- * TypeScript pages, drivine4j's on the Kotlin & Java pages. Replaces Starlight's SocialIcons.
+ * TypeScript pages, drivine-python's on the Python pages, drivine4j's on the Kotlin & Java pages. Replaces
+ * Starlight's SocialIcons.
  */
 import { Icon } from '@astrojs/starlight/components';
 import { REPOS, formatStars, repoUrl, stars, type Topic } from '../lib/github';
 
-const topic: Topic = Astro.url.pathname.replace(import.meta.env.BASE_URL, '/').startsWith('/jvm') ? 'jvm' : 'ts';
+const path = Astro.url.pathname.replace(import.meta.env.BASE_URL, '/');
+const topic: Topic = path.startsWith('/jvm') ? 'jvm' : path.startsWith('/py') ? 'py' : 'ts';
 const count = await stars(topic);
 const { name } = REPOS[topic];
 ---

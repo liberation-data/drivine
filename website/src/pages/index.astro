@@ -24,11 +24,13 @@ const photo = async (width: number): Promise<string> => {
 };
 const photoVars = `--photo: ${await photo(1920)}; --photo-small: ${await photo(960)};`;
 const ts = `${base}ts/`;
+const py = `${base}py/`;
 const jvm = `${base}jvm/`;
 const image = (name: string) => `${base}images/${name}`;
 
 import { REPOS, formatStars, repoUrl, stars } from '../lib/github';
 const tsStars = await stars('ts');
+const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
 const starLabel = (count: number | undefined) => (count === undefined ? '' : formatStars(count));
 
@@ -52,6 +54,22 @@ const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s
 <span class="k">const</span> leads = <span class="k">await</span> gom.loadAll(<span class="t">PersonCareer</span>, (q) =&gt; ({
     where: q.person.bio.contains(<span class="s">'Lead'</span>)
 }));`;
+const pySample = `<span class="k">class</span> <span class="t">Person</span>(<span class="t">NodeFragment</span>, labels=[<span class="s">"Person"</span>]):
+    uuid: <span class="t">Annotated</span>[<span class="t">str</span>, <span class="a">NodeId</span>()]
+    name: <span class="t">str</span>
+    bio: <span class="t">str</span> | <span class="k">None</span> = <span class="k">None</span>
+
+<span class="k">class</span> <span class="t">PersonCareer</span>(<span class="t">GraphView</span>):
+    person: <span class="t">Annotated</span>[<span class="t">Person</span>, <span class="a">Root</span>()]
+    employment_history: <span class="t">Annotated</span>[
+        <span class="t">list</span>[<span class="t">WorkHistory</span>], <span class="a">Relationship</span>(<span class="s">"WORKS_FOR"</span>)
+    ] = []
+
+<span class="c"># Everyone whose bio mentions leading</span>
+q = refs(<span class="t">PersonCareer</span>)
+leads = <span class="k">await</span> gom.load_all(
+    <span class="t">PersonCareer</span>, where=q.person.bio.contains(<span class="s">"Lead"</span>)
+)`;
 const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s">"Person"</span>])
 <span class="k">data class</span> <span class="t">Person</span>(
     <span class="a">@NodeId</span> <span class="k">val</span> uuid: <span class="t">String</span>,
@@ -80,8 +98,8 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Drivine: graph database client for TypeScript and the JVM</title>
-        <meta name="description" content="Drivine is a graph database client for TypeScript and the JVM: Neo4j, Memgraph, FalkorDB and Oracle." />
+        <title>Drivine: graph database client for TypeScript, Python and the JVM</title>
+        <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB and Oracle." />
         <link rel="icon" href={`${base}favicon.ico`} />
         <!-- The heading's font, which the largest paint (DRIVINE) waits for. -->
         <link rel="preload" href={headingFont} as="font" type="font/woff2" crossorigin />
@@ -160,7 +178,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
 
             .libraries { padding: 0 32px 96px; }
             .row { display: flex; flex-wrap: wrap; gap: 28px; }
-            .card { flex: 1 1 380px; min-width: 0; background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 36px; display: flex; flex-direction: column; gap: 16px; }
+            .card { flex: 1 1 320px; min-width: 0; background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 36px; display: flex; flex-direction: column; gap: 16px; }
             .card h3 { margin: 0; font-size: 32px; font-weight: 700; }
             .card p { margin: 0; font-size: 17px; line-height: 1.6; color: var(--muted); }
             .card .eyebrow { letter-spacing: 0.14em; }
@@ -240,6 +258,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                 <a href={base} class="brand"><img src={image('cow-emblem.png')} alt="" width="36" height="36" /><span>DRIVINE</span></a>
                 <div class="nav-links">
                     <a href={ts}>TypeScript docs</a>
+                    <a href={py}>Python docs</a>
                     <a href={jvm}>Kotlin &amp; Java docs</a>
                     <details class="repo-menu">
                         <summary>GitHub</summary>
@@ -247,6 +266,10 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                             <a href={repoUrl('ts')}>
                                 <span><strong>{REPOS.ts.name}</strong> {REPOS.ts.language}</span>
                                 {tsStars !== undefined && <span class="count">★ {starLabel(tsStars)}</span>}
+                            </a>
+                            <a href={repoUrl('py')}>
+                                <span><strong>{REPOS.py.name}</strong> {REPOS.py.language}</span>
+                                {pyStars !== undefined && <span class="count">★ {starLabel(pyStars)}</span>}
                             </a>
                             <a href={repoUrl('jvm')}>
                                 <span><strong>{REPOS.jvm.name}</strong> {REPOS.jvm.language}</span>
@@ -262,14 +285,16 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                 <div class="rule" style="width: min(760px, 86%); margin-top: 32px" aria-hidden="true"></div>
                 <h1>DRIVINE</h1>
                 <div class="rule" style="width: min(900px, 94%)" aria-hidden="true"></div>
-                <p class="subtitle">Graph database client for TypeScript &amp; the JVM</p>
+                <p class="subtitle">Graph database client for TypeScript, Python &amp; the JVM</p>
                 <p class="tagline">Community project by Liberation Data.</p>
                 <div class="actions" style="margin-top: 44px">
                     <a href={ts} class="button primary">TypeScript docs <span aria-hidden="true">→</span></a>
+                    <a href={py} class="button ghost">Python docs <span aria-hidden="true">→</span></a>
                     <a href={jvm} class="button ghost">Kotlin &amp; Java docs <span aria-hidden="true">→</span></a>
                 </div>
                 <div class="installs">
                     <code>npm install @liberation-data/drivine</code>
+                    <code>pip install drivine</code>
                     <code>org.drivine:drivine4j</code>
                 </div>
             </div>
@@ -306,6 +331,20 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                             </div>
                         </article>
                         <article class="card">
+                            <p class="eyebrow">PYTHON · ASYNCIO</p>
+                            <h3>drivine-python</h3>
+                            <p>
+                                Async first, with a sync API written from it. Pydantic models, a query DSL that stubs generated
+                                from your models type, and assemblies with pi-pilgrim.
+                            </p>
+                            <code>pip install drivine</code>
+                            <div class="links">
+                                <a href={py}>Read the docs →</a>
+                                <a href={repoUrl('py')} class="star">★ Star on GitHub{pyStars !== undefined && <span>{starLabel(pyStars)}</span>}</a>
+                                <a href="https://pypi.org/project/drivine/">PyPI</a>
+                            </div>
+                        </article>
+                        <article class="card">
                             <p class="eyebrow">KOTLIN · JAVA · SPRING BOOT</p>
                             <h3>drivine4j</h3>
                             <p>
@@ -325,7 +364,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                             <circle cx="7" cy="14" r="4"></circle><circle cx="21" cy="7" r="4"></circle><circle cx="21" cy="21" r="4"></circle>
                             <path d="M10.5 12.2 17.5 8.8M10.5 15.8l7 3.4"></path>
                         </svg>
-                        <span><strong>One storage format.</strong> A store written from Node is read, stamped and checked alike from the JVM, and the other way round.</span>
+                        <span><strong>One storage format.</strong> A store written from Node, Python or the JVM is read, stamped and checked alike from the others.</span>
                     </p>
                 </div>
             </section>
@@ -339,15 +378,17 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                         <ul>
                             <li><span><code>@NodeFragment</code> maps one node.</span></li>
                             <li><span><code>@GraphView</code> composes fragments and relationships from a <code>@Root</code>.</span></li>
-                            <li><span>The DSL’s references come from your classes, or from code KSP generates.</span></li>
+                            <li><span>The DSL’s references come from your classes, or from code generated from them: by KSP on the JVM, as stubs in Python.</span></li>
                         </ul>
                     </div>
                     <div class="panel">
                         <div class="tabs" role="group" aria-label="Language">
                             <button type="button" aria-pressed="true" data-lang="ts">TypeScript</button>
+                            <button type="button" aria-pressed="false" data-lang="py">Python</button>
                             <button type="button" aria-pressed="false" data-lang="kt">Kotlin</button>
                         </div>
 <pre data-lang="ts" set:html={tsSample} />
+<pre data-lang="py" hidden set:html={pySample} />
 <pre data-lang="kt" hidden set:html={ktSample} />
                     </div>
                 </div>
@@ -356,13 +397,13 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
             <section class="features">
                 <div class="wrap">
                     <header>
-                        <p class="eyebrow">IN BOTH LIBRARIES</p>
+                        <p class="eyebrow">IN EVERY LIBRARY</p>
                         <h2>Everything an object manager should do, and the Cypher when you want it.</h2>
                     </header>
                     <div class="row">
                         <article class="feature"><h3>A typed query DSL</h3><p>Filters, ordering, keyset paging and index advice, accepted by loads, counts, deletes, patches and grouped reads.</p></article>
                         <article class="feature"><h3>Saves, patches and edges</h3><p>save and saveAll with null policies and replace modes, update, create, patch, cascading deletes, relate and unrelate.</p></article>
-                        <article class="feature"><h3>Optimistic locking</h3><p><code>@NodeStamp</code> refuses a save when the node changed since it was loaded, in a stamp format Node and the JVM share.</p></article>
+                        <article class="feature"><h3>Optimistic locking</h3><p><code>@NodeStamp</code> refuses a save when the node changed since it was loaded, in a stamp format Node, Python and the JVM share.</p></article>
                         <article class="feature"><h3>Vector and full-text search</h3><p>loadNearest and loadMatching on views and fragments, with one score scale on every engine.</p></article>
                         <article class="feature"><h3>Schema management</h3><p>Range, uniqueness, vector and full-text indexes declared on your classes, enforced at startup, with drift detection.</p></article>
                         <article class="feature"><h3>Test containers, or yours</h3><p>A container for each datasource in CI. While you iterate, <code>USE_LOCAL_NEO4J=true</code> points tests at your own instance.</p></article>
@@ -421,6 +462,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                     <p>Configure a connection, inject the object manager, load your first view.</p>
                     <div class="actions" style="margin-top: 8px">
                         <a href={`${ts}quick-start/`} class="button primary">TypeScript quick start</a>
+                        <a href={`${py}quick-start/`} class="button ghost">Python quick start</a>
                         <a href={`${jvm}quick-start/`} class="button ghost">Kotlin &amp; Java quick start</a>
                     </div>
                 </div>
@@ -438,6 +480,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                 </div>
                 <nav aria-label="Footer">
                     <div><span>TypeScript</span><a href="https://github.com/liberation-data/drivine">GitHub</a><a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a></div>
+                    <div><span>Python</span><a href="https://github.com/liberation-data/drivine-python">GitHub</a><a href="https://pypi.org/project/drivine/">PyPI</a></div>
                     <div><span>JVM</span><a href="https://github.com/liberation-data/drivine4j">GitHub</a><a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a></div>
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
