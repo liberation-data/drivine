@@ -3,9 +3,10 @@
 
 **Docs: [drivine.org](https://drivine.org)**, for TypeScript and for Kotlin & Java.
 
-Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module and no need
-for one ([Without Nest](#without-nest)). It supports **Neo4j**, **Memgraph**, **FalkorDB** and **Oracle** (SQL/PGQ) as graph stores, plus Amazon Neptune and plain SQL on
-Postgres through the low-level API. It gives you two ways to work with a graph:
+Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module, and no need
+for one: see [Without Nest](#3-without-nest). It supports **Neo4j**, **Memgraph**, **FalkorDB** and **Oracle**
+(SQL/PGQ) as graph stores, plus Amazon Neptune and plain SQL on Postgres through the low-level API. It gives you two
+ways to work with a graph:
 
 1. **PersistenceManager**: a low-level API where you write the queries yourself. This is the classic Drivine approach.
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
@@ -26,7 +27,8 @@ Its design goals:
 - [Philosophy](#philosophy)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-  - [Without Nest](#without-nest)
+  - [With Nest](#2-with-nest)
+  - [Without Nest](#3-without-nest)
 - [Object Manager](#object-manager)
   - [Key Concepts](#key-concepts)
   - [Loading Data](#loading-data)
@@ -90,8 +92,8 @@ Composition lets you mix and match as needed.
 npm install @liberation-data/drivine
 ```
 
-Drivine needs `reflect-metadata` and `neo4j-driver` as peer dependencies, and NestJS (6 to 11) only for its module. The FalkorDB, Oracle
-(`oracledb`, thin mode, no Instant Client needed) and Postgres drivers are bundled.
+Drivine needs `reflect-metadata` and `neo4j-driver` as peer dependencies, and NestJS (6 to 11) only for its module. The
+FalkorDB, Oracle (`oracledb`, thin mode, no Instant Client needed) and Postgres drivers are bundled.
 
 The object manager reads decorators and their type metadata, so enable both in `tsconfig.json`:
 
@@ -122,7 +124,12 @@ DATABASE_POOL_MAX=40
 DATABASE_CONNECTION_TIMEOUT=5000
 ```
 
-Then register the connections with the module:
+Use them through Nest's module, or without Nest. Only the setup differs: the decorators, the DSL, `@Transactional`
+and the managers are the same.
+
+### 2. With Nest
+
+Register the connections with the module, from `@liberation-data/drivine/nest`:
 
 ```typescript
 import { DrivineModule } from '@liberation-data/drivine/nest';
@@ -133,15 +140,13 @@ import { DrivineModule } from '@liberation-data/drivine/nest';
             connectionProviders: [DatabaseRegistry.buildOrResolveFromEnv()]
         })
     ],
-    providers: [PersonRepository]
+    providers: [RouteRepository, PersonService]
 })
 export class AppModule {}
 ```
 
-### 2. A Repository
-
-The `Inject…` decorators come from `@liberation-data/drivine/nest` too; everything else from
-`@liberation-data/drivine`.
+Then inject a persistence manager, an object manager or a statement. The `Inject…` decorators come from
+`@liberation-data/drivine/nest` too; everything else from `@liberation-data/drivine`:
 
 ```typescript
 @Injectable()
@@ -172,9 +177,73 @@ export class PersonService {
     constructor(@InjectGraphObjectManager() readonly gom: StatelessGraphObjectManager) {}
 
     async leads(): Promise<PersonCareer[]> {
-        return this.gom.loadAll(PersonCareer, (q) => ({ where: q.person.bio.contains('Lead') }));
+        return this.gom.loadAll(PersonCareer, (q) => ({ where: q.person.bio.containsIgnoreCase('lead') }));
     }
 }
+```
+
+The module closes the connections when the application stops.
+
+### 3. Without Nest
+
+In Express, Fastify, a job or a CLI, make the factories yourself, once, and hand the managers to your classes:
+
+```typescript
+import {
+    cypherStatement,
+    DatabaseRegistry,
+    GraphObjectManagerFactory,
+    inDrivineContext,
+    PersistenceManager,
+    PersistenceManagerFactory,
+    QuerySpecification,
+    StatelessGraphObjectManager,
+    Transactional
+} from '@liberation-data/drivine';
+import { readFileSync } from 'fs';
+
+DatabaseRegistry.buildOrResolveFromEnv();                  // and buildOrResolveFromEnv('ANALYTICS'), …
+const persistenceManagers = new PersistenceManagerFactory();
+const graphObjectManagers = new GraphObjectManagerFactory(persistenceManagers);
+
+export class RouteRepository {
+    private readonly routesBetween = cypherStatement(readFileSync(`${__dirname}/routesBetween.cypher`, 'utf8'));
+
+    constructor(readonly persistenceManager: PersistenceManager = persistenceManagers.get()) {}
+
+    @Transactional() // the same as in Nest: join the current transaction, or start one
+    async findFastestBetween(start: string, destination: string): Promise<Route> {
+        return this.persistenceManager.getOne(
+            new QuerySpecification<Route>()
+                .withStatement(this.routesBetween)
+                .bind([start, destination])
+                .limit(1)
+                .transform(Route)
+        );
+    }
+}
+
+export class PersonService {
+    constructor(readonly gom: StatelessGraphObjectManager = graphObjectManagers.get()) {}
+
+    async leads(): Promise<PersonCareer[]> {
+        return this.gom.loadAll(PersonCareer, (q) => ({ where: q.person.bio.containsIgnoreCase('lead') }));
+    }
+}
+```
+
+To run a block in one transaction without a decorator:
+
+```typescript
+await inDrivineContext()
+    .withTransaction()
+    .run(async () => { /* … */ });
+```
+
+Close the connections when the application stops:
+
+```typescript
+await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
 ```
 
 ### Return One Map
@@ -194,40 +263,6 @@ RETURN properties(p)
 RETURN count(p) AS total
 ```
 
-### Without Nest
-
-Only `@liberation-data/drivine/nest` needs Nest. Elsewhere (Express, Fastify, a job, a CLI) make the factories yourself:
-
-```typescript
-import {
-    DatabaseRegistry,
-    GraphObjectManagerFactory,
-    inDrivineContext,
-    PersistenceManagerFactory,
-    Transactional
-} from '@liberation-data/drivine';
-
-DatabaseRegistry.buildOrResolveFromEnv();                       // and buildOrResolveFromEnv('ANALYTICS'), …
-const persistenceManagers = new PersistenceManagerFactory();
-const gom = new GraphObjectManagerFactory(persistenceManagers).get();
-const pm = persistenceManagers.get();
-
-class PersonService {
-    @Transactional()   // as in Nest: join the caller's transaction, or start one
-    async hire(...people: Person[]): Promise<void> {
-        await gom.saveAll(people);
-    }
-}
-
-// A block in one transaction, without a decorator:
-await inDrivineContext()
-    .withTransaction()
-    .run(async () => { … });
-```
-
-Close the connections when the app stops:
-`await Promise.all(DatabaseRegistry.getInstance().providers.map((it) => it.end()))`.
-
 ## Object Manager
 
 `StatelessGraphObjectManager` maps decorated classes to the graph. It writes the statements itself, and gives you a
@@ -245,7 +280,8 @@ constructor(
 ) {}
 ```
 
-Or take one from `GraphObjectManagerFactory`, which the module provides: `factory.get('ANALYTICS')`.
+Or take one from `GraphObjectManagerFactory`, which the module provides: `factory.get('ANALYTICS')`. Without Nest, from
+the factory you made: `graphObjectManagers.get('ANALYTICS')`.
 
 ### Key Concepts
 
@@ -678,9 +714,11 @@ DrivineModule.withOptions({
 });
 ```
 
-That applies to every manager the module makes. To change one manager: `gom.indexAdvice = 'FAIL'`. A query pinned to
-one root, by an equality on the id or on a uniquely constrained property, is never advised on. The index list is read
-once and kept; after making indexes as the application runs, call `gom.indexAdvisor.refresh()`.
+That applies to every manager the module makes. Without Nest, give it to the factory:
+`new GraphObjectManagerFactory(persistenceManagers, { indexAdvice: 'FAIL' })`. To change one manager:
+`gom.indexAdvice = 'FAIL'`. A query pinned to one root, by an equality on the id or on a uniquely constrained property,
+is never advised on. The index list is read once and kept; after making indexes as the application runs, call
+`gom.indexAdvisor.refresh()`.
 
 ### Grouped Reads (`groups`)
 
@@ -1472,6 +1510,12 @@ DrivineModule.withOptions({
 });
 ```
 
+Without Nest, enforce the schema yourself before the application serves:
+
+```typescript
+await new SchemaManager(graphObjectManagers, { catalogs: [/* … */] }).enforce();
+```
+
 Catalogs merge, identical declarations count once, and conflicting ones for the same kind, label and properties fail
 startup. A catalog applies to every database that supports schema, unless you narrow it:
 `.forDefaultDatabase()`, `.forDatabase('users')` or `.forDatabases('a', 'b')`. A named target is strict: an unknown
@@ -1535,6 +1579,9 @@ export class AnalyticsRepository {
     ) {}
 }
 ```
+
+Without Nest, register each with `DatabaseRegistry.buildOrResolveFromEnv('ANALYTICS')`, and take its managers by name:
+`persistenceManagers.get('ANALYTICS')`, `graphObjectManagers.get('ANALYTICS')`.
 
 One `@Transactional()` method can span several databases.
 
