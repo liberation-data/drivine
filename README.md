@@ -1,7 +1,7 @@
-<a href="https://drivine.org/"> ![DrivineSplash](https://raw.githubusercontent.com/liberation-data/drivine/master/website/public/images/splash.jpg)</a>
+<a href="https://drivine.org/"><img src="https://raw.githubusercontent.com/liberation-data/drivine/master/website/public/images/splash.jpg" alt="Drivine: graph database client for TypeScript, Python and the JVM"></a>
 # <a href="https://drivine.org/">drivine</a>
 
-**Docs: [drivine.org](https://drivine.org)**, for TypeScript and for Kotlin & Java.
+**Docs: [drivine.org](https://drivine.org/ts/)**, for TypeScript, Python, and Kotlin & Java.
 
 Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module, and no need
 for one: see [Without Nest](#3-without-nest). It supports **Neo4j**, **Memgraph**, **FalkorDB** and **Oracle**
@@ -12,10 +12,11 @@ ways to work with a graph:
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
    query DSL whose references come from the classes themselves.
 
-> **On the JVM?** [drivine4j](https://github.com/liberation-data/drivine4j) is Drivine's Java and Kotlin twin
-> (`org.drivine:drivine4j`), the graph client for [Embabel](https://hub.embabel.com), with Spring Boot support and a
-> code-generated DSL. The two share a storage format: a store written from Node is read, stamped and checked alike from
-> the JVM, and the other way round.
+> **On Python or the JVM?** [drivine-python](https://github.com/liberation-data/drivine-python) (`pip install drivine`)
+> is Drivine's Python twin, async first with a sync API. [drivine4j](https://github.com/liberation-data/drivine4j)
+> (`org.drivine:drivine4j`) is its Java and Kotlin twin, the graph client for [Embabel](https://hub.embabel.com), with
+> Spring Boot support and a code-generated DSL. The three share a storage format: a store written from any of them is
+> read, stamped and checked alike by the others.
 
 Its design goals:
 
@@ -1433,7 +1434,7 @@ its own graph's tables alone.
 `<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
 as JSON. Labels, property names and relationship types are data, so `@NodeLabels`, `@PropertyBag` and `edges` work as
 they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>_schema`, records the indexes and
-constraints Drivine made. The layout is drivine4j's, so the JVM and Node read one store.
+constraints Drivine made. The layout is drivine4j's, so the JVM, Node and Python read one store.
 
 Notes:
 
@@ -1701,7 +1702,7 @@ Repository: [github.com/SlackMap/slackmap](https://github.com/SlackMap/slackmap)
 
 ## Documentation
 
-The [User Guide](https://github.com/liberation-data/drivine/wiki) covers the `PersistenceManager`.
+[drivine.org](https://drivine.org/ts/) has this guide a page per section, beside drivine-python's and drivine4j's.
 
 ## Tutorials
 
