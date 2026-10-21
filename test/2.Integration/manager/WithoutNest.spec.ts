@@ -35,6 +35,20 @@ describe.each(graphEngines())('Drivine without Nest on $type', (engine) => {
         }
     }
 
+    class Onboarding {
+        constructor(
+            readonly people: PersonService = new PersonService(),
+            readonly mentors: PersonService = new PersonService()
+        ) {}
+
+        @Transactional()
+        async onboard(name: string, mentor: string): Promise<void> {
+            await this.people.hire(name);
+            await this.mentors.hire(mentor);
+            throw new Error('Changed our minds');
+        }
+    }
+
     const service = new PersonService();
     // FalkorDB commits each statement by itself, so there is nothing to roll back.
     const itRollsBack = engine.type === DatabaseType.FALKORDB ? it.skip : it;
@@ -61,6 +75,11 @@ describe.each(graphEngines())('Drivine without Nest on $type', (engine) => {
 
     itRollsBack('should roll back a @Transactional method called with no context when it throws', async () => {
         await expect(service.hireThenFail('Ada')).rejects.toThrow('Changed our minds');
+        expect(await names()).toEqual([]);
+    });
+
+    itRollsBack('should join one transaction across classes, through the awaits, and roll it all back', async () => {
+        await expect(new Onboarding().onboard('Ada', 'Grace')).rejects.toThrow('Changed our minds');
         expect(await names()).toEqual([]);
     });
 

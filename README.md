@@ -229,6 +229,36 @@ export class PersonService {
     async leads(): Promise<PersonCareer[]> {
         return this.gom.loadAll(PersonCareer, (q) => ({ where: q.person.bio.containsIgnoreCase('lead') }));
     }
+
+    @Transactional()
+    async hire(person: Person): Promise<void> {
+        await this.gom.save(person);
+    }
+}
+```
+
+**`@Transactional` needs no setup.** Drivine keeps the transaction in Node's `AsyncLocalStorage`, which follows every
+`await`. A marked method starts a transaction when none is running, and every marked method it calls, in any class,
+joins it. Nothing passes a transaction or a context around:
+
+```typescript
+class AuditLog {
+    constructor(readonly gom: StatelessGraphObjectManager = graphObjectManagers.get('AUDIT')) {}
+
+    @Transactional()
+    async record(event: AuditEvent): Promise<void> {
+        await this.gom.save(event);
+    }
+}
+
+class Onboarding {
+    constructor(readonly people = new PersonService(), readonly audit = new AuditLog()) {}
+
+    @Transactional()
+    async onboard(person: Person): Promise<void> {
+        await this.people.hire(person);                           // joins onboard's transaction
+        await this.audit.record(AuditEvent.hired(person));        // so does this, on another database
+    } // both commit here; a throw anywhere in it rolls both back
 }
 ```
 
