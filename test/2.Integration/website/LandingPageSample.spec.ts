@@ -64,6 +64,7 @@ describe.each(graphEngines())('The landing page sample on $type', (engine) => {
             new QuerySpecification(
                 "CREATE (lead:Person {uuid: 'landing-lead', name: 'Lead', bio: 'Design Lead'}), " +
                     "(dev:Person {uuid: 'landing-dev', name: 'Dev', bio: 'Developer'}), " +
+                    "(:Person {uuid: 'landing-head', name: 'Head', bio: 'leading the platform team'}), " +
                     "(org:Organization {uuid: 'landing-org', name: 'Studio'}), " +
                     "(lead)-[:WORKS_FOR {role: 'Lead'}]->(org), (dev)-[:WORKS_FOR {role: 'Dev'}]->(org)"
             )
@@ -78,11 +79,12 @@ describe.each(graphEngines())('The landing page sample on $type', (engine) => {
     it('should load everyone whose bio mentions leading', async () => {
         // Everyone whose bio mentions leading
         const leads = await gom.loadAll(PersonCareer, (q) => ({
-            where: q.person.bio.contains('Lead')
+            where: q.person.bio.containsIgnoreCase('lead')
         }));
 
         const ours = leads.filter((it) => it.person.uuid.startsWith('landing-'));
-        expect(ours.map((it) => it.person.name)).toEqual(['Lead']);
-        expect(ours[0].employmentHistory.map((it) => [it.role, it.organization.name])).toEqual([['Lead', 'Studio']]);
+        expect(ours.map((it) => it.person.name).sort()).toEqual(['Head', 'Lead']);
+        const lead = ours.find((it) => it.person.name === 'Lead')!;
+        expect(lead.employmentHistory.map((it) => [it.role, it.organization.name])).toEqual([['Lead', 'Studio']]);
     });
 });
