@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { InjectPersistenceManager } from '@/DrivineInjectionDecorators';
+import { InjectPersistenceManager } from '@liberation-data/drivine/nest';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { Transactional } from '@/transaction/Transactional';
 import { QuerySpecification } from '@/query/QuerySpecification';

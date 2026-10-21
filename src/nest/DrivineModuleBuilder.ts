@@ -1,8 +1,8 @@
 import { Provider } from '@nestjs/common';
-import { DrivineModuleOptions } from '@/DrivineModule';
-import { cypherInjections, fileContentInjections, sqlInjections } from '@/DrivineInjectionDecorators';
+import { DrivineModuleOptions } from '@/nest/DrivineModule';
+import { cypherInjections, fileContentInjections, sqlInjections } from '@/nest/DrivineInjectionDecorators';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
-import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
+import { TransactionContextMiddleware } from '@/nest/TransactionContextMiddleware';
 import { TransactionalPersistenceManager } from '@/manager/TransactionalPersistenceManager';
 import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { cypherStatement, CypherStatement, sqlStatement, SqlStatement } from '@/query/Statement';
@@ -45,7 +45,12 @@ export class DrivineModuleBuilder {
         return [
             <Provider>{ provide: DatabaseRegistry, useFactory: () => DatabaseRegistry.getInstance() },
             <Provider>{ provide: TransactionContextHolder, useFactory: () => TransactionContextHolder.getInstance() },
-            PersistenceManagerFactory,
+            <Provider>{
+                provide: PersistenceManagerFactory,
+                inject: [DatabaseRegistry, TransactionContextHolder],
+                useFactory: (registry: DatabaseRegistry, contextHolder: TransactionContextHolder) =>
+                    new PersistenceManagerFactory(registry, contextHolder)
+            },
             <Provider>{
                 provide: GraphObjectManagerFactory,
                 inject: [PersistenceManagerFactory],

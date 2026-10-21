@@ -1,4 +1,5 @@
-import { DrivineModuleBuilder } from '@/DrivineModuleBuilder';
+import '@/Environment';
+import { DrivineModuleBuilder } from '@/nest/DrivineModuleBuilder';
 import {
     DynamicModule,
     Global,
@@ -11,14 +12,10 @@ import {
 } from '@nestjs/common';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
-import { TransactionContextMiddleware } from '@/transaction/TransactionContextMiddleware';
-import { TransactionContextHolder } from './transaction';
+import { TransactionContextMiddleware } from '@/nest/TransactionContextMiddleware';
+import { TransactionContextHolder } from '@/transaction';
 import { SchemaOptions } from '@/schema/SchemaManager';
 import { QueryOptions } from '@/manager/GraphObjectManagerFactory';
-
-require('dotenv').config({
-    path: process.env.DOTENV_CONFIG_PATH || require('find-config')('.env')
-});
 
 export interface DrivineModuleOptions {
     connectionProviders: ConnectionProvider[];

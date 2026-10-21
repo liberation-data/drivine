@@ -1,6 +1,7 @@
 import { HealthRepository } from './HealthRepository';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DatabaseRegistry, DrivineModule, DrivineModuleOptions, RunWithDrivine } from '@liberation-data/drivine';
+import { DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 
 RunWithDrivine({ rollback: true });
 describe('HealthRepository', () => {

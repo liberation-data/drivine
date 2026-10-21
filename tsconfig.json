@@ -14,6 +14,7 @@
         "baseUrl": "./",
         "paths": {
             "@liberation-data/drivine": ["src/index.ts"],
+            "@liberation-data/drivine/nest": ["src/nest/index.ts"],
             "@/*": ["src/*"],
             "*": ["node_modules/*", "src/typings/*"]
         },

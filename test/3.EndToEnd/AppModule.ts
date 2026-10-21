@@ -2,7 +2,8 @@ import { ClassSerializerInterceptor, INestApplication, Module, ValidationPipe } 
 import { RouteRepository } from '../2.Integration/RouteRepository';
 import { Reflector } from '@nestjs/core';
 import { RouteController } from './RouteController';
-import { DrivineModule, DrivineModuleOptions, DatabaseRegistry } from '@liberation-data/drivine';
+import { DatabaseRegistry } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 
 export async function configureApp(app: INestApplication): Promise<void> {
     app.useGlobalPipes(

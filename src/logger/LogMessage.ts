@@ -1,6 +1,5 @@
 import { LogLevel } from '@/logger/LogLevel';
 import { Writable } from 'stream';
-import { isObject } from '@nestjs/common/utils/shared.utils';
 import * as SourceMapSupport from 'source-map-support';
 
 SourceMapSupport.install({
@@ -16,7 +15,7 @@ export class LogMessage {
 
     toConsole(): string {
         let messageText;
-        if (isObject(this.message)) {
+        if (typeof this.message === 'object' && this.message !== null) {
             messageText = this.level.color(JSON.stringify(this.message, undefined, 2));
         } else {
             messageText = this.level.color(this.message);

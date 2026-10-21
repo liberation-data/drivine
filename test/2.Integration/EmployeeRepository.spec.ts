@@ -1,11 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-    DatabaseRegistry,
-    DrivineError,
-    DrivineModule,
-    DrivineModuleOptions,
-    RunWithDrivine
-} from "@liberation-data/drivine";
+import { DatabaseRegistry, DrivineError, RunWithDrivine } from "@liberation-data/drivine";
+import { DrivineModule, DrivineModuleOptions } from "@liberation-data/drivine/nest";
 import { EmployeeRepository } from './EmployeeRepository';
 import { Employee } from "./models/Employee";
 import { plainToInstance } from "class-transformer";

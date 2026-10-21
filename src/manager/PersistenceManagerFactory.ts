@@ -4,7 +4,6 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 import { DrivineError } from '@/DrivineError';
-import { Injectable } from '@nestjs/common';
 import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 import { DelegatingPersistenceManager } from '@/manager/DelegatingPersistenceManager';
 
@@ -14,13 +13,12 @@ interface PersistenceManagerEntry {
     delegating: DelegatingPersistenceManager;
 }
 
-@Injectable()
 export class PersistenceManagerFactory {
     readonly managers: Map<string, PersistenceManagerEntry> = new Map<string, PersistenceManagerEntry>();
 
     constructor(
-        readonly registry: DatabaseRegistry,
-        readonly contextHolder: TransactionContextHolder
+        readonly registry: DatabaseRegistry = DatabaseRegistry.getInstance(),
+        readonly contextHolder: TransactionContextHolder = TransactionContextHolder.getInstance()
     ) {}
 
     /**

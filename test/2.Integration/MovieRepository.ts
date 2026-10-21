@@ -1,7 +1,7 @@
 import { PersistenceManager } from '@/manager';
 import { Injectable } from '@nestjs/common';
 import { CypherStatement, QuerySpecification } from '@/query';
-import { InjectCypher, InjectPersistenceManager } from '@liberation-data/drivine';
+import { InjectCypher, InjectPersistenceManager } from '@liberation-data/drivine/nest';
 
 @Injectable()
 export class MovieRepository {

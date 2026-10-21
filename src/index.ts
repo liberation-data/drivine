@@ -1,3 +1,5 @@
+import './Environment';
+
 export * from './annotation';
 export * from './backend';
 export * from './connection';
@@ -14,6 +16,3 @@ export * from './store';
 export * from './utils';
 export * from './transaction';
 export * from './DrivineError';
-export * from './DrivineInjectionDecorators';
-export * from './DrivineModule';
-export * from './DrivineModuleBuilder';

@@ -2,7 +2,8 @@ import { StreamUtils } from '@/utils/StreamUtils';
 import { RouteRepository } from './RouteRepository';
 import { Route } from './models/Route';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DrivineModule, DrivineModuleOptions, DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
+import { DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 
 const fs = require('fs');
 

@@ -1,12 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-    DatabaseRegistry,
-    DrivineModule,
-    DrivineModuleOptions,
-    InjectGraphObjectManager,
-    StatelessGraphObjectManager
-} from '@liberation-data/drivine';
+import { DatabaseRegistry, StatelessGraphObjectManager } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions, InjectGraphObjectManager } from '@liberation-data/drivine/nest';
 
 @Injectable()
 class UsesObjectManagers {

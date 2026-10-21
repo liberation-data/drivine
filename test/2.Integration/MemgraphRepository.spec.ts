@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DatabaseRegistry, DrivineModule, DrivineModuleOptions, RunWithDrivine } from '@liberation-data/drivine';
+import { DatabaseRegistry, RunWithDrivine } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 import { MemgraphRepository } from './MemgraphRepository';
 
 // Requires the MEMGRAPH_* connection in .env (see .env.example).

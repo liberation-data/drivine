@@ -1,14 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
     DatabaseRegistry,
-    DrivineModule,
-    DrivineModuleOptions,
-    InjectGraphObjectManager,
     rangeIndex,
     SchemaCatalog,
     SchemaManager,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions, InjectGraphObjectManager } from '@liberation-data/drivine/nest';
 import { Injectable } from '@nestjs/common';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.

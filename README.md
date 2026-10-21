@@ -3,8 +3,8 @@
 
 **Docs: [drivine.org](https://drivine.org)**, for TypeScript and for Kotlin & Java.
 
-Drivine is a graph database client for Node.js and TypeScript, built on [NestJS](https://nestjs.com/). It supports
-**Neo4j**, **Memgraph**, **FalkorDB** and **Oracle** (SQL/PGQ) as graph stores, plus Amazon Neptune and plain SQL on
+Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module and no need
+for one ([Without Nest](#without-nest)). It supports **Neo4j**, **Memgraph**, **FalkorDB** and **Oracle** (SQL/PGQ) as graph stores, plus Amazon Neptune and plain SQL on
 Postgres through the low-level API. It gives you two ways to work with a graph:
 
 1. **PersistenceManager**: a low-level API where you write the queries yourself. This is the classic Drivine approach.
@@ -26,6 +26,7 @@ Its design goals:
 - [Philosophy](#philosophy)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+  - [Without Nest](#without-nest)
 - [Object Manager](#object-manager)
   - [Key Concepts](#key-concepts)
   - [Loading Data](#loading-data)
@@ -89,7 +90,7 @@ Composition lets you mix and match as needed.
 npm install @liberation-data/drivine
 ```
 
-Drivine needs NestJS (6 to 11), `reflect-metadata` and `neo4j-driver`, as peer dependencies. The FalkorDB, Oracle
+Drivine needs `reflect-metadata` and `neo4j-driver` as peer dependencies, and NestJS (6 to 11) only for its module. The FalkorDB, Oracle
 (`oracledb`, thin mode, no Instant Client needed) and Postgres drivers are bundled.
 
 The object manager reads decorators and their type metadata, so enable both in `tsconfig.json`:
@@ -124,6 +125,8 @@ DATABASE_CONNECTION_TIMEOUT=5000
 Then register the connections with the module:
 
 ```typescript
+import { DrivineModule } from '@liberation-data/drivine/nest';
+
 @Module({
     imports: [
         DrivineModule.withOptions({
@@ -136,6 +139,9 @@ export class AppModule {}
 ```
 
 ### 2. A Repository
+
+The `Inject…` decorators come from `@liberation-data/drivine/nest` too; everything else from
+`@liberation-data/drivine`.
 
 ```typescript
 @Injectable()
@@ -187,6 +193,40 @@ RETURN { name: a.name, age: a.age, title: b.title } AS result
 RETURN properties(p)
 RETURN count(p) AS total
 ```
+
+### Without Nest
+
+Only `@liberation-data/drivine/nest` needs Nest. Elsewhere (Express, Fastify, a job, a CLI) make the factories yourself:
+
+```typescript
+import {
+    DatabaseRegistry,
+    GraphObjectManagerFactory,
+    inDrivineContext,
+    PersistenceManagerFactory,
+    Transactional
+} from '@liberation-data/drivine';
+
+DatabaseRegistry.buildOrResolveFromEnv();                       // and buildOrResolveFromEnv('ANALYTICS'), …
+const persistenceManagers = new PersistenceManagerFactory();
+const gom = new GraphObjectManagerFactory(persistenceManagers).get();
+const pm = persistenceManagers.get();
+
+class PersonService {
+    @Transactional()   // as in Nest: join the caller's transaction, or start one
+    async hire(...people: Person[]): Promise<void> {
+        await gom.saveAll(people);
+    }
+}
+
+// A block in one transaction, without a decorator:
+await inDrivineContext()
+    .withTransaction()
+    .run(async () => { … });
+```
+
+Close the connections when the app stops:
+`await Promise.all(DatabaseRegistry.getInstance().providers.map((it) => it.end()))`.
 
 ## Object Manager
 
@@ -1231,9 +1271,10 @@ export class UserService {
 }
 ```
 
-A transaction spans every database the method touches. Outside a request, run code in Drivine's context with
-`inDrivineContext().withTransaction({ rollback: true }).run(async () => …)`, or call
-`runInTransaction(fn)` inside one.
+A transaction spans every database the method touches. A method called outside a request (a job, `onModuleInit`, a
+script) starts its own. To run a block in one transaction without a decorator, use
+`inDrivineContext().withTransaction().run(async () => …)`; `withTransaction({ rollback: true })` rolls it back
+at the end, as tests do.
 
 ### Cursors
 
@@ -1249,7 +1290,7 @@ cursor.asStream().pipe(destination);   // or as a Node stream
 
 ### Statements in Files
 
-Keep statements in files beside your code, and inject them:
+Keep statements in files beside your code, and inject them (Nest), or read them with `cypherStatement(readFileSync(path, 'utf8'))`:
 
 ```typescript
 constructor(

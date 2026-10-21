@@ -1,13 +1,12 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import {
     DatabaseRegistry,
-    DrivineModule,
-    DrivineModuleOptions,
     GraphObjectManagerFactory,
     PersistenceManager,
     PersistenceManagerFactory,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
+import { DrivineModule, DrivineModuleOptions } from '@liberation-data/drivine/nest';
 
 /** The token the sample's persistence manager is injected by: an interface is no token. */
 export const SAMPLE_PERSISTENCE_MANAGER = 'SamplePersistenceManager';

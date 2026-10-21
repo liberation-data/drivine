@@ -6,7 +6,10 @@ import { inDrivineContext } from '@/context/DrivineContext';
 
 @Injectable()
 export class TransactionContextMiddleware implements NestMiddleware {
-    constructor(readonly transactionContext: TransactionContextHolder, readonly databaseRegistry: DatabaseRegistry) {}
+    constructor(
+        readonly transactionContext: TransactionContextHolder,
+        readonly databaseRegistry: DatabaseRegistry
+    ) {}
 
     async use(req: express.Request, res: express.Response, next: express.NextFunction): Promise<any> {
         return inDrivineContext().run(async () => {
