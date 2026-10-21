@@ -52,7 +52,7 @@ const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s
 
 <span class="c">// Everyone whose bio mentions leading</span>
 <span class="k">const</span> leads = <span class="k">await</span> gom.loadAll(<span class="t">PersonCareer</span>, (q) =&gt; ({
-    where: q.person.bio.contains(<span class="s">'Lead'</span>)
+    where: q.person.bio.containsIgnoreCase(<span class="s">'lead'</span>)
 }));`;
 const pySample = `<span class="k">class</span> <span class="t">Person</span>(<span class="t">NodeFragment</span>, labels=[<span class="s">"Person"</span>]):
     uuid: <span class="t">Annotated</span>[<span class="t">str</span>, <span class="a">NodeId</span>()]
@@ -68,7 +68,7 @@ const pySample = `<span class="k">class</span> <span class="t">Person</span>(<sp
 <span class="c"># Everyone whose bio mentions leading</span>
 q = refs(<span class="t">PersonCareer</span>)
 leads = <span class="k">await</span> gom.load_all(
-    <span class="t">PersonCareer</span>, where=q.person.bio.contains(<span class="s">"Lead"</span>)
+    <span class="t">PersonCareer</span>, where=q.person.bio.contains_ignore_case(<span class="s">"lead"</span>)
 )`;
 const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s">"Person"</span>])
 <span class="k">data class</span> <span class="t">Person</span>(
@@ -88,7 +88,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
 <span class="c">// Everyone whose bio mentions leading</span>
 <span class="k">val</span> leads = graphObjectManager.loadAll&lt;<span class="t">PersonCareer</span>&gt; {
     where {
-        person.bio contains <span class="s">"Lead"</span>
+        person.bio containsIgnoreCase <span class="s">"lead"</span>
     }
 }`;
 ---
