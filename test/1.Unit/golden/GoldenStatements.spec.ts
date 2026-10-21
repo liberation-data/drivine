@@ -285,6 +285,7 @@ function queries(registry: ModelRegistry, backend: GraphBackend): Record<string,
             ),
             orderBy: [q.person.name.asc(), q.employmentHistory.startDate.desc()]
         })),
+        'query.LocationAncestors.deep': load(view(LocationAncestors), (q) => ({ where: q.within.name.eq('Europe') })),
         'query.Customer.bags': load(fragment(Customer), (q) => ({
             where: [
                 q.metadata.source.eq('wiki'),
@@ -363,6 +364,7 @@ function saves(
         'PersonCareer.delete.where': backend.delete(view(PersonCareer), where),
         'PersonCareer.delete.all': backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ALL),
         'LocationHierarchy.delete.all': backend.delete(view(LocationHierarchy), undefined, CascadeType.DELETE_ALL),
+        'LocationAncestors.delete.all': backend.delete(view(LocationAncestors), undefined, CascadeType.DELETE_ALL),
         'Person.heldProperties': backend.heldProperties(registry.fragment(Person)),
         'Person.foundStamp': backend.foundStamp(registry.fragment(Person)),
         'saveAll.fragments': backend.fragmentBatch(

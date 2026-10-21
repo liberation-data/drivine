@@ -5,7 +5,7 @@ import {
     jsonKey,
     nodeDocument,
     OracleGraph,
-    RELATED_SUBQUERY,
+    relatedSubquery,
     sqlText
 } from '@/backend/oracle/OracleGraph';
 import { target } from '@/backend/ViewProjector';
@@ -17,6 +17,12 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 interface PathRows {
     body: string;
     nodes: string[];
+}
+
+/** The FROM that reads node rows by their ids, and the hint its SELECT carries. */
+interface NodesOf {
+    from: string;
+    hint: string;
 }
 
 /**
@@ -31,11 +37,6 @@ export class OracleViews {
         private readonly graph: OracleGraph,
         private readonly depth: Record<string, number> = {}
     ) {}
-
-    /** The table of nodes. */
-    get graphNodes(): string {
-        return this.graph.nodes;
-    }
 
     /** An alias no other part of the statement uses. */
     nextAlias(prefix: string): string {
@@ -67,7 +68,7 @@ export class OracleViews {
             .filter((it) => it.required)
             .map((rel) => {
                 const step = this.step(rel.type, rel.direction, alias, labelsOf(target(rel)));
-                return `EXISTS (${RELATED_SUBQUERY} ${step.from} AND ${step.x})`;
+                return `EXISTS (${relatedSubquery()} ${step.from} AND ${step.x})`;
             });
         const paths = model.paths.filter((it) => it.required).map((path) => `EXISTS (${this.pathIds(path, alias)})`);
         return [...relationships, ...paths];
@@ -102,7 +103,22 @@ export class OracleViews {
         };
     }
 
-    /** The ids of the nodes 1 to `depth` relationships of the type away from the node row `from`. */
+    /**
+     * The node rows `x` whose ids the query `ids` selects, as a column `nid`, each once: the FROM of a query that reads
+     * them, and the hint its SELECT carries. They're joined from the ids, so a query correlated to another row is read
+     * from where it starts; tested with `IN`, Oracle would test every node against it. The hint has each read by its
+     * id: Oracle takes a test of a node's labels for a lookup of one row, and would read every node of the label for
+     * each id.
+     */
+    nodesOf(ids: string, x: string): NodesOf {
+        const r = this.alias('r');
+        return {
+            from: `FROM (SELECT DISTINCT nid FROM (${ids})) ${r} JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid`,
+            hint: byId(x)
+        };
+    }
+
+    /** The ids (a column `nid`) of the nodes 1 to `depth` relationships of the type from the node row `from`. */
     reached(type: string, direction: Direction, from: string, depth: number): string {
         const edges =
             direction === Direction.UNDIRECTED
@@ -111,7 +127,7 @@ export class OracleViews {
                 : direction === Direction.INCOMING
                 ? `(SELECT dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
                 : `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
-        return `SELECT b FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
+        return `SELECT b AS nid FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
     }
 
     private reachedFrom(
@@ -127,12 +143,12 @@ export class OracleViews {
             const into = target(rel);
             if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
                 const x = this.alias('x');
+                const r = this.alias('r');
+                const reached = this.reached(rel.type, rel.direction, from, depth);
                 queries.push(
-                    `SELECT ${x}.nid ${froms.join(' ')} CROSS JOIN ${this.graph.nodes} ${x} WHERE ${[
-                        ...wheres,
-                        `${x}.nid IN (${this.reached(rel.type, rel.direction, from, depth)})`,
-                        hasLabels(x, labelsOf(into))
-                    ].join(' AND ')}`
+                    `SELECT /*+ ${byId(x)} */ ${x}.nid ${froms.join(' ')} CROSS JOIN LATERAL (${reached}) ${r} ` +
+                        `JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid ` +
+                        `WHERE ${[...wheres, hasLabels(x, labelsOf(into))].join(' AND ')}`
                 );
                 continue;
             }
@@ -193,13 +209,11 @@ export class OracleViews {
     private deepFragments(rel: RelationshipModel, from: string, depth: number): string {
         const x = this.alias('x');
         const reached = this.reached(rel.type, rel.direction, from, depth);
-        const nodes = `FROM ${this.graph.nodes} ${x} WHERE ${x}.nid IN (${reached}) AND ${hasLabels(
-            x,
-            labelsOf(target(rel))
-        )}`;
+        const { from: nodes, hint }: NodesOf = this.nodesOf(reached, x);
+        const where = `WHERE ${hasLabels(x, labelsOf(target(rel)))}`;
         return rel.isCollection
-            ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes})`
-            : `(SELECT ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
+            ? `(SELECT /*+ ${hint} */ JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes} ${where})`
+            : `(SELECT /*+ ${hint} */ ${nodeDocument(x)} ${nodes} ${where} FETCH FIRST 1 ROW ONLY)`;
     }
 
     /** The nodes at the far end of a path, each once: in the order one of its hops names, where one does. */
@@ -207,10 +221,10 @@ export class OracleViews {
         const x = this.alias('x');
         const ordered = path.hops.find((it) => it.orderBy);
         if (!ordered) {
-            const nodes = `FROM ${this.graph.nodes} ${x} WHERE ${x}.nid IN (${this.pathIds(path, from)})`;
+            const { from: nodes, hint }: NodesOf = this.nodesOf(this.pathIds(path, from), x);
             return path.isCollection
-                ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes})`
-                : `(SELECT ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
+                ? `(SELECT /*+ ${hint} */ JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes})`
+                : `(SELECT /*+ ${hint} */ ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
         }
         const o = this.alias('o');
         const direction = ordered.ascending ? 'ASC' : 'DESC';
@@ -302,6 +316,11 @@ export class OracleViews {
     private alias(prefix: string): string {
         return this.nextAlias(prefix);
     }
+}
+
+/** The hint that has Oracle read the node row `x` by its id, through the primary key. */
+function byId(x: string): string {
+    return `INDEX(${x} (nid))`;
 }
 
 function labelsOf(into: TargetModel): string[] {
