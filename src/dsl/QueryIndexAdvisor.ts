@@ -14,7 +14,9 @@ export type IndexAdvicePolicy = 'OFF' | 'WARN' | 'FAIL';
 
 /**
  * Checks that an ordered query has a range index over exactly its ordered properties, in order, and says so when it
- * has none. The index list is read once and kept: an index made later is unseen until `refresh`.
+ * has none. The index list is read once and kept: an index made later is unseen until `refresh`, which the object
+ * manager's own index and constraint managers call when they make or drop one. The list is also what a filter is read
+ * through, on a store that does (see SchemaGrammar's labelledIndexes).
  */
 export class QueryIndexAdvisor {
     private readonly logger = new DrivineLogger(QueryIndexAdvisor.name);
@@ -65,6 +67,11 @@ export class QueryIndexAdvisor {
             this.reported.add(signature);
             this.logger.warn(message);
         }
+    }
+
+    /** The range indexes and uniqueness constraints there are, read once and kept as for advice. */
+    async indexed(): Promise<SchemaItem[]> {
+        return [...(await this.indexList()), ...(await this.constraintList())];
     }
 
     /** Forgets the index list, so the next check reads it again. */

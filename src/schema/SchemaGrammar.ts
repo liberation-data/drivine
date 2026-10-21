@@ -33,6 +33,12 @@ export interface SchemaGrammar {
     readonly rangesPerProperty?: boolean;
     /** Whether a full-text index over several properties is made over the whole label, and reported with none. */
     readonly fullTextOverLabel?: boolean;
+    /**
+     * Whether its range indexes and uniqueness constraints hold a label's nodes alone, so that a query over references
+     * reads a filter on one of their properties through them, in place of the label (Oracle). The object manager then
+     * gives the backend's renderQuery the ones there are.
+     */
+    readonly labelledIndexes?: boolean;
     /** Whether a uniqueness constraint needs a range index over its properties, made first. */
     readonly uniqueNeedsRange?: boolean;
     /** A statement listing range indexes, and how to read its rows. */

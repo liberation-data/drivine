@@ -33,7 +33,7 @@ import { GroupOperations } from '@/manager/GroupOperations';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { IndexManager } from '@/schema/IndexManager';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
-import { SchemaGrammar, schemaGrammarFor } from '@/schema/SchemaGrammar';
+import { SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
 import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { StoreIdentity, StoreIdentityResolver } from '@/store/StoreIdentity';
 import { DrivineLogger } from '@/logger';
@@ -60,19 +60,25 @@ export interface LoadOptions {
 /** A filter as a load takes it: a Cypher predicate over `n`, LoadOptions, or a query over the class's references. */
 export type Filter<T> = string | LoadOptions | QueryFn<T>;
 
+/**
+ * A load's filter, depth and page. `indexed` is what a query over references may read its filter through (see
+ * SchemaGrammar's labelledIndexes); `tested`, the root labels its filter then tests itself.
+ */
 function loadOptions<T>(
     where: Filter<T> | undefined,
     bindings: Record<string, any>,
     target: TargetModel,
-    backend: GraphBackend
-): Required<LoadOptions> & { page: Page; query?: RenderedQuery } {
+    backend: GraphBackend,
+    indexed: SchemaItem[] = []
+): Required<LoadOptions> & { page: Page; tested: string[]; query?: RenderedQuery } {
     if (typeof where === 'function') {
-        const query = backend.renderQuery(where, target);
+        const query = backend.renderQuery(where, target, indexed);
         return {
             where: query.where as string,
             bindings: query.bindings,
             depth: checkedDepth(query.depth),
             page: { orderBy: query.orderBy, skip: query.skip, limit: query.limit },
+            tested: query.labelsTested ?? [],
             query
         };
     }
@@ -81,7 +87,8 @@ function loadOptions<T>(
         where: options.where as string,
         bindings: options.bindings ?? {},
         depth: checkedDepth(options.depth ?? {}),
-        page: {}
+        page: {},
+        tested: []
     };
 }
 
@@ -100,12 +107,13 @@ function filterOnly<T>(
     bindings: Record<string, any>,
     target: TargetModel,
     backend: GraphBackend,
-    what: string
-): { where?: string; bindings: Record<string, any> } {
+    what: string,
+    indexed: SchemaItem[] = []
+): { where?: string; bindings: Record<string, any>; tested: string[] } {
     if (typeof where !== 'function') {
-        return { where, bindings };
+        return { where, bindings, tested: [] };
     }
-    const options = loadOptions(where, bindings, target, backend);
+    const options = loadOptions(where, bindings, target, backend, indexed);
     if (options.query?.paged) {
         throw new DrivineError(`A ${what} takes a query's where, not an order, skip, limit or seek.`);
     }
@@ -213,12 +221,12 @@ export class StatelessGraphObjectManager {
 
     /** Range indexes of this manager's database: made idempotently, outside any transaction. */
     get indexes(): IndexManager {
-        return new IndexManager(this.schemaExecutor(), this.schemaGrammar());
+        return new IndexManager(this.schemaExecutor(), this.schemaGrammar(), () => this.indexAdvisor.refresh());
     }
 
     /** Uniqueness constraints of this manager's database: made idempotently, outside any transaction. */
     get constraints(): ConstraintManager {
-        return new ConstraintManager(this.schemaExecutor(), this.schemaGrammar());
+        return new ConstraintManager(this.schemaExecutor(), this.schemaGrammar(), () => this.indexAdvisor.refresh());
     }
 
     /**
@@ -248,7 +256,7 @@ export class StatelessGraphObjectManager {
      */
     async loadAll<T>(type: ClassRef<T>, where?: Filter<T>, bindings: Record<string, any> = {}): Promise<T[]> {
         const target = this.modelOf(type);
-        const options = loadOptions(where, bindings, target, this.backend);
+        const options = loadOptions(where, bindings, target, this.backend, await this.filterIndexes(where));
         if (options.query?.ordered.length) {
             await this.indexAdvisor.check(
                 this.indexAdvice,
@@ -261,7 +269,7 @@ export class StatelessGraphObjectManager {
         if (target.kind === 'GRAPH_VIEW') {
             const rows = await this.persistenceManager.query<ViewRow>(
                 this.backend
-                    .loadAllViews(target.model, options.where, options.depth, options.page)
+                    .loadAllViews(target.model, options.where, options.depth, options.page, options.tested)
                     .spec(options.bindings)
             );
             const views = rows.map((row) => this.mapper.view<T>(target.model, row));
@@ -269,7 +277,9 @@ export class StatelessGraphObjectManager {
             return views;
         }
         const rows = await this.persistenceManager.query<FragmentRow>(
-            this.backend.loadAllFragments(target.model, options.where, options.page).spec(options.bindings)
+            this.backend
+                .loadAllFragments(target.model, options.where, options.page, options.tested)
+                .spec(options.bindings)
         );
         return rows.map((row) => this.mapper.fragment<T>(target.model, row));
     }
@@ -298,11 +308,11 @@ export class StatelessGraphObjectManager {
         bindings: Record<string, any> = {}
     ): Promise<number> {
         const target = this.modelOf(type);
-        const filter = filterOnly(where, bindings, target, this.backend, 'count');
+        const filter = filterOnly(where, bindings, target, this.backend, 'count', await this.filterIndexes(where));
         const statement =
             target.kind === 'GRAPH_VIEW'
-                ? this.backend.countViews(target.model, filter.where)
-                : this.backend.countFragments(target.model, filter.where);
+                ? this.backend.countViews(target.model, filter.where, {}, filter.tested)
+                : this.backend.countFragments(target.model, filter.where, filter.tested);
         return this.persistenceManager.getOne<number>(statement.spec(filter.bindings));
     }
 
@@ -631,9 +641,9 @@ export class StatelessGraphObjectManager {
         bindings: Record<string, any> = {}
     ): Promise<number> {
         const target = this.modelOf(type);
-        const filter = filterOnly(where, bindings, target, this.backend, 'delete');
+        const filter = filterOnly(where, bindings, target, this.backend, 'delete', await this.filterIndexes(where));
         return this.persistenceManager.getOne<number>(
-            this.backend.deleteAll(target, filter.where).spec(filter.bindings)
+            this.backend.deleteAll(target, filter.where, filter.tested).spec(filter.bindings)
         );
     }
 
@@ -822,6 +832,25 @@ export class StatelessGraphObjectManager {
     }
 
     /** The schema grammar of this manager's store, over the graph its backend works on. */
+    /**
+     * The range indexes and uniqueness constraints a query over references may read its filter through, where the
+     * store reads one through them (see SchemaGrammar's labelledIndexes): none for a filter given as a string, nor
+     * elsewhere.
+     */
+    private async filterIndexes(where: unknown): Promise<SchemaItem[]> {
+        if (typeof where !== 'function') {
+            return [];
+        }
+        try {
+            if (!this.schemaGrammar().labelledIndexes) {
+                return [];
+            }
+        } catch {
+            return [];
+        }
+        return this.indexAdvisor.indexed();
+    }
+
     private schemaGrammar(): SchemaGrammar {
         const backend = this.backend;
         return schemaGrammarFor(

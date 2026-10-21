@@ -171,6 +171,18 @@ export function hasLabels(alias: string, labels: string[]): string {
         .join(' AND ');
 }
 
+/**
+ * A property of the node row `alias` as a range index or a uniqueness constraint over the label holds it: as text, for
+ * the label's nodes alone, and null for every other node, for a value that isn't a scalar, and for one longer than
+ * 4,000 bytes. A predicate over this expression implies the label.
+ */
+export function labelledValue(alias: string, label: string, property: string): string {
+    return (
+        `CASE WHEN ${hasLabels(alias, [label])} THEN JSON_VALUE(${alias}.props, '$${jsonKey(property)}' ` +
+        `RETURNING VARCHAR2(4000) NULL ON ERROR) END`
+    );
+}
+
 /** Java's String.hashCode, over UTF-16 code units, as a 32-bit int. */
 function javaHash(text: string): number {
     let hash = 0;

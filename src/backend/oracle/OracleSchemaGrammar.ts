@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
+import { hasLabels, jsonKey, labelledValue, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { OracleSideTable } from '@/backend/oracle/OracleSideTable';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import {
@@ -21,6 +21,7 @@ type Kind = 'RANGE' | 'UNIQUE';
  */
 export class OracleSchemaGrammar implements SchemaGrammar {
     readonly engine = 'Oracle';
+    readonly labelledIndexes = true;
 
     constructor(private readonly graph: OracleGraph) {}
 
@@ -208,14 +209,7 @@ END;`
     /** Makes the index and records it, in one block; an item recorded already is recorded again. */
     private create(kind: Kind, label: string, properties: string[]): string {
         const object = this.objectName(kind, label, properties);
-        const columns = properties
-            .map(
-                (it) =>
-                    `CASE WHEN ${hasLabels('n', [label])} THEN JSON_VALUE(n.props, '$${jsonKey(
-                        it
-                    )}' RETURNING VARCHAR2(4000) NULL ON ERROR) END`
-            )
-            .join(', ');
+        const columns = properties.map((it) => labelledValue('n', label, it)).join(', ');
         const ddl = `CREATE ${kind === 'UNIQUE' ? 'UNIQUE ' : ''}INDEX ${object} ON ${this.graph.nodes} n (${columns})`;
         const name = `${label}_${properties.join('_')}_${kind === 'RANGE' ? 'range' : 'unique'}`;
         return `BEGIN

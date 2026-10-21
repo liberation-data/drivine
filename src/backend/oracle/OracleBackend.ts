@@ -19,6 +19,7 @@ import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GroupQuery } from '@/manager/Groups';
+import { SchemaItem } from '@/schema/SchemaGrammar';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
@@ -51,9 +52,11 @@ export const ROW_ALIAS = 'n';
 export class OracleBackend implements GraphBackend {
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
 
-    loadAllFragments(model: FragmentModel, where?: string, page: Page = {}): GraphStatement {
+    loadAllFragments(model: FragmentModel, where?: string, page: Page = {}, tested: string[] = []): GraphStatement {
         return new GraphStatement(
-            [`SELECT ${nodeDocument(ROW_ALIAS)} AS "result"`, this.from(model, where), ...this.page(page)].join('\n')
+            [`SELECT ${nodeDocument(ROW_ALIAS)} AS "result"`, this.from(model, where, tested), ...this.page(page)].join(
+                '\n'
+            )
         );
     }
 
@@ -61,21 +64,22 @@ export class OracleBackend implements GraphBackend {
         return this.loadAllFragments(model, this.idPredicate(model));
     }
 
-    countFragments(model: FragmentModel, where?: string): GraphStatement {
-        return new GraphStatement([`SELECT COUNT(*) AS "count"`, this.from(model, where)].join('\n'));
+    countFragments(model: FragmentModel, where?: string, tested: string[] = []): GraphStatement {
+        return new GraphStatement([`SELECT COUNT(*) AS "count"`, this.from(model, where, tested)].join('\n'));
     }
 
     loadAllViews(
         model: GraphViewModel,
         where?: string,
         depth: Record<string, number> = {},
-        page: Page = {}
+        page: Page = {},
+        tested: string[] = []
     ): GraphStatement {
         const views = new OracleViews(this.graph, depth);
         return new GraphStatement(
             [
                 `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
-                this.from(model.root, this.viewWhere(model, where, depth)),
+                this.from(model.root, this.viewWhere(model, where, depth), tested),
                 ...this.page(page)
             ].join('\n')
         );
@@ -85,9 +89,16 @@ export class OracleBackend implements GraphBackend {
         return this.loadAllViews(model, this.idPredicate(model.root), depth);
     }
 
-    countViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
+    countViews(
+        model: GraphViewModel,
+        where?: string,
+        depth: Record<string, number> = {},
+        tested: string[] = []
+    ): GraphStatement {
         return new GraphStatement(
-            [`SELECT COUNT(*) AS "count"`, this.from(model.root, this.viewWhere(model, where, depth))].join('\n')
+            [`SELECT COUNT(*) AS "count"`, this.from(model.root, this.viewWhere(model, where, depth), tested)].join(
+                '\n'
+            )
         );
     }
 
@@ -127,9 +138,9 @@ BEGIN
 END;`);
     }
 
-    deleteAll(target: TargetModel, where?: string): GraphStatement {
+    deleteAll(target: TargetModel, where?: string, tested: string[] = []): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        return this.deleting(root, this.rootWhere(target, where));
+        return this.deleting(root, this.rootWhere(target, where), tested);
     }
 
     searchIndexTable(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement {
@@ -180,8 +191,14 @@ END;`);
         );
     }
 
-    renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
-        return OracleQueryRenderer.render(fn, target, (depth) => new OracleViews(this.graph, depth), ROW_ALIAS);
+    renderQuery<T>(fn: QueryFn<T>, target: TargetModel, indexed: SchemaItem[] = []): RenderedQuery {
+        return OracleQueryRenderer.render(
+            fn,
+            target,
+            (depth) => new OracleViews(this.graph, depth),
+            ROW_ALIAS,
+            indexed
+        );
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
@@ -323,19 +340,29 @@ END;`);
         return parts.length ? parts.join(' AND ') : undefined;
     }
 
-    /** The nodes of the fragment's labels that meet `where`, as the row `n`. */
-    private from(model: FragmentModel, where?: string): string {
-        const labels = hasLabels(ROW_ALIAS, model.labels);
-        return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${labels}${where ? ` AND (${where})` : ''}`;
+    /**
+     * The nodes of the fragment's labels that meet `where`, as the row `n`. A label `where` tests itself (`tested`) is
+     * not tested again. Beside one, the others are tested in a form no index serves: Oracle takes a label's test for a
+     * lookup of one row, and would read that label's nodes in place of the index `where` is read through.
+     */
+    private from(model: FragmentModel, where?: string, tested: string[] = []): string {
+        const untested = model.labels.filter((it) => !tested.includes(it));
+        const labels = !tested.length
+            ? [hasLabels(ROW_ALIAS, untested)]
+            : untested.length
+            ? [`CASE WHEN ${hasLabels(ROW_ALIAS, untested)} THEN 1 END = 1`]
+            : [];
+        const tests = [...labels, ...(where ? [`(${where})`] : [])];
+        return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${tests.join(' AND ')}`;
     }
 
     /** Deletes the nodes `where` selects, with their relationships, and returns how many: `{deleted}`. */
-    private deleting(model: FragmentModel, where?: string): GraphStatement {
+    private deleting(model: FragmentModel, where?: string, tested: string[] = []): GraphStatement {
         return new GraphStatement(`DECLARE
     v_deleted NUMBER;
     c SYS_REFCURSOR;
 BEGIN
-    DELETE ${this.from(model, where)};
+    DELETE ${this.from(model, where, tested)};
     v_deleted := SQL%ROWCOUNT;
     OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
     DBMS_SQL.RETURN_RESULT(c);

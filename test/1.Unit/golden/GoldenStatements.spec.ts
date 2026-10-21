@@ -42,6 +42,7 @@ import {
     NEO4J_GRAMMAR,
     RelateMode,
     RemovedTargets,
+    SchemaItem,
     TargetModel
 } from '@liberation-data/drivine';
 import {
@@ -101,7 +102,40 @@ function oracleStatements(): Record<string, string> {
             limit: 10,
             table: 'drivine_t_Personnamebio_4d5e6f'
         }).text,
-        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text
+        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text,
+        ...indexedReads(backend, registry)
+    };
+}
+
+/** Oracle's reads through a labelled index: a filter on a property a range index or a constraint begins with. */
+function indexedReads(backend: OracleBackend, registry: ModelRegistry): Record<string, string> {
+    const indexed: SchemaItem[] = [
+        { label: 'Movie', properties: ['title'] },
+        { label: 'Dog', properties: ['breed', 'name'] }
+    ];
+    const movie: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Movie) };
+    const dog: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Dog) };
+    const movies = backend.renderQuery(
+        (q: any) => ({
+            where: [
+                q.title.eq('Heat'),
+                q.released.gt(1990),
+                anyOf(q.title.eq('x'), q.uuid.eq('m1')),
+                q.title.lte('Z'),
+                q.uuid.eq('m2')
+            ]
+        }),
+        movie,
+        indexed
+    );
+    const dogs = backend.renderQuery((q: any) => ({ where: q.breed.gte('Collie') }), dog, indexed);
+    const names = backend.renderQuery((q: any) => ({ where: q.name.eq('Rex') }), dog, indexed);
+    return {
+        'query.Movie.indexed': backend.loadAllFragments(movie.model, movies.where, {}, movies.labelsTested).text,
+        'query.Movie.indexed.count': backend.countFragments(movie.model, movies.where, movies.labelsTested).text,
+        'query.Dog.indexed': backend.loadAllFragments(dog.model, dogs.where, {}, dogs.labelsTested).text,
+        'query.Dog.indexed.deleteAll': backend.deleteAll(dog, dogs.where, dogs.labelsTested).text,
+        'query.Dog.notIndexed': backend.loadAllFragments(dog.model, names.where, {}, names.labelsTested).text
     };
 }
 
