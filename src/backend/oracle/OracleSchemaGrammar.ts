@@ -206,14 +206,21 @@ END;`
         };
     }
 
-    /** Makes the index and records it, in one block; an item recorded already is recorded again. */
+    /**
+     * Makes the index and records it, in one block; an item recorded already is recorded again. Another session may
+     * make and record the same item at once, as managers that start together each ensure the store's key: an index of
+     * the name is this one, its name a hash of what it is over, and a record of the item is this record.
+     */
     private create(kind: Kind, label: string, properties: string[]): string {
         const object = this.objectName(kind, label, properties);
         const columns = properties.map((it) => labelledValue('n', label, it)).join(', ');
         const ddl = `CREATE ${kind === 'UNIQUE' ? 'UNIQUE ' : ''}INDEX ${object} ON ${this.graph.nodes} n (${columns})`;
         const name = `${label}_${properties.join('_')}_${kind === 'RANGE' ? 'range' : 'unique'}`;
-        return `BEGIN
-    EXECUTE IMMEDIATE ${sqlText(ddl)};
+        return `DECLARE
+    e_exists EXCEPTION;
+    PRAGMA EXCEPTION_INIT(e_exists, -955);
+BEGIN
+    BEGIN EXECUTE IMMEDIATE ${sqlText(ddl)}; EXCEPTION WHEN e_exists THEN NULL; END;
     DELETE FROM ${this.graph.catalog} WHERE kind = '${kind}' AND label = ${sqlText(label)} AND properties = ${sqlText(
         JSON.stringify(properties)
     )};
@@ -221,6 +228,8 @@ END;`
         VALUES ('${kind}', ${sqlText(label)}, ${sqlText(JSON.stringify(properties))}, ${sqlText(
             name
         )}, '${object}', JSON('{}'));
+EXCEPTION
+    WHEN DUP_VAL_ON_INDEX THEN NULL;
 END;`;
     }
 

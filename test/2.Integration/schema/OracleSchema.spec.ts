@@ -108,6 +108,9 @@ describeOnOracle('schema on Oracle', () => {
     });
 
     it('should agree on one store identity across managers resolving at once', async () => {
+        // As a new store: each manager ensures the key constraint, and stamps the store, at once.
+        await gom.constraints.drop(uniquenessConstraint('DrivineStore', 'key'));
+        await new OracleSeed(pm, 'DrivineStore').clear();
         const ids = await Promise.all([1, 2, 3, 4, 5].map(async () => (await manager().storeIdentity()).id));
         expect(new Set(ids).size).toEqual(1);
         expect((await manager().storeIdentity()).engine).toEqual(DatabaseType.ORACLE);
