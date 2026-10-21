@@ -51,6 +51,7 @@ import {
     Dog,
     Location,
     ActorWithLatestMovie,
+    ActorWithDirectors,
     ActorWithMovies,
     Animal,
     LocationAncestors,
@@ -124,6 +125,7 @@ function written(backend: GraphBackend, where: string, orphans: boolean): Record
         'ActorStats.loadAll': backend.loadAllViews(view(ActorStats)),
         'ActorWithMovies.loadAll.where': backend.loadAllViews(view(ActorWithMovies), where),
         'ActorWithMovies.count': backend.countViews(view(ActorWithMovies)),
+        'ActorWithDirectors.loadAll': backend.loadAllViews(view(ActorWithDirectors)),
         'ActorWithLatestMovie.loadAll': backend.loadAllViews(view(ActorWithLatestMovie))
     };
     Object.assign(cases, saves(registry, backend, where, orphans));
