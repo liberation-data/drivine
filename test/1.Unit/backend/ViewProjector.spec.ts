@@ -108,12 +108,12 @@ describe('Ordered path statements', () => {
     it('should sort the rows before collecting them on FalkorDB, nulls last', () => {
         expect(new CypherBackend(FALKORDB_GRAMMAR).loadAllViews(model).text).toEqual(
             'MATCH (n:Person)\n' +
-                'WHERE size([(n)-[:ACTED_IN]->(:Movie)-[:DIRECTED_BY]->(:Director) | 1]) > 0\n' +
-                'CALL { WITH n OPTIONAL MATCH (n)-[:ACTED_IN]->(h1:Movie)-[:DIRECTED_BY]->(t1) WHERE t1:Director ' +
-                'WITH n, t1, h1 ORDER BY h1.year IS NULL, h1.year ASC RETURN collect(DISTINCT CASE WHEN t1 IS NOT NULL ' +
+                'WHERE any(p1 IN [(n)-[:ACTED_IN]->(:Movie)-[:DIRECTED_BY]->(p1) | p1] WHERE p1:Director)\n' +
+                'CALL { WITH n OPTIONAL MATCH (n)-[:ACTED_IN]->(h1:Movie)-[:DIRECTED_BY]->(t1) ' +
+                'WITH n, t1, h1 ORDER BY h1.year IS NULL, h1.year ASC RETURN collect(DISTINCT CASE WHEN t1:Director ' +
                 'THEN {props: properties(t1), labels: labels(t1)} END) AS v1 }\n' +
-                'CALL { WITH n OPTIONAL MATCH (n)<-[:DIRECTED]-(t2) WHERE t2:Movie ' +
-                'WITH n, t2 ORDER BY t2.`release year` IS NULL, t2.`release year` DESC RETURN head(collect(DISTINCT CASE WHEN t2 IS NOT NULL ' +
+                'CALL { WITH n OPTIONAL MATCH (n)<-[:DIRECTED]-(t2) ' +
+                'WITH n, t2 ORDER BY t2.`release year` IS NULL, t2.`release year` DESC RETURN head(collect(DISTINCT CASE WHEN t2:Movie ' +
                 'THEN {props: properties(t2), labels: labels(t2)} END)) AS v2 }\n' +
                 'RETURN {root: {props: properties(n), labels: labels(n)}, rels: {directors: v1, latest: v2}} AS result'
         );

@@ -3,7 +3,7 @@ import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
-import { ViewProjector } from '@/backend/ViewProjector';
+import { labelTest, ViewProjector } from '@/backend/ViewProjector';
 
 /**
  * The nodes a view reaches from its root, as one list expression: a pattern comprehension per position in the view,
@@ -31,12 +31,17 @@ export class CascadeTargets {
             const alias = `c${++this.aliasCount}`;
             const into = target(rel);
             const hops = into.kind === 'NODE_FRAGMENT' && rel.maxDepth > 1 ? `*1..${rel.maxDepth}` : '';
-            const extended = `${chain}${hop(rel, hops)}(${alias}${labelExpression(labelsOf(into))})`;
+            const step = `${chain}${hop(rel, hops)}(${alias}`;
+            const extended = `${step}${labelExpression(labelsOf(into))})`;
             const own =
                 into.kind === 'GRAPH_VIEW' ? new ViewProjector(this.grammar).requirements(into.model, alias) : [];
             const all = [...conditions, ...own];
             const where = all.length ? ` WHERE ${all.join(' AND ')}` : '';
-            const here = `[${extended}${where} | ${alias}]`;
+            // Where the grammar says so, the far node's labels are tested after the match, the next level's chain
+            // keeping them.
+            const here = this.grammar.farLabelsAfterMatch
+                ? `[${alias} IN [${step})${where} | ${alias}] WHERE ${labelTest(alias, labelsOf(into))}]`
+                : `[${extended}${where} | ${alias}]`;
             return into.kind === 'GRAPH_VIEW'
                 ? [here, ...this.view(into.model, extended, all, [...path, rel])]
                 : [here];

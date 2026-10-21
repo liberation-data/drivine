@@ -28,6 +28,13 @@ export interface CypherGrammar {
     readonly viewProjection: 'INLINE' | 'CALL_SUBQUERY';
 
     /**
+     * Whether a view's paths, and a cascade's patterns, match their far node without its labels, and test them after,
+     * outside the match: FalkorDB 6 plans a match of several hops from a labelled far end, reading every relationship
+     * of the last hop's type, whether the label is in the pattern or in its WHERE (FalkorDB/FalkorDB#3332).
+     */
+    readonly farLabelsAfterMatch: boolean;
+
+    /**
      * Whether a keyset predicate constrains each key with `IS NOT NULL`: where indexes leave out null-valued nodes
      * (Neo4j), that is what lets a composite index serve the page. On Memgraph it costs the range bound.
      */
@@ -103,6 +110,7 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
     existenceCheck: existsSubquery,
     someMatch: someMatchSubquery,
     viewProjection: 'INLINE',
+    farLabelsAfterMatch: false,
     contended: transientOverBolt
 };
 
@@ -124,6 +132,7 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     existenceCheck: existsSubquery,
     someMatch: someMatchSubquery,
     viewProjection: 'INLINE',
+    farLabelsAfterMatch: false,
     contended: transientOverBolt,
     orphanDeleteLimit: 'Memgraph takes an existence check only in a WHERE clause, not in the list of nodes to delete'
 };
@@ -163,6 +172,7 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
         );
     },
     viewProjection: 'CALL_SUBQUERY',
+    farLabelsAfterMatch: true,
     // FalkorDB runs one query at a time, but turns a write away while another is in progress, as its constraint
     // commands do under load.
     contended: (failure: unknown) => failure instanceof Error && /another write is in progress/i.test(failure.message)

@@ -43,7 +43,15 @@ export class ViewProjector {
     requirements(model: GraphViewModel, alias: string): string[] {
         const paths = model.paths
             .filter((it) => it.required)
-            .map((it) => this.grammar.existenceCheck(pathPattern(it, alias, '', true)));
+            .map((it) => {
+                if (!this.grammar.farLabelsAfterMatch) {
+                    return this.grammar.existenceCheck(pathPattern(it, alias, '', true));
+                }
+                const far = `p${++this.aliasCount}`;
+                return this.grammar.someMatch(pathPattern(it, alias, far, false), far, '', () =>
+                    labelTest(far, farLabels(it))
+                );
+            });
         return [...this.relationshipRequirements(model, alias), ...paths];
     }
 
@@ -129,27 +137,27 @@ export class ViewProjector {
     }
 
     /**
-     * The nodes at the far end of a path, each once, in the order one of its hops names where one does. On FalkorDB the
-     * far node's labels are tested after the match: with a label in the pattern, FalkorDB 6 plans the match from that
-     * end (FalkorDB/FalkorDB#3332).
+     * The nodes at the far end of a path, each once, in the order one of its hops names where one does. Where the
+     * grammar says so, the far node's labels are tested as each is collected, after the match.
      */
     private path(path: PathModel, from: string): ViewProjection {
         const n = ++this.aliasCount;
         const t = `t${n}`;
         const order = pathOrder(path, t, n);
         if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
-            const match = pathPattern(path, from, t, false, order?.node);
-            const labels = path.target.labels.map((it) => `${t}:${quoteName(it)}`).join(' AND ');
+            const after = this.grammar.farLabelsAfterMatch;
+            const match = pathPattern(path, from, t, !after, order?.node);
+            const kept = after ? labelTest(t, farLabels(path)) : `${t} IS NOT NULL`;
             // collect(DISTINCT …) keeps each node where it first occurs, so sorting the rows first orders the list.
             const sorted = order
                 ? ` WITH ${[...new Set([from, t, order.node])].join(', ')} ORDER BY ${order.key} IS NULL, ` +
                   `${order.key} ${order.ascending ? 'ASC' : 'DESC'}`
                 : '';
-            const collected = `collect(DISTINCT CASE WHEN ${t} IS NOT NULL THEN ${fragment(t)} END)`;
+            const collected = `collect(DISTINCT CASE WHEN ${kept} THEN ${fragment(t)} END)`;
             const value = `v${n}`;
             return {
                 calls: [
-                    `CALL { WITH ${from} OPTIONAL MATCH ${match} WHERE ${labels}${sorted} ` +
+                    `CALL { WITH ${from} OPTIONAL MATCH ${match}${sorted} ` +
                         `RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
                 ],
                 expression: value
@@ -300,9 +308,20 @@ function sortedByKey(pattern: string, far: string, order: PathOrder, n: number):
     return `[${z} IN ${sorted} | ${z}.n]`;
 }
 
+/** The labels a path's far node carries: its last hop's, and its target's. */
+function farLabels(path: PathModel): string[] {
+    const last = path.hops[path.hops.length - 1];
+    return [...(last.label ? [last.label] : []), ...path.target.labels];
+}
+
+/** A test that the node bound to `alias` carries every one of the labels; that it is there, for none. */
+export function labelTest(alias: string, labels: string[]): string {
+    return labels.length ? labels.map((it) => `${alias}:${quoteName(it)}`).join(' AND ') : `${alias} IS NOT NULL`;
+}
+
 /**
- * A path from `from` through its hops, the far node bound to `far` (with its labels when `labelled`), and the node of
- * the hop the path is ordered by bound to `ordered`.
+ * A path from `from` through its hops, the far node bound to `far` (with its labels, its last hop's among them, when
+ * `labelled`), and the node of the hop the path is ordered by bound to `ordered`.
  */
 function pathPattern(path: PathModel, from: string, far: string, labelled: boolean, ordered?: string): string {
     const steps = path.hops.map((hop, i) => {
@@ -315,11 +334,7 @@ function pathPattern(path: PathModel, from: string, far: string, labelled: boole
                 ? `-${edge}-`
                 : `-${edge}->`;
         const own = hop.label ? [hop.label] : [];
-        const labels = last
-            ? labelled
-                ? labelExpression([...own, ...path.target.labels])
-                : labelExpression(own)
-            : labelExpression(own);
+        const labels = last ? (labelled ? labelExpression(farLabels(path)) : '') : labelExpression(own);
         const named = last ? far : hop.orderBy && ordered ? ordered : '';
         return `${arrow}(${named}${labels})`;
     });

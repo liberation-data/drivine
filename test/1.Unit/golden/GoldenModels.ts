@@ -108,6 +108,16 @@ export class ActorStats {
 }
 
 @GraphView()
+export class ActorWithDirectors {
+    @Root() actor: Actor;
+    @GraphPath([hop('ACTED_IN', Direction.OUTGOING, 'Movie'), hop('DIRECTED_BY', Direction.OUTGOING, 'Person')], {
+        target: () => Director,
+        required: true
+    })
+    directors: Director[];
+}
+
+@GraphView()
 export class ActorWithMovies {
     @Root() actor: Actor;
     @GraphRelationship({ type: 'ACTED_IN', target: () => Movie, required: true }) movies: Movie[];
