@@ -13,6 +13,7 @@ import { GroupQuery } from '@/manager/Groups';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
+import { SchemaItem } from '@/schema/SchemaGrammar';
 
 /**
  * Generates the statements the object manager runs. One backend per engine family: Cypher now, SQL/PGQ later.
@@ -62,8 +63,12 @@ export interface MatchingSearch {
  * written by the backend.
  */
 export interface GraphBackend {
-    /** A query over a class's references, written for the store: its predicate, order and paging, and its values. */
-    renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery;
+    /**
+     * A query over a class's references, written for the store: its predicate, order and paging, and its values.
+     * `indexed` is the store's range indexes and uniqueness constraints, for a store that reads a filter through them
+     * (see SchemaGrammar's labelledIndexes); it decides how the query reads, never what it finds.
+     */
+    renderQuery<T>(fn: QueryFn<T>, target: TargetModel, indexed?: SchemaItem[]): RenderedQuery;
 
     /** A condition over a class's references, written for the store, with its values. */
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> };
@@ -116,23 +121,37 @@ export interface GraphBackend {
     /** Removes every marker of the owner `$scope` but the newest: what a race before the marker's constraint left. */
     pruneSchemaMarkers(): GraphStatement;
 
-    /** Loads every node of the fragment, optionally filtered by a predicate over `n`. */
-    loadAllFragments(model: FragmentModel, where?: string, page?: Page): GraphStatement;
+    /**
+     * Loads every node of the fragment, optionally filtered by a predicate over `n`. `tested` names the labels `where`
+     * tests itself (a rendered query's labelsTested), which the statement needn't.
+     */
+    loadAllFragments(model: FragmentModel, where?: string, page?: Page, tested?: string[]): GraphStatement;
 
     /** Loads the node of the fragment whose id is the parameter `id`. */
     loadFragment(model: FragmentModel): GraphStatement;
 
     /** Counts the nodes of the fragment, optionally filtered by a predicate over `n`. Returns one number. */
-    countFragments(model: FragmentModel, where?: string): GraphStatement;
+    countFragments(model: FragmentModel, where?: string, tested?: string[]): GraphStatement;
 
     /** Loads every view whose root meets the view's requirements and, optionally, a predicate over `n`. */
-    loadAllViews(model: GraphViewModel, where?: string, depth?: Record<string, number>, page?: Page): GraphStatement;
+    loadAllViews(
+        model: GraphViewModel,
+        where?: string,
+        depth?: Record<string, number>,
+        page?: Page,
+        tested?: string[]
+    ): GraphStatement;
 
     /** Loads the view whose root's id is the parameter `id`. */
     loadView(model: GraphViewModel, depth?: Record<string, number>): GraphStatement;
 
     /** Counts the views {@link loadAllViews} would load. Returns one number. */
-    countViews(model: GraphViewModel, where?: string, depth?: Record<string, number>): GraphStatement;
+    countViews(
+        model: GraphViewModel,
+        where?: string,
+        depth?: Record<string, number>,
+        tested?: string[]
+    ): GraphStatement;
 
     /**
      * Deletes the root whose id is the parameter `id`, if it meets the optional predicate (and, for a view, the view's
@@ -142,7 +161,7 @@ export interface GraphBackend {
     delete(target: TargetModel, where?: string, cascade?: CascadeType): GraphStatement;
 
     /** Deletes every root a load would find, with its relationships. Returns the number deleted. */
-    deleteAll(target: TargetModel, where?: string): GraphStatement;
+    deleteAll(target: TargetModel, where?: string, tested?: string[]): GraphStatement;
 
     /**
      * Loads the `$_k` nodes nearest `$_vector` by the vector index over a property, as fragments or views, each with its

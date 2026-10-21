@@ -1,4 +1,4 @@
-import { hasLabels, holding, jsonKey, RELATED_SUBQUERY } from '@/backend/oracle/OracleGraph';
+import { hasLabels, holding, jsonKey, labelledValue, RELATED_SUBQUERY } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -20,6 +20,8 @@ import { allOfOne, Condition, OrderTerm, Query, QueryFn, SeekValue, Test, WhereF
 import { classLabels } from '@/model/InstanceOf';
 import { FragmentModel } from '@/model/FragmentModel';
 import { TargetModel } from '@/model/RelationshipModel';
+import { Stamps } from '@/model/Stamps';
+import { SchemaItem } from '@/schema/SchemaGrammar';
 
 /** The row a path's conditions read: the node's, and the relationship's that a relationship fragment holds. */
 interface Rows {
@@ -32,22 +34,31 @@ interface Rows {
  * tested in a JSON path filter against a bound value (`JSON_EXISTS(props, '$?(@."k" > $v)' PASSING …)`), so numbers,
  * text and booleans compare as their JSON types and a missing property meets no comparison, as in Cypher. A condition
  * across a relationship is an EXISTS over the relationship table. Values are bound (`$_q0`, …), never written in.
+ *
+ * Oracle takes a test of a node's labels for a lookup of one row, so it reads a label's nodes even where a range
+ * index or a uniqueness constraint would find a few (drivine4j#65). So a comparison with text that every root meets,
+ * of a property such an index of one of the root's labels begins with, is also written as the index's expression,
+ * which Oracle reads through the index: see `throughIndex`.
  */
 export class OracleQueryRenderer {
     private readonly bindings: Record<string, any> = {};
     private readonly views: OracleViews;
+    /** The root's labels whose test a comparison makes, through a labelled index. */
+    private readonly tested = new Set<string>();
 
     static render<T>(
         fn: QueryFn<T>,
         model: TargetModel,
         views: (depth: Record<string, number>) => OracleViews,
-        alias: string
+        alias: string,
+        indexed: SchemaItem[] = []
     ): RenderedQuery {
         const scope = scopeOf(model);
         const query: Query = fn(rootRefs<T>(scope));
-        const renderer = new OracleQueryRenderer(views(query.depth ?? {}));
+        const root = model.kind === 'GRAPH_VIEW' ? model.model.root : (model.model as FragmentModel);
+        const renderer = new OracleQueryRenderer(views(query.depth ?? {}), { alias, labels: root.labels, indexed });
         const condition = query.where !== undefined ? allOfOne(query.where) : undefined;
-        const filter = condition ? renderer.condition(condition, scope, { node: alias }) : undefined;
+        const filter = condition ? renderer.condition(condition, scope, { node: alias }, true) : undefined;
         const terms = listOf<OrderTerm>(query.orderBy).map((it) => classify(it, scope));
         const keys = terms.filter((it): it is RootKey => it.kind === 'ROOT');
         const seek = listOf<SeekValue>(query.seek);
@@ -63,7 +74,8 @@ export class OracleQueryRenderer {
             ordered: keys.some((it) => it.term.expression) ? [] : keys.map((it) => it.property!),
             pinned: condition ? pinnedProperties(condition, scope) : [],
             seeks: query.seek !== undefined,
-            paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined)
+            paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined),
+            labelsTested: [...renderer.tested]
         };
     }
 
@@ -79,7 +91,18 @@ export class OracleQueryRenderer {
         return { where, bindings: renderer.bindings };
     }
 
-    constructor(views: OracleViews) {
+    /**
+     * @param root the root's row, its labels, and the indexes a comparison of one of its properties may be read
+     * through. Without them, none is.
+     */
+    constructor(
+        views: OracleViews,
+        private readonly root: { alias: string; labels: string[]; indexed: SchemaItem[] } = {
+            alias: '',
+            labels: [],
+            indexed: []
+        }
+    ) {
         this.views = views;
     }
 
@@ -93,21 +116,34 @@ export class OracleQueryRenderer {
         return this.condition(condition, scope, { node: alias });
     }
 
-    private condition(condition: Condition, scope: Scope, rows: Rows): string {
+    /** A condition, which every root meets when it is `top`: the query's, or one of those it holds all of. */
+    private condition(condition: Condition, scope: Scope, rows: Rows, top: boolean = false): string {
         const all = (it: readonly Condition[]): string[] => it.map((c) => this.condition(c, scope, rows));
         switch (condition.kind) {
             case 'AND':
-                return condition.conditions.length ? group(all(condition.conditions), ' AND ') : '1 = 1';
+                return condition.conditions.length
+                    ? group(
+                          condition.conditions.map((c) => this.condition(c, scope, rows, top)),
+                          ' AND '
+                      )
+                    : '1 = 1';
             case 'OR':
                 return condition.conditions.length ? group(all(condition.conditions), ' OR ') : '1 = 0';
             case 'NOT':
                 return `NOT ${group(all(condition.conditions), ' AND ', true)}`;
             default:
-                return this.walk(condition.path, 0, condition.test, scope, rows);
+                return this.walk(condition.path, 0, condition.test, scope, rows, top);
         }
     }
 
-    private walk(path: readonly string[], i: number, test: Test, scope: Scope, rows: Rows): string {
+    private walk(
+        path: readonly string[],
+        i: number,
+        test: Test,
+        scope: Scope,
+        rows: Rows,
+        top: boolean = false
+    ): string {
         if (i === path.length) {
             return this.atNode(test, path, rows);
         }
@@ -115,7 +151,7 @@ export class OracleQueryRenderer {
         const last = i === path.length - 1;
         switch (next.kind) {
             case 'SAME_NODE':
-                return this.walk(path, i + 1, test, next.scope, rows);
+                return this.walk(path, i + 1, test, next.scope, rows, top);
             case 'TARGET':
                 return this.walk(path, i + 1, test, next.scope, { node: rows.node });
             case 'HOP':
@@ -124,8 +160,7 @@ export class OracleQueryRenderer {
                 if (!last) {
                     throw new DrivineError(`${path.slice(0, i + 1).join('.')} is a property; it has no fields.`);
                 }
-                const column = next.on === 'RELATIONSHIP' ? `${rows.rel}.props` : holding(rows.node, next.property);
-                return this.compare(test, column, next.property, next.jsonPacked, path);
+                return this.property(next, test, rows, path, top);
             }
             default:
                 if (!last || test.kind !== 'COMPARE' || test.operator !== 'HAS_ITEM') {
@@ -135,6 +170,23 @@ export class OracleQueryRenderer {
                 }
                 return hasLabels(rows.node, [String(test.value)]);
         }
+    }
+
+    /** A test of a property: of the root, every root meeting it when `top`, read through an index where it can be. */
+    private property(
+        next: Step & { kind: 'PROPERTY' },
+        test: Test,
+        rows: Rows,
+        path: readonly string[],
+        top: boolean
+    ): string {
+        const column = next.on === 'RELATIONSHIP' ? `${rows.rel}.props` : holding(rows.node, next.property);
+        const indexed =
+            top && next.on !== 'RELATIONSHIP' && rows.node === this.root.alias
+                ? this.throughIndex(test, next.property, next.jsonPacked)
+                : undefined;
+        const compared = this.compare(test, column, next.property, next.jsonPacked, path);
+        return indexed ? `${indexed} AND ${compared}` : compared;
     }
 
     /** At least one node the relationship leads to meets the rest of the path's test, or a quantifier's conditions. */
@@ -184,6 +236,34 @@ export class OracleQueryRenderer {
             default:
                 throw new DrivineError(`${where} is a node: compare one of its fields.`);
         }
+    }
+
+    /**
+     * The comparison of the root's property `name` with text as the expression of a range index or a uniqueness
+     * constraint of one of the root's labels that begins with the property, the first label with one: undefined where
+     * there is none, or where the comparison isn't `eq`, `gt`, `gte`, `lt` or `lte` with text of at most 4,000 bytes.
+     *
+     * It is written beside the JSON test, which still decides: the expression is the property as text, so it holds of
+     * every node the test holds of, and of a number written as the same text too. It is null for a node without the
+     * label, so it tests the label, and the statement needn't (see labelsTested).
+     */
+    private throughIndex(test: Test, name: string, jsonPacked: boolean): string | undefined {
+        if (test.kind !== 'COMPARE' || jsonPacked || name === Stamps.PROPERTY) {
+            return undefined;
+        }
+        const operator = SQL_OPERATORS[test.operator as keyof typeof SQL_OPERATORS];
+        const value = storable(test.value);
+        if (!operator || typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 4000) {
+            return undefined;
+        }
+        const label = this.root.labels.find((it) =>
+            this.root.indexed.some((item) => item.label === it && item.properties[0] === name)
+        );
+        if (!label) {
+            return undefined;
+        }
+        this.tested.add(label);
+        return `${labelledValue(this.root.alias, label, name)} ${operator} ${this.bind(value)}`;
     }
 
     /** A test of the property `name` of the JSON column `column`. */
@@ -375,6 +455,9 @@ export class OracleQueryRenderer {
 }
 
 const PATH_OPERATORS = { EQ: '==', NEQ: '!=', GT: '>', GTE: '>=', LT: '<', LTE: '<=' };
+
+/** The comparisons an index answers, as SQL writes them. */
+const SQL_OPERATORS = { EQ: '=', GT: '>', GTE: '>=', LT: '<', LTE: '<=' };
 
 /** A value as Oracle's JSON holds it: a date as ISO 8601 text, as a save writes it. */
 function storable(value: unknown): unknown {

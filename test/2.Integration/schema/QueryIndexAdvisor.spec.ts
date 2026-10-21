@@ -65,13 +65,15 @@ describe.each(graphEngines())('query index advice on $type', (engine) => {
         expect(one.map((it) => it.id)).toEqual(['t1']);
     });
 
-    it('should take an index over exactly the ordered properties, once it is seen', async () => {
+    it('should take an index over exactly the ordered properties: its own at once, another once refreshed', async () => {
         await gom.indexes.ensure(byOpened);
-        await expect(gom.loadAll(Ticket, (q) => ({ orderBy: q.opened.asc() }))).rejects.toThrow(/no matching/);
-        gom.indexAdvisor.refresh();
         const rows = await gom.loadAll(Ticket, (q) => ({ orderBy: q.opened.desc() }));
         expect(rows.map((it) => it.id)).toEqual(['t2', 't1']);
-        await gom.indexes.ensure(byOpenedAndRank);
+        const other = new StatelessGraphObjectManager(pm, gom.backend, new ModelRegistry());
+        await other.indexes.ensure(byOpenedAndRank);
+        await expect(gom.loadAll(Ticket, (q) => ({ orderBy: [q.opened.asc(), q.rank.asc()] }))).rejects.toThrow(
+            /no matching/
+        );
         gom.indexAdvisor.refresh();
         await gom.loadAll(Ticket, (q) => ({ orderBy: [q.opened.asc(), q.rank.asc()] }));
     });

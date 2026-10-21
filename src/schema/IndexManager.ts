@@ -34,9 +34,11 @@ function shapeOf(found: SchemaItem): SchemaItemShape {
 export class IndexManager {
     private readonly logger = new DrivineLogger(IndexManager.name);
 
+    /** @param changed told once this has made or dropped an index, as the object manager's index list is then stale. */
     constructor(
         private readonly executor: SchemaExecutor,
-        private readonly grammar: SchemaGrammar
+        private readonly grammar: SchemaGrammar,
+        private readonly changed: () => void = () => undefined
     ) {}
 
     /** The indexes of a kind the engine holds. */
@@ -59,6 +61,7 @@ export class IndexManager {
                 : { status: 'DRIFT', spec, found: shapeOf(found) };
         }
         await this.create(spec);
+        this.changed();
         await this.logEffective(spec);
         return { status: 'CREATED', spec };
     }
@@ -67,6 +70,7 @@ export class IndexManager {
     async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         await this.drop(spec);
         await this.create(spec);
+        this.changed();
         return { status: 'RECREATED', spec };
     }
 
@@ -82,6 +86,7 @@ export class IndexManager {
         for (const statement of statements) {
             await this.executor.run(statement);
         }
+        this.changed();
     }
 
     /** Says which pins of a vector index the engine can't express: they are reported, never dropped silently. */

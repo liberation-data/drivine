@@ -15,9 +15,11 @@ const same = (a: string[], b: string[]): boolean => a.length === b.length && a.e
  * values, nothing is made and the result is a VIOLATION with a sample of the values.
  */
 export class ConstraintManager {
+    /** @param changed told once this has made or dropped a constraint, as the object manager's list is then stale. */
     constructor(
         private readonly executor: SchemaExecutor,
-        private readonly grammar: SchemaGrammar
+        private readonly grammar: SchemaGrammar,
+        private readonly changed: () => void = () => undefined
     ) {}
 
     async list(): Promise<SchemaItem[]> {
@@ -40,12 +42,15 @@ export class ConstraintManager {
             return { status: 'VIOLATION', spec, sample };
         }
         if (this.grammar.uniqueNeedsRange) {
-            await new IndexManager(this.executor, this.grammar).ensure(rangeIndex(spec.label, spec.properties));
+            await new IndexManager(this.executor, this.grammar, this.changed).ensure(
+                rangeIndex(spec.label, spec.properties)
+            );
         }
         for (const statement of this.grammar.createUnique(spec)) {
             await this.executor.run(statement);
         }
         await this.awaitBuilt(spec);
+        this.changed();
         return { status: 'CREATED', spec };
     }
 
@@ -54,6 +59,7 @@ export class ConstraintManager {
             for (const statement of this.grammar.dropUnique(spec)) {
                 await this.executor.run(statement);
             }
+            this.changed();
         }
     }
 

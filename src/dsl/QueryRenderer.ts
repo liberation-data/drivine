@@ -27,6 +27,11 @@ export interface RenderedQuery {
     paged: boolean;
     /** Whether it continues after a cursor. */
     seeks: boolean;
+    /**
+     * The root's labels the predicate tests itself, as it reads a property through a labelled index: a statement
+     * needn't test them again, and testing them on their own would have the store read the label instead (Oracle).
+     */
+    labelsTested?: string[];
 }
 
 /** The aliases a path's conditions are written against: the node, and the relationship a relationship fragment holds. */
