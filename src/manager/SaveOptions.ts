@@ -41,4 +41,10 @@ export interface SaveOptions<T> {
      * labels a @NodeLabels field no longer holds.
      */
     heldProperties?: Record<string, any>;
+    /**
+     * Internal: the root as `update` loaded it, before its change ran. Where a read takes no snapshot (Neo4j), the
+     * checked save compares the node with it under the node's lock, as well as the stamp: the stamp a load was handed
+     * may be newer than the data it read.
+     */
+    loaded?: any;
 }

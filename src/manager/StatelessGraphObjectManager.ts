@@ -439,7 +439,9 @@ export class StatelessGraphObjectManager {
      * set to null cleared, and for a view each relationship list that lost an item replaced (lists that only grew are
      * added to). The save is checked against the stamp that was loaded; if the node changed meanwhile, it is loaded
      * again and the change applied again, `attempts` times in all, then StaleObjectException is thrown. Without a
-     * `@NodeStamp` field a change by another writer is not noticed.
+     * `@NodeStamp` field a change by another writer is not noticed. On Neo4j, whose reads take no snapshot, a load can
+     * be handed another writer's stamp with the data from before its write, so the save compares each field of the
+     * root as it was loaded too: each field's value, each property bag key by key, and the @NodeLabels field.
      *
      * `change` may change the object it is given or return a copy, but not give it another id or class. Returns the
      * saved object, or undefined when there is no such node or it is deleted meanwhile. A related node is written
@@ -725,7 +727,8 @@ export class StatelessGraphObjectManager {
                       })
                       .map((rel) => rel.field)
                 : [];
-        return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}) };
+        // The root as loaded, before the change ran, which the save compares with the node where a read takes no snapshot.
+        return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}), loaded: rootBefore };
     }
 
     /**

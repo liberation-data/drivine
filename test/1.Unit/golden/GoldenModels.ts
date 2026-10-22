@@ -164,3 +164,14 @@ export class Customer {
     @GraphProperty('LEGACY') legacyCode?: string;
     @GraphTransient() scratch = '';
 }
+
+/** Two bags and an open set of labels beside a stamp: what an update on Neo4j compares as loaded. */
+@NodeFragment({ labels: ['Badge'] })
+export class Badge {
+    @NodeId() uuid: string;
+    name: string;
+    @PropertyBag() metadata: Record<string, any> = {};
+    @PropertyBag({ flat: true }) extras: Record<string, any> = {};
+    @NodeLabels() kinds: string[] = [];
+    @NodeStamp() stamp?: string;
+}

@@ -898,7 +898,8 @@ const saved = await gom.update(Person, id, (person) => {
 
 - If the node changed between the load and the save, `update` loads it again and re-applies the change: three attempts
   by default (the fourth argument), then `StaleObjectException`. That needs a `@NodeStamp` field; without one a change
-  by another writer goes unnoticed.
+  by another writer goes unnoticed. On Neo4j the save compares the root's fields as they were loaded as well as the
+  stamp: see [When a Save Is Refused](#when-a-save-is-refused).
 - It returns undefined when there is no such node, or the node is deleted in between. It never makes a node.
 - A change that gives the object another id or another class is refused.
 
@@ -1051,6 +1052,15 @@ writes nothing and throws `StaleObjectException`.
 
 An object whose stamp is undefined isn't checked: it makes the node or overwrites it. The save is one statement that
 takes the node's write lock before it compares, so of several writers holding the same stamp exactly one succeeds.
+
+**On Neo4j a load can be handed a stamp newer than its data.** Neo4j reads under read committed, without a snapshot, so
+a load that runs while another writer commits can find that writer's stamp and the data from before its write. `update`
+therefore compares each field of the root as it loaded it too, under the node's lock, and loads again if one differs: a
+field's value, a `@PropertyBag`'s keys and their values, and the labels a `@NodeLabels` field reads. A field the object
+doesn't hold and its class doesn't initialize isn't compared. A `save` of an object you loaded yourself has only the
+stamp to go on, and in that moment it can write over the other writer's change: where every writer's change must be
+kept, change the node with `update`. Memgraph reads from a snapshot, FalkorDB runs no read beside a write, and Oracle and
+Postgres read a statement whole, so on them the stamp is what was read.
 
 ```typescript
 try {
