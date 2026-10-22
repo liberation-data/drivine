@@ -1481,8 +1481,9 @@ DATABASE_DEFAULT_GRAPH_PATH=drivine   # names the graph's tables; this is the de
 ```
 
 The graph's name names tables, so it is letters, digits and underscores, begins with a letter, and is at most 49
-characters; Postgres folds it to lower case. The tables are made when an object manager first runs a statement, so a
-database used only for plain SQL is left as it is.
+characters; Postgres folds it to lower case. The tables are made when an object manager first runs a statement.
+Postgres is a graph store like the others, so a schema catalog that names no database applies to it too, and makes its
+tables at startup: to keep a database you use only for plain SQL as it is, narrow the catalog with `.forDatabase(...)`.
 
 **How a graph is stored.** drivine4j's store, byte for byte, so the JVM, Node and Python read and write one graph:
 `<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
