@@ -4,9 +4,9 @@
 **Docs: [drivine.org](https://drivine.org/ts/)**, for TypeScript, Python, and Kotlin & Java.
 
 Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module, and no need
-for one: see [Without Nest](#3-without-nest). It supports **Neo4j**, **Memgraph**, **FalkorDB** and **Oracle**
-(SQL/PGQ) as graph stores, plus Amazon Neptune and plain SQL on Postgres through the low-level API. It gives you two
-ways to work with a graph:
+for one: see [Without Nest](#3-without-nest). It supports **Neo4j**, **Memgraph**, **FalkorDB**, **Oracle** (SQL/PGQ)
+and **Postgres** as graph stores, plus Amazon Neptune through the low-level API. It gives you two ways to work with a
+graph:
 
 1. **PersistenceManager**: a low-level API where you write the queries yourself. This is the classic Drivine approach.
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
@@ -1379,7 +1379,7 @@ The same models, queries and DSL run on each graph store. Switch the engine with
 | FalkorDB | `FALKORDB` | yes | each statement commits by itself | vector, full-text |
 | Oracle 23ai / 26ai | `ORACLE` | yes | full | vector, Oracle Text |
 | Amazon Neptune | `NEPTUNE` | no: `PersistenceManager` only | full | no |
-| Postgres | `POSTGRES` | no: plain SQL on `PersistenceManager` | full | no |
+| Postgres 14 or later | `POSTGRES` | yes | full | vector (pgvector), full-text |
 
 ### Neo4j
 
@@ -1463,12 +1463,53 @@ properties, so store dates as text and annotate lists with `@JsonPacked`.
 
 ### Postgres
 
-Plain SQL on `PersistenceManager`, with cursors and transactions as on the graph engines.
+Postgres 14 or later (tested on 16), as drivine4j states. Postgres keeps a graph in two tables, as Oracle does, read
+with joins and written through a function the store keeps.
+No extension is needed but pgvector, for vector search, which Drivine makes where the server has it. Models, the DSL
+and the object manager are the same as on the graph engines; `PersistenceManager` runs plain SQL, with cursors and
+transactions, as it always has.
+
+```bash
+DATABASE_TYPE=POSTGRES
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=app
+DATABASE_USER=app
+DATABASE_PASSWORD=secret
+DATABASE_DEFAULT_GRAPH_PATH=drivine   # names the graph's tables; this is the default
+```
+
+The graph's name names tables, so it is letters, digits and underscores, begins with a letter, and is at most 49
+characters; Postgres folds it to lower case. The tables are made when an object manager first runs a statement, so a
+database used only for plain SQL is left as it is.
+
+**How a graph is stored.** drivine4j's store, byte for byte, so the JVM, Node and Python read and write one graph:
+`<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
+as `jsonb` and a GIN index over the labels, so a node carries any number of them; `<graph>_schema`, the indexes and
+constraints Drivine made; and `<graph>_write`, the function a save's steps are carried out by, as one statement that is
+applied whole or not at all.
+
+Notes:
+
+- A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher, and a statement is bound only the
+  ones it names.
+- A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`,
+  e.g. `(n.props ->> 'name') = $name`.
+- A number is compared as a number only where one is stored: `'7'` is not `7`, as on the graph engines.
+- A save checks the stamp, as on the graph engines. A save turned away by a serialization failure (`40001`) or a
+  deadlock (`40P01`) is run again.
+- Index the id of each class you save: a range index or a uniqueness constraint is a partial index over the label's
+  nodes, which finds a node by its id.
+- `matches` takes a Postgres regular expression, matched against the whole value.
+- A vector index is a pgvector HNSW index over the embeddings of the label's nodes of its size; `loadNearest` is
+  approximate through it, and exact with no index made. A full-text index is a trigram index over the text a search
+  reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
+  `"phrase"`, `+must`, `-not` and a `prefix*`.
 
 ## Schema Management (Indexes & Constraints)
 
 Drivine manages range indexes, uniqueness constraints, vector indexes and full-text indexes on Neo4j, Memgraph,
-FalkorDB and Oracle. `ensure` is idempotent and drift-aware, and the engines' differences (DDL, introspection,
+FalkorDB, Oracle and Postgres. `ensure` is idempotent and drift-aware, and the engines' differences (DDL, introspection,
 FalkorDB's constraint commands) are handled for you. Declare nothing, and pay nothing.
 
 ### Imperative
@@ -1581,14 +1622,14 @@ and an item two catalogs declare is never recreated by one of them alone.
 
 ### Per-Engine Notes
 
-| | Neo4j | Memgraph | FalkorDB | Oracle |
-|---|---|---|---|---|
-| Vector | `CREATE VECTOR INDEX` | `WITH CONFIG`, uSearch metrics | `OPTIONS`, unnamed | A `VECTOR` table beside the nodes, kept by a trigger, with a neighbour-partition vector index |
-| Full-text | `CREATE FULLTEXT INDEX` | `CREATE TEXT INDEX` | per property, unnamed | A text table beside the nodes, with an Oracle Text index |
-| Range | named, composite | label-property | per label | an index over the JSON property |
-| Uniqueness | `REQUIRE … IS UNIQUE` | `ASSERT … IS UNIQUE` | `GRAPH.CONSTRAINT`, with its backing index, polled while it builds | a unique index for the label's nodes |
+| | Neo4j | Memgraph | FalkorDB | Oracle | Postgres |
+|---|---|---|---|---|---|
+| Vector | `CREATE VECTOR INDEX` | `WITH CONFIG`, uSearch metrics | `OPTIONS`, unnamed | A `VECTOR` table beside the nodes, kept by a trigger, with a neighbour-partition vector index | A pgvector HNSW index over the label's embeddings of its size |
+| Full-text | `CREATE FULLTEXT INDEX` | `CREATE TEXT INDEX` | per property, unnamed | A text table beside the nodes, with an Oracle Text index | A trigram index over the text a search reads |
+| Range | named, composite | label-property | per label | an index over the JSON property | a partial index over the label's nodes |
+| Uniqueness | `REQUIRE … IS UNIQUE` | `ASSERT … IS UNIQUE` | `GRAPH.CONSTRAINT`, with its backing index, polled while it builds | a unique index for the label's nodes | a unique partial index over the label's nodes |
 
-Neptune and Postgres have no schema management.
+Neptune has no schema management.
 
 ## Multi-Database Support
 
