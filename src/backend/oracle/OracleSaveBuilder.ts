@@ -1,9 +1,20 @@
-import { Direction, ClassKind } from '@/annotation/Metadata';
+import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
+import {
+    concreteModel,
+    heldIds,
+    items,
+    nodeOf,
+    nodeWrite,
+    NodeWrite,
+    replacedFields,
+    rootOf,
+    stampExcluded
+} from '@/backend/sql/SqlSaves';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
@@ -11,20 +22,6 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
-
-/** What writing one node takes: how to find it, and the labels and properties to give it. */
-interface NodeWrite {
-    model: FragmentModel;
-    id: any;
-    /** The labels it is made with, when it is not there. */
-    labels: string[];
-    add: string[];
-    remove: string[];
-    /** A merge patch: a null removes the property. */
-    props: Record<string, any>;
-    /** For an open @NodeLabels field: the property recording the labels it wrote, and whether it is replaced. */
-    record?: { property: string; replace: boolean };
-}
 
 /**
  * Writes a save as one PL/SQL block, applied whole or not at all, with or without a transaction: the root found (or
@@ -62,7 +59,7 @@ export class OracleSaveBuilder {
                     `replace names relationship fields of a view. ${target.model.type.name} is a @NodeFragment.`
                 );
             }
-            const expected = this.root(this.concrete(target.model, object), object, createOnly, false);
+            const expected = this.root(concreteModel(this.registry, target.model, object), object, createOnly, false);
             return this.statement(target.model, object, expected);
         }
         const view = target.model;
@@ -72,8 +69,8 @@ export class OracleSaveBuilder {
                 `${view.type.name}.${view.rootField}, the root, is ${rootObject}. A view is saved from its root.`
             );
         }
-        const replace = this.replacedFields(view, object, options);
-        const root = this.concrete(view.root, rootObject);
+        const replace = replacedFields(view, object, options);
+        const root = concreteModel(this.registry, view.root, rootObject);
         const expected = this.root(root, rootObject, createOnly, replace.length > 0);
         const writes: string[] = [];
         this.related(view, object, 'v_root', [], writes);
@@ -93,7 +90,7 @@ export class OracleSaveBuilder {
         const props: Record<string, any> = { ...objectProps(model, object, this.options) };
         const bagged = { ...model, propertyBags: model.propertyBags.filter((it) => keep(it.field)) };
         bagEntries(bagged, object, Object.keys(held), clear).forEach((value, key) => (props[key] = value));
-        const write = this.nodeWrite(
+        const write = nodeWrite(
             model,
             object,
             props,
@@ -156,18 +153,11 @@ export class OracleSaveBuilder {
                 }
                 const nodeObject = into.kind === 'GRAPH_VIEW' ? node[into.model.rootField] : node;
                 const root = rootOf(into);
-                const concrete = this.concrete(root, nodeObject);
+                const concrete = concreteModel(this.registry, root, nodeObject);
                 this.stampedId(root, idOf(root, nodeObject));
                 const props: Record<string, any> = { ...propsOf(concrete, nodeObject, stampExcluded(concrete)) };
                 bagEntries(concrete, nodeObject).forEach((value, key) => (props[key] = value));
-                const write = this.nodeWrite(
-                    concrete,
-                    nodeObject,
-                    props,
-                    concrete.nodeLabels ? false : undefined,
-                    {},
-                    root
-                );
+                const write = nodeWrite(concrete, nodeObject, props, concrete.nodeLabels ? false : undefined, {}, root);
                 const p = this.nodeParams(write);
                 const variable = this.variable();
                 out.push(
@@ -299,48 +289,6 @@ END;`;
         );
     }
 
-    /** The write of a node: found by the labels of `found` (by default its own class's) and its id. */
-    private nodeWrite(
-        model: FragmentModel,
-        object: any,
-        props: Record<string, any>,
-        labelsClear: boolean | undefined,
-        held: Record<string, any>,
-        found: FragmentModel = model
-    ): NodeWrite {
-        const write: NodeWrite = {
-            model: found,
-            id: idOf(model, object),
-            labels: [...model.labels],
-            add: model === found ? [] : model.labels.filter((it) => !found.labels.includes(it)),
-            remove: [],
-            props
-        };
-        if (labelsClear !== undefined && model.nodeLabels) {
-            const field = model.nodeLabels;
-            const labels = [...new Set([...((object?.[field.field] as Iterable<string>) ?? [])])];
-            const outside = field.members ? labels.filter((it) => !field.members!.includes(it)) : [];
-            if (outside.length) {
-                throw new DrivineError(
-                    `${model.type.name}.${field.field} holds ${outside.join(', ')}, which its labels don't include.`
-                );
-            }
-            if (labels.some((it) => typeof it !== 'string' || it.startsWith('__drivine.'))) {
-                throw new DrivineError(
-                    `${model.type.name}.${field.field} holds a label that isn't a name, or begins '__drivine.'.`
-                );
-            }
-            const owned: string[] = field.members ?? (held[field.recordProperty] as string[] | undefined) ?? [];
-            write.add.push(...labels);
-            write.labels.push(...labels);
-            write.remove = labelsClear ? owned.filter((it) => !labels.includes(it) && !model.labels.includes(it)) : [];
-            if (!field.members) {
-                write.record = { property: field.recordProperty, replace: labelsClear };
-            }
-        }
-        return write;
-    }
-
     private nodeParams(write: NodeWrite): Record<string, string> {
         const k = jsonKey(write.model.nodeIdProperty!);
         const match = `${hasLabels(
@@ -357,28 +305,6 @@ END;`;
             record: write.record ? this.bind(write.record.property) : 'NULL',
             replaceRecord: write.record?.replace ? 'TRUE' : 'FALSE'
         };
-    }
-
-    private replacedFields(view: GraphViewModel, object: any, options: SaveOptions<any>): string[] {
-        if (options.replace !== 'all') {
-            return options.replace ?? [];
-        }
-        const root = object[view.rootField];
-        if (!view.root.stampField || root?.[view.root.stampField] == null) {
-            throw new DrivineError(
-                `replace: 'all' needs a ${view.type.name} whose root carries a stamp: an object built from scratch holds ` +
-                    `its defaults, not what the store holds. Load it first, or name the fields to replace.`
-            );
-        }
-        return view.relationships.filter((it) => !it.readOnly).map((it) => it.field);
-    }
-
-    private concrete(target: FragmentModel, object: any): FragmentModel {
-        const type = object?.constructor;
-        if (!this.registry || !type || type === target.type || this.registry.kindOf(type) !== ClassKind.NODE_FRAGMENT) {
-            return target;
-        }
-        return this.registry.fragment(type);
     }
 
     private stampedId(model: FragmentModel, id: any): void {
@@ -599,45 +525,4 @@ function referencedAs(value: Direction): string {
         default:
             return 'r.dst = x.nid';
     }
-}
-
-function stampExcluded(model: FragmentModel): string[] {
-    return model.stampField ? [model.stampField] : [];
-}
-
-function rootOf(into: TargetModel): FragmentModel {
-    return into.kind === 'GRAPH_VIEW' ? into.model.root : into.model;
-}
-
-function nodeOf(rel: RelationshipModel, item: any): any {
-    return rel.related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[rel.related.model.targetField] : item;
-}
-
-function items(rel: RelationshipModel, value: any): any[] {
-    if (value == null) {
-        return [];
-    }
-    if (rel.isCollection && !Array.isArray(value)) {
-        throw new DrivineError(`${rel.field} is a list relationship, but holds a ${typeof value}.`);
-    }
-    return rel.isCollection ? value : [value];
-}
-
-/** The ids of every node the object holds, at any depth. */
-function heldIds(view: GraphViewModel, object: any, seen: Set<any> = new Set<any>()): any[] {
-    if (object == null || seen.has(object)) {
-        return [];
-    }
-    seen.add(object);
-    const ids = [object[view.rootField]?.[view.root.nodeIdField!]];
-    for (const rel of view.relationships) {
-        const into = targetOf(rel);
-        for (const item of items(rel, object[rel.field])) {
-            const node = nodeOf(rel, item);
-            ids.push(
-                ...(into.kind === 'GRAPH_VIEW' ? heldIds(into.model, node, seen) : [node?.[into.model.nodeIdField!]])
-            );
-        }
-    }
-    return ids.filter((it) => it != null);
 }

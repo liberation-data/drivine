@@ -6,6 +6,7 @@ import {
     QuerySpecification,
     TransactionContextHolder
 } from '@liberation-data/drivine';
+import { sqlStores } from './SqlStores';
 
 export interface GraphEngine {
     /** The connection's name in the registry. */
@@ -52,14 +53,11 @@ export async function closeGraphEngines(): Promise<void> {
 }
 
 /**
- * Every store a suite that holds to the object manager's contract runs on: the graph engines, and Oracle when
- * ORACLE_DATABASE_* configures it.
+ * Every store a suite that holds to the object manager's contract runs on: the graph engines, Postgres when
+ * POSTGRES_DATABASE_* configures it, and Oracle when ORACLE_DATABASE_* does.
  */
 export function allStores(): GraphEngine[] {
-    return [
-        ...graphEngines(),
-        ...(process.env.ORACLE_DATABASE_TYPE === 'ORACLE' ? [{ name: 'ORACLE', type: DatabaseType.ORACLE }] : [])
-    ];
+    return [...graphEngines(), ...sqlStores()];
 }
 
 /** Deletes every node carrying any of the labels, with its relationships, in the store's own language. */
@@ -69,6 +67,8 @@ export async function clearLabels(pm: PersistenceManager, engine: GraphEngine, .
             ? `DELETE FROM drivine_node n WHERE ${labels
                   .map((it) => `JSON_EXISTS(n.labels, '$?(@ == "${it}")')`)
                   .join(' OR ')}`
+            : engine.type === DatabaseType.POSTGRES
+            ? `DELETE FROM drivine_node n WHERE ${labels.map((it) => `n.labels @> '["${it}"]'`).join(' OR ')}`
             : `MATCH (n) WHERE ${labels.map((it) => `n:${it}`).join(' OR ')} DETACH DELETE n`;
     await pm.execute(new QuerySpecification(statement));
 }

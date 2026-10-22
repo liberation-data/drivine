@@ -3,6 +3,9 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 
 const assert = require('assert');
 
+/** A named parameter, `$name`: the longest name, so `$id` is not read in `$idList`. */
+const PARAMETER = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
+
 export class PostgresSpecCompiler extends QuerySpecificationCompiler {
     private readonly paramKeys: string[] = [];
 
@@ -13,13 +16,14 @@ export class PostgresSpecCompiler extends QuerySpecificationCompiler {
 
     constructor(spec: QuerySpecification<any>) {
         super(spec);
-        assert(
-            this.spec.statement.language === 'SQL',
-            `${this.spec.statement.language} is not supported on Postgres.`
-        );
+        assert(this.spec.statement.language === 'SQL', `${this.spec.statement.language} is not supported on Postgres.`);
 
         if (!Array.isArray(this.spec.parameters)) {
-            this.paramKeys = Object.keys(this.spec.parameters).sort();
+            // Only the names the statement uses: Postgres refuses a parameter its statement does not name.
+            const used = new Set([...this.spec.statement.text.matchAll(PARAMETER)].map((it) => it[1]));
+            this.paramKeys = Object.keys(this.spec.parameters)
+                .filter((key) => used.has(key))
+                .sort();
             this.indexParams = this.paramKeys.map((it) => (this.spec.parameters as Record<string, any>)[it]);
         } else {
             this.indexParams = this.spec.parameters;
@@ -35,7 +39,7 @@ export class PostgresSpecCompiler extends QuerySpecificationCompiler {
         if (this.paramKeys.length === 0) {
             return result;
         }
-        return result.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, key: string) => {
+        return result.replace(PARAMETER, (match: string, key: string) => {
             const index = this.paramKeys.indexOf(key);
             return index >= 0 ? `$${index + 1}` : match;
         });

@@ -17,6 +17,9 @@ import { OracleConnectionProvider } from '@/connection/oracle/OracleConnectionPr
  */
 const AUTO_COMMIT_ENGINES: DatabaseType[] = [DatabaseType.FALKORDB];
 
+/** The stores that keep a graph of a name in tables of its own: `defaultGraphPath` names it. */
+const GRAPH_STORES = [DatabaseType.ORACLE, DatabaseType.POSTGRES];
+
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
 
@@ -94,7 +97,7 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
-    /** On Oracle, the graph to work on: see {@link ConnectionProperties.defaultGraphPath}. */
+    /** On Oracle and Postgres, the graph to work on: see {@link ConnectionProperties.defaultGraphPath}. */
     defaultGraphPath(path: string): this {
         this._defaultGraphPath = path;
         return this;
@@ -122,7 +125,7 @@ export class ConnectionProviderBuilder {
         }
 
         assert(this._host, `host config is required`);
-        if (this._defaultGraphPath && this._type !== DatabaseType.ORACLE) {
+        if (this._defaultGraphPath && !GRAPH_STORES.includes(this._type)) {
             this.logger.warn(`defaultGraphPath is ignored by ${this._type}, which names no graph`);
         }
         if (this._transactionMode && !AUTO_COMMIT_ENGINES.includes(this._type)) {
@@ -159,16 +162,21 @@ export class ConnectionProviderBuilder {
         }
         assert(this._name, `Database name is required`);
 
-        return new PostgresConnectionProvider(name, this._type, {
-            host: this._host,
-            user: this._userName,
-            password: this._password,
-            database: this._name!,
-            port: this._port,
-            idleTimeoutMillis: this._idleTimeout,
-            connectionTimeoutMillis: this._connectionTimeout,
-            max: this._poolMax
-        });
+        return new PostgresConnectionProvider(
+            name,
+            this._type,
+            {
+                host: this._host,
+                user: this._userName,
+                password: this._password,
+                database: this._name!,
+                port: this._port,
+                idleTimeoutMillis: this._idleTimeout,
+                connectionTimeoutMillis: this._connectionTimeout,
+                max: this._poolMax
+            },
+            this._defaultGraphPath
+        );
     }
 
     /** Oracle's database name is its service, as in `host:1521/FREEPDB1`. */
@@ -264,16 +272,9 @@ export class ConnectionProviderBuilder {
             this.logger.warn(`${this._port} is a non-standard port for Neptune`);
         }
 
-        return new NeptuneConnectionProvider(
-            name,
-            this._type,
-            this._host,
-            this._port,
-            this._protocol,
-            {
-                connectionTimeout: this._connectionTimeout
-            }
-        );
+        return new NeptuneConnectionProvider(name, this._type, this._host, this._port, this._protocol, {
+            connectionTimeout: this._connectionTimeout
+        });
     }
 
     private buildFalkorDbProvider(name: string): ConnectionProvider {

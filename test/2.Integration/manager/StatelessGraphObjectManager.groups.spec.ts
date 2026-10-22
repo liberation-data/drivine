@@ -18,8 +18,8 @@ import {
     StatelessGraphObjectManager,
     sum
 } from '@liberation-data/drivine';
-import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
-import { OracleSeed } from '../support/OracleSeed';
+import { clearLabels, closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { SqlSeed, SqlStore, sqlStores } from '../support/SqlStores';
 
 @NodeFragment({ labels: ['GroupTest', 'Feedback'] })
 class Feedback {
@@ -42,23 +42,33 @@ class User {
     username?: string;
 }
 
-describe.each(allStores())('groups on $type', (engine) => {
+describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) => {
     const oracle = engine.type === DatabaseType.ORACLE;
-    /** A raw filter in the store's own language: Cypher over n, or SQL over the row n. */
-    const raw = (cypher: string, sql: string): string => (oracle ? sql : cypher);
-    const hasPage = raw('n.page IS NOT NULL', "JSON_EXISTS(n.props, '$.page')");
-    const helpful = raw('n.helpful = true', "JSON_EXISTS(n.props, '$?(@.helpful == true)')");
+    const postgres = engine.type === DatabaseType.POSTGRES;
+    /** A raw filter in the store's own language: Cypher over n, or SQL over the row n on Oracle and on Postgres. */
+    const raw = (cypher: string, oracleSql: string, postgresSql: string): string =>
+        oracle ? oracleSql : postgres ? postgresSql : cypher;
+    const month = "CAST(n.props ->> 'month' AS numeric)";
+    const hasPage = raw('n.page IS NOT NULL', "JSON_EXISTS(n.props, '$.page')", "(n.props -> 'page') IS NOT NULL");
+    const helpful = raw(
+        'n.helpful = true',
+        "JSON_EXISTS(n.props, '$?(@.helpful == true)')",
+        "(n.props -> 'helpful') = 'true'::jsonb"
+    );
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
 
     beforeAll(async () => {
         pm = persistenceManagerFor(engine);
         gom = new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
-        await clearLabels(pm, engine, 'GroupTest');
-        if (oracle) {
-            await seedOracle(new OracleSeed(pm, 'GroupTest'));
+        if (oracle || postgres) {
+            const seed = new SqlSeed(pm, engine as SqlStore, 'GroupTest');
+            await seed.prepare();
+            await seed.clear();
+            await seedSql(seed);
             return;
         }
+        await clearLabels(pm, engine, 'GroupTest');
         await pm.execute(
             new QuerySpecification(
                 "CREATE (:GroupTest:Feedback {id: 'f1', page: '/install', helpful: true, month: 1, score: 5}), " +
@@ -107,7 +117,8 @@ describe.each(allStores())('groups on $type', (engine) => {
         const march = await gom.groups.load(Feedback, {
             where: raw(
                 'n.page IS NOT NULL AND n.month >= $march',
-                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= $m)' PASSING $march AS "m")`
+                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= $m)' PASSING $march AS "m")`,
+                `${hasPage} AND ${month} >= $march`
             ),
             bindings: { march: 3 },
             keys: { page: key('page') },
@@ -120,13 +131,29 @@ describe.each(allStores())('groups on $type', (engine) => {
         const busy = await gom.groups.load(Feedback, {
             where: raw(
                 'n.page IS NOT NULL AND n.month >= 3',
-                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= 3)')`
+                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= 3)')`,
+                `${hasPage} AND ${month} >= 3`
             ),
             keys: { page: key('page') },
             aggregates: { votes: count() },
             having: [['votes', 'gte', 3]]
         });
         expect(busy).toEqual([]);
+        // A count compared with a fraction, as any number is.
+        const halfway = await gom.groups.load(Feedback, {
+            where: raw(
+                'n.page IS NOT NULL AND n.month >= 3',
+                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= 3)')`,
+                `${hasPage} AND ${month} >= 3`
+            ),
+            keys: { page: key('page') },
+            aggregates: { votes: count() },
+            having: [['votes', 'gt', 1.5]]
+        });
+        expect(halfway).toEqual([
+            { page: '/agents', votes: 2 },
+            { page: '/install', votes: 2 }
+        ]);
     });
 
     it('should sum, average and find extremes, skipping missing values', async () => {
@@ -140,11 +167,19 @@ describe.each(allStores())('groups on $type', (engine) => {
                 high: max('score'),
                 helpfulTotal: sum(
                     'score',
-                    raw('n.helpful = true AND n.month > 5', `${helpful} AND JSON_EXISTS(n.props, '$?(@.month > 5)')`)
+                    raw(
+                        'n.helpful = true AND n.month > 5',
+                        `${helpful} AND JSON_EXISTS(n.props, '$?(@.month > 5)')`,
+                        `${helpful} AND ${month} > 5`
+                    )
                 ),
                 helpfulMean: avg(
                     'score',
-                    raw('n.helpful = true AND n.month > 5', `${helpful} AND JSON_EXISTS(n.props, '$?(@.month > 5)')`)
+                    raw(
+                        'n.helpful = true AND n.month > 5',
+                        `${helpful} AND JSON_EXISTS(n.props, '$?(@.month > 5)')`,
+                        `${helpful} AND ${month} > 5`
+                    )
                 )
             }
         });
@@ -214,8 +249,8 @@ describe.each(allStores())('groups on $type', (engine) => {
     });
 });
 
-/** The graph the Cypher seed writes, written into Oracle's tables. */
-async function seedOracle(seed: OracleSeed): Promise<void> {
+/** The graph the Cypher seed writes, written into a SQL store's tables. */
+async function seedSql(seed: SqlSeed): Promise<void> {
     const feedback: [string, Record<string, any>][] = [
         ['f1', { page: '/install', helpful: true, month: 1, score: 5 }],
         ['f2', { page: '/install', helpful: true, month: 3, score: 4 }],

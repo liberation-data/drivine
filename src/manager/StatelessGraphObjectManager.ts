@@ -35,6 +35,8 @@ import { IndexManager } from '@/schema/IndexManager';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
 import { OracleBackend } from '@/backend/oracle/OracleBackend';
+import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
+import { ensuredFirst, ensureStore } from '@/manager/EnsuredStore';
 import { StoreIdentity, StoreIdentityResolver } from '@/store/StoreIdentity';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
@@ -176,6 +178,9 @@ function chunked(groups: FragmentGroup[], size: number): FragmentGroup[][] {
 }
 
 export class StatelessGraphObjectManager {
+    /** The manager's statements run through it, once the backend's store is made where it has one to make. */
+    readonly persistenceManager: PersistenceManager;
+
     /** Relationships on their own, between stored nodes: see EdgeOperations. */
     readonly edges: EdgeOperations;
     /** Grouped reads: see GroupOperations. */
@@ -193,10 +198,13 @@ export class StatelessGraphObjectManager {
     private readonly mapper: GraphObjectMapper;
 
     constructor(
-        readonly persistenceManager: PersistenceManager,
+        persistenceManager: PersistenceManager,
         readonly backend: GraphBackend,
         readonly registry: ModelRegistry
     ) {
+        this.persistenceManager = backend.ensuring
+            ? ensuredFirst(persistenceManager, backend.ensuring)
+            : persistenceManager;
         this.mapper = new GraphObjectMapper(registry);
         this.indexAdvisor = new QueryIndexAdvisor(
             () => this.indexes,
@@ -339,7 +347,8 @@ export class StatelessGraphObjectManager {
             threshold: options.threshold !== undefined,
             k: options.searchK ?? options.topK,
             limit: options.searchK !== undefined ? options.topK : undefined,
-            depth: options.depth
+            depth: options.depth,
+            dimensions: vector.length
         });
         const rows = await this.persistenceManager.query<{ value: any; score: number }>(
             statement.spec({
@@ -753,6 +762,10 @@ export class StatelessGraphObjectManager {
                     runEach(async (spec) => this.persistenceManager.query(spec.spec()))
                 );
             }
+            // The batch runs on a connection of its own, past the persistence manager that makes the store first.
+            if (this.backend.ensuring) {
+                await ensureStore(this.persistenceManager, this.backend.ensuring);
+            }
             return await this.whenUncontended(async () => {
                 const connection = await provider.connect();
                 try {
@@ -855,7 +868,7 @@ export class StatelessGraphObjectManager {
         const backend = this.backend;
         return schemaGrammarFor(
             this.persistenceManager.type,
-            backend instanceof OracleBackend ? backend.graph : undefined
+            backend instanceof OracleBackend || backend instanceof PostgresBackend ? backend.graph : undefined
         );
     }
 
@@ -864,7 +877,11 @@ export class StatelessGraphObjectManager {
         if (!provider) {
             throw new DrivineError(`No database is registered under ${this.persistenceManager.database}.`);
         }
-        return new SchemaExecutor(provider);
+        const ensuring = this.backend.ensuring;
+        return new SchemaExecutor(
+            provider,
+            ensuring ? async () => ensureStore(this.persistenceManager, ensuring) : undefined
+        );
     }
 
     /** The @VectorIndex field a nearest search uses, with its options checked. */

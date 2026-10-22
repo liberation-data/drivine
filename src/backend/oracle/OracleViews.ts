@@ -8,117 +8,43 @@ import {
     relatedSubquery,
     sqlText
 } from '@/backend/oracle/OracleGraph';
-import { target } from '@/backend/ViewProjector';
-import { FragmentModel } from '@/model/FragmentModel';
-import { AggregateModel, GraphViewModel, PathHop, PathModel } from '@/model/GraphViewModel';
-import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
-
-/** The FROM and WHERE of a path, and the row each of its hops reaches. */
-interface PathRows {
-    body: string;
-    nodes: string[];
-}
-
-/** The FROM that reads node rows by their ids, and the hint its SELECT carries. */
-interface NodesOf {
-    from: string;
-    hint: string;
-}
+import { byId, NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
+import { GraphViewModel } from '@/model/GraphViewModel';
 
 /**
- * Writes a view as one JSON document per root, `{root, rels}`, as the graph engines return it: each relationship a
- * correlated subquery over the relationship table, its nodes aggregated with JSON_ARRAYAGG. A relationship is followed
- * as many times as its maxDepth along any one path; past that, a list is empty and a single absent.
+ * Writes a view on Oracle (see SqlViews): each relationship's nodes aggregated with JSON_ARRAYAGG, and a relationship
+ * to a depth followed with CONNECT BY.
  */
-export class OracleViews {
-    private aliasCount = 0;
+export class OracleViews extends SqlViews {
+    protected readonly emptyObject = `JSON('{}')`;
 
-    constructor(
-        private readonly graph: OracleGraph,
-        private readonly depth: Record<string, number> = {}
-    ) {}
-
-    /** An alias no other part of the statement uses. */
-    nextAlias(prefix: string): string {
-        return `${prefix}${++this.aliasCount}`;
+    constructor(graph: OracleGraph, depth: Record<string, number> = {}) {
+        super(graph, depth);
     }
 
-    /** The document of the view whose root is the node row `alias`. */
-    document(model: GraphViewModel, alias: string): string {
-        return this.view(model, alias, []);
-    }
-
-    /**
-     * Queries of the ids of the nodes a load of the view from the roots in the PL/SQL collection `roots` reaches: as far
-     * as each relationship's maxDepth, and only into nested views whose requirements a node meets, as a load would.
-     */
+    /** Queries of the ids of the nodes a load of the view from the roots in the PL/SQL collection `roots` reaches. */
     cascaded(model: GraphViewModel, roots: string): string[] {
-        return this.reachedFrom(
-            model,
-            'n',
-            [],
-            [`FROM ${this.graph.nodes} n`],
-            [`n.nid IN (SELECT column_value FROM TABLE(${roots}))`]
-        );
+        return this.reachedFromRoots(model, `n.nid IN (SELECT column_value FROM TABLE(${roots}))`);
     }
 
-    /** What the node row `alias` must meet to be the view's root: each required relationship and path is there. */
-    requirements(model: GraphViewModel, alias: string): string[] {
-        const relationships = model.relationships
-            .filter((it) => it.required)
-            .map((rel) => {
-                const step = this.step(rel.type, rel.direction, alias, labelsOf(target(rel)));
-                return `EXISTS (${relatedSubquery()} ${step.from} AND ${step.x})`;
-            });
-        const paths = model.paths.filter((it) => it.required).map((path) => `EXISTS (${this.pathIds(path, alias)})`);
-        return [...relationships, ...paths];
+    object(entries: [string, string][]): string {
+        return `JSON_OBJECT(${entries
+            .map(([key, value]) => `${sqlText(key)} VALUE ${value}`)
+            .join(', ')} RETURNING JSON)`;
     }
 
-    /**
-     * One relationship of the type from the node row `from`: the clauses `FROM … WHERE …` (ending in an open WHERE to
-     * add to), the edge's and the far node's aliases, and the test of the far node's labels (`1 = 1` for none).
-     */
-    step(
-        type: string,
-        direction: Direction,
-        from: string,
-        labels: string[]
-    ): { from: string; edge: string; node: string; x: string } {
-        const edge = this.alias('e');
-        const node = this.alias('x');
-        const typed = `${edge}.type = ${sqlText(type)}`;
-        const join =
-            direction === Direction.INCOMING
-                ? `${node}.nid = ${edge}.src WHERE ${edge}.dst = ${from}.nid`
-                : direction === Direction.UNDIRECTED
-                ? `((${edge}.src = ${from}.nid AND ${node}.nid = ${edge}.dst) OR (${edge}.dst = ${from}.nid AND ` +
-                  `${node}.nid = ${edge}.src)) WHERE 1 = 1`
-                : `${node}.nid = ${edge}.dst WHERE ${edge}.src = ${from}.nid`;
-        const [on, where] = join.split(' WHERE ');
-        return {
-            from: `FROM ${this.graph.edges} ${edge} JOIN ${this.graph.nodes} ${node} ON ${on}\nWHERE ${where} AND ${typed}`,
-            edge,
-            node,
-            x: labels.length ? hasLabels(node, labels) : '1 = 1'
-        };
+    nodeDocument(alias: string): string {
+        return nodeDocument(alias);
     }
 
-    /**
-     * The node rows `x` whose ids the query `ids` selects, as a column `nid`, each once: the FROM of a query that reads
-     * them, and the hint its SELECT carries. They're joined from the ids, so a query correlated to another row is read
-     * from where it starts; tested with `IN`, Oracle would test every node against it. The hint has each read by its
-     * id: Oracle takes a test of a node's labels for a lookup of one row, and would read every node of the label for
-     * each id.
-     */
-    nodesOf(ids: string, x: string): NodesOf {
-        const r = this.alias('r');
-        return {
-            from: `FROM (SELECT DISTINCT nid FROM (${ids})) ${r} JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid`,
-            hint: byId(x)
-        };
+    hasLabels(alias: string, labels: string[]): string {
+        return hasLabels(alias, labels);
     }
 
-    /** The ids (a column `nid`) of the nodes 1 to `depth` relationships of the type from the node row `from`. */
+    relatedSubquery(...hints: string[]): string {
+        return relatedSubquery(...hints);
+    }
+
     reached(type: string, direction: Direction, from: string, depth: number): string {
         const edges =
             direction === Direction.UNDIRECTED
@@ -130,200 +56,43 @@ export class OracleViews {
         return `SELECT b AS nid FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
     }
 
-    private reachedFrom(
-        model: GraphViewModel,
-        from: string,
-        path: RelationshipModel[],
-        froms: string[],
-        wheres: string[]
-    ): string[] {
-        const queries: string[] = [];
-        for (const rel of model.relationships) {
-            const depth = this.depth[rel.field] ?? rel.maxDepth;
-            const into = target(rel);
-            if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
-                const x = this.alias('x');
-                const r = this.alias('r');
-                const reached = this.reached(rel.type, rel.direction, from, depth);
-                queries.push(
-                    `SELECT /*+ ${byId(x)} */ ${x}.nid ${froms.join(' ')} CROSS JOIN LATERAL (${reached}) ${r} ` +
-                        `JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid ` +
-                        `WHERE ${[...wheres, hasLabels(x, labelsOf(into))].join(' AND ')}`
-                );
-                continue;
-            }
-            if (path.filter((it) => it === rel).length >= depth) {
-                continue;
-            }
-            const step = this.step(rel.type, rel.direction, from, labelsOf(into));
-            const [fromClause, whereClause] = step.from.split('\nWHERE ');
-            const nextFroms = [...froms, fromClause.replace(/^FROM /, 'CROSS JOIN ')];
-            const required = into.kind === 'GRAPH_VIEW' ? this.requirements(into.model, step.node) : [];
-            const nextWheres = [...wheres, whereClause, step.x, ...required];
-            queries.push(`SELECT ${step.node}.nid ${nextFroms.join(' ')} WHERE ${nextWheres.join(' AND ')}`);
-            if (into.kind === 'GRAPH_VIEW') {
-                queries.push(...this.reachedFrom(into.model, step.node, [...path, rel], nextFroms, nextWheres));
-            }
-        }
-        return queries;
-    }
-
-    private view(model: GraphViewModel, alias: string, path: RelationshipModel[]): string {
-        const entries = [
-            ...model.relationships.map((rel) => [rel.field, this.relationship(rel, alias, path)]),
-            ...model.paths.map((it) => [it.field, this.path(it, alias)]),
-            ...model.aggregates.map((it) => [it.field, this.aggregate(it, alias)])
-        ];
-        const rels = entries.length
-            ? `JSON_OBJECT(${entries
-                  .map(([field, value]) => `${sqlText(field)} VALUE ${value}`)
-                  .join(', ')} RETURNING JSON)`
-            : `JSON('{}')`;
-        return `JSON_OBJECT('root' VALUE ${nodeDocument(alias)}, 'rels' VALUE ${rels} RETURNING JSON)`;
-    }
-
-    private relationship(rel: RelationshipModel, from: string, path: RelationshipModel[]): string {
-        const depth = this.depth[rel.field] ?? rel.maxDepth;
-        if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
-            return this.deepFragments(rel, from, depth);
-        }
-        if (path.filter((it) => it === rel).length >= depth) {
-            return 'NULL';
-        }
-        const into = target(rel);
-        const step = this.step(rel.type, rel.direction, from, labelsOf(into));
-        const node =
-            into.kind === 'GRAPH_VIEW' ? this.view(into.model, step.node, [...path, rel]) : nodeDocument(step.node);
-        const item =
-            rel.related.kind === 'RELATIONSHIP_FRAGMENT'
-                ? `JSON_OBJECT('rel' VALUE ${step.edge}.props, 'target' VALUE ${node} RETURNING JSON)`
-                : node;
-        const required = into.kind === 'GRAPH_VIEW' ? this.requirements(into.model, step.node) : [];
-        const where = [step.x, ...required].join(' AND ');
-        return rel.isCollection
-            ? `(SELECT JSON_ARRAYAGG(${item} RETURNING JSON) ${step.from} AND ${where})`
-            : `(SELECT ${item} ${step.from} AND ${where} FETCH FIRST 1 ROW ONLY)`;
-    }
-
-    /** A list of fragments read over 1 to `depth` hops, each node once. */
-    private deepFragments(rel: RelationshipModel, from: string, depth: number): string {
-        const x = this.alias('x');
-        const reached = this.reached(rel.type, rel.direction, from, depth);
-        const { from: nodes, hint }: NodesOf = this.nodesOf(reached, x);
-        const where = `WHERE ${hasLabels(x, labelsOf(target(rel)))}`;
-        return rel.isCollection
-            ? `(SELECT /*+ ${hint} */ JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes} ${where})`
-            : `(SELECT /*+ ${hint} */ ${nodeDocument(x)} ${nodes} ${where} FETCH FIRST 1 ROW ONLY)`;
-    }
-
-    /** The nodes at the far end of a path, each once: in the order one of its hops names, where one does. */
-    private path(path: PathModel, from: string): string {
-        const x = this.alias('x');
-        const ordered = path.hops.find((it) => it.orderBy);
-        if (!ordered) {
-            const { from: nodes, hint }: NodesOf = this.nodesOf(this.pathIds(path, from), x);
-            return path.isCollection
-                ? `(SELECT /*+ ${hint} */ JSON_ARRAYAGG(${nodeDocument(x)} RETURNING JSON) ${nodes})`
-                : `(SELECT /*+ ${hint} */ ${nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
-        }
-        const o = this.alias('o');
-        const direction = ordered.ascending ? 'ASC' : 'DESC';
-        const nodes = `FROM ${this.graph.nodes} ${x} JOIN (${this.orderedPathNodes(
-            path,
-            from,
-            ordered
-        )}) ${o} ON ${o}.nid = ${x}.nid`;
-        const order =
-            `${o}.order_kind ${direction} NULLS LAST, ${o}.order_number ${direction} NULLS LAST, ` +
-            `${o}.order_text ${direction} NULLS ${ordered.ascending ? 'FIRST' : 'LAST'}, ${x}.nid`;
-        return path.isCollection
-            ? `(SELECT JSON_ARRAYAGG(${nodeDocument(x)} ORDER BY ${order} RETURNING JSON) ${nodes})`
-            : `(SELECT ${nodeDocument(x)} ${nodes} ORDER BY ${order} FETCH FIRST 1 ROW ONLY)`;
-    }
-
     /**
-     * The nodes at the far end of a path, each with the value the hop the path is ordered by keeps for it: that of the
-     * first node of the hop that leads to it, the lowest or, read highest first, the highest. The node the hop reaches
-     * is mapped to no class, so its property's type is not known: it is read as a number, which is null for a value
-     * that is not a JSON number (a text of digits included), and as text. `order_kind` is 0 for a text, 1 for a number
-     * and null for a node without the property, so a text comes before a number read lowest first, as the graph engines
-     * order them, and a node without the property last, whichever way the path is read. Only the kind kept is read further: a node
-     * reached through a text and a number keeps the text, read lowest first, and the number, read highest first.
-     * `JSON_VALUE` reads a stored `""` as null, so whether the node holds one is read on its own: it is a text, and the
-     * lowest. `order_text` is null for it, and orders first among the texts read lowest first.
+     * They're joined from the ids, so a query correlated to another row is read from where it starts; tested with
+     * `IN`, Oracle would test every node against it. The hint has each read by its id: Oracle takes a test of a node's
+     * labels for a lookup of one row, and would read every node of the label for each id.
      */
-    private orderedPathNodes(path: PathModel, from: string, ordered: PathHop): string {
-        const { body, nodes }: PathRows = this.pathRows(path, from);
-        const node = nodes[path.hops.indexOf(ordered)];
-        const last = nodes[nodes.length - 1];
-        const r = this.alias('r');
-        const keep = ordered.ascending ? 'MIN' : 'MAX';
-        const key = `$${jsonKey(ordered.orderBy!)}`;
-        const read = holding(node, ordered.orderBy!);
-        const kind =
-            `${keep}(CASE WHEN ${r}.num IS NOT NULL THEN 1 ` + `WHEN ${r}.txt IS NOT NULL OR ${r}.emp = 1 THEN 0 END)`;
-        const text = `CASE WHEN ${r}.num IS NULL THEN ${r}.txt END`;
-        // Read lowest first, a node that a "" leads to keeps no text, which orders first among the texts.
-        const kept = ordered.ascending ? `CASE WHEN MAX(${r}.emp) IS NULL THEN MIN(${text}) END` : `MAX(${text})`;
-        return (
-            `SELECT ${r}.nid, ${kind} AS order_kind, ` +
-            `CASE WHEN ${kind} = 1 THEN ${keep}(${r}.num) END AS order_number, ` +
-            `CASE WHEN ${kind} = 0 THEN ${kept} END AS order_text ` +
-            `FROM (SELECT ${last}.nid AS nid, JSON_VALUE(${read}, '${key}.numberOnly()' RETURNING NUMBER) AS num, ` +
-            `JSON_VALUE(${read}, '${key}') AS txt, ` +
-            `CASE WHEN JSON_EXISTS(${read}, '${key}?(@ == "")') THEN 1 END AS emp ${body}) ${r} GROUP BY ${r}.nid`
-        );
+    nodesOf(ids: string, x: string): NodesOf {
+        const r = this.nextAlias('r');
+        return {
+            from: `FROM (SELECT DISTINCT nid FROM (${ids})) ${r} JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid`,
+            hint: byId(x)
+        };
     }
 
-    /** The ids of the nodes at the far end of a path from the node row `from`, its hops' labels met. */
-    private pathIds(path: PathModel, from: string): string {
-        const { body, nodes }: PathRows = this.pathRows(path, from);
-        return `SELECT ${nodes[nodes.length - 1]}.nid ${body}`;
+    number(node: string, property: string): string {
+        return `JSON_VALUE(${node}.props, '$${jsonKey(property)}' RETURNING NUMBER)`;
     }
 
-    /** The FROM and WHERE of a path from the node row `from`, its hops' labels met, and the row each hop reaches. */
-    private pathRows(path: PathModel, from: string): PathRows {
-        const froms: string[] = [];
-        const wheres: string[] = [];
-        const nodes: string[] = [];
-        path.hops.forEach((hop, i) => {
-            const last = i === path.hops.length - 1;
-            const labels = [...(hop.label ? [hop.label] : []), ...(last ? path.target.labels : [])];
-            const step = this.step(hop.type, hop.direction, nodes[i - 1] ?? from, labels);
-            const [fromClause, whereClause] = step.from.split('\nWHERE ');
-            froms.push(i === 0 ? fromClause : fromClause.replace(/^FROM /, 'CROSS JOIN '));
-            wheres.push(whereClause, ...(labels.length ? [step.x] : []));
-            nodes.push(step.node);
-        });
-        return { body: `${froms.join(' ')} WHERE ${wheres.join(' AND ')}`, nodes };
+    zeroIfNull(value: string): string {
+        return `NVL(${value}, 0)`;
     }
 
-    /** An aggregate over the nodes one relationship type leads to: COUNT of relationships, else of property values. */
-    private aggregate(aggregate: AggregateModel, from: string): string {
-        const step = this.step(aggregate.type, aggregate.direction, from, []);
-        const number = aggregate.property
-            ? `JSON_VALUE(${step.node}.props, '$${jsonKey(aggregate.property)}' RETURNING NUMBER)`
-            : undefined;
-        const fn =
-            aggregate.function === 'COUNT'
-                ? `COUNT(${number ?? '*'})`
-                : aggregate.function === 'SUM'
-                ? `NVL(SUM(${number}), 0)`
-                : `${aggregate.function}(${number})`;
-        return `(SELECT ${fn} ${step.from})`;
+    protected arrayOf(item: string, order?: string): string {
+        return `JSON_ARRAYAGG(${item}${order ? ` ORDER BY ${order}` : ''} RETURNING JSON)`;
     }
 
-    private alias(prefix: string): string {
-        return this.nextAlias(prefix);
+    protected select(hint: string): string {
+        return `SELECT /*+ ${hint} */ `;
     }
-}
 
-/** The hint that has Oracle read the node row `x` by its id, through the primary key. */
-function byId(x: string): string {
-    return `INDEX(${x} (nid))`;
-}
-
-function labelsOf(into: TargetModel): string[] {
-    const model: FragmentModel = into.kind === 'GRAPH_VIEW' ? into.model.root : into.model;
-    return model.labels;
+    /** `JSON_VALUE` reads a stored `""` as null, so whether the node holds one is read on its own. */
+    protected orderReads(node: string, property: string): OrderReads {
+        const key = `$${jsonKey(property)}`;
+        const read = holding(node, property);
+        return {
+            num: `JSON_VALUE(${read}, '${key}.numberOnly()' RETURNING NUMBER)`,
+            txt: `JSON_VALUE(${read}, '${key}')`,
+            emp: `CASE WHEN JSON_EXISTS(${read}, '${key}?(@ == "")') THEN 1 END`
+        };
+    }
 }

@@ -1,7 +1,7 @@
 import {
     backendFor,
-    DatabaseRegistry,
     DatabaseType,
+    DatabaseRegistry,
     Direction,
     GraphProperty,
     GraphRelationship,
@@ -22,10 +22,9 @@ import {
     StatelessGraphObjectManager,
     TargetNode
 } from '@liberation-data/drivine';
-import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
-import { OracleSeed } from '../support/OracleSeed';
+import { rawProps, SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
-@NodeFragment({ labels: ['OraSave', 'Person'] })
+@NodeFragment({ labels: ['SqlSave', 'Person'] })
 class Person {
     @NodeId() id: string;
     name?: string | null;
@@ -38,23 +37,30 @@ class Person {
 @NodeFragment({ labels: ['Pilot'] })
 class Pilot extends Person {}
 
-@NodeFragment({ labels: ['OraSave', 'Tag'] })
+@NodeFragment({ labels: ['SqlSave', 'Tag'] })
 class Tag {
     @NodeId() id: string;
     @NodeStamp() stamp?: string;
 }
 
 /** A bag and no @NodeLabels: a save merges its properties in place, as Oracle then keeps them (OSON version 2). */
-@NodeFragment({ labels: ['OraSave', 'Note'] })
+@NodeFragment({ labels: ['SqlSave', 'Note'] })
 class Note {
     @NodeId() id: string;
     @PropertyBag() metadata: Record<string, any> = {};
 }
 
-@NodeFragment({ labels: ['OraSave', 'Org'] })
+@NodeFragment({ labels: ['SqlSave', 'Org'] })
 class Org {
     @NodeId() id: string;
     name?: string;
+}
+
+/** A closed @NodeLabels field: it owns only its members. */
+@NodeFragment({ labels: ['SqlSave', 'Badge'] })
+class Badge {
+    @NodeId() id: string;
+    @NodeLabels(['Gold', 'Silver']) levels: string[] = [];
 }
 
 @RelationshipFragment()
@@ -82,15 +88,16 @@ const person = (id: string, fields: Partial<Person> = {}): Person => Object.assi
 const tag = (id: string): Tag => Object.assign(new Tag(), { id });
 const career = (fields: Partial<Career>): Career => Object.assign(new Career(), fields);
 
-describeOnOracle('saves on Oracle', () => {
+describe.each(sqlStores())('saves on $name', (store) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
-    let seed: OracleSeed;
+    let seed: SqlSeed;
 
-    beforeAll(() => {
-        pm = oraclePersistenceManager();
-        gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
-        seed = new OracleSeed(pm, 'OraSave');
+    beforeAll(async () => {
+        pm = sqlPersistenceManager(store);
+        gom = new StatelessGraphObjectManager(pm, backendFor(store.type), new ModelRegistry());
+        seed = new SqlSeed(pm, store, 'SqlSave');
+        await seed.prepare();
     });
 
     beforeEach(async () => {
@@ -116,19 +123,14 @@ describeOnOracle('saves on Oracle', () => {
         const changed = await gom.save(loaded);
         expect(changed.stamp!.split(':')[0]).not.toEqual(ada.stamp!.split(':')[0]);
         expect(changed.stamp!.split(':')[1]).toEqual(ada.stamp!.split(':')[1]);
-        const raw = await pm.getOne<any>(
-            new QuerySpecification(
-                // Re-encoded: the thin driver can't read a document updated in place (oracle/node-oracledb#1796).
-                `SELECT JSON_TRANSFORM(n.props, KEEP '$') AS "props" FROM drivine_node n ` +
-                    `WHERE JSON_EXISTS(n.labels, '$?(@ == "OraSave")')`
-            )
-        );
-        expect(raw).toEqual({
+        const raw = await pm.getOne<any>(new QuerySpecification(rawProps(store, 'SqlSave')));
+        expect(raw.props ?? raw).toEqual({
             id: 'ada',
             name: 'Ada Lovelace',
             born_in: 1815,
             'metadata.source': 'wiki',
-            '__drivine.labels.tags': []
+            // An open label field's record of the labels it holds: drivine4j's write function removes one that is empty.
+            ...(store.type === DatabaseType.ORACLE ? { '__drivine.labels.tags': [] } : {})
         });
     });
 
@@ -234,6 +236,12 @@ describeOnOracle('saves on Oracle', () => {
         expect((await gom.load(Team, 'acme'))!.members.map((it) => it.person.id)).toEqual(['mo']);
     });
 
+    it('should hand a related node the save makes its whole stamp, though the view holds it twice', async () => {
+        const saved = await gom.save(career({ person: person('pat'), tagList: [tag('both'), tag('both')] }));
+        const stored = (await gom.load(Tag, 'both'))!.stamp;
+        expect(saved.tagList.map((it) => it.stamp)).toEqual([stored, stored]);
+    });
+
     it('should save a batch whose stamps run past 4000 characters', async () => {
         await gom.saveAll(Array.from({ length: 300 }, (_, i) => tag(`t${i}`)));
         expect(await gom.count(Tag)).toEqual(300);
@@ -245,5 +253,49 @@ describeOnOracle('saves on Oracle', () => {
         await gom.save(note({ source: 'wiki', rank: 2 }));
         await gom.save(note({ rank: 3 }), { nullPolicy: NullPolicy.CLEAR });
         expect((await gom.load(Note, 'n1'))!.metadata).toEqual({ rank: 3 });
+    });
+
+    it('should refuse replace of a fragment or a field it names wrongly, replace all from scratch, and create of a loaded node', async () => {
+        await expect(gom.save(person('ann'), { replace: ['tags'] })).rejects.toThrow(/is a @NodeFragment/);
+        await expect(gom.save(career({ person: person('ann') }), { replace: 'all' })).rejects.toThrow(
+            /replace: 'all' needs a Career whose root carries a stamp/
+        );
+        await expect(gom.save(career({ person: person('ann') }), { replace: ['nope' as any] })).rejects.toThrow(
+            /not a relationship field of Career/
+        );
+        await expect(
+            gom.save(career({ person: person('ann'), tagList: null as any }), { replace: ['tagList'] })
+        ).rejects.toThrow(/Give an empty list/);
+        const ann = await gom.save(person('ann'));
+        await expect(gom.create(ann)).rejects.toThrow(/carries a stamp was loaded/);
+        expect(await gom.count(Person)).toEqual(1);
+    });
+
+    it('should replace every list of a loaded view with replace all', async () => {
+        await gom.save(career({ person: person('ned'), tagList: [tag('t1'), tag('t2')], mentor: person('ola') }));
+        const ned = (await gom.load(Career, 'ned'))!;
+        ned.tagList = [];
+        ned.mentor = undefined;
+        await gom.save(ned, { replace: 'all' });
+        const replaced = (await gom.load(Career, 'ned'))!;
+        expect(replaced.tagList).toEqual([]);
+        expect(replaced.mentor).toBeUndefined();
+        expect(await gom.load(Tag, 't1')).toBeDefined();
+    });
+
+    it('should save a closed @NodeLabels field, dropping under CLEAR a member it no longer holds', async () => {
+        const badge = (levels: string[]): Badge => Object.assign(new Badge(), { id: 'b1', levels });
+        await gom.save(badge(['Gold', 'Silver']));
+        await gom.save(badge(['Silver']), { nullPolicy: NullPolicy.CLEAR });
+        expect((await gom.load(Badge, 'b1'))!.levels).toEqual(['Silver']);
+        await expect(gom.save(badge(['Bronze']))).rejects.toThrow(/holds Bronze, which its labels don't include/);
+        await expect(gom.save(person('ray', { tags: ['__drivine.x'] }))).rejects.toThrow(/begins '__drivine.'/);
+    });
+
+    it("should make a related node held as a subclass with the subclass's labels", async () => {
+        await gom.save(
+            career({ person: person('sam'), mentor: Object.assign(new Pilot(), { id: 'tia', name: 'Tia' }) })
+        );
+        expect((await gom.load(Career, 'sam'))!.mentor).toBeInstanceOf(Pilot);
     });
 });

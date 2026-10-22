@@ -4,7 +4,7 @@ import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { TargetModel } from '@/model/RelationshipModel';
 import { DrivineError } from '@/DrivineError';
-import { TextQuery } from '@/backend/oracle/TextQuery';
+import { TextQuery } from '@/backend/sql/TextQuery';
 
 /**
  * Vector and full-text search on Oracle, each as one statement returning `{value, score}` per hit, best first, as the

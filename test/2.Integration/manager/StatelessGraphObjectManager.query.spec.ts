@@ -1,7 +1,6 @@
 import {
     above,
     backendFor,
-    DatabaseType,
     allOf,
     below,
     caseOf,
@@ -36,8 +35,7 @@ import {
     TargetNode
 } from '@liberation-data/drivine';
 import { closeGraphEngines, GraphEngine, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
-import { oracleConfigured, oraclePersistenceManager } from '../support/Oracle';
-import { OracleSeed } from '../support/OracleSeed';
+import { SqlSeed, sqlPersistenceManager, SqlStore, sqlStores } from '../support/SqlStores';
 
 @NodeFragment({ labels: ['QueryTest', 'Issue'] })
 class Issue {
@@ -105,7 +103,7 @@ class IssueView {
 const ids = (items: { id: string }[]): string[] => items.map((it) => it.id).sort();
 const viewIds = (items: IssueView[]): string[] => items.map((it) => it.issue.id).sort();
 
-/** A store the suite runs on: Cypher on each graph engine, SQL on Oracle, seeded with the same graph. */
+/** A store the suite runs on: Cypher on each graph engine, SQL on Oracle and Postgres, seeded with the same graph. */
 interface Store {
     name: string;
     start(): Promise<{ gom: StatelessGraphObjectManager; addIssue(props: Record<string, any>): Promise<void> }>;
@@ -157,14 +155,15 @@ const cypherStore = (engine: GraphEngine): Store => {
     };
 };
 
-const oracleStore = (): Store => {
-    let seed: OracleSeed;
+const sqlStore = (sql: SqlStore): Store => {
+    let seed: SqlSeed;
     return {
-        name: 'ORACLE',
+        name: sql.name,
         start: async () => {
-            const pm = oraclePersistenceManager();
-            const gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
-            seed = new OracleSeed(pm, 'QueryTest');
+            const pm = sqlPersistenceManager(sql);
+            const gom = new StatelessGraphObjectManager(pm, backendFor(sql.type), new ModelRegistry());
+            seed = new SqlSeed(pm, sql, 'QueryTest');
+            await seed.prepare();
             await seed.clear();
             const issue = async (labels: string[], props: Record<string, any>): Promise<void> =>
                 seed.node(['Issue', ...labels], props);
@@ -211,7 +210,7 @@ const oracleStore = (): Store => {
     };
 };
 
-const stores: Store[] = [...graphEngines().map(cypherStore), ...(oracleConfigured ? [oracleStore()] : [])];
+const stores: Store[] = [...graphEngines().map(cypherStore), ...sqlStores().map(sqlStore)];
 
 describe.each(stores)('query DSL on $name', (store) => {
     let gom: StatelessGraphObjectManager;

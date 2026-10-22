@@ -35,6 +35,8 @@ interface Token {
 
 /** One term as Oracle is asked it: as a whole-word expression, and for Oracle Text. */
 interface Term {
+    /** The term's words in turn, the last of them the start of a word for a prefix. */
+    words: string[];
     pattern: string;
     oracleText: string;
 }
@@ -42,6 +44,7 @@ interface Term {
 /** The parts of a query as they are read, each kind as expressions and as Oracle Text. */
 interface Parts {
     scored: string[];
+    scoredWords: string[][];
     required: string[];
     excluded: string[];
     scoredText: string[];
@@ -64,6 +67,7 @@ export class TextQuery {
     static parse(query: string): TextQuery {
         const parts: Parts = {
             scored: [],
+            scoredWords: [],
             required: [],
             excluded: [],
             scoredText: [],
@@ -90,13 +94,18 @@ export class TextQuery {
         const text =
             [`(${parts.scoredText.join(' ACCUM ')})`, ...parts.requiredText].join(' AND ') +
             parts.excludedText.map((it) => ` NOT ${it}`).join('');
-        return new TextQuery(parts.scored, parts.required, parts.excluded, text);
+        return new TextQuery(parts.scored, parts.required, parts.excluded, parts.scoredWords, text);
     }
 
     private constructor(
         readonly scored: string[],
         readonly required: string[],
         readonly excluded: string[],
+        /**
+         * The words of each term of `scored`, in turn: a node whose text matches the term holds each of them, so a store
+         * may narrow what it counts to the nodes that hold them all, by an index of their text.
+         */
+        readonly scoredWords: string[][],
         /**
          * The same query for an Oracle Text index: the scoring terms accumulated, each required one conjoined and each
          * excluded one taken away. A word is in braces, so it is a word and never one of Oracle Text's operators.
@@ -121,6 +130,7 @@ function add(parts: Parts, token: Token, must: boolean, not: boolean): void {
         parts.requiredText.push(term.oracleText);
     }
     parts.scored.push(term.pattern);
+    parts.scoredWords.push(term.words);
     parts.scoredText.push(term.oracleText);
 }
 
@@ -247,6 +257,7 @@ function termOf(token: Token): Term | undefined {
     }
     const prefix = isBare(text[text.length - 1], '*');
     return {
+        words,
         oracleText: prefix
             ? [...words.slice(0, -1).map((it) => `{${it}}`), `${words[words.length - 1]}%`].join(' ')
             : `{${words.join(' ')}}`,

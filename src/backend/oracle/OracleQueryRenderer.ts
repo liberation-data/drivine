@@ -1,48 +1,26 @@
-import { hasLabels, holding, jsonKey, labelledValue, relatedSubquery } from '@/backend/oracle/OracleGraph';
+import { holding, jsonKey, labelledValue } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
-import { target } from '@/backend/ViewProjector';
+import { Compared, SqlQueryRenderer } from '@/backend/sql/SqlQueryRenderer';
 import { DrivineError } from '@/DrivineError';
-import { Scope, scopeOf, Step, step } from '@/dsl/ModelScope';
-import { ConditionNode, ExpressionNode } from '@/dsl/OrderExpressions';
-import { rootRefs } from '@/dsl/QueryRefs';
-import {
-    classify,
-    CollectionSort,
-    count,
-    group,
-    listOf,
-    pinnedProperties,
-    RenderedQuery,
-    rootProperty,
-    RootKey
-} from '@/dsl/QueryRenderer';
-import { allOfOne, Condition, OrderTerm, Query, QueryFn, SeekValue, Test, WhereFn } from '@/dsl/Refs';
-import { classLabels } from '@/model/InstanceOf';
+import { RenderedQuery } from '@/dsl/QueryRenderer';
+import { Query, QueryFn, Test, WhereFn } from '@/dsl/Refs';
+import { Scope } from '@/dsl/ModelScope';
 import { FragmentModel } from '@/model/FragmentModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 import { SchemaItem } from '@/schema/SchemaGrammar';
 
-/** The row a path's conditions read: the node's, and the relationship's that a relationship fragment holds. */
-interface Rows {
-    node: string;
-    rel?: string;
-}
-
 /**
- * Writes a query over a class's references as SQL over Oracle's tables, the root's row bound to `alias`. A property is
- * tested in a JSON path filter against a bound value (`JSON_EXISTS(props, '$?(@."k" > $v)' PASSING …)`), so numbers,
- * text and booleans compare as their JSON types and a missing property meets no comparison, as in Cypher. A condition
- * across a relationship is an EXISTS over the relationship table. Values are bound (`$_q0`, …), never written in.
+ * Writes a query on Oracle (see SqlQueryRenderer). A property is tested in a JSON path filter against a bound value
+ * (`JSON_EXISTS(props, '$?(@."k" > $v)' PASSING …)`), so numbers, text and booleans compare as their JSON types and a
+ * missing property meets no comparison, as in Cypher.
  *
  * Oracle takes a test of a node's labels for a lookup of one row, so it reads a label's nodes even where a range
  * index or a uniqueness constraint would find a few (drivine4j#65). So a comparison with text that every root meets,
  * of a property such an index of one of the root's labels begins with, is also written as the index's expression,
  * which Oracle reads through the index: see `throughIndex`.
  */
-export class OracleQueryRenderer {
-    private readonly bindings: Record<string, any> = {};
-    private readonly views: OracleViews;
+export class OracleQueryRenderer extends SqlQueryRenderer {
     /** The root's labels whose test a comparison makes, through a labelled index. */
     private readonly tested = new Set<string>();
 
@@ -53,30 +31,10 @@ export class OracleQueryRenderer {
         alias: string,
         indexed: SchemaItem[] = []
     ): RenderedQuery {
-        const scope = scopeOf(model);
-        const query: Query = fn(rootRefs<T>(scope));
+        const { scope, query }: { scope: Scope; query: Query } = SqlQueryRenderer.made(fn, model);
         const root = model.kind === 'GRAPH_VIEW' ? model.model.root : (model.model as FragmentModel);
         const renderer = new OracleQueryRenderer(views(query.depth ?? {}), { alias, labels: root.labels, indexed });
-        const condition = query.where !== undefined ? allOfOne(query.where) : undefined;
-        const filter = condition ? renderer.condition(condition, scope, { node: alias }, true) : undefined;
-        const terms = listOf<OrderTerm>(query.orderBy).map((it) => classify(it, scope));
-        const keys = terms.filter((it): it is RootKey => it.kind === 'ROOT');
-        const seek = listOf<SeekValue>(query.seek);
-        const keyset = query.seek !== undefined ? renderer.keyset(keys, seek, query, alias) : undefined;
-        return {
-            where: [filter, keyset].filter((it) => it !== undefined).join(' AND ') || undefined,
-            orderBy: keys.length ? keys.map((it) => renderer.order(it, scope, alias)).join(', ') : undefined,
-            collectionSorts: terms.filter((it): it is CollectionSort => it.kind === 'COLLECTION'),
-            limit: count('limit', query.limit),
-            skip: count('skip', query.skip),
-            depth: query.depth ?? {},
-            bindings: renderer.bindings,
-            ordered: keys.some((it) => it.term.expression) ? [] : keys.map((it) => it.property!),
-            pinned: condition ? pinnedProperties(condition, scope) : [],
-            seeks: query.seek !== undefined,
-            paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined),
-            labelsTested: [...renderer.tested]
-        };
+        return renderer.render(scope, query, alias);
     }
 
     static renderWhere<T>(
@@ -85,10 +43,7 @@ export class OracleQueryRenderer {
         views: OracleViews,
         alias: string
     ): { where: string; bindings: Record<string, any> } {
-        const scope = scopeOf(model);
-        const renderer = new OracleQueryRenderer(views);
-        const where = renderer.condition(allOfOne(fn(rootRefs<T>(scope))), scope, { node: alias });
-        return { where, bindings: renderer.bindings };
+        return new OracleQueryRenderer(views).renderOnly(fn, model, alias);
     }
 
     /**
@@ -103,138 +58,53 @@ export class OracleQueryRenderer {
             indexed: []
         }
     ) {
-        this.views = views;
+        super(views);
     }
 
-    /** The values the conditions written so far bind, by parameter name. */
-    get boundValues(): Record<string, any> {
-        return { ...this.bindings };
-    }
-
-    /** A condition over the node row `alias`. */
-    where(condition: Condition, scope: Scope, alias: string): string {
-        return this.condition(condition, scope, { node: alias });
-    }
-
-    /** A condition, which every root meets when it is `top`: the query's, or one of those it holds all of. */
-    private condition(condition: Condition, scope: Scope, rows: Rows, top: boolean = false): string {
-        const all = (it: readonly Condition[]): string[] => it.map((c) => this.condition(c, scope, rows));
-        switch (condition.kind) {
-            case 'AND':
-                return condition.conditions.length
-                    ? group(
-                          condition.conditions.map((c) => this.condition(c, scope, rows, top)),
-                          ' AND '
-                      )
-                    : '1 = 1';
-            case 'OR':
-                return condition.conditions.length ? group(all(condition.conditions), ' OR ') : '1 = 0';
-            case 'NOT':
-                return `NOT ${group(all(condition.conditions), ' AND ', true)}`;
-            default:
-                return this.walk(condition.path, 0, condition.test, scope, rows, top);
-        }
-    }
-
-    private walk(
-        path: readonly string[],
-        i: number,
-        test: Test,
-        scope: Scope,
-        rows: Rows,
-        top: boolean = false
-    ): string {
-        if (i === path.length) {
-            return this.atNode(test, path, rows);
-        }
-        const next = step(scope, path[i]);
-        const last = i === path.length - 1;
-        switch (next.kind) {
-            case 'SAME_NODE':
-                return this.walk(path, i + 1, test, next.scope, rows, top);
-            case 'TARGET':
-                return this.walk(path, i + 1, test, next.scope, { node: rows.node });
-            case 'HOP':
-                return this.across(next, path, i, test, rows);
-            case 'PROPERTY': {
-                if (!last) {
-                    throw new DrivineError(`${path.slice(0, i + 1).join('.')} is a property; it has no fields.`);
-                }
-                return this.property(next, test, rows, path, top);
-            }
-            default:
-                if (!last || test.kind !== 'COMPARE' || test.operator !== 'HAS_ITEM') {
-                    throw new DrivineError(
-                        `${path.slice(0, i + 1).join('.')} holds the node's labels: test it with hasItem.`
-                    );
-                }
-                return hasLabels(rows.node, [String(test.value)]);
-        }
+    protected labelsTested(): string[] {
+        return [...this.tested];
     }
 
     /** A test of a property: of the root, every root meeting it when `top`, read through an index where it can be. */
-    private property(
-        next: Step & { kind: 'PROPERTY' },
-        test: Test,
-        rows: Rows,
-        path: readonly string[],
-        top: boolean
-    ): string {
-        const column = next.on === 'RELATIONSHIP' ? `${rows.rel}.props` : holding(rows.node, next.property);
+    protected property(compared: Compared, top: boolean): string {
+        const { test, row, onRelationship, name, jsonPacked, path }: Compared = compared;
+        const column = onRelationship ? `${row}.props` : holding(row, name);
         const indexed =
-            top && next.on !== 'RELATIONSHIP' && rows.node === this.root.alias
-                ? this.throughIndex(test, next.property, next.jsonPacked)
-                : undefined;
-        const compared = this.compare(test, column, next.property, next.jsonPacked, path);
-        return indexed ? `${indexed} AND ${compared}` : compared;
+            top && !onRelationship && row === this.root.alias ? this.throughIndex(test, name, jsonPacked) : undefined;
+        const tested = this.compare(test, column, name, jsonPacked, path);
+        return indexed ? `${indexed} AND ${tested}` : tested;
     }
 
-    /** At least one node the relationship leads to meets the rest of the path's test, or a quantifier's conditions. */
-    private across(next: Step & { kind: 'HOP' }, path: readonly string[], i: number, test: Test, rows: Rows): string {
-        const rel = next.rel;
-        const into = target(rel);
-        const labels = (into.kind === 'GRAPH_VIEW' ? into.model.root : (into.model as FragmentModel)).labels;
-        const depth = rel.maxDepth;
-        let clause: string;
-        let hints: string[] = [];
-        let inner: Rows;
-        if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
-            const node = this.views.nextAlias('x');
-            const reached = this.views.reached(rel.type, rel.direction, rows.node, depth);
-            const nodes = this.views.nodesOf(reached, node);
-            clause = `${nodes.from} WHERE ${hasLabels(node, labels)}`;
-            hints = [nodes.hint];
-            inner = { node };
-        } else {
-            const hop = this.views.step(rel.type, rel.direction, rows.node, labels);
-            clause = `${hop.from} AND ${hop.x}`;
-            inner = { node: hop.node, rel: hop.edge };
-        }
-        const quantified = i === path.length - 1 && test.kind === 'QUANTIFY' ? test : undefined;
-        const tested = quantified
-            ? quantified.conditions.map((it) => this.condition(it, next.scope, inner)).join(' AND ')
-            : this.walk(path, i + 1, test, next.scope, inner);
-        const exists = `EXISTS (${relatedSubquery(...hints)} ${clause} AND ${tested})`;
-        return quantified?.negate ? `NOT ${exists}` : exists;
+    protected anyLabel(row: string, labels: readonly string[]): string {
+        const passing = labels.map((label, i) => `${this.bind(label)} AS "l${i}"`).join(', ');
+        const filter = labels.map((_, i) => `@ == $l${i}`).join(' || ');
+        return `JSON_EXISTS(${row}.labels, '$?(${filter})' PASSING ${passing})`;
     }
 
-    private atNode(test: Test, path: readonly string[], rows: Rows): string {
-        const where = path.length ? path.join('.') : 'the root';
-        switch (test.kind) {
-            case 'INSTANCE_OF':
-                return hasLabels(rows.node, classLabels(test.type));
-            case 'ANY_LABEL': {
-                const passing = test.labels.map((label, i) => `${this.bind(label)} AS "l${i}"`).join(', ');
-                const filter = test.labels.map((_, i) => `@ == $l${i}`).join(' || ');
-                return test.labels.length
-                    ? `JSON_EXISTS(${rows.node}.labels, '$?(${filter})' PASSING ${passing})`
-                    : '1 = 0';
-            }
-            case 'QUANTIFY':
-                throw new DrivineError(`any and none follow a relationship; ${where} is not one.`);
-            default:
-                throw new DrivineError(`${where} is a node: compare one of its fields.`);
-        }
+    /** Each a JSON path filter, so the cursor's values compare as their JSON types. */
+    protected seekTest(alias: string, property: string, operator: string, value: string): string {
+        return `JSON_EXISTS(${holding(alias, property)}, '$?(@${jsonKey(
+            property
+        )} ${operator} $v)' PASSING ${value} AS "v")`;
+    }
+
+    /** A property by its JSON type: numbers as numbers. */
+    protected orderedProperty(alias: string, property: string, direction: 'ASC' | 'DESC', nulls?: string): string {
+        return (
+            `JSON_QUERY(${holding(alias, property)}, '$${jsonKey(property)}' RETURNING JSON)` +
+            `${direction === 'DESC' ? ' DESC' : ''}${nulls ? ` NULLS ${nulls}` : ''}`
+        );
+    }
+
+    protected read(alias: string, property: string, as: 'NUMBER' | 'TEXT'): string {
+        const k = jsonKey(property);
+        return as === 'NUMBER'
+            ? `JSON_VALUE(${holding(alias, property)}, '$${k}' RETURNING NUMBER)`
+            : `JSON_VALUE(${holding(alias, property)}, '$${k}')`;
+    }
+
+    protected present(alias: string, property: string): string {
+        return `JSON_EXISTS(${holding(alias, property)}, '$?(@${jsonKey(property)} != null)')`;
     }
 
     /**
@@ -251,7 +121,7 @@ export class OracleQueryRenderer {
             return undefined;
         }
         const operator = SQL_OPERATORS[test.operator as keyof typeof SQL_OPERATORS];
-        const value = storable(test.value);
+        const value = this.storable(test.value);
         if (!operator || typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 4000) {
             return undefined;
         }
@@ -271,7 +141,7 @@ export class OracleQueryRenderer {
             throw new DrivineError(`${path.join('.')} is a property, not a node.`);
         }
         const k = jsonKey(name);
-        const packed = (value: unknown): unknown => storable(jsonPacked ? JSON.stringify(value) : value);
+        const packed = (value: unknown): unknown => this.storable(jsonPacked ? JSON.stringify(value) : value);
         const filter = (expression: string, values: unknown[]): string => {
             const passing = values.map((value, i) => `${this.bind(packed(value))} AS "v${i}"`).join(', ');
             return `JSON_EXISTS(${column}, '$?(${expression})'${passing ? ` PASSING ${passing}` : ''})`;
@@ -320,145 +190,9 @@ export class OracleQueryRenderer {
                 return `LOWER(${text}) = ${this.bind(String(value).toLowerCase())}`;
         }
     }
-
-    /**
-     * The predicate that continues after a cursor, as on the graph engines: a leading bound on the first key, then
-     * the lexicographic branches, each a JSON path filter so the cursor's values compare as their JSON types.
-     */
-    private keyset(keys: RootKey[], seek: SeekValue[], query: Query, alias: string): string {
-        if (!keys.length) {
-            throw new DrivineError('seek continues an order: give orderBy, with a cursor value for each of its terms.');
-        }
-        if (keys.length !== seek.length) {
-            throw new DrivineError(`seek has ${seek.length} cursor values for ${keys.length} orderBy terms.`);
-        }
-        if (query.skip !== undefined) {
-            throw new DrivineError('seek and skip are two ways to page: give one.');
-        }
-        keys.forEach((key, i) => {
-            if (key.term.expression) {
-                throw new DrivineError(
-                    "seek can't continue an order by an expression: a cursor holds properties' values, and an " +
-                        "expression's is computed for each row."
-                );
-            }
-            if (key.term.nulls) {
-                throw new DrivineError(
-                    `${key.term.path.join('.')} places its nulls, which no cursor reaches: a cursor does not say ` +
-                        'which side of the nulls it is on.'
-                );
-            }
-            if (key.term.path.join('.') !== seek[i].path.join('.')) {
-                throw new DrivineError(
-                    `seek value ${i + 1} is of ${seek[i].path.join('.')}, but orderBy term ${i + 1} is ` +
-                        `${key.term.path.join('.')}.`
-                );
-            }
-        });
-        const values = seek.map((it) => this.bind(storable(it.value)));
-        const test = (i: number, operator: string): string =>
-            `JSON_EXISTS(${holding(alias, keys[i].property!)}, '$?(@${jsonKey(
-                keys[i].property!
-            )} ${operator} $v)' PASSING ${values[i]} AS "v")`;
-        const compare = (i: number, strict: boolean): string =>
-            test(i, `${keys[i].term.direction === 'ASC' ? '>' : '<'}${strict ? '' : '='}`);
-        const branches = keys.map((_, i) => {
-            const branch = [...keys.slice(0, i).map((__, j) => test(j, '==')), compare(i, true)].join(' AND ');
-            return i === 0 ? branch : `(${branch})`;
-        });
-        return [
-            ...(keys.length > 1 ? [compare(0, false)] : []),
-            branches.length > 1 ? `(${branches.join(' OR ')})` : branches[0]
-        ].join(' AND ');
-    }
-
-    /** An order term: a property by its JSON type (numbers as numbers), or an expression; nulls as placed. */
-    private order(key: RootKey, scope: Scope, alias: string): string {
-        const value = key.term.expression
-            ? this.expression(key.term.expression, scope, alias, 'NUMBER')
-            : `JSON_QUERY(${holding(alias, key.property!)}, '$${jsonKey(key.property!)}' RETURNING JSON)`;
-        const nulls = key.term.nulls ? ` NULLS ${key.term.nulls}` : '';
-        return `${value}${key.term.direction === 'DESC' ? ' DESC' : ''}${nulls}`;
-    }
-
-    /** An order expression over the root's properties: as numbers, or as text where it is compared with text. */
-    private expression(node: ExpressionNode, scope: Scope, alias: string, as: 'NUMBER' | 'TEXT'): string {
-        const of = (it: ExpressionNode): string => this.expression(it, scope, alias, 'NUMBER');
-        switch (node.kind) {
-            case 'PROPERTY': {
-                const property = rootProperty(node.path, scope, 'An expression');
-                const k = jsonKey(property);
-                return as === 'NUMBER'
-                    ? `JSON_VALUE(${holding(alias, property)}, '$${k}' RETURNING NUMBER)`
-                    : `JSON_VALUE(${holding(alias, property)}, '$${k}')`;
-            }
-            case 'VALUE':
-                return this.bind(storable(node.value));
-            case 'ARITHMETIC':
-                return `(${of(node.left)} ${node.operator} ${of(node.right)})`;
-            case 'NEGATE':
-                return `(-${of(node.operand)})`;
-            case 'FUNCTION':
-                return `${node.name.toUpperCase()}(${node.args.map(of).join(', ')})`;
-            default:
-                return `CASE ${node.branches
-                    .map((it) => `WHEN ${this.caseCondition(it.when, scope, alias)} THEN ${of(it.then)}`)
-                    .join(' ')} ELSE ${of(node.otherwise)} END`;
-        }
-    }
-
-    private caseCondition(node: ConditionNode, scope: Scope, alias: string): string {
-        switch (node.kind) {
-            case 'COMPARE': {
-                const textual = [node.left, node.right].some(
-                    (it) => it.kind === 'VALUE' && typeof it.value !== 'number' && typeof it.value !== 'bigint'
-                );
-                const as = textual ? 'TEXT' : 'NUMBER';
-                return `${this.expression(node.left, scope, alias, as)} ${node.operator} ${this.expression(
-                    node.right,
-                    scope,
-                    alias,
-                    as
-                )}`;
-            }
-            case 'HAS_VALUE': {
-                const tested =
-                    node.operand.kind === 'PROPERTY'
-                        ? this.present(alias, rootProperty(node.operand.path, scope, 'An expression'))
-                        : `${this.expression(node.operand, scope, alias, 'NUMBER')} IS NOT NULL`;
-                return node.negate ? `NOT ${tested}` : tested;
-            }
-            case 'NOT':
-                return `NOT (${this.caseCondition(node.condition, scope, alias)})`;
-            default:
-                return `(${node.conditions.map((it) => this.caseCondition(it, scope, alias)).join(` ${node.kind} `)})`;
-        }
-    }
-
-    private present(alias: string, property: string): string {
-        return `JSON_EXISTS(${holding(alias, property)}, '$?(@${jsonKey(property)} != null)')`;
-    }
-
-    private list(value: unknown, path: readonly string[]): unknown[] {
-        if (!Array.isArray(value)) {
-            throw new DrivineError(`${path.join('.')} is tested against a list, not ${value}.`);
-        }
-        return value;
-    }
-
-    private bind(value: unknown): string {
-        const name = `_q${Object.keys(this.bindings).length}`;
-        this.bindings[name] = value;
-        return `$${name}`;
-    }
 }
 
 const PATH_OPERATORS = { EQ: '==', NEQ: '!=', GT: '>', GTE: '>=', LT: '<', LTE: '<=' };
 
 /** The comparisons an index answers, as SQL writes them. */
 const SQL_OPERATORS = { EQ: '=', GT: '>', GTE: '>=', LT: '<', LTE: '<=' };
-
-/** A value as Oracle's JSON holds it: a date as ISO 8601 text, as a save writes it. */
-function storable(value: unknown): unknown {
-    return value instanceof Date ? value.toISOString() : value;
-}

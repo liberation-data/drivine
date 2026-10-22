@@ -2,7 +2,6 @@ import {
     backendFor,
     CascadeType,
     DatabaseRegistry,
-    DatabaseType,
     Direction,
     GraphRelationship,
     GraphView,
@@ -16,10 +15,9 @@ import {
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
-import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
-import { OracleSeed } from '../support/OracleSeed';
+import { rawProperty, SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
-@NodeFragment({ labels: ['OraWrite', 'Session'] })
+@NodeFragment({ labels: ['SqlWrite', 'Session'] })
 class Session {
     @NodeId() id: string;
     lastActivity?: number | null;
@@ -27,14 +25,14 @@ class Session {
     @NodeStamp() stamp?: string;
 }
 
-@NodeFragment({ labels: ['OraWrite', 'Message'] })
+@NodeFragment({ labels: ['SqlWrite', 'Message'] })
 class Message {
     @NodeId() id: string;
     text?: string;
     @NodeStamp() stamp?: string;
 }
 
-@NodeFragment({ labels: ['OraWrite', 'Person'] })
+@NodeFragment({ labels: ['SqlWrite', 'Person'] })
 class Person {
     @NodeId() id: string;
     name?: string;
@@ -50,15 +48,16 @@ class Conversation {
 const session = (id: string, fields: Partial<Session> = {}): Session => Object.assign(new Session(), { id, ...fields });
 const message = (id: string, text?: string): Message => Object.assign(new Message(), { id, text });
 
-describeOnOracle('writes beside save on Oracle', () => {
+describe.each(sqlStores())('writes beside save on $name', (store) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
-    let seed: OracleSeed;
+    let seed: SqlSeed;
 
-    beforeAll(() => {
-        pm = oraclePersistenceManager();
-        gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
-        seed = new OracleSeed(pm, 'OraWrite');
+    beforeAll(async () => {
+        pm = sqlPersistenceManager(store);
+        gom = new StatelessGraphObjectManager(pm, backendFor(store.type), new ModelRegistry());
+        seed = new SqlSeed(pm, store, 'SqlWrite');
+        await seed.prepare();
     });
 
     beforeEach(async () => {
@@ -77,6 +76,14 @@ describeOnOracle('writes beside save on Oracle', () => {
         expect(objects.every((it) => /^[0-9a-f]{16}:[0-9a-f]{16}$/.test(it.stamp!))).toBe(true);
         expect((await gom.load(Session, 's1'))!.summary).toEqual('One');
         expect((await gom.load(Message, 'm1'))!.stamp).toEqual(objects[2].stamp);
+    });
+
+    it('should hand a node a batch makes whole stamps, though the batch holds it twice', async () => {
+        const objects = [session('twice', { summary: 'a' }), session('twice', { summary: 'b' })];
+        await gom.saveAll(objects);
+        const stored = (await gom.load(Session, 'twice'))!;
+        expect(stored.summary).toEqual('b');
+        expect(objects.map((it) => it.stamp)).toEqual([stored.stamp, stored.stamp]);
     });
 
     it('should patch where a condition holds, with all four outcomes', async () => {
@@ -103,6 +110,23 @@ describeOnOracle('writes beside save on Oracle', () => {
         expect(after.stamp!.split(':')[0]).not.toEqual(before.split(':')[0]);
         await gom.patch(Session, 's1', { clear: ['lastActivity'] });
         expect((await gom.load(Session, 's1'))!.lastActivity).toBeUndefined();
+    });
+
+    it('should patch where a raw condition holds, a negative number bound in it', async () => {
+        await gom.save(session('s1', { lastActivity: 100 }));
+        const patched = await gom.patch(Session, 's1', {
+            set: { summary: 'patched' },
+            where: `${rawProperty(store, 'lastActivity', 'NUMBER')} > 150-$back`,
+            bindings: { back: -60 }
+        });
+        expect(patched).toEqual({ found: true, applied: false, changed: false });
+        expect(
+            await gom.patch(Session, 's1', {
+                set: { summary: 'patched' },
+                where: `${rawProperty(store, 'lastActivity', 'NUMBER')} > 150-$back`,
+                bindings: { back: 60 }
+            })
+        ).toEqual({ found: true, applied: true, changed: true });
     });
 
     it('should patch many, in order, making none', async () => {
@@ -153,6 +177,8 @@ describeOnOracle('writes beside save on Oracle', () => {
         ).toEqual(['s1']);
         expect(await gom.edges.unrelate(nodeRef(Session, 's1'), nodeRef(Message, 'm1'), 'HAS_MESSAGE')).toBe(1);
         expect(await gom.edges.unrelateAll(nodeRef(Session, 's1'), 'HAS_MESSAGE')).toBe(1);
+        expect(await gom.edges.unrelate(nodeRef(Session, 's1'), nodeRef(Message, 'nobody'), 'HAS_MESSAGE')).toBe(0);
+        expect(await gom.edges.unrelateAll(nodeRef(Session, 'nobody'), 'HAS_MESSAGE')).toBe(0);
         expect(await gom.edges.loadRelated(nodeRef(Session, 's1'), 'HAS_MESSAGE', Direction.OUTGOING, Message)).toEqual(
             []
         );
