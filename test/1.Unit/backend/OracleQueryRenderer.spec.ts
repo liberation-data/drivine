@@ -26,6 +26,9 @@ describe('OracleQueryRenderer', () => {
         expect(bound('a\\\\1')).toEqual('^(a\\\\1)$');
         expect(bound('[\\1]x')).toEqual('^([\\1]x)$');
         expect(bound('[]\\1](a)\\1')).toEqual('^([]\\1](a)\\2)$');
+        expect(bound('[^]\\1](a)\\1')).toEqual('^([^]\\1](a)\\2)$');
+        // An escaped bracket opens no bracket expression.
+        expect(bound('\\[(a)\\1]')).toEqual('^(\\[(a)\\2])$');
     });
 
     it('should refuse a reference to a ninth group, which would need a tenth', () => {
