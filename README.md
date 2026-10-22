@@ -942,7 +942,9 @@ await gom.saveAll(chunks, { only: ['summary', 'summaryModel'] });
 - Fragments go in one statement for each 1,000, of any classes and labels. A view is a statement of its own. Outside a
   transaction of yours the statements run in one transaction, so a failure leaves nothing written; inside one they join
   it. FalkorDB has no transactions: see [FalkorDB](#falkordb).
-- The objects come back in the order given, carrying the stamps the batch left.
+- The objects come back in the order given, carrying the stamps the batch left. The batch writes the fragments' classes
+  in the order of their names and the fragments of each in the order of their ids, so two batches over the same nodes
+  take their locks in the same order.
 - A batch that only adds doesn't check a fragment's stamp: a stale one is written anyway, and keeps the stamp it had, so
   a later `save` of it is refused.
 - `replace` applies to views; a batch holding a fragment is refused with it. A stale view throws

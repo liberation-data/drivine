@@ -78,6 +78,18 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
         expect((await gom.load(Message, 'm1'))!.stamp).toEqual(objects[2].stamp);
     });
 
+    it('should hand each fragment its own stamp when they are given out of the order they are written in', async () => {
+        await gom.save(message('m1', 'Before'));
+        const m1 = Object.assign((await gom.load(Message, 'm1'))!, { text: 'One' });
+        const objects = [message('m2', 'Two'), session('s1'), m1];
+        await gom.saveAll(objects);
+        expect(objects[0].stamp).not.toEqual(objects[2].stamp);
+        expect(objects.map((it) => it.id)).toEqual(['m2', 's1', 'm1']);
+        expect(objects[0].stamp).toEqual((await gom.load(Message, 'm2'))!.stamp);
+        expect(objects[2].stamp).toEqual((await gom.load(Message, 'm1'))!.stamp);
+        expect(objects[1].stamp).toEqual((await gom.load(Session, 's1'))!.stamp);
+    });
+
     it('should hand a node a batch makes whole stamps, though the batch holds it twice', async () => {
         const objects = [session('twice', { summary: 'a' }), session('twice', { summary: 'b' })];
         await gom.saveAll(objects);
