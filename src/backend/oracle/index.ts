@@ -1,2 +1,3 @@
 export { OracleBackend } from './OracleBackend';
-export { DEFAULT_GRAPH, OracleGraph } from './OracleGraph';
+export { OracleGraph } from './OracleGraph';
+export { DEFAULT_GRAPH } from '../sql/SqlGraph';

@@ -60,7 +60,8 @@ const FALKORDB: TestContainerSpec = {
 };
 
 const POSTGRES: TestContainerSpec = {
-    image: 'postgres:16',
+    // pgvector's image: Postgres with the extension a vector search uses, which the object manager makes where it can.
+    image: 'pgvector/pgvector:pg16',
     port: 5432,
     container: (image, datasource) =>
         new GenericContainer(image)
@@ -138,11 +139,13 @@ export class DrivineTestContainers {
 
     /** The prefix of each datasource configured in the environment, '' for the default one, with its type. */
     static datasources(env: Environment = process.env): { prefix: string; type: DatabaseType }[] {
-        return Object.keys(env)
-            .map((key) => TYPE_KEY.exec(key))
-            // A blank type is no datasource: a setting cleared so dotenv can't fill it again.
-            .filter((match): match is RegExpExecArray => match != null && !!env[match[0]])
-            .map((match) => ({ prefix: match[1] ? `${match[1]}_` : '', type: env[match[0]] as DatabaseType }));
+        return (
+            Object.keys(env)
+                .map((key) => TYPE_KEY.exec(key))
+                // A blank type is no datasource: a setting cleared so dotenv can't fill it again.
+                .filter((match): match is RegExpExecArray => match != null && !!env[match[0]])
+                .map((match) => ({ prefix: match[1] ? `${match[1]}_` : '', type: env[match[0]] as DatabaseType }))
+        );
     }
 
     /**

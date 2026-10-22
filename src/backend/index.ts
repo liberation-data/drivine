@@ -14,3 +14,5 @@ export * from './CascadeTargets';
 export * from './SaveStatement';
 export * from './SaveStatementBuilder';
 export * from './oracle';
+export * from './postgres';
+export { SqlGraph } from './sql';

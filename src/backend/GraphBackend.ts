@@ -33,8 +33,13 @@ export interface NearestSearch {
     /** How many are kept after the filter, if any are trimmed. */
     limit?: number;
     depth?: Record<string, number>;
-    /** The table an index made for the search is over, where the store keeps one (see `searchIndexTable`). */
+    /**
+     * The table an index made for the search is over, where the store keeps one (see `searchIndexTable`). On Postgres,
+     * whose index is over the node table, the size of the embeddings the index holds.
+     */
     table?: string;
+    /** The size of the vector searched for: a store that measures only embeddings of one size reads only those. */
+    dimensions?: number;
 }
 
 /** How a load's roots are ordered (an order written over the root), and how many are skipped and returned. */
@@ -63,6 +68,13 @@ export interface MatchingSearch {
  * written by the backend.
  */
 export interface GraphBackend {
+    /**
+     * Where the store is tables an object manager makes (Postgres): the statement that makes them when they are not
+     * there and does nothing when they are, which a manager runs once, before its first statement, outside any
+     * transaction. Undefined where there is nothing to make, or the connection makes it (Oracle).
+     */
+    readonly ensuring?: string;
+
     /**
      * A query over a class's references, written for the store: its predicate, order and paging, and its values.
      * `indexed` is the store's range indexes and uniqueness constraints, for a store that reads a filter through them

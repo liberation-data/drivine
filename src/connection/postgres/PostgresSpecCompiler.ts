@@ -13,13 +13,14 @@ export class PostgresSpecCompiler extends QuerySpecificationCompiler {
 
     constructor(spec: QuerySpecification<any>) {
         super(spec);
-        assert(
-            this.spec.statement.language === 'SQL',
-            `${this.spec.statement.language} is not supported on Postgres.`
-        );
+        assert(this.spec.statement.language === 'SQL', `${this.spec.statement.language} is not supported on Postgres.`);
 
         if (!Array.isArray(this.spec.parameters)) {
-            this.paramKeys = Object.keys(this.spec.parameters).sort();
+            // Only the names the statement uses: Postgres refuses a parameter its statement does not name.
+            const statement = this.spec.statement.text;
+            this.paramKeys = Object.keys(this.spec.parameters)
+                .filter((key) => new RegExp(`\\$${key}(?![A-Za-z0-9_])`).test(statement))
+                .sort();
             this.indexParams = this.paramKeys.map((it) => (this.spec.parameters as Record<string, any>)[it]);
         } else {
             this.indexParams = this.spec.parameters;

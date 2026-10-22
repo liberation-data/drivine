@@ -1,4 +1,4 @@
-import { TextQuery } from '@/backend/oracle/TextQuery';
+import { TextQuery } from '@/backend/sql/TextQuery';
 
 // drivine4j's TextQueryTest, ported: the same queries read the same way on the JVM and in Node.
 const word = (text: string): string => `(^|[^[:alnum:]_])${text}($|[^[:alnum:]_])`;
@@ -17,6 +17,11 @@ describe('TextQuery', () => {
         expect(query.scored).toEqual([word('kotlin'), word('graph'), word('store')]);
         expect(query.required).toEqual([word('kotlin'), word('store')]);
         expect(query.excluded).toEqual([word('python'), word('rust')]);
+    });
+
+    it('should give the words of each scoring term, which a store narrows a search by', () => {
+        const query = TextQuery.parse('"Graph data" data* -python +Kotlin');
+        expect(query.scoredWords).toEqual([['graph', 'data'], ['data'], ['kotlin']]);
     });
 
     it("should read a quoted phrase as its words in turn, a star as the start of a word, and a field's word as the word", () => {

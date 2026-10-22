@@ -2,6 +2,9 @@ import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
+import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
+import { PostgresSchemaGrammar } from '@/backend/postgres/PostgresSchemaGrammar';
+import { SqlGraph } from '@/backend/sql/SqlGraph';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import {
     FullTextIndexSpec,
@@ -320,8 +323,8 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     }
 };
 
-/** The schema grammar of an engine; on Oracle, over `graph` (the default graph unless given). */
-export function schemaGrammarFor(type: DatabaseType, graph: OracleGraph = new OracleGraph()): SchemaGrammar {
+/** The schema grammar of an engine; on Oracle and Postgres, over `graph` (the default graph unless given). */
+export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGrammar {
     switch (type) {
         case DatabaseType.NEO4J:
             return NEO4J_SCHEMA;
@@ -330,7 +333,9 @@ export function schemaGrammarFor(type: DatabaseType, graph: OracleGraph = new Or
         case DatabaseType.FALKORDB:
             return FALKORDB_SCHEMA;
         case DatabaseType.ORACLE:
-            return new OracleSchemaGrammar(graph);
+            return new OracleSchemaGrammar(graph instanceof OracleGraph ? graph : new OracleGraph(graph?.name));
+        case DatabaseType.POSTGRES:
+            return new PostgresSchemaGrammar(graph instanceof PostgresGraph ? graph : new PostgresGraph(graph?.name));
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }

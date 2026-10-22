@@ -23,10 +23,18 @@ function contended(failure: unknown): boolean {
  * Runs schema statements on a connection of their own, in auto-commit: schema DDL can't run inside a data transaction.
  */
 export class SchemaExecutor {
-    constructor(private readonly provider: ConnectionProvider) {}
+    /**
+     * @param prepare what is done once before a statement runs, as an object manager makes its store first: a
+     * listing reads the catalog the store keeps.
+     */
+    constructor(
+        private readonly provider: ConnectionProvider,
+        private readonly prepare?: () => Promise<void>
+    ) {}
 
     /** Runs a statement, again after a pause when the engine turned it away because another write was in progress. */
     async run(statement: string | NativeOperation, bindings: Record<string, any> = {}): Promise<any[]> {
+        await this.prepare?.();
         return whenNotContended(async () => this.runOnce(statement, bindings), contended);
     }
 

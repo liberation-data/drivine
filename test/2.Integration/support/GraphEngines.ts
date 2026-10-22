@@ -69,6 +69,8 @@ export async function clearLabels(pm: PersistenceManager, engine: GraphEngine, .
             ? `DELETE FROM drivine_node n WHERE ${labels
                   .map((it) => `JSON_EXISTS(n.labels, '$?(@ == "${it}")')`)
                   .join(' OR ')}`
+            : engine.type === DatabaseType.POSTGRES
+            ? `DELETE FROM drivine_node n WHERE ${labels.map((it) => `n.labels @> '["${it}"]'`).join(' OR ')}`
             : `MATCH (n) WHERE ${labels.map((it) => `n:${it}`).join(' OR ')} DETACH DELETE n`;
     await pm.execute(new QuerySpecification(statement));
 }

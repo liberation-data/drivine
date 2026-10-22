@@ -4,7 +4,6 @@ import {
     backendFor,
     Count,
     DatabaseRegistry,
-    DatabaseType,
     Direction,
     GraphPath,
     GraphProperty,
@@ -20,8 +19,7 @@ import {
     StatelessGraphObjectManager,
     TargetNode
 } from '@liberation-data/drivine';
-import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
-import { OracleSeed } from '../support/OracleSeed';
+import { rawProperty, SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
 @NodeFragment({ labels: ['Person'] })
 class Person {
@@ -140,15 +138,16 @@ class Category {
     parent?: Category;
 }
 
-describeOnOracle('views on Oracle', () => {
+describe.each(sqlStores())('views on $name', (store) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
-    let seed: OracleSeed;
+    let seed: SqlSeed;
 
     beforeAll(async () => {
-        pm = oraclePersistenceManager();
-        gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
-        seed = new OracleSeed(pm, 'OraView');
+        pm = sqlPersistenceManager(store);
+        gom = new StatelessGraphObjectManager(pm, backendFor(store.type), new ModelRegistry());
+        seed = new SqlSeed(pm, store, 'SqlView');
+        await seed.prepare();
         await seed.clear();
         await seed.node(['Person'], { id: 'ava', name: 'Ada' });
         await seed.node(['Person', 'Engineer'], { id: 'ben', name: 'Bob' });
@@ -316,7 +315,7 @@ describeOnOracle('views on Oracle', () => {
 
     it('should filter views by SQL over the root row, and delete a view root that meets its requirements', async () => {
         const named = await gom.loadAll(Career, {
-            where: "JSON_VALUE(n.props, '$.name') = $name",
+            where: `${rawProperty(store, 'name')} = $name`,
             bindings: { name: 'Bob' }
         });
         expect(named.map((it) => it.person.id)).toEqual(['ben']);

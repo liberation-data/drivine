@@ -77,10 +77,17 @@ export class DrivineModuleBuilder {
     }
 
     /**
-     * An object manager for each graph database, Oracle among them. Postgres is plain SQL, and has none.
+     * An object manager for each graph database, Oracle and Postgres among them. One on Postgres makes its graph's
+     * tables only when it is first used, so a Postgres database used for plain SQL alone is left as it is.
      */
     graphObjectManagers(): Provider[] {
-        const graphTypes = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB, DatabaseType.ORACLE];
+        const graphTypes = [
+            DatabaseType.NEO4J,
+            DatabaseType.MEMGRAPH,
+            DatabaseType.FALKORDB,
+            DatabaseType.ORACLE,
+            DatabaseType.POSTGRES
+        ];
         const registry = DatabaseRegistry.getInstance();
         const names = registry.providers.filter((it) => graphTypes.includes(it.type)).map((it) => it.name);
         const defaultProvider = registry.connectionProvider();
