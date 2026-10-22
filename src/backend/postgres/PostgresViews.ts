@@ -2,7 +2,6 @@ import { Direction } from '@/annotation/Metadata';
 import { hasLabels, jsonValue, nodeDocument, numberOf, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
-import { GraphViewModel } from '@/model/GraphViewModel';
 import { Stamps } from '@/model/Stamps';
 
 /**
@@ -14,11 +13,6 @@ export class PostgresViews extends SqlViews {
 
     constructor(graph: PostgresGraph, depth: Record<string, number> = {}) {
         super(graph, depth);
-    }
-
-    /** Queries of the ids of the nodes a load of the view from the roots `roots` selects reaches. */
-    cascaded(model: GraphViewModel, roots: string): string[] {
-        return this.reachedFromRoots(model, roots);
     }
 
     object(entries: [string, string][]): string {

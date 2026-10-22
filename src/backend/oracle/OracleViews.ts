@@ -9,7 +9,6 @@ import {
     sqlText
 } from '@/backend/oracle/OracleGraph';
 import { byId, NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
-import { GraphViewModel } from '@/model/GraphViewModel';
 
 /**
  * Writes a view on Oracle (see SqlViews): each relationship's nodes aggregated with JSON_ARRAYAGG, and a relationship
@@ -20,11 +19,6 @@ export class OracleViews extends SqlViews {
 
     constructor(graph: OracleGraph, depth: Record<string, number> = {}) {
         super(graph, depth);
-    }
-
-    /** Queries of the ids of the nodes a load of the view from the roots in the PL/SQL collection `roots` reaches. */
-    cascaded(model: GraphViewModel, roots: string): string[] {
-        return this.reachedFromRoots(model, `n.nid IN (SELECT column_value FROM TABLE(${roots}))`);
     }
 
     object(entries: [string, string][]): string {
