@@ -99,7 +99,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Drivine: graph database client for TypeScript, Python and the JVM</title>
-        <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB and Oracle." />
+        <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB, Oracle and Postgres." />
         <link rel="icon" href={`${base}favicon.ico`} />
         <!-- The heading's font, which the largest paint (DRIVINE) waits for. -->
         <link rel="preload" href={headingFont} as="font" type="font/woff2" crossorigin />
@@ -436,12 +436,12 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                         </p>
                         <p>
                             <a href="https://github.com/liberation-data/graph-bench">Graph Bench</a> uses drivine4j to compare
-                            Neo4j, FalkorDB and Oracle on a graph of 1.1 million nodes and 4.5 million relationships, with the
-                            same Kotlin on each.
+                            Neo4j, FalkorDB, Oracle and Postgres on a graph of 1.1 million nodes and 4.5 million relationships,
+                            with the same Kotlin on each.
                         </p>
                     </div>
                     <dl class="stats">
-                        <div><dt>1.5–3.5 ms</dt><dd>to load an issue with its repo, author, assignees, topics and comments, on every engine</dd></div>
+                        <div><dt>1.2–3.5 ms</dt><dd>to load an issue with its repo, author, assignees, topics and comments, on every engine</dd></div>
                         <div><dt>1</dt><dd>statement for each load or save, however many relationships it has</dd></div>
                     </dl>
                 </div>
@@ -463,7 +463,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                     <p class="eyebrow">ENGINES</p>
                     <div class="chips">
                         <span>Neo4j</span><span>Memgraph</span><span>FalkorDB</span><span>Oracle · SQL/PGQ</span>
-                        <span class="via">Amazon Neptune</span><span class="via">Postgres · SQL</span>
+                        <span>Postgres · SQL</span><span class="via">Amazon Neptune</span>
                     </div>
                     <p>Dashed: through the persistence manager.</p>
                 </div>
