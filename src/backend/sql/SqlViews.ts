@@ -1,4 +1,5 @@
 import { Direction } from '@/annotation/Metadata';
+import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
 import { rootOf } from '@/backend/sql/SqlSaves';
 import { target } from '@/backend/ViewProjector';
@@ -9,6 +10,17 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 interface PathRows {
     body: string;
     nodes: string[];
+}
+
+/**
+ * What a cascade reaches from its roots: queries of the ids of the nodes, each relationship followed to them, and for
+ * each relationship to views of its own class the query of the nodes one level below its maxDepth, which the cascade
+ * would leave behind.
+ */
+export interface SqlCascade {
+    reached: string[];
+    followed: RelationshipModel[];
+    beyond: CascadeBeyond[];
 }
 
 /** The FROM that reads node rows by their ids, and the hint its SELECT carries. */
@@ -98,11 +110,15 @@ export abstract class SqlViews {
     }
 
     /**
-     * Queries of the ids of the nodes a load of the view from the roots `roots` selects of the node row `n` reaches: as
-     * far as each relationship's maxDepth, and only into nested views whose requirements a node meets, as a load would.
+     * What a cascade from the roots the predicate `roots` selects of the node row `n` reaches: queries of the ids of the nodes a load
+     * of the view reaches, as far as each relationship's maxDepth, and only into nested views whose requirements a node
+     * meets, as a load would; each relationship followed; and for a relationship to views of the same class, the query
+     * of the nodes one level below its maxDepth.
      */
-    protected reachedFromRoots(model: GraphViewModel, roots: string): string[] {
-        return this.reachedFrom(model, 'n', [], [`FROM ${this.graph.nodes} n`], [roots]);
+    cascade(model: GraphViewModel, roots: string): SqlCascade {
+        const cascade: SqlCascade = { reached: [], followed: [], beyond: [] };
+        this.reachedFrom(model, 'n', [], [`FROM ${this.graph.nodes} n`], [roots], cascade);
+        return cascade;
     }
 
     private reachedFrom(
@@ -110,9 +126,9 @@ export abstract class SqlViews {
         from: string,
         path: RelationshipModel[],
         froms: string[],
-        wheres: string[]
-    ): string[] {
-        const queries: string[] = [];
+        wheres: string[],
+        cascade: SqlCascade
+    ): void {
         for (const rel of model.relationships) {
             const depth = this.depth[rel.field] ?? rel.maxDepth;
             const into = target(rel);
@@ -120,14 +136,16 @@ export abstract class SqlViews {
                 const x = this.nextAlias('x');
                 const r = this.nextAlias('r');
                 const reached = this.reached(rel.type, rel.direction, from, depth);
-                queries.push(
+                cascade.followed.push(rel);
+                cascade.reached.push(
                     `${this.select(byId(x))}${x}.nid ${froms.join(' ')} CROSS JOIN LATERAL (${reached}) ${r} ` +
                         `JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid ` +
                         `WHERE ${[...wheres, this.hasLabels(x, labelsOf(into))].join(' AND ')}`
                 );
                 continue;
             }
-            if (path.filter((it) => it === rel).length >= depth) {
+            const deep = path.filter((it) => it === rel).length >= depth;
+            if (deep && !(into.kind === 'GRAPH_VIEW' && into.model.type === model.type)) {
                 continue;
             }
             const step = this.step(rel.type, rel.direction, from, labelsOf(into));
@@ -135,12 +153,17 @@ export abstract class SqlViews {
             const nextFroms = [...froms, fromClause.replace(/^FROM /, 'CROSS JOIN ')];
             const required = into.kind === 'GRAPH_VIEW' ? this.requirements(into.model, step.node) : [];
             const nextWheres = [...wheres, whereClause, step.x, ...required];
-            queries.push(`SELECT ${step.node}.nid ${nextFroms.join(' ')} WHERE ${nextWheres.join(' AND ')}`);
+            const query = `SELECT ${step.node}.nid ${nextFroms.join(' ')} WHERE ${nextWheres.join(' AND ')}`;
+            if (deep) {
+                cascade.beyond.push({ view: model.type.name, field: rel.field, maxDepth: depth, nodes: query });
+                continue;
+            }
+            cascade.followed.push(rel);
+            cascade.reached.push(query);
             if (into.kind === 'GRAPH_VIEW') {
-                queries.push(...this.reachedFrom(into.model, step.node, [...path, rel], nextFroms, nextWheres));
+                this.reachedFrom(into.model, step.node, [...path, rel], nextFroms, nextWheres, cascade);
             }
         }
-        return queries;
     }
 
     private view(model: GraphViewModel, alias: string, path: RelationshipModel[]): string {

@@ -1,7 +1,9 @@
-import { GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
+import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
+import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
+import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
 import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
 import { OracleWrites } from '@/backend/oracle/OracleWrites';
@@ -102,21 +104,37 @@ export class OracleBackend implements GraphBackend {
         );
     }
 
+    /**
+     * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it:
+     * every one, or with `DELETE_ORPHAN` those not kept (see keptTargets), which are read before anything is deleted.
+     * Returns how many roots were deleted: `{deleted}`.
+     */
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const id = this.idPredicate(root);
-        const filter = this.rootWhere(target, where ? `${id} AND (${where})` : id);
+        const filter = this.deletedWhere(target, where);
         if (cascade === CascadeType.NONE) {
             return this.deleting(root, filter);
         }
         if (target.kind !== 'GRAPH_VIEW') {
             throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
         }
-        const reached = new OracleViews(this.graph).cascaded(target.model, 'v_roots');
-        const deletable =
-            cascade === CascadeType.DELETE_ORPHAN
-                ? ` AND NOT EXISTS (SELECT 1 FROM ${this.graph.edges} e WHERE e.src = x.nid OR e.dst = x.nid)`
-                : '';
+        const cascaded = new OracleViews(this.graph).cascade(
+            target.model,
+            'n.nid IN (SELECT column_value FROM TABLE(v_roots))'
+        );
+        const reached = cascaded.reached.join('\n        UNION ALL ');
+        const targets = !cascaded.reached.length
+            ? 'NULL;'
+            : cascade === CascadeType.DELETE_ORPHAN
+            ? [
+                  `WITH cascade_targets AS (SELECT DISTINCT t.nid FROM (${reached}) t ` +
+                      `WHERE t.nid NOT IN (SELECT column_value FROM TABLE(v_roots))),`,
+                  `    cascade_all AS (SELECT column_value AS nid FROM TABLE(v_roots) UNION SELECT nid FROM cascade_targets),`,
+                  `    cascade_kept (nid) AS (\n    ${keptTargets(this.graph, cascaded.followed, 'UNION ALL')}`,
+                  `    ) CYCLE nid SET looped TO 'Y' DEFAULT 'N'`,
+                  `    SELECT nid BULK COLLECT INTO v_targets FROM cascade_targets WHERE nid NOT IN (SELECT nid FROM cascade_kept);`
+              ].join('\n')
+            : `SELECT DISTINCT nid BULK COLLECT INTO v_targets FROM (${reached});`;
         return new GraphStatement(`DECLARE
     v_roots SYS.ODCINUMBERLIST;
     v_targets SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
@@ -124,18 +142,27 @@ export class OracleBackend implements GraphBackend {
     c SYS_REFCURSOR;
 BEGIN
     SELECT ${ROW_ALIAS}.nid BULK COLLECT INTO v_roots ${this.from(root, filter)};
-    ${
-        reached.length
-            ? `SELECT DISTINCT nid BULK COLLECT INTO v_targets FROM (${reached.join('\n        UNION ALL ')});`
-            : 'NULL;'
-    }
+    ${targets}
     DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT column_value FROM TABLE(v_roots));
     v_deleted := SQL%ROWCOUNT;
-    -- The roots' relationships went with them (the relationship table cascades), so an orphan is now one with none.
-    DELETE FROM ${this.graph.nodes} x WHERE x.nid IN (SELECT column_value FROM TABLE(v_targets))${deletable};
+    DELETE FROM ${this.graph.nodes} x WHERE x.nid IN (SELECT column_value FROM TABLE(v_targets));
     OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
     DBMS_SQL.RETURN_RESULT(c);
 END;`);
+    }
+
+    cascadeDepthChecks(target: TargetModel, where?: string): CascadeDepthCheck[] {
+        if (target.kind !== 'GRAPH_VIEW') {
+            return [];
+        }
+        const roots = `SELECT ${ROW_ALIAS}.nid ${this.from(target.model.root, this.deletedWhere(target, where))}`;
+        const cascaded = new OracleViews(this.graph).cascade(target.model, 'n.nid IN (SELECT nid FROM cascade_roots)');
+        return cascaded.beyond.map(({ view, field, maxDepth, nodes }: CascadeBeyond) => ({
+            view,
+            field,
+            maxDepth,
+            statement: new GraphStatement(beyondCount(roots, cascaded.reached, nodes))
+        }));
     }
 
     deleteAll(target: TargetModel, where?: string, tested: string[] = []): GraphStatement {
@@ -325,6 +352,13 @@ END;`);
     /** The markers of the owner bound as `$scope`. */
     private marker(alias: string): string {
         return `${hasLabels(alias, [SCHEMA_MARKER])} AND JSON_VALUE(${alias}.props, '$.scope') = $scope`;
+    }
+
+    /** What the root a delete by `$id` takes meets: the id, `where`, and for a view the view's requirements. */
+    private deletedWhere(target: TargetModel, where?: string): string | undefined {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const id = this.idPredicate(root);
+        return this.rootWhere(target, where ? `${id} AND (${where})` : id);
     }
 
     /** A predicate over the root's row and, for a view, the view's requirements. */

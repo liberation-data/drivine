@@ -640,6 +640,10 @@ export class StatelessGraphObjectManager {
      * Deletes the object whose root has the id, with the root's relationships. A view's root is deleted only if it
      * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
      * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
+     *
+     * A view that contains itself is deleted as it loads: every level of it, and what each level holds. A cascade that
+     * finds a node one level below such a relationship's maxDepth is refused before anything is written, rather than
+     * leave that node and all it holds.
      */
     async delete<T>(
         type: ClassRef<T>,
@@ -649,7 +653,11 @@ export class StatelessGraphObjectManager {
         const target = this.modelOf(type);
         const filter = this.condition(target, options.where, options.bindings);
         const statement = this.backend.delete(target, filter.where, options.cascade);
-        return this.persistenceManager.getOne<number>(statement.spec({ ...filter.bindings, id }));
+        const bindings = { ...filter.bindings, id };
+        if (options.cascade === CascadeType.DELETE_ALL || options.cascade === CascadeType.DELETE_ORPHAN) {
+            await this.refuseCascadeBelowDepth(target, filter.where, bindings);
+        }
+        return this.persistenceManager.getOne<number>(statement.spec(bindings));
     }
 
     /**
@@ -706,6 +714,34 @@ export class StatelessGraphObjectManager {
                 ? this.mapper.view<T>(target.model, rows[0])
                 : this.mapper.fragment<T>(target.model, rows[0]);
         return { object, row: rows[0] };
+    }
+
+    /**
+     * Refuses, before anything is written, a cascading delete that would stop short of the nodes a relationship to
+     * views of the same class reaches. The cascade follows such a relationship to its maxDepth; a node one level further
+     * would have its relationship to a deleted node dropped and stay, with all it holds. The check is a read run before
+     * the delete: on FalkorDB, which has no transactions, nothing else could stop the delete midway.
+     */
+    private async refuseCascadeBelowDepth(
+        target: TargetModel,
+        where: string | undefined,
+        bindings: Record<string, any>
+    ): Promise<void> {
+        for (const check of this.backend.cascadeDepthChecks(target, where)) {
+            const beyond = Number(await this.persistenceManager.getOne<number>(check.statement.spec(bindings)));
+            if (beyond > 0) {
+                const levels = check.maxDepth === 1 ? 'level' : 'levels';
+                const nodes = beyond === 1 ? 'node' : 'nodes';
+                throw new DrivineError(
+                    `Cannot cascade-delete ${target.model.type.name} '${String(bindings.id)}': ${check.view}.${
+                        check.field
+                    } reaches ` +
+                        `${check.maxDepth} ${levels} deep (maxDepth = ${check.maxDepth}), and ${beyond} ${nodes} below ` +
+                        `that would be left behind. Raise maxDepth on ${check.field} to cover the deepest level. ` +
+                        `Nothing was deleted.`
+                );
+            }
+        }
     }
 
     /** A condition as Cypher over the root, `n`, with its values: written from the class's references, or as given. */

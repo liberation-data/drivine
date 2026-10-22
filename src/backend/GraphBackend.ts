@@ -63,6 +63,18 @@ export interface MatchingSearch {
 }
 
 /**
+ * A relationship to views of its own class that a cascading delete follows, to `maxDepth` levels, and the read that
+ * counts the nodes one level further that the delete would leave behind: such a node is related to one the cascade
+ * deletes, and keeps everything it holds. `view` declares `field`. Returns one number: `{beyond}`.
+ */
+export interface CascadeDepthCheck {
+    view: string;
+    field: string;
+    maxDepth: number;
+    statement: GraphStatement;
+}
+
+/**
  * What the object manager asks of a store: each statement it runs, ready to bind. Cypher engines have one backend, SQL
  * stores another. A `where` given as a string is a predicate in the store's own language; a query over references is
  * written by the backend.
@@ -167,10 +179,16 @@ export interface GraphBackend {
 
     /**
      * Deletes the root whose id is the parameter `id`, if it meets the optional predicate (and, for a view, the view's
-     * requirements), with its relationships. A cascade, for a view only, deletes nodes the view reaches too. Returns
-     * the number of roots deleted.
+     * requirements), with its relationships. A cascade, for a view only, deletes nodes the view reaches too: every one,
+     * or with `DELETE_ORPHAN` those nothing outside the view still needs. Returns the number of roots deleted.
      */
     delete(target: TargetModel, where?: string, cascade?: CascadeType): GraphStatement;
+
+    /**
+     * The reads a cascading {@link delete} of the same root runs first, one for each relationship to views of its own
+     * class that the cascade follows: see {@link CascadeDepthCheck}. Empty when it follows none.
+     */
+    cascadeDepthChecks(target: TargetModel, where?: string): CascadeDepthCheck[];
 
     /** Deletes every root a load would find, with its relationships. Returns the number deleted. */
     deleteAll(target: TargetModel, where?: string, tested?: string[]): GraphStatement;
