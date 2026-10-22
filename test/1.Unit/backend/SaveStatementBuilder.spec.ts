@@ -1,13 +1,16 @@
 import {
+    GraphProperty,
     GraphRelationship,
     GraphView,
     ModelRegistry,
     NEO4J_GRAMMAR,
     NodeFragment,
     NodeId,
+    PropertyBag,
     Root,
     SaveStatementBuilder
 } from '@liberation-data/drivine';
+import { bagEntries } from '@/backend/SaveStatementBuilder';
 
 @NodeFragment({ labels: ['Person'] })
 class Person {
@@ -30,6 +33,20 @@ class Team {
 class Org {
     @Root() head: Person;
     @GraphRelationship({ type: 'RUNS', target: () => Team }) teams: Team[];
+}
+
+@NodeFragment({ labels: ['Sticker'] })
+class Sticker {
+    @NodeId() id: string;
+    @GraphProperty('sticker_name') name?: string;
+    @PropertyBag({ prefix: 'meta', delimiter: '_' }) meta: Record<string, any> = {};
+    @PropertyBag({ flat: true }) extras: Record<string, any> = {};
+}
+
+@GraphView()
+class Album {
+    @Root() owner: Person;
+    @GraphRelationship({ type: 'HOLDS', target: () => Sticker }) stickers: Sticker[];
 }
 
 describe('SaveStatementBuilder', () => {
@@ -97,5 +114,23 @@ describe('SaveStatementBuilder', () => {
             { id: 'a', props: { id: 'a' }, vectors: {} },
             { id: 'b', props: { id: 'b' }, vectors: {} }
         ]);
+    });
+
+    it('should refuse a flat bag entry another bag is stored under, though except leaves that bag out', () => {
+        const model = registry.fragment(Sticker);
+        const sticker = (extras: Record<string, any>) => Object.assign(new Sticker(), { id: 's', extras });
+        const keep = (field: string): boolean => field !== 'meta';
+        expect(() => bagEntries(model, sticker({ meta_lang: 'en' }), [], false, keep)).toThrow(
+            /Sticker.extras has an entry 'meta_lang', which is the property of a declared field or of another bag/
+        );
+        expect(bagEntries(model, sticker({ sticker_name: null, size: 3 }))).toEqual(new Map([['size', 3]]));
+    });
+
+    it("should refuse a related node's flat bag entry that its field is stored under", () => {
+        const sticker = Object.assign(new Sticker(), { id: 's', extras: { sticker_name: 'x' } });
+        const album = Object.assign(new Album(), { owner: person('o'), stickers: [sticker] });
+        expect(() =>
+            new SaveStatementBuilder(NEO4J_GRAMMAR).build({ kind: 'GRAPH_VIEW', model: registry.view(Album) }, album)
+        ).toThrow(/Sticker.extras has an entry 'sticker_name'/);
     });
 });

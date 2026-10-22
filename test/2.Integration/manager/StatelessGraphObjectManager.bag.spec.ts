@@ -1,6 +1,7 @@
 import {
     CypherBackend,
     cypherGrammarFor,
+    GraphProperty,
     GraphRelationship,
     GraphView,
     ModelRegistry,
@@ -30,6 +31,18 @@ class Thing {
     @NodeId() id: string;
     name = '';
     @PropertyBag({ flat: true }) properties: Record<string, any> = {};
+}
+
+/** A flat bag beside a stamp, a prefixed bag, a field stored under another name, and fields of no decorator. */
+@NodeFragment({ labels: ['BagTest', 'Sticker'] })
+class Sticker {
+    @NodeId() id: string;
+    @GraphProperty('sticker_name') name?: string;
+    colour = '';
+    note?: string;
+    @PropertyBag({ prefix: 'meta', delimiter: '_' }) meta: Record<string, any> = {};
+    @PropertyBag({ flat: true }) extras: Record<string, any> = {};
+    @NodeStamp() stamp?: string;
 }
 
 @NodeFragment({ labels: ['BagTest', 'Doc'] })
@@ -116,6 +129,27 @@ describe.each(graphEngines())('@PropertyBag on $type', (engine) => {
         loaded.properties.weight = 5;
         await gom.save(loaded);
         expect(await stored('t1')).toEqual(expect.objectContaining({ colour: 'red', size: 3, weight: 5 }));
+    });
+
+    it('should refuse a flat bag entry that a field, the id, another bag or the stamp is stored under, writing nothing', async () => {
+        const sticker = (extras: Record<string, any>): Sticker =>
+            Object.assign(new Sticker(), { id: 's1', name: 'Star', note: 'Shiny', extras });
+        for (const key of ['sticker_name', 'colour', 'note', 'id', 'meta_lang', '__drivine.stamp']) {
+            await expect(gom.save(sticker({ [key]: 'x' }))).rejects.toThrow(
+                new RegExp(`Sticker.extras has an entry '${key}', which is the property of a declared field`)
+            );
+            await expect(gom.saveAll([sticker({ [key]: 'x' })])).rejects.toThrow(/which is the property/);
+            await expect(gom.save(sticker({ [key]: 'x' }), { only: ['extras'] })).rejects.toThrow(
+                /which is the property/
+            );
+        }
+        expect(await gom.load(Sticker, 's1')).toBeUndefined();
+
+        const saved = await gom.save(Object.assign(sticker({ name: 'open', size: 3 }), { note: undefined }));
+        const loaded = (await gom.load(Sticker, 's1'))!;
+        expect(loaded.extras).toEqual({ name: 'open', size: 3 });
+        expect(loaded.name).toEqual('Star');
+        expect(loaded.stamp).toEqual(saved.stamp);
     });
 
     it('should write the bags of related nodes, and of fragments in a batch', async () => {

@@ -8,7 +8,8 @@ export interface PropertyBagOptions {
     /**
      * No prefix: each entry is stored under its bare key, and the bag reads back every property that no other field
      * or bag accounts for. One to a fragment. A field the bag should not take must be decorated or have an initializer:
-     * TypeScript keeps no list of a class's other fields.
+     * TypeScript keeps no list of a class's other fields. A save refuses an entry whose key another field, the id,
+     * another bag or the stamp is stored under.
      */
     flat?: boolean;
 }

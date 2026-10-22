@@ -9,6 +9,7 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
+import { knownProperties, RESERVED_PREFIX } from '@/mapper/GraphObjectMapper';
 import { splitVectors, vectorClauses } from '@/backend/VectorWrites';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassKind } from '@/annotation/Metadata';
@@ -191,12 +192,7 @@ export class SaveStatementBuilder {
         const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
         const clear = this.options.nullPolicy === NullPolicy.CLEAR;
         const held = this.options.heldProperties ?? {};
-        const entries = bagEntries(
-            { ...model, propertyBags: model.propertyBags.filter((it) => keep(it.field)) },
-            object,
-            Object.keys(held),
-            clear
-        );
+        const entries = bagEntries(model, object, Object.keys(held), clear, keep);
         const bag = this.bagSets('n', 'rootBag', entries);
         const labelled =
             model.nodeLabels && keep(model.nodeLabels.field)
@@ -689,27 +685,25 @@ function referencedAs(rel: RelationshipModel, node: string): string {
 
 /**
  * The node properties a fragment's property bags write: each entry under its bag's namespace, and, given the keys the
- * node holds and `clear`, null for each held key of a bag that the bag no longer has.
+ * node holds and `clear`, null for each held key of a bag that the bag no longer has. Only the bags whose fields `keep`
+ * takes are written; a flat bag's entries are checked against the others all the same.
  */
 export function bagEntries(
     model: FragmentModel,
     object: any,
     held: string[] = [],
-    clear: boolean = false
+    clear: boolean = false,
+    keep: (field: string) => boolean = () => true
 ): Map<string, any> {
     const entries = new Map<string, any>();
-    for (const bag of model.propertyBags) {
+    for (const bag of model.propertyBags.filter((it) => keep(it.field))) {
         const map = object?.[bag.field];
         if (map != null && (typeof map !== 'object' || Array.isArray(map))) {
             throw new DrivineError(`The @PropertyBag ${model.type.name}.${bag.field} must hold an object of entries.`);
         }
+        const owns = bag.flat ? flatBagOwns(model, object) : undefined;
         for (const [key, value] of Object.entries(map ?? {})) {
-            if (!storable(value)) {
-                throw new DrivineError(
-                    `The entry '${key}' of ${model.type.name}.${bag.field} can't be stored as a property: a bag holds ` +
-                        `strings, numbers, booleans, dates, or arrays of them.`
-                );
-            }
+            requireWritable(model, bag, key, value, owns);
             if (value != null) {
                 entries.set(`${bag.namespace}${key}`, value);
             }
@@ -721,6 +715,40 @@ export function bagEntries(
         }
     }
     return entries;
+}
+
+/** Refuses an entry of a bag that can't be stored, or that a flat bag doesn't own and so would write over another's. */
+function requireWritable(
+    model: FragmentModel,
+    bag: PropertyBagModel,
+    key: string,
+    value: any,
+    owns?: (key: string) => boolean
+): void {
+    if (!storable(value)) {
+        throw new DrivineError(
+            `The entry '${key}' of ${model.type.name}.${bag.field} can't be stored as a property: a bag holds ` +
+                `strings, numbers, booleans, dates, or arrays of them.`
+        );
+    }
+    if (value != null && owns && !owns(key)) {
+        throw new DrivineError(
+            `The flat @PropertyBag ${model.type.name}.${bag.field} has an entry '${key}', which is the property of a ` +
+                `declared field or of another bag. Both would write the same node property; remove the entry or ` +
+                `rename the field's property.`
+        );
+    }
+}
+
+/**
+ * Whether a flat bag owns a node property: whether no field of the object writes it, no other bag's namespace holds it,
+ * a load wouldn't hand it to a field (see knownProperties), and it isn't Drivine's own, such as the stamp.
+ */
+function flatBagOwns(model: FragmentModel, object: any): (key: string) => boolean {
+    const known = knownProperties(model.type, model, model);
+    Object.keys(propsOf(model, object, [], true)).forEach((it) => known.add(it));
+    const namespaces = model.propertyBags.filter((it) => !it.flat).map((it) => it.namespace);
+    return (key) => !known.has(key) && !key.startsWith(RESERVED_PREFIX) && !namespaces.some((it) => key.startsWith(it));
 }
 
 function skipped(

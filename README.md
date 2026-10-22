@@ -1249,7 +1249,10 @@ namespace from the field's name, and `delimiter` changes the separator. A value 
 nested object is refused. Under `NullPolicy.CLEAR` a save removes the keys the map no longer has; `IGNORE` leaves them.
 
 A **flat** bag, `@PropertyBag({ flat: true })`, has no prefix: each entry is stored under its own key, and the bag reads
-back every property that no declared field accounts for. A fragment may have one.
+back every property that no declared field accounts for. A fragment may have one. A save refuses, before it writes
+anything, an entry whose key is the stored property of a field (one that is decorated, initialized or set on the
+object), the id's, one under another bag's prefix, or one beginning `__drivine.`, Drivine's own, such as the stamp:
+the two would write the same property.
 
 #### @NodeLabels
 
