@@ -197,15 +197,13 @@ $forget$`;
                 `'details', c.details) AS "item" FROM ${this.graph.catalog} c WHERE c.kind = ${sqlText(KINDS[kind])} ` +
                 `AND (c.object_name IS NULL OR to_regclass(c.object_name) IS NOT NULL) ORDER BY c.label, c.properties`,
             read: (rows) =>
-                rows
-                    .map((row) => row.item ?? row)
-                    .map((it) => ({
-                        label: it.label,
-                        properties: it.properties,
-                        name: it.name,
-                        dimensions: it.details?.dimensions,
-                        similarity: it.details?.similarity
-                    }))
+                rows.map((it) => ({
+                    label: it.label,
+                    properties: it.properties,
+                    name: it.name,
+                    dimensions: it.details?.dimensions,
+                    similarity: it.details?.similarity
+                }))
         };
     }
 }
