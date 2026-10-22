@@ -1,22 +1,30 @@
 import {
+    above,
     backendFor,
+    caseOf,
     CascadeType,
+    ConnectionPropertiesFromEnv,
     DatabaseRegistry,
     DatabaseType,
+    equalTo,
     FullTextIndex,
     fullTextIndex,
     GraphRelationship,
+    GraphObjectManagerFactory,
     GraphView,
     ModelRegistry,
     NodeFragment,
     NodeId,
     PersistenceManager,
+    PersistenceManagerFactory,
     PostgresBackend,
     PostgresGraph,
     QuerySpecification,
     rangeIndex,
     Root,
     StatelessGraphObjectManager,
+    TransactionContextHolder,
+    Transactional,
     uniquenessConstraint,
     VectorIndex,
     vectorIndex
@@ -58,6 +66,16 @@ class Doc {
     @NodeId() id: string;
     @FullTextIndex() body?: string;
     @VectorIndex({ dimensions: 3 }) embedding?: number[];
+}
+
+@NodeFragment({ labels: ['PgStore', 'Moment'] })
+class Moment {
+    @NodeId() id: string;
+    at?: Date;
+    open?: boolean;
+    flags?: boolean[];
+    days?: Date[];
+    count?: number;
 }
 
 const postgres: SqlStore[] = sqlStores().filter((it) => it.type === DatabaseType.POSTGRES);
@@ -103,6 +121,93 @@ describe.each(postgres)('a store on $name', (store) => {
         );
         expect(comment.version).toEqual(PostgresGraph.VERSION);
         await pm.execute(new QuerySpecification(`DROP TABLE ${name}_edge, ${name}_node, ${name}_schema CASCADE`));
+    });
+
+    it("should make a graph's tables when its manager's first statement is a batch run in a transaction of its own", async () => {
+        const name = 'pgstore_batched';
+        const drop = `DROP TABLE IF EXISTS ${name}_edge, ${name}_node, ${name}_schema CASCADE`;
+        await pm.execute(new QuerySpecification(drop));
+        const batched = new StatelessGraphObjectManager(
+            pm,
+            backendFor(DatabaseType.POSTGRES, name),
+            new ModelRegistry()
+        );
+        // A fragment and a view: two statements, which the manager runs on a connection of its own.
+        await batched.saveAll([
+            Object.assign(new Ticket(), { id: 'batched-1' }),
+            Object.assign(new Holding(), {
+                owner: Object.assign(new Owner(), { id: 'batched-2' }),
+                items: [],
+                tags: []
+            })
+        ]);
+        expect(await batched.count(Ticket)).toBe(1);
+        await pm.execute(new QuerySpecification(drop));
+    });
+
+    it("should keep a graph's tables made at a transaction's first statement, though the transaction rolls back", async () => {
+        const name = 'pgstore_rolled';
+        const drop = `DROP TABLE IF EXISTS ${name}_edge, ${name}_node, ${name}_schema CASCADE`;
+        await pm.execute(new QuerySpecification(drop));
+        const rolled = new StatelessGraphObjectManager(
+            new PersistenceManagerFactory(DatabaseRegistry.getInstance(), TransactionContextHolder.getInstance()).get(
+                store.name
+            ),
+            backendFor(DatabaseType.POSTGRES, name),
+            new ModelRegistry()
+        );
+        class Tickets {
+            @Transactional()
+            async open(): Promise<void> {
+                await rolled.save(Object.assign(new Ticket(), { id: 'rolled-1' }));
+                throw new Error('Changed our minds');
+            }
+        }
+        await expect(new Tickets().open()).rejects.toThrow('Changed our minds');
+        expect(await exists(`${name}_node`)).toBe(true);
+        expect(await rolled.count(Ticket)).toBe(0);
+        await pm.execute(new QuerySpecification(drop));
+    });
+
+    it("should make a graph's tables when its manager's first statement is a schema statement", async () => {
+        const name = 'pgstore_schema_first';
+        const drop = `DROP TABLE IF EXISTS ${name}_edge, ${name}_node, ${name}_schema CASCADE`;
+        await pm.execute(new QuerySpecification(drop));
+        const schemaFirst = new StatelessGraphObjectManager(
+            pm,
+            backendFor(DatabaseType.POSTGRES, name),
+            new ModelRegistry()
+        );
+        expect((await schemaFirst.indexes.ensure(rangeIndex('Ticket', 'title'))).status).toEqual('CREATED');
+        expect(await exists(`${name}_schema`)).toBe(true);
+        await pm.execute(new QuerySpecification(drop));
+    });
+
+    it("should work on the graph its connection's defaultGraphPath names, and on no other", async () => {
+        const name = 'pgstore_named';
+        const drop = `DROP TABLE IF EXISTS ${name}_edge, ${name}_node, ${name}_schema CASCADE`;
+        await pm.execute(new QuerySpecification(drop));
+        DatabaseRegistry.getInstance()
+            .builder()
+            .withProperties({ ...ConnectionPropertiesFromEnv(store.name), defaultGraphPath: name })
+            .register(`${store.name}_NAMED`);
+        const named = new GraphObjectManagerFactory(
+            new PersistenceManagerFactory(DatabaseRegistry.getInstance(), TransactionContextHolder.getInstance())
+        ).get(`${store.name}_NAMED`);
+        await named.save(Object.assign(new Ticket(), { id: 'named-1', title: 'named' }));
+        const held = async (table: string): Promise<number> =>
+            (
+                await pm.getOne<any>(
+                    new QuerySpecification(
+                        `SELECT CAST(COUNT(*) AS integer) AS held FROM ${table} WHERE props ->> 'id' = 'named-1'`
+                    )
+                )
+            ).held;
+        expect(await held(`${name}_node`)).toEqual(1);
+        expect(await held(graph.nodes)).toEqual(0);
+        expect((await named.load(Ticket, 'named-1'))?.title).toEqual('named');
+        expect(await gom.load(Ticket, 'named-1')).toBeUndefined();
+        await pm.execute(new QuerySpecification(drop));
     });
 
     it('should refuse a graph name that cannot name its tables within 63 characters', () => {
@@ -175,7 +280,8 @@ describe.each(postgres)('a store on $name', (store) => {
     it('should report the values a uniqueness constraint would refuse, and refuse a second node once it is made', async () => {
         await seed.node(['Ticket'], { id: 'u1', title: 'same' });
         await seed.node(['Ticket'], { id: 'u2', title: 'same' });
-        const spec = uniquenessConstraint('Ticket', 'title');
+        // Over the suite's own label: the suites share a graph, and another seeds tickets with one title.
+        const spec = uniquenessConstraint('PgStore', 'title');
         const refused = await gom.constraints.ensure(spec);
         expect(refused).toEqual(expect.objectContaining({ status: 'VIOLATION', sample: ['same'] }));
         await gom.delete(Ticket, 'u2');
@@ -207,12 +313,71 @@ describe.each(postgres)('a store on $name', (store) => {
         expect(scored.map(([id]) => id)).toEqual(['d1', 'd5']);
         expect(scored[0][1]).toEqual(1);
         expect((await matching('graph*')).map(([id]) => id).sort()).toEqual(['d1', 'd3', 'd5']);
-        await gom.indexes.ensure(vectorIndex('Doc', 'embedding', 3));
-        await gom.indexes.ensure(fullTextIndex('Doc', 'body'));
+        // A search is over a class's first label, so the indexes are over it.
+        const vectors = vectorIndex('PgStore', 'embedding', 3);
+        const texts = fullTextIndex('PgStore', 'body');
+        await gom.indexes.ensure(vectors);
+        await gom.indexes.ensure(texts);
+        const made = async (kind: 'VECTOR' | 'FULLTEXT', property: string): Promise<any> => {
+            const statement = new PostgresBackend(graph).searchIndexTable(kind, 'PgStore', [property]);
+            return pm.maybeGetOne<any>(statement.spec());
+        };
+        expect(await made('VECTOR', 'embedding')).toEqual('3');
+        expect(await made('FULLTEXT', 'body')).toEqual(graph.objectName('t', ['PgStore', 'body']));
         expect(await nearest()).toEqual(exact);
+        // A vector of another size than the index's is measured without it, against the embeddings of its own size.
+        expect((await gom.loadNearest(Doc, [1, 0], { topK: 2 })).map((it) => it.value.id)).toEqual(['d5']);
         expect(await matching('graph -relational')).toEqual(scored);
-        await gom.indexes.drop(vectorIndex('Doc', 'embedding', 3));
-        await gom.indexes.drop(fullTextIndex('Doc', 'body'));
+        await gom.indexes.drop(vectors);
+        await gom.indexes.drop(texts);
+    });
+
+    it('should compare, seek and patch a boolean and a date as a save stores them: as JSON text', async () => {
+        const first = new Date('2026-01-01T00:00:00.000Z');
+        const second = new Date('2026-02-01T00:00:00.000Z');
+        const moment = (id: string, fields: Partial<Moment>): Moment => Object.assign(new Moment(), { id, ...fields });
+        await gom.saveAll([
+            moment('m1', { at: first, open: true, flags: [true], days: [first], count: 1 }),
+            moment('m2', { at: second, open: false, flags: [false], days: [second], count: 2 })
+        ]);
+        const found = async (where: (q: any) => any): Promise<string[]> =>
+            (await gom.loadAll(Moment, (q) => ({ where: where(q) }))).map((it) => it.id).sort();
+        expect(await found((q) => q.at.eq(first))).toEqual(['m1']);
+        expect(await found((q) => q.at.gt(first))).toEqual(['m2']);
+        expect(await found((q) => q.at.in([second]))).toEqual(['m2']);
+        expect(await found((q) => q.open.eq(true))).toEqual(['m1']);
+        expect(await found((q) => q.open.in([false]))).toEqual(['m2']);
+        expect(await found((q) => q.open.notIn([false]))).toEqual(['m1']);
+        expect(await found((q) => q.flags.hasItem(true))).toEqual(['m1']);
+        expect(await found((q) => q.days.hasItem(second))).toEqual(['m2']);
+        const after = async (seek: (q: any) => any, order: (q: any) => any): Promise<string[]> =>
+            (await gom.loadAll(Moment, (q) => ({ orderBy: order(q), seek: seek(q) }))).map((it) => it.id);
+        expect(
+            await after(
+                (q) => q.at.after(first),
+                (q) => q.at.asc()
+            )
+        ).toEqual(['m2']);
+        expect(
+            await after(
+                (q) => q.open.after(false),
+                (q) => q.open.asc()
+            )
+        ).toEqual(['m1']);
+        const ordered = await gom.loadAll(Moment, (q) => ({
+            orderBy: caseOf([equalTo(q.open as any, false).then(0), above(q.at, first).then(1)], 2).asc()
+        }));
+        expect(ordered.map((it) => it.id)).toEqual(['m2', 'm1']);
+        // A patch's condition is written into the statement the write function runs, each value as a literal.
+        const patched = async (where: any, bindings?: Record<string, any>): Promise<boolean> =>
+            (await gom.patch(Moment, 'm1', { set: { count: 3 }, where, bindings })).applied;
+        expect(await patched((q: any) => q.at.eq(first))).toBe(true);
+        expect(await patched((q: any) => q.open.eq(true))).toBe(true);
+        expect(await patched((q: any) => q.open.in([true]))).toBe(true);
+        expect(await patched((q: any) => q.days.hasItem(first))).toBe(true);
+        expect(await patched((q: any) => q.open.eq(false))).toBe(false);
+        expect(await patched("(n.props ->> 'at') = $when", { when: first })).toBe(true);
+        expect(await patched("(n.props ->> 'open') = $open", { open: true })).toBe(true);
     });
 
     it('should mint the store identity once, as a node of the graph', async () => {

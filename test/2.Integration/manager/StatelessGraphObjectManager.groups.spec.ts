@@ -139,6 +139,21 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
             having: [['votes', 'gte', 3]]
         });
         expect(busy).toEqual([]);
+        // A count compared with a fraction, as any number is.
+        const halfway = await gom.groups.load(Feedback, {
+            where: raw(
+                'n.page IS NOT NULL AND n.month >= 3',
+                `${hasPage} AND JSON_EXISTS(n.props, '$?(@.month >= 3)')`,
+                `${hasPage} AND ${month} >= 3`
+            ),
+            keys: { page: key('page') },
+            aggregates: { votes: count() },
+            having: [['votes', 'gt', 1.5]]
+        });
+        expect(halfway).toEqual([
+            { page: '/agents', votes: 2 },
+            { page: '/install', votes: 2 }
+        ]);
     });
 
     it('should sum, average and find extremes, skipping missing values', async () => {

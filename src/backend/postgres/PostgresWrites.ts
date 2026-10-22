@@ -113,15 +113,7 @@ export class PostgresWrites {
             this.graph,
             'EACH_STAMP',
             () => ({ plan }),
-            (rows) => {
-                const result = groups.map(() => ({ before: [] as any[], after: [] as any[] }));
-                for (const entry of rows.map((it) => FoundStamp.of(it))) {
-                    const { group, id }: { group: number; id: any } = handed.get(entry.index)!;
-                    result[group].before.push({ id, stamp: entry.found });
-                    result[group].after.push({ id, stamp: entry.stamp });
-                }
-                return [{ groups: result }];
-            }
+            (rows) => [{ groups: FoundStamp.grouped(rows, groups.length, handed) }]
         );
     }
 
@@ -197,14 +189,15 @@ export class PostgresWrites {
 
 /**
  * A value written into a statement as a literal, as a driver would bind it: a number as itself, anything else as text,
- * which Postgres reads as the type the statement wants there, as it reads a value bound without a type.
+ * which Postgres reads as the type the statement wants there, as it reads a value bound without a type. A number is
+ * written in parentheses, so a negative one after a minus is not read as the start of a comment.
  */
 function literal(value: unknown): string {
     if (value === null || value === undefined) {
         return 'NULL';
     }
     if (typeof value === 'number' || typeof value === 'bigint') {
-        return String(value);
+        return `(${String(value)})`;
     }
     if (value instanceof Date) {
         return sqlText(value.toISOString());

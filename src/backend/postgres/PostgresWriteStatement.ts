@@ -1,5 +1,6 @@
 import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
+import { columnValue } from '@/backend/postgres/PostgresStatement';
 import { WritePlan, WriteReturns } from '@/backend/sql/WritePlan';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
@@ -54,11 +55,7 @@ export class PostgresWriteStatement extends GraphStatement {
         return new QuerySpecification<T>(this.text)
             .bind(PostgresWriteStatement.bindings(plan, patchedIf))
             .addPostProcessors({
-                apply: (rows: any[]) =>
-                    this.reshaped(
-                        rows.map((row) => (row !== null && typeof row === 'object' ? Object.values(row)[0] : row)),
-                        bound
-                    )
+                apply: (rows: any[]) => this.reshaped(rows.map(columnValue), bound)
             });
     }
 }

@@ -76,7 +76,9 @@ export abstract class SqlGroups {
             bindings[`_having${i}`] = compared;
             const index = Number(column.slice(1));
             const expression = aggregateColumns[index].replace(/ AS a\d+$/, '');
-            return `${expression} ${COMPARISONS[comparison as keyof typeof COMPARISONS]} $_having${i}`;
+            return `${expression} ${COMPARISONS[comparison as keyof typeof COMPARISONS]} ${this.havingValue(
+                `$_having${i}`
+            )}`;
         });
         const keyOf = (i: number): string => {
             const key = keys[i][1];
@@ -124,6 +126,11 @@ export abstract class SqlGroups {
             ...(query.limit != null ? [`FETCH NEXT ${integer(query.limit, 'limit')} ROWS ONLY`] : [])
         ].join('\n');
         return new GraphStatement(text, bindings);
+    }
+
+    /** The bound value `having` compares an aggregate with, as the store reads a number bound without a type. */
+    protected havingValue(parameter: string): string {
+        return parameter;
     }
 
     /** The store's views, which write the steps of a path key and its JSON. */

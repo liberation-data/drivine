@@ -97,7 +97,7 @@ export class ConnectionProviderBuilder {
         return this;
     }
 
-    /** On Oracle, the graph to work on: see {@link ConnectionProperties.defaultGraphPath}. */
+    /** On Oracle and Postgres, the graph to work on: see {@link ConnectionProperties.defaultGraphPath}. */
     defaultGraphPath(path: string): this {
         this._defaultGraphPath = path;
         return this;

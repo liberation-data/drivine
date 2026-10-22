@@ -762,6 +762,10 @@ export class StatelessGraphObjectManager {
                     runEach(async (spec) => this.persistenceManager.query(spec.spec()))
                 );
             }
+            // The batch runs on a connection of its own, past the persistence manager that makes the store first.
+            if (this.backend.ensuring) {
+                await ensureStore(this.persistenceManager, this.backend.ensuring);
+            }
             return await this.whenUncontended(async () => {
                 const connection = await provider.connect();
                 try {

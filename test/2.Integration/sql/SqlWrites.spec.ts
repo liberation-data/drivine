@@ -15,7 +15,7 @@ import {
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
-import { SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
+import { rawProperty, SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
 @NodeFragment({ labels: ['SqlWrite', 'Session'] })
 class Session {
@@ -78,6 +78,14 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
         expect((await gom.load(Message, 'm1'))!.stamp).toEqual(objects[2].stamp);
     });
 
+    it('should hand a node a batch makes whole stamps, though the batch holds it twice', async () => {
+        const objects = [session('twice', { summary: 'a' }), session('twice', { summary: 'b' })];
+        await gom.saveAll(objects);
+        const stored = (await gom.load(Session, 'twice'))!;
+        expect(stored.summary).toEqual('b');
+        expect(objects.map((it) => it.stamp)).toEqual([stored.stamp, stored.stamp]);
+    });
+
     it('should patch where a condition holds, with all four outcomes', async () => {
         await gom.save(session('s1', { lastActivity: 100 }));
         const advance = (to: number) => ({
@@ -102,6 +110,23 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
         expect(after.stamp!.split(':')[0]).not.toEqual(before.split(':')[0]);
         await gom.patch(Session, 's1', { clear: ['lastActivity'] });
         expect((await gom.load(Session, 's1'))!.lastActivity).toBeUndefined();
+    });
+
+    it('should patch where a raw condition holds, a negative number bound in it', async () => {
+        await gom.save(session('s1', { lastActivity: 100 }));
+        const patched = await gom.patch(Session, 's1', {
+            set: { summary: 'patched' },
+            where: `${rawProperty(store, 'lastActivity', 'NUMBER')} > 150-$back`,
+            bindings: { back: -60 }
+        });
+        expect(patched).toEqual({ found: true, applied: false, changed: false });
+        expect(
+            await gom.patch(Session, 's1', {
+                set: { summary: 'patched' },
+                where: `${rawProperty(store, 'lastActivity', 'NUMBER')} > 150-$back`,
+                bindings: { back: 60 }
+            })
+        ).toEqual({ found: true, applied: true, changed: true });
     });
 
     it('should patch many, in order, making none', async () => {
@@ -152,6 +177,8 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
         ).toEqual(['s1']);
         expect(await gom.edges.unrelate(nodeRef(Session, 's1'), nodeRef(Message, 'm1'), 'HAS_MESSAGE')).toBe(1);
         expect(await gom.edges.unrelateAll(nodeRef(Session, 's1'), 'HAS_MESSAGE')).toBe(1);
+        expect(await gom.edges.unrelate(nodeRef(Session, 's1'), nodeRef(Message, 'nobody'), 'HAS_MESSAGE')).toBe(0);
+        expect(await gom.edges.unrelateAll(nodeRef(Session, 'nobody'), 'HAS_MESSAGE')).toBe(0);
         expect(await gom.edges.loadRelated(nodeRef(Session, 's1'), 'HAS_MESSAGE', Direction.OUTGOING, Message)).toEqual(
             []
         );

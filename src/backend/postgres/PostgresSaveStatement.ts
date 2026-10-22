@@ -21,7 +21,7 @@ export class PostgresSaveStatement extends SaveStatement {
         rootObject: any,
         expectedStamp: string | undefined,
         stampedModels: FragmentModel[],
-        private readonly handed: Map<string, { model: number; id: any }>
+        private readonly handed: Map<string, { group: number; id: any }>
     ) {
         super(text, bindings, root, rootObject, expectedStamp, stampedModels);
     }
@@ -34,26 +34,10 @@ export class PostgresSaveStatement extends SaveStatement {
 
     private result(row: string): Record<string, any> {
         const [stamp, ...entries]: string[] = row.split(',');
-        const related = this.stampedModels.map(() => ({
-            before: new Map<any, string>(),
-            after: new Map<any, string>()
-        }));
-        for (const entry of entries.map((it) => FoundStamp.of(it))) {
-            const node = this.handed.get(entry.index)!;
-            const { before, after }: { before: Map<any, string>; after: Map<any, string> } = related[node.model];
-            // A node held twice was found by its first step as it was before the save; its last says what it is now.
-            if (!before.has(node.id)) {
-                before.set(node.id, entry.found);
-            }
-            after.set(node.id, entry.stamp);
-        }
         return {
             found: this.expectedStamp ?? '',
             now: stamp,
-            related: related.map(({ before, after }: { before: Map<any, string>; after: Map<any, string> }) => ({
-                before: [...before].map(([id, it]) => ({ id, stamp: it })),
-                after: [...after].map(([id, it]) => ({ id, stamp: it }))
-            }))
+            related: FoundStamp.grouped(entries, this.stampedModels.length, this.handed)
         };
     }
 }

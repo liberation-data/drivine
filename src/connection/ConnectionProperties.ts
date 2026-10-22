@@ -18,9 +18,9 @@ export interface ConnectionProperties {
      */
     transactionMode?: TransactionMode;
     /**
-     * On Oracle, the graph to work on: it names the property graph and its tables (`<name>_node`, `<name>_edge`,
-     * `<name>_schema`). Letters, digits and underscores, beginning with a letter, at most 114. Defaults to `drivine`.
-     * drivine4j's `default-graph-path`.
+     * On Oracle and Postgres, the graph to work on: it names its tables (`<name>_node`, `<name>_edge`, `<name>_schema`),
+     * and on Oracle the property graph. Letters, digits and underscores, beginning with a letter, at most 114 on Oracle
+     * and 49 on Postgres. Defaults to `drivine`. drivine4j's `default-graph-path`.
      */
     defaultGraphPath?: string;
 }

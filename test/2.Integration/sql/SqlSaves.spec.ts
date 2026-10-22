@@ -56,6 +56,13 @@ class Org {
     name?: string;
 }
 
+/** A closed @NodeLabels field: it owns only its members. */
+@NodeFragment({ labels: ['SqlSave', 'Badge'] })
+class Badge {
+    @NodeId() id: string;
+    @NodeLabels(['Gold', 'Silver']) levels: string[] = [];
+}
+
 @RelationshipFragment()
 class Job {
     role: string;
@@ -229,6 +236,12 @@ describe.each(sqlStores())('saves on $name', (store) => {
         expect((await gom.load(Team, 'acme'))!.members.map((it) => it.person.id)).toEqual(['mo']);
     });
 
+    it('should hand a related node the save makes its whole stamp, though the view holds it twice', async () => {
+        const saved = await gom.save(career({ person: person('pat'), tagList: [tag('both'), tag('both')] }));
+        const stored = (await gom.load(Tag, 'both'))!.stamp;
+        expect(saved.tagList.map((it) => it.stamp)).toEqual([stored, stored]);
+    });
+
     it('should save a batch whose stamps run past 4000 characters', async () => {
         await gom.saveAll(Array.from({ length: 300 }, (_, i) => tag(`t${i}`)));
         expect(await gom.count(Tag)).toEqual(300);
@@ -240,5 +253,49 @@ describe.each(sqlStores())('saves on $name', (store) => {
         await gom.save(note({ source: 'wiki', rank: 2 }));
         await gom.save(note({ rank: 3 }), { nullPolicy: NullPolicy.CLEAR });
         expect((await gom.load(Note, 'n1'))!.metadata).toEqual({ rank: 3 });
+    });
+
+    it('should refuse replace of a fragment or a field it names wrongly, replace all from scratch, and create of a loaded node', async () => {
+        await expect(gom.save(person('ann'), { replace: ['tags'] })).rejects.toThrow(/is a @NodeFragment/);
+        await expect(gom.save(career({ person: person('ann') }), { replace: 'all' })).rejects.toThrow(
+            /replace: 'all' needs a Career whose root carries a stamp/
+        );
+        await expect(gom.save(career({ person: person('ann') }), { replace: ['nope' as any] })).rejects.toThrow(
+            /not a relationship field of Career/
+        );
+        await expect(
+            gom.save(career({ person: person('ann'), tagList: null as any }), { replace: ['tagList'] })
+        ).rejects.toThrow(/Give an empty list/);
+        const ann = await gom.save(person('ann'));
+        await expect(gom.create(ann)).rejects.toThrow(/carries a stamp was loaded/);
+        expect(await gom.count(Person)).toEqual(1);
+    });
+
+    it('should replace every list of a loaded view with replace all', async () => {
+        await gom.save(career({ person: person('ned'), tagList: [tag('t1'), tag('t2')], mentor: person('ola') }));
+        const ned = (await gom.load(Career, 'ned'))!;
+        ned.tagList = [];
+        ned.mentor = undefined;
+        await gom.save(ned, { replace: 'all' });
+        const replaced = (await gom.load(Career, 'ned'))!;
+        expect(replaced.tagList).toEqual([]);
+        expect(replaced.mentor).toBeUndefined();
+        expect(await gom.load(Tag, 't1')).toBeDefined();
+    });
+
+    it('should save a closed @NodeLabels field, dropping under CLEAR a member it no longer holds', async () => {
+        const badge = (levels: string[]): Badge => Object.assign(new Badge(), { id: 'b1', levels });
+        await gom.save(badge(['Gold', 'Silver']));
+        await gom.save(badge(['Silver']), { nullPolicy: NullPolicy.CLEAR });
+        expect((await gom.load(Badge, 'b1'))!.levels).toEqual(['Silver']);
+        await expect(gom.save(badge(['Bronze']))).rejects.toThrow(/holds Bronze, which its labels don't include/);
+        await expect(gom.save(person('ray', { tags: ['__drivine.x'] }))).rejects.toThrow(/begins '__drivine.'/);
+    });
+
+    it("should make a related node held as a subclass with the subclass's labels", async () => {
+        await gom.save(
+            career({ person: person('sam'), mentor: Object.assign(new Pilot(), { id: 'tia', name: 'Tia' }) })
+        );
+        expect((await gom.load(Career, 'sam'))!.mentor).toBeInstanceOf(Pilot);
     });
 });

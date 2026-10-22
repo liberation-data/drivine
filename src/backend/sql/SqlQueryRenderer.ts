@@ -1,3 +1,4 @@
+import { rootOf } from '@/backend/sql/SqlSaves';
 import { SqlViews } from '@/backend/sql/SqlViews';
 import { target } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -17,7 +18,6 @@ import {
 } from '@/dsl/QueryRenderer';
 import { allOfOne, Condition, OrderTerm, Query, QueryFn, SeekValue, Test, WhereFn } from '@/dsl/Refs';
 import { classLabels } from '@/model/InstanceOf';
-import { FragmentModel } from '@/model/FragmentModel';
 import { TargetModel } from '@/model/RelationshipModel';
 
 /** The row a path's conditions read: the node's, and the relationship's that a relationship fragment holds. */
@@ -196,7 +196,7 @@ export abstract class SqlQueryRenderer {
     private across(next: Step & { kind: 'HOP' }, path: readonly string[], i: number, test: Test, rows: Rows): string {
         const rel = next.rel;
         const into = target(rel);
-        const labels = (into.kind === 'GRAPH_VIEW' ? into.model.root : (into.model as FragmentModel)).labels;
+        const labels = rootOf(into).labels;
         const depth = rel.maxDepth;
         let clause: string;
         let hints: string[] = [];

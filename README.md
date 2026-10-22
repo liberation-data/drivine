@@ -1465,7 +1465,8 @@ properties, so store dates as text and annotate lists with `@JsonPacked`.
 
 Postgres 14 or later (tested on 16), as drivine4j states. Postgres keeps a graph in two tables, as Oracle does, read
 with joins and written through a function the store keeps.
-No extension is needed but pgvector, for vector search, which Drivine makes where the server has it. Models, the DSL
+No extension is needed but pgvector, for vector search, which Drivine makes where the server has it, and pg_trgm,
+which a full-text index is made with (it ships with Postgres's contrib modules). Models, the DSL
 and the object manager are the same as on the graph engines; `PersistenceManager` runs plain SQL, with cursors and
 transactions, as it always has.
 

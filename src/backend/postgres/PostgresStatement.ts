@@ -13,9 +13,15 @@ export class PostgresStatement extends GraphStatement {
     }
 
     spec<T>(more: Record<string, any> = {}): QuerySpecification<T> {
-        return super.spec<T>(more).map((row: any) => {
-            const keys = row !== null && typeof row === 'object' ? Object.keys(row) : [];
-            return keys.length === 1 ? row[keys[0]] : row;
-        });
+        return super.spec<T>(more).map(columnValue);
     }
+}
+
+/**
+ * A row of one column as that column's value, as the graph engines and Oracle give a record of one column: Postgres
+ * gives a row as a record of its columns.
+ */
+export function columnValue(row: any): any {
+    const keys = row !== null && typeof row === 'object' ? Object.keys(row) : [];
+    return keys.length === 1 ? row[keys[0]] : row;
 }

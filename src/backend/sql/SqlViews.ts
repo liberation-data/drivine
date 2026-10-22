@@ -1,7 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
 import { SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
+import { rootOf } from '@/backend/sql/SqlSaves';
 import { target } from '@/backend/ViewProjector';
-import { FragmentModel } from '@/model/FragmentModel';
 import { AggregateModel, GraphViewModel, PathHop, PathModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 
@@ -333,7 +333,7 @@ export function byId(x: string): string {
     return `INDEX(${x} (nid))`;
 }
 
-export function labelsOf(into: TargetModel): string[] {
-    const model: FragmentModel = into.kind === 'GRAPH_VIEW' ? into.model.root : into.model;
-    return model.labels;
+/** The labels of the node a relationship leads to: a view's root's, or the fragment's. */
+function labelsOf(into: TargetModel): string[] {
+    return rootOf(into).labels;
 }

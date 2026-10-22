@@ -24,4 +24,12 @@ export class PostgresGroups extends SqlGroups {
     protected idValue(property: string): string {
         return jsonValue('p', property);
     }
+
+    /**
+     * A number, whatever the aggregate: Postgres takes a value bound without a type as the type of what it is compared
+     * with, and a count is a whole number, so `0.5` compared with one would be refused.
+     */
+    protected havingValue(parameter: string): string {
+        return `CAST(${parameter} AS numeric)`;
+    }
 }

@@ -1,3 +1,4 @@
+import { columnValue } from '@/backend/postgres/PostgresStatement';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
@@ -18,15 +19,6 @@ function contended(failure: unknown): boolean {
         }
     }
     return false;
-}
-
-/**
- * A row of one column as that column's value, as the graph engines and Oracle give a record of one column: Postgres
- * gives a row as a record of its columns.
- */
-function valueOf(row: any): any {
-    const keys = row !== null && typeof row === 'object' ? Object.keys(row) : [];
-    return keys.length === 1 ? row[keys[0]] : row;
 }
 
 /**
@@ -56,7 +48,7 @@ export class SchemaExecutor {
         try {
             const rows = await connection.query(new QuerySpecification(statement).bind(bindings));
             await connection.release();
-            return this.provider.type === DatabaseType.POSTGRES ? rows.map(valueOf) : rows;
+            return this.provider.type === DatabaseType.POSTGRES ? rows.map(columnValue) : rows;
         } catch (e) {
             await connection.release(e as Error);
             throw DrivineError.withRootCause(e as Error);

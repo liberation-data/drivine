@@ -43,6 +43,15 @@ describe('PostgresSpecCompiler', () => {
         expect(compiled.parameters).toEqual(['Moon Girl']);
     });
 
+    it('should leave out a binding whose key no parameter can name, whatever it holds', () => {
+        const spec = new QuerySpecification(`select * from t where name = $name`)
+            .bind({ name: 'Moon Girl', 'c++ (draft)': 1 })
+            .finalizedCopy('SQL');
+        const compiled = new PostgresSpecCompiler(spec).compile();
+        expect(compiled.statement).toEqual('select * from t where name = $1');
+        expect(compiled.parameters).toEqual(['Moon Girl']);
+    });
+
     it('should apply skip and limit as OFFSET and LIMIT', () => {
         const spec = new QuerySpecification(`select * from t`).skip(10).limit(5).finalizedCopy('SQL');
         const compiled = new PostgresSpecCompiler(spec).compile();
