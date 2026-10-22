@@ -183,13 +183,70 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
                 return `SUBSTR(${text}, -LENGTH(${bound})) = ${bound}`;
             }
             case 'MATCHES':
-                return `REGEXP_LIKE(${text}, '^(' || ${this.bind(value)} || ')$')`;
+                return this.matches(text, String(value));
             case 'CONTAINS_IGNORE_CASE':
                 return `INSTR(LOWER(${text}), ${this.bind(String(value).toLowerCase())}) > 0`;
             default:
                 return `LOWER(${text}) = ${this.bind(String(value).toLowerCase())}`;
         }
     }
+
+    /**
+     * A regular expression that must match the whole value, as Cypher's `=~` does. A leading `(?i)` ignores case. The
+     * expression itself is Oracle's, in the POSIX dialect: what Java adds to it, such as `(?:…)`, a look-around or `\b`,
+     * is not read, and a flag anywhere but the start is not either.
+     *
+     * The expression is anchored in a group of its own, which POSIX can only write as one that captures: so each group
+     * the caller wrote is one further on, and a backreference to it is renumbered to match (see {@link renumbered}).
+     */
+    private matches(text: string, pattern: string): string {
+        const ignoreCase = pattern.startsWith('(?i)');
+        const body = renumbered(ignoreCase ? pattern.slice(4) : pattern);
+        return `REGEXP_LIKE(${text}, ${this.bind(`^(${body})$`)}${ignoreCase ? ", 'i'" : ''})`;
+    }
+}
+
+/**
+ * `body` with each backreference, `\1` to `\8`, one higher, for the group that anchors it is the first. An escaped
+ * backslash is no backreference, nor is a backslash inside a bracket expression, where POSIX reads it as itself. `\9`
+ * would need a tenth group, which POSIX does not have, and is refused.
+ */
+function renumbered(body: string): string {
+    let out = '';
+    let i = 0;
+    while (i < body.length) {
+        const c = body[i];
+        if (c === '[') {
+            // A bracket expression is copied whole: `[`, a `^`, a `]` first among its characters, and on to the `]` that ends it.
+            let end = i + 1;
+            if (body[end] === '^') {
+                end++;
+            }
+            if (body[end] === ']') {
+                end++;
+            }
+            const close = body.indexOf(']', end);
+            end = close < 0 ? body.length : close + 1;
+            out += body.slice(i, end);
+            i = end;
+        } else if (c === '\\' && i + 1 < body.length) {
+            const next = body[i + 1];
+            if (next >= '1' && next <= '8') {
+                out += `\\${Number(next) + 1}`;
+            } else if (next === '9') {
+                throw new DrivineError(
+                    `matches on Oracle reads at most eight groups by reference: '${body}' refers to the ninth, and Oracle's expressions have no tenth to anchor it beside.`
+                );
+            } else {
+                out += c + next;
+            }
+            i += 2;
+        } else {
+            out += c;
+            i++;
+        }
+    }
+    return out;
 }
 
 const PATH_OPERATORS = { EQ: '==', NEQ: '!=', GT: '>', GTE: '>=', LT: '<', LTE: '<=' };

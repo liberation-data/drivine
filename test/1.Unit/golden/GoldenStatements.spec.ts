@@ -364,6 +364,7 @@ function queries(registry: ModelRegistry, backend: GraphBackend): Record<string,
                 q.legacyCode.isNull()
             ]
         })),
+        'query.Movie.matches': load(fragment(Movie), (q) => ({ where: q.title.matches('(?i)the.*') })),
         'query.Animal.labels': load(fragment(Animal), (q) => ({
             where: anyOf(q.instanceOf(Puppy), q.hasAnyLabel('Dog', 'Cat'))
         })),
