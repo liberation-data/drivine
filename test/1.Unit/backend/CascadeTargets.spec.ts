@@ -15,7 +15,9 @@ import {
     OracleGraph,
     PostgresBackend,
     PostgresGraph,
-    Root
+    QuerySpecification,
+    Root,
+    StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 
 @NodeFragment({ labels: ['Doc'] })
@@ -55,6 +57,13 @@ class Tree {
 class Shelf {
     @Root() doc: Doc;
     @GraphRelationship({ type: 'SHELVES', target: () => Tree }) trees: Tree[];
+}
+
+/** A view that contains itself one level deep. */
+@GraphView()
+class Thread {
+    @Root() doc: Doc;
+    @GraphRelationship({ type: 'REPLIES_TO', direction: Direction.INCOMING, target: () => Thread }) replies: Thread[];
 }
 
 @GraphView()
@@ -136,5 +145,57 @@ describe('CascadeTargets', () => {
         ).text;
         expect(pals).toContain("ON (e.type = 'KNOWS' AND (e.src = k.nid OR e.dst = k.nid))");
         expect(pals).toMatch(/^WITH RECURSIVE cascade_roots/);
+    });
+
+    it('should refuse a cascade before deleting when its depth check finds nodes below, check none without one, and delete once it finds none', async () => {
+        const run: string[] = [];
+        let below = 2;
+        const pm: any = {
+            getOne: async (spec: QuerySpecification<number>): Promise<number> => {
+                run.push(spec.statement.text);
+                return Promise.resolve(spec.statement.text.includes('AS beyond') ? below : 1);
+            }
+        };
+        const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+
+        await expect(gom.delete(Thread, 'd1', { cascade: CascadeType.DELETE_ALL })).rejects.toThrow(
+            "Cannot cascade-delete Thread 'd1': Thread.replies reaches 1 level deep (maxDepth = 1), and 2 nodes below " +
+                'that would be left behind. Raise maxDepth on replies to cover the deepest level. Nothing was deleted.'
+        );
+        expect(run.map((it) => it.includes('AS beyond'))).toEqual([true]);
+
+        run.length = 0;
+        expect(await gom.delete(Thread, 'd1')).toEqual(1);
+        expect(run.map((it) => it.includes('AS beyond'))).toEqual([false]);
+
+        run.length = 0;
+        below = 0;
+        expect(await gom.delete(Thread, 'd1', { cascade: CascadeType.DELETE_ORPHAN })).toEqual(1);
+        expect(run.map((it) => it.includes('AS beyond'))).toEqual([true, false]);
+    });
+
+    it("should check a nested view's depth with the delete's predicate and bindings, naming the view that declares it", async () => {
+        const run: QuerySpecification<number>[] = [];
+        const pm: any = {
+            getOne: async (spec: QuerySpecification<number>): Promise<number> => {
+                run.push(spec);
+                return Promise.resolve(1);
+            }
+        };
+        const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+
+        await expect(
+            gom.delete(Shelf, 's1', {
+                where: 'n.title = $title',
+                bindings: { title: 'Poems' },
+                cascade: CascadeType.DELETE_ALL
+            })
+        ).rejects.toThrow(
+            "Cannot cascade-delete Shelf 's1': Tree.parts reaches 2 levels deep (maxDepth = 2), and 1 node below " +
+                'that would be left behind. Raise maxDepth on parts to cover the deepest level. Nothing was deleted.'
+        );
+        expect(run).toHaveLength(1);
+        expect(run[0].statement.text).toContain('(n.title = $title)');
+        expect(run[0].parameters).toEqual({ title: 'Poems', id: 's1' });
     });
 });

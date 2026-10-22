@@ -7,7 +7,8 @@ import { labelTest, ViewProjector } from '@/backend/ViewProjector';
 
 /**
  * A relationship of a view to views of its own class, which a cascade follows to its maxDepth, and the nodes one level
- * further as a list expression: those the cascade would leave behind, with all they hold.
+ * further: a list expression in Cypher, a query of their ids in SQL. Those are what the cascade would leave behind,
+ * with all they hold.
  */
 export interface CascadeBeyond {
     /** The view that declares the relationship, and the relationship's field. */
