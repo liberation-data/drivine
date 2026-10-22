@@ -1,5 +1,7 @@
 /**
- * What deleting a view by id deletes besides its root.
+ * What deleting a view by id deletes besides its root. A cascade follows only the relationships a save of the view
+ * writes: it leaves the nodes of a read-only field (one marked @ReadOnly, a @GraphPath, or a list of fragments read
+ * over several hops), and follows each level of a view that contains itself.
  */
 export enum CascadeType {
     /** The root only. Its relationships are removed; the nodes they led to stay. */

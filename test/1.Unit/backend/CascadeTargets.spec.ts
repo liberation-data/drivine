@@ -16,6 +16,7 @@ import {
     PostgresBackend,
     PostgresGraph,
     QuerySpecification,
+    ReadOnly,
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
@@ -72,6 +73,18 @@ class Pals {
     @GraphRelationship({ type: 'KNOWS', direction: Direction.UNDIRECTED, target: () => Doc }) pals: Doc[];
 }
 
+/** A tree with fields it only reads: reviewers marked so, and the docs below it as a flat list read over several hops. */
+@GraphView()
+class ReviewedTree {
+    @Root() doc: Doc;
+    @GraphRelationship({ type: 'HAS', target: () => Note }) notes: Note[];
+    @ReadOnly() @GraphRelationship({ type: 'REVIEWED_BY', target: () => Tag }) reviewers: Tag[];
+    @GraphRelationship({ type: 'PART_OF', direction: Direction.INCOMING, target: () => Doc, maxDepth: 3 })
+    below: Doc[];
+    @GraphRelationship({ type: 'PART_OF', direction: Direction.INCOMING, target: () => ReviewedTree, maxDepth: 2 })
+    parts: ReviewedTree[];
+}
+
 describe('CascadeTargets', () => {
     const registry = new ModelRegistry();
 
@@ -120,6 +133,21 @@ describe('CascadeTargets', () => {
                 maxDepth: 2
             });
             expect(check.statement.text).toMatch(/beyond/);
+        }
+    );
+
+    it.each(backends)(
+        'should follow only what a save writes, every level of a view nested in itself among it, on %s',
+        (_, backend) => {
+            for (const cascade of [CascadeType.DELETE_ALL, CascadeType.DELETE_ORPHAN]) {
+                const text = backend.delete(view(ReviewedTree), undefined, cascade).text;
+                expect(text).not.toContain('REVIEWED_BY');
+                expect(text).toContain('PART_OF');
+                expect(text).toContain('HAS');
+                // The list read over several hops would be a variable-length read of PART_OF.
+                expect(text).not.toMatch(/\*1\.\.3|LEVEL <= 3|depth < 3/);
+            }
+            expect(backend.cascadeDepthChecks(view(ReviewedTree)).map((it) => it.field)).toEqual(['parts']);
         }
     );
 

@@ -3,13 +3,16 @@ import {
     CascadeType,
     DatabaseType,
     Direction,
+    GraphPath,
     GraphRelationship,
     GraphView,
+    hop,
     ModelRegistry,
     NodeFragment,
     NodeId,
     PersistenceManager,
     QuerySpecification,
+    ReadOnly,
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
@@ -29,6 +32,11 @@ class Message {
 
 @NodeFragment({ labels: ['RecursiveCascade', 'Attachment'] })
 class Attachment {
+    @NodeId() id: string;
+}
+
+@NodeFragment({ labels: ['RecursiveCascade', 'User'] })
+class User {
     @NodeId() id: string;
 }
 
@@ -76,6 +84,37 @@ class DeletableSessionTreeDeep {
 class DeletableSessionShelf {
     @Root() session: Session;
     @GraphRelationship({ type: 'SHELVES', target: () => DeletableSessionTree }) trees: DeletableSessionTree[] = [];
+}
+
+/** DeletableSessionTree with reviewers it only reads, at every level: a cascade deletes the levels and leaves those. */
+@GraphView()
+class ReviewedSessionTree {
+    @Root() session: Session;
+    @GraphRelationship({ type: 'HAS_MESSAGE', target: () => Message }) messages: Message[] = [];
+    @ReadOnly() @GraphRelationship({ type: 'REVIEWED_BY', target: () => User }) reviewers: User[] = [];
+    @GraphRelationship({
+        type: 'PART_OF',
+        direction: Direction.INCOMING,
+        target: () => ReviewedSessionTree,
+        maxDepth: 3
+    })
+    parts: ReviewedSessionTree[] = [];
+}
+
+/** The sessions below a session, as a flat list read over several hops: read-only, as no one relationship holds it. */
+@GraphView()
+class SessionDescendants {
+    @Root() session: Session;
+    @GraphRelationship({ type: 'PART_OF', direction: Direction.INCOMING, target: () => Session, maxDepth: 3 })
+    below: Session[] = [];
+}
+
+/** The users who wrote a session's messages, read over a path of two hops. */
+@GraphView()
+class SessionAuthors {
+    @Root() session: Session;
+    @GraphPath([hop('HAS_MESSAGE', Direction.OUTGOING, 'Message'), hop('AUTHORED_BY')], { target: () => User })
+    authors: User[] = [];
 }
 
 /** A graph to seed: each node by label and id, and each relationship from one id to another. */
@@ -360,6 +399,86 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
         expect(await ids()).toEqual(seeded);
         // Without a cascade the delete takes the root alone, as it always has.
         expect(await gom.delete(DeletableSessionTree, 'rc-s0')).toEqual(1);
+    });
+
+    describe('what a cascade follows', () => {
+        // drivine4j's StatelessSaveSoundnessContract: a cascade follows only the relationships a save writes.
+        const cascades = orphans ? [CascadeType.DELETE_ALL, CascadeType.DELETE_ORPHAN] : [CascadeType.DELETE_ALL];
+
+        it('should leave the nodes of a read-only field, and delete every level of a view nested in itself', async () => {
+            const reviewed = plus(
+                TREE,
+                graph(
+                    [['User', 'rc-reviewer']],
+                    [
+                        ['rc-root', 'REVIEWED_BY', 'rc-reviewer'],
+                        ['rc-grand', 'REVIEWED_BY', 'rc-reviewer']
+                    ]
+                )
+            );
+            for (const cascade of cascades) {
+                await clear();
+                await seed(reviewed);
+                const loaded = (await gom.load(ReviewedSessionTree, 'rc-root'))!;
+                expect(loaded.reviewers.map((it) => it.id)).toEqual(['rc-reviewer']);
+                expect(loaded.parts[0].parts[0].reviewers.map((it) => it.id)).toEqual(['rc-reviewer']);
+
+                const { removed }: Removed = await removedBy(async () =>
+                    gom.delete(ReviewedSessionTree, 'rc-root', { cascade })
+                );
+
+                if (cascade === CascadeType.DELETE_ALL) {
+                    expect(removed).toEqual(sorted(['rc-root', 'rc-m0', 'rc-child', 'rc-m1', 'rc-grand', 'rc-m2']));
+                } else {
+                    // The reviewer is outside the cascade, so it keeps rc-grand, with its message; rc-user keeps rc-m1.
+                    expect(removed).toEqual(['rc-child', 'rc-m0', 'rc-root']);
+                }
+                expect(await ids()).toContain('rc-reviewer');
+            }
+        });
+
+        it('should leave the nodes of a list read over several hops', async () => {
+            for (const cascade of cascades) {
+                await clear();
+                await seed(chain(2));
+                const loaded = (await gom.load(SessionDescendants, 'rc-s0'))!;
+                expect(sorted(loaded.below.map((it) => it.id))).toEqual(['rc-s1', 'rc-s2']);
+
+                const { removed }: Removed = await removedBy(async () =>
+                    gom.delete(SessionDescendants, 'rc-s0', { cascade })
+                );
+
+                expect(removed).toEqual(['rc-s0']);
+            }
+        });
+
+        it('should not follow a path field as one relationship', async () => {
+            // The path's first hop leads straight to a user here: taken as one relationship, the user would go.
+            const authored = graph(
+                [
+                    ['Session', 'rc-root'],
+                    ['Message', 'rc-m0'],
+                    ['User', 'rc-user'],
+                    ['User', 'rc-author']
+                ],
+                [
+                    ['rc-root', 'HAS_MESSAGE', 'rc-user'],
+                    ['rc-root', 'HAS_MESSAGE', 'rc-m0'],
+                    ['rc-m0', 'AUTHORED_BY', 'rc-author']
+                ]
+            );
+            for (const cascade of cascades) {
+                await clear();
+                await seed(authored);
+                expect((await gom.load(SessionAuthors, 'rc-root'))!.authors.map((it) => it.id)).toEqual(['rc-author']);
+
+                const { removed }: Removed = await removedBy(async () =>
+                    gom.delete(SessionAuthors, 'rc-root', { cascade })
+                );
+
+                expect(removed).toEqual(['rc-root']);
+            }
+        });
     });
 
     (orphans ? describe : describe.skip)('DELETE_ORPHAN', () => {

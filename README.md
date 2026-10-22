@@ -1112,7 +1112,8 @@ export class IssueOverview {
 }
 ```
 
-Every save skips a `@ReadOnly()` field. Naming it in `replace` is an error, and `replace: 'all'` leaves it alone.
+Every save skips a `@ReadOnly()` field. Naming it in `replace` is an error, and `replace: 'all'` leaves it alone. A
+cascading delete doesn't follow it either, so it leaves the reviewers.
 
 ### Deleting Data
 
@@ -1133,11 +1134,14 @@ await gom.delete(SessionView, sessionId, { cascade: CascadeType.DELETE_ORPHAN })
 await gom.delete(SessionView, sessionId, { cascade: CascadeType.DELETE_ALL });     // and every node in the view
 ```
 
-The cascade follows the view's relationships, through nested views; a node outside the view is never deleted.
-`DELETE_ALL` deletes nodes others may still point at, so use it for nodes the root owns. `DELETE_ORPHAN` keeps a node in
-the view that a node outside it still refers to, at any level, together with everything the view holds below it: a
-bookmarked message keeps its attachments, and a pinned sub-session keeps its messages and its own sub-sessions. The rest
-of the view is deleted, including the session that held a kept message. `DELETE_ORPHAN` isn't available on Memgraph.
+The cascade follows the relationships a save of the view writes, through nested views; a node outside the view is never
+deleted. So it leaves what a read-only field loads (a `@ReadOnly()` field, a `@GraphPath`, and a list of fragments read
+over several hops): other code writes those nodes. A view that contains itself is not read-only, so each of its levels
+is deleted. `DELETE_ALL` deletes nodes others may still point at, so use it for nodes the root owns. `DELETE_ORPHAN`
+keeps a node in the view that a node outside it still refers to, at any level, together with everything the view holds
+below it: a bookmarked message keeps its attachments, and a pinned sub-session keeps its messages and its own
+sub-sessions. The rest of the view is deleted, including the session that held a kept message. `DELETE_ORPHAN` isn't
+available on Memgraph.
 
 A view that contains itself (`parts: SessionTree[]`, with a `maxDepth`) deletes what a load of it reads: the nodes at
 every level, and what each level holds through the view's other relationships. A cascade never stops short: if the
