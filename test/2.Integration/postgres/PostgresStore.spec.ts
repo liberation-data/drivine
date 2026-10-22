@@ -87,14 +87,22 @@ describe.each(postgres)('a store on $name', (store) => {
 
     it("should make a graph's tables at an object manager's first statement, and not at a connection", async () => {
         const name = 'pgstore_lazy';
-        await pm.execute(new QuerySpecification(`DROP TABLE IF EXISTS ${name}_edge, ${name}_node, ${name}_schema`));
+        // CASCADE: the store's functions return a row of its node table.
+        await pm.execute(
+            new QuerySpecification(`DROP TABLE IF EXISTS ${name}_edge, ${name}_node, ${name}_schema CASCADE`)
+        );
         const lazy = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.POSTGRES, name), new ModelRegistry());
         expect(await exists(`${name}_node`)).toBe(false);
         expect(await lazy.count(Ticket)).toBe(0);
         expect(await exists(`${name}_node`)).toBe(true);
         expect(await exists(`${name}_edge`)).toBe(true);
         expect(await exists(`${name}_schema`)).toBe(true);
-        await pm.execute(new QuerySpecification(`DROP TABLE ${name}_edge, ${name}_node, ${name}_schema`));
+        // drivine4j's store, as its node table's comment says: a manager on the JVM finds it made.
+        const comment = await pm.getOne<any>(
+            new QuerySpecification(`SELECT obj_description(to_regclass('${name}_node'), 'pg_class') AS version`)
+        );
+        expect(comment.version).toEqual(PostgresGraph.VERSION);
+        await pm.execute(new QuerySpecification(`DROP TABLE ${name}_edge, ${name}_node, ${name}_schema CASCADE`));
     });
 
     it('should refuse a graph name that cannot name its tables within 63 characters', () => {

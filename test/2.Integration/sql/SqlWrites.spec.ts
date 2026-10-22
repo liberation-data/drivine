@@ -2,7 +2,6 @@ import {
     backendFor,
     CascadeType,
     DatabaseRegistry,
-    DatabaseType,
     Direction,
     GraphRelationship,
     GraphView,
@@ -16,10 +15,9 @@ import {
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
-import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
-import { OracleSeed } from '../support/OracleSeed';
+import { SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
-@NodeFragment({ labels: ['OraWrite', 'Session'] })
+@NodeFragment({ labels: ['SqlWrite', 'Session'] })
 class Session {
     @NodeId() id: string;
     lastActivity?: number | null;
@@ -27,14 +25,14 @@ class Session {
     @NodeStamp() stamp?: string;
 }
 
-@NodeFragment({ labels: ['OraWrite', 'Message'] })
+@NodeFragment({ labels: ['SqlWrite', 'Message'] })
 class Message {
     @NodeId() id: string;
     text?: string;
     @NodeStamp() stamp?: string;
 }
 
-@NodeFragment({ labels: ['OraWrite', 'Person'] })
+@NodeFragment({ labels: ['SqlWrite', 'Person'] })
 class Person {
     @NodeId() id: string;
     name?: string;
@@ -50,15 +48,16 @@ class Conversation {
 const session = (id: string, fields: Partial<Session> = {}): Session => Object.assign(new Session(), { id, ...fields });
 const message = (id: string, text?: string): Message => Object.assign(new Message(), { id, text });
 
-describeOnOracle('writes beside save on Oracle', () => {
+describe.each(sqlStores())('writes beside save on $name', (store) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
-    let seed: OracleSeed;
+    let seed: SqlSeed;
 
-    beforeAll(() => {
-        pm = oraclePersistenceManager();
-        gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
-        seed = new OracleSeed(pm, 'OraWrite');
+    beforeAll(async () => {
+        pm = sqlPersistenceManager(store);
+        gom = new StatelessGraphObjectManager(pm, backendFor(store.type), new ModelRegistry());
+        seed = new SqlSeed(pm, store, 'SqlWrite');
+        await seed.prepare();
     });
 
     beforeEach(async () => {

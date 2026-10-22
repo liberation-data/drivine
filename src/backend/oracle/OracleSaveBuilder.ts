@@ -4,6 +4,7 @@ import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/Sa
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
+import { heldIds, items, nodeOf, rootOf, stampExcluded } from '@/backend/sql/SqlSaves';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
@@ -599,45 +600,4 @@ function referencedAs(value: Direction): string {
         default:
             return 'r.dst = x.nid';
     }
-}
-
-function stampExcluded(model: FragmentModel): string[] {
-    return model.stampField ? [model.stampField] : [];
-}
-
-function rootOf(into: TargetModel): FragmentModel {
-    return into.kind === 'GRAPH_VIEW' ? into.model.root : into.model;
-}
-
-function nodeOf(rel: RelationshipModel, item: any): any {
-    return rel.related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[rel.related.model.targetField] : item;
-}
-
-function items(rel: RelationshipModel, value: any): any[] {
-    if (value == null) {
-        return [];
-    }
-    if (rel.isCollection && !Array.isArray(value)) {
-        throw new DrivineError(`${rel.field} is a list relationship, but holds a ${typeof value}.`);
-    }
-    return rel.isCollection ? value : [value];
-}
-
-/** The ids of every node the object holds, at any depth. */
-function heldIds(view: GraphViewModel, object: any, seen: Set<any> = new Set<any>()): any[] {
-    if (object == null || seen.has(object)) {
-        return [];
-    }
-    seen.add(object);
-    const ids = [object[view.rootField]?.[view.root.nodeIdField!]];
-    for (const rel of view.relationships) {
-        const into = targetOf(rel);
-        for (const item of items(rel, object[rel.field])) {
-            const node = nodeOf(rel, item);
-            ids.push(
-                ...(into.kind === 'GRAPH_VIEW' ? heldIds(into.model, node, seen) : [node?.[into.model.nodeIdField!]])
-            );
-        }
-    }
-    return ids.filter((it) => it != null);
 }

@@ -32,6 +32,8 @@ import {
     GraphBackend,
     OracleBackend,
     OracleGraph,
+    PostgresBackend,
+    PostgresGraph,
     schemaGrammarFor,
     Direction,
     CypherGrammar,
@@ -65,6 +67,8 @@ import {
     Tier,
     WorkHistory
 } from './GoldenModels';
+import { PostgresSaveStatement } from '@/backend/postgres/PostgresSaveStatement';
+import { PostgresWriteStatement } from '@/backend/postgres/PostgresWriteStatement';
 
 /**
  * The statements this backend writes for drivine-python's test models, in `statements.json`, which drivine-python
@@ -76,6 +80,7 @@ const GOLDEN = path.join(__dirname, 'statements.json');
 /** A filter in the store's own language: Cypher over `n`, or SQL over the node row `n` on Oracle. */
 const CYPHER_WHERE = 'n.name = $name';
 const SQL_WHERE = "JSON_VALUE(n.props, '$.name') = $name";
+const POSTGRES_WHERE = "(n.props ->> 'name') = $name";
 
 function statements(grammar: CypherGrammar): Record<string, string> {
     return written(new CypherBackend(grammar), CYPHER_WHERE, !grammar.orphanDeleteLimit);
@@ -141,6 +146,11 @@ function indexedReads(backend: OracleBackend, registry: ModelRegistry): Record<s
 }
 
 function written(backend: GraphBackend, where: string, orphans: boolean): Record<string, string> {
+    const cases = writtenCases(backend, where, orphans);
+    return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
+}
+
+function writtenCases(backend: GraphBackend, where: string, orphans: boolean): Record<string, GraphStatement> {
     const registry = new ModelRegistry();
     const fragment = registry.fragment.bind(registry);
     const view = registry.view.bind(registry);
@@ -166,7 +176,62 @@ function written(backend: GraphBackend, where: string, orphans: boolean): Record
     Object.assign(cases, queries(registry, backend));
     Object.assign(cases, groups(registry, backend));
     Object.assign(cases, searches(registry, backend, where));
-    return Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text]));
+    return cases;
+}
+
+/**
+ * Postgres's statements: the same cases, a filter in SQL, and the searches through an index. A write on Postgres is
+ * one call of drivine4j's write function, the same text for every write, so the plan it binds is written too, its
+ * fresh stamps written as `<stamp>`: drivine-python makes the same plan for the same object.
+ */
+function postgresStatements(): Record<string, string> {
+    const backend = new PostgresBackend(new PostgresGraph());
+    const registry = new ModelRegistry();
+    const person: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Person) };
+    const cases = writtenCases(backend, POSTGRES_WHERE, true);
+    // What the manager binds when it runs a patch, which its plan is made from.
+    const bound: Record<string, Record<string, any>> = {
+        'Person.patch': { id: 'p1', set: { name: 'Ada', bio: null }, vectors: {} },
+        'Person.patch.where': { id: 'p1', set: { name: 'Ada' }, vectors: {}, name: "O'Brien" },
+        'Person.patchAll': {
+            rows: [
+                { id: 'p1', props: { name: 'Ada' }, vectors: {} },
+                { id: 2, props: { bio: null } }
+            ]
+        }
+    };
+    const plans = Object.entries(cases)
+        .filter(([, it]) => it instanceof PostgresWriteStatement || it instanceof PostgresSaveStatement)
+        .map(([name, it]) => {
+            const parameters = it.spec(bound[name] ?? {}).parameters as any;
+            const plan = { plan: JSON.parse(parameters._plan), shapes: JSON.parse(parameters._shapes) };
+            const patchedIf = parameters._patchedIf ? { patchedIf: parameters._patchedIf } : {};
+            return [
+                `${name}.plan`,
+                JSON.stringify({ ...plan, ...patchedIf }).replace(/[0-9a-f]{16}:[0-9a-f]{16}/g, '<stamp>')
+            ];
+        });
+    return {
+        ...Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text])),
+        ...Object.fromEntries(plans),
+        'Person.nearest.indexed': backend.nearest(person, {
+            label: 'Person',
+            property: 'embedding',
+            similarity: 'EUCLIDEAN',
+            k: 20,
+            limit: 5,
+            table: '3',
+            dimensions: 3
+        }).text,
+        'Person.matching.indexed': backend.matching(person, {
+            label: 'Person',
+            properties: ['name', 'bio'],
+            text: 'graph -relational',
+            limit: 10,
+            table: 'drivine_t_Personnamebio_4d5e6f'
+        }).text,
+        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text
+    };
 }
 
 /** The grouped reads drivine-python's golden test writes, written alike. */
@@ -458,7 +523,8 @@ describe('Golden statements', () => {
         NEO4J: { ...statements(NEO4J_GRAMMAR), ...schema(NEO4J_SCHEMA) },
         MEMGRAPH: { ...statements(MEMGRAPH_GRAMMAR), ...schema(MEMGRAPH_SCHEMA) },
         FALKORDB: { ...statements(FALKORDB_GRAMMAR), ...schema(FALKORDB_SCHEMA) },
-        ORACLE: { ...oracleStatements(), ...schema(schemaGrammarFor(DatabaseType.ORACLE, new OracleGraph())) }
+        ORACLE: { ...oracleStatements(), ...schema(schemaGrammarFor(DatabaseType.ORACLE, new OracleGraph())) },
+        POSTGRES: { ...postgresStatements(), ...schema(schemaGrammarFor(DatabaseType.POSTGRES, new PostgresGraph())) }
     };
 
     it('should match the statements drivine-python checks against', () => {

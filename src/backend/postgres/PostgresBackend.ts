@@ -6,9 +6,11 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGroups } from '@/backend/postgres/PostgresGroups';
 import { hasLabels, nodeDocument, numberOf, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresQueryRenderer } from '@/backend/postgres/PostgresQueryRenderer';
+import { PostgresSaveBuilder, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresSearch } from '@/backend/postgres/PostgresSearch';
 import { PostgresStatement } from '@/backend/postgres/PostgresStatement';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
+import { PostgresWrites } from '@/backend/postgres/PostgresWrites';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
@@ -165,13 +167,13 @@ export class PostgresBackend implements GraphBackend {
     }
 
     save(
-        _target: TargetModel,
-        _object: any,
-        _options?: SaveOptions<any>,
-        _createOnly?: boolean,
-        _registry?: ModelRegistry
+        target: TargetModel,
+        object: any,
+        options?: SaveOptions<any>,
+        createOnly?: boolean,
+        registry?: ModelRegistry
     ): SaveStatement {
-        throw unwritten('save');
+        return new PostgresSaveBuilder(this.graph, registry).build(target, object, options, createOnly);
     }
 
     heldProperties(model: FragmentModel): GraphStatement {
@@ -197,16 +199,16 @@ export class PostgresBackend implements GraphBackend {
         return PostgresQueryRenderer.renderWhere(fn, target, new PostgresViews(this.graph), ROW_ALIAS);
     }
 
-    patchOne(_model: FragmentModel, _where?: string): GraphStatement {
-        throw unwritten('patch');
+    patchOne(model: FragmentModel, where?: string): GraphStatement {
+        return new PostgresWrites(this.graph).patchOne(model, where);
     }
 
-    patchMany(_model: FragmentModel): GraphStatement {
-        throw unwritten('patchAll');
+    patchMany(model: FragmentModel): GraphStatement {
+        return new PostgresWrites(this.graph).patchMany(model);
     }
 
-    fragmentBatch(_groups: FragmentGroup[], _options: SaveOptions<any>): GraphStatement {
-        throw unwritten('saveAll');
+    fragmentBatch(groups: FragmentGroup[], options: SaveOptions<any>): GraphStatement {
+        return new PostgresWrites(this.graph).fragmentBatch(groups, options);
     }
 
     groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
@@ -243,21 +245,21 @@ export class PostgresBackend implements GraphBackend {
     }
 
     relate(
-        _from: MatchedNode,
-        _to: MatchedNode,
-        _type: string,
-        _properties: Record<string, any>,
-        _mode: RelateMode
+        from: MatchedNode,
+        to: MatchedNode,
+        type: string,
+        properties: Record<string, any>,
+        mode: RelateMode
     ): GraphStatement {
-        throw unwritten('relate');
+        return new PostgresWrites(this.graph).relate(from, to, type, properties, mode);
     }
 
-    unrelate(_from: MatchedNode, _to: MatchedNode, _type: string): GraphStatement {
-        throw unwritten('unrelate');
+    unrelate(from: MatchedNode, to: MatchedNode, type: string): GraphStatement {
+        return new PostgresWrites(this.graph).unrelate(from, to, type);
     }
 
-    unrelateAll(_from: MatchedNode, _type: string, _direction: Direction): GraphStatement {
-        throw unwritten('unrelateAll');
+    unrelateAll(from: MatchedNode, type: string, direction: Direction): GraphStatement {
+        return new PostgresWrites(this.graph).unrelateAll(from, type, direction);
     }
 
     storeStamps(): GraphStatement {
@@ -380,14 +382,4 @@ export class PostgresBackend implements GraphBackend {
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];
     }
-}
-
-/** An id as `->>` reads its stored property back: a number or a boolean as its JSON text. */
-function storedKey(id: unknown): string {
-    return typeof id === 'string' ? id : JSON.stringify(id);
-}
-
-/** Writes on Postgres go through drivine4j's write function, which this version does not make yet. */
-function unwritten(operation: string): DrivineError {
-    return new DrivineError(`${operation} is not yet supported on Postgres: this version reads a Postgres store.`);
 }

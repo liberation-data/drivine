@@ -133,6 +133,8 @@ describe.each(allStores())('loadNearest on $type', (engine) => {
             where:
                 engine.type === DatabaseType.ORACLE
                     ? "JSON_VALUE(n.props, '$.contextId') = $context"
+                    : engine.type === DatabaseType.POSTGRES
+                    ? "(n.props ->> 'contextId') = $context"
                     : 'n.contextId = $context',
             bindings: { context: 'b' }
         });

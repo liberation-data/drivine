@@ -48,6 +48,17 @@ export function rawProperty(store: SqlStore, property: string, as: 'TEXT' | 'NUM
 }
 
 /**
+ * The statement that reads the properties of the one node carrying `scope`, as the store holds them: a row of one
+ * column, `props`. Oracle's are re-encoded, as the thin driver can't read a document updated in place
+ * (oracle/node-oracledb#1796).
+ */
+export function rawProps(store: SqlStore, scope: string): string {
+    return store.type === DatabaseType.ORACLE
+        ? `SELECT JSON_TRANSFORM(n.props, KEEP '$') AS "props" FROM drivine_node n WHERE JSON_EXISTS(n.labels, '$?(@ == "${scope}")')`
+        : `SELECT n.props AS "props" FROM drivine_node n WHERE n.labels @> '["${scope}"]'`;
+}
+
+/**
  * Writes a graph into a SQL store's tables directly, for reads to be tested before writes are: nodes by labels and
  * properties, relationships between nodes found by a key property among those carrying `scope`.
  */

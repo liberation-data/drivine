@@ -1,7 +1,7 @@
 import {
     backendFor,
-    DatabaseRegistry,
     DatabaseType,
+    DatabaseRegistry,
     Direction,
     GraphProperty,
     GraphRelationship,
@@ -22,10 +22,9 @@ import {
     StatelessGraphObjectManager,
     TargetNode
 } from '@liberation-data/drivine';
-import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
-import { OracleSeed } from '../support/OracleSeed';
+import { rawProps, SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
-@NodeFragment({ labels: ['OraSave', 'Person'] })
+@NodeFragment({ labels: ['SqlSave', 'Person'] })
 class Person {
     @NodeId() id: string;
     name?: string | null;
@@ -38,20 +37,20 @@ class Person {
 @NodeFragment({ labels: ['Pilot'] })
 class Pilot extends Person {}
 
-@NodeFragment({ labels: ['OraSave', 'Tag'] })
+@NodeFragment({ labels: ['SqlSave', 'Tag'] })
 class Tag {
     @NodeId() id: string;
     @NodeStamp() stamp?: string;
 }
 
 /** A bag and no @NodeLabels: a save merges its properties in place, as Oracle then keeps them (OSON version 2). */
-@NodeFragment({ labels: ['OraSave', 'Note'] })
+@NodeFragment({ labels: ['SqlSave', 'Note'] })
 class Note {
     @NodeId() id: string;
     @PropertyBag() metadata: Record<string, any> = {};
 }
 
-@NodeFragment({ labels: ['OraSave', 'Org'] })
+@NodeFragment({ labels: ['SqlSave', 'Org'] })
 class Org {
     @NodeId() id: string;
     name?: string;
@@ -82,15 +81,16 @@ const person = (id: string, fields: Partial<Person> = {}): Person => Object.assi
 const tag = (id: string): Tag => Object.assign(new Tag(), { id });
 const career = (fields: Partial<Career>): Career => Object.assign(new Career(), fields);
 
-describeOnOracle('saves on Oracle', () => {
+describe.each(sqlStores())('saves on $name', (store) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
-    let seed: OracleSeed;
+    let seed: SqlSeed;
 
-    beforeAll(() => {
-        pm = oraclePersistenceManager();
-        gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
-        seed = new OracleSeed(pm, 'OraSave');
+    beforeAll(async () => {
+        pm = sqlPersistenceManager(store);
+        gom = new StatelessGraphObjectManager(pm, backendFor(store.type), new ModelRegistry());
+        seed = new SqlSeed(pm, store, 'SqlSave');
+        await seed.prepare();
     });
 
     beforeEach(async () => {
@@ -116,19 +116,14 @@ describeOnOracle('saves on Oracle', () => {
         const changed = await gom.save(loaded);
         expect(changed.stamp!.split(':')[0]).not.toEqual(ada.stamp!.split(':')[0]);
         expect(changed.stamp!.split(':')[1]).toEqual(ada.stamp!.split(':')[1]);
-        const raw = await pm.getOne<any>(
-            new QuerySpecification(
-                // Re-encoded: the thin driver can't read a document updated in place (oracle/node-oracledb#1796).
-                `SELECT JSON_TRANSFORM(n.props, KEEP '$') AS "props" FROM drivine_node n ` +
-                    `WHERE JSON_EXISTS(n.labels, '$?(@ == "OraSave")')`
-            )
-        );
-        expect(raw).toEqual({
+        const raw = await pm.getOne<any>(new QuerySpecification(rawProps(store, 'SqlSave')));
+        expect(raw.props ?? raw).toEqual({
             id: 'ada',
             name: 'Ada Lovelace',
             born_in: 1815,
             'metadata.source': 'wiki',
-            '__drivine.labels.tags': []
+            // An open label field's record of the labels it holds: drivine4j's write function removes one that is empty.
+            ...(store.type === DatabaseType.ORACLE ? { '__drivine.labels.tags': [] } : {})
         });
     });
 
