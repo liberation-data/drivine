@@ -283,6 +283,21 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             expect(again).toEqual([neo4j ? 'RANGE:CREATED' : 'RANGE:ALREADY_MATCHING', 'UNIQUE:ALREADY_MATCHING']);
         });
 
+        it('should keep the index and fail enforce for a repeated value, asked to replace it with no sample', async () => {
+            if (!neo4j) {
+                return;
+            }
+            await gom().persistenceManager.execute(
+                new QuerySpecification("CREATE (:Ledger {ref: 'r1'}), (:Ledger {ref: 'r1'})")
+            );
+            const enforced = manager([SchemaCatalog.of(ledger)], {
+                replaceBlockingIndex: true,
+                violationSampleSize: 0
+            }).enforce();
+            await expect(enforced).rejects.toThrow(/^VIOLATION for the UNIQUE on Ledger\(ref\)$/);
+            expect(await rangeNames('Ledger')).toEqual(['ledger_lookup']);
+        });
+
         it("should replace a plain index on the marker's key, the label being Drivine's", async () => {
             await plainIndex('_DrivineSchema', 'scope');
             await manager([SchemaCatalog.of(rangeIndex('Ledger', 'ref')).withVersion('v1')]).enforce();

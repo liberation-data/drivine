@@ -474,7 +474,7 @@ export class SchemaManager {
                 `${result.status} for the ${result.spec.kind} on ${result.spec.label}(${result.spec.properties.join(
                     ', '
                 )})` +
-                (result.sample ? `: values held more than once include ${JSON.stringify(result.sample)}` : '') +
+                (result.sample?.length ? `: values held more than once include ${JSON.stringify(result.sample)}` : '') +
                 (result.found ? `: the engine holds ${JSON.stringify(result.found)}` : '') +
                 (result.index
                     ? `: index ${result.index.name} is in the way of it. Drop the index, or set replaceBlockingIndex ` +

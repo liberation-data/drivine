@@ -1689,9 +1689,9 @@ all known at runtime gives it `schema: { catalogs: [] }`.
 The items join what that owner's catalogs declared, for the life of the manager, and are applied as `enforce` applies
 the owner's:
 
-- **Under the same options.** `mode`, `recreateOnDrift` and `violationSampleSize` apply. Only the items given are
-  applied, and the results come back by database. `ensure` leaves a change of the owner's version to `enforce`, and
-  `recreateOnStartup` doesn't apply to it.
+- **Under the same options.** `mode`, `recreateOnDrift`, `replaceBlockingIndex` and `violationSampleSize` apply. Only
+  the items given are applied, and the results come back by database. `ensure` leaves a change of the owner's version
+  to `enforce`, and `recreateOnStartup` doesn't apply to it.
 - **In the owner's inventory.** The owner's `_DrivineSchema` marker records them as ensured at runtime. A later
   `enforce()` applies them with the rest, and `recreateAll()` recreates them. An `enforce` by a manager built later (the
   next process, before the item is ensured again) keeps them in the inventory and doesn't report them as orphans.

@@ -18,9 +18,10 @@ const rangeRow = (name: string, ...properties: string[]) => ({ name, labels: ['P
 
 /**
  * A Neo4j that refuses the constraint for an index in the way of it until DROP INDEX has run, and answers the query for
- * values held more than once with `conflicts`, or fails it when that is an error.
+ * values held more than once with `conflicts`, or fails it when that is an error. Given `refusedAfterDrop`, it refuses
+ * the constraint with that once the index is gone too.
  */
-function blockedStore(indexes: object[], conflicts: unknown[] | Error = []) {
+function blockedStore(indexes: object[], conflicts: unknown[] | Error = [], refusedAfterDrop?: Error) {
     const ran: string[] = [];
     let dropped = false;
     let created = false;
@@ -33,6 +34,9 @@ function blockedStore(indexes: object[], conflicts: unknown[] | Error = []) {
         if (statement.startsWith('CREATE CONSTRAINT')) {
             if (!dropped) {
                 throw DrivineError.withRootCause(inTheWay());
+            }
+            if (refusedAfterDrop) {
+                throw refusedAfterDrop;
             }
             created = true;
             return [];
@@ -97,6 +101,13 @@ describe('ConstraintManager with an index in the way of a constraint', () => {
         const store = blockedStore([rangeRow('person_email', 'email')], new Error('connection lost'));
         await expect(store.constraints.ensure(spec, 0, true)).rejects.toThrow(/There already exists an index/);
         expect(drops(store.ran)).toEqual([]);
+    });
+
+    it('should throw what refuses the constraint once the index is dropped, the index being gone', async () => {
+        const store = blockedStore([rangeRow('person_email', 'email')], [], new Error('schema lock timed out'));
+        await expect(store.constraints.ensure(spec, undefined, true)).rejects.toThrow('schema lock timed out');
+        expect(drops(store.ran)).toEqual(['DROP INDEX person_email IF EXISTS']);
+        expect(await store.constraints.list()).toEqual([]);
     });
 
     it("should take the index over the constraint's properties in their order", async () => {
