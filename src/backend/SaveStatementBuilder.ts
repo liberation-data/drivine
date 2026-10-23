@@ -291,7 +291,7 @@ export class SaveStatementBuilder {
             if (value == null) {
                 return `${stored} IS NULL`;
             }
-            const param = bind(`_loaded${i}`, model.jsonPacked.has(field) ? JSON.stringify(value) : value);
+            const param = bind(`_loaded${i}`, model.jsonPacked.has(field) ? JSON.stringify(value) : asCompared(value));
             const expression = model.vectorFields.has(field) ? this.grammar.vectorValue(param) : param;
             const same = `NOT coalesce(${stored} <> ${expression}, false)`;
             // A value a load gives a node that holds none may have been loaded from none.
@@ -304,7 +304,7 @@ export class SaveStatementBuilder {
         const bags = model.propertyBags.map((bag, i) => {
             const entries = Object.entries(loaded[bag.field] ?? {})
                 .filter(([, value]) => value != null)
-                .map(([key, value]) => [`${bag.namespace}${key}`, value]);
+                .map(([key, value]) => [`${bag.namespace}${key}`, asCompared(value)]);
             const held = bind(`_loadedBag${i}`, Object.fromEntries(entries));
             const owned = bag.flat
                 ? `NOT k IN ${bind(`_loadedBag${i}Reserved`, known)} AND ` +
@@ -840,6 +840,17 @@ function skipped(
         !!model.propertyBags?.some((it) => it.field === field) ||
         model.nodeLabels?.field === field
     );
+}
+
+/**
+ * A loaded value as the check of `update`'s save binds it: as it is where the store can compare it with what the node
+ * holds, and otherwise null, which no comparison refuses, so the stamp alone speaks for it. A load hands over a value
+ * it can't be given back as: a temporal value as a Date, which the Neo4j driver sends as an empty map, unequal to any
+ * property, so the save would be refused each time.
+ */
+function asCompared(value: any): any {
+    const plain = (it: any): boolean => it == null || ['string', 'number', 'boolean', 'bigint'].includes(typeof it);
+    return (Array.isArray(value) ? value.every(plain) : plain(value)) ? value : null;
 }
 
 function storable(value: any): boolean {

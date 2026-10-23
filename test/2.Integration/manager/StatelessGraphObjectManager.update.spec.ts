@@ -76,6 +76,15 @@ class Swatch {
     @NodeStamp() stamp?: string;
 }
 
+/** A field the store holds as a temporal value, which a load hands over as a Date. */
+@NodeFragment({ labels: ['UpdateTest', 'Dated'] })
+class Dated {
+    @NodeId() id: string;
+    text?: string;
+    seen?: Date;
+    @NodeStamp() stamp?: string;
+}
+
 const proposition = (fields: Partial<Proposition>): Proposition => Object.assign(new Proposition(), fields);
 const entity = (id: string, name?: string): Entity => Object.assign(new Entity(), { id, name });
 const make = <T extends object>(type: new () => T, fields: Partial<T>): T => Object.assign(new type(), fields);
@@ -286,6 +295,21 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
                 expect([...(await gom.load(Swatch, 'w1'))!.shades].sort()).toEqual(['Green', 'Red']);
             }
         );
+
+        readsWithoutSnapshot('should update a node holding a temporal value it does not change', async () => {
+            await gom.save(make(Dated, { id: 'd1', text: 'one' }));
+            await pm.execute(new QuerySpecification("MATCH (n:Dated {id: 'd1'}) SET n.seen = datetime()"));
+
+            expect((await gom.load(Dated, 'd1'))!.seen).toBeInstanceOf(Date);
+            await gom.update(Dated, 'd1', (it) => void (it.text = 'two'), 1);
+
+            expect((await gom.load(Dated, 'd1'))!.text).toEqual('two');
+
+            await gom.save(make(Tagged, { id: 't1', text: 'one' }));
+            await pm.execute(new QuerySpecification("MATCH (n:Tagged {id: 't1'}) SET n.`meta.seen` = datetime()"));
+            await gom.update(Tagged, 't1', (it) => void (it.text = 'two'), 1);
+            expect((await gom.load(Tagged, 't1'))!.text).toEqual('two');
+        });
 
         it('should replace a view’s list that lost an item, and add to one that grew', async () => {
             await gom.save(

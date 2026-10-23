@@ -22,6 +22,9 @@ export class StaleObjectException extends DrivineError {
                 ? `${type.name} '${String(
                       id
                   )}' may have changed since it was loaded: another writer held it each time the save was tried.`
+                : foundStamp === expectedStamp
+                ? `${type.name} '${String(id)}' changed since it was loaded, under the stamp ${foundStamp}: a field ` +
+                  `is not as it was loaded.`
                 : `${type.name} '${String(
                       id
                   )}' changed since it was loaded: expected stamp ${expectedStamp}, found ${foundStamp}.`,

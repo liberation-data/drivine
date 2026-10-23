@@ -1,8 +1,10 @@
 import {
+    EmptyWhenAbsent,
     FALKORDB_GRAMMAR,
     GraphProperty,
     GraphRelationship,
     GraphView,
+    JsonPacked,
     MEMGRAPH_GRAMMAR,
     ModelRegistry,
     NEO4J_GRAMMAR,
@@ -13,6 +15,7 @@ import {
     NullPolicy,
     PropertyBag,
     Root,
+    VectorIndex,
     SaveStatementBuilder
 } from '@liberation-data/drivine';
 import { CypherGrammar } from '@/backend/CypherGrammar';
@@ -92,6 +95,26 @@ enum Shade {
 class Swatch {
     @NodeId() id: string;
     @NodeLabels(Shade) shades: Set<string> = new Set();
+    @NodeStamp() stamp?: string;
+}
+
+/** A renamed field, a packed one, and fields a load gives an empty collection when the node holds none. */
+@NodeFragment({ labels: ['Note'] })
+class Note {
+    @NodeId() id: string;
+    @GraphProperty('a_title') title?: string;
+    body?: string;
+    @JsonPacked() extra?: Record<string, any>;
+    @EmptyWhenAbsent() tags: string[];
+    @EmptyWhenAbsent() attrs: Record<string, any>;
+    @NodeStamp() stamp?: string;
+}
+
+/** A vector field, which the engine may store in a type of its own. */
+@NodeFragment({ labels: ['Chunk'] })
+class Chunk {
+    @NodeId() id: string;
+    @VectorIndex({ dimensions: 2 }) embedding?: number[];
     @NodeStamp() stamp?: string;
 }
 
@@ -216,6 +239,53 @@ describe('SaveStatementBuilder', () => {
 
         expect(check).toContain('n.status IS NOT NULL AND NOT coalesce(n.status <> $_loaded1, false)');
         expect(check).toContain('n.note IS NULL');
+    });
+
+    it('should bind null, which no comparison refuses, for a loaded value the store cannot be handed back', () => {
+        const seen = new Date();
+        const loaded = Object.assign(claim('one'), { note: seen });
+        const { check, bindings }: Check = checkOfChange(loaded, claim('two'));
+        expect(check).toContain('n.note IS NOT NULL AND NOT coalesce(n.note <> $_loaded0, false)');
+        expect(bindings._loaded0).toBeNull();
+
+        const tagged = Object.assign(new Tagged(), { id: 't1', meta: { owner: 'ada', seen }, stamp: STAMP });
+        const bagged: Check = checkOfChange(tagged, Object.assign(new Tagged(), { ...tagged, text: 'two' }));
+        expect(bagged.bindings._loadedBag0).toEqual({ 'meta.owner': 'ada', 'meta.seen': null });
+    });
+
+    it('should compare a field under its stored name, packed as it is stored, and an empty collection as maybe absent', () => {
+        const loaded = Object.assign(new Note(), {
+            id: 'n1',
+            title: 'T',
+            body: 'B',
+            extra: { x: 1 },
+            tags: [],
+            attrs: {},
+            stamp: STAMP
+        });
+        const { check, bindings }: Check = checkOfChange(loaded, Object.assign(new Note(), { ...loaded, body: 'C' }));
+
+        expect(check).toContain(
+            'n.a_title IS NOT NULL AND NOT coalesce(n.a_title <> $_loaded0, false) AND ' +
+                'NOT coalesce(n.attrs <> $_loaded1, false) AND ' +
+                'n.body IS NOT NULL AND NOT coalesce(n.body <> $_loaded2, false) AND ' +
+                'n.extra IS NOT NULL AND NOT coalesce(n.extra <> $_loaded3, false) AND ' +
+                'NOT coalesce(n.tags <> $_loaded4, false), false) AS _ok'
+        );
+        expect([bindings._loaded0, bindings._loaded3, bindings._loaded4]).toEqual(['T', '{"x":1}', []]);
+    });
+
+    it('should compare a vector field as the engine stores a vector', () => {
+        const typed: CypherGrammar = { ...NEO4J_GRAMMAR, vectorValue: (it) => `toVector(${it})` };
+        const loaded = Object.assign(new Chunk(), { id: 'k1', embedding: [0.5, 1], stamp: STAMP });
+        const { check, bindings }: Check = checkOfChange(
+            loaded,
+            Object.assign(new Chunk(), { ...loaded, embedding: [1, 0] }),
+            typed
+        );
+
+        expect(check).toContain('n.embedding IS NOT NULL AND NOT coalesce(n.embedding <> toVector($_loaded0), false)');
+        expect(bindings._loaded0).toEqual([0.5, 1]);
     });
 
     it('should compare the stamp alone where a read takes a snapshot, or the object was not loaded by update', () => {
