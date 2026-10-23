@@ -148,7 +148,7 @@ export class CypherBackend implements GraphBackend {
             return [];
         }
         const cascaded = new CascadeTargets(this.grammar).cascade(target.model, NODE_ALIAS);
-        return cascaded.beyond.map(({ view, field, maxDepth, nodes }: CascadeBeyond) => ({
+        return cascaded.beyond.map(({ view, field, maxDepth, nodes, within }: CascadeBeyond) => ({
             view,
             field,
             maxDepth,
@@ -156,9 +156,9 @@ export class CypherBackend implements GraphBackend {
                 [
                     this.deleted(target, where),
                     `\nWITH ${NODE_ALIAS}`,
-                    `\nWITH ${NODE_ALIAS}, ${cascaded.targets} AS targets, ${nodes} AS beyond`,
+                    `\nWITH ${NODE_ALIAS}, ${within.join(' + ')} AS levels, ${nodes} AS beyond`,
                     `\nUNWIND beyond AS b`,
-                    `\nWITH ${NODE_ALIAS}, targets, b WHERE NOT b IN targets AND b <> ${NODE_ALIAS}`,
+                    `\nWITH ${NODE_ALIAS}, levels, b WHERE NOT b IN levels AND b <> ${NODE_ALIAS}`,
                     `\nRETURN count(DISTINCT b) AS beyond`
                 ].join('')
             )

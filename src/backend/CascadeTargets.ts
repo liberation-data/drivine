@@ -16,6 +16,13 @@ export interface CascadeBeyond {
     field: string;
     maxDepth: number;
     nodes: string;
+    /**
+     * The nodes of the view the cascade takes, wherever it reaches the view: the levels of the relationship, and the
+     * node a level is first reached from. A node one level further that is one of these is not left behind. Only these
+     * are read, and not every target, since a read of each comprehension the cascade has is a statement the graph
+     * engines take long to plan.
+     */
+    within: string[];
 }
 
 /** The nodes one step reaches, as a list expression, the chain that ends in them, and the conditions they meet. */
@@ -50,6 +57,10 @@ export class CascadeTargets {
     private aliasCount = 0;
     private readonly followed: RelationshipModel[] = [];
     private readonly beyond: CascadeBeyond[] = [];
+    /** The class of the view each of `beyond` is a relationship of. */
+    private readonly beyondViews: Function[] = [];
+    /** The lists of the roots of each view the cascade reaches, by the view's class. */
+    private readonly views = new Map<Function, string[]>();
 
     constructor(private readonly grammar: CypherGrammar) {}
 
@@ -63,6 +74,7 @@ export class CascadeTargets {
      */
     cascade(model: GraphViewModel, root: string): Cascade {
         const lists = this.view(model, `(${root})`, [], []);
+        this.beyond.forEach((it, i) => it.within.push(...(this.views.get(this.beyondViews[i]) ?? [])));
         const steps = this.followed.filter(
             (rel, i) => this.followed.findIndex((it) => it.type === rel.type && it.direction === rel.direction) === i
         );
@@ -84,12 +96,22 @@ export class CascadeTargets {
             if (path.filter((it) => it === rel).length >= rel.maxDepth) {
                 if (into.kind === 'GRAPH_VIEW' && into.model.type === model.type) {
                     const nodes: string = this.step(rel, into, chain, conditions).list;
-                    this.beyond.push({ view: model.type.name, field: rel.field, maxDepth: rel.maxDepth, nodes });
+                    this.beyond.push({
+                        view: model.type.name,
+                        field: rel.field,
+                        maxDepth: rel.maxDepth,
+                        nodes,
+                        within: []
+                    });
+                    this.beyondViews.push(model.type);
                 }
                 return [];
             }
             this.followed.push(rel);
             const { list, extended, all }: Step = this.step(rel, into, chain, conditions);
+            if (into.kind === 'GRAPH_VIEW') {
+                this.views.set(into.model.type, [...(this.views.get(into.model.type) ?? []), list]);
+            }
             return into.kind === 'GRAPH_VIEW'
                 ? [list, ...this.view(into.model, extended, all, [...path, rel])]
                 : [list];

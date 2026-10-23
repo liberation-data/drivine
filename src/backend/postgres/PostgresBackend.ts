@@ -155,11 +155,11 @@ export class PostgresBackend implements GraphBackend {
             target.model,
             'n.nid IN (SELECT nid FROM cascade_roots)'
         );
-        return cascaded.beyond.map(({ view, field, maxDepth, nodes }: CascadeBeyond) => ({
+        return cascaded.beyond.map(({ view, field, maxDepth, nodes, within }: CascadeBeyond) => ({
             view,
             field,
             maxDepth,
-            statement: new PostgresStatement(beyondCount(roots, cascaded.reached, nodes))
+            statement: new PostgresStatement(beyondCount(roots, within, nodes))
         }));
     }
 

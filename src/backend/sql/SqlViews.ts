@@ -23,6 +23,16 @@ export interface SqlCascade {
     beyond: CascadeBeyond[];
 }
 
+/**
+ * A cascade as it is walked: what it reaches, the queries of the roots of each view it reaches by the view's class, and
+ * the class of the view each of its `beyond` is a relationship of.
+ */
+interface CascadeWalk {
+    cascade: SqlCascade;
+    views: Map<Function, string[]>;
+    beyond: Function[];
+}
+
 /** The FROM that reads node rows by their ids, and the hint its SELECT carries. */
 export interface NodesOf {
     from: string;
@@ -116,9 +126,10 @@ export abstract class SqlViews {
      * to views of the same class, the query of the nodes one level below its maxDepth.
      */
     cascade(model: GraphViewModel, roots: string): SqlCascade {
-        const cascade: SqlCascade = { reached: [], followed: [], beyond: [] };
-        this.reachedFrom(model, 'n', [], [`FROM ${this.graph.nodes} n`], [roots], cascade);
-        return cascade;
+        const walk: CascadeWalk = { cascade: { reached: [], followed: [], beyond: [] }, views: new Map(), beyond: [] };
+        this.reachedFrom(model, 'n', [], [`FROM ${this.graph.nodes} n`], [roots], walk);
+        walk.cascade.beyond.forEach((it, i) => it.within.push(...(walk.views.get(walk.beyond[i]) ?? [])));
+        return walk.cascade;
     }
 
     private reachedFrom(
@@ -127,8 +138,9 @@ export abstract class SqlViews {
         path: RelationshipModel[],
         froms: string[],
         wheres: string[],
-        cascade: SqlCascade
+        walk: CascadeWalk
     ): void {
+        const cascade: SqlCascade = walk.cascade;
         // A read-only field (@ReadOnly, or a list of fragments read over several hops) is not the view's to delete.
         // A view nested in itself is not one: each level is one relationship from the level above.
         for (const rel of model.relationships.filter((it) => !it.readOnly)) {
@@ -145,13 +157,21 @@ export abstract class SqlViews {
             const nextWheres = [...wheres, whereClause, step.x, ...required];
             const query = `SELECT ${step.node}.nid ${nextFroms.join(' ')} WHERE ${nextWheres.join(' AND ')}`;
             if (deep) {
-                cascade.beyond.push({ view: model.type.name, field: rel.field, maxDepth: depth, nodes: query });
+                cascade.beyond.push({
+                    view: model.type.name,
+                    field: rel.field,
+                    maxDepth: depth,
+                    nodes: query,
+                    within: []
+                });
+                walk.beyond.push(model.type);
                 continue;
             }
             cascade.followed.push(rel);
             cascade.reached.push(query);
             if (into.kind === 'GRAPH_VIEW') {
-                this.reachedFrom(into.model, step.node, [...path, rel], nextFroms, nextWheres, cascade);
+                walk.views.set(into.model.type, [...(walk.views.get(into.model.type) ?? []), query]);
+                this.reachedFrom(into.model, step.node, [...path, rel], nextFroms, nextWheres, walk);
             }
         }
     }
