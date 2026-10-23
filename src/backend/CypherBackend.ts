@@ -1,4 +1,4 @@
-import { GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
+import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
@@ -8,7 +8,7 @@ import { fragment, ViewProjector } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
-import { CascadeTargets } from '@/backend/CascadeTargets';
+import { Cascade, CascadeBeyond, CascadeTargets } from '@/backend/CascadeTargets';
 import { SaveStatementBuilder } from '@/backend/SaveStatementBuilder';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { STAMP } from '@/backend/CypherStamps';
@@ -87,9 +87,7 @@ export class CypherBackend implements GraphBackend {
 
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const id = this.idPredicate(root);
-        const filter = where ? `${id} AND (${where})` : id;
-        const head = [this.match(root), this.rootWhere(target, filter)].join('');
+        const head = this.deleted(target, where);
         if (cascade === CascadeType.NONE) {
             return new GraphStatement(`${head}\nDETACH DELETE ${NODE_ALIAS}\nRETURN count(*) AS deleted`);
         }
@@ -101,24 +99,70 @@ export class CypherBackend implements GraphBackend {
                 `CascadeType.DELETE_ORPHAN is not available on ${this.grammar.engine}: ${this.grammar.orphanDeleteLimit}.`
             );
         }
-        const targets = new CascadeTargets(this.grammar).of(target.model, NODE_ALIAS);
-        const deletable =
-            cascade === CascadeType.DELETE_ALL
-                ? 'targets'
-                : `[x IN targets WHERE NOT ${this.grammar.existenceCheck('(x)--()')}]`;
+        const cascaded: Cascade = new CascadeTargets(this.grammar).cascade(target.model, NODE_ALIAS);
+        const holders: string = cascaded.holders('t');
+        // WITH before the list: FalkorDB errors on a WHERE and a projection that both hold comprehensions
+        // (FalkorDB/FalkorDB#3387).
+        const targets = [`\nWITH ${NODE_ALIAS}`, `\nWITH ${NODE_ALIAS}, ${cascaded.targets} AS targets`];
+        if (cascade === CascadeType.DELETE_ALL) {
+            return new GraphStatement(
+                [
+                    head,
+                    ...targets,
+                    `\nDETACH DELETE ${NODE_ALIAS}`,
+                    `\nWITH targets`,
+                    `\nFOREACH (t IN targets | DETACH DELETE t)`,
+                    `\nRETURN count(*) AS deleted`
+                ].join('')
+            );
+        }
+        // A node is kept when a node outside the cascade refers to it, or when it is one step of a relationship the
+        // cascade follows below a kept one: a kept message keeps its attachments, and its session is still deleted.
+        // What is kept is read before anything is deleted, so a node's relationships to others the cascade takes do
+        // not keep it. Holders chain through the targets (a part of two sessions starts a second run of levels), so the
+        // walk takes as many steps as there are targets; `found` is what is kept, and how much of it the step before
+        // had: each step reads holders among the newly kept only, and once one keeps nothing new the rest pass it on.
         return new GraphStatement(
             [
                 head,
-                // WITH before the list: FalkorDB errors on a WHERE and a projection that both hold comprehensions
-                // (FalkorDB/FalkorDB#3387).
-                `\nWITH ${NODE_ALIAS}`,
-                `\nWITH ${NODE_ALIAS}, ${targets} AS targets`,
+                ...targets,
+                // A node reached by two paths, or the root reached again, is in the targets once, and the root not at all.
+                `\nWITH ${NODE_ALIAS}, reduce(seen = [], t IN targets | ` +
+                    `CASE WHEN t IN seen OR t = ${NODE_ALIAS} THEN seen ELSE seen + t END) AS targets`,
+                `\nWITH ${NODE_ALIAS}, targets, ` +
+                    `[t IN targets WHERE any(m IN [(t)--(m) | m] WHERE m <> ${NODE_ALIAS} AND NOT m IN targets)] AS kept`,
+                `\nWITH ${NODE_ALIAS}, targets, reduce(found = [kept, 0], step IN range(1, size(targets)) | ` +
+                    `CASE WHEN found[1] = size(found[0]) THEN found ELSE [found[0] + [t IN targets WHERE NOT t IN found[0] ` +
+                    `AND any(h IN ${holders} WHERE h IN found[0][found[1]..])], size(found[0])] END)[0] AS kept`,
+                `\nWITH ${NODE_ALIAS}, [t IN targets WHERE NOT t IN kept] AS orphans`,
                 `\nDETACH DELETE ${NODE_ALIAS}`,
-                `\nWITH targets`,
-                `\nFOREACH (t IN ${deletable} | DETACH DELETE t)`,
+                `\nWITH orphans`,
+                `\nFOREACH (t IN orphans | DETACH DELETE t)`,
                 `\nRETURN count(*) AS deleted`
             ].join('')
         );
+    }
+
+    cascadeDepthChecks(target: TargetModel, where?: string): CascadeDepthCheck[] {
+        if (target.kind !== 'GRAPH_VIEW') {
+            return [];
+        }
+        const cascaded = new CascadeTargets(this.grammar).cascade(target.model, NODE_ALIAS);
+        return cascaded.beyond.map(({ view, field, maxDepth, nodes }: CascadeBeyond) => ({
+            view,
+            field,
+            maxDepth,
+            statement: new GraphStatement(
+                [
+                    this.deleted(target, where),
+                    `\nWITH ${NODE_ALIAS}`,
+                    `\nWITH ${NODE_ALIAS}, ${cascaded.targets} AS targets, ${nodes} AS beyond`,
+                    `\nUNWIND beyond AS b`,
+                    `\nWITH ${NODE_ALIAS}, targets, b WHERE NOT b IN targets AND b <> ${NODE_ALIAS}`,
+                    `\nRETURN count(DISTINCT b) AS beyond`
+                ].join('')
+            )
+        }));
     }
 
     deleteAll(target: TargetModel, where?: string): GraphStatement {
@@ -306,6 +350,13 @@ export class CypherBackend implements GraphBackend {
                 ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
             ].join('\n')
         );
+    }
+
+    /** The match of the root a delete by `$id` takes, if it meets `where`, and for a view the view's requirements. */
+    private deleted(target: TargetModel, where?: string): string {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const id = this.idPredicate(root);
+        return [this.match(root), this.rootWhere(target, where ? `${id} AND (${where})` : id)].join('');
     }
 
     private rootWhere(target: TargetModel, where?: string): string {

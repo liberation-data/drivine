@@ -131,7 +131,7 @@ describe.each(graphEngines())('StatelessGraphObjectManager deletes on $type', (e
         expect(await ids()).toEqual(['m3', 's2']);
     });
 
-    it('should delete what is left with no relationship with DELETE_ORPHAN', async () => {
+    it('should delete what nothing outside the view refers to with DELETE_ORPHAN', async () => {
         if (engine.type === DatabaseType.MEMGRAPH) {
             await expect(gom.delete(SessionView, 's1', { cascade: CascadeType.DELETE_ORPHAN })).rejects.toThrow(
                 /DELETE_ORPHAN is not available on Memgraph/
@@ -139,8 +139,9 @@ describe.each(graphEngines())('StatelessGraphObjectManager deletes on $type', (e
             return;
         }
         expect(await gom.delete(SessionView, 's1', { cascade: CascadeType.DELETE_ORPHAN })).toEqual(1);
-        // u and m2 are left with nothing; m1 still attaches a1 and shared, and shared is attached to m3.
-        expect(await ids()).toEqual(['a1', 'm1', 'm3', 's2', 'shared']);
+        // shared is attached to m3, outside the view, so it is kept; the rest of the view goes, m1 with it, though it
+        // attached shared: its relationships to a1 and shared were to nodes in the view.
+        expect(await ids()).toEqual(['m3', 's2', 'shared']);
     });
 
     it('should delete what each level of a view that contains itself holds, as a load reads it', async () => {

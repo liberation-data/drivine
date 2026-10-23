@@ -1,7 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
-import { GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
+import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGroups } from '@/backend/postgres/PostgresGroups';
 import { hasLabels, nodeDocument, numberOf, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
@@ -12,6 +12,8 @@ import { PostgresStatement } from '@/backend/postgres/PostgresStatement';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
 import { PostgresWrites } from '@/backend/postgres/PostgresWrites';
 import { SaveStatement } from '@/backend/SaveStatement';
+import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
+import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
@@ -98,45 +100,67 @@ export class PostgresBackend implements GraphBackend {
     }
 
     /**
-     * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it:
-     * every one, or only those left with no relationship but to the root. Postgres runs a statement's deletes on one
-     * snapshot, so a node is an orphan when every relationship it has is to the root: those go with the root. Returns
-     * how many roots were deleted: `{deleted}`.
+     * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it
+     * through the relationships a save writes (see SqlViews.cascade): every one, or with `DELETE_ORPHAN` those not kept
+     * (see keptTargets). Postgres runs a statement's deletes on one snapshot, so what is kept is read before anything
+     * is deleted. Returns how many roots were deleted: `{deleted}`.
      */
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const id = this.idPredicate(root);
-        const filter = this.rootWhere(target, where ? `${id} AND (${where})` : id);
+        const filter = this.deletedWhere(target, where);
         if (cascade === CascadeType.NONE) {
             return this.deleting(root, filter);
         }
         if (target.kind !== 'GRAPH_VIEW') {
             throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
         }
-        const reached = new PostgresViews(this.graph).cascaded(
+        const cascaded = new PostgresViews(this.graph).cascade(
             target.model,
             'n.nid IN (SELECT nid FROM cascade_roots)'
         );
-        const orphaned =
-            cascade === CascadeType.DELETE_ORPHAN
-                ? ` AND NOT EXISTS (SELECT 1 FROM ${this.graph.edges} e WHERE (e.src = x.nid AND e.dst NOT IN ` +
-                  `(SELECT nid FROM cascade_roots)) OR (e.dst = x.nid AND e.src NOT IN (SELECT nid FROM cascade_roots)))`
-                : '';
-        const targets = reached.length
+        const orphans = cascade === CascadeType.DELETE_ORPHAN && cascaded.reached.length > 0;
+        const targets = cascaded.reached.length
             ? [
-                  `cascade_targets AS (SELECT DISTINCT t.nid FROM (${reached.join('\n    UNION ALL ')}) t),`,
-                  `deleted_targets AS (DELETE FROM ${this.graph.nodes} x WHERE x.nid IN (SELECT nid FROM cascade_targets) ` +
-                      `AND x.nid NOT IN (SELECT nid FROM cascade_roots)${orphaned} RETURNING 1),`
+                  `cascade_targets AS (SELECT DISTINCT t.nid FROM (${cascaded.reached.join('\n    UNION ALL ')}) t ` +
+                      `WHERE t.nid NOT IN (SELECT nid FROM cascade_roots)),`,
+                  ...(orphans
+                      ? [
+                            `cascade_all AS (SELECT nid FROM cascade_roots UNION SELECT nid FROM cascade_targets),`,
+                            `cascade_kept (nid) AS (\n    ${keptTargets(this.graph, cascaded.followed, 'UNION')}),`
+                        ]
+                      : []),
+                  `deleted_targets AS (DELETE FROM ${this.graph.nodes} x WHERE x.nid IN (SELECT nid FROM cascade_targets)` +
+                      `${orphans ? ' AND x.nid NOT IN (SELECT nid FROM cascade_kept)' : ''} RETURNING 1),`
               ]
             : [];
         return new PostgresStatement(
             [
-                `WITH cascade_roots AS (SELECT ${ROW_ALIAS}.nid ${this.from(root, filter)}),`,
+                `WITH ${orphans ? 'RECURSIVE ' : ''}cascade_roots AS (SELECT ${ROW_ALIAS}.nid ${this.from(
+                    root,
+                    filter
+                )}),`,
                 ...targets,
                 `deleted AS (DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM cascade_roots) RETURNING 1)`,
                 `SELECT CAST(COUNT(*) AS integer) AS "deleted" FROM deleted`
             ].join('\n')
         );
+    }
+
+    cascadeDepthChecks(target: TargetModel, where?: string): CascadeDepthCheck[] {
+        if (target.kind !== 'GRAPH_VIEW') {
+            return [];
+        }
+        const roots = `SELECT ${ROW_ALIAS}.nid ${this.from(target.model.root, this.deletedWhere(target, where))}`;
+        const cascaded = new PostgresViews(this.graph).cascade(
+            target.model,
+            'n.nid IN (SELECT nid FROM cascade_roots)'
+        );
+        return cascaded.beyond.map(({ view, field, maxDepth, nodes }: CascadeBeyond) => ({
+            view,
+            field,
+            maxDepth,
+            statement: new PostgresStatement(beyondCount(roots, cascaded.reached, nodes))
+        }));
     }
 
     deleteAll(target: TargetModel, where?: string): GraphStatement {
@@ -335,6 +359,13 @@ export class PostgresBackend implements GraphBackend {
     /** The marker applied last first, then the one made later, so the marker read, written and kept are one. */
     private newestFirst(alias: string): string {
         return `${numberOf(alias, 'appliedAt')} DESC NULLS LAST, ${alias}.nid DESC`;
+    }
+
+    /** What the root a delete by `$id` takes meets: the id, `where`, and for a view the view's requirements. */
+    private deletedWhere(target: TargetModel, where?: string): string | undefined {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const id = this.idPredicate(root);
+        return this.rootWhere(target, where ? `${id} AND (${where})` : id);
     }
 
     /** A predicate over the root's row and, for a view, the view's requirements. */

@@ -459,6 +459,7 @@ function saves(
         'PersonCareer.delete.all': backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ALL),
         'LocationHierarchy.delete.all': backend.delete(view(LocationHierarchy), undefined, CascadeType.DELETE_ALL),
         'LocationAncestors.delete.all': backend.delete(view(LocationAncestors), undefined, CascadeType.DELETE_ALL),
+        'LocationHierarchy.delete.depthCheck': backend.cascadeDepthChecks(view(LocationHierarchy))[0].statement,
         'Person.heldProperties': backend.heldProperties(registry.fragment(Person)),
         'Person.foundStamp': backend.foundStamp(registry.fragment(Person)),
         'saveAll.fragments': backend.fragmentBatch(
@@ -504,6 +505,11 @@ function saves(
     };
     if (orphans) {
         cases['PersonCareer.delete.orphans'] = backend.delete(view(PersonCareer), undefined, CascadeType.DELETE_ORPHAN);
+        cases['LocationHierarchy.delete.orphans'] = backend.delete(
+            view(LocationHierarchy),
+            undefined,
+            CascadeType.DELETE_ORPHAN
+        );
     }
     return cases;
 }
