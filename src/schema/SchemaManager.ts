@@ -139,12 +139,15 @@ export class SchemaManager {
         private readonly options: SchemaOptions
     ) {}
 
-    /** Ensures every catalog on its databases: indexes before constraints. Returns the results, by database. */
+    /**
+     * Ensures every catalog on its databases, and every item given to `ensure`: indexes before constraints. Returns the
+     * results, by database.
+     */
     async enforce(): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
         return this.serialized(async () => this.apply(false));
     }
 
-    /** Drops and makes every declared item. Destructive. */
+    /** Drops and makes every declared item, and every item given to `ensure`. Destructive. */
     async recreateAll(): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
         return this.serialized(async () => this.apply(true));
     }
@@ -183,11 +186,16 @@ export class SchemaManager {
             return new Map();
         }
         return this.serialized(async () => {
-            const candidate = this.withRuntime(catalog);
+            const databases = [...this.catalogsByDatabase([catalog]).keys()];
+            // The items given are merged as a catalog's are, so two of one identity that differ fail, on no database too;
+            // such a conflict is on every database they are for, so names one only when there is one.
+            const only = databases.length === 1 ? databases[0] : undefined;
+            const items = this.merged(only, [catalog]).map(([spec]) => spec);
+            const candidate = this.withRuntime(catalog, items);
             const runtime = this.runtimeCatalogs(candidate);
             const byDatabase = this.catalogsByDatabase([...this.options.catalogs, ...runtime]);
             // Plan every database before anything is kept or applied, so a conflict leaves both as they were.
-            const plans = [...this.catalogsByDatabase([catalog]).keys()].map(
+            const plans = databases.map(
                 (database) => [database, this.plan(database, byDatabase.get(database)!, runtime)] as const
             );
             this.runtime = candidate;
@@ -208,12 +216,15 @@ export class SchemaManager {
         return next;
     }
 
-    /** The runtime items with the catalog's added, each replacing an item of its identity, owner and target. */
-    private withRuntime(catalog: SchemaCatalog): Map<string, RuntimeItems> {
+    /**
+     * The runtime items with the catalog's added, each replacing an item of its identity, owner and target. A target is
+     * its set of databases, as drivine4j's is, whatever the order they are named in.
+     */
+    private withRuntime(catalog: SchemaCatalog, items: SchemaSpec[]): Map<string, RuntimeItems> {
         const copy = new Map([...this.runtime].map(([key, it]) => [key, { ...it, items: new Map(it.items) }]));
-        const key = JSON.stringify([catalog.name, catalog.databases ?? null]);
+        const key = JSON.stringify([catalog.name, catalog.databases ? [...new Set(catalog.databases)].sort() : null]);
         const entry = copy.get(key) ?? { owner: catalog.name, databases: catalog.databases, items: new Map() };
-        catalog.items.forEach((spec) => entry.items.set(keyOf(spec), spec));
+        items.forEach((spec) => entry.items.set(keyOf(spec), spec));
         copy.set(key, entry);
         return copy;
     }
@@ -447,9 +458,10 @@ export class SchemaManager {
     /**
      * The items of a database's catalogs, each once. Two declarations of one item must agree on everything portable;
      * where one of them carries engine options it wins whole (a vector index tuned in a catalog spec beside the
-     * @VectorIndex that drives queries), and two that both carry different engine options conflict.
+     * @VectorIndex that drives queries), and two that both carry different engine options conflict. With no
+     * `database`, the conflict names none.
      */
-    private merged(database: string, catalogs: SchemaCatalog[]): [SchemaSpec, SchemaCatalog][] {
+    private merged(database: string | undefined, catalogs: SchemaCatalog[]): [SchemaSpec, SchemaCatalog][] {
         const items = new Map<string, [SchemaSpec, SchemaCatalog]>();
         for (const catalog of catalogs) {
             for (const spec of catalog.items) {
@@ -462,7 +474,7 @@ export class SchemaManager {
     }
 
     private reconciled(
-        database: string,
+        database: string | undefined,
         [held, heldBy]: [SchemaSpec, SchemaCatalog],
         [spec, by]: [SchemaSpec, SchemaCatalog]
     ): SchemaSpec {
@@ -478,8 +490,9 @@ export class SchemaManager {
             }
         }
         throw new DrivineError(
-            `Two schema catalogs declare the ${spec.kind} on ${spec.label}(${spec.properties.join(', ')}) on ` +
-                `${database} differently, ` +
+            `Two schema catalogs declare the ${spec.kind} on ${spec.label}(${spec.properties.join(', ')}) ` +
+                (database ? `on ${database} ` : '') +
+                `differently, ` +
                 (heldBy.name === by.name
                     ? `both owned by '${by.name}'.`
                     : `owned by '${heldBy.name}' and '${by.name}'.`)

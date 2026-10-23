@@ -1666,6 +1666,9 @@ arrive with an embedding model configured after startup, or an index for each la
 await schemaManager.ensure('dice', vectorIndex('Proposition', 'embedding', model.dimensions));
 ```
 
+With Nest, inject `SchemaManager`. The module provides one only when given `schema`, so an application whose schema is
+all known at runtime gives it `schema: { catalogs: [] }`.
+
 The items join what that owner's catalogs declared, for the life of the manager, and are applied as `enforce` applies
 the owner's:
 
@@ -1675,8 +1678,9 @@ the owner's:
 - **In the owner's inventory.** The owner's `_DrivineSchema` marker records them as ensured at runtime. A later
   `enforce()` applies them with the rest, and `recreateAll()` recreates them. An `enforce` by a manager built later (the
   next process, before the item is ensured again) keeps them in the inventory and doesn't report them as orphans.
-- **Recreated with the owner.** When that later `enforce` recreates the owner's items (its version changed, or
-  `recreateAll`), it has no spec for a runtime item, so it marks it, and the next `ensure` of the item recreates it.
+- **Recreated with the owner.** When that later manager recreates the owner's items (its version changed,
+  `recreateOnStartup`, or `recreateAll`), it has no spec for a runtime item, so it marks it, and the next `ensure` of
+  the item recreates it.
 - **Checked against other owners.** A declaration that conflicts with another owner's, or with the owner's own, fails
   naming both, and nothing is kept or applied on any database. One identical to another owner's is co-owned.
 

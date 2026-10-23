@@ -4,6 +4,7 @@ import {
     EnsureResult,
     GraphObjectManagerFactory,
     NodeFragment,
+    neo4jVectorOptions,
     NodeId,
     PersistenceManagerFactory,
     QuerySpecification,
@@ -116,9 +117,29 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         const schema = manager([dice]);
         await schema.enforce();
         await gom().indexes.drop(startup);
+        const log = jest.spyOn(DrivineLogger.prototype, 'log');
 
-        expect(statuses(await schema.ensure('dice', vector(3)))).toEqual(['VECTOR:CREATED']);
+        try {
+            expect(statuses(await schema.ensure('dice', vector(3)))).toEqual(['VECTOR:CREATED']);
+            expect(log).toHaveBeenCalledWith(
+                `Ensuring schema for owner 'dice' on ${engine.name}: 1 runtime items, 2 declared in all`
+            );
+        } finally {
+            log.mockRestore();
+        }
         expect(await hasRange('RtProp')).toBe(false);
+    });
+
+    it("should record an item the owner's startup catalogs declare too as declared, not ensured at runtime", async () => {
+        const schema = manager([dice]);
+        await schema.enforce();
+
+        expect(statuses(await schema.ensure('dice', startup))).toEqual(['RANGE:ALREADY_MATCHING']);
+        expect(await record('dice')).toEqual({
+            keys: ['RANGE_INDEX:RtProp:contextId:RtProp_contextId_range'],
+            runtime: new Set(),
+            stale: new Set()
+        });
     });
 
     it('should keep, in a manager built later, what an earlier one ensured, without calling it an orphan', async () => {
@@ -206,6 +227,17 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         await next.enforce();
         expect((await record('dice'))!.stale).toEqual(new Set([key]));
         expect(orphanWarnings()).toEqual([]);
+    });
+
+    it('should mark a runtime item it has no spec for on recreateOnStartup', async () => {
+        const first = manager([dice]);
+        await first.enforce();
+        await first.ensure('dice', vector(3));
+
+        await manager([dice], { recreateOnStartup: true }).enforce();
+        expect((await record('dice'))!.stale).toEqual(
+            new Set(['VECTOR_INDEX:RtProp:embedding:RtProp_embedding_vector'])
+        );
     });
 
     it('should keep the mark of an item its manager holds until that manager applies it', async () => {
@@ -302,6 +334,27 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         expect(await dimensions('RtProp')).toEqual(3);
     });
 
+    it('should refuse two items of one identity given at once that differ, and keep nothing', async () => {
+        const schema = manager([]);
+
+        await expect(schema.ensure('dice', vector(3), vector(4))).rejects.toThrow(/differently, both owned by 'dice'/);
+        await schema.enforce();
+        expect(await dimensions('RtProp')).toBeUndefined();
+        expect(await read('dice', 'items')).toBeUndefined();
+    });
+
+    it('should keep one of two items of one identity given at once, the one that pins engine options', async () => {
+        const schema = manager([]);
+        const tuned = vectorIndex('RtProp', 'embedding', 3, 'COSINE', {
+            engineOptions: [neo4jVectorOptions({ quantizationEnabled: false })]
+        });
+
+        const report = [...(await schema.ensure('dice', vector(3), tuned, vector(3))).values()].flat();
+        expect(report.map((it) => `${it.spec.kind}:${it.status}`)).toEqual(['VECTOR:CREATED']);
+        expect(report[0].spec).toEqual(tuned);
+        expect((await record('dice'))!.keys).toEqual(['VECTOR_INDEX:RtProp:embedding:RtProp_embedding_vector']);
+    });
+
     it("should co-own a runtime item identical to another owner's", async () => {
         const shared = rangeIndex('RtShared', 'slug');
         const schema = manager([SchemaCatalog.of(shared).named('app')]);
@@ -376,6 +429,7 @@ describe.each(allStores().filter((it) => it.type === DatabaseType.NEO4J))(
 
         afterAll(async () => {
             await factory.get(engine.name).indexes.drop(vectorIndex('RtDoc', 'embedding', 3));
+            await factory.get(engine.name).indexes.drop(vectorIndex('RtOrder', 'embedding', 4));
             await clearLabels(factory.get(engine.name).persistenceManager, engine, '_DrivineSchema');
             await closeGraphEngines();
         });
@@ -398,6 +452,22 @@ describe.each(allStores().filter((it) => it.type === DatabaseType.NEO4J))(
                     new QuerySpecification(`MATCH (m:_DrivineSchema {scope: 'rag'}) RETURN m.items`)
                 )
             ).toBeUndefined();
+        });
+
+        it('should replace an item ensured again on the same databases named in another order', async () => {
+            const schema = new SchemaManager(factory, { catalogs: [], recreateOnDrift: true });
+            const on = (dimensions: number, ...databases: string[]) =>
+                SchemaCatalog.of(vectorIndex('RtOrder', 'embedding', dimensions))
+                    .named('rag')
+                    .forDatabases(...databases);
+
+            await schema.ensure(on(3, engine.name, 'TRAFFIC'));
+            await schema.ensure(on(4, 'TRAFFIC', engine.name));
+
+            // Were both kept, the merge would refuse them as a conflict.
+            await schema.enforce();
+            const vectors = await factory.get(engine.name).indexes.list('VECTOR');
+            expect(vectors.find((it) => it.label === 'RtOrder')?.dimensions).toEqual(4);
         });
     }
 );

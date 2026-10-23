@@ -1,3 +1,4 @@
+import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { inventoryEntries, readInventory } from '@/schema/SchemaInventory';
 
 describe('A schema marker inventory', () => {
@@ -32,5 +33,14 @@ describe('A schema marker inventory', () => {
             inventoryEntries(['a', 'b', 'c'], new Set(['b', 'c']), new Set(['c'])).split('\n')
         )!;
         expect(recorded).toEqual({ keys: ['a', 'b', 'c'], runtime: new Set(['b', 'c']), stale: new Set(['c']) });
+    });
+
+    it('should read back what it writes on Oracle, which keeps the entries behind its items mark', () => {
+        const written = inventoryEntries(['a', 'b', 'c'], new Set(['b', 'c']), new Set(['c']));
+        expect(readInventory(new OracleBackend().markerItems(`items:${written}`))).toEqual({
+            keys: ['a', 'b', 'c'],
+            runtime: new Set(['b', 'c']),
+            stale: new Set(['c'])
+        });
     });
 });
