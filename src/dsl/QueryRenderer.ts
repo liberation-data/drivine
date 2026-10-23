@@ -110,8 +110,19 @@ export class QueryRenderer {
         return { ...this.bindings };
     }
 
+    /**
+     * The condition as a whole `WHERE`. Its outermost `AND`, and any `allOf` directly in it, stand without
+     * parentheses, on every engine: what a statement joins to a `WHERE` it joins by `AND`, and FalkorDB 6 reads a
+     * condition in parentheses it does not need by scanning the label, where it would have used an index
+     * (FalkorDB/FalkorDB#3331). An `anyOf` or a `not` in it keeps its own.
+     */
     where(condition: Condition, scope: Scope, alias: string): string {
-        return this.condition(condition, scope, { node: alias });
+        const aliases = { node: alias };
+        const conjuncts = (it: Condition): Condition[] =>
+            it.kind === 'AND' && it.conditions.length ? it.conditions.flatMap(conjuncts) : [it];
+        return conjuncts(condition)
+            .map((it) => this.condition(it, scope, aliases))
+            .join(' AND ');
     }
 
     /**
