@@ -126,7 +126,8 @@ function staleAfter(
  * known only later is given to `ensure`, under an owner.
  *
  * The catalogs are read once, when the manager is built: one made later is never seen, and `enforce` applies the same
- * list again. With nothing to apply (no catalog, or only empty ones) it says so, naming the empty ones.
+ * list again. With nothing to apply (no catalog, or only empty ones, and nothing given to `ensure`) it says so, naming
+ * the empty ones.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
@@ -276,10 +277,12 @@ export class SchemaManager {
 
     /**
      * Says why there is nothing to apply, so that a catalog never passed and one that came out empty can be told from an
-     * application with no schema to manage. Both say the catalogs are read once: one made after the manager is not seen.
+     * application with no schema to manage. Both say the catalogs are read once: one made after the manager is not seen,
+     * and schema known later is given to `ensure`. Runtime items count, so a manager given only those applies them.
      */
     private logNothingToApply(): void {
-        const once = 'Catalogs are read once, when the SchemaManager is built.';
+        const once =
+            'Catalogs are read once, when the SchemaManager is built; schema known later is given to SchemaManager.ensure.';
         const catalogs = this.options.catalogs;
         if (!catalogs.length) {
             this.logger.log(`Schema management found no SchemaCatalog; nothing to apply. ${once}`);

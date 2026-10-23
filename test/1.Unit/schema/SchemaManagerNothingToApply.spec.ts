@@ -24,11 +24,11 @@ describe('SchemaManager with nothing to apply', () => {
 
     afterEach(() => jest.restoreAllMocks());
 
-    it('should say there is no catalog at all, and that the catalogs are read once', async () => {
+    it('should say there is no catalog at all, that the catalogs are read once, and where schema known later goes', async () => {
         expect(await manager([]).enforce()).toEqual(new Map());
         expect(lines()).toEqual([
             'Schema management found no SchemaCatalog; nothing to apply. ' +
-                'Catalogs are read once, when the SchemaManager is built.'
+                'Catalogs are read once, when the SchemaManager is built; schema known later is given to SchemaManager.ensure.'
         ]);
         expect(warn).not.toHaveBeenCalled();
     });
@@ -42,7 +42,7 @@ describe('SchemaManager with nothing to apply', () => {
         ]).enforce();
         expect(lines()).toEqual([
             "Schema management found 4 SchemaCatalog(s), all empty: 'dice', unnamed (2), 'rag'; nothing to apply. " +
-                'Catalogs are read once, when the SchemaManager is built.'
+                'Catalogs are read once, when the SchemaManager is built; schema known later is given to SchemaManager.ensure.'
         ]);
     });
 
