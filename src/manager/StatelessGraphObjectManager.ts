@@ -639,7 +639,8 @@ export class StatelessGraphObjectManager {
     /**
      * Deletes the object whose root has the id, with the root's relationships. A view's root is deleted only if it
      * meets the view's requirements, and `where`, a predicate over `n`, when given. A cascade deletes nodes the view
-     * reaches too. Returns the number of roots deleted: 1, or 0 when there was none.
+     * reaches too, through the relationships a save writes: it leaves what a read-only field loads. Returns the number
+     * of roots deleted: 1, or 0 when there was none.
      *
      * A view that contains itself is deleted as it loads: every level of it, and what each level holds. A cascade that
      * finds a node one level below such a relationship's maxDepth is refused before anything is written, rather than

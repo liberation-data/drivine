@@ -111,9 +111,9 @@ export abstract class SqlViews {
 
     /**
      * What a cascade from the roots the predicate `roots` selects of the node row `n` reaches: queries of the ids of the nodes a load
-     * of the view reaches, as far as each relationship's maxDepth, and only into nested views whose requirements a node
-     * meets, as a load would; each relationship followed; and for a relationship to views of the same class, the query
-     * of the nodes one level below its maxDepth.
+     * of the view reaches through the relationships a save writes, as far as each relationship's maxDepth, and only into
+     * nested views whose requirements a node meets, as a load would; each relationship followed; and for a relationship
+     * to views of the same class, the query of the nodes one level below its maxDepth.
      */
     cascade(model: GraphViewModel, roots: string): SqlCascade {
         const cascade: SqlCascade = { reached: [], followed: [], beyond: [] };
@@ -129,21 +129,11 @@ export abstract class SqlViews {
         wheres: string[],
         cascade: SqlCascade
     ): void {
-        for (const rel of model.relationships) {
+        // A read-only field (@ReadOnly, or a list of fragments read over several hops) is not the view's to delete.
+        // A view nested in itself is not one: each level is one relationship from the level above.
+        for (const rel of model.relationships.filter((it) => !it.readOnly)) {
             const depth = this.depth[rel.field] ?? rel.maxDepth;
             const into = target(rel);
-            if (rel.related.kind === 'NODE_FRAGMENT' && depth > 1) {
-                const x = this.nextAlias('x');
-                const r = this.nextAlias('r');
-                const reached = this.reached(rel.type, rel.direction, from, depth);
-                cascade.followed.push(rel);
-                cascade.reached.push(
-                    `${this.select(byId(x))}${x}.nid ${froms.join(' ')} CROSS JOIN LATERAL (${reached}) ${r} ` +
-                        `JOIN ${this.graph.nodes} ${x} ON ${x}.nid = ${r}.nid ` +
-                        `WHERE ${[...wheres, this.hasLabels(x, labelsOf(into))].join(' AND ')}`
-                );
-                continue;
-            }
             const deep = path.filter((it) => it === rel).length >= depth;
             if (deep && !(into.kind === 'GRAPH_VIEW' && into.model.type === model.type)) {
                 continue;

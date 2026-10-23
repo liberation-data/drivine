@@ -42,8 +42,9 @@ export interface Cascade {
  * FalkorDB evaluates nested ones wrongly when they are combined (FalkorDB/FalkorDB#2006, #3386).
  *
  * The view's maxDepth and the requirements of its nested views apply, so the list holds what loading the view would
- * load. A node reached by two paths is listed twice. A view that contains itself is read a level at a time, each level
- * holding what the root does.
+ * load through the relationships a save writes. A read-only field is not followed: other code writes what it loads. A
+ * node reached by two paths is listed twice. A view that contains itself is read a level at a time, each level holding
+ * what the root does.
  */
 export class CascadeTargets {
     private aliasCount = 0;
@@ -74,6 +75,11 @@ export class CascadeTargets {
 
     private view(model: GraphViewModel, chain: string, conditions: string[], path: RelationshipModel[]): string[] {
         return model.relationships.flatMap((rel) => {
+            // A read-only field (@ReadOnly, or a list of fragments read over several hops) is not the view's to delete.
+            // A view nested in itself is not one: each level is one relationship from the level above.
+            if (rel.readOnly) {
+                return [];
+            }
             const into = target(rel);
             if (path.filter((it) => it === rel).length >= rel.maxDepth) {
                 if (into.kind === 'GRAPH_VIEW' && into.model.type === model.type) {
@@ -93,8 +99,7 @@ export class CascadeTargets {
     /** The nodes one step of the relationship reaches from the end of `chain`, and the chain that ends in them. */
     private step(rel: RelationshipModel, into: TargetModel, chain: string, conditions: string[]): Step {
         const alias = `c${++this.aliasCount}`;
-        const hops = into.kind === 'NODE_FRAGMENT' && rel.maxDepth > 1 ? `*1..${rel.maxDepth}` : '';
-        const step = `${chain}${hop(rel, hops)}(${alias}`;
+        const step = `${chain}${hop(rel)}(${alias}`;
         const extended = `${step}${labelExpression(labelsOf(into))})`;
         const own = into.kind === 'GRAPH_VIEW' ? new ViewProjector(this.grammar).requirements(into.model, alias) : [];
         const all = [...conditions, ...own];
@@ -117,8 +122,8 @@ function labelsOf(into: TargetModel): string[] {
     return into.kind === 'GRAPH_VIEW' ? into.model.root.labels : into.model.labels;
 }
 
-function hop(rel: RelationshipModel, hops: string = ''): string {
-    const edge = `[:${quoteName(rel.type)}${hops}]`;
+function hop(rel: RelationshipModel): string {
+    const edge = `[:${quoteName(rel.type)}]`;
     switch (rel.direction) {
         case Direction.INCOMING:
             return `<-${edge}-`;
