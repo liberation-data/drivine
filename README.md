@@ -1586,9 +1586,13 @@ Schema statements run outside any transaction. `ensure` returns a result whose `
 | `CREATED` | Nothing existed, and the item was made. |
 | `ALREADY_MATCHING` | A matching item exists; nothing changed. |
 | `DRIFT` | An item exists with a different shape, such as other vector dimensions. Nothing changed: `recreate(spec)` replaces it. |
-| `VIOLATION` | Constraints only: the data breaks it. A sample of the keys held more than once is included, each its `properties`, the `count` of nodes that hold it, and `nodes`: as many of them as the sample size, each its `elementId` (the engine's own id) and the constraint's `nodeIdProperty`. |
+| `VIOLATION` | Constraints only: the data breaks it. A sample of the keys held more than once is included, each its `properties`, the `count` of nodes that hold it, and `nodes`: as many of them as the sample size at most, each its `elementId` (the engine's own id) and the constraint's `nodeIdProperty`. |
 | `BLOCKED_BY_INDEX` | Constraints only, on Neo4j: a plain range index over the same label and properties is in the way of it, and is named in `index`. Nothing changed: `ensure(spec, sampleSize, true)` drops the index and makes the constraint, whose own index serves the same lookups. A key held more than once keeps the index, as a `VIOLATION`. |
 | `RECREATED` | From `recreate(spec)`: the old item dropped and the new one made. |
+
+A `VIOLATION`'s `sample` is a breaking change from 3.2. Each entry used to be the repeated value itself: one property's
+value as it is, or several properties' values as a list. Each entry is now a `ViolatingKey`, and the value is in its
+`properties`.
 
 **Pinning a vector index.** Only the dimensions and similarity are always sent; the rest is the engine's choice, and
 engine defaults change between versions. Pin the HNSW shape portably, and anything engine-specific as an engine option:

@@ -41,7 +41,7 @@ describe('The statement sampling the keys a constraint would refuse', () => {
     it('should number each node within its key on Oracle, naming it by its nid', () => {
         expect(schemaGrammarFor(DatabaseType.ORACLE).conflicts(named, 3)).toEqual(
             `SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('email' VALUE k0), 'count' VALUE MAX(c), 'nodes' VALUE ` +
-                `JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid, 'uuid' VALUE i) ORDER BY nid) RETURNING JSON) AS "value" ` +
+                `JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid, 'uuid' VALUE i) ORDER BY nid RETURNING JSON) RETURNING JSON) AS "value" ` +
                 `FROM (SELECT n.nid, JSON_VALUE(n.props, '$."email"') AS k0, JSON_VALUE(n.props, '$."uuid"') AS i, ` +
                 `COUNT(*) OVER (PARTITION BY JSON_VALUE(n.props, '$."email"')) AS c, ` +
                 `ROW_NUMBER() OVER (PARTITION BY JSON_VALUE(n.props, '$."email"') ORDER BY n.nid) AS r ` +

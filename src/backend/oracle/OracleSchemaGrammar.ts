@@ -254,7 +254,8 @@ END;`
 
     /**
      * Each node of a key that repeats is numbered within its key, and counted with it, so that a row names `limit` of
-     * its nodes at most however many hold the key. A node's own id is its `nid`.
+     * its nodes at most however many hold the key. A node's own id is its `nid`. The nodes are aggregated as JSON, since
+     * as text they would be held to 4000 bytes, and a large sample overflows that (ORA-40478).
      */
     conflicts(spec: UniquenessConstraintSpec, limit: number): string {
         const value = (property: string): string => `JSON_VALUE(n.props, '$${jsonKey(property)}')`;
@@ -271,7 +272,7 @@ END;`
         const partition = values.join(', ');
         return (
             `SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT(${properties}), 'count' VALUE MAX(c), 'nodes' VALUE ` +
-            `JSON_ARRAYAGG(JSON_OBJECT(${node}) ORDER BY nid) RETURNING JSON) AS "value" ` +
+            `JSON_ARRAYAGG(JSON_OBJECT(${node}) ORDER BY nid RETURNING JSON) RETURNING JSON) AS "value" ` +
             `FROM (SELECT n.nid, ${selected}, COUNT(*) OVER (PARTITION BY ${partition}) AS c, ` +
             `ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY n.nid) AS r ` +
             `FROM ${this.graph.nodes} n ` +

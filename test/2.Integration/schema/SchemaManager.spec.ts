@@ -186,6 +186,37 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
     });
 
+    it("should name as many keys, and as many of each one's nodes, as the sample size", async () => {
+        const gom = factory.get(engine.name);
+        const unique = uniquenessConstraint('ManagedDoc', 'id', { nodeIdProperty: 'key' });
+        await gom.constraints.drop(unique);
+        const ids = ['a', 'a', 'a', 'b', 'b', 'b', 'c', 'c', 'c'];
+        await gom.saveAll(ids.map((id, i) => Object.assign(new ManagedDoc(), { key: `k${i}`, id })));
+        const result = await gom.constraints.ensure(unique, 2);
+        expect(result.status).toEqual('VIOLATION');
+        expect(result.sample!.length).toEqual(2);
+        result.sample!.forEach((key) => {
+            expect(Number(key.count)).toEqual(3);
+            expect(key.nodes.length).toEqual(2);
+            const held = ids.flatMap((id, i) => (id === key.properties.id ? [`k${i}`] : []));
+            key.nodes.forEach((node) => expect(held).toContain(node.key));
+        });
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
+    it('should name many nodes of a key when the sample size asks for them', async () => {
+        const gom = factory.get(engine.name);
+        const unique = uniquenessConstraint('ManagedDoc', 'id', { nodeIdProperty: 'key' });
+        await gom.constraints.drop(unique);
+        const held = Array.from({ length: 150 }, (_, i) => `node-key-${String(i).padStart(4, '0')}`);
+        await gom.saveAll(held.map((key) => Object.assign(new ManagedDoc(), { key, id: 'a' })));
+        const result = await gom.constraints.ensure(unique, 200);
+        expect(result.status).toEqual('VIOLATION');
+        expect(result.sample!.map((it) => [Number(it.count), it.nodes.length])).toEqual([[150, 150]]);
+        expect(result.sample![0].nodes.map((it) => it.key).sort()).toEqual(held);
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
     it("should take a fragment's constraint and the same one by hand as one, naming nodes by the fragment's @NodeId", async () => {
         const gom = factory.get(engine.name);
         const byHand = SchemaCatalog.of(uniquenessConstraint('ManagedDoc', 'id'));
