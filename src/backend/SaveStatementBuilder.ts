@@ -291,7 +291,10 @@ export class SaveStatementBuilder {
             if (value == null) {
                 return `${stored} IS NULL`;
             }
-            const param = bind(`_loaded${i}`, model.jsonPacked.has(field) ? JSON.stringify(value) : asCompared(value));
+            const param = bind(
+                `_loaded${i}`,
+                model.jsonPacked.has(field) ? this.packedAsLoaded(property, value) : asCompared(value)
+            );
             const expression = model.vectorFields.has(field) ? this.grammar.vectorValue(param) : param;
             const same = `NOT coalesce(${stored} <> ${expression}, false)`;
             // A value a load gives a node that holds none may have been loaded from none.
@@ -328,6 +331,16 @@ export class SaveStatementBuilder {
             ? `[l IN labels(n) WHERE l IN ${bind('_loadedLabelsClosed', field.members)}]`
             : `[l IN labels(n) WHERE NOT l IN ${bind('_loadedLabelsOwn', model.labels)}]`;
         return [...declared, ...bags, `size(${read}) = size(${held}) AND all(l IN ${held} WHERE l IN labels(n))`];
+    }
+
+    /**
+     * A @JsonPacked field's value as the node held it: the text the load read, so that text another writer packed with
+     * other spacing or escaping is not taken for a change. A value the node held no text for (one a load gives an
+     * absent property) is packed as a save packs it.
+     */
+    private packedAsLoaded(property: string, value: any): any {
+        const text = this.options.loadedProperties?.[property];
+        return typeof text === 'string' ? text : JSON.stringify(value);
     }
 
     private removals(

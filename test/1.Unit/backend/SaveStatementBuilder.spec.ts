@@ -275,6 +275,24 @@ describe('SaveStatementBuilder', () => {
         expect([bindings._loaded0, bindings._loaded3, bindings._loaded4]).toEqual(['T', '{"x":1}', []]);
     });
 
+    it('should compare a packed field as the text the load read, and pack one the node held none for', () => {
+        const loaded = Object.assign(new Note(), { id: 'n1', extra: { a: 1 }, stamp: STAMP });
+        const changed = Object.assign(new Note(), { ...loaded, body: 'C' });
+        const packed = (loadedProperties: Record<string, any>): any[] => {
+            const bindings = new SaveStatementBuilder(NEO4J_GRAMMAR).build(fragment(Note), changed, {
+                nullPolicy: NullPolicy.CLEAR,
+                loaded,
+                loadedProperties
+            }).bindings;
+            return Object.entries(bindings)
+                .filter(([key, value]) => key.startsWith('_loaded') && String(value).includes('"a"'))
+                .map(([, value]) => value);
+        };
+
+        expect(packed({ id: 'n1', extra: '{"a": 1}' })).toEqual(['{"a": 1}']);
+        expect(packed({ id: 'n1' })).toEqual(['{"a":1}']);
+    });
+
     it('should compare a vector field as the engine stores a vector', () => {
         const typed: CypherGrammar = { ...NEO4J_GRAMMAR, vectorValue: (it) => `toVector(${it})` };
         const loaded = Object.assign(new Chunk(), { id: 'k1', embedding: [0.5, 1], stamp: STAMP });

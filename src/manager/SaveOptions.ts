@@ -47,4 +47,9 @@ export interface SaveOptions<T> {
      * may be newer than the data it read.
      */
     loaded?: any;
+    /**
+     * Internal: the root's properties as `update`'s load read them, by stored name. A @JsonPacked field is compared as
+     * the text the node held, not as its value written again: text another writer wrote with other spacing would differ.
+     */
+    loadedProperties?: Record<string, any>;
 }

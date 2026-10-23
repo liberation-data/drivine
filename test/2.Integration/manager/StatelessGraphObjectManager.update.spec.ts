@@ -5,6 +5,7 @@ import {
     DatabaseType,
     GraphRelationship,
     GraphView,
+    JsonPacked,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -73,6 +74,14 @@ enum Shade {
 class Swatch {
     @NodeId() id: string;
     @NodeLabels(Shade) shades: Set<string> = new Set();
+    @NodeStamp() stamp?: string;
+}
+
+@NodeFragment({ labels: ['UpdateTest', 'Packed'] })
+class Packed {
+    @NodeId() id: string;
+    text?: string;
+    @JsonPacked() prefs?: Record<string, any>;
     @NodeStamp() stamp?: string;
 }
 
@@ -309,6 +318,17 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
             await pm.execute(new QuerySpecification("MATCH (n:Tagged {id: 't1'}) SET n.`meta.seen` = datetime()"));
             await gom.update(Tagged, 't1', (it) => void (it.text = 'two'), 1);
             expect((await gom.load(Tagged, 't1'))!.text).toEqual('two');
+        });
+
+        it('should update a node whose packed text another writer wrote with other spacing, at the first attempt', async () => {
+            await gom.save(make(Packed, { id: 'k1', text: 'one', prefs: { a: 1 } }));
+            // As drivine-python, or a migration, packs it: not as JSON.stringify would.
+            await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = '{"a": 1}'`));
+
+            await gom.update(Packed, 'k1', (it) => void (it.text = 'two'), 1);
+
+            const updated = (await gom.load(Packed, 'k1'))!;
+            expect([updated.text, updated.prefs]).toEqual(['two', { a: 1 }]);
         });
 
         it('should replace a view’s list that lost an item, and add to one that grew', async () => {
