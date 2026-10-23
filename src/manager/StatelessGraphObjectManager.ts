@@ -293,21 +293,7 @@ export class StatelessGraphObjectManager {
     }
 
     async load<T>(type: ClassRef<T>, id: unknown, options: Pick<LoadOptions, 'depth'> = {}): Promise<T | undefined> {
-        const target = this.modelOf(type);
-        const statement =
-            target.kind === 'GRAPH_VIEW'
-                ? this.backend.loadView(target.model, options.depth)
-                : this.backend.loadFragment(target.model);
-        const rows = await this.persistenceManager.query<any>(statement.spec({ id }));
-        if (rows.length > 1) {
-            throw new DrivineError(`${rows.length} ${type.name} roots have the id ${String(id)}. An id is one node's.`);
-        }
-        if (!rows.length) {
-            return undefined;
-        }
-        return target.kind === 'GRAPH_VIEW'
-            ? this.mapper.view<T>(target.model, rows[0])
-            : this.mapper.fragment<T>(target.model, rows[0]);
+        return (await this.loadRow(type, id, options.depth))?.object;
     }
 
     async count<T>(
@@ -439,7 +425,9 @@ export class StatelessGraphObjectManager {
      * set to null cleared, and for a view each relationship list that lost an item replaced (lists that only grew are
      * added to). The save is checked against the stamp that was loaded; if the node changed meanwhile, it is loaded
      * again and the change applied again, `attempts` times in all, then StaleObjectException is thrown. Without a
-     * `@NodeStamp` field a change by another writer is not noticed.
+     * `@NodeStamp` field a change by another writer is not noticed. On Neo4j, whose reads take no snapshot, a load can
+     * be handed another writer's stamp with the data from before its write, so the save compares each field of the
+     * root as it was loaded too: each field's value, each property bag key by key, and the @NodeLabels field.
      *
      * `change` may change the object it is given or return a copy, but not give it another id or class. Returns the
      * saved object, or undefined when there is no such node or it is deleted meanwhile. A related node is written
@@ -453,13 +441,16 @@ export class StatelessGraphObjectManager {
     ): Promise<T | undefined> {
         const target = this.modelOf(type);
         for (let attempt = 1; ; attempt++) {
-            const loaded = await this.load(type, id);
-            if (loaded === undefined) {
+            const found = await this.loadRow(type, id);
+            if (found === undefined) {
                 return undefined;
             }
+            const loaded = found.object;
             const before = ObjectUtils.deepCopy(loaded);
             const changed = ((await change(loaded)) ?? loaded) as T;
-            const options = this.changeOf(target, before, changed);
+            // The root's properties as the load read them, which the save compares a packed field with.
+            const loadedProperties = (target.kind === 'GRAPH_VIEW' ? found.row?.root?.props : found.row?.props) ?? {};
+            const options: SaveOptions<any> = { ...this.changeOf(target, before, changed), loadedProperties };
             try {
                 return await this.write(changed, options, false);
             } catch (failure) {
@@ -671,6 +662,31 @@ export class StatelessGraphObjectManager {
         return rows[0];
     }
 
+    /** The object with the id, and the row it was mapped from; undefined when there is none. */
+    private async loadRow<T>(
+        type: ClassRef<T>,
+        id: unknown,
+        depth?: LoadOptions['depth']
+    ): Promise<{ object: T; row: any } | undefined> {
+        const target = this.modelOf(type);
+        const statement =
+            target.kind === 'GRAPH_VIEW'
+                ? this.backend.loadView(target.model, depth)
+                : this.backend.loadFragment(target.model);
+        const rows = await this.persistenceManager.query<any>(statement.spec({ id }));
+        if (rows.length > 1) {
+            throw new DrivineError(`${rows.length} ${type.name} roots have the id ${String(id)}. An id is one node's.`);
+        }
+        if (!rows.length) {
+            return undefined;
+        }
+        const object =
+            target.kind === 'GRAPH_VIEW'
+                ? this.mapper.view<T>(target.model, rows[0])
+                : this.mapper.fragment<T>(target.model, rows[0]);
+        return { object, row: rows[0] };
+    }
+
     /** A condition as Cypher over the root, `n`, with its values: written from the class's references, or as given. */
     private condition<T>(
         target: TargetModel,
@@ -725,7 +741,8 @@ export class StatelessGraphObjectManager {
                       })
                       .map((rel) => rel.field)
                 : [];
-        return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}) };
+        // The root as loaded, before the change ran, which the save compares with the node where a read takes no snapshot.
+        return { only, nullPolicy: NullPolicy.CLEAR, ...(replace.length ? { replace } : {}), loaded: rootBefore };
     }
 
     /**

@@ -11,7 +11,7 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
  * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
  * give the object it is copied onto a prototype of the store's choosing.
  */
-const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+export const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Property names beginning with this are Drivine's own, and are never mapped onto an object. */
 export const RESERVED_PREFIX = '__drivine.';

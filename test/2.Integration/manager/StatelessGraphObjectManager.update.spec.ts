@@ -1,13 +1,18 @@
 import {
+    ClassRef,
     CypherBackend,
     cypherGrammarFor,
+    DatabaseType,
     GraphRelationship,
     GraphView,
+    JsonPacked,
     ModelRegistry,
     NodeFragment,
     NodeId,
+    NodeLabels,
     NodeStamp,
     PersistenceManager,
+    PropertyBag,
     QuerySpecification,
     Root,
     StatelessGraphObjectManager
@@ -34,8 +39,70 @@ class PropositionView {
     @GraphRelationship({ type: 'MENTIONS', target: () => Entity }) mentions: Entity[];
 }
 
+@NodeFragment({ labels: ['UpdateTest', 'Finding'] })
+class Finding {
+    @NodeId() id: string;
+    sources: string[] = [];
+    @NodeStamp() stamp?: string;
+}
+
+@NodeFragment({ labels: ['UpdateTest', 'Tagged'] })
+class Tagged {
+    @NodeId() id: string;
+    text?: string;
+    @PropertyBag() meta: Record<string, any> = {};
+    @NodeStamp() stamp?: string;
+}
+
+/** A flat bag and an open set of labels beside a stamp. */
+@NodeFragment({ labels: ['UpdateTest', 'Sticker'] })
+class Sticker {
+    @NodeId() id: string;
+    @NodeLabels() labels: string[] = [];
+    @PropertyBag({ flat: true }) extras: Record<string, any> = {};
+    @NodeStamp() stamp?: string;
+}
+
+enum Shade {
+    RED = 'Red',
+    GREEN = 'Green',
+    BLUE = 'Blue'
+}
+
+/** A closed set of labels: the field speaks for the Shade labels and no other. */
+@NodeFragment({ labels: ['UpdateTest', 'Swatch'] })
+class Swatch {
+    @NodeId() id: string;
+    @NodeLabels(Shade) shades: Set<string> = new Set();
+    @NodeStamp() stamp?: string;
+}
+
+@NodeFragment({ labels: ['UpdateTest', 'Packed'] })
+class Packed {
+    @NodeId() id: string;
+    text?: string;
+    @JsonPacked() prefs?: Record<string, any>;
+    @NodeStamp() stamp?: string;
+}
+
+@GraphView()
+class PackedView {
+    @Root() packed: Packed;
+    @GraphRelationship({ type: 'MENTIONS', target: () => Entity }) mentions: Entity[];
+}
+
+/** A field the store holds as a temporal value, which a load hands over as a Date. */
+@NodeFragment({ labels: ['UpdateTest', 'Dated'] })
+class Dated {
+    @NodeId() id: string;
+    text?: string;
+    seen?: Date;
+    @NodeStamp() stamp?: string;
+}
+
 const proposition = (fields: Partial<Proposition>): Proposition => Object.assign(new Proposition(), fields);
 const entity = (id: string, name?: string): Entity => Object.assign(new Entity(), { id, name });
+const make = <T extends object>(type: new () => T, fields: Partial<T>): T => Object.assign(new type(), fields);
 
 describe.each(graphEngines())('update and create on $type', (engine) => {
     let pm: PersistenceManager;
@@ -43,7 +110,11 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
 
     beforeAll(() => {
         pm = persistenceManagerFor(engine);
-        gom = new StatelessGraphObjectManager(pm, new CypherBackend(cypherGrammarFor(engine.type)), new ModelRegistry());
+        gom = new StatelessGraphObjectManager(
+            pm,
+            new CypherBackend(cypherGrammarFor(engine.type)),
+            new ModelRegistry()
+        );
     });
 
     beforeEach(async () => {
@@ -106,6 +177,178 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
                 /can't give it another id/
             );
             await expect(gom.update(Proposition, 'p1', () => entity('p1') as any)).rejects.toThrow(/must leave it one/);
+        });
+
+        it("should keep every writer's change when many writers update one node at once", async () => {
+            // A load that runs while another writer commits can be handed that writer's stamp with the data from
+            // before its write, on an engine that reads without a snapshot. An update of what it loaded then passes
+            // the stamp's check and writes over the other writer's change.
+            const [writers, each] = [8, 50];
+            await gom.save(make(Finding, { id: 'f1' }));
+            await Promise.all(
+                Array.from({ length: writers }, async (_, writer) => {
+                    for (let k = 0; k < each; k++) {
+                        await gom.update(Finding, 'f1', (it) => void it.sources.push(`w${writer}-${k}`), 500);
+                    }
+                })
+            );
+            const kept = new Set((await gom.load(Finding, 'f1'))!.sources);
+            const lost = Array.from(
+                { length: writers * each },
+                (_, i) => `w${Math.floor(i / each)}-${i % each}`
+            ).filter((it) => !kept.has(it));
+            expect(lost).toEqual([]);
+        }, 300_000);
+
+        /**
+         * Runs an update whose first load is overtaken by `unmarked`, Cypher that changes the node and leaves its stamp
+         * alone: the node as a load sees it when it is handed another writer's stamp with the data from before that
+         * writer's write. Gives how many times the change was applied.
+         */
+        const appliedAfterUnmarked = async <T extends object>(
+            type: ClassRef<T>,
+            id: string,
+            unmarked: string,
+            change: (loaded: T) => void
+        ): Promise<number> => {
+            let applied = 0;
+            const updated = await gom.update(type, id, async (loaded) => {
+                if (applied++ === 0) {
+                    await pm.execute(new QuerySpecification(unmarked));
+                }
+                change(loaded);
+            });
+            expect(updated).toBeDefined();
+            return applied;
+        };
+
+        // Neo4j reads without a snapshot: there an update compares the root's fields as loaded, not only the stamp.
+        const readsWithoutSnapshot = engine.type === DatabaseType.NEO4J ? it : it.skip;
+
+        readsWithoutSnapshot(
+            'should load again when a field differs from what it loaded under the same stamp',
+            async () => {
+                await gom.save(make(Finding, { id: 'f1', sources: ['first'] }));
+
+                const applied = await appliedAfterUnmarked(
+                    Finding,
+                    'f1',
+                    "MATCH (n:Finding {id: 'f1'}) SET n.sources = n.sources + 'theirs'",
+                    (it) => void it.sources.push('mine')
+                );
+
+                expect(applied).toEqual(2);
+                expect((await gom.load(Finding, 'f1'))!.sources.sort()).toEqual(['first', 'mine', 'theirs']);
+            }
+        );
+
+        readsWithoutSnapshot(
+            'should load again when a bag entry differs from what it loaded under the same stamp',
+            async () => {
+                await gom.save(make(Tagged, { id: 't1', text: 'one', meta: { owner: 'first' } }));
+
+                const applied = await appliedAfterUnmarked(
+                    Tagged,
+                    't1',
+                    "MATCH (n:Tagged {id: 't1'}) SET n.`meta.owner` = 'theirs'",
+                    (it) => void (it.meta.mine = 'yes')
+                );
+
+                expect(applied).toEqual(2);
+                expect((await gom.load(Tagged, 't1'))!.meta).toEqual({ owner: 'theirs', mine: 'yes' });
+            }
+        );
+
+        readsWithoutSnapshot(
+            'should load again when a bag gained an entry under the same stamp, and not for a property outside it',
+            async () => {
+                await gom.save(make(Tagged, { id: 't1', text: 'one', meta: { owner: 'first' } }));
+
+                const gained = "MATCH (n:Tagged {id: 't1'}) SET n.`meta.extra` = 'theirs'";
+                const outside = "MATCH (n:Tagged {id: 't1'}) SET n.unrelated = 'theirs'";
+                expect(await appliedAfterUnmarked(Tagged, 't1', gained, (it) => void (it.text = 'two'))).toEqual(2);
+                expect(await appliedAfterUnmarked(Tagged, 't1', outside, (it) => void (it.text = 'three'))).toEqual(1);
+                expect((await gom.load(Tagged, 't1'))!.meta).toEqual({ owner: 'first', extra: 'theirs' });
+            }
+        );
+
+        readsWithoutSnapshot(
+            'should load again when a flat bag or an open set of labels differs under the same stamp',
+            async () => {
+                await gom.save(make(Sticker, { id: 's1', labels: ['Shiny'], extras: { size: 1 } }));
+
+                const coloured = "MATCH (n:Sticker {id: 's1'}) SET n.colour = 'red'";
+                const sneaked = "MATCH (n:Sticker {id: 's1'}) SET n:Sneaked";
+                expect(await appliedAfterUnmarked(Sticker, 's1', coloured, (it) => void (it.extras.size = 2))).toEqual(
+                    2
+                );
+                expect(await appliedAfterUnmarked(Sticker, 's1', sneaked, (it) => void (it.extras.size = 3))).toEqual(
+                    2
+                );
+
+                const sticker = (await gom.load(Sticker, 's1'))!;
+                expect(sticker.extras).toEqual({ size: 3, colour: 'red' });
+                expect(sticker.labels).toContain('Sneaked');
+            }
+        );
+
+        readsWithoutSnapshot(
+            'should load again when a closed set of labels differs under the same stamp, and not for a label outside it',
+            async () => {
+                await gom.save(make(Swatch, { id: 'w1', shades: new Set([Shade.BLUE]) }));
+
+                const red = "MATCH (n:Swatch {id: 'w1'}) SET n:Red";
+                const unrelated = "MATCH (n:Swatch {id: 'w1'}) SET n:Unrelated";
+                expect(await appliedAfterUnmarked(Swatch, 'w1', red, (it) => void it.shades.add(Shade.GREEN))).toEqual(
+                    2
+                );
+                expect(
+                    await appliedAfterUnmarked(Swatch, 'w1', unrelated, (it) => void it.shades.delete(Shade.BLUE))
+                ).toEqual(1);
+
+                // The label another writer added is kept.
+                expect([...(await gom.load(Swatch, 'w1'))!.shades].sort()).toEqual(['Green', 'Red']);
+            }
+        );
+
+        readsWithoutSnapshot('should update a node holding a temporal value it does not change', async () => {
+            await gom.save(make(Dated, { id: 'd1', text: 'one' }));
+            await pm.execute(new QuerySpecification("MATCH (n:Dated {id: 'd1'}) SET n.seen = datetime()"));
+
+            expect((await gom.load(Dated, 'd1'))!.seen).toBeInstanceOf(Date);
+            await gom.update(Dated, 'd1', (it) => void (it.text = 'two'), 1);
+
+            expect((await gom.load(Dated, 'd1'))!.text).toEqual('two');
+
+            await gom.save(make(Tagged, { id: 't1', text: 'one' }));
+            await pm.execute(new QuerySpecification("MATCH (n:Tagged {id: 't1'}) SET n.`meta.seen` = datetime()"));
+            await gom.update(Tagged, 't1', (it) => void (it.text = 'two'), 1);
+            expect((await gom.load(Tagged, 't1'))!.text).toEqual('two');
+        });
+
+        it('should update a node whose packed text another writer wrote with other spacing, at the first attempt', async () => {
+            await gom.save(make(Packed, { id: 'k1', text: 'one', prefs: { a: 1 } }));
+            // As drivine-python, or a migration, packs it: not as JSON.stringify would.
+            await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = '{"a": 1}'`));
+
+            await gom.update(Packed, 'k1', (it) => void (it.text = 'two'), 1);
+
+            const updated = (await gom.load(Packed, 'k1'))!;
+            expect([updated.text, updated.prefs]).toEqual(['two', { a: 1 }]);
+        });
+
+        it('should update a view whose root holds packed text another writer wrote, and text that is no JSON', async () => {
+            await gom.save(make(Packed, { id: 'k1', text: 'one', prefs: { a: 1 } }));
+            await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = '{"a": 1}'`));
+            await gom.update(PackedView, 'k1', (it) => void (it.packed.text = 'two'), 1);
+            expect((await gom.load(Packed, 'k1'))!.text).toEqual('two');
+
+            // A load hands text that isn't JSON, or a value that isn't text, over as it is.
+            for (const [i, held] of [`'plain'`, '5', '[1, 2]'].entries()) {
+                await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = ${held}`));
+                await gom.update(Packed, 'k1', (it) => void (it.text = `again ${i}`), 1);
+                expect((await gom.load(Packed, 'k1'))!.text).toEqual(`again ${i}`);
+            }
         });
 
         it('should replace a view’s list that lost an item, and add to one that grew', async () => {

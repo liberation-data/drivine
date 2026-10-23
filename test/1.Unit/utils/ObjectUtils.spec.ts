@@ -80,4 +80,18 @@ describe('ObjectUtils deepCopy and deepEqual', () => {
         expect(ObjectUtils.deepEqual([1, 2], { 0: 1, 1: 2 })).toBe(false);
         expect(ObjectUtils.deepEqual(null, undefined)).toBe(false);
     });
+
+    it('should copy and compare sets and maps by what they hold', () => {
+        const source = { labels: new Set(['Red']), byName: new Map([['a', new Point(1)]]) };
+        const copy = ObjectUtils.deepCopy(source);
+        expect([...copy.labels]).toEqual(['Red']);
+        expect(copy.byName.get('a')).toBeInstanceOf(Point);
+        expect(copy.byName.get('a')).not.toBe(source.byName.get('a'));
+        expect(ObjectUtils.deepEqual(copy, source)).toBe(true);
+        copy.labels.add('Green');
+        expect(source.labels.has('Green')).toBe(false);
+        expect(ObjectUtils.deepEqual(copy.labels, source.labels)).toBe(false);
+        expect(ObjectUtils.deepEqual(new Map([['a', 1]]), new Map([['a', 2]]))).toBe(false);
+        expect(ObjectUtils.deepEqual(new Set(), [])).toBe(false);
+    });
 });
