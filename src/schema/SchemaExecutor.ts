@@ -6,15 +6,12 @@ import { DrivineError } from '@/DrivineError';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { NativeOperation } from '@/schema/SchemaGrammar';
 import { whenNotContended } from '@/manager/Contention';
-import { Neo4jError } from 'neo4j-driver';
+import { transientOverBolt } from '@/backend/CypherGrammar';
 
 /** A transient error over Bolt, or FalkorDB turning a write away while another is in progress. */
 function contended(failure: unknown): boolean {
     for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
-        if (
-            (cause instanceof Neo4jError && Neo4jError.isRetriable(cause)) ||
-            /another write is in progress/i.test(cause.message ?? '')
-        ) {
+        if (transientOverBolt(cause) || /another write is in progress/i.test(cause.message ?? '')) {
             return true;
         }
     }

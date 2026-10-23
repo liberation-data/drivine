@@ -86,9 +86,24 @@ const someMatchSubquery = (
     where: (relProperties: string) => string
 ): string => existsSubquery(pattern, where(rel));
 
-/** A transient error over Bolt: a deadlock on Neo4j, a conflicting transaction on Memgraph. */
-const transientOverBolt = (failure: unknown): boolean =>
-    failure instanceof Neo4jError && Neo4jError.isRetriable(failure);
+/** Transient codes that are not another writer's doing: the Java driver, and so drivine4j, doesn't retry them. */
+const NOT_CONTENTION = [
+    'Neo.TransientError.Transaction.Terminated',
+    'Neo.TransientError.Transaction.LockClientStopped'
+];
+
+/**
+ * A transient error over Bolt: a deadlock on Neo4j (`Neo.TransientError.*`), a conflicting transaction on Memgraph
+ * (`Memgraph.TransientError.*`).
+ *
+ * A lost connection (`ServiceUnavailable`, `SessionExpired`) or an expired authorization is not run again, though the
+ * driver's `Neo4jError.isRetriable` calls it retriable: the save may have been applied before the connection went, and
+ * a second run would find its own stamp and report a save that was applied as refused.
+ */
+export const transientOverBolt = (failure: unknown): boolean =>
+    failure instanceof Neo4jError &&
+    /^[^.]+\.TransientError\./.test(failure.code ?? '') &&
+    !NOT_CONTENTION.includes(failure.code);
 
 const plainVector = (expression: string): string => expression;
 
