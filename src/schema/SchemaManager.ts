@@ -6,6 +6,7 @@ import { DrivineLogger } from '@/logger';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
 import { SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
+import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
 import {
     EnsureResult,
     IndexSpec,
@@ -63,6 +64,10 @@ function coOwnedKeys(owners: Map<string, SchemaCatalog[]>): Set<string> {
 /**
  * Holds catalogs of indexes and constraints on the databases they apply to. `enforce` is idempotent: it makes what is
  * missing, and recreates a catalog's items when its version changed. `recreateAll` drops and makes everything.
+ *
+ * Before anything is applied, a vector index over a property that a fragment class stores in a field without
+ * @VectorIndex is refused, naming the class, the field and the spec; a fragment class built later is checked against
+ * the specs applied here. See VectorAnnotationCheck.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
@@ -83,6 +88,7 @@ export class SchemaManager {
     }
 
     private async apply(recreate: boolean): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
+        VectorAnnotationCheck.register(this.options.catalogs);
         const report = new Map<string, EnsureResult<SchemaSpec>[]>();
         for (const [database, catalogs] of this.catalogsByDatabase()) {
             const gom = this.factory.get(database);
