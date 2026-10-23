@@ -47,7 +47,8 @@ export class SchemaCatalog {
                 const properties = it.fields.map(graphName);
                 switch (it.kind) {
                     case 'UNIQUE':
-                        return uniquenessConstraint(label, properties);
+                        // A violation's sample names each conflicting node by the fragment's @NodeId too.
+                        return uniquenessConstraint(label, properties, { nodeIdProperty: model.nodeIdProperty });
                     case 'FULLTEXT':
                         return fullTextIndex(label, properties);
                     case 'VECTOR': {

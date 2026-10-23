@@ -8,6 +8,7 @@ import {
     SchemaCatalog,
     SchemaManager,
     TransactionContextHolder,
+    Unique,
     uniquenessConstraint,
     vectorIndex
 } from '@liberation-data/drivine';
@@ -153,7 +154,47 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow();
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
     });
+
+    it('should name the conflicting nodes in a violation, by their own ids and by the node id given', async () => {
+        const gom = factory.get(engine.name);
+        const unique = uniquenessConstraint('ManagedDoc', 'id', { nodeIdProperty: 'key' });
+        await gom.constraints.drop(unique);
+        await gom.saveAll(['a', 'a', 'b'].map((id, i) => Object.assign(new ManagedDoc(), { key: `k${i}`, id })));
+        const report = await manager([SchemaCatalog.of(unique)], { mode: 'WARN' }).enforce();
+        const [key] = [...report.values()].flat()[0].sample!;
+        const nodes = [...key.nodes].sort((x, y) => String(x.key).localeCompare(String(y.key)));
+        expect([key.properties, Number(key.count), nodes.map((it) => it.key)]).toEqual([{ id: 'a' }, 2, ['k0', 'k1']]);
+        expect(new Set(nodes.map((it) => String(it.elementId))).size).toEqual(2);
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
+    it("should take a fragment's constraint and the same one by hand as one, naming nodes by the fragment's @NodeId", async () => {
+        const gom = factory.get(engine.name);
+        const byHand = SchemaCatalog.of(uniquenessConstraint('ManagedDoc', 'id'));
+        const fromFragment = SchemaCatalog.fromFragments(undefined, UniqueDoc);
+        await gom.constraints.drop(uniquenessConstraint('ManagedDoc', 'id'));
+        await gom.saveAll(['a', 'a'].map((id, i) => Object.assign(new ManagedDoc(), { key: `k${i}`, id })));
+        for (const catalogs of [
+            [byHand, fromFragment.named('rag')],
+            [fromFragment, byHand.named('rag')],
+            [byHand, fromFragment]
+        ]) {
+            const report = await manager(catalogs, { mode: 'WARN' }).enforce();
+            const violations = [...report.values()].flat().filter((it) => it.status === 'VIOLATION');
+            expect(violations.length).toBeGreaterThan(0);
+            violations.forEach((it) =>
+                expect(it.sample![0].nodes.map((node) => node.key).sort()).toEqual(['k0', 'k1'])
+            );
+        }
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
 });
+
+@NodeFragment({ labels: ['ManagedDoc'] })
+class UniqueDoc {
+    @NodeId() key: string;
+    @Unique() id: string;
+}
 
 @NodeFragment({ labels: ['ManagedDoc'] })
 class ManagedDoc {

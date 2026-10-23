@@ -1,7 +1,7 @@
 import { DrivineError } from '@/DrivineError';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
-import { EnsureResult, rangeIndex, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
+import { EnsureResult, rangeIndex, UniquenessConstraintSpec, ViolatingKey } from '@/schema/SchemaSpecs';
 import { IndexManager } from '@/schema/IndexManager';
 
 /** How many conflicting values a constraint violation reports. */
@@ -12,7 +12,7 @@ const same = (a: string[], b: string[]): boolean => a.length === b.length && a.e
 
 /**
  * Uniqueness constraints, made idempotently. Before making one, the data is checked: if two nodes already hold the same
- * values, nothing is made and the result is a VIOLATION with a sample of the values.
+ * values, nothing is made and the result is a VIOLATION with a sample of the keys, each naming the nodes that hold it.
  */
 export class ConstraintManager {
     /** @param changed told once this has made or dropped a constraint, as the object manager's list is then stale. */
@@ -27,8 +27,9 @@ export class ConstraintManager {
     }
 
     /**
-     * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` values held more than
-     * once are reported; 0 skips the check, leaving the engine to refuse a constraint the data breaks.
+     * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` keys held more than
+     * once are reported, each with up to `sampleSize` of the nodes that hold it; 0 skips the check, leaving the engine
+     * to refuse a constraint the data breaks.
      */
     async ensure(
         spec: UniquenessConstraintSpec,
@@ -67,8 +68,9 @@ export class ConstraintManager {
         return (await this.list()).some((it) => it.label === spec.label && same(it.properties, spec.properties));
     }
 
-    private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<unknown[]> {
-        return this.executor.run(this.grammar.conflicts(spec, sampleSize));
+    /** Up to `sampleSize` keys held more than once, each naming up to `sampleSize` of the nodes that hold it. */
+    private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<ViolatingKey[]> {
+        return (await this.executor.run(this.grammar.conflicts(spec, sampleSize))) as ViolatingKey[];
     }
 
     /** FalkorDB builds a constraint in the background; wait until it reports it, or says it failed. */

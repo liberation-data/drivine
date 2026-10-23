@@ -8,6 +8,7 @@ import {
     itemName,
     rangeIndex,
     RangeIndexSpec,
+    sampledNodeId,
     UniquenessConstraintSpec,
     VectorIndexSpec
 } from '@/schema/SchemaSpecs';
@@ -251,16 +252,32 @@ END;`
         return [this.forgotten(spec)];
     }
 
+    /**
+     * Each node of a key that repeats is numbered within its key, and counted with it, so that a row names `limit` of
+     * its nodes at most however many hold the key. A node's own id is its `nid`.
+     */
     conflicts(spec: UniquenessConstraintSpec, limit: number): string {
-        const values = spec.properties.map((it) => `JSON_VALUE(n.props, '$${jsonKey(it)}')`);
+        const value = (property: string): string => `JSON_VALUE(n.props, '$${jsonKey(property)}')`;
+        const values = spec.properties.map(value);
+        const properties = spec.properties.map((it, k) => `${sqlText(it)} VALUE k${k}`).join(', ');
+        const nodeId = sampledNodeId(spec);
+        const node = [`'elementId' VALUE nid`, ...(nodeId !== undefined ? [`${sqlText(nodeId)} VALUE i`] : [])].join(
+            ', '
+        );
+        const selected = [
+            ...values.map((it, k) => `${it} AS k${k}`),
+            ...(nodeId !== undefined ? [`${value(nodeId)} AS i`] : [])
+        ].join(', ');
+        const partition = values.join(', ');
         return (
-            // One property's value as it is, several as a list, as the graph engines give them.
-            `SELECT ${
-                values.length === 1 ? values[0] : `JSON_ARRAY(${values.join(', ')} RETURNING JSON)`
-            } AS "value" ` +
+            `SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT(${properties}), 'count' VALUE MAX(c), 'nodes' VALUE ` +
+            `JSON_ARRAYAGG(JSON_OBJECT(${node}) ORDER BY nid) RETURNING JSON) AS "value" ` +
+            `FROM (SELECT n.nid, ${selected}, COUNT(*) OVER (PARTITION BY ${partition}) AS c, ` +
+            `ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY n.nid) AS r ` +
             `FROM ${this.graph.nodes} n ` +
-            `WHERE ${hasLabels('n', [spec.label])} AND ${values.map((it) => `${it} IS NOT NULL`).join(' AND ')} ` +
-            `GROUP BY ${values.join(', ')} HAVING COUNT(*) > 1 FETCH FIRST ${limit} ROWS ONLY`
+            `WHERE ${hasLabels('n', [spec.label])} AND ${values.map((it) => `${it} IS NOT NULL`).join(' AND ')}) ` +
+            `WHERE c > 1 AND r <= ${limit} GROUP BY ${spec.properties.map((_, k) => `k${k}`).join(', ')} ` +
+            `FETCH FIRST ${limit} ROWS ONLY`
         );
     }
 

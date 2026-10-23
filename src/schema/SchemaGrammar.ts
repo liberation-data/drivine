@@ -10,6 +10,7 @@ import {
     FullTextIndexSpec,
     itemName,
     RangeIndexSpec,
+    sampledNodeId,
     SimilarityFunction,
     UniquenessConstraintSpec,
     VectorIndexSpec,
@@ -63,7 +64,11 @@ export interface SchemaGrammar {
     createFullText(spec: FullTextIndexSpec): string[];
     /** Drops the full-text index; `name` is the engine's name for it, where the engine names items. */
     dropFullText(spec: FullTextIndexSpec, name?: string): string[];
-    /** A statement giving up to `limit` values that more than one of the label's nodes hold, one per row. */
+    /**
+     * A statement giving up to `limit` keys that more than one of the label's nodes hold, one per row: each the
+     * `properties` that repeat, the `count` of nodes that hold them, and `nodes`, `limit` of those at most, each its
+     * `elementId` and, when the spec knows it, its `nodeIdProperty` (see ViolatingKey).
+     */
     conflicts(spec: UniquenessConstraintSpec, limit: number): string;
     /** The pins of a vector index the engine can't express, by name: reported and logged, never dropped silently. */
     unsupportedVectorTuning?(spec: VectorIndexSpec): string[];
@@ -77,15 +82,27 @@ function portablePins(spec: VectorIndexSpec): string[] {
     ];
 }
 
-/** Duplicate values over the properties, in Cypher. */
-function cypherConflicts(spec: UniquenessConstraintSpec, limit: number): string {
-    const values = spec.properties.map((it) => `n.${quoteName(it)}`);
-    const present = values.map((it) => `${it} IS NOT NULL`).join(' AND ');
-    const key = values.length === 1 ? values[0] : `[${values.join(', ')}]`;
-    return (
-        `MATCH (n${labelExpression([spec.label])}) WHERE ${present} WITH ${key} AS value, count(*) AS holders ` +
-        `WHERE holders > 1 RETURN value LIMIT ${limit}`
-    );
+/**
+ * Keys that repeat over the properties, in Cypher, each with the nodes that hold it, `limit` of them at most: `elementId`
+ * names how the engine gives a node's own id.
+ */
+function cypherConflicts(elementId: string): (spec: UniquenessConstraintSpec, limit: number) => string {
+    return (spec, limit) => {
+        const values = spec.properties.map((it) => `n.${quoteName(it)}`);
+        const present = values.map((it) => `${it} IS NOT NULL`).join(' AND ');
+        const keys = values.map((it, k) => `${it} AS _k${k}`).join(', ');
+        const nodeId = sampledNodeId(spec);
+        const node = [
+            `elementId: ${elementId}(n)`,
+            ...(nodeId !== undefined ? [`${quoteName(nodeId)}: n.${quoteName(nodeId)}`] : [])
+        ].join(', ');
+        const properties = spec.properties.map((it, k) => `${quoteName(it)}: _k${k}`).join(', ');
+        return (
+            `MATCH (n${labelExpression([spec.label])}) WHERE ${present} ` +
+            `WITH ${keys}, count(*) AS holders, collect({${node}}) AS held WHERE holders > 1 ` +
+            `RETURN {properties: {${properties}}, count: holders, nodes: held[0..${limit}]} LIMIT ${limit}`
+        );
+    };
 }
 
 /** A command for the engine's driver, rather than a Cypher statement. */
@@ -99,7 +116,7 @@ const pattern = (spec: { label: string }): string => `(n${labelExpression([spec.
 const props = (spec: { properties: string[] }): string => spec.properties.map((it) => `n.${quoteName(it)}`).join(', ');
 
 export const NEO4J_SCHEMA: SchemaGrammar = {
-    conflicts: cypherConflicts,
+    conflicts: cypherConflicts('elementId'),
     listVectors: {
         statement:
             "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options WHERE type = 'VECTOR' AND entityType = 'NODE' " +
@@ -175,7 +192,7 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
 };
 
 export const MEMGRAPH_SCHEMA: SchemaGrammar = {
-    conflicts: cypherConflicts,
+    conflicts: cypherConflicts('id'),
     fullTextOverLabel: true,
     listVectors: {
         // Columns: index_name, label (as ':Label'), property, capacity, dimension, metric, ...
@@ -246,7 +263,7 @@ export const MEMGRAPH_SCHEMA: SchemaGrammar = {
  * when each is. Its uniqueness constraints are a Redis command, and need a range index over their properties.
  */
 export const FALKORDB_SCHEMA: SchemaGrammar = {
-    conflicts: cypherConflicts,
+    conflicts: cypherConflicts('id'),
     engine: 'FalkorDB',
     rangesPerProperty: true,
     uniqueNeedsRange: true,
