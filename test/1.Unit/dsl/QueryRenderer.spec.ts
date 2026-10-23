@@ -1,4 +1,5 @@
 import {
+    allOf,
     anyOf,
     below,
     caseOf,
@@ -6,7 +7,9 @@ import {
     epochSeconds,
     hasNoValue,
     minus,
+    not,
     FALKORDB_GRAMMAR,
+    MEMGRAPH_GRAMMAR,
     GraphRelationship,
     GraphView,
     ModelRegistry,
@@ -66,10 +69,52 @@ describe('QueryRenderer', () => {
             NEO4J_GRAMMAR,
             'n'
         );
-        expect(query.where).toBe('(n.title = $_q0 AND n.done = $_q1)');
+        expect(query.where).toBe('n.title = $_q0 AND n.done = $_q1');
         expect(query.bindings).toEqual({ _q0: "x' OR true", _q1: false });
         expect(query.orderBy).toBe('n.title');
         expect(query.limit).toBe(5);
+    });
+
+    it('should write the outermost AND of a WHERE without parentheses, and keep those precedence needs', () => {
+        // FalkorDB 6 scans the label for a WHERE in parentheses it does not need (FalkorDB/FalkorDB#3331). The
+        // parentheses go on every engine, where they change nothing.
+        const where = (fn: (q: any) => any) =>
+            [NEO4J_GRAMMAR, MEMGRAPH_GRAMMAR, FALKORDB_GRAMMAR].map(
+                (grammar) => QueryRenderer.render<Task>((q) => ({ where: fn(q) }), fragment, grammar, 'n').where
+            );
+        const onEvery = (it: string) => [it, it, it];
+
+        expect(where((q) => q.title.eq('a'))).toEqual(onEvery('n.title = $_q0'));
+        expect(where((q) => [anyOf(q.title.eq('a'), q.title.eq('b')), q.done.eq(false)])).toEqual(
+            onEvery('(n.title = $_q0 OR n.title = $_q1) AND n.done = $_q2')
+        );
+        // An anyOf at the top keeps its parentheses: a statement may join more to the WHERE by AND.
+        expect(where((q) => anyOf(q.title.eq('a'), allOf(q.title.eq('b'), q.done.eq(true))))).toEqual(
+            onEvery('(n.title = $_q0 OR (n.title = $_q1 AND n.done = $_q2))')
+        );
+        expect(where((q) => [not(q.title.eq('a'), q.done.eq(true)), q.title.eq('b')])).toEqual(
+            onEvery('NOT (n.title = $_q0 AND n.done = $_q1) AND n.title = $_q2')
+        );
+        expect(where((q) => not(q.title.eq('a')))).toEqual(onEvery('NOT (n.title = $_q0)'));
+        // An allOf in the outermost AND is a part of it, and needs no parentheses of its own.
+        expect(where((q) => [allOf(q.title.eq('a'), q.done.eq(true)), q.title.eq('b')])).toEqual(
+            onEvery('n.title = $_q0 AND n.done = $_q1 AND n.title = $_q2')
+        );
+        expect(where(() => [])).toEqual(onEvery('true'));
+    });
+
+    it('should join a cursor to the outermost AND as it stands', () => {
+        const query = QueryRenderer.render<Task>(
+            (q) => ({
+                where: [anyOf(q.title.eq('a'), q.title.eq('b')), q.done.eq(false)],
+                orderBy: q.title.asc(),
+                seek: q.title.after('m')
+            }),
+            fragment,
+            FALKORDB_GRAMMAR,
+            'n'
+        );
+        expect(query.where).toBe('(n.title = $_q0 OR n.title = $_q1) AND n.done = $_q2 AND n.title > $_q3');
     });
 
     it('should write a test of related nodes as an existence check, one per engine', () => {
