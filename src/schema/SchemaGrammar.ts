@@ -55,7 +55,8 @@ export interface SchemaGrammar {
     listVectors: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listFullTexts: { statement: string; read: (rows: any[]) => SchemaItem[] };
     createRange(spec: RangeIndexSpec): string[];
-    dropRange(spec: RangeIndexSpec): string[];
+    /** Drops the range index; `name` is the engine's name for it, where the engine names items and Drivine didn't. */
+    dropRange(spec: RangeIndexSpec, name?: string): string[];
     createUnique(spec: UniquenessConstraintSpec): (string | NativeOperation)[];
     dropUnique(spec: UniquenessConstraintSpec): (string | NativeOperation)[];
     createVector(spec: VectorIndexSpec): string[];
@@ -67,7 +68,17 @@ export interface SchemaGrammar {
     conflicts(spec: UniquenessConstraintSpec, limit: number): string;
     /** The pins of a vector index the engine can't express, by name: reported and logged, never dropped silently. */
     unsupportedVectorTuning?(spec: VectorIndexSpec): string[];
+    /**
+     * Whether a failure making a uniqueness constraint says a plain range index over the same label and properties is
+     * in the way of it. Only on an engine whose constraint brings its own index, so that the plain one is redundant once
+     * the constraint is made and may be dropped for it (Neo4j). Never where the constraint needs the plain index
+     * (`uniqueNeedsRange`, FalkorDB) or is made beside it (Memgraph, Oracle, Postgres).
+     */
+    blockedByIndex?(failure: unknown): boolean;
 }
+
+/** Neo4j's code for an index over the schema a constraint would make its own index over. */
+const INDEX_ALREADY_EXISTS = 'Neo.ClientError.Schema.IndexAlreadyExists';
 
 /** The portable HNSW pins a spec makes, for an engine with no HNSW parameters of its own. */
 function portablePins(spec: VectorIndexSpec): string[] {
@@ -150,7 +161,23 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
     createRange: (spec) => [
         `CREATE INDEX ${quoteName(itemName(spec))} IF NOT EXISTS FOR ${pattern(spec)} ON (${props(spec)})`
     ],
-    dropRange: (spec) => [`DROP INDEX ${quoteName(itemName(spec))} IF EXISTS`],
+    dropRange: (spec, name) => [`DROP INDEX ${quoteName(name ?? itemName(spec))} IF EXISTS`],
+    /**
+     * "There already exists an index (:Label {prop}). A constraint cannot be created until the index has been dropped."
+     * Known by its code, however deep the failure is wrapped: not by a name clash, nor by its prose.
+     */
+    blockedByIndex: (failure) => {
+        for (
+            let cause: any = failure, depth = 0;
+            cause && depth < 10;
+            cause = cause.rootCause ?? cause.cause, depth++
+        ) {
+            if (cause.code === INDEX_ALREADY_EXISTS) {
+                return true;
+            }
+        }
+        return false;
+    },
     listRanges: {
         statement:
             "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, owningConstraint WHERE type = 'RANGE' " +

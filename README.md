@@ -1583,6 +1583,7 @@ Schema statements run outside any transaction. `ensure` returns a result whose `
 | `ALREADY_MATCHING` | A matching item exists; nothing changed. |
 | `DRIFT` | An item exists with a different shape, such as other vector dimensions. Nothing changed: `recreate(spec)` replaces it. |
 | `VIOLATION` | Constraints only: the data breaks it. A sample of the values held more than once is included. |
+| `BLOCKED_BY_INDEX` | Constraints only, on Neo4j: a plain range index over the same label and properties is in the way of it, and is named in `index`. Nothing changed: `ensure(spec, sampleSize, true)` drops the index and makes the constraint, whose own index serves the same lookups. A value held more than once keeps the index, as a `VIOLATION`. |
 | `RECREATED` | From `recreate(spec)`: the old item dropped and the new one made. |
 
 **Pinning a vector index.** Only the dimensions and similarity are always sent; the rest is the engine's choice, and
@@ -1656,9 +1657,10 @@ the default from target ES2022). A spec for a label no fragment maps, and one gi
 
 | Option | Meaning |
 |---|---|
-| `mode` | `FAIL_FAST` (the default) throws on drift or a violation; `WARN` logs it and carries on. |
+| `mode` | `FAIL_FAST` (the default) throws on drift, a violation or an index in the way of a constraint; `WARN` logs it and carries on. |
 | `recreateOnDrift` | Destructive: replace an item whose shape drifted. |
 | `recreateOnStartup` | Destructive: drop and make every declared item on every startup. |
+| `replaceBlockingIndex` | Destructive: drop a plain index in the way of a uniqueness constraint (Neo4j) and make the constraint in its place. |
 | `violationSampleSize` | How many values held more than once a violation reports; 0 skips the check. Defaults to 10. |
 | `enabled` | `false` skips the startup run; `SchemaManager` can still be injected. |
 
@@ -1687,9 +1689,9 @@ all known at runtime gives it `schema: { catalogs: [] }`.
 The items join what that owner's catalogs declared, for the life of the manager, and are applied as `enforce` applies
 the owner's:
 
-- **Under the same options.** `mode`, `recreateOnDrift` and `violationSampleSize` apply. Only the items given are
-  applied, and the results come back by database. `ensure` leaves a change of the owner's version to `enforce`, and
-  `recreateOnStartup` doesn't apply to it.
+- **Under the same options.** `mode`, `recreateOnDrift`, `replaceBlockingIndex` and `violationSampleSize` apply. Only
+  the items given are applied, and the results come back by database. `ensure` leaves a change of the owner's version
+  to `enforce`, and `recreateOnStartup` doesn't apply to it.
 - **In the owner's inventory.** The owner's `_DrivineSchema` marker records them as ensured at runtime. A later
   `enforce()` applies them with the rest, and `recreateAll()` recreates them. An `enforce` by a manager built later (the
   next process, before the item is ensured again) keeps them in the inventory and doesn't report them as orphans.

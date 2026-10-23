@@ -18,12 +18,17 @@ import {
 
 export interface SchemaOptions {
     catalogs: SchemaCatalog[];
-    /** FAIL_FAST (default) throws on drift or a violation; WARN logs it and carries on. */
+    /** FAIL_FAST (default) throws on drift, a violation or an index in the way; WARN logs it and carries on. */
     mode?: 'FAIL_FAST' | 'WARN';
     /** Destructive: replace an item whose shape drifted, rather than reporting it. */
     recreateOnDrift?: boolean;
     /** Destructive: drop and make every declared item on every enforce. */
     recreateOnStartup?: boolean;
+    /**
+     * Destructive: drop a plain index in the way of a uniqueness constraint and make the constraint, whose own index
+     * takes its place (Neo4j), rather than reporting it as BLOCKED_BY_INDEX.
+     */
+    replaceBlockingIndex?: boolean;
     /** How many values held more than once a constraint violation reports; 0 skips the check. Defaults to 10. */
     violationSampleSize?: number;
     /** Whether DrivineModule enforces the schema at startup. Defaults to true. */
@@ -415,7 +420,8 @@ export class SchemaManager {
      */
     private async ensureSingleton(gom: StatelessGraphObjectManager, owner: string): Promise<void> {
         await gom.persistenceManager.execute(gom.backend.pruneSchemaMarkers().spec({ scope: owner }));
-        await gom.constraints.ensure(uniquenessConstraint(MARKER_LABEL, 'scope'));
+        // The label is Drivine's, so a plain index on the key (made by hand, on Neo4j) is replaced by the constraint.
+        await gom.constraints.ensure(uniquenessConstraint(MARKER_LABEL, 'scope'), undefined, true);
     }
 
     /** Warns of what the owner's marker recorded that is not `kept` and no other owner declares. */
@@ -445,7 +451,11 @@ export class SchemaManager {
                 await gom.constraints.drop(spec);
             }
             return this.judge(
-                await gom.constraints.ensure(spec as UniquenessConstraintSpec, this.options.violationSampleSize)
+                await gom.constraints.ensure(
+                    spec as UniquenessConstraintSpec,
+                    this.options.violationSampleSize,
+                    this.options.replaceBlockingIndex === true
+                )
             );
         }
         if (recreate) {
@@ -459,13 +469,17 @@ export class SchemaManager {
     }
 
     private judge<S extends SchemaSpec>(result: EnsureResult<S>): EnsureResult<S> {
-        if (result.status === 'DRIFT' || result.status === 'VIOLATION') {
+        if (result.status === 'DRIFT' || result.status === 'VIOLATION' || result.status === 'BLOCKED_BY_INDEX') {
             const message =
                 `${result.status} for the ${result.spec.kind} on ${result.spec.label}(${result.spec.properties.join(
                     ', '
                 )})` +
-                (result.sample ? `: values held more than once include ${JSON.stringify(result.sample)}` : '') +
-                (result.found ? `: the engine holds ${JSON.stringify(result.found)}` : '');
+                (result.sample?.length ? `: values held more than once include ${JSON.stringify(result.sample)}` : '') +
+                (result.found ? `: the engine holds ${JSON.stringify(result.found)}` : '') +
+                (result.index
+                    ? `: index ${result.index.name} is in the way of it. Drop the index, or set replaceBlockingIndex ` +
+                      `to replace it with the constraint`
+                    : '');
             if (this.options.mode === 'WARN') {
                 this.logger.warn(message);
             } else {
