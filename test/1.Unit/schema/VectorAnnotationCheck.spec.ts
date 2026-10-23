@@ -1,4 +1,7 @@
 import {
+    ConnectionProvider,
+    DatabaseRegistry,
+    DatabaseType,
     GraphObjectManagerFactory,
     GraphProperty,
     NodeFragment,
@@ -86,6 +89,12 @@ class CheckConstructed {
     constructor(from: { id: string }) {
         this.id = from.id;
     }
+}
+
+@NodeFragment({ labels: ['CheckBeforeWrite'] })
+class CheckBeforeWrite {
+    @NodeId() id: string;
+    embedding: number[] = [];
 }
 
 @NodeFragment({ labels: ['CheckAnnotated'] })
@@ -213,5 +222,21 @@ describe('A vector index spec over a fragment field', () => {
 
         await enforceSpecs(vectorIndex('CheckAnnotatedLater', 'embedding', 4));
         expect(() => build(CheckAnnotatedLater)).not.toThrow();
+    });
+
+    describe('with a graph database registered', () => {
+        beforeEach(() => DatabaseRegistry.tearDown());
+        afterAll(() => DatabaseRegistry.tearDown());
+
+        it('should be refused before the database is spoken to, by enforce and by ensure', async () => {
+            DatabaseRegistry.getInstance().register({ name: 'a', type: DatabaseType.NEO4J } as ConnectionProvider);
+            build(CheckBeforeWrite);
+            const spec = vectorIndex('CheckBeforeWrite', 'embedding', 4);
+            const refusal = message('CheckBeforeWrite.embedding', 'CheckBeforeWrite.embedding');
+
+            // The factory throws when asked for the database, so any other error means it was reached first.
+            await expect(enforceSpecs(spec)).rejects.toThrow(refusal);
+            await expect(new SchemaManager(factory, { catalogs: [] }).ensure('rag', spec)).rejects.toThrow(refusal);
+        });
     });
 });

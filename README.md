@@ -1650,7 +1650,8 @@ the spec. Without the decorator FalkorDB stores the field as a plain list, and `
 fragment. Declare both when a catalog spec tunes the index. The check runs when `SchemaManager` applies the catalog, or
 is given the spec by `ensure`, and when the fragment class is first used. A field is matched by the property it's stored
 under, on any of the fragment's labels. Only fields the class decorates or initializes can be seen, so
-`embedding?: number[]` with neither isn't checked. A spec for a label no fragment maps, and one given to
+`embedding?: number[]` with neither isn't checked, unless the compiler emits class fields (`useDefineForClassFields`,
+the default from target ES2022). A spec for a label no fragment maps, and one given to
 `indexes.ensure` directly, aren't checked either.
 
 | Option | Meaning |
