@@ -13,6 +13,7 @@ import {
     uniquenessConstraint,
     vectorIndex
 } from '@liberation-data/drivine';
+import { DrivineLogger } from '@/logger';
 import { inventoryEntries, readInventory } from '@/schema/SchemaInventory';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
@@ -248,6 +249,28 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             expect(await statuses(manager([catalog], { replaceBlockingIndex: true }), 'recreateAll')).toEqual([
                 'UNIQUE:CREATED'
             ]);
+        });
+
+        it('should fail ensure under FAIL_FAST naming the index, warn of it under WARN, and replace it when asked', async () => {
+            const ensured = async (m: SchemaManager): Promise<string[]> =>
+                [...(await m.ensure(SchemaCatalog.of(ledger).named('ledger').forDatabase(engine.name))).values()]
+                    .flat()
+                    .map((it) => `${it.spec.kind}:${it.status}`);
+            if (neo4j) {
+                await expect(ensured(manager([]))).rejects.toThrow(
+                    /BLOCKED_BY_INDEX for the UNIQUE on Ledger\(ref\): index ledger_lookup is in the way of it/
+                );
+                const warn = jest.spyOn(DrivineLogger.prototype, 'warn');
+                try {
+                    expect(await ensured(manager([], { mode: 'WARN' }))).toEqual(['UNIQUE:BLOCKED_BY_INDEX']);
+                    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/index ledger_lookup is in the way of it/));
+                } finally {
+                    warn.mockRestore();
+                }
+                expect(await rangeNames('Ledger')).toEqual(['ledger_lookup']);
+            }
+            expect(await ensured(manager([], { replaceBlockingIndex: true }))).toEqual(['UNIQUE:CREATED']);
+            expect(await rangeNames('Ledger')).toHaveLength(neo4j ? 0 : 1);
         });
 
         it('should apply a catalog declaring a range index and a constraint over the same properties, each time', async () => {
