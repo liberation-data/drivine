@@ -67,6 +67,14 @@ class Thread {
     @GraphRelationship({ type: 'REPLIES_TO', direction: Direction.INCOMING, target: () => Thread }) replies: Thread[];
 }
 
+/** A view that holds two views nested in themselves, of different classes. */
+@GraphView()
+class Library {
+    @Root() doc: Doc;
+    @GraphRelationship({ type: 'SHELVES', target: () => Tree }) trees: Tree[];
+    @GraphRelationship({ type: 'HOSTS', target: () => Thread }) threads: Thread[];
+}
+
 @GraphView()
 class Pals {
     @Root() doc: Doc;
@@ -158,12 +166,31 @@ describe('CascadeTargets', () => {
         }
     );
 
-    it('should read the nodes past the depth through the shelf, and count those the cascade does not reach', () => {
+    it('should read the nodes past the depth through the shelf, and count those not a level of the view', () => {
         const [check] = new CypherBackend(NEO4J_GRAMMAR).cascadeDepthChecks(view(Shelf));
         expect(check.statement.text).toContain(
             '[(n)-[:SHELVES]->(c1:Doc)<-[:PART_OF]-(c3:Doc)<-[:PART_OF]-(c5:Doc)<-[:PART_OF]-(c7:Doc) | c7] AS beyond'
         );
-        expect(check.statement.text).toContain('WHERE NOT b IN targets AND b <> n');
+        // The trees the shelf holds and their levels, which a ring may come back to; not the notes each level holds,
+        // which can't be a level, and would only make the statement longer to plan.
+        expect(check.statement.text).toContain(
+            'WITH n, [(n)-[:SHELVES]->(c1:Doc) | c1] + [(n)-[:SHELVES]->(c1:Doc)<-[:PART_OF]-(c3:Doc) | c3] + ' +
+                '[(n)-[:SHELVES]->(c1:Doc)<-[:PART_OF]-(c3:Doc)<-[:PART_OF]-(c5:Doc) | c5] AS levels'
+        );
+        expect(check.statement.text).not.toContain(':HAS]');
+        expect(check.statement.text).toContain('WHERE NOT b IN levels AND b <> n');
+        const [sql] = new PostgresBackend(new PostgresGraph()).cascadeDepthChecks(view(Shelf));
+        expect(sql.statement.text).not.toContain("'HAS'");
+        expect(sql.statement.text).toContain('WHERE b.nid NOT IN (SELECT nid FROM cascade_levels)');
+    });
+
+    it.each(backends)("should read, for each view nested in itself, only that view's levels, on %s", (_, backend) => {
+        const [tree, thread, ...others] = backend.cascadeDepthChecks(view(Library));
+        expect(others).toEqual([]);
+        expect([tree.view, thread.view]).toEqual(['Tree', 'Thread']);
+        // A level of one view is never a node one level past the other's maxDepth.
+        expect(tree.statement.text).not.toContain('REPLIES_TO');
+        expect(thread.statement.text).not.toContain('PART_OF');
     });
 
     it('should keep, below a kept node, the far end of each step the cascade follows, in its direction', () => {

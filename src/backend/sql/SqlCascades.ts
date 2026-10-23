@@ -37,15 +37,15 @@ export function keptTargets(graph: SqlGraph, followed: RelationshipModel[], unio
 }
 
 /**
- * The read that counts the nodes `beyond` selects, one level below a relationship's maxDepth, that the cascade does
- * not reach otherwise (`reached`) nor starts from (`roots`, the query of the roots' ids): those the delete would leave
- * behind. `reached` and `beyond` read the roots from `cascade_roots`. Returns one number: `{beyond}`.
+ * The read that counts the nodes `beyond` selects, one level below a relationship's maxDepth, that are not nodes of the
+ * view the cascade takes otherwise (`within`) nor its roots (`roots`, the query of the roots' ids): those the delete
+ * would leave behind. `within` and `beyond` read the roots from `cascade_roots`. Returns one number: `{beyond}`.
  */
-export function beyondCount(roots: string, reached: string[], beyond: string): string {
+export function beyondCount(roots: string, within: string[], beyond: string): string {
     return [
         `WITH cascade_roots AS (${roots}),`,
-        `cascade_targets AS (SELECT t.nid FROM (${reached.join('\n    UNION ALL ')}) t)`,
+        `cascade_levels AS (SELECT t.nid FROM (${within.join('\n    UNION ALL ')}) t)`,
         `SELECT CAST(COUNT(DISTINCT b.nid) AS integer) AS "beyond" FROM (${beyond}) b`,
-        `WHERE b.nid NOT IN (SELECT nid FROM cascade_targets) AND b.nid NOT IN (SELECT nid FROM cascade_roots)`
+        `WHERE b.nid NOT IN (SELECT nid FROM cascade_levels) AND b.nid NOT IN (SELECT nid FROM cascade_roots)`
     ].join('\n');
 }

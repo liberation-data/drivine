@@ -19,6 +19,11 @@ import {
 import { allStores, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 import { SqlSeed } from '../support/SqlStores';
 
+// Neo4j plans each cascade statement the first time it sees it, and a cascade through a view nested in itself is a dozen
+// pattern comprehensions, one for each position at each level: the plan takes most of a test's time, ten times its run,
+// and on CI, beside the suites running in parallel, it can pass Jest's 5 seconds.
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['RecursiveCascade', 'Session'] })
 class Session {
     @NodeId() id: string;
@@ -367,6 +372,29 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
                 )
             ).removed
         ).toEqual(loaded);
+    });
+
+    it('should delete through a shelf a ring that comes back to the tree it shelves', async () => {
+        // One level past maxDepth is the shelved tree again: a node the cascade takes, so nothing is refused.
+        await seed(
+            plus(
+                chain(3),
+                graph(
+                    [['Session', 'rc-shelf']],
+                    [
+                        ['rc-s0', 'PART_OF', 'rc-s3'],
+                        ['rc-shelf', 'SHELVES', 'rc-s0']
+                    ]
+                )
+            )
+        );
+        const loaded = sorted(['rc-shelf', ...treeIds((await gom.load(DeletableSessionTree, 'rc-s0'))!)]);
+
+        const { removed }: Removed = await removedBy(async () =>
+            gom.delete(DeletableSessionShelf, 'rc-shelf', { cascade: CascadeType.DELETE_ALL })
+        );
+
+        expect(removed).toEqual(loaded);
     });
 
     it('should refuse a cascade through a tree deeper than maxDepth, deleting nothing', async () => {

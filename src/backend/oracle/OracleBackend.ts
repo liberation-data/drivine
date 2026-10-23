@@ -157,11 +157,11 @@ END;`);
         }
         const roots = `SELECT ${ROW_ALIAS}.nid ${this.from(target.model.root, this.deletedWhere(target, where))}`;
         const cascaded = new OracleViews(this.graph).cascade(target.model, 'n.nid IN (SELECT nid FROM cascade_roots)');
-        return cascaded.beyond.map(({ view, field, maxDepth, nodes }: CascadeBeyond) => ({
+        return cascaded.beyond.map(({ view, field, maxDepth, nodes, within }: CascadeBeyond) => ({
             view,
             field,
             maxDepth,
-            statement: new GraphStatement(beyondCount(roots, cascaded.reached, nodes))
+            statement: new GraphStatement(beyondCount(roots, within, nodes))
         }));
     }
 
