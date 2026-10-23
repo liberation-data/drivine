@@ -50,6 +50,16 @@ class Note {
     @PropertyBag() metadata: Record<string, any> = {};
 }
 
+/** A flat bag beside a stamp, a prefixed bag, and a field stored under another name. */
+@NodeFragment({ labels: ['SqlSave', 'Sticker'] })
+class Sticker {
+    @NodeId() id: string;
+    @GraphProperty('sticker_name') name?: string;
+    @PropertyBag() meta: Record<string, any> = {};
+    @PropertyBag({ flat: true }) extras: Record<string, any> = {};
+    @NodeStamp() stamp?: string;
+}
+
 @NodeFragment({ labels: ['SqlSave', 'Org'] })
 class Org {
     @NodeId() id: string;
@@ -148,6 +158,24 @@ describe.each(sqlStores())('saves on $name', (store) => {
         const gone = await gom.save(mine).catch((e) => e);
         expect(gone.deleted).toBe(true);
         expect(await gom.load(Person, 'bob')).toBeUndefined();
+    });
+
+    it('should refuse a flat bag entry that a field, the id, another bag or the stamp is stored under, writing nothing', async () => {
+        const sticker = (extras: Record<string, any>): Sticker =>
+            Object.assign(new Sticker(), { id: 's1', name: 'Star', extras });
+        for (const key of ['sticker_name', 'id', 'meta.lang', '__drivine.stamp']) {
+            await expect(gom.save(sticker({ [key]: 'x' }))).rejects.toThrow(
+                new RegExp(`Sticker.extras has an entry '${key}', which is the property of a declared field`)
+            );
+            await expect(gom.save(sticker({ [key]: 'x' }), { only: ['extras'] })).rejects.toThrow(
+                /which is the property/
+            );
+        }
+        expect(await gom.load(Sticker, 's1')).toBeUndefined();
+        const saved = await gom.save(sticker({ name: 'open' }));
+        const loaded = (await gom.load(Sticker, 's1'))!;
+        expect(loaded.extras).toEqual({ name: 'open' });
+        expect(loaded.stamp).toEqual(saved.stamp);
     });
 
     it('should let exactly one of several writers holding one stamp win', async () => {

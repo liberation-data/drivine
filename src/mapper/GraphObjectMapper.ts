@@ -11,10 +11,26 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
  * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
  * give the object it is copied onto a prototype of the store's choosing.
  */
-const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+export const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Property names beginning with this are Drivine's own, and are never mapped onto an object. */
 export const RESERVED_PREFIX = '__drivine.';
+
+/**
+ * The properties a flat bag doesn't take on load, as they are named on the node: those of the fields the class
+ * decorates or initializes, and the id.
+ */
+export function knownProperties(type: Function, mapping: FieldMapping, fragment: FragmentModel): Set<string> {
+    return new Set<string>([
+        ...mapping.graphProperties.values(),
+        ...mapping.transientFields,
+        ...mapping.jsonPacked,
+        ...mapping.defaults,
+        ...mapping.emptyWhenAbsent.keys(),
+        ...[fragment.nodeIdProperty, fragment.stampField].filter((it): it is string => !!it),
+        ...Object.keys(plainToInstance(type as any, {}) as object)
+    ]);
+}
 
 /**
  * A node as a fragment load returns it: its properties, and its labels apart from them.
@@ -112,15 +128,7 @@ export class GraphObjectMapper {
         const bags: Record<string, Record<string, any>> = {};
         fragment.propertyBags.forEach((bag) => (bags[bag.field] = {}));
         const flat = fragment.propertyBags.find((it) => it.flat);
-        const known = new Set<string>([
-            ...mapping.graphProperties.values(),
-            ...mapping.transientFields,
-            ...mapping.jsonPacked,
-            ...mapping.defaults,
-            ...mapping.emptyWhenAbsent.keys(),
-            ...[fragment.nodeIdProperty, fragment.stampField].filter((it): it is string => !!it),
-            ...(flat ? Object.keys(plainToInstance(type as any, {}) as object) : [])
-        ]);
+        const known = flat ? knownProperties(type, mapping, fragment) : new Set<string>();
         for (const [name, value] of Object.entries(source)) {
             const bag = fragment.propertyBags.find((it) => !it.flat && name.startsWith(it.namespace));
             if (FORBIDDEN_KEYS.has(bag ? name.slice(bag.namespace.length) : name)) {

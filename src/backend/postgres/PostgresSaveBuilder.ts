@@ -83,8 +83,7 @@ export class PostgresSaveBuilder {
         const clear = this.options.nullPolicy === NullPolicy.CLEAR;
         const held = this.options.heldProperties ?? {};
         const props: Record<string, any> = { ...objectProps(model, object, this.options) };
-        const bagged = { ...model, propertyBags: model.propertyBags.filter((it) => keep(it.field)) };
-        bagEntries(bagged, object, Object.keys(held), clear).forEach((value, key) => (props[key] = value));
+        bagEntries(model, object, Object.keys(held), clear, keep).forEach((value, key) => (props[key] = value));
         const write = nodeWrite(
             model,
             object,

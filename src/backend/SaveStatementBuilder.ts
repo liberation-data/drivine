@@ -9,6 +9,9 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
+import { FORBIDDEN_KEYS, knownProperties, RESERVED_PREFIX } from '@/mapper/GraphObjectMapper';
+import { ObjectUtils } from '@/utils/ObjectUtils';
+import { plainToInstance } from 'class-transformer';
 import { splitVectors, vectorClauses } from '@/backend/VectorWrites';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassKind } from '@/annotation/Metadata';
@@ -191,12 +194,7 @@ export class SaveStatementBuilder {
         const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
         const clear = this.options.nullPolicy === NullPolicy.CLEAR;
         const held = this.options.heldProperties ?? {};
-        const entries = bagEntries(
-            { ...model, propertyBags: model.propertyBags.filter((it) => keep(it.field)) },
-            object,
-            Object.keys(held),
-            clear
-        );
+        const entries = bagEntries(model, object, Object.keys(held), clear, keep);
         const bag = this.bagSets('n', 'rootBag', entries);
         const labelled =
             model.nodeLabels && keep(model.nodeLabels.field)
@@ -245,6 +243,10 @@ export class SaveStatementBuilder {
         if (replacing) {
             ok.push(`size(${EXPECTED}) = ${2 * T + 1} AND right(n.${STAMP}, ${T}) = right(${EXPECTED}, ${T})`);
         }
+        // The fields as loaded are compared only where a load may have been handed a stamp newer than its data.
+        if (this.options.loaded != null && this.grammar.readsWithoutSnapshot) {
+            ok.push(...this.stillAsLoaded(model, this.options.loaded));
+        }
         return [
             `MATCH (n${labels} ${id})`,
             `SET n.${LOCK} = true`,
@@ -254,6 +256,91 @@ export class SaveStatementBuilder {
             `WITH n, coalesce(n.${STAMP}, '${Stamps.NEVER_STAMPED}') AS _found`,
             ...write
         ].join('\n');
+    }
+
+    /**
+     * What the checked save of `loaded`, the root as `update` loaded it, requires of the node besides the stamp. A load
+     * that ran while another writer committed can hold that writer's stamp with the data from before its write. Each
+     * field is compared as it was loaded too, under the lock, so the save of such an object is refused, as a stale one
+     * is: a field its value, a bag the keys it owns and their values, the labels field the labels it reads. A
+     * comparison that can't tell (a list holding a null) is not a difference: the stamp still speaks for the field.
+     */
+    private stillAsLoaded(model: FragmentModel, loaded: any): string[] {
+        const bind = (name: string, value: any): string => {
+            this.bindings[name] = value;
+            return `$${name}`;
+        };
+        // What a load gives a field of a node that holds no property for it: the class's initializer, or an empty
+        // collection.
+        const initial: any = plainToInstance(model.type as any, {});
+        const absent = (field: string): any =>
+            initial[field] ??
+            (model.emptyWhenAbsent.get(field) === 'array' ? [] : model.emptyWhenAbsent.has(field) ? {} : undefined);
+        const fields = [...new Set([...Object.keys(initial), ...model.graphProperties.keys(), ...Object.keys(loaded)])]
+            .filter(
+                (it) =>
+                    it !== model.nodeIdField &&
+                    typeof loaded[it] !== 'function' &&
+                    !skipped(model, it, stampExcluded(model))
+            )
+            .map((field) => ({ field, property: model.graphProperties.get(field) ?? field }))
+            .sort((a, b) => (a.property < b.property ? -1 : a.property > b.property ? 1 : 0));
+        const declared = fields.map(({ field, property }: { field: string; property: string }, i) => {
+            const stored = `n.${quoteName(property)}`;
+            const value = loaded[field];
+            if (value == null) {
+                return `${stored} IS NULL`;
+            }
+            const param = bind(
+                `_loaded${i}`,
+                model.jsonPacked.has(field) ? this.packedAsLoaded(property, value) : asCompared(value)
+            );
+            const expression = model.vectorFields.has(field) ? this.grammar.vectorValue(param) : param;
+            const same = `NOT coalesce(${stored} <> ${expression}, false)`;
+            // A value a load gives a node that holds none may have been loaded from none.
+            return ObjectUtils.deepEqual(value, absent(field)) ? same : `${stored} IS NOT NULL AND ${same}`;
+        });
+        const known = [...knownProperties(model.type, model, model), ...FORBIDDEN_KEYS];
+        const namespaces = model.propertyBags.filter((it) => !it.flat).map((it) => it.namespace);
+        // A bag holds the keys it owns, each with its value: none added, none removed, none changed. What a bag owns
+        // is what a load hands it: a prefixed bag the keys under its prefix, a flat one what no field or other bag takes.
+        const bags = model.propertyBags.map((bag, i) => {
+            const entries = Object.entries(loaded[bag.field] ?? {})
+                .filter(([, value]) => value != null)
+                .map(([key, value]) => [`${bag.namespace}${key}`, asCompared(value)]);
+            const held = bind(`_loadedBag${i}`, Object.fromEntries(entries));
+            const owned = bag.flat
+                ? `NOT k IN ${bind(`_loadedBag${i}Reserved`, known)} AND ` +
+                  `none(p IN ${bind(`_loadedBag${i}ReservedPrefixes`, [
+                      RESERVED_PREFIX,
+                      ...namespaces
+                  ])} WHERE k STARTS WITH p)`
+                : `k STARTS WITH ${bind(`_loadedBag${i}Prefix`, bag.namespace)}`;
+            return (
+                `size([k IN keys(n) WHERE ${owned}]) = size(keys(${held})) AND ` +
+                `all(k IN keys(${held}) WHERE n[k] IS NOT NULL AND NOT coalesce(n[k] <> ${held}[k], false))`
+            );
+        });
+        // The labels field reads the node's labels: a closed one its members, an open one those not the fragment's own.
+        const field = model.nodeLabels;
+        if (!field) {
+            return [...declared, ...bags];
+        }
+        const held = bind('_loadedLabels', [...new Set<string>(loaded[field.field] ?? [])]);
+        const read = field.members
+            ? `[l IN labels(n) WHERE l IN ${bind('_loadedLabelsClosed', field.members)}]`
+            : `[l IN labels(n) WHERE NOT l IN ${bind('_loadedLabelsOwn', model.labels)}]`;
+        return [...declared, ...bags, `size(${read}) = size(${held}) AND all(l IN ${held} WHERE l IN labels(n))`];
+    }
+
+    /**
+     * A @JsonPacked field's value as the node held it: what the load read, so that text another writer packed with
+     * other spacing or escaping, or a value a load hands over unpacked (text that isn't JSON, a number), is not taken
+     * for a change. A value the node held none for (one a load gives an absent property) is packed as a save packs it.
+     */
+    private packedAsLoaded(property: string, value: any): any {
+        const held = this.options.loadedProperties?.[property];
+        return held != null ? asCompared(held) : JSON.stringify(value);
     }
 
     private removals(
@@ -689,27 +776,25 @@ function referencedAs(rel: RelationshipModel, node: string): string {
 
 /**
  * The node properties a fragment's property bags write: each entry under its bag's namespace, and, given the keys the
- * node holds and `clear`, null for each held key of a bag that the bag no longer has.
+ * node holds and `clear`, null for each held key of a bag that the bag no longer has. Only the bags whose fields `keep`
+ * takes are written; a flat bag's entries are checked against the others all the same.
  */
 export function bagEntries(
     model: FragmentModel,
     object: any,
     held: string[] = [],
-    clear: boolean = false
+    clear: boolean = false,
+    keep: (field: string) => boolean = () => true
 ): Map<string, any> {
     const entries = new Map<string, any>();
-    for (const bag of model.propertyBags) {
+    for (const bag of model.propertyBags.filter((it) => keep(it.field))) {
         const map = object?.[bag.field];
         if (map != null && (typeof map !== 'object' || Array.isArray(map))) {
             throw new DrivineError(`The @PropertyBag ${model.type.name}.${bag.field} must hold an object of entries.`);
         }
+        const owns = bag.flat ? flatBagOwns(model, object) : undefined;
         for (const [key, value] of Object.entries(map ?? {})) {
-            if (!storable(value)) {
-                throw new DrivineError(
-                    `The entry '${key}' of ${model.type.name}.${bag.field} can't be stored as a property: a bag holds ` +
-                        `strings, numbers, booleans, dates, or arrays of them.`
-                );
-            }
+            requireWritable(model, bag, key, value, owns);
             if (value != null) {
                 entries.set(`${bag.namespace}${key}`, value);
             }
@@ -723,6 +808,40 @@ export function bagEntries(
     return entries;
 }
 
+/** Refuses an entry of a bag that can't be stored, or that a flat bag doesn't own and so would write over another's. */
+function requireWritable(
+    model: FragmentModel,
+    bag: PropertyBagModel,
+    key: string,
+    value: any,
+    owns?: (key: string) => boolean
+): void {
+    if (!storable(value)) {
+        throw new DrivineError(
+            `The entry '${key}' of ${model.type.name}.${bag.field} can't be stored as a property: a bag holds ` +
+                `strings, numbers, booleans, dates, or arrays of them.`
+        );
+    }
+    if (value != null && owns && !owns(key)) {
+        throw new DrivineError(
+            `The flat @PropertyBag ${model.type.name}.${bag.field} has an entry '${key}', which is the property of a ` +
+                `declared field or of another bag. Both would write the same node property; remove the entry or ` +
+                `rename the field's property.`
+        );
+    }
+}
+
+/**
+ * Whether a flat bag owns a node property: whether no field of the object writes it, no other bag's namespace holds it,
+ * a load wouldn't hand it to a field (see knownProperties), and it isn't Drivine's own, such as the stamp.
+ */
+function flatBagOwns(model: FragmentModel, object: any): (key: string) => boolean {
+    const known = knownProperties(model.type, model, model);
+    Object.keys(propsOf(model, object, [], true)).forEach((it) => known.add(it));
+    const namespaces = model.propertyBags.filter((it) => !it.flat).map((it) => it.namespace);
+    return (key) => !known.has(key) && !key.startsWith(RESERVED_PREFIX) && !namespaces.some((it) => key.startsWith(it));
+}
+
 function skipped(
     model: { transientFields: Set<string>; propertyBags?: PropertyBagModel[]; nodeLabels?: { field: string } },
     field: string,
@@ -734,6 +853,17 @@ function skipped(
         !!model.propertyBags?.some((it) => it.field === field) ||
         model.nodeLabels?.field === field
     );
+}
+
+/**
+ * A loaded value as the check of `update`'s save binds it: as it is where the store can compare it with what the node
+ * holds, and otherwise null, which no comparison refuses, so the stamp alone speaks for it. A load hands over a value
+ * it can't be given back as: a temporal value as a Date, which the Neo4j driver sends as an empty map, unequal to any
+ * property, so the save would be refused each time.
+ */
+function asCompared(value: any): any {
+    const plain = (it: any): boolean => it == null || ['string', 'number', 'boolean', 'bigint'].includes(typeof it);
+    return (Array.isArray(value) ? value.every(plain) : plain(value)) ? value : null;
 }
 
 function storable(value: any): boolean {

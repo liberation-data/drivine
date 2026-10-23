@@ -40,8 +40,8 @@ export class ObjectUtils {
     };
 
     /**
-     * A deep copy of plain data and class instances, each copy keeping its prototype. Dates are copied; functions and
-     * other values are shared. A value met twice is copied once.
+     * A deep copy of plain data and class instances, each copy keeping its prototype. Dates, sets and maps are copied;
+     * functions and other values are shared. A value met twice is copied once.
      */
     static deepCopy<T>(value: T, seen: Map<any, any> = new Map()): T {
         if (value === null || typeof value !== 'object') {
@@ -53,6 +53,17 @@ export class ObjectUtils {
         if (seen.has(value)) {
             return seen.get(value);
         }
+        if (value instanceof Set || value instanceof Map) {
+            // A set or a map holds its items in no key, so a copy of its keys would be empty.
+            const copy: any = value instanceof Set ? new Set() : new Map();
+            seen.set(value, copy);
+            value.forEach((item: any, key: any) =>
+                copy instanceof Set
+                    ? copy.add(ObjectUtils.deepCopy(item, seen))
+                    : copy.set(key, ObjectUtils.deepCopy(item, seen))
+            );
+            return copy;
+        }
         const copy: any = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
         seen.set(value, copy);
         for (const key of Object.keys(value)) {
@@ -61,7 +72,10 @@ export class ObjectUtils {
         return copy;
     }
 
-    /** Whether two values hold the same data: equal primitives, dates of one time, or arrays and objects alike. */
+    /**
+     * Whether two values hold the same data: equal primitives, dates of one time, sets of the same primitives, or
+     * arrays, maps and objects alike.
+     */
     static deepEqual(a: any, b: any): boolean {
         if (a === b) {
             return true;
@@ -75,7 +89,27 @@ export class ObjectUtils {
         if (Array.isArray(a) !== Array.isArray(b)) {
             return false;
         }
+        if (isCollection(a) || isCollection(b)) {
+            return ObjectUtils.collectionsEqual(a, b);
+        }
         const keys = Object.keys(a);
         return keys.length === Object.keys(b).length && keys.every((key) => ObjectUtils.deepEqual(a[key], b[key]));
     }
+
+    /** Whether two sets hold the same items, or two maps the same entries alike. */
+    private static collectionsEqual(a: any, b: any): boolean {
+        if (a instanceof Set && b instanceof Set) {
+            return a.size === b.size && [...a].every((it) => b.has(it));
+        }
+        if (a instanceof Map && b instanceof Map) {
+            return (
+                a.size === b.size && [...a].every(([key, it]) => b.has(key) && ObjectUtils.deepEqual(it, b.get(key)))
+            );
+        }
+        return false;
+    }
+}
+
+function isCollection(value: object): boolean {
+    return value instanceof Set || value instanceof Map;
 }

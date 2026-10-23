@@ -43,6 +43,15 @@ export interface CypherGrammar {
     /** Why the engine can't delete with CascadeType.DELETE_ORPHAN; undefined when it can. */
     readonly orphanDeleteLimit?: string;
 
+    /**
+     * Whether a read takes no snapshot, so one query can find a node's properties as different commits left them.
+     * Neo4j reads under read committed without a lock: a load that runs while another writer commits can be handed
+     * that writer's stamp with the data from before its write, however the query orders its reads. The checked save of
+     * what `update` loaded then compares the root's fields as loaded too, under the node's lock. Memgraph reads from a
+     * snapshot, and FalkorDB runs no read beside a write.
+     */
+    readonly readsWithoutSnapshot?: boolean;
+
     /** How a vector value is written so the engine's vector index takes it: as it is, or in the engine's own type. */
     vectorValue(expression: string): string;
 
@@ -110,6 +119,7 @@ const plainVector = (expression: string): string => expression;
 export const NEO4J_GRAMMAR: CypherGrammar = {
     engine: 'Neo4j',
     keysetNullGuard: true,
+    readsWithoutSnapshot: true,
     vectorValue: plainVector,
     fullTextSearch: (label, properties) =>
         `CALL db.index.fulltext.queryNodes(${quoteString(

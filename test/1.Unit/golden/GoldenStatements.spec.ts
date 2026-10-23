@@ -7,6 +7,7 @@ import {
     MEMGRAPH_SCHEMA,
     NEO4J_SCHEMA,
     neo4jVectorOptions,
+    NullPolicy,
     rangeIndex,
     SchemaGrammar,
     uniquenessConstraint,
@@ -49,6 +50,7 @@ import {
 } from '@liberation-data/drivine';
 import {
     ActorStats,
+    Badge,
     Customer,
     Director,
     Dog,
@@ -401,6 +403,15 @@ function saves(
             location: make(Location, { uuid, name: uuid, type: 'place' }),
             subLocations: below
         });
+    const badge = (name: string): Badge =>
+        make(Badge, {
+            uuid: 'b1',
+            name,
+            metadata: { source: 'wiki' },
+            extras: { size: 3 },
+            kinds: ['Shiny'],
+            stamp: 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb'
+        });
     const cases: Record<string, GraphStatement> = {
         'Person.save': save(fragment(Person), ada()),
         'Person.save.checked': save(
@@ -418,6 +429,23 @@ function saves(
                 tiers: new Set([Tier.GOLD])
             })
         ),
+        // The save update makes of what it loaded: the root's fields as loaded are compared where a read takes no
+        // snapshot.
+        'Person.update': save(
+            fragment(Person),
+            make(Person, { ...ada(), stamp: 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb' }),
+            {
+                only: ['name'],
+                nullPolicy: NullPolicy.CLEAR,
+                loaded: make(Person, { ...ada(), bio: undefined, stamp: 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb' })
+            }
+        ),
+        'Badge.update': save(fragment(Badge), badge('Grace'), {
+            only: ['name'],
+            nullPolicy: NullPolicy.CLEAR,
+            heldProperties: {},
+            loaded: badge('Ada')
+        }),
         'PersonCareer.save': save(view(PersonCareer), career()),
         'PersonCareer.save.replace': save(view(PersonCareer), career('aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb'), {
             replace: ['employmentHistory'],
