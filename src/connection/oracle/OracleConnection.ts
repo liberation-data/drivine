@@ -7,6 +7,9 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { OracleCursor } from '@/connection/oracle/OracleCursor';
+import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -23,18 +26,28 @@ export class OracleConnection implements Connection {
     private readonly logger = new DrivineLogger(OracleConnection.name);
     private inTransaction = false;
 
+    /**
+     * @param graph the graph a Cypher statement is compiled against: its tables are `<graph>_node` and `<graph>_edge`
+     */
     constructor(
         readonly connection: oracledb.Connection,
         readonly resultMapper: ResultMapper,
-        private readonly id: string
+        private readonly id: string,
+        private readonly graph: string = DEFAULT_GRAPH
     ) {}
 
     sessionId(): string {
         return this.id;
     }
 
+    /**
+     * Runs the statement. A Cypher statement is compiled to SQL over the graph's tables, so a statement written for a
+     * graph engine runs here and gives the same rows; one that writes is a PL/SQL block.
+     */
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
-        const finalized = spec.finalizedCopy('SQL');
+        const given = spec.finalizedCopy('SQL');
+        const cypher = given.statement.language === 'CYPHER';
+        const finalized = cypher ? compiledSpecification(given, new OracleCypherCompiler(this.graph)).spec : given;
         const compiled = new OracleSpecCompiler(finalized).compile();
         const hrStart = process.hrtime();
         const result = await this.connection.execute<any>(compiled.statement, compiled.parameters, {
@@ -43,7 +56,9 @@ export class OracleConnection implements Connection {
         });
         new StatementLogger(this.sessionId()).log(spec, hrStart);
         const rows = result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined);
-        return this.resultMapper.mapQueryResults<T>(rows, finalized);
+        // A Cypher statement that writes returns its rows in one: see OracleCypherCompiler.returnRows.
+        const returned = cypher && !result.rows ? (rows[0]?.rows ?? []).map((it: any) => ({ result: it })) : rows;
+        return this.resultMapper.mapQueryResults<T>(returned, finalized);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<OracleCursor<T>> {

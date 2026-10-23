@@ -4,3 +4,6 @@ dist
 public
 coverage
 package-lock.json
+
+# Generated from Cypher.g4 by scripts/generate-cypher-parser.sh.
+src/cypher/grammar

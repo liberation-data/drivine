@@ -1,5 +1,7 @@
 {
     "root": true,
+    // Generated from Cypher.g4 by scripts/generate-cypher-parser.sh.
+    "ignorePatterns": ["src/cypher/grammar/*.ts"],
     "extends": [
         "eslint:recommended",
         "plugin:@typescript-eslint/recommended"

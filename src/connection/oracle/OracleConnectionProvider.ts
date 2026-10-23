@@ -57,7 +57,12 @@ export class OracleConnectionProvider implements ConnectionProvider {
             {},
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
-        return new OracleConnection(connection, new OracleResultMapper(), `oracle.${session.rows?.[0]?.SID ?? '?'}`);
+        return new OracleConnection(
+            connection,
+            new OracleResultMapper(),
+            `oracle.${session.rows?.[0]?.SID ?? '?'}`,
+            this.graphName
+        );
     }
 
     async end(): Promise<void> {

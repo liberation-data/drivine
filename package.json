@@ -47,7 +47,7 @@
         "test:unit": "jest --coverage --testPathPatterns '1[.]Unit[/]'",
         "test:integration": "jest --coverage --testPathPatterns '2[.]Integration[/]'",
         "test:e2e": "jest --coverage --testPathPatterns '3[.]EndToEnd[/]'",
-        "lint:ci": "eslint src test/1.Unit test/2.Integration/manager test/2.Integration/schema test/2.Integration/backend test/2.Integration/support test/2.Integration/oracle test/2.Integration/sql test/2.Integration/postgres test/2.Integration/testing test/2.Integration/security test/2.Integration/website test/jest-global-setup.ts test/jest-global-teardown.ts test/run-tests.ts test/TestEnvironment.ts test/register-paths.ts sample"
+        "lint:ci": "eslint src test/1.Unit test/2.Integration/manager test/2.Integration/schema test/2.Integration/backend test/2.Integration/support test/2.Integration/oracle test/2.Integration/sql test/2.Integration/postgres test/2.Integration/testing test/2.Integration/security test/2.Integration/website test/2.Integration/cypher test/cypher test/jest-global-setup.ts test/jest-global-teardown.ts test/run-tests.ts test/TestEnvironment.ts test/register-paths.ts sample"
     },
     "peerDependencies": {
         "@nestjs/common": ">= 6 <= 11",
@@ -60,6 +60,7 @@
         "testcontainers": ">= 10"
     },
     "dependencies": {
+        "antlr4ng": "^3.0.16",
         "async-mutex": "^0.4.0",
         "cli-color": "^2.0.3",
         "dotenv": "^16.3.1",
@@ -94,6 +95,7 @@
         "@typescript-eslint/eslint-plugin": "^8.71.2",
         "@typescript-eslint/parser": "^8.71.2",
         "acorn": "^8.11.2",
+        "antlr4ng-cli": "^2.0.0",
         "class-transformer": "^0.5.1",
         "class-validator": "^0.14.0",
         "eslint": "^8.57.1",
@@ -110,7 +112,8 @@
         "ts-mockito": "^2.6.1",
         "ts-node": "^10.9.1",
         "tsconfig-paths": "^4.2.0",
-        "typescript": "^5.2.2"
+        "typescript": "^5.2.2",
+        "yaml": "^2.9.1"
     },
     "jest": {
         "moduleFileExtensions": [
