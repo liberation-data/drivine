@@ -73,7 +73,10 @@ class Pals {
     @GraphRelationship({ type: 'KNOWS', direction: Direction.UNDIRECTED, target: () => Doc }) pals: Doc[];
 }
 
-/** A tree with fields it only reads: reviewers marked so, and the docs below it as a flat list read over several hops. */
+/**
+ * A tree with fields it only reads: reviewers marked so, the docs below it as a flat list read over several hops, and
+ * trees it links to, nested in itself but marked so, which reach past their maxDepth without a depth check.
+ */
 @GraphView()
 class ReviewedTree {
     @Root() doc: Doc;
@@ -83,6 +86,9 @@ class ReviewedTree {
     below: Doc[];
     @GraphRelationship({ type: 'PART_OF', direction: Direction.INCOMING, target: () => ReviewedTree, maxDepth: 2 })
     parts: ReviewedTree[];
+    @ReadOnly()
+    @GraphRelationship({ type: 'LINKS', direction: Direction.INCOMING, target: () => ReviewedTree, maxDepth: 1 })
+    linked: ReviewedTree[];
 }
 
 describe('CascadeTargets', () => {
@@ -142,6 +148,7 @@ describe('CascadeTargets', () => {
             for (const cascade of [CascadeType.DELETE_ALL, CascadeType.DELETE_ORPHAN]) {
                 const text = backend.delete(view(ReviewedTree), undefined, cascade).text;
                 expect(text).not.toContain('REVIEWED_BY');
+                expect(text).not.toContain('LINKS');
                 expect(text).toContain('PART_OF');
                 expect(text).toContain('HAS');
                 // The list read over several hops would be a variable-length read of PART_OF.

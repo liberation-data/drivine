@@ -1144,9 +1144,9 @@ sub-sessions. The rest of the view is deleted, including the session that held a
 available on Memgraph.
 
 A view that contains itself (`parts: SessionTree[]`, with a `maxDepth`) deletes what a load of it reads: the nodes at
-every level, and what each level holds through the view's other relationships. A cascade never stops short: if the
-relationship reaches below its `maxDepth`, the delete throws a `DrivineError` before anything is written, saying how deep
-the view reads. Raise the `maxDepth` to cover the deepest level.
+every level, and what each level holds through the view's other relationships a save writes. A cascade never stops
+short: if the relationship reaches below its `maxDepth`, the delete throws a `DrivineError` before anything is written,
+saying how deep the view reads. Raise the `maxDepth` to cover the deepest level.
 
 ### Polymorphism
 
