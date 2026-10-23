@@ -77,7 +77,9 @@ export function FullTextIndex(options: { properties?: string[] } = {}): ClassDec
 
 /**
  * A vector index over the field. Its dimensions come from the catalog's dimension provider when the catalog is built
- * (they belong to the embedding model, known at runtime), unless given here. Drives `loadNearest`.
+ * (they belong to the embedding model, known at runtime), unless given here. Drives `loadNearest`, and FalkorDB writes
+ * only a decorated field as a vector. Keep it beside a catalog spec that tunes the index: a catalog spec over a field
+ * without it is refused, when SchemaManager applies the catalog and when the fragment's model is first built.
  */
 export function VectorIndex(
     options: { similarity?: SchemaSimilarity; dimensions?: number; hnswM?: number; hnswEfConstruction?: number } = {}

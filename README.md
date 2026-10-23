@@ -1646,6 +1646,15 @@ startup. A catalog applies to every database that supports schema, unless you na
 `.forDefaultDatabase()`, `.forDatabase('users')` or `.forDatabases('a', 'b')`. A named target is strict: an unknown
 database, or one without schema support, fails startup.
 
+A vector index in a catalog over a fragment field that has no `@VectorIndex` fails too, naming the class, the field and
+the spec. Without the decorator FalkorDB stores the field as a plain list, and `loadNearest` finds no index for the
+fragment. Declare both when a catalog spec tunes the index. The check runs when `SchemaManager` applies the catalog, or
+is given the spec by `ensure`, and when the fragment class is first used. A field is matched by the property it's stored
+under, on any of the fragment's labels. Only fields the class decorates or initializes can be seen, so
+`embedding?: number[]` with neither isn't checked, unless the compiler emits class fields (`useDefineForClassFields`,
+the default from target ES2022). A spec for a label no fragment maps, and one given to
+`indexes.ensure` directly, aren't checked either.
+
 | Option | Meaning |
 |---|---|
 | `mode` | `FAIL_FAST` (the default) throws on drift, a violation or an index in the way of a constraint; `WARN` logs it and carries on. |
@@ -1657,6 +1666,45 @@ database, or one without schema support, fails startup.
 
 `SchemaManager` is injectable, to change the schema as the application runs: `enforce()` is safe to call again, and
 `recreateAll()` drops and remakes every declared item.
+
+The manager reads its catalogs once, when it is built: a catalog made later isn't seen, and a later `enforce()` applies
+the same list. Schema known later is given to `ensure` (below). With nothing to apply, in its catalogs or given to
+`ensure`, it says so at info level: `Schema management found no SchemaCatalog` when it was given none, or
+`found 2 SchemaCatalog(s), all empty: 'dice', unnamed` when every one came out empty. So a missing index can be traced
+to a catalog that never arrived.
+
+### Schema Known Only at Runtime
+
+Some schema can't be in a catalog, because it isn't known when the catalogs are read: a vector index whose dimensions
+arrive with an embedding model configured after startup, or an index for each label a tenant declares. Give it to
+`ensure`, under the owner it belongs to:
+
+```typescript
+await schemaManager.ensure('dice', vectorIndex('Proposition', 'embedding', model.dimensions));
+```
+
+With Nest, inject `SchemaManager`. The module provides one only when given `schema`, so an application whose schema is
+all known at runtime gives it `schema: { catalogs: [] }`.
+
+The items join what that owner's catalogs declared, for the life of the manager, and are applied as `enforce` applies
+the owner's:
+
+- **Under the same options.** `mode`, `recreateOnDrift` and `violationSampleSize` apply. Only the items given are
+  applied, and the results come back by database. `ensure` leaves a change of the owner's version to `enforce`, and
+  `recreateOnStartup` doesn't apply to it.
+- **In the owner's inventory.** The owner's `_DrivineSchema` marker records them as ensured at runtime. A later
+  `enforce()` applies them with the rest, and `recreateAll()` recreates them. An `enforce` by a manager built later (the
+  next process, before the item is ensured again) keeps them in the inventory and doesn't report them as orphans.
+- **Recreated with the owner.** When that later manager recreates the owner's items (its version changed,
+  `recreateOnStartup`, or `recreateAll`), it has no spec for a runtime item, so it marks it, and the next `ensure` of
+  the item recreates it.
+- **Checked against other owners.** A declaration that conflicts with another owner's, or with the owner's own, fails
+  naming both, and nothing is kept or applied on any database. One identical to another owner's is co-owned.
+
+Ensuring an item again with the same kind, label and properties replaces it: of another shape, it's drift. To target
+databases, give a catalog: `ensure(SchemaCatalog.of(spec).named('dice').forDatabase('users'))`. A runtime catalog
+can't carry a version, since the owner's version is its startup catalogs'. The marker is drivine4j's: either library
+keeps what the other ensured at runtime.
 
 ### Version-Triggered Rebuild
 

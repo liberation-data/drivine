@@ -13,6 +13,7 @@ import {
     uniquenessConstraint,
     vectorIndex
 } from '@liberation-data/drivine';
+import { inventoryEntries, readInventory } from '@/schema/SchemaInventory';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
@@ -114,6 +115,20 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         ]);
         expect(await read('rag', 'version')).toBeNull();
         expect(await read('rag', 'items')).toEqual(['RANGE_INDEX:ManagedDoc:contextId:ManagedDoc_contextId_range']);
+        // An item ensured at runtime is kept behind drivine4j's prefixes, in the same property.
+        await gom.persistenceManager.execute(
+            gom.backend.recordSchemaMarker().spec({
+                scope: 'rag',
+                version: null,
+                items: inventoryEntries(['a', 'b', 'c'], new Set(['b', 'c']), new Set(['c']))
+            })
+        );
+        expect(await read('rag', 'items')).toEqual(['a', 'runtime:b', 'runtime-stale:c']);
+        expect(readInventory((await read('rag', 'items')) as string[])).toEqual({
+            keys: ['a', 'b', 'c'],
+            runtime: new Set(['b', 'c']),
+            stale: new Set(['c'])
+        });
         // The marker's key is guarded by a uniqueness constraint, made the first time an owner versions.
         expect(
             (await gom.constraints.list()).some((it) => it.label === '_DrivineSchema' && it.properties[0] === 'scope')
