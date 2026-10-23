@@ -178,6 +178,22 @@ describe.each(sqlStores())('saves on $name', (store) => {
         expect(loaded.stamp).toEqual(saved.stamp);
     });
 
+    it('should check a save from the object as loaded against the stamp it was loaded with', async () => {
+        await gom.save(person('dee', { name: 'Dee' }));
+        const loaded = (await gom.load(Person, 'dee'))!;
+
+        // Built anew, without the stamp: checked as what it was loaded from, and handed the new stamp.
+        const saved = await gom.save(person('dee', { name: 'Dee Dee' }), { from: loaded });
+        expect((await gom.load(Person, 'dee'))!.name).toEqual('Dee Dee');
+        expect(saved.stamp).not.toEqual(loaded.stamp);
+
+        await expect(gom.save(person('dee', { name: 'Late' }), { from: loaded })).rejects.toThrow(StaleObjectException);
+        await expect(gom.save(person('dee', { name: 'Late' }), { from: person('dee') })).rejects.toThrow(
+            /carries no stamp/
+        );
+        expect((await gom.load(Person, 'dee'))!.name).toEqual('Dee Dee');
+    });
+
     it('should let exactly one of several writers holding one stamp win', async () => {
         const base = await gom.save(person('cy', { name: 'Cy' }));
         const writers = [1, 2, 3, 4, 5].map((i) => person('cy', { name: `Writer ${i}`, stamp: base.stamp }));

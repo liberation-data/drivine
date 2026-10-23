@@ -2,9 +2,12 @@ import {
     GraphObjectMapper,
     GraphProperty,
     GraphTransient,
+    JsonPacked,
     ModelRegistry,
     NodeFragment,
-    NodeId
+    NodeId,
+    NodeStamp,
+    packedTextOf
 } from '@liberation-data/drivine';
 
 @NodeFragment({ labels: ['Person'] })
@@ -18,6 +21,13 @@ class Person {
     greeting(): string {
         return `Hi, ${this.name}`;
     }
+}
+
+@NodeFragment({ labels: ['Settings'] })
+class Settings {
+    @NodeId() uuid: string;
+    @JsonPacked() @GraphProperty('prefs_json') prefs?: Record<string, any>;
+    @NodeStamp() stamp?: string;
 }
 
 describe('GraphObjectMapper', () => {
@@ -53,5 +63,19 @@ describe('GraphObjectMapper', () => {
         expect(
             mapper.fragment<Person>(model, { props: { uuid: '1', nickname: 'MG' }, labels: ['Person'] }).nickname
         ).toEqual('MG');
+    });
+
+    it('should keep the text a packed property held, for a save given the fragment as loaded', () => {
+        const settings = mapper.fragment<Settings>(new ModelRegistry().fragment(Settings), {
+            props: { uuid: '1', prefs_json: '{"a": 1}', '__drivine.stamp': 'abc' },
+            labels: ['Settings']
+        });
+        expect(settings.prefs).toEqual({ a: 1 });
+        expect(packedTextOf(settings)).toEqual({ prefs_json: '{"a": 1}' });
+        // A copy, or a fragment of a class with nothing packed, holds none.
+        expect(packedTextOf({ ...settings })).toBeUndefined();
+        expect(
+            packedTextOf(mapper.fragment<Person>(model, { props: { uuid: '1' }, labels: ['Person'] }))
+        ).toBeUndefined();
     });
 });

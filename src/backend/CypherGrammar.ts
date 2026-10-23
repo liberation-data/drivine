@@ -47,8 +47,8 @@ export interface CypherGrammar {
      * Whether a read takes no snapshot, so one query can find a node's properties as different commits left them.
      * Neo4j reads under read committed without a lock: a load that runs while another writer commits can be handed
      * that writer's stamp with the data from before its write, however the query orders its reads. The checked save of
-     * what `update` loaded then compares the root's fields as loaded too, under the node's lock. Memgraph reads from a
-     * snapshot, and FalkorDB runs no read beside a write.
+     * what `update` loaded, or a save given `from`, then compares the root's fields as loaded too, under the node's
+     * lock. Memgraph reads from a snapshot, and FalkorDB runs no read beside a write.
      */
     readonly readsWithoutSnapshot?: boolean;
 

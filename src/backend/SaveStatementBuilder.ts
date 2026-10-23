@@ -259,11 +259,12 @@ export class SaveStatementBuilder {
     }
 
     /**
-     * What the checked save of `loaded`, the root as `update` loaded it, requires of the node besides the stamp. A load
-     * that ran while another writer committed can hold that writer's stamp with the data from before its write. Each
-     * field is compared as it was loaded too, under the lock, so the save of such an object is refused, as a stale one
-     * is: a field its value, a bag the keys it owns and their values, the labels field the labels it reads. A
-     * comparison that can't tell (a list holding a null) is not a difference: the stamp still speaks for the field.
+     * What the checked save of `loaded`, the root as `update` loaded it or as a save's `from` holds it, requires of the
+     * node besides the stamp. A load that ran while another writer committed can hold that writer's stamp with the data
+     * from before its write. Each field is compared as it was loaded too, under the lock, so the save of such an object
+     * is refused, as a stale one is: a field its value, a bag the keys it owns and their values, the labels field the
+     * labels it reads. A comparison that can't tell (a list holding a null) is not a difference: the stamp still speaks
+     * for the field.
      */
     private stillAsLoaded(model: FragmentModel, loaded: any): string[] {
         const bind = (name: string, value: any): string => {

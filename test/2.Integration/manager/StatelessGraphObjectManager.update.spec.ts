@@ -15,6 +15,8 @@ import {
     PropertyBag,
     QuerySpecification,
     Root,
+    StaleObjectException,
+    Stamps,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
@@ -126,6 +128,10 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
         await closeGraphEngines();
     });
 
+    // Neo4j reads without a snapshot: there an update, and a save given the object as loaded, compare the root's fields
+    // as loaded, not only the stamp.
+    const readsWithoutSnapshot = engine.type === DatabaseType.NEO4J ? it : it.skip;
+
     describe('update', () => {
         it('should return undefined when there is no such node', async () => {
             expect(await gom.update(Proposition, 'nobody', (it) => it)).toBeUndefined();
@@ -221,9 +227,6 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
             expect(updated).toBeDefined();
             return applied;
         };
-
-        // Neo4j reads without a snapshot: there an update compares the root's fields as loaded, not only the stamp.
-        const readsWithoutSnapshot = engine.type === DatabaseType.NEO4J ? it : it.skip;
 
         readsWithoutSnapshot(
             'should load again when a field differs from what it loaded under the same stamp',
@@ -367,6 +370,223 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
             });
             expect((await gom.load(PropositionView, 'p1'))!.mentions.map((it) => it.id).sort()).toEqual(['e2', 'e3']);
         });
+    });
+
+    describe('save from the object as loaded', () => {
+        const finding = (id: string, sources: string[], stamp?: string): Finding =>
+            make(Finding, { id, sources, stamp });
+
+        readsWithoutSnapshot('should be refused when a field changed under the same stamp', async () => {
+            await gom.save(finding('f1', ['first']));
+            const loaded = (await gom.load(Finding, 'f1'))!;
+            // As a load sees the node when it is handed another writer's stamp with the data from before its write.
+            await pm.execute(
+                new QuerySpecification("MATCH (n:Finding {id: 'f1'}) SET n.sources = n.sources + 'theirs'")
+            );
+
+            await expect(
+                gom.save(finding('f1', [...loaded.sources, 'mine'], loaded.stamp), { from: loaded })
+            ).rejects.toThrow(StaleObjectException);
+            // The other writer's change stands.
+            expect((await gom.load(Finding, 'f1'))!.sources.sort()).toEqual(['first', 'theirs']);
+
+            // Without from, the stamp alone speaks, and the save writes over the other writer's change.
+            await gom.save(finding('f1', [...loaded.sources, 'mine'], loaded.stamp));
+            expect((await gom.load(Finding, 'f1'))!.sources).toEqual(['first', 'mine']);
+        });
+
+        readsWithoutSnapshot(
+            'should be refused when a bag, a flat bag or the labels changed under the same stamp',
+            async () => {
+                await gom.save(make(Tagged, { id: 't1', text: 'one', meta: { owner: 'first' } }));
+                await gom.save(make(Sticker, { id: 's1', labels: ['Shiny'], extras: { size: 1 } }));
+                const tagged = (await gom.load(Tagged, 't1'))!;
+                const sticker = (await gom.load(Sticker, 's1'))!;
+                await pm.execute(new QuerySpecification("MATCH (n:Tagged {id: 't1'}) SET n.`meta.owner` = 'theirs'"));
+                await pm.execute(new QuerySpecification("MATCH (n:Sticker {id: 's1'}) SET n:Sneaked"));
+
+                await expect(gom.save(make(Tagged, { ...tagged, text: 'two' }), { from: tagged })).rejects.toThrow(
+                    StaleObjectException
+                );
+                await expect(
+                    gom.save(make(Sticker, { ...sticker, extras: { size: 2 } }), { from: sticker })
+                ).rejects.toThrow(StaleObjectException);
+                expect((await gom.load(Tagged, 't1'))!.text).toEqual('one');
+                expect((await gom.load(Sticker, 's1'))!.extras).toEqual({ size: 1 });
+            }
+        );
+
+        it('should be applied when the node is as loaded, and hand back the new stamp', async () => {
+            await gom.save(finding('f1', ['first']));
+            const loaded = (await gom.load(Finding, 'f1'))!;
+
+            const saved = await gom.save(finding('f1', [...loaded.sources, 'mine'], loaded.stamp), { from: loaded });
+
+            expect((await gom.load(Finding, 'f1'))!.sources).toEqual(['first', 'mine']);
+            expect(saved.stamp).not.toEqual(loaded.stamp);
+            expect((await gom.load(Finding, 'f1'))!.stamp).toEqual(saved.stamp);
+        });
+
+        it('should be checked against the stamp it was loaded with, whatever the copy carries', async () => {
+            await gom.save(finding('f1', ['first']));
+            const loaded = (await gom.load(Finding, 'f1'))!;
+            await pm.execute(
+                new QuerySpecification(
+                    `MATCH (n:Finding {id: 'f1'}) SET n.sources = ['theirs'], ${Stamps.setClause('n')}`
+                )
+            );
+            const current = (await gom.load(Finding, 'f1'))!.stamp;
+
+            // Built anew, without the stamp, or with the node's current one: checked as what it was loaded from.
+            const anew = finding('f1', ['mine']);
+            await expect(gom.save(anew, { from: loaded })).rejects.toThrow(StaleObjectException);
+            await expect(gom.save(finding('f1', ['mine'], current), { from: loaded })).rejects.toThrow(
+                StaleObjectException
+            );
+
+            expect((await gom.load(Finding, 'f1'))!.sources).toEqual(['theirs']);
+            // A refused save leaves the copy with the stamp it carried.
+            expect(anew.stamp).toBeUndefined();
+        });
+
+        it('should be refused before anything is written when from is not the object as loaded', async () => {
+            await gom.save(finding('f1', ['first']));
+            await gom.save(finding('f2', ['second']));
+            const loaded = (await gom.load(Finding, 'f1'))!;
+            const other = (await gom.load(Finding, 'f2'))!;
+            const mine = (): Finding => finding('f1', ['mine'], loaded.stamp);
+
+            await expect(gom.save(mine(), { from: other })).rejects.toThrow(
+                "from is the Finding 'f2', and the object saved 'f1'"
+            );
+            await expect(gom.save(mine(), { from: finding('f1', ['first']) })).rejects.toThrow(/carries no stamp/);
+            await expect(
+                gom.save<any>(mine(), { from: make(Proposition, { id: 'f1', stamp: loaded.stamp }) })
+            ).rejects.toThrow('from is a Proposition, and the object saved a Finding');
+            // The very object loaded, changed in place, can't say what was loaded.
+            loaded.sources.push('mine');
+            await expect(gom.save(loaded, { from: loaded })).rejects.toThrow(/from is the Finding saved itself/);
+            await expect(gom.saveAll([mine()], { from: loaded } as any)).rejects.toThrow(/saveAll takes no from/);
+
+            expect((await gom.load(Finding, 'f1'))!.sources).toEqual(['first']);
+        });
+
+        it('should save a view from the view as loaded', async () => {
+            await gom.save(
+                make(PropositionView, { proposition: proposition({ id: 'p1', text: 'one' }), mentions: [entity('e1')] })
+            );
+            const loaded = (await gom.load(PropositionView, 'p1'))!;
+            const edited = make(PropositionView, {
+                proposition: proposition({ ...loaded.proposition, text: 'two' }),
+                mentions: [...loaded.mentions, entity('e2')]
+            });
+
+            const saved = await gom.save(edited, { from: loaded });
+
+            const reloaded = (await gom.load(PropositionView, 'p1'))!;
+            expect(reloaded.proposition.text).toEqual('two');
+            expect(reloaded.mentions.map((it) => it.id).sort()).toEqual(['e1', 'e2']);
+            expect(saved.proposition.stamp).toEqual(reloaded.proposition.stamp);
+            await expect(gom.save(edited, { from: loaded })).rejects.toThrow(StaleObjectException);
+        });
+
+        it('should save a copy of a view that shares the root as loaded and changes only a relationship', async () => {
+            await gom.save(
+                make(PropositionView, { proposition: proposition({ id: 'p1', text: 'one' }), mentions: [entity('e1')] })
+            );
+            const loaded = (await gom.load(PropositionView, 'p1'))!;
+            const edited = make(PropositionView, {
+                proposition: loaded.proposition,
+                mentions: [...loaded.mentions, entity('e2')]
+            });
+
+            const saved = await gom.save(edited, { from: loaded });
+
+            const reloaded = (await gom.load(PropositionView, 'p1'))!;
+            expect(reloaded.proposition.text).toEqual('one');
+            expect(reloaded.mentions.map((it) => it.id).sort()).toEqual(['e1', 'e2']);
+            expect(saved.proposition.stamp).toEqual(reloaded.proposition.stamp);
+        });
+
+        readsWithoutSnapshot(
+            'should refuse a copy of a view sharing the root when a root field changed under the same stamp',
+            async () => {
+                await gom.save(
+                    make(PropositionView, {
+                        proposition: proposition({ id: 'p1', text: 'one' }),
+                        mentions: [entity('e1')]
+                    })
+                );
+                const loaded = (await gom.load(PropositionView, 'p1'))!;
+                await pm.execute(new QuerySpecification("MATCH (n:Proposition {id: 'p1'}) SET n.text = 'theirs'"));
+                const edited = make(PropositionView, {
+                    proposition: loaded.proposition,
+                    mentions: [...loaded.mentions, entity('e2')]
+                });
+
+                await expect(gom.save(edited, { from: loaded })).rejects.toThrow(StaleObjectException);
+
+                const reloaded = (await gom.load(PropositionView, 'p1'))!;
+                expect(reloaded.proposition.text).toEqual('theirs');
+                expect(reloaded.mentions.map((it) => it.id)).toEqual(['e1']);
+            }
+        );
+
+        it('should save a node whose packed text another writer wrote with other spacing, as the load read it', async () => {
+            await gom.save(make(Packed, { id: 'k1', text: 'one', prefs: { a: 1 } }));
+            // As drivine-python, or a migration, packs it: not as JSON.stringify would.
+            await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = '{"a": 1}'`));
+            const loaded = (await gom.load(Packed, 'k1'))!;
+
+            await gom.save(make(Packed, { ...loaded, text: 'two' }), { from: loaded });
+            expect((await gom.load(Packed, 'k1'))!.text).toEqual('two');
+        });
+
+        readsWithoutSnapshot(
+            'should refuse a from no load made whose packed text the node holds with other spacing',
+            async () => {
+                await gom.save(make(Packed, { id: 'k1', text: 'one', prefs: { a: 1 } }));
+                await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = '{"a": 1}'`));
+                // A copy of what was loaded: its packed field is compared as a save packs it, which the node's text
+                // isn't. A refusal that is not needed, rather than a change gone unnoticed.
+                const copied = make(Packed, { ...(await gom.load(Packed, 'k1'))! });
+
+                await expect(gom.save(make(Packed, { ...copied, text: 'two' }), { from: copied })).rejects.toThrow(
+                    StaleObjectException
+                );
+            }
+        );
+
+        it("should keep every writer's change when many writers save from what they loaded at once", async () => {
+            const [writers, each] = [8, 25];
+            await gom.save(finding('f1', []));
+            await Promise.all(
+                Array.from({ length: writers }, async (_, writer) => {
+                    for (let k = 0; k < each; k++) {
+                        // Load, change and save from what was loaded; again when another writer got there first.
+                        for (;;) {
+                            const loaded = (await gom.load(Finding, 'f1'))!;
+                            try {
+                                await gom.save(finding('f1', [...loaded.sources, `w${writer}-${k}`], loaded.stamp), {
+                                    from: loaded
+                                });
+                                break;
+                            } catch (failure) {
+                                if (!(failure instanceof StaleObjectException)) {
+                                    throw failure;
+                                }
+                            }
+                        }
+                    }
+                })
+            );
+            const kept = new Set((await gom.load(Finding, 'f1'))!.sources);
+            const lost = Array.from(
+                { length: writers * each },
+                (_, i) => `w${Math.floor(i / each)}-${i % each}`
+            ).filter((it) => !kept.has(it));
+            expect(lost).toEqual([]);
+        }, 300_000);
     });
 
     describe('create', () => {
