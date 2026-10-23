@@ -171,6 +171,22 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         expect((await record('schema'))!.runtime).toEqual(new Set(['RANGE_INDEX:RtAnon:slug:RtAnon_slug_range']));
     });
 
+    it('should apply what it was ensured when its catalogs are all empty, and not say there is nothing to apply', async () => {
+        const schema = manager([SchemaCatalog.of().named('dice')]);
+        await schema.ensure('dice', rangeIndex('RtAnon', 'slug'));
+        await gom().indexes.drop(rangeIndex('RtAnon', 'slug'));
+        const log = jest.spyOn(DrivineLogger.prototype, 'log');
+        try {
+            expect(statuses(await schema.enforce())).toEqual(['RANGE:CREATED']);
+            expect(statuses(await schema.recreateAll())).toEqual(['RANGE:RECREATED']);
+            const said = log.mock.calls.map(([it]) => String(it));
+            expect(said.filter((it) => it.includes('nothing to apply'))).toEqual([]);
+        } finally {
+            log.mockRestore();
+        }
+        expect((await record('dice'))!.runtime).toEqual(new Set(['RANGE_INDEX:RtAnon:slug:RtAnon_slug_range']));
+    });
+
     it('should mark a runtime item on a version change that has no spec for it, and recreate it when next ensured', async () => {
         const first = manager([dice.withVersion('model-a')], { mode: 'WARN' });
         await first.enforce();

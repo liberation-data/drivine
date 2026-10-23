@@ -5,7 +5,7 @@ import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
-import { SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
+import { DEFAULT_SCOPE, SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import { inventoryEntries, readInventory, RecordedInventory } from '@/schema/SchemaInventory';
 import {
     EnsureResult,
@@ -124,6 +124,10 @@ function staleAfter(
  * Holds catalogs of indexes and constraints on the databases they apply to. `enforce` is idempotent: it makes what is
  * missing, and recreates a catalog's items when its version changed. `recreateAll` drops and makes everything. Schema
  * known only later is given to `ensure`, under an owner.
+ *
+ * The catalogs are read once, when the manager is built: one made later is never seen, and `enforce` applies the same
+ * list again. With nothing to apply (no catalog, or only empty ones, and nothing given to `ensure`) it says so, naming
+ * the empty ones.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
@@ -239,7 +243,12 @@ export class SchemaManager {
     private async apply(recreate: boolean): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
         const runtime = this.runtimeCatalogs(this.runtime);
         const report = new Map<string, EnsureResult<SchemaSpec>[]>();
-        for (const [database, catalogs] of this.catalogsByDatabase([...this.options.catalogs, ...runtime])) {
+        const all = [...this.options.catalogs, ...runtime];
+        if (!all.some((it) => it.items.length)) {
+            this.logNothingToApply();
+            return report;
+        }
+        for (const [database, catalogs] of this.catalogsByDatabase(all)) {
             const gom = this.factory.get(database);
             const plan = this.plan(database, catalogs, runtime);
             const results: EnsureResult<SchemaSpec>[] = [];
@@ -264,6 +273,30 @@ export class SchemaManager {
             runtimeOnly.set(owner, new Set([...ensured].filter((it) => !atStartup.has(it))));
         }
         return { items, owners, coOwned: coOwnedKeys(owners), runtimeOnly };
+    }
+
+    /**
+     * Says why there is nothing to apply, so that a catalog never passed and one that came out empty can be told from an
+     * application with no schema to manage. Both say the catalogs are read once: one made after the manager is not seen,
+     * and schema known later is given to `ensure`. Runtime items count, so a manager given only those applies them.
+     */
+    private logNothingToApply(): void {
+        const once =
+            'Catalogs are read once, when the SchemaManager is built; schema known later is given to SchemaManager.ensure.';
+        const catalogs = this.options.catalogs;
+        if (!catalogs.length) {
+            this.logger.log(`Schema management found no SchemaCatalog; nothing to apply. ${once}`);
+            return;
+        }
+        const counts = new Map<string, number>();
+        catalogs
+            .map((it) => (it.name === DEFAULT_SCOPE ? 'unnamed' : `'${it.name}'`))
+            .forEach((owner) => counts.set(owner, (counts.get(owner) ?? 0) + 1));
+        const owners = [...counts].map(([owner, count]) => (count === 1 ? owner : `${owner} (${count})`));
+        this.logger.log(
+            `Schema management found ${catalogs.length} SchemaCatalog(s), all empty: ${owners.join(', ')}; ` +
+                `nothing to apply. ${once}`
+        );
     }
 
     /**
