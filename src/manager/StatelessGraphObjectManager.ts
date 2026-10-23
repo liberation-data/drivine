@@ -5,7 +5,7 @@ import { IndexAdvicePolicy, QueryIndexAdvisor } from '@/dsl/QueryIndexAdvisor';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
-import { FragmentRow, GraphObjectMapper, ViewRow } from '@/mapper/GraphObjectMapper';
+import { FragmentRow, GraphObjectMapper, packedTextOf, ViewRow } from '@/mapper/GraphObjectMapper';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
@@ -425,11 +425,35 @@ export class StatelessGraphObjectManager {
      * view each related node and the relationship to it. Relationships are added, never removed, except those of the
      * fields named in `options.replace`. Returns the object.
      *
+     * With `options.from`, the object as it was loaded, the save of a changed copy of it is checked against what
+     * `from` holds: its stamp, and on Neo4j each field of its root (see SaveOptions.from).
+     *
      * Outside a transaction, a save the engine turns away because another writer held what it writes is run again,
      * after a pause. Inside one, it fails, and the transaction's owner decides.
      */
     async save<T extends object>(object: T, options: SaveOptions<T> = {}): Promise<T> {
-        return (await this.write(object, options, false))!;
+        const { from, ...rest }: SaveOptions<T> = options;
+        if (from == null) {
+            return (await this.write(object, rest, false))!;
+        }
+        // Everything is checked before anything is written: that the object is a copy of what it was loaded as.
+        const target = this.modelOf(object.constructor as ClassType);
+        const loaded = this.loadedAs(target, object, from);
+        const model = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const root: any = target.kind === 'GRAPH_VIEW' ? (object as any)[target.model.rootField] : object;
+        // Checked against the stamp from was loaded with, whatever the copy carries, as update checks its save.
+        const own = root[model.stampField!];
+        root[model.stampField!] = loaded.stamp;
+        try {
+            return (await this.write(
+                object,
+                { ...rest, loaded: loaded.root, loadedProperties: packedTextOf(loaded.root) },
+                false
+            ))!;
+        } catch (failure) {
+            root[model.stampField!] = own;
+            throw failure;
+        }
     }
 
     /**
@@ -587,9 +611,15 @@ export class StatelessGraphObjectManager {
      * StaleObjectException, the batch then writing nothing. FalkorDB has no transactions: a batch of more than one
      * statement runs statement by statement in WARN mode, and is refused with NonAtomicBatchException in STRICT.
      *
-     * `replace` applies to views: a batch holding a fragment is refused with it. Returns the objects, in order.
+     * `replace` applies to views: a batch holding a fragment is refused with it. `from` is `save`'s alone, and is
+     * refused here. Returns the objects, in order.
      */
-    async saveAll<T extends object>(objects: T[], options: SaveOptions<T> = {}): Promise<T[]> {
+    async saveAll<T extends object>(objects: T[], options: Omit<SaveOptions<T>, 'from'> = {}): Promise<T[]> {
+        if ((options as SaveOptions<T>).from != null) {
+            throw new DrivineError(
+                'saveAll takes no from: a batch holds many objects. Save a changed copy with save(edited, { from }).'
+            );
+        }
         const fragments = new Map<Function, FragmentGroup>();
         const views: T[] = [];
         for (const object of objects) {
@@ -755,6 +785,59 @@ export class StatelessGraphObjectManager {
             return { where, bindings };
         }
         return this.backend.renderWhere(where, target);
+    }
+
+    /**
+     * The root of `from`, the object as it was loaded, and the stamp it carries, which a save of `object`, a changed
+     * copy of it, is checked against. Refuses a `from` that is the object saved itself, whose fields would then be the
+     * changed ones and not those loaded, and one of another class, with another id, or with no stamp, as one of a class
+     * with no @NodeStamp field has none. A copy may share an unchanged root with `from`.
+     */
+    private loadedAs(target: TargetModel, object: any, from: any): { root: any; stamp: string } {
+        const name = object.constructor.name;
+        if (from === object) {
+            throw new DrivineError(
+                `from is the ${name} saved itself, so it holds the changes, not what was loaded. Give the object as ` +
+                    `it was loaded, and save a changed copy of it.`
+            );
+        }
+        if (from.constructor !== object.constructor) {
+            throw new DrivineError(
+                `from is a ${from.constructor.name}, and the object saved a ${name}. Give the object as it was loaded.`
+            );
+        }
+        const model = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const [root, loadedRoot] =
+            target.kind === 'GRAPH_VIEW'
+                ? [object[target.model.rootField], from[target.model.rootField]]
+                : [object, from];
+        if (root == null) {
+            throw new DrivineError(`The ${name} saved has no root fragment.`);
+        }
+        if (loadedRoot == null) {
+            throw new DrivineError(`The ${name} given as from has no root fragment.`);
+        }
+        const [loadedId, id] = [loadedRoot[model.nodeIdField!], root[model.nodeIdField!]];
+        if (String(loadedId) !== String(id)) {
+            throw new DrivineError(
+                `from is the ${name} '${String(loadedId)}', and the object saved '${String(id)}'. Give the object as ` +
+                    `it was loaded.`
+            );
+        }
+        if (!model.stampField) {
+            throw new DrivineError(
+                `${model.type.name} has no @NodeStamp field, so a save of a ${name} has no stamp to be checked ` +
+                    `against what was loaded. Give it one, or save without from.`
+            );
+        }
+        const stamp = loadedRoot[model.stampField];
+        if (stamp == null) {
+            throw new DrivineError(
+                `The ${name} given as from carries no stamp, so nothing says what it was loaded with. Give it as it ` +
+                    `was loaded, with its @NodeStamp field.`
+            );
+        }
+        return { root: loadedRoot, stamp };
     }
 
     /**

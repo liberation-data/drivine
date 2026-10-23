@@ -259,11 +259,12 @@ export class SaveStatementBuilder {
     }
 
     /**
-     * What the checked save of `loaded`, the root as `update` loaded it, requires of the node besides the stamp. A load
-     * that ran while another writer committed can hold that writer's stamp with the data from before its write. Each
-     * field is compared as it was loaded too, under the lock, so the save of such an object is refused, as a stale one
-     * is: a field its value, a bag the keys it owns and their values, the labels field the labels it reads. A
-     * comparison that can't tell (a list holding a null) is not a difference: the stamp still speaks for the field.
+     * What the checked save of `loaded`, the root as `update` loaded it or as a save's `from` holds it, requires of the
+     * node besides the stamp. A load that ran while another writer committed can hold that writer's stamp with the data
+     * from before its write. Each field is compared as it was loaded too, under the lock, so the save of such an object
+     * is refused, as a stale one is: a field its value, a bag the keys it owns and their values, the labels field the
+     * labels it reads. A comparison that can't tell (a list holding a null) is not a difference: the stamp still speaks
+     * for the field.
      */
     private stillAsLoaded(model: FragmentModel, loaded: any): string[] {
         const bind = (name: string, value: any): string => {
@@ -336,7 +337,8 @@ export class SaveStatementBuilder {
     /**
      * A @JsonPacked field's value as the node held it: what the load read, so that text another writer packed with
      * other spacing or escaping, or a value a load hands over unpacked (text that isn't JSON, a number), is not taken
-     * for a change. A value the node held none for (one a load gives an absent property) is packed as a save packs it.
+     * for a change. A value the node held none for (one a load gives an absent property), or one of a `from` no load
+     * made, such as a copy, is packed as a save packs it.
      */
     private packedAsLoaded(property: string, value: any): any {
         const held = this.options.loadedProperties?.[property];

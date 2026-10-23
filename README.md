@@ -851,6 +851,7 @@ await gom.save(view, { replace: ['assignedTo'] });               // this field's
 await gom.save(view, { replace: 'all' });                        // every relationship field's list is the whole list
 await gom.save(chunk, { except: ['embedding'] });                // write everything but these
 await gom.save(person, { only: ['name'] });                      // write just these
+await gom.save(edited, { from: loaded });                        // checked against the object as it was loaded
 await gom.update(Person, id, (it) => { it.name = 'Ada'; });      // load, change, save what differs
 await gom.create(person);                                        // make it only if it is not there; undefined when it is
 await gom.edges.unrelate(nodeRef(Issue, a), nodeRef(Person, b), 'ASSIGNED_TO');
@@ -861,6 +862,19 @@ applied whole or not at all, with or without a transaction, on every engine.
 
 `only` and `except` name fields of the object, and for a view fields of its root. A view's relationships are written
 whatever they name. Give one or the other, not both.
+
+`from` is the object as you loaded it, when what you save is a changed copy of it. The save is then checked against the
+stamp `from` carries, whatever stamp the copy carries, as `update` checks against what it loaded. On Neo4j it is also
+checked against each field of `from`'s root: see [When a Save Is Refused](#when-a-save-is-refused). It is refused before
+anything is written if `from` is the object saved itself, is of another class, has another id, or carries no stamp.
+Changed in place, an object no longer says what was loaded: save a copy. A copy of a view may share the root with
+`from` when it changes only relationships, but don't change a root it shares in place. `saveAll` takes no `from`.
+
+```typescript
+const loaded = (await gom.load(Person, id))!;
+// ... later, from what the user changed:
+await gom.save(Object.assign(new Person(), loaded, { name: form.name }), { from: loaded });
+```
 
 `save` returns the saved object. On a class with a [`@NodeStamp`](#nodestamp-refusing-a-save-when-the-node-changed)
 field, use the returned object from then on: it carries the stamps the save left, on the root and on each related node
@@ -898,7 +912,8 @@ const saved = await gom.update(Person, id, (person) => {
 
 - If the node changed between the load and the save, `update` loads it again and re-applies the change: three attempts
   by default (the fourth argument), then `StaleObjectException`. That needs a `@NodeStamp` field; without one a change
-  by another writer goes unnoticed.
+  by another writer goes unnoticed. On Neo4j the save compares the root's fields as they were loaded as well as the
+  stamp: see [When a Save Is Refused](#when-a-save-is-refused).
 - It returns undefined when there is no such node, or the node is deleted in between. It never makes a node.
 - A change that gives the object another id or another class is refused.
 
@@ -1049,8 +1064,22 @@ writes nothing and throws `StaleObjectException`.
 | deleted the root | refused, `deleted` is true | refused, `deleted` is true | returns undefined |
 | changed anything with Cypher that doesn't mark it | not noticed | not noticed | not noticed |
 
-An object whose stamp is undefined isn't checked: it makes the node or overwrites it. The save is one statement that
-takes the node's write lock before it compares, so of several writers holding the same stamp exactly one succeeds.
+An object whose stamp is undefined isn't checked, unless it is saved with `from`: it makes the node or overwrites it.
+The save is one statement that takes the node's write lock before it compares, so of several writers holding the same
+stamp exactly one succeeds.
+
+**On Neo4j a load can be handed a stamp newer than its data.** Neo4j reads under read committed, without a snapshot, so
+a load that runs while another writer commits can find that writer's stamp and the data from before its write. `update`
+therefore compares each field of the root as it loaded it too, under the node's lock, and loads again if one differs: a
+field's value (a `@JsonPacked` field's as the text the node held), a `@PropertyBag`'s keys and their values, and the
+labels a `@NodeLabels` field reads. A field the object doesn't hold and its class doesn't initialize isn't compared. A
+`save` checks the same when you give it the object as loaded, as [`from`](#saving-data). A `@JsonPacked` field of a
+`from` that a load made is compared as the text the node held; of one that no load made, such as a copy, as a save
+packs it, so JSON another writer packed with other spacing has the save refused, though nothing changed. Without
+`from` a save has only the stamp to go on, and in that moment it can write over the other writer's change: hold on to
+what you loaded and pass it, or change the node with `update`. Where only the stamp makes the round trip, as through a
+web form, the stamp is all there is. Memgraph reads from a snapshot, FalkorDB runs no read beside a write, and Oracle
+and Postgres read a statement whole, so on them the stamp is what was read.
 
 ```typescript
 try {
@@ -1096,7 +1125,7 @@ every property (`SET n = $props`) removes the stamp, and the next checked save o
 #### What a Stamp Doesn't Cover
 
 - A related node isn't checked: `save` writes it whole. `update` writes only what the change altered.
-- An object with no stamp isn't checked, nor is a fragment in a `saveAll`.
+- An object with no stamp, saved without `from`, isn't checked, nor is a fragment in a `saveAll`.
 - One relationship token covers every relationship: a `replace` of one list is refused when a relationship of another
   type was added.
 - Deleting a node removes its relationships without marking the nodes at their other ends.
