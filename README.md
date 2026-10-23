@@ -1016,6 +1016,9 @@ Under `NullPolicy.IGNORE` a named field that is null is left as the store has it
   nothing; what the transaction wrote before it is undone only if the transaction rolls back.
 - A statement the engine turns away because another writer was changing the same node is run again, after a pause,
   outside a transaction. Inside one it fails, and the transaction's owner decides.
+- A statement that lost its connection is not run again, though the Neo4j driver calls that retriable: it may have been
+  applied before the connection went, and a second run would find its own stamp and report a save that was applied as
+  refused.
 
 ### @NodeStamp: refusing a save when the node changed
 
