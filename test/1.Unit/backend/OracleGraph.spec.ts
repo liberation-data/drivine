@@ -1,4 +1,9 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle';
+
+/** What drivine4j wrote of a store's schema on Oracle, and the names it gives objects (see its `source`). */
+const DRIVINE4J = JSON.parse(fs.readFileSync(path.join(__dirname, '../golden/drivine4j-oracle-schema.json'), 'utf8'));
 
 describe('OracleGraph', () => {
     it("should name its tables after the graph, drivine's unless named", () => {
@@ -22,5 +27,13 @@ describe('OracleGraph', () => {
         const graph = new OracleGraph(`g${'x'.repeat(113)}`);
         expect(graph.vectors('Label', 'embedding').length + 2).toBeLessThanOrEqual(128);
         expect(graph.texts('Label', ['a', 'b']).length + 2).toBeLessThanOrEqual(128);
+    });
+
+    it("should name objects as drivine4j names them, to the hash: Java's String.hashCode of the parts", () => {
+        const names: { graph: string; kind: string; parts: string[]; name: string }[] = DRIVINE4J.objectNames;
+        expect(names.length).toBeGreaterThan(10);
+        for (const it of names) {
+            expect(new OracleGraph(it.graph).objectName(it.kind, it.parts)).toEqual(it.name);
+        }
     });
 });

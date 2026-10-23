@@ -14,6 +14,7 @@ import { PostgresWrites } from '@/backend/postgres/PostgresWrites';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
+import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
@@ -178,7 +179,7 @@ export class PostgresBackend implements GraphBackend {
             `SELECT ${made} AS "table" FROM ${this.graph.catalog} WHERE kind = CAST($kind AS text) ` +
                 `AND label = CAST($label AS text) AND properties = CAST($properties AS text) ` +
                 `AND object_name IS NOT NULL AND to_regclass(object_name) IS NOT NULL`,
-            { kind: `${kind}_INDEX`, label, properties: JSON.stringify(properties) }
+            { kind: CATALOG_KINDS[kind], label, properties: catalogProperties(properties) }
         );
     }
 

@@ -1,0 +1,228 @@
+{
+  "source": "Written by drivine4j at 8aa41c8: for each item, the statements OracleSchemaGrammar(OracleGraph(\"jvm\")) makes it with (createIndex or createConstraint), less the first, which makes the store; and SqlGraph.objectName's names, with the String.hashCode they end in.",
+  "items": [
+    {
+      "spec": {
+        "kind": "RANGE",
+        "label": "Session",
+        "properties": [
+          "lastActivityAt",
+          "sessionId"
+        ]
+      },
+      "statements": [
+        "CREATE INDEX IF NOT EXISTS jvm_ix_lastActivityAtsessionId_8a35af29 ON jvm_node (JSON_VALUE(props, '$.lastActivityAt'), JSON_VALUE(props, '$.sessionId'))",
+        "DECLARE\n    v_unique NUMBER;\nBEGIN\n    SELECT COUNT(*) INTO v_unique FROM jvm_schema u WHERE u.label = 'Session' AND u.properties = '[\"lastActivityAt\",\"sessionId\"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));\n    IF v_unique = 0 THEN\n        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS jvm_lx_SessionlastActivityAtsessionId_396a2573 ON jvm_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == \"Session\")'') THEN JSON_VALUE(n.props, ''$.lastActivityAt'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == \"Session\")'') THEN JSON_VALUE(n.props, ''$.sessionId'') END)';\n    END IF;\nEND;",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'RANGE_INDEX' AS kind, 'Session' AS label, '[\"lastActivityAt\",\"sessionId\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN MATCHED THEN UPDATE SET c.details = '{\"labelled\": \"jvm_lx_SessionlastActivityAtsessionId_396a2573\"}'\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Session_lastActivityAt_sessionId_range', 'jvm_ix_lastActivityAtsessionId_8a35af29', '{\"labelled\": \"jvm_lx_SessionlastActivityAtsessionId_396a2573\"}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;"
+      ]
+    },
+    {
+      "spec": {
+        "kind": "RANGE",
+        "label": "Person",
+        "properties": [
+          "name"
+        ]
+      },
+      "statements": [
+        "CREATE INDEX IF NOT EXISTS jvm_ix_name_337a8b ON jvm_node (JSON_VALUE(props, '$.name'))",
+        "DECLARE\n    v_unique NUMBER;\nBEGIN\n    SELECT COUNT(*) INTO v_unique FROM jvm_schema u WHERE u.label = 'Person' AND u.properties = '[\"name\"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));\n    IF v_unique = 0 THEN\n        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS jvm_lx_Personname_44ce5436 ON jvm_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == \"Person\")'') THEN JSON_VALUE(n.props, ''$.name'') END)';\n    END IF;\nEND;",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '[\"name\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN MATCHED THEN UPDATE SET c.details = '{\"labelled\": \"jvm_lx_Personname_44ce5436\"}'\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Person_name_range', 'jvm_ix_name_337a8b', '{\"labelled\": \"jvm_lx_Personname_44ce5436\"}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;"
+      ]
+    },
+    {
+      "spec": {
+        "kind": "VECTOR",
+        "label": "Chunk",
+        "properties": [
+          "embedding"
+        ],
+        "dimensions": 2,
+        "similarity": "COSINE"
+      },
+      "statements": [
+        "CREATE TABLE IF NOT EXISTS jvm_v_Chunkembedding_7e60bd64 (nid NUMBER PRIMARY KEY REFERENCES jvm_node (nid) ON DELETE CASCADE, embedding VECTOR(2, FLOAT32) NOT NULL)",
+        "BEGIN EXECUTE IMMEDIATE 'CREATE OR REPLACE TRIGGER jvm_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON jvm_node FOR EACH ROW\nBEGIN\n    IF INSTR(JSON_SERIALIZE(:NEW.labels), ''\"Chunk\"'') > 0 AND JSON_EXISTS(:NEW.props, ''$.embedding'') THEN\n                BEGIN\n            MERGE INTO jvm_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, ''$.embedding'' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\nWHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\nWHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n        EXCEPTION WHEN OTHERS THEN\n            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n            DELETE FROM jvm_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n        END;\n    ELSE\n        DELETE FROM jvm_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n    END IF;\nEND;'; END;",
+        "INSERT INTO jvm_v_Chunkembedding_7e60bd64 (nid, embedding)\nSELECT n.nid, TO_VECTOR(JSON_QUERY(n.props, '$.embedding' RETURNING CLOB)) FROM jvm_node n\nWHERE INSTR(JSON_SERIALIZE(n.labels), '\"Chunk\"') > 0 AND JSON_EXISTS(n.props, '$.embedding') AND VECTOR_DIMENSION_COUNT(TO_VECTOR(JSON_QUERY(n.props, '$.embedding' RETURNING CLOB))) = 2\n  AND NOT EXISTS (SELECT 1 FROM jvm_v_Chunkembedding_7e60bd64 s WHERE s.nid = n.nid)",
+        "CREATE VECTOR INDEX IF NOT EXISTS jvm_v_Chunkembedding_7e60bd64_i ON jvm_v_Chunkembedding_7e60bd64 (embedding) ORGANIZATION NEIGHBOR PARTITIONS DISTANCE COSINE",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'VECTOR_INDEX' AS kind, 'Chunk' AS label, '[\"embedding\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Chunk_embedding_vector', 'jvm_v_Chunkembedding_7e60bd64', '{\"dimensions\": 2, \"similarity\": \"COSINE\"}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;"
+      ]
+    },
+    {
+      "spec": {
+        "kind": "FULLTEXT",
+        "label": "Article",
+        "properties": [
+          "title",
+          "body"
+        ]
+      },
+      "statements": [
+        "            DECLARE\n                v_indexed NUMBER;\n                e_no_text EXCEPTION;\n                e_exists EXCEPTION;\n                PRAGMA EXCEPTION_INIT(e_no_text, -29833);\n                PRAGMA EXCEPTION_INIT(e_exists, -955);\n            BEGIN\n                EXECUTE IMMEDIATE 'CREATE TABLE IF NOT EXISTS jvm_t_Articletitlebody_77f227b4 (nid NUMBER PRIMARY KEY REFERENCES jvm_node (nid) ON DELETE CASCADE, doc JSON NOT NULL)';\n                SELECT COUNT(*) INTO v_indexed FROM user_indexes WHERE index_name = 'JVM_T_ARTICLETITLEBODY_77F227B4_I';\n                IF v_indexed = 0 THEN\n                    BEGIN\n                        EXECUTE IMMEDIATE 'CREATE SEARCH INDEX jvm_t_Articletitlebody_77f227b4_i ON jvm_t_Articletitlebody_77f227b4 (doc) FOR JSON PARAMETERS (''SYNC (ON COMMIT)'')';\n                    EXCEPTION\n                        WHEN e_exists THEN\n                            NULL; -- made by another process at this moment\n                        WHEN e_no_text THEN\n                            EXECUTE IMMEDIATE 'DROP TABLE jvm_t_Articletitlebody_77f227b4 PURGE';\n                            BEGIN\n                                MERGE INTO jvm_schema c\n                                USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Article' AS label, '[\"title\",\"body\"]' AS properties FROM dual) k\n                                ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n                                WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n                                    VALUES (k.kind, k.label, k.properties, 'Article_title_body_fulltext', NULL, '{}');\n                            EXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n                                -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n                                NULL;\n                            END;\n                            RETURN;\n                    END;\n                END IF;\n                EXECUTE IMMEDIATE 'CREATE OR REPLACE TRIGGER jvm_t_Articletitlebody_77f227b4_t AFTER INSERT OR UPDATE OF labels, props ON jvm_node FOR EACH ROW\nBEGIN\n    IF INSTR(JSON_SERIALIZE(:NEW.labels), ''\"Article\"'') > 0 THEN\n        MERGE INTO jvm_t_Articletitlebody_77f227b4 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT(''title'' VALUE JSON_VALUE(:NEW.props, ''$.title'' RETURNING CLOB), ''body'' VALUE JSON_VALUE(:NEW.props, ''$.body'' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\nWHEN MATCHED THEN UPDATE SET s.doc = n.doc\nWHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n    ELSE\n        DELETE FROM jvm_t_Articletitlebody_77f227b4 WHERE nid = :NEW.nid;\n    END IF;\nEND;';\n                EXECUTE IMMEDIATE 'INSERT INTO jvm_t_Articletitlebody_77f227b4 (nid, doc)\nSELECT n.nid, JSON_OBJECT(''title'' VALUE JSON_VALUE(n.props, ''$.title'' RETURNING CLOB), ''body'' VALUE JSON_VALUE(n.props, ''$.body'' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) FROM jvm_node n\nWHERE INSTR(JSON_SERIALIZE(n.labels), ''\"Article\"'') > 0\n  AND NOT EXISTS (SELECT 1 FROM jvm_t_Articletitlebody_77f227b4 s WHERE s.nid = n.nid)';\n                BEGIN\n                    MERGE INTO jvm_schema c\n                    USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Article' AS label, '[\"title\",\"body\"]' AS properties FROM dual) k\n                    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n                    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n                        VALUES (k.kind, k.label, k.properties, 'Article_title_body_fulltext', 'jvm_t_Articletitlebody_77f227b4', '{}');\n                EXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n                    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n                    NULL;\n                END;\n            END;"
+      ]
+    },
+    {
+      "spec": {
+        "kind": "UNIQUE",
+        "label": "Person",
+        "properties": [
+          "uuid"
+        ]
+      },
+      "statements": [
+        "CREATE INDEX IF NOT EXISTS jvm_ix_uuid_36f3bb ON jvm_node (JSON_VALUE(props, '$.uuid'))",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '[\"uuid\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Person_uuid_range', 'jvm_ix_uuid_36f3bb', '{\"unique\": \"jvm_uq_Personuuid_44d1cd66\"}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS jvm_uq_Personuuid_44d1cd66 ON jvm_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.uuid') THEN JSON_VALUE(n.props, '$.uuid') END)",
+        "DECLARE\n    v_labelled VARCHAR2(128);\nBEGIN\n    SELECT MAX(JSON_VALUE(details, '$.labelled')) INTO v_labelled FROM jvm_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"uuid\"]';\n    IF v_labelled IS NOT NULL THEN\n        EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;\n    END IF;\n    UPDATE jvm_schema SET details = '{\"unique\": \"jvm_uq_Personuuid_44d1cd66\"}' WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"uuid\"]';\n    COMMIT;\nEND;",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '[\"uuid\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Person_uuid_unique', 'jvm_uq_Personuuid_44d1cd66', '{}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;"
+      ]
+    },
+    {
+      "spec": {
+        "kind": "UNIQUE",
+        "label": "Person",
+        "properties": [
+          "email",
+          "tenant"
+        ]
+      },
+      "statements": [
+        "CREATE INDEX IF NOT EXISTS jvm_ix_emailtenant_6d0f958e ON jvm_node (JSON_VALUE(props, '$.email'), JSON_VALUE(props, '$.tenant'))",
+        "DECLARE\n    v_unique NUMBER;\nBEGIN\n    SELECT COUNT(*) INTO v_unique FROM jvm_schema u WHERE u.label = 'Person' AND u.properties = '[\"email\",\"tenant\"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));\n    IF v_unique = 0 THEN\n        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS jvm_lx_Personemailtenant_83779439 ON jvm_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == \"Person\")'') THEN JSON_VALUE(n.props, ''$.email'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == \"Person\")'') THEN JSON_VALUE(n.props, ''$.tenant'') END)';\n    END IF;\nEND;",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '[\"email\",\"tenant\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN MATCHED THEN UPDATE SET c.details = '{\"labelled\": \"jvm_lx_Personemailtenant_83779439\"}'\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Person_email_tenant_range', 'jvm_ix_emailtenant_6d0f958e', '{\"labelled\": \"jvm_lx_Personemailtenant_83779439\"}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS jvm_uq_Personemailtenant_83779439 ON jvm_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.email') AND JSON_EXISTS(n.props, '$.tenant') THEN JSON_VALUE(n.props, '$.email') END, CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.email') AND JSON_EXISTS(n.props, '$.tenant') THEN JSON_VALUE(n.props, '$.tenant') END)",
+        "BEGIN\n    MERGE INTO jvm_schema c\n    USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '[\"email\",\"tenant\"]' AS properties FROM dual) k\n    ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)\n    WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)\n        VALUES (k.kind, k.label, k.properties, 'Person_email_tenant_unique', 'jvm_uq_Personemailtenant_83779439', '{}');\nEXCEPTION WHEN DUP_VAL_ON_INDEX THEN\n    -- Another process recorded it between the MERGE's read and its insert: it is recorded.\n    NULL;\nEND;"
+      ]
+    }
+  ],
+  "objectNames": [
+    {
+      "graph": "jvm",
+      "kind": "ix",
+      "parts": [
+        "name"
+      ],
+      "name": "jvm_ix_name_337a8b",
+      "hash": 3373707
+    },
+    {
+      "graph": "jvm",
+      "kind": "lx",
+      "parts": [
+        "Person",
+        "name"
+      ],
+      "name": "jvm_lx_Personname_44ce5436",
+      "hash": 1154372662
+    },
+    {
+      "graph": "jvm",
+      "kind": "uq",
+      "parts": [
+        "Person",
+        "uuid"
+      ],
+      "name": "jvm_uq_Personuuid_44d1cd66",
+      "hash": 1154600294
+    },
+    {
+      "graph": "drivine",
+      "kind": "ix",
+      "parts": [
+        "lastActivityAt",
+        "sessionId"
+      ],
+      "name": "drivine_ix_lastActivityAtsessionId_8a35af29",
+      "hash": -1976193239
+    },
+    {
+      "graph": "drivine",
+      "kind": "v",
+      "parts": [
+        "Chunk",
+        "embedding"
+      ],
+      "name": "drivine_v_Chunkembedding_7e60bd64",
+      "hash": 2120269156
+    },
+    {
+      "graph": "drivine",
+      "kind": "t",
+      "parts": [
+        "Article",
+        "title",
+        "body"
+      ],
+      "name": "drivine_t_Articletitlebody_77f227b4",
+      "hash": 2012358580
+    },
+    {
+      "graph": "drivine",
+      "kind": "ix",
+      "parts": [
+        "metadata.source"
+      ],
+      "name": "drivine_ix_metadatasource_ed086fba",
+      "hash": -318214214
+    },
+    {
+      "graph": "drivine",
+      "kind": "uq",
+      "parts": [
+        "Ünïcödé",
+        "prøpérty"
+      ],
+      "name": "drivine_uq_ncdprprty_241190b3",
+      "hash": 605130931
+    },
+    {
+      "graph": "drivine",
+      "kind": "lx",
+      "parts": [
+        "Emoji😀",
+        "名前"
+      ],
+      "name": "drivine_lx_Emoji_ea37eb37",
+      "hash": -365434057
+    },
+    {
+      "graph": "drivine",
+      "kind": "ix",
+      "parts": [
+        ""
+      ],
+      "name": "drivine_ix__0",
+      "hash": 0
+    },
+    {
+      "graph": "drivine",
+      "kind": "t",
+      "parts": [
+        "Label",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "name": "drivine_t_Labelaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_b1e6ded4",
+      "hash": -1310269740
+    },
+    {
+      "graph": "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "kind": "v",
+      "parts": [
+        "Label",
+        "embedding"
+      ],
+      "name": "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_v__15f35d2b",
+      "hash": 368270635
+    },
+    {
+      "graph": "drivine",
+      "kind": "ix",
+      "parts": [
+        "polygenelubricants"
+      ],
+      "name": "drivine_ix_polygenelubricants_80000000",
+      "hash": -2147483648
+    }
+  ]
+}

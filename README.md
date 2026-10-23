@@ -277,16 +277,6 @@ Close the connections when the application stops:
 await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
 ```
 
-[`sample/lambda`](sample/lambda) is a runnable example: an AWS Lambda handler, `export const handler`, with the
-factories made once per cold start, a repository, and a `@Transactional` service that rolls a hire back when it takes an
-organization past its headcount. `npm run start-lambda-sample` serves it on your machine, on `PORT` (3000) and over the
-database `DATABASE_*` configures:
-
-```bash
-curl -X POST localhost:3000/hires -d '{"name": "Ada", "bio": "Team Lead", "organization": "Acme", "role": "CTO"}'
-curl localhost:3000/leads
-```
-
 ### Return One Map
 
 When you write a statement yourself, return a **single map** or a **scalar**, not several columns. That maps cleanly
@@ -908,8 +898,7 @@ const saved = await gom.update(Person, id, (person) => {
 
 - If the node changed between the load and the save, `update` loads it again and re-applies the change: three attempts
   by default (the fourth argument), then `StaleObjectException`. That needs a `@NodeStamp` field; without one a change
-  by another writer goes unnoticed. On Neo4j the save compares the root's fields as they were loaded as well as the
-  stamp: see [When a Save Is Refused](#when-a-save-is-refused).
+  by another writer goes unnoticed.
 - It returns undefined when there is no such node, or the node is deleted in between. It never makes a node.
 - A change that gives the object another id or another class is refused.
 
@@ -953,9 +942,7 @@ await gom.saveAll(chunks, { only: ['summary', 'summaryModel'] });
 - Fragments go in one statement for each 1,000, of any classes and labels. A view is a statement of its own. Outside a
   transaction of yours the statements run in one transaction, so a failure leaves nothing written; inside one they join
   it. FalkorDB has no transactions: see [FalkorDB](#falkordb).
-- The objects come back in the order given, carrying the stamps the batch left. The batch writes the fragments' classes
-  in the order of their names and the fragments of each in the order of their ids, so two batches over the same nodes
-  take their locks in the same order.
+- The objects come back in the order given, carrying the stamps the batch left.
 - A batch that only adds doesn't check a fragment's stamp: a stale one is written anyway, and keeps the stamp it had, so
   a later `save` of it is refused.
 - `replace` applies to views; a batch holding a fragment is refused with it. A stale view throws
@@ -1019,9 +1006,6 @@ Under `NullPolicy.IGNORE` a named field that is null is left as the store has it
   nothing; what the transaction wrote before it is undone only if the transaction rolls back.
 - A statement the engine turns away because another writer was changing the same node is run again, after a pause,
   outside a transaction. Inside one it fails, and the transaction's owner decides.
-- A statement that lost its connection is not run again, though the Neo4j driver calls that retriable: it may have been
-  applied before the connection went, and a second run would find its own stamp and report a save that was applied as
-  refused.
 
 ### @NodeStamp: refusing a save when the node changed
 
@@ -1067,16 +1051,6 @@ writes nothing and throws `StaleObjectException`.
 
 An object whose stamp is undefined isn't checked: it makes the node or overwrites it. The save is one statement that
 takes the node's write lock before it compares, so of several writers holding the same stamp exactly one succeeds.
-
-**On Neo4j a load can be handed a stamp newer than its data.** Neo4j reads under read committed, without a snapshot, so
-a load that runs while another writer commits can find that writer's stamp and the data from before its write. `update`
-therefore compares each field of the root as it loaded it too, under the node's lock, and loads again if one differs: a
-field's value (a `@JsonPacked` field's as the text the node held), a `@PropertyBag`'s keys and their values, and the
-labels a `@NodeLabels` field reads. A field the object doesn't hold and its class doesn't initialize isn't compared. A
-`save` of an object you loaded yourself has only the stamp to go on, and in that moment it can write over the other
-writer's change: where every writer's change must be kept, change the node with `update`. Memgraph reads from a
-snapshot, FalkorDB runs no read beside a write, and Oracle and Postgres read a statement whole, so on them the stamp is
-what was read.
 
 ```typescript
 try {
@@ -1286,10 +1260,7 @@ namespace from the field's name, and `delimiter` changes the separator. A value 
 nested object is refused. Under `NullPolicy.CLEAR` a save removes the keys the map no longer has; `IGNORE` leaves them.
 
 A **flat** bag, `@PropertyBag({ flat: true })`, has no prefix: each entry is stored under its own key, and the bag reads
-back every property that no declared field accounts for. A fragment may have one. A save refuses, before it writes
-anything, an entry whose key is the stored property of a field (one that is decorated, initialized or set on the
-object), the id's, one under another bag's prefix, or one beginning `__drivine.`, Drivine's own, such as the stamp:
-the two would write the same property.
+back every property that no declared field accounts for. A fragment may have one.
 
 #### @NodeLabels
 
@@ -1474,7 +1445,8 @@ its own graph's tables alone.
 `<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
 as JSON. Labels, property names and relationship types are data, so `@NodeLabels`, `@PropertyBag` and `edges` work as
 they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>_schema`, records the indexes and
-constraints Drivine made. The layout is drivine4j's, so the JVM, Node and Python read one store.
+constraints Drivine made, as drivine4j records them. The layout is drivine4j's, so the JVM, Node and Python read one
+store, and each sees and drops the indexes the others made, and makes none beside them.
 
 Notes:
 
@@ -1486,6 +1458,9 @@ Notes:
   stamp: the first sixteen characters of `stamp` for its properties or labels, the last sixteen for its relationships.
 - Index the id of each class you save: `uniquenessConstraint('Person', 'id')` makes the unique index a node is found
   by. Without one, a save reads the table.
+- A range index is two indexes, as drivine4j makes it: one over the property whatever the label, and one over the
+  label's nodes alone, which a filter is read through. A uniqueness constraint comes with a range index over its
+  properties, which stays when the constraint is dropped.
 - Oracle reads an empty string as null, so a comparison with `''` in the DSL is written to find a property stored empty.
 - `matches` takes a regular expression in Oracle's POSIX dialect, matched against the whole value. A leading `(?i)`
   ignores case; what Java adds, such as `(?:…)`, a look-around or `\b`, is not read. A backreference names the group the
@@ -1772,9 +1747,6 @@ Datasources of one type share a container. `<TYPE>_TEST_IMAGE` picks another ima
 relationship fragments, polymorphic users, property bags, stamps and search. `SampleAppModule.forDatabase(name)` wires
 Drivine as an application would, and `sample/test` runs drivine4j's sample tests on every store: the DSL, grouped reads,
 patches, label polymorphism, required relationships, deletes and search.
-
-[`sample/lambda`](sample/lambda) is the same people and organizations served from an AWS Lambda, with no Nest: see
-[Without Nest](#3-without-nest). `sample/lambda/test` invokes its handler on every store, and through its local runner.
 
 ## Example Applications
 

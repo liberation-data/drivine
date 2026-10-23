@@ -12,9 +12,12 @@ export class OracleSideTable {
     /** The index over the column: a vector index, or an Oracle Text one. */
     readonly index: string;
 
-    /** Drops the trigger, then the table (the index over it goes with it); neither fails when absent. */
+    /**
+     * Drops the trigger, then the table (the index over it goes with it); neither fails when absent. The table is named
+     * by `name`, an expression of PL/SQL (the name a catalog's record holds), so each is a statement to execute.
+     */
     static dropping(name: string): string[] {
-        return [`DROP TRIGGER IF EXISTS ${name}_t`, `DROP TABLE IF EXISTS ${name} PURGE`];
+        return [`'DROP TRIGGER IF EXISTS ' || ${name} || '_t'`, `'DROP TABLE IF EXISTS ' || ${name} || ' PURGE'`];
     }
 
     constructor(

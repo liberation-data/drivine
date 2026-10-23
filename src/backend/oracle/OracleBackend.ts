@@ -9,6 +9,8 @@ import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
 import { OracleWrites } from '@/backend/oracle/OracleWrites';
 import { OracleSearch } from '@/backend/oracle/OracleSearch';
 import { OracleGroups } from '@/backend/oracle/OracleGroups';
+import { recordedAs } from '@/backend/oracle/OracleSchemaGrammar';
+import { catalogProperties } from '@/backend/sql/SqlCatalog';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -170,11 +172,13 @@ END;`);
         return this.deleting(root, this.rootWhere(target, where), tested);
     }
 
+    /** The table a search index was made over, recorded as drivine4j records it or as this library did before. */
     searchIndexTable(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement {
+        const [recorded, earlier] = recordedAs(kind);
         return new GraphStatement(
-            `SELECT object_name AS "table" FROM ${this.graph.catalog} WHERE kind = $kind AND label = $label ` +
-                `AND properties = $properties AND object_name IS NOT NULL`,
-            { kind, label, properties: JSON.stringify(properties) }
+            `SELECT object_name AS "table" FROM ${this.graph.catalog} WHERE kind IN ($kind, $earlier) ` +
+                `AND label = $label AND properties = $properties AND object_name IS NOT NULL`,
+            { kind: recorded, earlier, label, properties: catalogProperties(properties) }
         );
     }
 

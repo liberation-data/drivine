@@ -1,5 +1,6 @@
 import { hasLabels, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { embedding, holds, searchedText } from '@/backend/postgres/PostgresSearch';
+import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import {
@@ -10,14 +11,6 @@ import {
     UniquenessConstraintSpec,
     VectorIndexSpec
 } from '@/schema/SchemaSpecs';
-
-/** What drivine4j records each kind of item as, in the graph's catalog. */
-const KINDS = {
-    RANGE: 'RANGE_INDEX',
-    UNIQUE: 'UNIQUENESS_CONSTRAINT',
-    VECTOR: 'VECTOR_INDEX',
-    FULLTEXT: 'FULLTEXT_INDEX'
-};
 
 /**
  * Indexes and constraints on Postgres, as drivine4j makes them, so a store's schema is one whichever library made it. A
@@ -152,8 +145,8 @@ export class PostgresSchemaGrammar implements SchemaGrammar {
     private recorded(spec: IndexSpec | UniquenessConstraintSpec, objectName: string, details: string = '{}'): string {
         return (
             `INSERT INTO ${this.graph.catalog} (kind, label, properties, name, object_name, details) ` +
-            `VALUES (${sqlText(KINDS[spec.kind])}, ${sqlText(spec.label)}, ${sqlText(
-                JSON.stringify(spec.properties)
+            `VALUES (${sqlText(CATALOG_KINDS[spec.kind])}, ${sqlText(spec.label)}, ${sqlText(
+                catalogProperties(spec.properties)
             )}, ` +
             `${sqlText(itemName(spec))}, ${sqlText(objectName)}, ${sqlText(details)}) ` +
             `ON CONFLICT (kind, label, properties) DO NOTHING`
@@ -165,9 +158,7 @@ export class PostgresSchemaGrammar implements SchemaGrammar {
      * so an item is dropped as it was made whatever a later version would call it.
      */
     private forgotten(spec: IndexSpec | UniquenessConstraintSpec): string {
-        const record =
-            `kind = ${sqlText(KINDS[spec.kind])} AND label = ${sqlText(spec.label)} ` +
-            `AND properties = ${sqlText(JSON.stringify(spec.properties))}`;
+        const record = catalogRecord(spec);
         return `DO $forget$
 DECLARE
     v_object text;
@@ -190,11 +181,13 @@ $forget$`;
      * What is recorded of the kind, and still there: an index dropped by hand is not listed, so that it is made again
      * when asked for.
      */
-    private listing(kind: keyof typeof KINDS): { statement: string; read: (rows: any[]) => SchemaItem[] } {
+    private listing(kind: keyof typeof CATALOG_KINDS): { statement: string; read: (rows: any[]) => SchemaItem[] } {
         return {
             statement:
                 `SELECT jsonb_build_object('label', c.label, 'properties', c.properties::jsonb, 'name', c.name, ` +
-                `'details', c.details) AS "item" FROM ${this.graph.catalog} c WHERE c.kind = ${sqlText(KINDS[kind])} ` +
+                `'details', c.details) AS "item" FROM ${this.graph.catalog} c WHERE c.kind = ${sqlText(
+                    CATALOG_KINDS[kind]
+                )} ` +
                 `AND (c.object_name IS NULL OR to_regclass(c.object_name) IS NOT NULL) ORDER BY c.label, c.properties`,
             read: (rows) =>
                 rows.map((it) => ({
