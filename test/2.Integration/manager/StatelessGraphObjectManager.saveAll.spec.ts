@@ -77,6 +77,17 @@ describe.each(graphEngines())('saveAll on $type', (engine) => {
         expect((saved[0] as Chunk).stamp).toMatch(/^[0-9a-f]{16}:[0-9a-f]{16}$/);
     });
 
+    it('should hand each fragment its own stamp when they are given out of the order they are written in', async () => {
+        await gom.save(chunk('c1', { text: 'Before' }));
+        const c1 = Object.assign((await gom.load(Chunk, 'c1'))!, { text: 'One' });
+        const objects = [chunk('c2', { text: 'Two' }), tag('t1'), c1];
+        const saved = await gom.saveAll(objects);
+        expect(saved.map((it) => it.id)).toEqual(['c2', 't1', 'c1']);
+        expect((saved[0] as Chunk).stamp).toEqual((await gom.load(Chunk, 'c2'))!.stamp);
+        expect((saved[2] as Chunk).stamp).toEqual((await gom.load(Chunk, 'c1'))!.stamp);
+        expect((saved[0] as Chunk).stamp).not.toEqual((saved[2] as Chunk).stamp);
+    });
+
     it('should write a fragment whose stamp is stale, which keeps the data token it had', async () => {
         await gom.saveAll([chunk('c1', { text: 'One' })]);
         const mine = (await gom.load(Chunk, 'c1'))!;

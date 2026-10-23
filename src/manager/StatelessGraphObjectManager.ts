@@ -12,7 +12,7 @@ import { SaveOptions } from '@/manager/SaveOptions';
 import { MatchingOptions, NearestOptions, Scored } from '@/manager/Scored';
 import { PatchOptions, PatchResult } from '@/manager/PatchResult';
 import { splitVectors } from '@/backend/VectorWrites';
-import { propsOf } from '@/backend/SaveStatementBuilder';
+import { idOf, propsOf } from '@/backend/SaveStatementBuilder';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 import { whenNotContended } from '@/manager/Contention';
@@ -152,6 +152,27 @@ interface BatchEntry<T> {
     spec: GraphStatement;
     view?: { object: T; statement: SaveStatement };
     groups?: FragmentGroup[];
+}
+
+/** Text in the order of its code units, as the ids of a batch's rows are taken in. */
+function inOrder(a: string, b: string): number {
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The groups of a batch in the order of their classes' names, and the objects of each in the order of their ids, so
+ * that two batches over the same nodes take their locks in the same order whatever order they were given in. Objects
+ * of one id keep the order they were given in.
+ */
+function lockOrdered(groups: FragmentGroup[]): FragmentGroup[] {
+    return [...groups]
+        .sort((a, b) => inOrder(a.model.type.name, b.model.type.name))
+        .map((group) => ({
+            model: group.model,
+            objects: [...group.objects].sort((a, b) =>
+                inOrder(String(idOf(group.model, a)), String(idOf(group.model, b)))
+            )
+        }));
 }
 
 /** The groups of a batch statement, split so that no statement holds more than `size` rows. */
@@ -549,9 +570,7 @@ export class StatelessGraphObjectManager {
             throw new DrivineError('patchAll takes each id once.');
         }
         // In order of id, so that two calls over the same nodes take their locks in the same order.
-        const sorted = [...rows].sort((a, b) =>
-            String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0
-        );
+        const sorted = [...rows].sort((a, b) => inOrder(String(a.id), String(b.id)));
         const results = new Map<any, PatchResult>();
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
             const chunk = sorted.slice(start, start + PATCH_ROWS);
@@ -569,6 +588,8 @@ export class StatelessGraphObjectManager {
      * Saves many objects, fragments and views of any classes, together. Fragments go in one statement (per 1,000),
      * each merged on its id; a view is a statement of its own, as `save` writes it. Outside a transaction of the
      * caller's, the statements run in one transaction, so a failure leaves nothing written; inside one, they join it.
+     * The fragments' classes go in the order of their names and the rows of each in the order of their ids, so that two
+     * batches over the same nodes take their locks in the same order.
      *
      * A fragment's stamp is not checked: a batch only adds, and a fragment with a stale stamp is written all the same,
      * keeping the stamp it had. A view that carries a stamp is checked as `save` checks it, and a stale one throws
@@ -596,7 +617,7 @@ export class StatelessGraphObjectManager {
             }
         }
         const statements: BatchEntry<T>[] = [];
-        for (const chunk of chunked([...fragments.values()], BATCH_ROWS)) {
+        for (const chunk of chunked(lockOrdered([...fragments.values()]), BATCH_ROWS)) {
             statements.push({
                 spec: this.backend.fragmentBatch(chunk, options),
                 groups: chunk
