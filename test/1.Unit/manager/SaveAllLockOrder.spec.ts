@@ -110,6 +110,14 @@ describe('saveAll lock order', () => {
         expect(ran[0].parameters.ids0).toEqual(['h1', 'h2', 'h3']);
     });
 
+    it('should sort the rows before splitting them into statements, so each statement holds the next ids in order', async () => {
+        const { pm, ran }: Recording = recording();
+        const ids = Array.from({ length: 1001 }, (_, i) => `l${String(i).padStart(4, '0')}`);
+        await managerOver(pm).saveAll([...ids].reverse().map(ledger));
+
+        expect(ran.map((it) => it.parameters.ids0)).toEqual([ids.slice(0, 1000), ids.slice(1000)]);
+    });
+
     it('should keep the rows of one id in the order they were given in', async () => {
         const { pm, ran }: Recording = recording();
         const later = Object.assign(ledger('l1'), { total: 2 });
