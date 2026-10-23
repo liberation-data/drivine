@@ -100,9 +100,10 @@ export class PostgresBackend implements GraphBackend {
     }
 
     /**
-     * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it:
-     * every one, or with `DELETE_ORPHAN` those not kept (see keptTargets). Postgres runs a statement's deletes on one
-     * snapshot, so what is kept is read before anything is deleted. Returns how many roots were deleted: `{deleted}`.
+     * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it
+     * through the relationships a save writes (see SqlViews.cascade): every one, or with `DELETE_ORPHAN` those not kept
+     * (see keptTargets). Postgres runs a statement's deletes on one snapshot, so what is kept is read before anything
+     * is deleted. Returns how many roots were deleted: `{deleted}`.
      */
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;

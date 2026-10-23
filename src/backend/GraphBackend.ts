@@ -179,8 +179,9 @@ export interface GraphBackend {
 
     /**
      * Deletes the root whose id is the parameter `id`, if it meets the optional predicate (and, for a view, the view's
-     * requirements), with its relationships. A cascade, for a view only, deletes nodes the view reaches too: every one,
-     * or with `DELETE_ORPHAN` those nothing outside the view still needs. Returns the number of roots deleted.
+     * requirements), with its relationships. A cascade, for a view only, deletes nodes the view reaches too, through
+     * the relationships a save writes: every one, or with `DELETE_ORPHAN` those nothing outside the view still needs.
+     * Returns the number of roots deleted.
      */
     delete(target: TargetModel, where?: string, cascade?: CascadeType): GraphStatement;
 
