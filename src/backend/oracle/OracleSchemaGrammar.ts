@@ -37,12 +37,12 @@ const UNIQUE_THERE =
 
 /**
  * The step of a JSON path naming `key` as drivine4j writes it: bare where SQL would take it for an identifier, else
- * quoted, and its quotes doubled for the SQL literal it is written in.
+ * quoted as `jsonKey` quotes it, for the SQL literal it is written in.
  */
 function drivine4jStep(key: string): string {
     return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !['true', 'false', 'null'].includes(key)
         ? key
-        : `"${key.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`.replace(/'/g, "''");
+        : jsonKey(key).slice(1);
 }
 
 /** A block that runs `ddl`, an object another session made meanwhile (ORA-00955) taken as made. */

@@ -227,6 +227,47 @@ END;`);
         );
     });
 
+    it('should keep the index two labels share over a property until the last range index over it is dropped', async () => {
+        const gom = await freshGraph(GRAPH);
+        const graph = new OracleGraph(GRAPH);
+        const shared = graph.objectName('ix', ['name']).toUpperCase();
+        const [person, company] = [rangeIndex('Person', 'name'), rangeIndex('Company', 'name')];
+        expect((await gom.indexes.ensure(person)).status).toEqual('CREATED');
+        expect((await gom.indexes.ensure(company)).status).toEqual('CREATED');
+        expect((await indexes(GRAPH)).filter((it) => it === shared)).toEqual([shared]);
+
+        await gom.indexes.drop(person);
+        expect(await indexes(GRAPH)).toContain(shared);
+        expect(await indexes(GRAPH)).not.toContain(graph.objectName('lx', ['Person', 'name']).toUpperCase());
+        expect((await gom.indexes.list('RANGE')).map((it) => [it.label, it.incomplete])).toEqual([
+            ['Company', undefined]
+        ]);
+
+        await gom.indexes.drop(company);
+        expect(await indexes(GRAPH)).not.toContain(shared);
+        expect(await rows(GRAPH)).toEqual([]);
+    });
+
+    it('should leave the range index incomplete where the data refuses its constraint, for an ensure to complete', async () => {
+        const gom = await freshGraph(GRAPH);
+        const graph = new OracleGraph(GRAPH);
+        const [unique] = uniques;
+        const range = rangeIndex(unique.label, unique.properties);
+        expect((await gom.indexes.ensure(range)).status).toEqual('CREATED');
+        for (let i = 0; i < 2; i++) {
+            await run(`INSERT INTO ${graph.nodes} (labels, props) VALUES (JSON('["Person"]'), JSON('{"uuid": "u1"}'))`);
+        }
+
+        // Unchecked, the unique index is refused (ORA-01452) after the labelled index it would stand for was dropped.
+        await expect(gom.constraints.ensure(unique, 0)).rejects.toThrow(/ORA-01452/);
+        expect(await gom.constraints.list()).toEqual([]);
+        expect((await gom.indexes.list('RANGE')).find((it) => it.label === 'Person')?.incomplete).toBe(true);
+
+        expect((await gom.indexes.ensure(range)).status).toEqual('CREATED');
+        expect((await gom.indexes.list('RANGE')).find((it) => it.label === 'Person')?.incomplete).toBeUndefined();
+        expect(await indexes(GRAPH)).toContain(graph.objectName('lx', ['Person', 'uuid']).toUpperCase());
+    });
+
     it('should understand a store this library wrote before it recorded what drivine4j records', async () => {
         const gom = await freshGraph(EARLIER_GRAPH);
         const graph = new OracleGraph(EARLIER_GRAPH);
