@@ -29,7 +29,10 @@ export interface SchemaOptions {
      * takes its place (Neo4j), rather than reporting it as BLOCKED_BY_INDEX.
      */
     replaceBlockingIndex?: boolean;
-    /** How many values held more than once a constraint violation reports; 0 skips the check. Defaults to 10. */
+    /**
+     * How many keys held more than once a constraint violation reports, and how many of the nodes that hold each it
+     * names; 0 skips the check. Defaults to 10.
+     */
     violationSampleSize?: number;
     /** Whether DrivineModule enforces the schema at startup. Defaults to true. */
     enabled?: boolean;
@@ -474,7 +477,7 @@ export class SchemaManager {
                 `${result.status} for the ${result.spec.kind} on ${result.spec.label}(${result.spec.properties.join(
                     ', '
                 )})` +
-                (result.sample?.length ? `: values held more than once include ${JSON.stringify(result.sample)}` : '') +
+                (result.sample?.length ? `: keys held more than once include ${JSON.stringify(result.sample)}` : '') +
                 (result.found ? `: the engine holds ${JSON.stringify(result.found)}` : '') +
                 (result.index
                     ? `: index ${result.index.name} is in the way of it. Drop the index, or set replaceBlockingIndex ` +
@@ -513,7 +516,8 @@ export class SchemaManager {
     /**
      * The items of a database's catalogs, each once. Two declarations of one item must agree on everything portable;
      * where one of them carries engine options it wins whole (a vector index tuned in a catalog spec beside the
-     * @VectorIndex that drives queries), and two that both carry different engine options conflict. With no
+     * @VectorIndex that drives queries), and two that both carry different engine options conflict. A constraint's
+     * `nodeIdProperty` is no part of the item: one read from a fragment, which knows it, wins over one by hand. With no
      * `database`, the conflict names none.
      */
     private merged(database: string | undefined, catalogs: SchemaCatalog[]): [SchemaSpec, SchemaCatalog][] {
@@ -534,9 +538,13 @@ export class SchemaManager {
         [spec, by]: [SchemaSpec, SchemaCatalog]
     ): SchemaSpec {
         const optionsOf = (it: SchemaSpec): unknown[] => (it.kind === 'VECTOR' ? it.engineOptions ?? [] : []);
-        const portable = (it: SchemaSpec): string => JSON.stringify({ ...it, engineOptions: undefined });
+        const portable = (it: SchemaSpec): string =>
+            JSON.stringify({ ...it, engineOptions: undefined, nodeIdProperty: undefined });
         const [a, b] = [optionsOf(held), optionsOf(spec)];
         if (portable(held) === portable(spec)) {
+            if (held.kind === 'UNIQUE' && spec.kind === 'UNIQUE' && held.nodeIdProperty !== spec.nodeIdProperty) {
+                return held.nodeIdProperty !== undefined ? held : spec;
+            }
             if (!b.length || JSON.stringify(a) === JSON.stringify(b)) {
                 return held;
             }

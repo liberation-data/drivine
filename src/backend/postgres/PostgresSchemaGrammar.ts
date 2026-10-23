@@ -8,6 +8,7 @@ import {
     IndexSpec,
     itemName,
     RangeIndexSpec,
+    sampledNodeId,
     UniquenessConstraintSpec,
     VectorIndexSpec
 } from '@/schema/SchemaSpecs';
@@ -119,11 +120,18 @@ export class PostgresSchemaGrammar implements SchemaGrammar {
         return [this.forgotten(spec)];
     }
 
+    /** A node's own id is its `nid`; `limit` of a key's nodes at most are named, the first made first. */
     conflicts(spec: UniquenessConstraintSpec, limit: number): string {
         const values = spec.properties.map((it) => textOf('n', it));
+        const properties = spec.properties.map((it, k) => `${sqlText(it)}, ${values[k]}`).join(', ');
+        const nodeId = sampledNodeId(spec);
+        const node = [
+            `'elementId', n.nid`,
+            ...(nodeId !== undefined ? [`${sqlText(nodeId)}, ${textOf('n', nodeId)}`] : [])
+        ].join(', ');
         return (
-            // One property's value as it is, several as a list, as the graph engines give them.
-            `SELECT ${values.length === 1 ? values[0] : `jsonb_build_array(${values.join(', ')})`} AS "value" ` +
+            `SELECT jsonb_build_object('properties', jsonb_build_object(${properties}), 'count', COUNT(*), 'nodes', ` +
+            `to_jsonb((array_agg(jsonb_build_object(${node}) ORDER BY n.nid))[1:${limit}])) AS "value" ` +
             `FROM ${this.graph.nodes} n ` +
             `WHERE ${hasLabels('n', [spec.label])} AND ${values.map((it) => `${it} IS NOT NULL`).join(' AND ')} ` +
             `GROUP BY ${values.join(', ')} HAVING COUNT(*) > 1 LIMIT ${limit}`

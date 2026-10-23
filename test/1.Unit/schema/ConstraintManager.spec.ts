@@ -18,7 +18,7 @@ const rangeRow = (name: string, ...properties: string[]) => ({ name, labels: ['P
 
 /**
  * A Neo4j that refuses the constraint for an index in the way of it until DROP INDEX has run, and answers the query for
- * values held more than once with `conflicts`, or fails it when that is an error. Given `refusedAfterDrop`, it refuses
+ * keys held more than once with `conflicts`, or fails it when that is an error. Given `refusedAfterDrop`, it refuses
  * the constraint with that once the index is gone too.
  */
 function blockedStore(indexes: object[], conflicts: unknown[] | Error = [], refusedAfterDrop?: Error) {
@@ -83,17 +83,17 @@ describe('ConstraintManager with an index in the way of a constraint', () => {
         expect(store.ran.slice(dropped).some((it) => it.startsWith('CREATE CONSTRAINT'))).toBe(true);
     });
 
-    it('should keep the index, and report the violation, when a value is held more than once', async () => {
-        const sampled = blockedStore([rangeRow('person_email', 'email')], ['x@y']);
-        expect(await sampled.constraints.ensure(spec, 10, true)).toEqual({
-            status: 'VIOLATION',
-            spec,
-            sample: ['x@y']
-        });
+    it('should keep the index, and report the violation, when a key is held more than once', async () => {
+        const held = [
+            { properties: { email: 'x@y' }, count: 2, nodes: [{ elementId: '4:a:1' }, { elementId: '4:a:2' }] }
+        ];
+        const sampled = blockedStore([rangeRow('person_email', 'email')], held);
+        expect(await sampled.constraints.ensure(spec, 10, true)).toEqual({ status: 'VIOLATION', spec, sample: held });
         expect(drops(sampled.ran)).toEqual([]);
-        // Asked for no sample, the data is still read before the index is dropped.
-        const unsampled = blockedStore([rangeRow('person_email', 'email')], ['x@y']);
+        // Asked for no sample, the data is still read, by the same query, before the index is dropped.
+        const unsampled = blockedStore([rangeRow('person_email', 'email')], held);
         expect(await unsampled.constraints.ensure(spec, 0, true)).toEqual({ status: 'VIOLATION', spec, sample: [] });
+        expect(unsampled.ran).toContain(NEO4J_SCHEMA.conflicts(spec, 1));
         expect(drops(unsampled.ran)).toEqual([]);
     });
 

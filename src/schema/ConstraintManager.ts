@@ -1,7 +1,7 @@
 import { DrivineError } from '@/DrivineError';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
-import { EnsureResult, rangeIndex, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
+import { EnsureResult, rangeIndex, UniquenessConstraintSpec, ViolatingKey } from '@/schema/SchemaSpecs';
 import { IndexManager } from '@/schema/IndexManager';
 import { DrivineLogger } from '@/logger';
 
@@ -16,9 +16,9 @@ const sameInOrder = (a: string[], b: string[]): boolean => a.length === b.length
 
 /**
  * Uniqueness constraints, made idempotently. Before making one, the data is checked: if two nodes already hold the same
- * values, nothing is made and the result is a VIOLATION with a sample of the values. On Neo4j a plain range index over
- * the same label and properties is in the way of a constraint: the result is then BLOCKED_BY_INDEX, naming it, unless
- * replacing it is asked for.
+ * values, nothing is made and the result is a VIOLATION with a sample of the keys, each naming the nodes that hold it.
+ * On Neo4j a plain range index over the same label and properties is in the way of a constraint: the result is then
+ * BLOCKED_BY_INDEX, naming it, unless replacing it is asked for.
  */
 export class ConstraintManager {
     private readonly logger = new DrivineLogger(ConstraintManager.name);
@@ -35,13 +35,15 @@ export class ConstraintManager {
     }
 
     /**
-     * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` values held more than
-     * once are reported; 0 skips the check, leaving the engine to refuse a constraint the data breaks.
+     * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` keys held more than
+     * once are reported, each with up to `sampleSize` of the nodes that hold it; 0 skips the check, leaving the engine
+     * to refuse a constraint the data breaks.
      *
      * @param replaceBlockingIndex drop a plain index in the way of the constraint and make the constraint, whose own
-     * index takes its place, rather than returning BLOCKED_BY_INDEX. The data is read first: a value held more than once
-     * keeps the index and is a VIOLATION, and data that can't be read keeps it and throws the refusal. Only an engine
-     * whose constraint brings its own index reports one in the way (Neo4j), so elsewhere this changes nothing.
+     * index takes its place, rather than returning BLOCKED_BY_INDEX. The data is read first: a key held more than once
+     * keeps the index and is a VIOLATION, with an empty sample when `sampleSize` is 0, and data that can't be read keeps
+     * it and throws the refusal. Only an engine whose constraint brings its own index reports one in the way (Neo4j), so
+     * elsewhere this changes nothing.
      */
     async ensure(
         spec: UniquenessConstraintSpec,
@@ -73,7 +75,7 @@ export class ConstraintManager {
                 );
                 return { status: 'BLOCKED_BY_INDEX', spec, index };
             }
-            // Neo4j refuses for the index before it reads the data, so a value held more than once would refuse the
+            // Neo4j refuses for the index before it reads the data, so a key held more than once would refuse the
             // constraint once the index is gone: unless the data was read above, look first, keeping the index.
             if (sampleSize <= 0 && (await this.repeats(spec, e))) {
                 return { status: 'VIOLATION', spec, sample: [] };
@@ -105,11 +107,12 @@ export class ConstraintManager {
         return (await this.list()).some((it) => it.label === spec.label && same(it.properties, spec.properties));
     }
 
-    private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<unknown[]> {
-        return this.executor.run(this.grammar.conflicts(spec, sampleSize));
+    /** Up to `sampleSize` keys held more than once, each naming up to `sampleSize` of the nodes that hold it. */
+    private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<ViolatingKey[]> {
+        return (await this.executor.run(this.grammar.conflicts(spec, sampleSize))) as ViolatingKey[];
     }
 
-    /** Whether a value of the constraint's properties is held more than once; the refusal is thrown if unreadable. */
+    /** Whether a key of the constraint's properties is held more than once; the refusal is thrown if unreadable. */
     private async repeats(spec: UniquenessConstraintSpec, refusal: unknown): Promise<boolean> {
         try {
             return (await this.conflicts(spec, 1)).length > 0;

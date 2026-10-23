@@ -12,6 +12,12 @@ export interface UniquenessConstraintSpec {
     kind: 'UNIQUE';
     label: string;
     properties: string[];
+    /**
+     * The property a node is identified by: the @NodeId of the fragment the spec was read from, unset for a spec
+     * declared by hand. Not part of what is made: a violation's sample names each conflicting node by it, beside the
+     * engine's own id, and two declarations that differ only in it are one.
+     */
+    nodeIdProperty?: string;
 }
 
 export type SimilarityFunction = 'COSINE' | 'EUCLIDEAN';
@@ -136,8 +142,26 @@ export function rangeIndex(label: string, properties: string | string[]): RangeI
     return { kind: 'RANGE', label, properties: [properties].flat() };
 }
 
-export function uniquenessConstraint(label: string, properties: string | string[]): UniquenessConstraintSpec {
-    return { kind: 'UNIQUE', label, properties: [properties].flat() };
+export function uniquenessConstraint(
+    label: string,
+    properties: string | string[],
+    options: { nodeIdProperty?: string } = {}
+): UniquenessConstraintSpec {
+    const spec: UniquenessConstraintSpec = { kind: 'UNIQUE', label, properties: [properties].flat() };
+    if (options.nodeIdProperty !== undefined) {
+        spec.nodeIdProperty = options.nodeIdProperty;
+    }
+    return spec;
+}
+
+/**
+ * The property a violation's sample names a node by, beside the engine's own id: the spec's `nodeIdProperty`, unless it
+ * is one of the keys, which every node of a conflict holds alike.
+ */
+export function sampledNodeId(spec: UniquenessConstraintSpec): string | undefined {
+    return spec.nodeIdProperty !== undefined && !spec.properties.includes(spec.nodeIdProperty)
+        ? spec.nodeIdProperty
+        : undefined;
 }
 
 /**
@@ -153,12 +177,24 @@ export type EnsureStatus = 'CREATED' | 'ALREADY_MATCHING' | 'DRIFT' | 'VIOLATION
 export interface EnsureResult<S> {
     status: EnsureStatus;
     spec: S;
-    /** For a VIOLATION: a sample of the values more than one node holds. */
-    sample?: unknown[];
+    /**
+     * For a VIOLATION: a sample of the keys more than one node holds, each its `properties`, the `count` of nodes that
+     * hold it, and `nodes`, as many of those as the sample size at most, each its `elementId` (the engine's own id:
+     * `elementId(n)` on Neo4j, `id(n)` on Memgraph and FalkorDB, the node row's `nid` on Oracle and Postgres) and the
+     * spec's `nodeIdProperty`, when it has one that isn't a key.
+     */
+    sample?: ViolatingKey[];
     /** For a DRIFT: what the engine holds. */
     found?: SchemaItemShape;
     /** For a BLOCKED_BY_INDEX: the index in the way, named. */
     index?: SchemaItem;
+}
+
+/** A key of a uniqueness constraint that more than one node holds, as a violation's sample gives it. */
+export interface ViolatingKey {
+    properties: Record<string, unknown>;
+    count: number;
+    nodes: Record<string, unknown>[];
 }
 
 /** The shape of a vector or full-text index, as an engine reports it. */

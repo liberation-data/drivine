@@ -73,7 +73,9 @@ describe.each(graphEngines())('indexes and constraints on $type', (engine) => {
         );
         const result = await gom.constraints.ensure(specs.violated);
         expect(result.status).toEqual('VIOLATION');
-        expect(result.sample).toEqual(['x']);
+        expect(result.sample).toEqual([
+            { properties: { id: 'x' }, count: 2, nodes: [expect.anything(), expect.anything()] }
+        ]);
         expect((await gom.constraints.list()).some((it) => it.label === 'SchemaDup')).toBe(false);
     });
 });

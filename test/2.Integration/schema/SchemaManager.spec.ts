@@ -10,6 +10,7 @@ import {
     SchemaCatalog,
     SchemaManager,
     TransactionContextHolder,
+    Unique,
     uniquenessConstraint,
     vectorIndex
 } from '@liberation-data/drivine';
@@ -172,6 +173,71 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
     });
 
+    it('should name the conflicting nodes in a violation, by their own ids and by the node id given', async () => {
+        const gom = factory.get(engine.name);
+        const unique = uniquenessConstraint('ManagedDoc', 'id', { nodeIdProperty: 'key' });
+        await gom.constraints.drop(unique);
+        await gom.saveAll(['a', 'a', 'b'].map((id, i) => Object.assign(new ManagedDoc(), { key: `k${i}`, id })));
+        const report = await manager([SchemaCatalog.of(unique)], { mode: 'WARN' }).enforce();
+        const [key] = [...report.values()].flat()[0].sample!;
+        const nodes = [...key.nodes].sort((x, y) => String(x.key).localeCompare(String(y.key)));
+        expect([key.properties, Number(key.count), nodes.map((it) => it.key)]).toEqual([{ id: 'a' }, 2, ['k0', 'k1']]);
+        expect(new Set(nodes.map((it) => String(it.elementId))).size).toEqual(2);
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
+    it("should name as many keys, and as many of each one's nodes, as the sample size", async () => {
+        const gom = factory.get(engine.name);
+        const unique = uniquenessConstraint('ManagedDoc', 'id', { nodeIdProperty: 'key' });
+        await gom.constraints.drop(unique);
+        const ids = ['a', 'a', 'a', 'b', 'b', 'b', 'c', 'c', 'c'];
+        await gom.saveAll(ids.map((id, i) => Object.assign(new ManagedDoc(), { key: `k${i}`, id })));
+        const result = await gom.constraints.ensure(unique, 2);
+        expect(result.status).toEqual('VIOLATION');
+        expect(result.sample!.length).toEqual(2);
+        result.sample!.forEach((key) => {
+            expect(Number(key.count)).toEqual(3);
+            expect(key.nodes.length).toEqual(2);
+            const held = ids.flatMap((id, i) => (id === key.properties.id ? [`k${i}`] : []));
+            key.nodes.forEach((node) => expect(held).toContain(node.key));
+        });
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
+    it('should name many nodes of a key when the sample size asks for them', async () => {
+        const gom = factory.get(engine.name);
+        const unique = uniquenessConstraint('ManagedDoc', 'id', { nodeIdProperty: 'key' });
+        await gom.constraints.drop(unique);
+        const held = Array.from({ length: 150 }, (_, i) => `node-key-${String(i).padStart(4, '0')}`);
+        await gom.saveAll(held.map((key) => Object.assign(new ManagedDoc(), { key, id: 'a' })));
+        const result = await gom.constraints.ensure(unique, 200);
+        expect(result.status).toEqual('VIOLATION');
+        expect(result.sample!.map((it) => [Number(it.count), it.nodes.length])).toEqual([[150, 150]]);
+        expect(result.sample![0].nodes.map((it) => it.key).sort()).toEqual(held);
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
+    it("should take a fragment's constraint and the same one by hand as one, naming nodes by the fragment's @NodeId", async () => {
+        const gom = factory.get(engine.name);
+        const byHand = SchemaCatalog.of(uniquenessConstraint('ManagedDoc', 'id'));
+        const fromFragment = SchemaCatalog.fromFragments(undefined, UniqueDoc);
+        await gom.constraints.drop(uniquenessConstraint('ManagedDoc', 'id'));
+        await gom.saveAll(['a', 'a'].map((id, i) => Object.assign(new ManagedDoc(), { key: `k${i}`, id })));
+        for (const catalogs of [
+            [byHand, fromFragment.named('rag')],
+            [fromFragment, byHand.named('rag')],
+            [byHand, fromFragment]
+        ]) {
+            const report = await manager(catalogs, { mode: 'WARN' }).enforce();
+            const violations = [...report.values()].flat().filter((it) => it.status === 'VIOLATION');
+            expect(violations.length).toBeGreaterThan(0);
+            violations.forEach((it) =>
+                expect(it.sample![0].nodes.map((node) => node.key).sort()).toEqual(['k0', 'k1'])
+            );
+        }
+        await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+    });
+
     describe('with an index in the way of a uniqueness constraint', () => {
         const ledger = uniquenessConstraint('Ledger', 'ref');
         const neo4j = engine.type === DatabaseType.NEO4J;
@@ -309,6 +375,12 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         });
     });
 });
+
+@NodeFragment({ labels: ['ManagedDoc'] })
+class UniqueDoc {
+    @NodeId() key: string;
+    @Unique() id: string;
+}
 
 @NodeFragment({ labels: ['ManagedDoc'] })
 class ManagedDoc {

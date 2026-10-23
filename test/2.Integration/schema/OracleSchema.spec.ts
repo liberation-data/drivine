@@ -87,7 +87,13 @@ describeOnOracle('schema on Oracle', () => {
         ]);
         const refused = await gom.constraints.ensure(uniqueEmail);
         expect(refused.status).toEqual('VIOLATION');
-        expect(refused.sample).toEqual(['x@y']);
+        expect(refused.sample).toEqual([
+            {
+                properties: { email: 'x@y' },
+                count: 2,
+                nodes: [{ elementId: expect.anything() }, { elementId: expect.anything() }]
+            }
+        ]);
         await gom.delete(Account, 'a2');
         expect((await gom.constraints.ensure(uniqueEmail)).status).toEqual('CREATED');
         expect((await gom.constraints.ensure(uniqueEmail)).status).toEqual('ALREADY_MATCHING');

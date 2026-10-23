@@ -283,7 +283,12 @@ describe.each(postgres)('a store on $name', (store) => {
         // Over the suite's own label: the suites share a graph, and another seeds tickets with one title.
         const spec = uniquenessConstraint('PgStore', 'title');
         const refused = await gom.constraints.ensure(spec);
-        expect(refused).toEqual(expect.objectContaining({ status: 'VIOLATION', sample: ['same'] }));
+        expect(refused).toEqual(
+            expect.objectContaining({
+                status: 'VIOLATION',
+                sample: [{ properties: { title: 'same' }, count: 2, nodes: [expect.anything(), expect.anything()] }]
+            })
+        );
         await gom.delete(Ticket, 'u2');
         expect((await gom.constraints.ensure(spec)).status).toEqual('CREATED');
         await expect(seed.node(['Ticket'], { id: 'u3', title: 'same' })).rejects.toThrow();

@@ -549,7 +549,11 @@ function schema(grammar: SchemaGrammar): Record<string, string> {
         'schema.createFullText.single': shown(grammar.createFullText(single)),
         'schema.dropFullText': shown(grammar.dropFullText(text)),
         'schema.dropFullText.named': shown(grammar.dropFullText(text, 'given_name')),
-        'schema.conflicts': grammar.conflicts(pair, 10)
+        'schema.conflicts': grammar.conflicts(pair, 10),
+        'schema.conflicts.nodeId': grammar.conflicts(
+            uniquenessConstraint('Person', ['email', 'tenant'], { nodeIdProperty: 'uuid' }),
+            10
+        )
     };
 }
 
