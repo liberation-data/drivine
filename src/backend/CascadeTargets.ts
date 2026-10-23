@@ -18,9 +18,9 @@ export interface CascadeBeyond {
     nodes: string;
     /**
      * The nodes of the view the cascade takes, wherever it reaches the view: the levels of the relationship, and the
-     * node a level is first reached from. A node one level further that is one of these is not left behind. Only these
-     * are read, and not every target, since a read of each comprehension the cascade has is a statement the graph
-     * engines take long to plan.
+     * node a level is first reached from, unless that is the cascade's root, which the check leaves out on its own. A
+     * node one level further that is one of these is not left behind. Only these are read, and not every target, since
+     * a read of each comprehension the cascade has is a statement the graph engines take long to plan.
      */
     within: string[];
 }
