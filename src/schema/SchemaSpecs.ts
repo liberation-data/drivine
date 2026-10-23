@@ -1,3 +1,5 @@
+import type { SchemaItem } from '@/schema/SchemaGrammar';
+
 /** A range index over one or more properties of a label's nodes. */
 export interface RangeIndexSpec {
     kind: 'RANGE';
@@ -166,9 +168,11 @@ export function sampledNodeId(spec: UniquenessConstraintSpec): string | undefine
  * CREATED: nothing was there, and the item was made. ALREADY_MATCHING: a matching item is there; nothing changed.
  * DRIFT: an item is there with another shape (a vector index's dimensions or similarity, a full-text index's
  * properties); nothing changed, and `recreate` replaces it. VIOLATION: a constraint the data already breaks; nothing
- * was made. RECREATED: from `recreate`.
+ * was made. BLOCKED_BY_INDEX: a constraint a plain range index over its label and properties is in the way of, on an
+ * engine whose constraint brings its own index (Neo4j); nothing changed, and `replaceBlockingIndex` replaces the index
+ * with the constraint. RECREATED: from `recreate`.
  */
-export type EnsureStatus = 'CREATED' | 'ALREADY_MATCHING' | 'DRIFT' | 'VIOLATION' | 'RECREATED';
+export type EnsureStatus = 'CREATED' | 'ALREADY_MATCHING' | 'DRIFT' | 'VIOLATION' | 'BLOCKED_BY_INDEX' | 'RECREATED';
 
 export interface EnsureResult<S> {
     status: EnsureStatus;
@@ -182,6 +186,8 @@ export interface EnsureResult<S> {
     sample?: ViolatingKey[];
     /** For a DRIFT: what the engine holds. */
     found?: SchemaItemShape;
+    /** For a BLOCKED_BY_INDEX: the index in the way, named. */
+    index?: SchemaItem;
 }
 
 /** A key of a uniqueness constraint that more than one node holds, as a violation's sample gives it. */

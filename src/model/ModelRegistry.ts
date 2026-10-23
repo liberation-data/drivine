@@ -16,6 +16,7 @@ import { FieldMapping } from '@/model/FieldMapping';
 import { AggregateModel, GraphViewModel, PathModel } from '@/model/GraphViewModel';
 import { RelatedModel, RelationshipModel } from '@/model/RelationshipModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
+import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
 
 /**
  * Builds the model of a decorated class from its decorators, once, and checks it. Models are built when first
@@ -158,7 +159,7 @@ export class ModelRegistry {
         }
         const graphProperties = this.graphProperties(properties);
         const nodeIdField = ids[0];
-        return {
+        const model: FragmentModel = {
             type,
             labels: [...labels],
             nodeIdField,
@@ -191,6 +192,10 @@ export class ModelRegistry {
             ...this.fieldMapping(properties),
             graphProperties
         };
+        // A catalog's vector index over a field without @VectorIndex is refused here as well as when the catalog is
+        // applied, since either may come first.
+        VectorAnnotationCheck.admit(model);
+        return model;
     }
 
     private buildRelationshipFragment(type: ClassType): RelationshipFragmentModel {

@@ -77,7 +77,8 @@ export class StoreIdentityResolver {
             return false;
         }
         try {
-            const result = await this.constraints.ensure(KEY_CONSTRAINT);
+            // The label is Drivine's, so a plain index on the key (Neo4j) is replaced by the constraint.
+            const result = await this.constraints.ensure(KEY_CONSTRAINT, undefined, true);
             if (result.status === 'VIOLATION') {
                 this.logger.warn(
                     `${this.persistenceManager.database} already holds duplicate DrivineStore stamps, so their uniqueness can't ` +
