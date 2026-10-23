@@ -1645,12 +1645,13 @@ startup. A catalog applies to every database that supports schema, unless you na
 `.forDefaultDatabase()`, `.forDatabase('users')` or `.forDatabases('a', 'b')`. A named target is strict: an unknown
 database, or one without schema support, fails startup.
 
-A vector index in a catalog over a fragment field that has no `@VectorIndex` fails too, naming the class, the field
-and the spec. Without the decorator FalkorDB stores the field as a plain list, and `loadNearest` finds no index for
-the fragment. Declare both when a catalog spec tunes the index. The check runs when `SchemaManager` applies the catalog
-and when the fragment class is first used. A field is matched by the property it's stored under, on any of the
-fragment's labels. Only fields the class decorates or initializes can be seen, so `embedding?: number[]` with neither
-isn't checked. A spec for a label no fragment maps, and one given to `indexes.ensure` directly, aren't checked either.
+A vector index in a catalog over a fragment field that has no `@VectorIndex` fails too, naming the class, the field and
+the spec. Without the decorator FalkorDB stores the field as a plain list, and `loadNearest` finds no index for the
+fragment. Declare both when a catalog spec tunes the index. The check runs when `SchemaManager` applies the catalog, or
+is given the spec by `ensure`, and when the fragment class is first used. A field is matched by the property it's stored
+under, on any of the fragment's labels. Only fields the class decorates or initializes can be seen, so
+`embedding?: number[]` with neither isn't checked. A spec for a label no fragment maps, and one given to
+`indexes.ensure` directly, aren't checked either.
 
 | Option | Meaning |
 |---|---|

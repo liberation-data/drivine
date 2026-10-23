@@ -130,9 +130,9 @@ function staleAfter(
  * list again. With nothing to apply (no catalog, or only empty ones, and nothing given to `ensure`) it says so, naming
  * the empty ones.
  *
- * Before anything is applied, a vector index over a property that a fragment class stores in a field without
- * @VectorIndex is refused, naming the class, the field and the spec; a fragment class built later is checked against
- * the specs applied here. See VectorAnnotationCheck.
+ * Before anything is applied, by `enforce`, `recreateAll` or `ensure`, a vector index over a property that a fragment
+ * class stores in a field without @VectorIndex is refused, naming the class, the field and the spec; a fragment class
+ * built later is checked against the specs applied here. See VectorAnnotationCheck.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
@@ -170,7 +170,8 @@ export class SchemaManager {
      * applies the owner's: `mode`, `recreateOnDrift` and `violationSampleSize` apply, and only the items given are
      * applied. Ensuring an item again with the same kind, label and properties replaces it. From then on `enforce` and
      * `recreateAll` apply them with the rest. A declaration that conflicts with another owner's, or with the owner's
-     * own, fails, and nothing is kept or applied on any database; one identical to another owner's is co-owned.
+     * own, fails, and nothing is kept or applied on any database; one identical to another owner's is co-owned. So
+     * does a vector index over a fragment field that has no @VectorIndex, as in a catalog.
      *
      * The owner's marker records them as ensured at runtime (drivine4j's `runtime:` entries), so an `enforce` by a
      * manager built later keeps them in the inventory without calling them orphans. When that enforce recreates the
@@ -207,6 +208,7 @@ export class SchemaManager {
             const plans = databases.map(
                 (database) => [database, this.plan(database, byDatabase.get(database)!, runtime)] as const
             );
+            VectorAnnotationCheck.register([catalog]);
             this.runtime = candidate;
             const given = new Set(catalog.items.map(inventoryKey));
             const report = new Map<string, EnsureResult<SchemaSpec>[]>();

@@ -20,6 +20,12 @@ class CheckMessageLater {
     embedding: number[] = [];
 }
 
+@NodeFragment({ labels: ['CheckEnsured'] })
+class CheckEnsured {
+    @NodeId() id: string;
+    embedding: number[] = [];
+}
+
 @NodeFragment({ labels: ['CheckMessageFirst'] })
 class CheckMessageFirst {
     @NodeId() id: string;
@@ -116,6 +122,17 @@ describe('A vector index spec over a fragment field', () => {
         await expect(enforceSpecs(vectorIndex('CheckMessageLater', 'embedding', 4))).rejects.toThrow(
             message('CheckMessageLater.embedding', 'CheckMessageLater.embedding')
         );
+    });
+
+    it("should be refused when ensured at runtime over a known fragment's unannotated field, and not kept", async () => {
+        build(CheckEnsured);
+        const manager = new SchemaManager(factory, { catalogs: [] });
+
+        await expect(manager.ensure('rag', vectorIndex('CheckEnsured', 'embedding', 4))).rejects.toThrow(
+            message('CheckEnsured.embedding', 'CheckEnsured.embedding')
+        );
+        // Refused before it was kept, so the manager has nothing to apply.
+        await expect(manager.enforce()).resolves.toEqual(new Map());
     });
 
     it('should refuse a fragment built after a catalog indexed its unannotated field, every time', async () => {
