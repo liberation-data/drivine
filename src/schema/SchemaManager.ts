@@ -6,6 +6,7 @@ import { DrivineLogger } from '@/logger';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
 import { SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
+import { inventoryEntries, readInventory, RecordedInventory } from '@/schema/SchemaInventory';
 import {
     EnsureResult,
     IndexSpec,
@@ -60,12 +61,78 @@ function coOwnedKeys(owners: Map<string, SchemaCatalog[]>): Set<string> {
     return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
 }
 
+/** Each owner's items on one database, merged, and which of them are co-owned or only ensured at runtime. */
+interface Plan {
+    items: [SchemaSpec, SchemaCatalog][];
+    owners: Map<string, SchemaCatalog[]>;
+    coOwned: Set<string>;
+    /** Per owner, the inventory keys of the items only `ensure` gave it, none of its startup catalogs. */
+    runtimeOnly: Map<string, Set<string>>;
+}
+
+/** An owner's version, what its marker holds, and whether an apply recreates the owner's items. */
+interface MarkerState {
+    version?: string;
+    stored?: string | null;
+    recreateOwner: boolean;
+    recorded?: RecordedInventory;
+}
+
+/** What `ensure` was given under one owner and target: each item by its identity, so a later one replaces it. */
+interface RuntimeItems {
+    owner: string;
+    databases?: string[];
+    items: Map<string, SchemaSpec>;
+}
+
+/** An inventory key without its name: what a renamed item shares with the key it had. */
+const identityOf = (spec: SchemaSpec): string => inventoryKey(spec).slice(0, -itemName(spec).length);
+
+/**
+ * The items an earlier manager ensured at runtime that this one has not been given: kept in the inventory, not
+ * orphans, since they arrive later; unless an item declared now has the same identity under another name.
+ */
+function carriedItems(recorded: RecordedInventory | undefined, own: SchemaSpec[]): string[] {
+    const declared = own.map(inventoryKey);
+    const identities = own.map(identityOf);
+    return (recorded?.keys ?? []).filter(
+        (key) => recorded!.runtime.has(key) && !declared.includes(key) && !identities.some((it) => key.startsWith(it))
+    );
+}
+
+/**
+ * The runtime items to record as waiting to be recreated. A carried item misses a recreate of its owner, having no
+ * spec here, so it is marked, to be recreated when next ensured; a version change spares one another owner declares,
+ * as it spares a co-owned item. A runtime item not applied this time keeps its mark; one applied loses it.
+ */
+function staleAfter(
+    stale: Set<string>,
+    carried: string[],
+    runtimeOnly: Set<string>,
+    applied: Set<string>,
+    owner: { forced: boolean; recreateOwner: boolean; declaredByOthers: Set<string> }
+): Set<string> {
+    return new Set([
+        ...[...stale].filter((key) => runtimeOnly.has(key) && !applied.has(key)),
+        ...carried.filter(
+            (key) => stale.has(key) || owner.forced || (owner.recreateOwner && !owner.declaredByOthers.has(key))
+        )
+    ]);
+}
+
 /**
  * Holds catalogs of indexes and constraints on the databases they apply to. `enforce` is idempotent: it makes what is
- * missing, and recreates a catalog's items when its version changed. `recreateAll` drops and makes everything.
+ * missing, and recreates a catalog's items when its version changed. `recreateAll` drops and makes everything. Schema
+ * known only later is given to `ensure`, under an owner.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
+
+    /** What `ensure` was given, by owner and target. */
+    private runtime = new Map<string, RuntimeItems>();
+
+    /** Serializes `enforce`, `recreateAll` and `ensure`, which read and write the runtime items and the markers. */
+    private queue: Promise<unknown> = Promise.resolve();
 
     constructor(
         private readonly factory: GraphObjectManagerFactory,
@@ -74,29 +141,118 @@ export class SchemaManager {
 
     /** Ensures every catalog on its databases: indexes before constraints. Returns the results, by database. */
     async enforce(): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
-        return this.apply(false);
+        return this.serialized(async () => this.apply(false));
     }
 
     /** Drops and makes every declared item. Destructive. */
     async recreateAll(): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
-        return this.apply(true);
+        return this.serialized(async () => this.apply(true));
+    }
+
+    /**
+     * Ensures schema known only at runtime, such as a vector index whose dimensions arrive with the embedding model or
+     * an index for each label a tenant declares, under `owner` (a catalog's `named`; 'schema' is the unnamed owner) on
+     * every graph database. To target databases, give a catalog that names its owner and databases.
+     *
+     * The items are added to what the owner declared at startup, for the life of this manager, and applied as `enforce`
+     * applies the owner's: `mode`, `recreateOnDrift` and `violationSampleSize` apply, and only the items given are
+     * applied. Ensuring an item again with the same kind, label and properties replaces it. From then on `enforce` and
+     * `recreateAll` apply them with the rest. A declaration that conflicts with another owner's, or with the owner's
+     * own, fails, and nothing is kept or applied on any database; one identical to another owner's is co-owned.
+     *
+     * The owner's marker records them as ensured at runtime (drivine4j's `runtime:` entries), so an `enforce` by a
+     * manager built later keeps them in the inventory without calling them orphans. When that enforce recreates the
+     * owner, it marks them (`runtime-stale:`), and the next `ensure` of one recreates it. `ensure` leaves a change of
+     * the owner's version to `enforce`, and `recreateOnStartup` does not apply to it.
+     */
+    async ensure(owner: string, ...specs: SchemaSpec[]): Promise<Map<string, EnsureResult<SchemaSpec>[]>>;
+    async ensure(catalog: SchemaCatalog): Promise<Map<string, EnsureResult<SchemaSpec>[]>>;
+    async ensure(
+        target: string | SchemaCatalog,
+        ...specs: SchemaSpec[]
+    ): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
+        const catalog = typeof target === 'string' ? SchemaCatalog.of(...specs).named(target) : target;
+        if (catalog.version !== undefined) {
+            throw new DrivineError(
+                `Schema ensured at runtime cannot carry a version (${catalog.version}): an owner's version is declared ` +
+                    `by its startup catalogs, with SchemaCatalog.withVersion.`
+            );
+        }
+        if (!catalog.items.length) {
+            this.logger.log(`Nothing to ensure for owner '${catalog.name}': no items given`);
+            return new Map();
+        }
+        return this.serialized(async () => {
+            const candidate = this.withRuntime(catalog);
+            const runtime = this.runtimeCatalogs(candidate);
+            const byDatabase = this.catalogsByDatabase([...this.options.catalogs, ...runtime]);
+            // Plan every database before anything is kept or applied, so a conflict leaves both as they were.
+            const plans = [...this.catalogsByDatabase([catalog]).keys()].map(
+                (database) => [database, this.plan(database, byDatabase.get(database)!, runtime)] as const
+            );
+            this.runtime = candidate;
+            const given = new Set(catalog.items.map(inventoryKey));
+            const report = new Map<string, EnsureResult<SchemaSpec>[]>();
+            for (const [database, plan] of plans) {
+                const gom = this.factory.get(database);
+                const own = plan.owners.get(catalog.name)!;
+                report.set(database, await this.applyOwner(gom, database, catalog.name, own, plan, false, given));
+            }
+            return report;
+        });
+    }
+
+    private async serialized<T>(run: () => Promise<T>): Promise<T> {
+        const next = this.queue.then(run);
+        this.queue = next.catch(() => undefined);
+        return next;
+    }
+
+    /** The runtime items with the catalog's added, each replacing an item of its identity, owner and target. */
+    private withRuntime(catalog: SchemaCatalog): Map<string, RuntimeItems> {
+        const copy = new Map([...this.runtime].map(([key, it]) => [key, { ...it, items: new Map(it.items) }]));
+        const key = JSON.stringify([catalog.name, catalog.databases ?? null]);
+        const entry = copy.get(key) ?? { owner: catalog.name, databases: catalog.databases, items: new Map() };
+        catalog.items.forEach((spec) => entry.items.set(keyOf(spec), spec));
+        copy.set(key, entry);
+        return copy;
+    }
+
+    private runtimeCatalogs(runtime: Map<string, RuntimeItems>): SchemaCatalog[] {
+        return [...runtime.values()].map((it) => {
+            const catalog = SchemaCatalog.of(...it.items.values()).named(it.owner);
+            return it.databases ? catalog.forDatabases(...it.databases) : catalog;
+        });
     }
 
     private async apply(recreate: boolean): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
+        const runtime = this.runtimeCatalogs(this.runtime);
         const report = new Map<string, EnsureResult<SchemaSpec>[]>();
-        for (const [database, catalogs] of this.catalogsByDatabase()) {
+        for (const [database, catalogs] of this.catalogsByDatabase([...this.options.catalogs, ...runtime])) {
             const gom = this.factory.get(database);
-            const items = this.merged(database, catalogs);
-            const owners = new Map<string, SchemaCatalog[]>();
-            catalogs.forEach((it) => owners.set(it.name, [...(owners.get(it.name) ?? []), it]));
-            const coOwned = coOwnedKeys(owners);
+            const plan = this.plan(database, catalogs, runtime);
             const results: EnsureResult<SchemaSpec>[] = [];
-            for (const [owner, own] of owners) {
-                results.push(...(await this.applyOwner(gom, database, owner, own, items, coOwned, recreate)));
+            for (const [owner, own] of plan.owners) {
+                results.push(...(await this.applyOwner(gom, database, owner, own, plan, recreate)));
             }
             report.set(database, results);
         }
         return report;
+    }
+
+    /** Merges what each owner declares on the database, startup and runtime alike; a conflict fails. */
+    private plan(database: string, catalogs: SchemaCatalog[], runtime: SchemaCatalog[]): Plan {
+        const items = this.merged(database, catalogs);
+        const owners = new Map<string, SchemaCatalog[]>();
+        catalogs.forEach((it) => owners.set(it.name, [...(owners.get(it.name) ?? []), it]));
+        const keysOf = (it: SchemaCatalog[]): Set<string> => new Set(it.flatMap((c) => c.items.map(inventoryKey)));
+        const runtimeOnly = new Map<string, Set<string>>();
+        for (const [owner, own] of owners) {
+            const atStartup = keysOf(own.filter((it) => !runtime.includes(it)));
+            const ensured = keysOf(own.filter((it) => runtime.includes(it)));
+            runtimeOnly.set(owner, new Set([...ensured].filter((it) => !atStartup.has(it))));
+        }
+        return { items, owners, coOwned: coOwnedKeys(owners), runtimeOnly };
     }
 
     /**
@@ -104,17 +260,79 @@ export class SchemaManager {
      * since it last applied (a first version is adopted, not acted on); an item another owner declares too is never
      * recreated by one owner's version. Items the owner applied before and no longer declares (orphans) are reported,
      * never dropped. The owner's version and inventory are recorded only when the apply succeeds, so a failed one is
-     * tried again on the next enforce.
+     * tried again on the next enforce. `only`, from `ensure`, is the keys of the items it was given: just those are
+     * applied, the version is recorded as it was found, and `recreateOnStartup` does not apply.
      */
     private async applyOwner(
         gom: StatelessGraphObjectManager,
         database: string,
         owner: string,
         catalogs: SchemaCatalog[],
-        items: [SchemaSpec, SchemaCatalog][],
-        coOwned: Set<string>,
-        forced: boolean
+        plan: Plan,
+        forced: boolean,
+        only?: Set<string>
     ): Promise<EnsureResult<SchemaSpec>[]> {
+        const ensuring = only !== undefined;
+        const { version, stored, recreateOwner, recorded }: MarkerState = await this.marker(
+            gom,
+            owner,
+            catalogs,
+            ensuring
+        );
+        // Every item the owner declares, as the catalogs together declare it: one another owner declares too is the
+        // owner's as much as the other's.
+        const byKey = new Map(plan.items.map(([spec]) => [keyOf(spec), spec]));
+        const own = [...new Set(catalogs.flatMap((it) => it.items.map(keyOf)))].map((key) => byKey.get(key)!);
+        const declared = own.map(inventoryKey);
+        const carried = carriedItems(recorded, own);
+        const stale = recorded?.stale ?? new Set<string>();
+        this.reportOrphans(database, owner, recorded?.keys, new Set([...declared, ...carried]), plan.coOwned);
+        const given = ensuring ? own.filter((it) => only.has(inventoryKey(it))) : own;
+        if (ensuring) {
+            this.logger.log(
+                `Ensuring schema for owner '${owner}' on ${database}: ${given.length} runtime items, ` +
+                    `${own.length} declared in all`
+            );
+        }
+        const ordered = [...given.filter((it) => it.kind !== 'UNIQUE'), ...given.filter((it) => it.kind === 'UNIQUE')];
+        const results: EnsureResult<SchemaSpec>[] = [];
+        for (const spec of ordered) {
+            // A runtime item marked stale missed its owner's recreate, and is recreated now.
+            const key = inventoryKey(spec);
+            const recreate = forced || ((recreateOwner || stale.has(key)) && !plan.coOwned.has(key));
+            results.push(await this.ensureItem(gom, spec, recreate));
+        }
+        const runtimeOnly = plan.runtimeOnly.get(owner) ?? new Set<string>();
+        const marked = staleAfter(stale, carried, runtimeOnly, new Set(given.map(inventoryKey)), {
+            forced,
+            recreateOwner,
+            declaredByOthers: new Set(
+                [...plan.owners]
+                    .filter(([other]) => other !== owner)
+                    .flatMap(([, it]) => it.flatMap((c) => c.items.map(inventoryKey)))
+            )
+        });
+        await gom.persistenceManager.execute(
+            gom.backend.recordSchemaMarker().spec({
+                scope: owner,
+                version: (ensuring ? stored : version) ?? null,
+                items: inventoryEntries([...declared, ...carried], new Set([...runtimeOnly, ...carried]), marked)
+            })
+        );
+        return results;
+    }
+
+    /**
+     * The owner's version, what its marker recorded, and whether its items are recreated: on a version change since it
+     * last applied (a first version is adopted, not acted on), or on `recreateOnStartup`; never while `ensuring`, which
+     * reads the version only to record it as it found it.
+     */
+    private async marker(
+        gom: StatelessGraphObjectManager,
+        owner: string,
+        catalogs: SchemaCatalog[],
+        ensuring: boolean
+    ): Promise<MarkerState> {
         const versions = [...new Set(catalogs.map((it) => it.version).filter((it): it is string => it !== undefined))];
         const version = versions.length ? versions.sort().join('|') : undefined;
         const pm = gom.persistenceManager;
@@ -122,30 +340,21 @@ export class SchemaManager {
             await this.ensureSingleton(gom, owner);
         }
         const stored =
-            version !== undefined
+            version !== undefined || ensuring
                 ? await pm.maybeGetOne<string>(gom.backend.schemaMarker('version').spec({ scope: owner }))
                 : undefined;
-        const versionChanged = version !== undefined && stored != null && stored !== version;
-        // Every item the owner declares, as the catalogs together declare it: one another owner declares too is the
-        // owner's as much as the other's.
-        const byKey = new Map(items.map(([spec]) => [keyOf(spec), spec]));
-        const own = [...new Set(catalogs.flatMap((it) => it.items.map(keyOf)))].map((key) => byKey.get(key)!);
-        const declared = own.map(inventoryKey);
-        await this.reportOrphans(gom, database, owner, declared, coOwned);
-        const ordered = [...own.filter((it) => it.kind !== 'UNIQUE'), ...own.filter((it) => it.kind === 'UNIQUE')];
-        const results: EnsureResult<SchemaSpec>[] = [];
-        for (const spec of ordered) {
-            const recreate =
-                forced ||
-                ((this.options.recreateOnStartup === true || versionChanged) && !coOwned.has(inventoryKey(spec)));
-            results.push(await this.ensure(gom, spec, recreate));
-        }
-        await pm.execute(
-            gom.backend
-                .recordSchemaMarker()
-                .spec({ scope: owner, version: version ?? null, items: declared.join('\n') })
+        const versionChanged = !ensuring && version !== undefined && stored != null && stored !== version;
+        const recorded = readInventory(
+            gom.backend.markerItems(
+                await pm.maybeGetOne<string | null>(gom.backend.schemaMarker('items').spec({ scope: owner }))
+            )
         );
-        return results;
+        return {
+            version,
+            stored,
+            recreateOwner: versionChanged || (!ensuring && this.options.recreateOnStartup === true),
+            recorded
+        };
     }
 
     /**
@@ -157,22 +366,15 @@ export class SchemaManager {
         await gom.constraints.ensure(uniquenessConstraint(MARKER_LABEL, 'scope'));
     }
 
-    private async reportOrphans(
-        gom: StatelessGraphObjectManager,
+    /** Warns of what the owner's marker recorded that is not `kept` and no other owner declares. */
+    private reportOrphans(
         database: string,
         owner: string,
-        declared: string[],
+        stored: string[] | undefined,
+        kept: Set<string>,
         coOwned: Set<string>
-    ): Promise<void> {
-        const stored = gom.backend.markerItems(
-            await gom.persistenceManager.maybeGetOne<string | null>(
-                gom.backend.schemaMarker('items').spec({ scope: owner })
-            )
-        );
-        if (stored === undefined) {
-            return;
-        }
-        const orphans = stored.filter((it) => !declared.includes(it) && !coOwned.has(it));
+    ): void {
+        const orphans = (stored ?? []).filter((it) => !kept.has(it) && !coOwned.has(it));
         if (orphans.length) {
             this.logger.warn(
                 `Owner '${owner}' on ${database} applied ${orphans.length} item(s) it no longer declares: ` +
@@ -181,7 +383,7 @@ export class SchemaManager {
         }
     }
 
-    private async ensure(
+    private async ensureItem(
         gom: StatelessGraphObjectManager,
         spec: SchemaSpec,
         recreate: boolean
@@ -222,11 +424,11 @@ export class SchemaManager {
     }
 
     /** The catalogs that apply to each graph database. A named database that is unknown or not a graph fails. */
-    private catalogsByDatabase(): Map<string, SchemaCatalog[]> {
+    private catalogsByDatabase(catalogs: SchemaCatalog[]): Map<string, SchemaCatalog[]> {
         const registry = DatabaseRegistry.getInstance();
         const graphs = registry.providers.filter((it) => GRAPH_TYPES.includes(it.type)).map((it) => it.name);
         const result = new Map<string, SchemaCatalog[]>();
-        for (const catalog of this.options.catalogs) {
+        for (const catalog of catalogs) {
             const targets =
                 catalog.databases?.map((name) => {
                     const provider = registry.connectionProvider(name);
@@ -252,14 +454,18 @@ export class SchemaManager {
         for (const catalog of catalogs) {
             for (const spec of catalog.items) {
                 const held = items.get(keyOf(spec));
-                const chosen = held ? this.reconciled(database, held[0], spec) : spec;
+                const chosen = held ? this.reconciled(database, held, [spec, catalog]) : spec;
                 items.set(keyOf(spec), [chosen, chosen === spec ? catalog : held![1]]);
             }
         }
         return [...items.values()];
     }
 
-    private reconciled(database: string, held: SchemaSpec, spec: SchemaSpec): SchemaSpec {
+    private reconciled(
+        database: string,
+        [held, heldBy]: [SchemaSpec, SchemaCatalog],
+        [spec, by]: [SchemaSpec, SchemaCatalog]
+    ): SchemaSpec {
         const optionsOf = (it: SchemaSpec): unknown[] => (it.kind === 'VECTOR' ? it.engineOptions ?? [] : []);
         const portable = (it: SchemaSpec): string => JSON.stringify({ ...it, engineOptions: undefined });
         const [a, b] = [optionsOf(held), optionsOf(spec)];
@@ -273,7 +479,10 @@ export class SchemaManager {
         }
         throw new DrivineError(
             `Two schema catalogs declare the ${spec.kind} on ${spec.label}(${spec.properties.join(', ')}) on ` +
-                `${database} differently.`
+                `${database} differently, ` +
+                (heldBy.name === by.name
+                    ? `both owned by '${by.name}'.`
+                    : `owned by '${heldBy.name}' and '${by.name}'.`)
         );
     }
 }
