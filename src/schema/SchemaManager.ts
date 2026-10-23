@@ -1,3 +1,4 @@
+import { CATALOG_KINDS } from '@/backend/sql/SqlCatalog';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
@@ -40,19 +41,12 @@ const keyOf = (spec: SchemaSpec): string => `${spec.kind}:${spec.label}:${[...sp
 /** The label of the schema markers: drivine4j's, so both read one. */
 const MARKER_LABEL = '_DrivineSchema';
 
-const KINDS = {
-    RANGE: 'RANGE_INDEX',
-    UNIQUE: 'UNIQUENESS_CONSTRAINT',
-    VECTOR: 'VECTOR_INDEX',
-    FULLTEXT: 'FULLTEXT_INDEX'
-};
-
 /**
  * An item's identity in an owner's inventory, drivine4j's `inventoryKey`: kind, label, properties and name, so a renamed
  * item shows as an orphan rather than coexisting unattributed.
  */
 export function inventoryKey(spec: SchemaSpec): string {
-    return `${KINDS[spec.kind]}:${spec.label}:${spec.properties.join(',')}:${itemName(spec)}`;
+    return `${CATALOG_KINDS[spec.kind]}:${spec.label}:${spec.properties.join(',')}:${itemName(spec)}`;
 }
 
 /** The inventory keys more than one owner declares. */

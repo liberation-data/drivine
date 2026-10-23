@@ -24,6 +24,11 @@ export interface SchemaItem extends VectorTuning {
     name?: string;
     dimensions?: number;
     similarity?: SimilarityFunction;
+    /**
+     * Whether the engine holds part of what is made for the item and lacks the rest (Oracle: a range index whose index
+     * over the label's nodes is gone), so that `ensure` makes the rest. It is listed, found and dropped as it is.
+     */
+    incomplete?: boolean;
 }
 
 /**

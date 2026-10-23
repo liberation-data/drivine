@@ -1474,7 +1474,8 @@ its own graph's tables alone.
 `<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
 as JSON. Labels, property names and relationship types are data, so `@NodeLabels`, `@PropertyBag` and `edges` work as
 they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>_schema`, records the indexes and
-constraints Drivine made. The layout is drivine4j's, so the JVM, Node and Python read one store.
+constraints Drivine made, as drivine4j records them. The layout is drivine4j's, so the JVM, Node and Python read one
+store, and each sees, uses and drops the indexes the others made.
 
 Notes:
 
@@ -1486,6 +1487,9 @@ Notes:
   stamp: the first sixteen characters of `stamp` for its properties or labels, the last sixteen for its relationships.
 - Index the id of each class you save: `uniquenessConstraint('Person', 'id')` makes the unique index a node is found
   by. Without one, a save reads the table.
+- A range index is two indexes, as drivine4j makes it: one over the property whatever the label, and one over the
+  label's nodes alone, which a filter is read through. A uniqueness constraint comes with a range index over its
+  properties, which stays when the constraint is dropped.
 - Oracle reads an empty string as null, so a comparison with `''` in the DSL is written to find a property stored empty.
 - `matches` takes a regular expression in Oracle's POSIX dialect, matched against the whole value. A leading `(?i)`
   ignores case; what Java adds, such as `(?:…)`, a look-around or `\b`, is not read. A backreference names the group the

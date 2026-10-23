@@ -69,9 +69,12 @@ export class QueryIndexAdvisor {
         }
     }
 
-    /** The range indexes and uniqueness constraints there are, read once and kept as for advice. */
+    /**
+     * The range indexes and uniqueness constraints there are, read once and kept as for advice: those whole, as a
+     * filter is read through them.
+     */
     async indexed(): Promise<SchemaItem[]> {
-        return [...(await this.indexList()), ...(await this.constraintList())];
+        return [...(await this.indexList()), ...(await this.constraintList())].filter((it) => !it.incomplete);
     }
 
     /** Forgets the index list, so the next check reads it again. */

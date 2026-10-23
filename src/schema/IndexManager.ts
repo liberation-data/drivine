@@ -55,6 +55,16 @@ export class IndexManager {
     async ensure<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         this.warnUnsupported(spec);
         const found = await this.find(spec);
+        if (found?.incomplete) {
+            await this.create(spec);
+            this.changed();
+            this.logger.log(
+                `Completed the ${spec.kind} index on ${spec.label}(${spec.properties.join(
+                    ', '
+                )}): it lacked part of what is made for it`
+            );
+            return { status: 'CREATED', spec };
+        }
         if (found) {
             return this.matches(spec, found)
                 ? { status: 'ALREADY_MATCHING', spec }

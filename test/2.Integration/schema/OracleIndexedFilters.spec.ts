@@ -17,6 +17,7 @@ import {
     TargetModel,
     uniquenessConstraint
 } from '@liberation-data/drivine';
+import { OracleGraph } from '@/backend/oracle';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 import { OracleSeed } from '../support/OracleSeed';
 
@@ -134,18 +135,19 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
 
     it('should read the index, and not the label, for a comparison every root meets', async () => {
         await gom.indexes.ensure(byRepo);
+        const labelled = new OracleGraph().objectName('lx', ['OraIssue', 'repoKey']).toUpperCase();
         const indexed = await planOf((q) => ({ where: [q.repoKey.eq('r7'), q.state.eq('closed')] }));
-        expect(indexed.some((it) => it.startsWith('DRIVINE_R_'))).toBe(true);
+        expect(indexed).toContain(labelled);
         expect(indexed).not.toContain('DRIVINE_NODE_LABELS');
         // Inside an or, the label is read as before.
         const either = await planOf((q) => ({ where: anyOf(q.repoKey.eq('r1'), q.repoKey.eq('r2')) }));
-        expect(either.some((it) => it.startsWith('DRIVINE_R_'))).toBe(false);
+        expect(either).not.toContain(labelled);
     });
 
     it('should read a uniqueness constraint over the property as it reads a range index', async () => {
         await gom.constraints.ensure(uniqueCode);
         const plan = await planOf((q) => ({ where: q.code.eq('c42') }));
-        expect(plan.some((it) => it.startsWith('DRIVINE_U_'))).toBe(true);
+        expect(plan).toContain(new OracleGraph().objectName('uq', ['OraIssue', 'code']).toUpperCase());
         expect(plan).not.toContain('DRIVINE_NODE_LABELS');
         expect(await ids((q) => ({ where: q.code.eq('c42') }))).toEqual(['i42']);
     });
