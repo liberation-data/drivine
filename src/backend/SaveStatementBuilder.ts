@@ -337,7 +337,8 @@ export class SaveStatementBuilder {
     /**
      * A @JsonPacked field's value as the node held it: what the load read, so that text another writer packed with
      * other spacing or escaping, or a value a load hands over unpacked (text that isn't JSON, a number), is not taken
-     * for a change. A value the node held none for (one a load gives an absent property) is packed as a save packs it.
+     * for a change. A value the node held none for (one a load gives an absent property), or one of a `from` no load
+     * made, such as a copy, is packed as a save packs it.
      */
     private packedAsLoaded(property: string, value: any): any {
         const held = this.options.loadedProperties?.[property];

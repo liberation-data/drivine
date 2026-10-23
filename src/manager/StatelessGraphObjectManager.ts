@@ -790,8 +790,8 @@ export class StatelessGraphObjectManager {
     /**
      * The root of `from`, the object as it was loaded, and the stamp it carries, which a save of `object`, a changed
      * copy of it, is checked against. Refuses a `from` that is the object saved itself, whose fields would then be the
-     * changed ones and not those loaded, and one of another class, with another id, or with no stamp. A copy may share
-     * an unchanged root with `from`.
+     * changed ones and not those loaded, and one of another class, with another id, or with no stamp, as one of a class
+     * with no @NodeStamp field has none. A copy may share an unchanged root with `from`.
      */
     private loadedAs(target: TargetModel, object: any, from: any): { root: any; stamp: string } {
         const name = object.constructor.name;
@@ -824,7 +824,13 @@ export class StatelessGraphObjectManager {
                     `it was loaded.`
             );
         }
-        const stamp = model.stampField ? loadedRoot[model.stampField] : undefined;
+        if (!model.stampField) {
+            throw new DrivineError(
+                `${model.type.name} has no @NodeStamp field, so a save of a ${name} has no stamp to be checked ` +
+                    `against what was loaded. Give it one, or save without from.`
+            );
+        }
+        const stamp = loadedRoot[model.stampField];
         if (stamp == null) {
             throw new DrivineError(
                 `The ${name} given as from carries no stamp, so nothing says what it was loaded with. Give it as it ` +

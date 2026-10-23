@@ -1064,8 +1064,9 @@ writes nothing and throws `StaleObjectException`.
 | deleted the root | refused, `deleted` is true | refused, `deleted` is true | returns undefined |
 | changed anything with Cypher that doesn't mark it | not noticed | not noticed | not noticed |
 
-An object whose stamp is undefined isn't checked: it makes the node or overwrites it. The save is one statement that
-takes the node's write lock before it compares, so of several writers holding the same stamp exactly one succeeds.
+An object whose stamp is undefined isn't checked, unless it is saved with `from`: it makes the node or overwrites it.
+The save is one statement that takes the node's write lock before it compares, so of several writers holding the same
+stamp exactly one succeeds.
 
 **On Neo4j a load can be handed a stamp newer than its data.** Neo4j reads under read committed, without a snapshot, so
 a load that runs while another writer commits can find that writer's stamp and the data from before its write. `update`
@@ -1124,7 +1125,7 @@ every property (`SET n = $props`) removes the stamp, and the next checked save o
 #### What a Stamp Doesn't Cover
 
 - A related node isn't checked: `save` writes it whole. `update` writes only what the change altered.
-- An object with no stamp isn't checked, nor is a fragment in a `saveAll`.
+- An object with no stamp, saved without `from`, isn't checked, nor is a fragment in a `saveAll`.
 - One relationship token covers every relationship: a `replace` of one list is refused when a relationship of another
   type was added.
 - Deleting a node removes its relationships without marking the nodes at their other ends.

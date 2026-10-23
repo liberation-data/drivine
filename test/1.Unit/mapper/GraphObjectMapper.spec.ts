@@ -30,6 +30,12 @@ class Settings {
     @NodeStamp() stamp?: string;
 }
 
+@NodeFragment({ labels: ['Draft'] })
+class Draft {
+    @NodeId() uuid: string;
+    @JsonPacked() prefs?: Record<string, any>;
+}
+
 describe('GraphObjectMapper', () => {
     const mapper = new GraphObjectMapper();
     const model = new ModelRegistry().fragment(Person);
@@ -76,6 +82,15 @@ describe('GraphObjectMapper', () => {
         expect(packedTextOf({ ...settings })).toBeUndefined();
         expect(
             packedTextOf(mapper.fragment<Person>(model, { props: { uuid: '1' }, labels: ['Person'] }))
+        ).toBeUndefined();
+        // Nor does one of a class with no stamp, which no save given it as from accepts.
+        expect(
+            packedTextOf(
+                mapper.fragment<Draft>(new ModelRegistry().fragment(Draft), {
+                    props: { uuid: '1', prefs: '{"a": 1}' },
+                    labels: ['Draft']
+                })
+            )
         ).toBeUndefined();
     });
 });

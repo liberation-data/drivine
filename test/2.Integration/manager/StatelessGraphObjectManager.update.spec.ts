@@ -93,6 +93,13 @@ class PackedView {
     @GraphRelationship({ type: 'MENTIONS', target: () => Entity }) mentions: Entity[];
 }
 
+/** A stamp with no id, which a save can't merge on. */
+@NodeFragment({ labels: ['UpdateTest', 'Unnamed'] })
+class Unnamed {
+    text?: string;
+    @NodeStamp() stamp?: string;
+}
+
 /** A field the store holds as a temporal value, which a load hands over as a Date. */
 @NodeFragment({ labels: ['UpdateTest', 'Dated'] })
 class Dated {
@@ -466,7 +473,23 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
             // The very object loaded, changed in place, can't say what was loaded.
             loaded.sources.push('mine');
             await expect(gom.save(loaded, { from: loaded })).rejects.toThrow(/from is the Finding saved itself/);
-            await expect(gom.saveAll([mine()], { from: loaded } as any)).rejects.toThrow(/saveAll takes no from/);
+            // @ts-expect-error saveAll's options have no from
+            await expect(gom.saveAll([mine()], { from: loaded })).rejects.toThrow(/saveAll takes no from/);
+            // A view with no root, saved or as from, and a class with no stamp to check.
+            const view = (root?: Proposition): PropositionView =>
+                make(PropositionView, { proposition: root, mentions: [] });
+            await expect(gom.save(view(), { from: view(proposition({ id: 'f1' })) })).rejects.toThrow(
+                'The PropositionView saved has no root fragment.'
+            );
+            await expect(gom.save(view(proposition({ id: 'f1' })), { from: view() })).rejects.toThrow(
+                'The PropositionView given as from has no root fragment.'
+            );
+            await expect(gom.save(entity('f1', 'mine'), { from: entity('f1') })).rejects.toThrow(
+                /Entity has no @NodeStamp field/
+            );
+            await expect(
+                gom.save(make(Unnamed, { text: 'mine' }), { from: make(Unnamed, { stamp: loaded.stamp }) })
+            ).rejects.toThrow('Unnamed has no @NodeId property, so it can\'t be saved: a save merges on the id.');
 
             expect((await gom.load(Finding, 'f1'))!.sources).toEqual(['first']);
         });
