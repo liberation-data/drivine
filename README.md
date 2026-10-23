@@ -1056,12 +1056,12 @@ takes the node's write lock before it compares, so of several writers holding th
 **On Neo4j a load can be handed a stamp newer than its data.** Neo4j reads under read committed, without a snapshot, so
 a load that runs while another writer commits can find that writer's stamp and the data from before its write. `update`
 therefore compares each field of the root as it loaded it too, under the node's lock, and loads again if one differs: a
-field's value (a `@JsonPacked` field's as the text the node held), a `@PropertyBag`'s keys and their values, and
-the labels a `@NodeLabels` field reads. A field the object
-doesn't hold and its class doesn't initialize isn't compared. A `save` of an object you loaded yourself has only the
-stamp to go on, and in that moment it can write over the other writer's change: where every writer's change must be
-kept, change the node with `update`. Memgraph reads from a snapshot, FalkorDB runs no read beside a write, and Oracle and
-Postgres read a statement whole, so on them the stamp is what was read.
+field's value (a `@JsonPacked` field's as the text the node held), a `@PropertyBag`'s keys and their values, and the
+labels a `@NodeLabels` field reads. A field the object doesn't hold and its class doesn't initialize isn't compared. A
+`save` of an object you loaded yourself has only the stamp to go on, and in that moment it can write over the other
+writer's change: where every writer's change must be kept, change the node with `update`. Memgraph reads from a
+snapshot, FalkorDB runs no read beside a write, and Oracle and Postgres read a statement whole, so on them the stamp is
+what was read.
 
 ```typescript
 try {

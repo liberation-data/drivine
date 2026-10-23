@@ -291,6 +291,16 @@ describe('SaveStatementBuilder', () => {
 
         expect(packed({ id: 'n1', extra: '{"a": 1}' })).toEqual(['{"a": 1}']);
         expect(packed({ id: 'n1' })).toEqual(['{"a":1}']);
+
+        // A load hands over a value that isn't JSON text as it is: it is compared as held, not packed again.
+        const bindings = new SaveStatementBuilder(NEO4J_GRAMMAR).build(
+            fragment(Note),
+            Object.assign(new Note(), { ...loaded, extra: 5, body: 'C' }),
+            { nullPolicy: NullPolicy.CLEAR, loaded: { ...loaded, extra: 5 }, loadedProperties: { id: 'n1', extra: 5 } }
+        ).bindings;
+        expect(
+            Object.entries(bindings).filter(([key, value]) => key.startsWith('_loaded') && value === 5)
+        ).toHaveLength(1);
     });
 
     it('should compare a vector field as the engine stores a vector', () => {

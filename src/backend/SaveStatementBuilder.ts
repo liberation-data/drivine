@@ -334,13 +334,13 @@ export class SaveStatementBuilder {
     }
 
     /**
-     * A @JsonPacked field's value as the node held it: the text the load read, so that text another writer packed with
-     * other spacing or escaping is not taken for a change. A value the node held no text for (one a load gives an
-     * absent property) is packed as a save packs it.
+     * A @JsonPacked field's value as the node held it: what the load read, so that text another writer packed with
+     * other spacing or escaping, or a value a load hands over unpacked (text that isn't JSON, a number), is not taken
+     * for a change. A value the node held none for (one a load gives an absent property) is packed as a save packs it.
      */
     private packedAsLoaded(property: string, value: any): any {
-        const text = this.options.loadedProperties?.[property];
-        return typeof text === 'string' ? text : JSON.stringify(value);
+        const held = this.options.loadedProperties?.[property];
+        return held != null ? asCompared(held) : JSON.stringify(value);
     }
 
     private removals(

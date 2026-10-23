@@ -85,6 +85,12 @@ class Packed {
     @NodeStamp() stamp?: string;
 }
 
+@GraphView()
+class PackedView {
+    @Root() packed: Packed;
+    @GraphRelationship({ type: 'MENTIONS', target: () => Entity }) mentions: Entity[];
+}
+
 /** A field the store holds as a temporal value, which a load hands over as a Date. */
 @NodeFragment({ labels: ['UpdateTest', 'Dated'] })
 class Dated {
@@ -329,6 +335,20 @@ describe.each(graphEngines())('update and create on $type', (engine) => {
 
             const updated = (await gom.load(Packed, 'k1'))!;
             expect([updated.text, updated.prefs]).toEqual(['two', { a: 1 }]);
+        });
+
+        it('should update a view whose root holds packed text another writer wrote, and text that is no JSON', async () => {
+            await gom.save(make(Packed, { id: 'k1', text: 'one', prefs: { a: 1 } }));
+            await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = '{"a": 1}'`));
+            await gom.update(PackedView, 'k1', (it) => void (it.packed.text = 'two'), 1);
+            expect((await gom.load(Packed, 'k1'))!.text).toEqual('two');
+
+            // A load hands text that isn't JSON, or a value that isn't text, over as it is.
+            for (const [i, held] of [`'plain'`, '5', '[1, 2]'].entries()) {
+                await pm.execute(new QuerySpecification(`MATCH (n:Packed {id: 'k1'}) SET n.prefs = ${held}`));
+                await gom.update(Packed, 'k1', (it) => void (it.text = `again ${i}`), 1);
+                expect((await gom.load(Packed, 'k1'))!.text).toEqual(`again ${i}`);
+            }
         });
 
         it('should replace a view’s list that lost an item, and add to one that grew', async () => {
