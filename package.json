@@ -36,6 +36,7 @@
         "format:test": "prettier --write \"test/**/*.ts\"",
         "format:check:test": "prettier --test \"src/**/*.ts\"",
         "start-test-app": "ts-node -r tsconfig-paths/register test/3.EndToEnd/main-web-app.ts",
+        "start-lambda-sample": "ts-node -r tsconfig-paths/register sample/lambda/src/local.ts",
         "lint": "npm run lint:src && npm run lint:test",
         "lint:src": "eslint src --ext .ts",
         "lint:test": "eslint test --ext .ts",

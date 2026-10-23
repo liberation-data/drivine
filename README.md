@@ -277,6 +277,16 @@ Close the connections when the application stops:
 await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
 ```
 
+[`sample/lambda`](sample/lambda) is a runnable example: an AWS Lambda handler, `export const handler`, with the
+factories made once per cold start, a repository, and a `@Transactional` service that rolls a hire back when it takes an
+organization past its headcount. `npm run start-lambda-sample` serves it on your machine, over the database
+`DATABASE_*` configures:
+
+```bash
+curl -X POST localhost:3000/hires -d '{"name": "Ada", "bio": "Team Lead", "organization": "Acme", "role": "CTO"}'
+curl localhost:3000/leads
+```
+
 ### Return One Map
 
 When you write a statement yourself, return a **single map** or a **scalar**, not several columns. That maps cleanly
@@ -1729,6 +1739,9 @@ Datasources of one type share a container. `<TYPE>_TEST_IMAGE` picks another ima
 relationship fragments, polymorphic users, property bags, stamps and search. `SampleAppModule.forDatabase(name)` wires
 Drivine as an application would, and `sample/test` runs drivine4j's sample tests on every store: the DSL, grouped reads,
 patches, label polymorphism, required relationships, deletes and search.
+
+[`sample/lambda`](sample/lambda) is the same people and organizations served from an AWS Lambda, with no Nest: see
+[Without Nest](#3-without-nest). `sample/lambda/test` invokes its handler on every store, and through its local runner.
 
 ## Example Applications
 

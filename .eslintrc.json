@@ -173,6 +173,24 @@
                     { "patterns": [{ "group": ["@nestjs/*", "express"], "message": "Only src/nest may use Nest." }] }
                 ]
             }
+        },
+        {
+            // The Lambda sample runs without Nest. The sample's index exports its Nest module: import from the files.
+            "files": ["sample/lambda/src/**/*.ts"],
+            "rules": {
+                "no-restricted-imports": [
+                    "error",
+                    {
+                        "paths": [
+                            { "name": "../../src", "message": "Import the sample's classes from their files." },
+                            { "name": "../../src/index", "message": "Import the sample's classes from their files." }
+                        ],
+                        "patterns": [
+                            { "group": ["@nestjs/*", "express"], "message": "The Lambda sample runs without Nest." }
+                        ]
+                    }
+                ]
+            }
         }
     ]
 }
