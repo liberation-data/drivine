@@ -5,7 +5,7 @@ import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
-import { SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
+import { DEFAULT_SCOPE, SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import {
     EnsureResult,
     IndexSpec,
@@ -63,6 +63,9 @@ function coOwnedKeys(owners: Map<string, SchemaCatalog[]>): Set<string> {
 /**
  * Holds catalogs of indexes and constraints on the databases they apply to. `enforce` is idempotent: it makes what is
  * missing, and recreates a catalog's items when its version changed. `recreateAll` drops and makes everything.
+ *
+ * The catalogs are read once, when the manager is built: one made later is never seen, and `enforce` applies the same
+ * list again. With nothing to apply (no catalog, or only empty ones) it says so, naming the empty ones.
  */
 export class SchemaManager {
     private readonly logger = new DrivineLogger(SchemaManager.name);
@@ -84,6 +87,10 @@ export class SchemaManager {
 
     private async apply(recreate: boolean): Promise<Map<string, EnsureResult<SchemaSpec>[]>> {
         const report = new Map<string, EnsureResult<SchemaSpec>[]>();
+        if (!this.options.catalogs.some((it) => it.items.length)) {
+            this.logNothingToApply();
+            return report;
+        }
         for (const [database, catalogs] of this.catalogsByDatabase()) {
             const gom = this.factory.get(database);
             const items = this.merged(database, catalogs);
@@ -97,6 +104,28 @@ export class SchemaManager {
             report.set(database, results);
         }
         return report;
+    }
+
+    /**
+     * Says why there is nothing to apply, so that a catalog never passed and one that came out empty can be told from an
+     * application with no schema to manage. Both say the catalogs are read once: one made after the manager is not seen.
+     */
+    private logNothingToApply(): void {
+        const once = 'Catalogs are read once, when the SchemaManager is built.';
+        const catalogs = this.options.catalogs;
+        if (!catalogs.length) {
+            this.logger.log(`Schema management found no SchemaCatalog; nothing to apply. ${once}`);
+            return;
+        }
+        const counts = new Map<string, number>();
+        catalogs
+            .map((it) => (it.name === DEFAULT_SCOPE ? 'unnamed' : `'${it.name}'`))
+            .forEach((owner) => counts.set(owner, (counts.get(owner) ?? 0) + 1));
+        const owners = [...counts].map(([owner, count]) => (count === 1 ? owner : `${owner} (${count})`));
+        this.logger.log(
+            `Schema management found ${catalogs.length} SchemaCatalog(s), all empty: ${owners.join(', ')}; ` +
+                `nothing to apply. ${once}`
+        );
     }
 
     /**

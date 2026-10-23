@@ -1656,6 +1656,11 @@ database, or one without schema support, fails startup.
 `SchemaManager` is injectable, to change the schema as the application runs: `enforce()` is safe to call again, and
 `recreateAll()` drops and remakes every declared item.
 
+The manager reads its catalogs once, when it is built: a catalog made later isn't seen, and a later `enforce()` applies
+the same list. With nothing to apply it says so at info level: `Schema management found no SchemaCatalog` when it was
+given none, or `found 2 SchemaCatalog(s), all empty: 'dice', unnamed` when every one came out empty. So a missing index
+can be traced to a catalog that never arrived.
+
 ### Version-Triggered Rebuild
 
 Drift detection sees only what introspection shows. Swapping an embedding model for another with the same dimensions
