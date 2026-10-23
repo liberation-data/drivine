@@ -58,6 +58,14 @@ describe.each(sampleStores())('the hiring Lambda on $type', (engine) => {
         expect(second.employmentHistory[0].target.uuid).toEqual(first.employmentHistory[0].target.uuid);
     });
 
+    it('should hire someone with no bio on the start date given, and leave them out of the leads', async () => {
+        const body = JSON.stringify({ name: 'Linus', organization: 'Acme', role: 'Engineer', startDate: '2024-01-15' });
+        const hired = await lambda(event('POST', '/hires', body));
+        expect(hired.statusCode).toEqual(201);
+        expect(bodyOf(hired).employmentHistory[0].startDate).toEqual('2024-01-15');
+        expect(await leads()).toEqual([]);
+    });
+
     itRollsBack('should roll the whole hire back when it takes the organization past its headcount', async () => {
         await hire('Ada', 'Acme', 'Lead');
         await hire('Grace', 'Acme', 'Lead');
@@ -77,6 +85,21 @@ describe.each(sampleStores())('the hiring Lambda on $type', (engine) => {
     it('should refuse a hire with a field missing, or a body that is not JSON', async () => {
         expect((await lambda(event('POST', '/hires', JSON.stringify({ name: 'Ada' })))).statusCode).toEqual(400);
         expect((await lambda(event('POST', '/hires', 'Ada at Acme'))).statusCode).toEqual(400);
+        expect((await lambda(event('POST', '/hires', 'null'))).statusCode).toEqual(400);
+        expect(await leads()).toEqual([]);
+    });
+
+    // A bio that is not text would be saved, and then fail every search of the leads.
+    it('should refuse a hire whose bio is not text, or whose start date is not a date', async () => {
+        const hireWith = async (fields: object): Promise<HttpResult> =>
+            lambda(
+                event('POST', '/hires', JSON.stringify({ name: 'Ada', organization: 'Acme', role: 'CTO', ...fields }))
+            );
+        expect((await hireWith({ bio: 5 })).statusCode).toEqual(400);
+        expect((await hireWith({ startDate: 20240101 })).statusCode).toEqual(400);
+        expect((await hireWith({ startDate: '' })).statusCode).toEqual(400);
+        expect((await hireWith({ startDate: 'next Monday' })).statusCode).toEqual(400);
+        expect((await hireWith({ startDate: ['2024-01-15'] })).statusCode).toEqual(400);
         expect(await leads()).toEqual([]);
     });
 
@@ -114,7 +137,23 @@ describe('the hiring Lambda run locally', () => {
         });
         expect(hired.status).toEqual(201);
         expect(hired.headers.get('content-type')).toEqual('application/json');
-        const found = await fetch(`${base}/leads`);
+        // API Gateway leaves the query string out of rawPath, and so does the runner.
+        const found = await fetch(`${base}/leads?page=1`);
         expect((await found.json()).map((it: { person: { name: string } }) => it.person.name)).toEqual(['Ada']);
+    });
+});
+
+// A handler that fails is an error Lambda would report: the local runner answers 500 with it.
+describe('the local runner', () => {
+    it('should answer 500 when the handler fails', async () => {
+        const server = serve(async () => Promise.reject(new Error('The database is down')), 0);
+        await once(server, 'listening');
+        try {
+            const result = await fetch(`http://localhost:${(server.address() as AddressInfo).port}/leads`);
+            expect(result.status).toEqual(500);
+            expect(await result.text()).toEqual('Error: The database is down');
+        } finally {
+            server.close();
+        }
     });
 });

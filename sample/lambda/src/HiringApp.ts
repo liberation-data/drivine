@@ -36,7 +36,7 @@ export interface HiringAppOptions {
  *
  * - `GET /leads`: everyone whose bio mentions leading.
  * - `POST /hires` with `{ name, bio?, organization, role, startDate? }`: 201 with the saved career, 400 when a field is
- *   missing, 409 when the organization is full.
+ *   missing, a bio is not text or a start date is not YYYY-MM-DD, 409 when the organization is full.
  */
 export function hiringApp(options: HiringAppOptions = {}): HttpHandler {
     const database = options.database ?? 'default';
@@ -56,7 +56,9 @@ export function hiringApp(options: HiringAppOptions = {}): HttpHandler {
         if (method === 'POST' && event.rawPath === '/hires') {
             const hire = hireIn(event);
             if (!hire) {
-                return json(400, { error: 'A hire needs a name, an organization and a role' });
+                return json(400, {
+                    error: 'A hire needs a name, an organization and a role, any bio as text and any start date as YYYY-MM-DD'
+                });
             }
             try {
                 return json(201, await service.hire(hire));
@@ -75,12 +77,25 @@ function hireIn(event: HttpEvent): Hire | undefined {
     const text = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString('utf8') : event.body;
     let hire: Partial<Hire>;
     try {
-        hire = JSON.parse(text ?? '{}');
+        hire = JSON.parse(text ?? '{}') ?? {};
     } catch {
         return undefined;
     }
     const given = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-    return given(hire.name) && given(hire.organization) && given(hire.role) ? (hire as Hire) : undefined;
+    // A bio that is not text would be saved, and then fail every search of the leads.
+    const textOrAbsent = (value: unknown): boolean => value === undefined || typeof value === 'string';
+    return given(hire.name) &&
+        given(hire.organization) &&
+        given(hire.role) &&
+        textOrAbsent(hire.bio) &&
+        dateOrAbsent(hire.startDate)
+        ? (hire as Hire)
+        : undefined;
+}
+
+/** A calendar date, YYYY-MM-DD, as WorkHistory keeps it: an empty or free-form text would be saved as the start. */
+function dateOrAbsent(value: unknown): boolean {
+    return value === undefined || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
 function json(statusCode: number, body: unknown): HttpResult {

@@ -17,6 +17,10 @@ export interface Hire {
     startDate?: string;
 }
 
+/**
+ * Hires people into organizations of at most `headcountLimit`. Made by hand, with no Nest: `@Transactional` needs no
+ * container, only the registered database the repository's object manager runs on.
+ */
 export class HiringService {
     constructor(
         readonly people: PeopleRepository,

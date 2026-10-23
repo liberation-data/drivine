@@ -279,8 +279,8 @@ await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.
 
 [`sample/lambda`](sample/lambda) is a runnable example: an AWS Lambda handler, `export const handler`, with the
 factories made once per cold start, a repository, and a `@Transactional` service that rolls a hire back when it takes an
-organization past its headcount. `npm run start-lambda-sample` serves it on your machine, over the database
-`DATABASE_*` configures:
+organization past its headcount. `npm run start-lambda-sample` serves it on your machine, on `PORT` (3000) and over the
+database `DATABASE_*` configures:
 
 ```bash
 curl -X POST localhost:3000/hires -d '{"name": "Ada", "bio": "Team Lead", "organization": "Acme", "role": "CTO"}'
