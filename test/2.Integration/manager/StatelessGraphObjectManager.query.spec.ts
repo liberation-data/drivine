@@ -257,6 +257,23 @@ describe.each(stores)('query DSL on $name', (store) => {
             ]);
         });
 
+        // Memgraph's expressions take no inline flag, and FalkorDB's no backreference.
+        (store.name === 'MEMGRAPH' ? it.skip : it)('should ignore case for a leading (?i)', async () => {
+            expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.title.matches('(?i).*crash.*') })))).toEqual([
+                'i1',
+                'i4'
+            ]);
+        });
+
+        (store.name === 'FALKORDB' ? it.skip : it)(
+            'should number the groups of a regular expression as it writes them',
+            async () => {
+                expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.title.matches('.*(o).*\\1.*') })))).toEqual([
+                    'i3'
+                ]);
+            }
+        );
+
         it('should test for no value, and for an item of a list', async () => {
             expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.priority.isNull() })))).toEqual(['i3']);
             expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.tags.isNotNull() })))).toEqual(['i1', 'i2']);

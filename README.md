@@ -1476,7 +1476,10 @@ Notes:
 - Index the id of each class you save: `uniquenessConstraint('Person', 'id')` makes the unique index a node is found
   by. Without one, a save reads the table.
 - Oracle reads an empty string as null, so a comparison with `''` in the DSL is written to find a property stored empty.
-- `matches` takes a regular expression in Oracle's POSIX dialect, matched against the whole value.
+- `matches` takes a regular expression in Oracle's POSIX dialect, matched against the whole value. A leading `(?i)`
+  ignores case; what Java adds, such as `(?:…)`, a look-around or `\b`, is not read. A backreference names the group the
+  expression numbers it by, `\1` to `\8`; `\9` is refused, as the group that anchors the expression would make it the
+  tenth, which POSIX does not have.
 - A vector index is a table of embeddings beside the nodes, kept in step by a trigger, with an Oracle vector index over
   it by neighbour partitions; `loadNearest` is approximate through it. With no index made, it measures every node of the
   label and is exact.
