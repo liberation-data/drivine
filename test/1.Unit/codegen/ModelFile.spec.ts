@@ -1141,6 +1141,60 @@ describe('Reading constants and types', () => {
         const of = properties(entry);
         expect([of.name.nullable, of.maybe.nullable, of.optional.nullable]).toEqual(['unknown', 'unknown', true]);
     });
+
+    it('reads an option given in shorthand, as `{ labels }`, by the constant of its name', () => {
+        const { warnings, entry }: Written = fragment({
+            'src/A.ts': [
+                "import { NodeFragment, PropertyBag } from '@liberation-data/drivine';",
+                "const labels = ['A', 'Extra'];",
+                "const prefix = 'meta';",
+                '@NodeFragment({ labels })',
+                'export class A { @PropertyBag({ prefix }) meta: Record<string, string>; }'
+            ].join('\n')
+        });
+        expect(warnings).toEqual([]);
+        expect(entry.labels).toEqual(['A', 'Extra']);
+        expect(entry.bags).toEqual([{ field: 'meta', prefix: 'meta.', type: 'string' }]);
+    });
+
+    it('reads a field whose name is in quotes, as a load maps it', () => {
+        const { entry }: Written = fragment({
+            'src/A.ts': [
+                "import { GraphProperty, NodeFragment } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                "export class A { 'first-name': string; @GraphProperty('surname') 'last-name': string; }"
+            ].join('\n')
+        });
+        expect(entry.properties.map((it: any) => [it.name, it.stored])).toEqual([
+            ['first-name', 'first-name'],
+            ['last-name', 'surname']
+        ]);
+    });
+
+    it('takes no class from a field without decorator metadata, as a load has none to take', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphRelationship, GraphView, NodeFragment, Root } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                '@GraphView()',
+                "export class V { @Root(() => A) a: A; @GraphRelationship({ type: 'T', target: () => A }) to: A[]; }",
+                '@GraphView()',
+                "export class W { @Root(() => A) a: A; @GraphRelationship({ type: 'T' }) one: A; }"
+            ].join('\n')
+        });
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        const config = JSON.parse(fs.readFileSync(tsconfig, 'utf8'));
+        config.compilerOptions.emitDecoratorMetadata = false;
+        fs.writeFileSync(tsconfig, JSON.stringify(config));
+        const warnings: string[] = [];
+        generateModelFile({ project: tsconfig, warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#W: Can't tell what W.one holds. Name its class in the decorator, e.g. () => Item."
+        ]);
+        // Without the metadata recording an Array, a load gives one item.
+        expect(read(dir).views.map((it: any) => [it.name, it.relationships[0].many])).toEqual([['V', false]]);
+    });
 });
 
 describe('drivine model', () => {

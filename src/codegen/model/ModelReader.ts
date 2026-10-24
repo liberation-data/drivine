@@ -835,11 +835,18 @@ export class ModelReader {
 
     /** The class an expression names, through imports. */
     private classOf(node: TS.Node): TS.ClassDeclaration | undefined {
-        let symbol = this.checker.getSymbolAtLocation(node);
-        if (symbol && symbol.flags & this.ts.SymbolFlags.Alias) {
-            symbol = this.checker.getAliasedSymbol(symbol);
-        }
-        return symbol?.declarations?.find((it): it is TS.ClassDeclaration => this.ts.isClassDeclaration(it));
+        return this.symbolOf(node)?.declarations?.find((it): it is TS.ClassDeclaration =>
+            this.ts.isClassDeclaration(it)
+        );
+    }
+
+    /** What a name refers to, through imports: for `{ labels }`, the variable of that name, not the object's property. */
+    private symbolOf(node: TS.Node): TS.Symbol | undefined {
+        const ts = this.ts;
+        const symbol = ts.isShorthandPropertyAssignment(node.parent)
+            ? this.checker.getShorthandAssignmentValueSymbol(node.parent)
+            : this.checker.getSymbolAtLocation(node);
+        return symbol && symbol.flags & ts.SymbolFlags.Alias ? this.checker.getAliasedSymbol(symbol) : symbol;
     }
 
     /**
@@ -850,7 +857,7 @@ export class ModelReader {
         const found = new Map<string, Property>();
         for (const decl of chain) {
             for (const named of this.members(decl)) {
-                const name = (named.name as TS.Identifier).text;
+                const name = (named.name as TS.Identifier | TS.StringLiteral).text;
                 const nearer = found.get(name);
                 // A field a subclass declares again without Drivine's decorators keeps its superclass's, as at run time.
                 if (nearer && !this.drivineDecorators(nearer.decorated).length) {
@@ -882,7 +889,8 @@ export class ModelReader {
                 members.push(...member.parameters.filter((it) => this.ts.getModifiers(it)?.length));
             }
         }
-        return members.filter((it) => this.ts.isIdentifier(it.name));
+        // A name in quotes, as `'first-name'`, is a field as much as one that is not.
+        return members.filter((it) => this.ts.isIdentifier(it.name) || this.ts.isStringLiteral(it.name));
     }
 
     /**
@@ -894,7 +902,7 @@ export class ModelReader {
             .reverse()
             .flatMap((it) => this.members(it))
             .filter((it) => this.drivineDecorators(it).length)
-            .map((it) => (it.name as TS.Identifier).text);
+            .map((it) => (it.name as TS.Identifier | TS.StringLiteral).text);
         return this.properties(chain)
             .filter((it) => order.includes(it.name))
             .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
@@ -1084,11 +1092,7 @@ export class ModelReader {
     /** What a name declares: an enum's members' values, as @NodeLabels takes them; a constant's value; a class. */
     private declared(node: TS.Identifier): unknown {
         const ts = this.ts;
-        let symbol = this.checker.getSymbolAtLocation(node);
-        if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
-            symbol = this.checker.getAliasedSymbol(symbol);
-        }
-        const declaration = symbol?.declarations?.[0];
+        const declaration = this.symbolOf(node)?.declarations?.[0];
         if (declaration && ts.isEnumDeclaration(declaration)) {
             // As the enum is at run time: a number member also maps its number back to its name.
             const members: Record<string, unknown> = {};
