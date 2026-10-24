@@ -364,6 +364,134 @@ describe("Reading Drivine's decorators", () => {
             expect.objectContaining({ name: 'name', stored: 'full_name', nullable: false })
         ]);
     });
+    it('reads the members of @NodeLabels as the decorator takes them: a list, a string enum, or a number enum by name', () => {
+        const fragment = (name: string, members: string) =>
+            `@NodeFragment({ labels: ['${name}'] })\nexport class ${name} { @NodeLabels(${members}) roles: string[]; }`;
+        const model = written({
+            'src/A.ts': [
+                "import { NodeFragment, NodeLabels } from '@liberation-data/drivine';",
+                "enum Named { X = 'Ex', Y = 'Why' }",
+                'enum Numbered { Low, High }',
+                fragment('List', "['P', 'Q']"),
+                fragment('Strings', 'Named'),
+                fragment('Numbers', 'Numbered'),
+                fragment('Open', '')
+            ].join('\n')
+        });
+        const values = (name: string) => byId(model.fragments, `src/A#${name}`).labelSet;
+        expect(values('List')).toEqual({ field: 'roles', values: ['P', 'Q'] });
+        expect(values('Strings')).toEqual({ field: 'roles', values: ['Ex', 'Why'] });
+        // At run time a number enum maps each number back to its name, and the decorator keeps the names.
+        expect(values('Numbers')).toEqual({ field: 'roles', values: ['Low', 'High'] });
+        expect(values('Open')).toEqual({ field: 'roles' });
+    });
+
+    it('names a @NodeLabels whose members it cannot read, rather than write a closed set as open', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { NodeFragment, NodeLabels } from '@liberation-data/drivine';",
+                "const roles = (): string[] => ['P'];",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { @NodeLabels(roles()) roles: string[]; }'
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#A: Can't read the members of @NodeLabels A.roles. Name them with a list, an enum or a constant."
+        ]);
+    });
+
+    it("reads a view's counts and aggregates, sorting, read-only paths, and a target named by its field's type", () => {
+        const model = written({
+            'src/A.ts': [
+                "import { Aggregate, AggregateFunction, Count, Direction, GraphPath, GraphRelationship, GraphView, hop, NodeFragment, ReadOnly, Root, SortedBy } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                "const TOTAL = { function: AggregateFunction.SUM, type: 'HAS', property: 'size', direction: Direction.INCOMING };",
+                '@GraphView()',
+                'export class Inner { @Root() a: A; }',
+                '@GraphView()',
+                'export class V {',
+                '    @Root() a: A;',
+                "    @GraphRelationship({ type: 'NEXT', direction: Direction.UNDIRECTED, maxDepth: 2 }) inner: Inner;",
+                "    @SortedBy('id') @GraphRelationship({ type: 'KNOWS', target: () => A }) known: A[];",
+                "    @ReadOnly() @GraphPath([{ type: 'TO' }]) far: A;",
+                "    @Count('HAS', Direction.INCOMING) parts: number;",
+                '    @Aggregate(TOTAL) total: number;',
+                '}'
+            ].join('\n')
+        });
+        const view = byId(model.views, 'src/A#V');
+        expect(view.relationships).toEqual([
+            {
+                field: 'far',
+                target: 'src/A#A',
+                many: false,
+                required: false,
+                readOnly: true,
+                path: [{ type: 'TO', direction: 'OUTGOING' }]
+            },
+            // A view over several hops is written: only a list of fragments read so is not.
+            {
+                field: 'inner',
+                type: 'NEXT',
+                direction: 'UNDIRECTED',
+                target: 'src/A#Inner',
+                many: false,
+                required: false,
+                maxDepth: 2
+            },
+            {
+                field: 'known',
+                type: 'KNOWS',
+                direction: 'OUTGOING',
+                target: 'src/A#A',
+                many: true,
+                required: false,
+                sortedBy: { property: 'id', ascending: true }
+            }
+        ]);
+        expect(view.aggregates).toEqual([
+            { field: 'parts', function: 'COUNT', type: 'HAS', direction: 'INCOMING' },
+            { field: 'total', function: 'SUM', type: 'HAS', direction: 'INCOMING', property: 'size' }
+        ]);
+    });
+
+    it("gives a fragment the indexes its superclasses declare, and a relationship fragment's target a view", () => {
+        const model = written({
+            'src/A.ts': [
+                "import { GraphView, NodeFragment, RangeIndex, RelationshipFragment, Root, TargetNode, Unique } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                "@Unique({ properties: ['x', 'y'] })",
+                "@RangeIndex({ properties: ['x'] })",
+                'export class A { x: string; y: string; }',
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B extends A {}',
+                '@GraphView()',
+                'export class V { @Root() a: A; }',
+                '@RelationshipFragment()',
+                'export class R { @TargetNode() to: V; }'
+            ].join('\n')
+        });
+        const b = byId(model.fragments, 'src/A#B');
+        expect(b.indexes).toEqual([{ kind: 'unique', properties: ['x', 'y'] }]);
+        expect(b.properties.find((it: any) => it.name === 'x').index).toEqual('range');
+        expect(byId(model.relationshipFragments, 'src/A#R').target).toEqual({ field: 'to', fragment: 'src/A#V' });
+    });
+
+    it('names a class in a .tsx or .mts file, or outside src, by its path without the extension', () => {
+        const fragment = (name: string) =>
+            `import { NodeFragment } from '@liberation-data/drivine';\n@NodeFragment({ labels: ['${name}'] })\nexport class ${name} {}\n`;
+        const dir = project({ 'src/A.tsx': fragment('A'), 'lib/B.mts': fragment('B') });
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        const config = JSON.parse(fs.readFileSync(tsconfig, 'utf8'));
+        config.include = ['src', 'lib'];
+        config.compilerOptions.jsx = 'preserve';
+        fs.writeFileSync(tsconfig, JSON.stringify(config));
+        generateModelFile({ project: tsconfig, warn: quiet });
+        expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['lib/B#B', 'src/A#A']);
+    });
 });
 
 describe('Reading constants and types', () => {

@@ -170,7 +170,7 @@ export class ModelReader {
             // ModelRegistry.registerSubtype can add a subtype to any fragment in code, which the source doesn't show:
             // and a load gives the fragment itself for a node no subtype's labels match.
             subtypesComplete: false,
-            labelSet: labelSet ? this.labelSet(labelSet) : undefined,
+            labelSet: labelSet ? this.labelSet(decl, labelSet) : undefined,
             bags: bags.length ? bags.sort(byName).map((it) => this.bag(it)) : undefined,
             properties: plain.sort(byName).map((it) => this.property(it, single.get(it.name))),
             indexes: classIndexes.some((it) => it.properties.length > 1)
@@ -328,11 +328,20 @@ export class ModelReader {
         };
     }
 
-    private labelSet(prop: Property): Entry {
-        const members = this.args(this.on(prop, 'NodeLabels'))[0];
-        const values =
-            members === undefined ? undefined : Array.isArray(members) ? members : Object.values(members as object);
-        return { field: prop.name, values: values?.filter((it): it is string => typeof it === 'string') };
+    private labelSet(decl: TS.ClassDeclaration, prop: Property): Entry {
+        const decorator = this.on(prop, 'NodeLabels')!;
+        const members = this.args(decorator)[0];
+        const given = this.ts.isCallExpression(decorator.expression) && decorator.expression.arguments.length > 0;
+        // Members read wrong would make a closed set open, or own labels it doesn't: ones that can't be read are a problem.
+        if (given && !(Array.isArray(members) ? strings(members).length === members.length : isObject(members))) {
+            const field = `${decl.name!.text}.${prop.name}`;
+            throw new Error(
+                `Can't read the members of @NodeLabels ${field}. Name them with a list, an enum or a constant.`
+            );
+        }
+        // As the decorator takes them: a list's, or an object's values that are strings.
+        const values = given ? strings(Array.isArray(members) ? members : Object.values(members as object)) : undefined;
+        return { field: prop.name, values };
     }
 
     /** The id of what a relationship, a root or a target node leads to: the class its decorator names, or its type. */
@@ -693,9 +702,17 @@ export class ModelReader {
         }
         const declaration = symbol?.declarations?.[0];
         if (declaration && ts.isEnumDeclaration(declaration)) {
-            return Object.fromEntries(
-                declaration.members.map((it) => [it.name.getText(), this.checker.getConstantValue(it)])
-            );
+            // As the enum is at run time: a number member also maps its number back to its name.
+            const members: Record<string, unknown> = {};
+            for (const it of declaration.members) {
+                const name = (it.name as TS.Identifier).text;
+                const value = this.checker.getConstantValue(it);
+                members[name] = value;
+                if (typeof value === 'number') {
+                    members[value] = name;
+                }
+            }
+            return members;
         }
         if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
             return this.value(declaration.initializer);
