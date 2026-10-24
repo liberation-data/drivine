@@ -481,12 +481,14 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /**
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
-     * matches, as `=~` asks: it ends at `\z`, the text's end, as Oracle's `$` also matches before a line break that ends it.
+     * matches, as `=~` asks: it starts at `\A` and ends at `\z`, the text's start and end, which `(?m)` leaves as they are,
+     * and Oracle's `$` also matches before a line break that ends the text. Under `(?m)`, Oracle's own `^` and `$` match
+     * at a line break only where nothing in the pattern reads past it: `x$\n^ab` matches no text.
      */
     matches(text: string, pattern: string): string {
         return this.shared([pattern], ([p]) => {
             const flags = `REGEXP_SUBSTR(${p}, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)`;
-            return `REGEXP_LIKE(${text}, '^(' || REGEXP_REPLACE(${p}, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE(${flags}, 's', 'n'), 'c'))`;
+            return `REGEXP_LIKE(${text}, '\\A(' || REGEXP_REPLACE(${p}, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE(${flags}, 's', 'n'), 'c'))`;
         });
     }
 

@@ -322,10 +322,13 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
 
     /**
      * Flags the pattern opens with, `(?i)`, are put before the anchors, where Postgres reads them, after `p`: a dot
-     * matches no line break, as Java's does, unless the pattern says `(?s)`.
+     * matches no line break, as Java's does, unless the pattern says `(?s)`. The anchors are `\A` and `\Z`, the text's
+     * start and end, which `(?m)` leaves as they are: it lets the pattern's own `^` and `$` match at a line break.
+     * Postgres's `s` and `m` each undo the other, so the two together end in `w`, which keeps both.
      */
     matches(text: string, pattern: string): string {
-        return `(${text} ~ regexp_replace(${pattern}, '^(\\(\\?([a-z]+)\\))?(.*)$', '(?p\\2)^(\\3)$'))`;
+        const anchored = `regexp_replace(${pattern}, '^(\\(\\?([a-z]+)\\))?(.*)$', '(?p\\2)\\\\A(\\3)\\\\Z')`;
+        return `(${text} ~ regexp_replace(${anchored}, '^\\(\\?([a-z]*(s[a-z]*m|m[a-z]*s)[a-z]*)\\)', '(?\\1w)'))`;
     }
 
     /**

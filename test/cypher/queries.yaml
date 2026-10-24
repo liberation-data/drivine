@@ -398,6 +398,19 @@ cases:
       - note: The whole text matches, a line break that ends it included, though Java's $ matches before one.
         cypher: "RETURN ['ab\\n' =~ 'ab', 'ab\\n' =~ 'ab\\n', 'ab\\n' =~ 'ab$']"
         rows: [[false, true, false]]
+      - note: (?m) lets ^ and $ in the pattern match at a line break, and the whole text must still match.
+        cypher: "RETURN ['x\\nab' =~ '(?m)ab', 'ab\\nx' =~ '(?m)ab', 'x\\nab' =~ 'x$\\n^ab', 'x\\nab' =~ '(?m).*ab']"
+        rows: [[false, false, false, false]]
+      - note: Oracle's ^ and $ match at a line break only where nothing in the pattern reads past it, so a pattern that does is left out there.
+        except: [oracle]
+        cypher: "RETURN 'x\\nab' =~ '(?m)x$\\n^ab'"
+        rows: [true]
+      - note: (?s) and (?m) together let a dot match a line break and ^ and $ match at one, in either order.
+        cypher: "RETURN ['a\\nb' =~ '(?sm)a.b', 'a\\nb' =~ '(?ms)a.b', 'a\\nb' =~ '(?si)A.B']"
+        rows: [[true, true, true]]
+      - except: [oracle]
+        cypher: "RETURN 'a\\nb' =~ '(?ims)A$.^B'"
+        rows: [true]
       - cypher: "MATCH (p:Person) WHERE p.name =~ $pattern RETURN p.name ORDER BY p.name"
         parameters: {pattern: "(?i)[ck].*"}
         rows: ["Carrie", "Keanu"]
