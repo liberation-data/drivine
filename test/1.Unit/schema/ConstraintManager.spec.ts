@@ -1,6 +1,7 @@
 import {
     ConstraintManager,
     DrivineError,
+    FALKORDB_SCHEMA,
     NEO4J_SCHEMA,
     SchemaExecutor,
     uniquenessConstraint
@@ -123,6 +124,46 @@ describe('ConstraintManager with an index in the way of a constraint', () => {
         const store = blockedStore([rangeRow('person_name', 'name')]);
         await expect(store.constraints.ensure(spec, undefined, true)).rejects.toThrow(/There already exists an index/);
         expect(drops(store.ran)).toEqual([]);
+    });
+});
+
+describe('ConstraintManager on FalkorDB, which builds a constraint in the background', () => {
+    const spec = uniquenessConstraint('Person', 'email');
+
+    /** A FalkorDB whose constraint, once made, is missing from the first `pending` listings and then has `status`. */
+    function falkorDb(status: 'OPERATED' | 'FAILED', pending: number = 1) {
+        const ran: unknown[] = [];
+        let made = false;
+        let listings = 0;
+        const answer = (statement: any): unknown[] => {
+            ran.push(statement);
+            if (statement?.native === 'CONSTRAINT_CREATE') {
+                made = true;
+                return [];
+            }
+            if (statement === FALKORDB_SCHEMA.listUniques.statement && made) {
+                listings++;
+                return listings <= pending ? [] : [{ label: 'Person', properties: ['email'], status }];
+            }
+            return [];
+        };
+        const executor = {
+            run: async (statement: unknown) => Promise.resolve().then(() => answer(statement))
+        } as unknown as SchemaExecutor;
+        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), ran };
+    }
+
+    it('should wait for the constraint to be built', async () => {
+        expect(await falkorDb('OPERATED', 2).constraints.ensure(spec, 0)).toEqual({ status: 'CREATED', spec });
+    });
+
+    it('should throw as soon as FalkorDB reports that the build failed, not after waiting out every attempt', async () => {
+        const store = falkorDb('FAILED');
+        const started = Date.now();
+        await expect(store.constraints.ensure(spec, 0)).rejects.toThrow(
+            'FalkorDB could not build the uniqueness constraint on Person(email): nodes may hold the same values.'
+        );
+        expect(Date.now() - started).toBeLessThan(1_000);
     });
 });
 

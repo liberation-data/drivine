@@ -53,13 +53,15 @@ Each type is chosen alone: a local Neo4j can run beside a FalkorDB container. `<
 | Backend  | Image                             | Container's settings                                         |
 |----------|-----------------------------------|--------------------------------------------------------------|
 | Neo4j    | `neo4j:5.26-community`, and `neo4j:latest` for Drivine's own tests | user `neo4j`, password `drivine-test` |
-| Memgraph | `memgraph/memgraph:3.12.0`        | no auth                                                      |
-| FalkorDB | `falkordb/falkordb:6.0.0`         | the graph is the datasource's `DATABASE_NAME`                |
+| Memgraph | `memgraph/memgraph:3.12.0`, and `memgraph/memgraph:3.14.0` for Drivine's own tests | no auth |
+| FalkorDB | `falkordb/falkordb:6.0.0`, and `falkordb/falkordb:6.0.3` for Drivine's own tests | the graph is the datasource's `DATABASE_NAME` |
 | Postgres | `pgvector/pgvector:pg16`          | user `drivine`, password `drivine-test`, the datasource's database |
 | Oracle   | `gvenzl/oracle-free:23-faststart` | user `drivine`, password `drivine-test`, service `FREEPDB1`  |
 
-Drivine's own tests set `NEO4J_TEST_IMAGE=neo4j:latest` in `.env.test`, as drivine4j and drivine-python test on the
-latest Neo4j, so a Neo4j release that changes what Drivine reads or writes shows up at once. The default above is what
+Drivine's own tests set `NEO4J_TEST_IMAGE=neo4j:latest`, `MEMGRAPH_TEST_IMAGE=memgraph/memgraph:3.14.0` and
+`FALKORDB_TEST_IMAGE=falkordb/falkordb:6.0.3` in `.env.test`, as drivine4j and drivine-python test on the latest Neo4j
+and the current Memgraph and FalkorDB, so an engine release that changes what Drivine reads or writes shows up soon.
+The Memgraph and FalkorDB pins move to each new release. The default above is what
 `@liberation-data/drivine/testing` starts for your tests (see [In Your Own Tests](#in-your-own-tests)).
 
 ## The Cypher spec

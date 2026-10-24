@@ -169,7 +169,10 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const one = await manager([SchemaCatalog.of(unique)], { mode: 'WARN', violationSampleSize: 1 }).enforce();
         const result = [...one.values()].flat()[0];
         expect([result.status, result.sample?.length]).toEqual(['VIOLATION', 1]);
-        await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow();
+        // FalkorDB builds the constraint in the background, and reports at once that the build failed.
+        await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow(
+            engine.type === DatabaseType.FALKORDB ? /FalkorDB could not build the uniqueness constraint/ : undefined
+        );
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
     });
 
