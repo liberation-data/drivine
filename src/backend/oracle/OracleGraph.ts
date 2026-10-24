@@ -76,6 +76,26 @@ export function jsonKey(name: string): string {
 }
 
 /**
+ * The step of a JSON path naming `key` as drivine4j writes it: bare where SQL would take it for an identifier, else
+ * quoted as `jsonKey` quotes it, for the SQL literal it is written in.
+ */
+export function drivine4jStep(key: string): string {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !['true', 'false', 'null'].includes(key)
+        ? key
+        : jsonKey(key).slice(1);
+}
+
+/**
+ * The property of the node row `alias` as text, as drivine4j's `OracleSql.property` reads it. The stamp is a column of
+ * its own.
+ */
+export function textOf(alias: string, property: string): string {
+    return property === Stamps.PROPERTY
+        ? `${alias}.stamp`
+        : `JSON_VALUE(${alias}.props, '$.${drivine4jStep(property)}')`;
+}
+
+/**
  * The JSON the property of the node row `alias` is read from: its properties, or, for the stamp, which is a column of
  * its own, a document of that column under the stamp's property, so a query reads it as any other.
  */
@@ -107,7 +127,8 @@ export function relatedSubquery(...hints: string[]): string {
 /**
  * A predicate that holds when the node row `alias` carries every one of the labels. A label may come from data (a
  * `@NodeLabels` filter's value, a search's partition label): it is escaped as `jsonKey` escapes a name, the backslash
- * first, for the JSON string the path or the labels' text holds it in, and then the SQL literal around it.
+ * first, for the JSON string the path holds it in, and then the SQL literal around it; a label after the first is looked
+ * for by its text ({@link holdsLabel}).
  *
  * The first label is tested so the multivalue index over labels can answer it, and the rest by the labels' text, which
  * that index can't: when two tests of the labels are answered by the index, Oracle (23.26) finds no node the open
@@ -118,9 +139,57 @@ export function hasLabels(alias: string, labels: string[]): string {
         .map((it, i) =>
             i === 0
                 ? `JSON_EXISTS(${alias}.labels, '$?(@ == "${escapedLabel(it)}")')`
-                : `INSTR(JSON_SERIALIZE(${alias}.labels), '"${escapedLabel(it)}"') > 0`
+                : holdsLabel(`${alias}.labels`, it)
         )
         .join(' AND ');
+}
+
+/**
+ * A predicate that holds when the JSON array of labels `labels` holds `label`, told by its text. `JSON_SERIALIZE`
+ * writes the array compactly, `["A","B"]`; with its brackets made commas and `,"` put after it, `,"A","B","`, each
+ * label is `,"label","`, and the label is looked for as that. The trims take one bracket at each end, since a label's
+ * quote stands beside each, and no labels at all leave `,,"`, which holds no label. Matched there, the needle is a
+ * whole label. Its first quote follows a comma, so isn't escaped: it opens a label or closes one. If it opens one, the
+ * label's text runs to the first unescaped quote, which is the one that closes the needle's label. If it closes one, a
+ * comma and an opening quote follow, which the needle has only when the label is `,`, and then the quote after that
+ * closes a label `,`. The label is written as `JSON_SERIALIZE` writes it ({@link serializedLabel}), so one holding a
+ * control character is found, and one holding `","` is not taken for two. drivine4j's `OracleSql.holdsLabel` writes the
+ * same.
+ */
+export function holdsLabel(labels: string, label: string): string {
+    return `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(${labels}), ']'), '[') || ',"', ${sqlText(
+        `,${serializedLabel(label)},"`
+    )}) > 0`;
+}
+
+/** The characters `JSON_SERIALIZE` writes with a short escape. */
+const SHORT_ESCAPES: Record<string, string> = {
+    '"': '\\"',
+    '\\': '\\\\',
+    '\b': '\\b',
+    '\t': '\\t',
+    '\n': '\\n',
+    '\f': '\\f',
+    '\r': '\\r'
+};
+
+/**
+ * `text` as Oracle's `JSON_SERIALIZE` writes a string, checked on Oracle Free 23 for every character: `"` and `\`
+ * escaped; backspace, tab, newline, form feed and carriage return as `\b`, `\t`, `\n`, `\f` and `\r`; every other
+ * character below U+0020, and U+007F, as `\u00XX` in upper case; U+2028 and U+2029 as `\u2028` and `\u2029`; and every
+ * other character as it is.
+ */
+export function serializedLabel(text: string): string {
+    let escaped = '';
+    for (const c of text) {
+        const code = c.charCodeAt(0);
+        escaped +=
+            SHORT_ESCAPES[c] ??
+            (code < 0x20 || code === 0x7f || code === 0x2028 || code === 0x2029
+                ? `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`
+                : c);
+    }
+    return `"${escaped}"`;
 }
 
 /** A label or a key as JSON writes it inside a string, the backslash first, in a SQL literal. */

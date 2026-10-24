@@ -1,4 +1,5 @@
 import { DrivineError } from '@/DrivineError';
+import { holdsLabel } from '@/backend/oracle/OracleGraph';
 import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
 import { indent, literal } from '@/cypher/sql/CypherSyntax';
@@ -188,10 +189,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * committed.
      */
     hasLabels(labels: string, all: string[]): string {
-        return [
-            this.hasLabel(labels, all[0]),
-            ...all.slice(1).map((it) => `INSTR(JSON_SERIALIZE(${labels}), ${literal(quoted(it))}) > 0`)
-        ].join(' AND ');
+        return [this.hasLabel(labels, all[0]), ...all.slice(1).map((it) => holdsLabel(labels, it))].join(' AND ');
     }
 
     /**

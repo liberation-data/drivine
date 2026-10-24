@@ -14,6 +14,7 @@ import { PostgresWrites } from '@/backend/postgres/PostgresWrites';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
+import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
@@ -44,7 +45,8 @@ export const ROW_ALIAS = 'n';
 /**
  * Statements for Postgres, over the tables of a PostgresGraph: drivine4j's store, so a graph written from the JVM and
  * from Node is one. A load returns the rows the graph engines do, `{props, labels}` for a fragment, as `jsonb`. A raw
- * `where` is an SQL predicate over the node's row, `n` (its `labels`, `props` and `stamp`).
+ * `where` is an SQL predicate over the node's row, `n` (its `labels`, `props` and `stamp`), in which a property of the
+ * node may be written as Cypher writes it, `n.name` (see `written`).
  *
  * The store is made by the object manager, before its first statement: see `ensuring`.
  */
@@ -218,6 +220,10 @@ export class PostgresBackend implements GraphBackend {
 
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
         return PostgresQueryRenderer.render(fn, target, (depth) => new PostgresViews(this.graph, depth), ROW_ALIAS);
+    }
+
+    written(predicate: string): string {
+        return new CypherShorthand(ROW_ALIAS, ROW_ALIAS, textOf).rewrite(predicate);
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
