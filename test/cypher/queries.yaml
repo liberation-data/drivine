@@ -57,6 +57,16 @@ cases:
         parameters: {born: 1964.0}
         rows: ["Keanu"]
 
+  - name: "Integer bounds"
+    description: "The least and greatest whole numbers are written as literals, and one past the greatest is refused."
+    steps:
+      - cypher: "RETURN [-9223372036854775808, 9223372036854775807, - 9223372036854775808]"
+        rows: [[-9223372036854775808, 9223372036854775807, -9223372036854775808]]
+      - cypher: "RETURN 9223372036854775808"
+        error: true
+      - cypher: "RETURN -9223372036854775809"
+        error: true
+
   - name: "Relationship direction and types"
     description: "A relationship is matched in its direction, either way, or by any of several types."
     steps:
@@ -460,6 +470,25 @@ cases:
       - cypher: "MATCH (:Person {name: 'Laurence'})-[r:KNOWS]->*(p) RETURN [p.name, size(r)] ORDER BY size(r)"
         rows: [["Laurence", 0], ["Keanu", 1], ["Carrie", 2]]
 
+  - name: "Quantifier bounds"
+    description: "A quantifier with no bound in its braces, or a least bound above its greatest, is refused, as Neo4j refuses it."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS]->{} (b) RETURN b.name"
+        error: true
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS]->{3,1} (b) RETURN b.name"
+        error: true
+      - cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){3,1} (b) RETURN b.name"
+        error: true
+      - cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){} (b) RETURN b.name"
+        error: true
+      - note: "Equal bounds are one count."
+        cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS]->{2,2} (b) RETURN b.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS*3..1]->(b) RETURN b.name"
+        rows: []
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS]->{,} (b) RETURN b.name ORDER BY b.name"
+        rows: ["Carrie", "Keanu", "Laurence"]
+
   - name: "Quantified path patterns"
     description: "A quantified path pattern repeats a pattern of nodes and relationships, its variables lists of what each repetition matched."
     steps:
@@ -698,6 +727,21 @@ cases:
       - cypher: "RETURN CASE null WHEN null THEN 'null' ELSE 'other' END"
         rows: ["other"]
 
+  - name: "Relationships in lists compare by identity"
+    description: "Two relationships with the same properties are different, as items of a list too."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[r:KNOWS*]->(b) RETURN [b.name, r[0] = r[-1]] ORDER BY b.name"
+        rows: [["Carrie", false], ["Keanu", true]]
+      - cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() RETURN [r1 = r2, [r1] = [r2], r1 IN [r2], r1 IN [r1], [r1] = [r1], [r1] <> [r2]]"
+        rows: [[false, false, false, true, true, true]]
+      - cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() WITH collect(r1) + collect(r2) AS rs RETURN [rs[0] = rs[1], size(rs), size([x IN rs WHERE x = rs[0]]), any(x IN rs WHERE x = rs[1]), rs[1] IN rs]"
+        rows: [[false, 2, 1, true, true]]
+      - note: "Keanu acted Neo in two films: the same properties, two relationships."
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN {role: 'Neo'}]->() WITH collect(r) AS rs RETURN [rs[0] = rs[1], rs[0] <> rs[1], rs[0] = rs[0]]"
+        rows: [[false, true, true]]
+      - cypher: "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN {role: 'Neo'}]->() RETURN [count(DISTINCT r), size(collect(DISTINCT r))]"
+        rows: [[2, 2]]
+
   - name: "Map projection"
     description: "A map projection's selectors override .*, and type() gives a relationship's type."
     steps:
@@ -712,6 +756,24 @@ cases:
       - cypher: "RETURN [x IN $v | x]"
         parameters: {v: null}
         rows: [null]
+
+  - name: "RETURN *"
+    description: "RETURN * gives each variable in scope as a column, in the order of their names."
+    steps:
+      - cypher: "MATCH (p:Person {name: 'Keanu'})-[:ACTED_IN]->(m:Movie {title: 'The Matrix'}) WITH m.title AS zeta, p.name AS alpha RETURN *"
+        rows: [["Keanu", "The Matrix"]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'})-[:ACTED_IN]->(m:Movie {title: 'The Matrix'}) RETURN *"
+        rows: [[{title: "The Matrix", released: 1999, tagline: "Welcome to the Real World"}, {name: "Keanu", born: 1964}]]
+      - note: "Names are ordered by their characters' codes: capitals, then an underscore, then small letters."
+        cypher: "WITH 1 AS b, 2 AS B, 3 AS a, 4 AS _x RETURN *"
+        rows: [[2, 4, 3, 1]]
+      - note: "Items named after the star come after its columns."
+        cypher: "WITH 1 AS b, 2 AS a RETURN *, 0 AS aa"
+        rows: [[2, 1, 0]]
+      - cypher: "WITH 1 AS b, 2 AS a WITH * RETURN *"
+        rows: [[2, 1]]
+      - cypher: "UNWIND [2, 1] AS b WITH b, 10 - b AS a RETURN * ORDER BY b"
+        rows: [[9, 1], [8, 2]]
 
   - name: "Implicit grouping key"
     description: "A RETURN item that mixes an aggregate with another variable is refused, as Neo4j refuses it."
@@ -833,3 +895,59 @@ cases:
       - only: [oracle]
         cypher: "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS]->() RETURN reduce(s = 0, x IN [1] | s + length(p))"
         error: "A path read in the step of reduce() does not run on Oracle: its function is given the row as JSON."
+
+  - name: "Quantifiers over a path's nodes"
+    description: "any(), all(), none() and single() over a path's nodes, or a quantified path pattern's group variable, read that path's list."
+    steps:
+      - cypher: "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*]->(b) RETURN [b.name, any(n IN nodes(p) WHERE n.name = 'Carrie'), all(n IN nodes(p) WHERE n.born > 1960)] ORDER BY b.name"
+        rows: [["Carrie", true, true], ["Keanu", false, true]]
+      - cypher: "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*]->(b) RETURN [b.name, none(n IN nodes(p) WHERE n.name = 'Carrie'), single(n IN nodes(p) WHERE n.born > 1963)] ORDER BY b.name"
+        rows: [["Carrie", false, false], ["Keanu", true, true]]
+      - cypher: "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*]->(b) WHERE any(n IN nodes(p) WHERE n.name = 'Carrie') RETURN b.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y))+ (b) RETURN [b.name, any(n IN y WHERE n.name = 'Carrie')] ORDER BY b.name"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Carrie", true], ["Keanu", false]]
+
+  - name: "A walk sorted by an expression"
+    description: "A variable-length walk sorted by an expression of where it ends, such as coalesce(), gives its rows in order."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN coalesce(b.name, b.title) AS n ORDER BY n"
+        rows: ["Carrie", "Johnny Mnemonic", "Keanu", "The Matrix", "The Matrix", "The Matrix", "The Matrix Reloaded", "The Matrix Reloaded"]
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN coalesce(b.name, b.title) AS n ORDER BY n DESC"
+        rows: ["The Matrix Reloaded", "The Matrix Reloaded", "The Matrix", "The Matrix", "The Matrix", "Keanu", "Johnny Mnemonic", "Carrie"]
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS]->(k)-[*1]-(c) RETURN coalesce(c.name, c.title) AS n ORDER BY n"
+        rows: ["Carrie", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN b.released ORDER BY coalesce(b.name, b.title), b.released"
+        rows: [null, 1995, null, 1999, 1999, 1999, 2003, 2003]
+      - cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS|ACTED_IN]->(y))+ (b) RETURN coalesce(b.name, b.title) AS n ORDER BY n"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Carrie", "Johnny Mnemonic", "Keanu", "The Matrix", "The Matrix", "The Matrix", "The Matrix Reloaded", "The Matrix Reloaded"]
+
+  - name: "collect(DISTINCT) past 4000 bytes"
+    description: "collect(DISTINCT …) gathers values whose text is past 4000 bytes, as collect() does."
+    steps:
+      - cypher: "UNWIND range(1, 500) AS i WITH collect(DISTINCT 'value number ' + toString(i % 400)) AS xs RETURN [size(xs), reduce(n = 0, x IN xs | n + size(x)), xs[0], xs[-1]]"
+        rows: [[400, 6290, "value number 1", "value number 0"]]
+      - cypher: "UNWIND range(1, 300) AS i RETURN size(collect(DISTINCT {i: i % 250, text: 'some words to make it longer'}))"
+        rows: [250]
+
+  - name: "A parameter past 32 KB"
+    description: "A parameter whose JSON is past 32 KB is bound, and comes back as it went. Oracle compares no JSON that long, so the value is only returned."
+    steps:
+      - cypher: "RETURN $big"
+        parameters: {big: {$repeat: "x", times: 40000}}
+        rows: [{$repeat: "x", times: 40000}]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [p.name, $doc.text, $doc.n]"
+        parameters: {doc: {text: {$repeat: "y", times: 40000}, n: 1}}
+        rows: [["Keanu", {$repeat: "y", times: 40000}, 1]]
+      - cypher: "UNWIND $texts AS t RETURN t"
+        parameters: {texts: [{$repeat: "a", times: 20000}, {$repeat: "b", times: 20000}]}
+        rows: [{$repeat: "a", times: 20000}, {$repeat: "b", times: 20000}]
+
+  - name: "A float parameter with no fraction"
+    description: "A float parameter that is a whole number, such as 2.0, stays a float."
+    steps:
+      - cypher: "RETURN [$f, $f * 2, $f + 1, toString($f), $m.f]"
+        parameters: {f: 2.0, m: {f: 3.0}}
+        rows: [[2.0, 4.0, 3.0, "2.0", 3.0]]

@@ -6,6 +6,12 @@ import { Clause } from '@/cypher/ast/Query';
 /** The functions that aggregate the rows of a group. */
 const AGGREGATES = ['count', 'collect', 'sum', 'avg', 'min', 'max'];
 
+/**
+ * The function that keeps each item of a list once, where it is first: see `CypherWriter.distinctFirst`. Named as no
+ * function is, unless quoted so.
+ */
+export const DISTINCT_ITEMS = '#distinct items';
+
 /** A string as a SQL literal. */
 export function literal(text: string): string {
     return `'${text.replace(/'/g, "''")}'`;
@@ -175,6 +181,57 @@ export function patternHoldsSubquery(pattern: Pattern): boolean {
                         (relationship.group.where !== undefined && holdsSubquery(relationship.group.where))))
         )
     );
+}
+
+/** An expression of each kind with its parts, those {@link children} finds, each as `r` gives it: as it is, for a kind not here. */
+const REPLACED: {
+    [K in Expression['kind']]?: (
+        expression: Extract<Expression, { kind: K }>,
+        r: (part: Expression) => Expression
+    ) => Expression;
+} = {
+    Property: (it, r) => ({ ...it, subject: r(it.subject) }),
+    HasLabels: (it, r) => ({ ...it, subject: r(it.subject) }),
+    ListLiteral: (it, r) => ({ ...it, items: it.items.map(r) }),
+    MapLiteral: (it, r) => ({
+        ...it,
+        entries: it.entries.map(([key, value]): [string, Expression] => [key, r(value)])
+    }),
+    MapProjection: (it, r) => ({
+        ...it,
+        elements: it.elements.map((element) =>
+            element.kind === 'Entry' ? { ...element, value: r(element.value) } : element
+        )
+    }),
+    Binary: (it, r) => ({ ...it, left: r(it.left), right: r(it.right) }),
+    Unary: (it, r) => ({ ...it, operand: r(it.operand) }),
+    Index: (it, r) => ({ ...it, subject: r(it.subject), index: r(it.index) }),
+    Slice: (it, r) => ({ ...it, subject: r(it.subject), from: it.from && r(it.from), to: it.to && r(it.to) }),
+    Function: (it, r) => ({ ...it, arguments: it.arguments.map(r) }),
+    Case: (it, r) => ({
+        ...it,
+        subject: it.subject && r(it.subject),
+        alternatives: it.alternatives.map(([condition, result]): [Expression, Expression] => [r(condition), r(result)]),
+        otherwise: it.otherwise && r(it.otherwise)
+    }),
+    ListComprehension: (it, r) => ({ ...it, list: r(it.list) }),
+    Reduce: (it, r) => ({ ...it, initial: r(it.initial), list: r(it.list) }),
+    Quantifier: (it, r) => ({ ...it, list: r(it.list) })
+};
+
+/** `expression` with each part `replacement` gives a replacement for replaced, among those {@link children} finds. */
+export function replaced(
+    expression: Expression,
+    replacement: (expression: Expression) => Expression | undefined
+): Expression {
+    const given = replacement(expression);
+    if (given !== undefined) {
+        return given;
+    }
+    const of = REPLACED[expression.kind] as
+        | ((expression: Expression, r: (part: Expression) => Expression) => Expression)
+        | undefined;
+    return of ? of(expression, (part) => replaced(part, replacement)) : expression;
 }
 
 /** The expressions an expression of each kind holds that are read in its own scope: none, for a kind not here. */

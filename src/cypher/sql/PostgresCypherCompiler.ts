@@ -20,6 +20,7 @@ const {
     FOUND,
     SAVED,
     GATHERED,
+    CALLER,
     NESTING,
     DOOMED,
     RECORD,
@@ -147,10 +148,17 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         return `COALESCE(json_agg(${value}${order ? ` ORDER BY ${order}` : ''}), '[]'::json)`;
     }
 
-    /** Distinct values are in no order: Postgres orders a `DISTINCT` aggregate by its argument alone. */
-    collect(value: string, distinct: boolean, order?: string): string {
-        const gathered = distinct ? `DISTINCT ${value}` : `${value}${order ? ` ORDER BY ${order}` : ''}`;
-        return `COALESCE(json_agg(${gathered}) FILTER (WHERE ${value} IS NOT NULL), '[]'::json)`;
+    collect(value: string, order?: string): string {
+        return `COALESCE(json_agg(${value}${
+            order ? ` ORDER BY ${order}` : ''
+        }) FILTER (WHERE ${value} IS NOT NULL), '[]'::json)`;
+    }
+
+    distinctItems(list: string): string {
+        return (
+            "(SELECT COALESCE(json_agg(d.item ORDER BY d.first), '[]'::json) " +
+            `FROM (SELECT min(e.item_no) AS first, e.item FROM ${this.elements(list, 'e')} GROUP BY e.item) d)`
+        );
     }
 
     /** Postgres has no min or max of jsonb, which orders: the first of the values in order is the least. */
@@ -353,7 +361,8 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
     procedure(body: string[]): ProcedureCall {
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} jsonb;`,
-            `    ${GATHERED}${i + 1} jsonb;`
+            `    ${GATHERED}${i + 1} jsonb;`,
+            `    ${CALLER}${i + 1} jsonb;`
         ]);
         const text = [
             '#variable_conflict use_column',

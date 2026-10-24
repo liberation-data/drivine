@@ -28,6 +28,15 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('collect(DISTINCT) beside a variable no other item is, outside its aggregates, as collect() is', () => {
+        // Not in the spec: distinctFirst groups by each such variable, so it is refused before.
+        compilers.forEach(([, compiler]) => {
+            expect(() =>
+                compiler().compile('MATCH (p:Person) RETURN p.born, collect(DISTINCT p.name) + p.name')
+            ).toThrow('names p outside its aggregates');
+        });
+    });
+
     it('a date written as a text that is no date, with what is wrong with it', () => {
         // Not in the spec: the message ends with the parser's own text.
         compilers.forEach(([, compiler]) => {

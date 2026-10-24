@@ -162,6 +162,42 @@ describe('CypherReader', () => {
         expect(returned('RETURN 0o17')).toEqual(literal(15));
         expect(returned('RETURN 1.5e3')).toEqual(literal(new CypherFloat(1500)));
         expect(returned('RETURN 2.0')).toEqual(literal(new CypherFloat(2)));
+        // The least whole number is its digits negated, which alone are past the greatest.
+        expect(returned('RETURN -9223372036854775808')).toEqual(literal(-(2 ** 63)));
+        expect(returned('RETURN -0x8000000000000000')).toEqual(literal(-(2 ** 63)));
+        expect(returned('RETURN -0o1000000000000000000000')).toEqual(literal(-(2 ** 63)));
+        // With a space after its minus, as the spec writes it in a step this runner skips.
+        expect(returned('RETURN - 9223372036854775808')).toEqual(literal(-(2 ** 63)));
+        expect(() => CypherReader.read('RETURN -0x8000000000000001')).toThrow(
+            '-0x8000000000000001 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.'
+        );
+        expect(returned('RETURN -1')).toEqual({ kind: 'Unary', operator: 'NEGATE', operand: literal(1) });
+        expect(() => CypherReader.read('RETURN 9223372036854775808')).toThrow(
+            '9223372036854775808 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.'
+        );
+        expect(() => CypherReader.read('RETURN -9223372036854775809')).toThrow(
+            '-9223372036854775809 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.'
+        );
+    });
+
+    it('reads a reading clause straight after a write in the order written', () => {
+        const kinds = (cypher: string): string[] => CypherReader.read(cypher).clauses.map((it) => it.kind);
+        expect(kinds('CREATE (n:Thing) UNWIND [1, 2] AS x MATCH (m:Thing) RETURN count(m)')).toEqual([
+            'Create',
+            'Unwind',
+            'Match',
+            'Return'
+        ]);
+        expect(kinds('MATCH (n) SET n.a = 1 MATCH (m) DELETE m')).toEqual(['Match', 'Set', 'Match', 'Delete']);
+        // And in a part that ends in a WITH.
+        expect(kinds('CREATE (n:Thing) MATCH (m:Thing) WITH count(m) AS c RETURN c')).toEqual([
+            'Create',
+            'Match',
+            'With',
+            'Return'
+        ]);
+        // As in Neo4j, a query that returns nothing ends in a write.
+        expect(() => CypherReader.read('CREATE (n) MATCH (m)')).toThrow(/is not Cypher/);
     });
 
     it('reads string, list and null predicates, labels, slices and functions', () => {

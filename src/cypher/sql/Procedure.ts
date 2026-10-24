@@ -28,6 +28,11 @@ export const Procedure = {
      * alone, followed by its depth, from 1 to `NESTING`.
      */
     GATHERED: 'cy_gathered',
+    /**
+     * The row a `CALL { … }` that writes and returns is written for, followed by its depth, from 1 to `NESTING`: each
+     * row it gives is that row with what it returns, whatever the call bound to the row's names inside it.
+     */
+    CALLER: 'cy_caller',
     /** How deep `FOREACH`es and writing `CALL`s nest. */
     NESTING: 3,
     /** The nodes a `DELETE` deletes once its rows are done, a JSON list of ids. */

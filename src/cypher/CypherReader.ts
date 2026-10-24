@@ -36,6 +36,7 @@ import {
     OC_RelationshipPatternContext,
     OC_RelationshipsPatternContext,
     OC_RemoveItemContext,
+    OC_ReturnContext,
     OC_SchemaNameContext,
     OC_SetContext,
     OC_SingleQueryContext,
@@ -43,6 +44,7 @@ import {
     OC_StringPredicateExpressionContext,
     OC_SubqueryReadingsContext,
     OC_SymbolicNameContext,
+    OC_UnaryAddOrSubtractExpressionContext,
     OC_UpdatingClauseContext,
     OC_VariableContext,
     OC_WithContext
@@ -121,7 +123,7 @@ function single(context: OC_SingleQueryContext): Clause[] {
     const clauses: Clause[] = [];
     const multi = context.oC_MultiPartQuery();
     if (multi) {
-        // Its children in order: the reading clauses and updates of each part, then the part's WITH.
+        // Its children in order: the reading clauses and updates of each part, in the order written, then the part's WITH.
         for (const child of multi.children) {
             if (child instanceof OC_ReadingClauseContext) {
                 clauses.push(reading(child));
@@ -133,11 +135,15 @@ function single(context: OC_SingleQueryContext): Clause[] {
         }
     }
     const last = context.oC_SinglePartQuery() ?? multi!.oC_SinglePartQuery();
-    last.oC_ReadingClause().forEach((it) => clauses.push(reading(it)));
-    last.oC_UpdatingClause().forEach((it) => clauses.push(updating(it)));
-    const returned = last.oC_Return();
-    if (returned) {
-        clauses.push({ kind: 'Return', projection: projection(returned.oC_ProjectionBody()) });
+    // Reading clauses and updates in the order written: a reading clause may follow an update.
+    for (const child of last.children) {
+        if (child instanceof OC_ReadingClauseContext) {
+            clauses.push(reading(child));
+        } else if (child instanceof OC_UpdatingClauseContext) {
+            clauses.push(updating(child));
+        } else if (child instanceof OC_ReturnContext) {
+            clauses.push({ kind: 'Return', projection: projection(child.oC_ProjectionBody()) });
+        }
     }
     return clauses;
 }
@@ -380,7 +386,10 @@ function link(chain: OC_PatternElementChainContext): RelationshipPattern {
     return { ...relationship, range: quantified(quantifier) };
 }
 
-/** `+` is one or more, `*` any, `{n}` exactly n, and `{m,n}` from m to n, either bound left out. */
+/**
+ * `+` is one or more, `*` any, `{n}` exactly n, and `{m,n}` from m to n, either bound left out. As in Neo4j, braces with
+ * no bound in them, `{}`, and a least bound above the greatest, `{3,1}`, are refused.
+ */
 function quantified(context: OC_PathQuantifierContext): Range {
     if (context.getText() === '+') {
         return { min: 1 };
@@ -391,12 +400,21 @@ function quantified(context: OC_PathQuantifierContext): Range {
     const integers = context.oC_IntegerLiteral();
     const comma = context.children.findIndex((it) => it.getText() === ',');
     if (comma < 0) {
+        if (integers.length !== 1) {
+            throw new DrivineError('A quantifier in braces has a bound in them, as in {2} or {1,3}.');
+        }
         const bound = integer(integers[0]);
         return { min: bound, max: bound };
     }
     const before = integers.find((it) => context.children.indexOf(it) < comma);
     const after = integers.find((it) => context.children.indexOf(it) > comma);
-    return { min: before ? integer(before) : 0, max: after ? integer(after) : undefined };
+    const [least, greatest] = [before ? integer(before) : undefined, after ? integer(after) : undefined];
+    if (least !== undefined && greatest !== undefined && least > greatest) {
+        throw new DrivineError(
+            `A quantifier's least bound is at most its greatest, and ${least} is more than ${greatest}.`
+        );
+    }
+    return { min: least ?? 0, max: greatest };
 }
 
 function node(context: OC_NodePatternContext): NodePattern {
@@ -519,14 +537,31 @@ function additive(context: OC_AddOrSubtractExpressionContext): Expression {
         .reduce((left, right, i) => binary(operators[i] === '+' ? 'ADD' : 'SUBTRACT', left, right), operands[0]);
 }
 
+function unary(context: OC_UnaryAddOrSubtractExpressionContext): Expression {
+    const negated = context.children[0].getText() === '-';
+    const written = context.oC_NonArithmeticOperatorExpression()!;
+    // The least whole number, -9223372036854775808, is written negated: its digits alone are past the greatest.
+    if (negated && written.getChildCount() === 1) {
+        const literal = written.oC_Atom()?.oC_Literal()?.oC_NumberLiteral()?.oC_IntegerLiteral();
+        if (literal) {
+            const value = magnitude(literal);
+            if (value === LONG_MIN_MAGNITUDE) {
+                return { kind: 'Literal', value: -Number(LONG_MIN_MAGNITUDE) };
+            }
+            if (value > LONG_MIN_MAGNITUDE) {
+                throw outOfRange(`-${literal.getText()}`);
+            }
+        }
+    }
+    const operand = nonArithmetic(written);
+    return negated ? { kind: 'Unary', operator: 'NEGATE', operand } : operand;
+}
+
 function multiplicative(context: OC_MultiplyDivideModuloExpressionContext): Expression {
     const operands = context.oC_PowerOfExpression().map((power) =>
         power
             .oC_UnaryAddOrSubtractExpression()
-            .map((unary): Expression => {
-                const operand = nonArithmetic(unary.oC_NonArithmeticOperatorExpression()!);
-                return unary.children[0].getText() === '-' ? { kind: 'Unary', operator: 'NEGATE', operand } : operand;
-            })
+            .map(unary)
             .reduce((a, b) => binary('POWER', a, b))
     );
     const operators = operatorsOf(context.children, Object.keys(MULTIPLICATIVE));
@@ -827,18 +862,35 @@ function symbolic(context: OC_SymbolicNameContext): string {
     return text.startsWith('`') ? text.substring(1, text.length - 1).replace(/``/g, '`') : text;
 }
 
+const LONG_MAX_MAGNITUDE = BigInt('9223372036854775807');
+
+const LONG_MIN_MAGNITUDE = LONG_MAX_MAGNITUDE + BigInt(1);
+
+/** An integer literal's value: one past either end of a 64-bit integer is refused. */
 function integer(context: OC_IntegerLiteralContext): number {
-    const text = context.getText();
-    if (text.startsWith('0x')) {
-        return parseInt(text.substring(2), 16);
+    const value = magnitude(context);
+    if (value > LONG_MAX_MAGNITUDE) {
+        throw outOfRange(context.getText());
     }
-    if (text.startsWith('0o')) {
-        return parseInt(text.substring(2), 8);
+    return Number(value);
+}
+
+/** The number an integer literal writes, decimal, hexadecimal (`0x`) or octal (`0o`, or a leading 0), however large. */
+function magnitude(context: OC_IntegerLiteralContext): bigint {
+    const text = context.getText();
+    if (text.startsWith('0x') || text.startsWith('0o')) {
+        return BigInt(text);
     }
     if (text.length > 1 && text.startsWith('0')) {
-        return parseInt(text.substring(1), 8);
+        return BigInt(`0o${text.substring(1)}`);
     }
-    return Number(text);
+    return BigInt(text);
+}
+
+function outOfRange(written: string): DrivineError {
+    return new DrivineError(
+        `${written} is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.`
+    );
 }
 
 /** A string literal's value: its quotes taken off and its escapes read. */
