@@ -1276,6 +1276,27 @@ describe('Reading constants and types', () => {
     });
 });
 
+describe('Subtypes', () => {
+    it('lists no subtype the reader left out as a problem, as no load gives one', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { NodeFragment, NodeId } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['Animal'] })",
+                'export class Animal { @NodeId() id: string; }',
+                "@NodeFragment({ labels: ['Dog'] })",
+                'export class Dog extends Animal {}',
+                "@NodeFragment({ labels: ['Twice'] })",
+                'export class Twice extends Animal { @NodeId() other: string; }'
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('src/A#Twice');
+        expect(byId(read(dir).fragments, 'src/A#Animal').subtypes).toEqual(['src/A#Dog']);
+    });
+});
+
 describe('drivine model', () => {
     const output = (): { lines: string[]; out: Output } => {
         const lines: string[] = [];

@@ -80,6 +80,12 @@ export class ModelReader {
         for (const key of ['fragments', 'relationshipFragments', 'views'] as const) {
             model[key] = model[key].filter((it) => it.id).sort((a, b) => compare(a.id as string, b.id as string));
         }
+        // A subtype left out as a problem is no load's to give: a current entry refers only to current ones.
+        const written = new Set(model.fragments.map((it) => it.id));
+        for (const fragment of model.fragments) {
+            const subtypes = (fragment.subtypes as string[] | undefined)?.filter((it) => written.has(it));
+            fragment.subtypes = subtypes?.length ? subtypes : undefined;
+        }
         return model;
     }
 
