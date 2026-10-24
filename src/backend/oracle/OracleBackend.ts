@@ -1,6 +1,7 @@
 import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
+import { hasLabels, jsonKey, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
+import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
@@ -51,7 +52,7 @@ export const ROW_ALIAS = 'n';
 /**
  * Statements for Oracle, over the tables of an OracleGraph. A load returns the rows the graph engines do, `{props,
  * labels}` for a fragment, as JSON. A raw `where` is an SQL predicate over the node's row, `n` (its `labels`, `props`
- * and `stamp`).
+ * and `stamp`), in which a property of the node may be written as Cypher writes it, `n.name` (see `written`).
  */
 export class OracleBackend implements GraphBackend {
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
@@ -230,6 +231,10 @@ END;`);
             ROW_ALIAS,
             indexed
         );
+    }
+
+    written(predicate: string): string {
+        return new CypherShorthand(ROW_ALIAS, ROW_ALIAS, textOf).rewrite(predicate);
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {

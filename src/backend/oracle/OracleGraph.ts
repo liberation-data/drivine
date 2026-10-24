@@ -76,6 +76,26 @@ export function jsonKey(name: string): string {
 }
 
 /**
+ * The step of a JSON path naming `key` as drivine4j writes it: bare where SQL would take it for an identifier, else
+ * quoted as `jsonKey` quotes it, for the SQL literal it is written in.
+ */
+export function drivine4jStep(key: string): string {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !['true', 'false', 'null'].includes(key)
+        ? key
+        : jsonKey(key).slice(1);
+}
+
+/**
+ * The property of the node row `alias` as text, as drivine4j's `OracleSql.property` reads it. The stamp is a column of
+ * its own.
+ */
+export function textOf(alias: string, property: string): string {
+    return property === Stamps.PROPERTY
+        ? `${alias}.stamp`
+        : `JSON_VALUE(${alias}.props, '$.${drivine4jStep(property)}')`;
+}
+
+/**
  * The JSON the property of the node row `alias` is read from: its properties, or, for the stamp, which is a column of
  * its own, a document of that column under the stamp's property, so a query reads it as any other.
  */
