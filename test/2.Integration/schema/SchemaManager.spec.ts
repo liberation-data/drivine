@@ -177,6 +177,12 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
                 new QuerySpecification("CALL db.constraints() YIELD label WHERE label = 'ManagedDoc' RETURN label")
             );
             expect(left).toEqual([]);
+            const warned = await manager([SchemaCatalog.of(unique)], {
+                mode: 'WARN',
+                violationSampleSize: 0
+            }).enforce();
+            const warning = [...warned.values()].flat()[0];
+            expect([warning.status, warning.sample]).toEqual(['VIOLATION', []]);
         }
         // Elsewhere the engine refuses the constraint, and its refusal is thrown.
         await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow(

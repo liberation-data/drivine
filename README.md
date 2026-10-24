@@ -1718,7 +1718,7 @@ the default from target ES2022). A spec for a label no fragment maps, and one gi
 | `recreateOnDrift` | Destructive: replace an item whose shape drifted. |
 | `recreateOnStartup` | Destructive: drop and make every declared item on every startup. |
 | `replaceBlockingIndex` | Destructive: drop a plain index in the way of a uniqueness constraint (Neo4j) and make the constraint in its place. |
-| `violationSampleSize` | How many keys held more than once a violation reports, and how many of each one's nodes; 0 skips the check. Defaults to 10. |
+| `violationSampleSize` | How many keys held more than once a violation reports, and how many of each one's nodes; 0 skips the check, though on FalkorDB a failed build is still checked, and is then a violation with an empty sample. Defaults to 10. |
 | `enabled` | `false` skips the startup run; `SchemaManager` can still be injected. |
 
 `SchemaManager` is injectable, to change the schema as the application runs: `enforce()` is safe to call again, and

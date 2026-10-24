@@ -109,12 +109,23 @@ export class ConstraintManager {
 
     /** Whether the engine reports that its build of the constraint failed. */
     private async failed(spec: UniquenessConstraintSpec): Promise<boolean> {
-        const listing = this.grammar.listFailedUniques;
+        return this.listedBy(this.grammar.listFailedUniques, spec);
+    }
+
+    /** Whether `listing` lists the constraint; a statement already in `rows` is read from there, not run again. */
+    private async listedBy(
+        listing: SchemaGrammar['listFailedUniques'],
+        spec: UniquenessConstraintSpec,
+        rows: Map<string, Promise<any[]>> = new Map()
+    ): Promise<boolean> {
         if (!listing) {
             return false;
         }
+        if (!rows.has(listing.statement)) {
+            rows.set(listing.statement, this.executor.run(listing.statement));
+        }
         return listing
-            .read(await this.executor.run(listing.statement))
+            .read(await rows.get(listing.statement)!)
             .some((it) => it.label === spec.label && same(it.properties, spec.properties));
     }
 
@@ -163,12 +174,18 @@ export class ConstraintManager {
         sampleSize: number
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
         for (let attempt = 0; attempt < 50; attempt++) {
-            if (await this.exists(spec)) {
+            // One reading per attempt, so that a build marked FAILED between two readings isn't taken for built.
+            const rows = new Map<string, Promise<any[]>>();
+            if (await this.listedBy(this.grammar.listFailedUniques, spec, rows)) {
+                return this.buildFailed(spec, sampleSize);
+            }
+            // FalkorDB lists the constraint UNDER CONSTRUCTION as it builds it, and may yet mark it FAILED.
+            if (
+                (await this.listedBy(this.grammar.listUniques, spec, rows)) &&
+                !(await this.listedBy(this.grammar.listBuildingUniques, spec, rows))
+            ) {
                 this.changed();
                 return { status: 'CREATED', spec };
-            }
-            if (await this.failed(spec)) {
-                return this.buildFailed(spec, sampleSize);
             }
             await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
         }

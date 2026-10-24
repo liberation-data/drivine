@@ -181,6 +181,48 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
         expect(await falkorDb('OPERATIONAL', 2).constraints.ensure(spec, 0)).toEqual({ status: 'CREATED', spec });
     });
 
+    it('should not take a constraint listed UNDER CONSTRUCTION for built, as its build may yet fail', async () => {
+        let listings = 0;
+        const executor = {
+            run: async (statement: any) =>
+                Promise.resolve().then(() => {
+                    if (statement === FALKORDB_SCHEMA.listUniques.statement) {
+                        // Absent before it is made, then built for two listings, then FAILED.
+                        const status = listings++ === 0 ? undefined : listings <= 4 ? 'UNDER CONSTRUCTION' : 'FAILED';
+                        return status ? [{ label: 'Person', properties: ['email'], status }] : [];
+                    }
+                    return typeof statement === 'string' && statement.includes('holders > 1') ? [repeated] : [];
+                })
+        } as unknown as SchemaExecutor;
+        expect(await new ConstraintManager(executor, FALKORDB_SCHEMA).ensure(spec, 0)).toEqual({
+            status: 'VIOLATION',
+            spec,
+            sample: []
+        });
+    });
+
+    it('should read the statuses of an attempt from one listing, so a build failing between readings is not built', async () => {
+        let listings = 0;
+        const executor = {
+            run: async (statement: any) =>
+                Promise.resolve().then(() => {
+                    if (statement === FALKORDB_SCHEMA.listUniques.statement) {
+                        // Absent before it is made, then UNDER CONSTRUCTION twice, then FAILED.
+                        const status = listings++ === 0 ? undefined : listings <= 3 ? 'UNDER CONSTRUCTION' : 'FAILED';
+                        return status ? [{ label: 'Person', properties: ['email'], status }] : [];
+                    }
+                    return typeof statement === 'string' && statement.includes('holders > 1') ? [repeated] : [];
+                })
+        } as unknown as SchemaExecutor;
+        expect(await new ConstraintManager(executor, FALKORDB_SCHEMA).ensure(spec, 0)).toEqual({
+            status: 'VIOLATION',
+            spec,
+            sample: []
+        });
+        // ensure's own check, then one listing per attempt: two UNDER CONSTRUCTION, one FAILED.
+        expect(listings).toBe(4);
+    });
+
     it('should drop a constraint whose build failed, and give a VIOLATION with an empty sample at sample size 0', async () => {
         const store = falkorDb('FAILED', 1, [repeated]);
         const started = Date.now();

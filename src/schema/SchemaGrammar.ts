@@ -58,6 +58,8 @@ export interface SchemaGrammar {
      * failed, as when two nodes hold the same values, and how to read its rows.
      */
     listFailedUniques?: { statement: string; read: (rows: any[]) => SchemaItem[] };
+    /** Where a uniqueness constraint is built in the background, the ones listed while still being built. */
+    listBuildingUniques?: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listVectors: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listFullTexts: { statement: string; read: (rows: any[]) => SchemaItem[] };
     createRange(spec: RangeIndexSpec): string[];
@@ -382,6 +384,14 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
         statement: FALKORDB_UNIQUES,
         read: (rows) =>
             rows.filter((it) => it.status === 'FAILED').map((it) => ({ label: it.label, properties: it.properties }))
+    },
+    // UNDER CONSTRUCTION until it is OPERATIONAL or FAILED.
+    listBuildingUniques: {
+        statement: FALKORDB_UNIQUES,
+        read: (rows) =>
+            rows
+                .filter((it) => it.status && it.status !== 'OPERATIONAL' && it.status !== 'FAILED')
+                .map((it) => ({ label: it.label, properties: it.properties }))
     }
 };
 
