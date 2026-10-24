@@ -3,8 +3,11 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 
 const assert = require('assert');
 
-/** A named parameter, `$name`: the longest name, so `$id` is not read in `$idList`. */
-const PARAMETER = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
+/**
+ * A named parameter, `$name`: the longest name, so `$id` is not read in `$idList`. A name is as Cypher's grammar reads
+ * one, past ASCII too (`$größe`), but for the currency symbols it allows after the first character: a `$` ends it.
+ */
+const PARAMETER = /\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*)/gu;
 
 export class PostgresSpecCompiler extends QuerySpecificationCompiler {
     private readonly paramKeys: string[] = [];

@@ -241,6 +241,18 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(await query('MATCH (n:CyWrite) WHERE n.i IN $ids RETURN n.i', { ids: new Set([2]) })).toEqual([2]);
         });
 
+        it('a write whose text holds the dollar quote of its Postgres function writes it whole', async () => {
+            await query("CREATE (:CyWrite {s: 'a$cy$b', t: 'c$cy1$d'})");
+            expect(await query('MATCH (n:CyWrite) RETURN [n.s, n.t]')).toEqual([['a$cy$b', 'c$cy1$d']]);
+        });
+
+        it('a parameter named past ASCII is bound, to a statement that reads and to one that writes', async () => {
+            await query('CREATE (:CyWrite {größe: $größe, 名前: $名前})', { größe: 3, 名前: 'ada' });
+            expect(
+                await query('MATCH (n:CyWrite) WHERE n.größe = $größe RETURN [n.größe, n.名前]', { größe: 3 })
+            ).toEqual([[3, 'ada']]);
+        });
+
         it('a statement of hundreds of creates, each naming nodes made before it, makes them all', async () => {
             const clauses = Array.from({ length: 300 }, (__, i) => [
                 `CREATE (n${i}:CyWrite {i: ${i}})`,

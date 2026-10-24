@@ -25,4 +25,11 @@ describe('OracleSpecCompiler', () => {
         expect(bound(list)).toEqual({ type: oracledb.CLOB, val: JSON.stringify(list) });
         expect(bound({ a: [1, 2] })).toEqual('{"a":[1,2]}');
     });
+
+    it('binds a name past ASCII, as Cypher reads one, and not a name it is the prefix of', () => {
+        const spec = new QuerySpecification('select $größe, $größer from dual').bind({ größe: 3 }).finalizedCopy('SQL');
+        const compiled = new OracleSpecCompiler(spec).compile();
+        expect(compiled.statement).toEqual('select :b0, $größer from dual');
+        expect(compiled.parameters).toEqual({ b0: 3 });
+    });
 });

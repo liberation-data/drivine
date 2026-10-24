@@ -4,6 +4,12 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
 
 /**
+ * A named parameter, `$name`: the longest name. A name is as Cypher's grammar reads one, past ASCII too (`$größe`), but
+ * for the currency symbols it allows after the first character: a `$` ends it.
+ */
+const PARAMETER = /\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*)/gu;
+
+/**
  * Compiles a specification for Oracle: `$name` parameters become `:name` binds, and skip and limit an
  * `OFFSET … FETCH`. A list or a map is bound as JSON text, which a statement reads with `JSON(:name)` or `JSON_TABLE`.
  */
@@ -24,7 +30,7 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
      */
     formattedStatement(): string {
         const names = Object.keys(this.named());
-        return this.appliedStatement().replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match: string, name: string) => {
+        return this.appliedStatement().replace(PARAMETER, (match: string, name: string) => {
             const index = names.indexOf(name);
             return index >= 0 ? `:b${index}` : match;
         });
@@ -35,7 +41,7 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
         const params: Record<string, any> = {};
         Object.entries(this.named()).forEach(([name, value], index) => {
             // Oracle refuses a bind the statement doesn't name.
-            if (new RegExp(`\\$${name}(?![A-Za-z0-9_])`).test(statement)) {
+            if (new RegExp(`\\$${name}(?!\\p{ID_Continue})`, 'u').test(statement)) {
                 params[`b${index}`] = bindable(value);
             }
         });
