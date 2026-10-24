@@ -256,6 +256,21 @@ describe('Writing the model file', () => {
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
         expect(warnings).toEqual([expect.stringContaining('is not a drivine-model/1 file, so nothing in it is kept')]);
         expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#A']);
+        // Nor one that is not JSON.
+        fs.writeFileSync(path.join(dir, '.drivine', 'model.json'), '{"format": "drivine-model/1", ');
+        warnings.length = 0;
+        expect(
+            generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) }).outcome
+        ).toEqual('written');
+        expect(warnings).toEqual([expect.stringContaining('is not a drivine-model/1 file, so nothing in it is kept')]);
+    });
+
+    it('fails on a project with no package.json, which says where the file goes', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-model-'));
+        fs.writeFileSync(path.join(dir, 'tsconfig.json'), '{}');
+        expect(() => generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: quiet })).toThrow(
+            'Drivine model file: there is no package.json at or above'
+        );
     });
 
     it('is turned off by "drivine": { "model": false } in package.json', () => {
@@ -538,6 +553,47 @@ describe('Reading constants and types', () => {
         expect(entry).toBeUndefined();
     });
 
+    it("names a subtype whose own labels it cannot read, rather than write it with its superclass's alone", () => {
+        const { warnings, entry }: Written = fragment({
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "const labels = (): string[] => ['B'];",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                '@NodeFragment({ labels: labels() })',
+                'export class B extends A {}'
+            ].join('\n')
+        });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#B: Can't read the labels of @NodeFragment B. Name each with a literal or a constant."
+        ]);
+        expect(entry.id).toEqual('src/A#A');
+    });
+
+    it('names a fragment with no labels, a relationship fragment with no target, and a field whose class it cannot tell', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphRelationship, GraphView, NodeFragment, RelationshipFragment, Root } from '@liberation-data/drivine';",
+                '@NodeFragment()',
+                'export class A { id: string; }',
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B { id: string; }',
+                '@RelationshipFragment()',
+                'export class R { since: string; }',
+                '@GraphView()',
+                "export class V { @Root() b: B; @GraphRelationship({ type: 'T' }) to: string; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            'Drivine model file: src/A#A: @NodeFragment A has no labels.',
+            'Drivine model file: src/A#R: @RelationshipFragment R has no @TargetNode property.',
+            "Drivine model file: src/A#V: Can't tell what V.to holds. Name its class in the decorator, e.g. () => Item."
+        ]);
+        expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#B']);
+    });
+
     it('names a direction or an aggregate function it cannot read, rather than write the default', () => {
         const dir = project({
             'src/A.ts': [
@@ -792,6 +848,19 @@ describe('drivine model', () => {
             'Drivine model file: turned off in package.json.',
             'Drivine model file: the project declares no fragments or views, so there is nothing to write.'
         ]);
+    });
+
+    it('says what it cannot read on standard error, and writes the rest', () => {
+        const { lines, out }: { lines: string[]; out: Output } = output();
+        const dir = project({
+            'src/V.ts': `import { GraphView } from '@liberation-data/drivine';\n@GraphView()\nexport class V { x: string; }\n`
+        });
+        const errors: string[] = [];
+        expect(
+            main(['model', '--project', path.join(dir, 'tsconfig.json')], { ...out, error: (it) => errors.push(it) })
+        ).toEqual(0);
+        expect(errors).toEqual(['Drivine model file: src/V#V: @GraphView V has no @Root property.']);
+        expect(lines).toEqual([expect.stringContaining('the project declares no fragments or views')]);
     });
 
     it('says how it is used, and fails on what it does not know', () => {

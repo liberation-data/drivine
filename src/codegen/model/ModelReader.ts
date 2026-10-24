@@ -119,7 +119,7 @@ export class ModelReader {
         for (const it of chain) {
             const options = this.options(this.decorator(it, 'NodeFragment'), `@NodeFragment ${it.name!.text}`);
             // A label read wrong would name nodes the fragment never loads: one that can't be read is a problem.
-            if (Array.isArray(options.labels) && strings(options.labels).length !== options.labels.length) {
+            if ('labels' in options && !isStrings(options.labels)) {
                 throw new Error(
                     `Can't read the labels of @NodeFragment ${it.name!.text}. Name each with a literal or a constant.`
                 );
@@ -370,7 +370,7 @@ export class ModelReader {
         const members = this.args(decorator)[0];
         const given = this.ts.isCallExpression(decorator.expression) && decorator.expression.arguments.length > 0;
         // Members read wrong would make a closed set open, or own labels it doesn't: ones that can't be read are a problem.
-        if (given && !(Array.isArray(members) ? strings(members).length === members.length : isObject(members))) {
+        if (given && !(Array.isArray(members) ? isStrings(members) : isObject(members))) {
             const field = this.field(prop);
             throw new Error(
                 `Can't read the members of @NodeLabels ${field}. Name them with a list, an enum or a constant.`
@@ -475,7 +475,9 @@ export class ModelReader {
             ?.getSymbol()
             ?.declarations?.find((it): it is TS.ClassDeclaration => this.ts.isClassDeclaration(it));
         if (!decl) {
-            throw new Error(`Can't tell what ${prop.name} holds. Name its class in the decorator, e.g. () => Item.`);
+            throw new Error(
+                `Can't tell what ${this.field(prop)} holds. Name its class in the decorator, e.g. () => Item.`
+            );
         }
         return decl;
     }
