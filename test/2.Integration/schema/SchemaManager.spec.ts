@@ -174,6 +174,8 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             engine.type === DatabaseType.FALKORDB ? /FalkorDB could not build the uniqueness constraint/ : undefined
         );
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+        // Nothing the refusal left behind, such as FalkorDB's failed constraint, is in the way once the data allows it.
+        expect((await gom.constraints.ensure(unique)).status).toBe('CREATED');
     });
 
     it('should name the conflicting nodes in a violation, by their own ids and by the node id given', async () => {
