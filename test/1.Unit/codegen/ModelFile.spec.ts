@@ -366,6 +366,83 @@ describe("Reading Drivine's decorators", () => {
     });
 });
 
+describe('Reading constants and types', () => {
+    type Written = { warnings: string[]; entry: any };
+    const fragment = (files: Record<string, string>, strict = true): Written => {
+        const dir = project(files);
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        const config = JSON.parse(fs.readFileSync(tsconfig, 'utf8'));
+        config.compilerOptions.strict = strict;
+        fs.writeFileSync(tsconfig, JSON.stringify(config));
+        const warnings: string[] = [];
+        generateModelFile({ project: tsconfig, warn: (it) => warnings.push(it) });
+        return { warnings, entry: fs.existsSync(path.join(dir, '.drivine')) ? read(dir).fragments[0] : undefined };
+    };
+    const properties = (entry: any) => Object.fromEntries(entry.properties.map((it: any) => [it.name, it]));
+
+    it('reads labels spread from a constant list, and from a constant object, `as const` or not', () => {
+        const { warnings, entry }: Written = fragment({
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "const LABELS = ['A', 'Extra'] as const;",
+                "const Fixed = { B: 'Bee' } as const;",
+                "const Loose = { C: 'Cee' };",
+                '@NodeFragment({ labels: [...LABELS, Fixed.B, Loose.C] })',
+                'export class A { id: string; }'
+            ].join('\n')
+        });
+        expect(warnings).toEqual([]);
+        expect(entry.labels).toEqual(['A', 'Extra', 'Bee', 'Cee']);
+    });
+
+    it('names a fragment whose labels it cannot read, rather than write it with labels missing', () => {
+        const { warnings, entry }: Written = fragment({
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "const label = (): string => 'B';",
+                "@NodeFragment({ labels: ['A', label()] })",
+                'export class A { id: string; }'
+            ].join('\n')
+        });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#A: Can't read the labels of @NodeFragment A. Name each with a literal or a constant."
+        ]);
+        expect(entry).toBeUndefined();
+    });
+
+    it('reads unions of literals, tuples, and unknown and any', () => {
+        const { entry }: Written = fragment({
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { level: 1 | 2; pair: [string, number]; same: [string, string]; u: unknown; a: any; }'
+            ].join('\n')
+        });
+        const of = properties(entry);
+        expect(of.level).toMatchObject({ type: 'float', nullable: false });
+        expect(of.pair).toMatchObject({ type: 'list', of: 'any' });
+        expect(of.same).toMatchObject({ type: 'list', of: 'string' });
+        // Each may hold null, and is shown as the code writes it.
+        expect(of.u).toMatchObject({ type: 'any', nullable: true, source: 'unknown' });
+        expect(of.a).toMatchObject({ type: 'any', nullable: true, source: 'any' });
+    });
+
+    it("says whether a field may be absent only where the compiler can tell: under strict null checks, or for '?'", () => {
+        const { entry }: Written = fragment(
+            {
+                'src/A.ts': [
+                    "import { NodeFragment } from '@liberation-data/drivine';",
+                    "@NodeFragment({ labels: ['A'] })",
+                    'export class A { name: string; maybe: string | null; optional?: string; }'
+                ].join('\n')
+            },
+            false
+        );
+        const of = properties(entry);
+        expect([of.name.nullable, of.maybe.nullable, of.optional.nullable]).toEqual(['unknown', 'unknown', true]);
+    });
+});
+
 describe('drivine model', () => {
     const output = (): { lines: string[]; out: Output } => {
         const lines: string[] = [];

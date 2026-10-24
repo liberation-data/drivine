@@ -122,6 +122,12 @@ export class ModelReader {
         const labels: string[] = [];
         for (const it of chain) {
             const options = this.args(this.decorator(it, 'NodeFragment'))[0] as { labels?: unknown } | undefined;
+            // A label read wrong would name nodes the fragment never loads: one that can't be read is a problem.
+            if (Array.isArray(options?.labels) && strings(options.labels).length !== options.labels.length) {
+                throw new Error(
+                    `Can't read the labels of @NodeFragment ${it.name!.text}. Name each with a literal or a constant.`
+                );
+            }
             for (const label of strings(options?.labels)) {
                 if (!labels.includes(label)) {
                     labels.push(label);
@@ -302,7 +308,7 @@ export class ModelReader {
             vector: vector
                 ? { similarity: vectorOptions.similarity ?? 'COSINE', dimensions: vectorOptions.dimensions }
                 : undefined,
-            source: this.checker.typeToString(this.nonNull(prop.type))
+            source: this.checker.typeToString(this.nonNull(prop.type, true))
         };
     }
 
@@ -383,8 +389,11 @@ export class ModelReader {
             [flags.BigInt | flags.BigIntLiteral, 'int'],
             [flags.Boolean | flags.BooleanLiteral, 'boolean']
         ];
-        const kind = kinds.find(([flag]) => t.flags & flag)?.[1];
-        if (kind) {
+        const kindOf = (it: TS.Type): string | undefined => kinds.find(([flag]) => it.flags & flag)?.[1];
+        // A union of literals of one kind, as `1 | 2`, is that kind.
+        const members = t.isUnion() && !(t.flags & flags.Boolean) ? t.types.map(kindOf) : [kindOf(t)];
+        const kind = members[0];
+        if (kind && members.every((it) => it === kind)) {
             return { type: kind };
         }
         return t.getSymbol()?.getName() === 'Date' ? { type: 'datetime' } : undefined;
@@ -393,8 +402,12 @@ export class ModelReader {
     /** A list, of its elements' type, or a map, of its values'. */
     private collection(t: TS.Type): Typed | undefined {
         if (this.isList(t)) {
-            const element = this.elementOf(t);
-            return { type: 'list', of: element ? this.typed(element).type : 'any' };
+            // A tuple's elements are of one type only when each is.
+            const elements = this.checker.isTupleType(t)
+                ? this.checker.getTypeArguments(t as TS.TypeReference)
+                : [this.elementOf(t)];
+            const types = new Set(elements.map((it) => (it ? this.typed(it).type : 'any')));
+            return { type: 'list', of: types.size === 1 ? [...types][0] : 'any' };
         }
         const name = t.getSymbol()?.getName();
         const indexed = this.checker.getIndexInfoOfType(t, this.ts.IndexKind.String)?.type;
@@ -420,8 +433,9 @@ export class ModelReader {
         return args[0];
     }
 
-    private nonNull(type: TS.Type): TS.Type {
-        return this.checker.getNonNullableType(type);
+    /** The type without `null` and `undefined`; `unknown` as it is, for showing, where the compiler would give `{}`. */
+    private nonNull(type: TS.Type, shown: boolean = false): TS.Type {
+        return shown && type.flags & this.ts.TypeFlags.Unknown ? type : this.checker.getNonNullableType(type);
     }
 
     // Classes and their properties
@@ -506,7 +520,8 @@ export class ModelReader {
         if (!this.strictNulls) {
             return 'unknown';
         }
-        return type !== this.nonNull(type);
+        // `any` and `unknown` hold null too, though the compiler takes nothing out of them.
+        return !!(type.flags & (this.ts.TypeFlags.Any | this.ts.TypeFlags.Unknown)) || type !== this.nonNull(type);
     }
 
     // Decorators
@@ -613,7 +628,10 @@ export class ModelReader {
     private structure(node: TS.Expression): unknown {
         const ts = this.ts;
         if (ts.isArrayLiteralExpression(node)) {
-            return node.elements.map((it) => this.value(it));
+            return node.elements.flatMap((it) => {
+                const value = this.value(ts.isSpreadElement(it) ? it.expression : it);
+                return ts.isSpreadElement(it) && Array.isArray(value) ? value : [value];
+            });
         }
         if (ts.isObjectLiteralExpression(node)) {
             return this.object(node);
@@ -657,6 +675,11 @@ export class ModelReader {
         const type = this.checker.getTypeAtLocation(node);
         if (type.isStringLiteral() || type.isNumberLiteral()) {
             return type.value;
+        }
+        if (ts.isPropertyAccessExpression(node)) {
+            // A member of a constant object, `as const` or not.
+            const object = this.value(node.expression);
+            return isObject(object) ? object[node.name.text] : undefined;
         }
         return ts.isIdentifier(node) ? this.declared(node) : undefined;
     }
@@ -702,6 +725,10 @@ interface Property {
 /** Whether an import's module is Drivine. */
 const isDrivine = (ts: typeof TS, module: TS.Expression): boolean =>
     ts.isStringLiteral(module) && DRIVINE.test(module.text);
+
+/** An object a decorator's argument or a constant is, as `object` reads it: not a list, nor one of the compiler's nodes. */
+const isObject = (value: unknown): value is Record<string, unknown> =>
+    !!value && Object.getPrototypeOf(value) === Object.prototype;
 
 const strings = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((it): it is string => typeof it === 'string') : [];
