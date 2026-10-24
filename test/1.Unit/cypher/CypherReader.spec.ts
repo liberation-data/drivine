@@ -74,6 +74,18 @@ describe('CypherReader', () => {
         expect(fourth.range?.max).toBeUndefined();
     });
 
+    it('reads a quantified relationship as a range, either bound of its braces left out', () => {
+        const ranges = (cypher: string): unknown[] =>
+            (CypherReader.read(cypher).clauses[0] as Match).patterns[0].relationships.map((it) => it.range);
+        expect(ranges('MATCH (a)-[:R]->{2}(b)-[:R]->{1,3}(c)-[:R]->{,4}(d)-[:R]->{2,}(e) RETURN a')).toEqual([
+            { min: 2, max: 2 },
+            { min: 1, max: 3 },
+            { min: 0, max: 4 },
+            { min: 2 }
+        ]);
+        expect(ranges('MATCH (a)-[:R]->+(b)-[:R]->*(c) RETURN a')).toEqual([{ min: 1 }, { min: 0 }]);
+    });
+
     it('reads a chain of comparisons as their conjunction, with the grammar’s precedence', () => {
         expect(returned('RETURN 1 < x <= 5')).toEqual({
             kind: 'Binary',
@@ -224,6 +236,9 @@ describe('CypherReader', () => {
 
     it('refuses Cypher the compiler does not take by name, and what is not Cypher with where', () => {
         expect(() => CypherReader.read('CALL db.labels()')).toThrow(
+            'A procedure call (CALL) is Cypher, and is not compiled to SQL yet.'
+        );
+        expect(() => CypherReader.read('MATCH (n) CALL db.labels() YIELD label RETURN label')).toThrow(
             'A procedure call (CALL) is Cypher, and is not compiled to SQL yet.'
         );
         expect(() => CypherReader.read('MATCH (n RETURN n')).toThrow(

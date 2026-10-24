@@ -45,6 +45,10 @@ describe('A temporal text that is no such value', () => {
             "'10:00:60' is no localtime: Text '10:00:60' could not be parsed: Invalid value for SecondOfMinute (valid values 0 - 59): 60"
         ],
         [
+            "localdatetime('2024-02-30T10:00:00.1234567890')",
+            "'2024-02-30T10:00:00.1234567890' is no localdatetime: Text '2024-02-30T10:00:00.1234567890' could not be parsed, unparsed text found at index 29"
+        ],
+        [
             "time('10:00:00.1234567890Z')",
             "'10:00:00.1234567890Z' is no time: Text '10:00:00.1234567890' could not be parsed, unparsed text found at index 18"
         ]

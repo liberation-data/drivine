@@ -1562,13 +1562,6 @@ Notes:
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
   `"phrase"`, `+must`, `-not` and a `prefix*`.
 
-## Schema Management (Indexes & Constraints)
-
-Drivine manages range indexes, uniqueness constraints, vector indexes and full-text indexes on Neo4j, Memgraph,
-FalkorDB, Oracle and Postgres. `ensure` is idempotent and drift-aware, and the engines' differences (DDL, introspection,
-FalkorDB's constraint commands) are handled for you. Declare nothing, and pay nothing.
-
-
 ### Cypher on Oracle and Postgres
 
 A Cypher statement given to a `PersistenceManager` on Oracle or Postgres is compiled to SQL over the graph's tables, so
@@ -1593,6 +1586,12 @@ const names = await pm.query<string>(
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A slice of a list
   (list[from..to]) is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own.
+
+## Schema Management (Indexes & Constraints)
+
+Drivine manages range indexes, uniqueness constraints, vector indexes and full-text indexes on Neo4j, Memgraph,
+FalkorDB, Oracle and Postgres. `ensure` is idempotent and drift-aware, and the engines' differences (DDL, introspection,
+FalkorDB's constraint commands) are handled for you. Declare nothing, and pay nothing.
 
 ### Imperative
 

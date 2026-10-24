@@ -79,6 +79,11 @@ function parsed(local: string, from: Temporal): Clock {
             : from === Temporal.LOCAL_DATE_TIME || from === Temporal.DATE_TIME
             ? local.split('T')
             : ['1970-01-01', local];
+    const [hms, digits = ''] = timePart?.split('.') ?? [];
+    if (digits.length > 9) {
+        // java.time reads nine digits of a fraction, and finds the rest left over before it checks any field.
+        refuse(local, `, unparsed text found at index ${local.indexOf('.') + 10}`);
+    }
     const [year, month, day] = datePart.split('-').map(Number);
     checked(local, 'MonthOfYear', month, 1, 12);
     checked(local, 'DayOfMonth', day, 1, 31, '1 - 28/31');
@@ -93,11 +98,6 @@ function parsed(local: string, from: Temporal): Clock {
     const clock: Clock = { year, month, day, hour: 0, minute: 0, second: 0, micros: 0 };
     if (timePart === undefined) {
         return clock;
-    }
-    const [hms, digits = ''] = timePart.split('.');
-    if (digits.length > 9) {
-        // java.time reads nine digits of a fraction, and finds the rest left over.
-        refuse(local, `, unparsed text found at index ${local.indexOf('.') + 10}`);
     }
     const [hour, minute, second = 0] = hms.split(':').map(Number);
     checked(local, 'MinuteOfHour', minute, 0, 59);
