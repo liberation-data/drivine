@@ -121,13 +121,59 @@ export function parametersIn(expression: Expression): Set<string> {
     }
 }
 
-/** Every variable `pattern` names, of its parts or in their properties. */
+/** Every variable `pattern` names, of its parts or in their properties, a quantified path pattern's among them. */
 export function variablesOfPattern(pattern: Pattern): Set<string> {
     return new Set(
         [...pattern.nodes, ...pattern.relationships].flatMap((part) => [
             ...(part.variable ? [part.variable] : []),
-            ...(part.properties ? [...variablesIn(part.properties)] : [])
+            ...(part.properties ? [...variablesIn(part.properties)] : []),
+            ...('group' in part && part.group
+                ? [
+                      ...variablesOfPattern(part.group.pattern),
+                      ...(part.group.where ? [...variablesIn(part.group.where)] : [])
+                  ]
+                : [])
         ])
+    );
+}
+
+/**
+ * Whether `expression` holds a subquery anywhere: in a comprehension's, a quantifier's or a pattern's condition or
+ * properties too, where {@link contains} does not look.
+ */
+export function holdsSubquery(expression: Expression): boolean {
+    const any = (...expressions: (Expression | undefined)[]): boolean => present(...expressions).some(holdsSubquery);
+    switch (expression.kind) {
+        case 'Subquery':
+            return true;
+        case 'ListComprehension':
+            return any(expression.list, expression.where, expression.projection);
+        case 'Quantifier':
+            return any(expression.list, expression.where);
+        case 'Reduce':
+            return any(expression.initial, expression.list, expression.expression);
+        case 'PatternComprehension':
+            return patternHoldsSubquery(expression.pattern) || any(expression.where, expression.projection);
+        case 'PatternPredicate':
+            return patternHoldsSubquery(expression.pattern);
+        case 'Exists':
+            return expression.patterns.some(patternHoldsSubquery) || any(expression.where);
+        default:
+            return children(expression).some(holdsSubquery);
+    }
+}
+
+/** Whether `pattern` holds a subquery in its parts' properties or a quantified path pattern's condition. */
+export function patternHoldsSubquery(pattern: Pattern): boolean {
+    return (
+        pattern.nodes.some((it) => it.properties !== undefined && holdsSubquery(it.properties)) ||
+        pattern.relationships.some(
+            (relationship) =>
+                (relationship.properties !== undefined && holdsSubquery(relationship.properties)) ||
+                (relationship.group !== undefined &&
+                    (patternHoldsSubquery(relationship.group.pattern) ||
+                        (relationship.group.where !== undefined && holdsSubquery(relationship.group.where))))
+        )
     );
 }
 

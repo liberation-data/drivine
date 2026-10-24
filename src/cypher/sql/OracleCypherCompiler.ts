@@ -5,7 +5,7 @@ import { indent, literal } from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
-import { Procedure, ProcedureCall, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
@@ -58,6 +58,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     readonly noIds = "','";
     /** `ROW_NUMBER()` takes an order of its own; `ROWNUM` counts the rows as the query gives them. */
     readonly rowNumber = 'ROWNUM';
+
+    /** Oracle's recursive queries read nothing of the row they are in. */
+    readonly walksReadRow: boolean = false;
 
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
@@ -337,19 +340,12 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /** A recursive query from each node that meets the seed, each row carrying the node it started from. */
     walk(walk: Walk): Walked {
         const w = walk.step;
-        const e = walk.edge;
         const n = `${walk.name}_n`;
-        const [join, far] = {
-            OUTGOING: [`${e}.src = ${w}.nid`, `${e}.dst`],
-            INCOMING: [`${e}.dst = ${w}.nid`, `${e}.src`],
-            // Either way, and a relationship from a node to itself once.
-            EITHER: [
-                `(${e}.src = ${w}.nid OR ${e}.dst = ${w}.nid)`,
-                `CASE WHEN ${e}.src = ${w}.nid THEN ${e}.dst ELSE ${e}.src END`
-            ]
-        }[walk.direction];
+        const { joins, reached, distinct }: Steps = this.steps(walk, `${w}.nid`);
+        const eids = walk.hops.map((it) => `${it.edge}.eid`);
         const conditions = [
-            `INSTR(${w}.eids, ',' || ${e}.eid || ',') = 0`,
+            ...eids.map((it) => `INSTR(${w}.eids, ',' || ${it} || ',') = 0`),
+            ...distinct,
             ...(walk.max !== undefined ? [`${w}.depth < ${walk.max}`] : []),
             ...walk.conditions
         ];
@@ -363,11 +359,16 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             '    UNION ALL',
             // Walked backwards, each node it leaves goes first, so its nodes end with the one it started from.
             walk.backwards
-                ? `    ${select} ${w}.src, ${far}, ${w}.depth + 1, ',' || ${w}.nid || ${w}.nids, ',' || ${e}.eid || ${w}.eids`
-                : `    ${select} ${w}.src, ${far}, ${w}.depth + 1, ${w}.nids || ${far} || ',', ${w}.eids || ${e}.eid || ','`,
-            `    FROM ${w} JOIN ${this.edges} ${e} ON ${join}`,
+                ? `    ${select} ${w}.src, ${reached[0]}, ${w}.depth + 1, ',' || ${w}.nid || ${w}.nids, ',' || ${eids[0]} || ${w}.eids`
+                : `    ${select} ${w}.src, ${reached[reached.length - 1]}, ${w}.depth + 1, ${w}.nids${reached
+                      .map((it) => ` || ${it} || ','`)
+                      .join('')}, ${w}.eids${eids.map((it) => ` || ${it} || ','`).join('')}`,
+            `    FROM ${w}`,
+            ...joins.map((it) => `    ${it}`),
             `    WHERE ${conditions.join(' AND ')}`,
-            ')',
+            // A walk may come back to a node it left, which Oracle takes for a cycle unless told what one is: a step
+            // takes no relationship twice, so no row's relationships are an earlier row's.
+            ") CYCLE eids SET looped TO 'Y' DEFAULT 'N'",
             `SELECT src, nid, nids, eids FROM ${w} WHERE depth >= ${walk.min}`
         ].join('\n');
         return {

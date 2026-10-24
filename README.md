@@ -1583,6 +1583,11 @@ const names = await pm.query<string>(
 - A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties.
 - A statement that writes (`CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`, `FOREACH`) runs as one statement, applied whole
   or not at all: an anonymous PL/SQL block on Oracle, and a function of the session's own (`pg_temp`) on Postgres.
+- Variable-length relationships (`-[:R*1..3]->`, `-[:R]->{1,3}`) and quantified path patterns
+  (`(a) ((x)-[r:R]->(y) WHERE x.v < y.v){1,3} (b)`) compile. A quantified path pattern's variables are lists of what
+  each repetition matched. On Oracle, whose recursive queries read nothing of the row they are in, its `WHERE` and
+  properties read no variable from outside it, and hold a subquery only where no variable of its `MATCH` or before it
+  is named, and that walks no variable-length relationship or quantified path pattern of its own; on Postgres they may.
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A slice of a list
   (list[from..to]) is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own.

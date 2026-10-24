@@ -362,6 +362,49 @@ cases:
         cypher: "MATCH (c:CyWrite {id: 'c'}) OPTIONAL MATCH p = (c)-[:NEXT]->() WITH p, nodes(p) AS ns CREATE (:CyWrite {id: 'y'}) RETURN [length(p), ns, p IS NULL]"
         rows: [[null, null, true]]
 
+  - name: "Walks around a cycle"
+    description: "A walk around a directed cycle takes each relationship once, and so comes back to the node it started from once."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:R]->(b:CyWrite {id: 'b'})-[:R]->(c:CyWrite {id: 'c'})-[:R]->(a), (s:CyWrite {id: 's'})-[:R]->(s)"
+      - cypher: "MATCH (:CyWrite {id: 'a'})-[rs:R*]->(n) RETURN [n.id, size(rs)] ORDER BY size(rs)"
+        rows: [["b", 1], ["c", 2], ["a", 3]]
+      - cypher: "MATCH (:CyWrite {id: 'a'})-[rs:R*]-(n) RETURN [n.id, size(rs)] ORDER BY size(rs), n.id"
+        rows: [["b", 1], ["c", 1], ["b", 2], ["c", 2], ["a", 3], ["a", 3]]
+      - note: "Walked backwards, from the node it reaches."
+        cypher: "MATCH (n)-[rs:R*]->(:CyWrite {id: 'a'}) RETURN [n.id, size(rs)] ORDER BY size(rs)"
+        rows: [["c", 1], ["b", 2], ["a", 3]]
+      - cypher: "MATCH (:CyWrite {id: 's'})-[rs:R*]-(n) RETURN [n.id, size(rs)]"
+        rows: [["s", 1]]
+      - cypher: "MATCH p = shortestPath((:CyWrite {id: 'a'})-[:R*]->(:CyWrite {id: 'c'})) RETURN length(p)"
+        rows: [2]
+      - cypher: "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]->(y))+ (n) RETURN [n.id, [m IN x | m.id]] ORDER BY size(x)"
+        except: [memgraph, falkordb, neptune]
+        rows: [["b", ["a"]], ["c", ["a", "b"]], ["a", ["a", "b", "c"]]]
+      - note: "A repetition of three relationships may come back to the node it started from."
+        cypher: "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]->(m)-[:R]->(o)-[:R]->(y)){1} (n) RETURN [n.id, [v IN x | v.id], [v IN m | v.id], [v IN o | v.id], [v IN y | v.id]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [["a", ["a"], ["b"], ["c"], ["a"]]]
+      - note: "A repetition of two relationships either way takes each once."
+        cypher: "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]-(m)-[:R]-(y))+ (n) RETURN [n.id, [v IN m | v.id]] ORDER BY n.id"
+        except: [memgraph, falkordb, neptune]
+        rows: [["b", ["c"]], ["c", ["b"]]]
+      - note: "A relationship from a node to itself is taken once, either way."
+        cypher: "MATCH (:CyWrite {id: 's'}) ((x)-[:R]-(y))+ (n) RETURN [n.id, [v IN x | v.id], [v IN y | v.id]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [["s", ["s"], ["s"]]]
+      - note: "A MATCH with a quantified path pattern writes to what it matched."
+        cypher: "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]->(y)){2} (n) SET n.seen = true"
+        except: [memgraph, falkordb, neptune]
+      - cypher: "MATCH (n:CyWrite {seen: true}) RETURN n.id"
+        except: [memgraph, falkordb, neptune]
+        rows: ["c"]
+      - note: "Its variables are written to in a FOREACH."
+        cypher: "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]->(y)){2} (n) FOREACH (m IN y | SET m.reached = true)"
+        except: [memgraph, falkordb, neptune]
+      - cypher: "MATCH (n:CyWrite {reached: true}) RETURN n.id ORDER BY n.id"
+        except: [memgraph, falkordb, neptune]
+        rows: ["b", "c"]
+
   - name: "Write refused on SQL stores"
     description: "Write syntax the compiler doesn't handle yet is refused on SQL stores, naming what it is."
     steps:

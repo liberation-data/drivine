@@ -1,11 +1,12 @@
 import { DrivineError } from '@/DrivineError';
+import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
 import { indent, unsupported, writes } from '@/cypher/sql/CypherSyntax';
 import { Parameters } from '@/cypher/sql/Parameters';
-import { Procedure, ProcedureCall, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
 import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
@@ -51,6 +52,12 @@ export abstract class SqlCypherCompiler {
 
     /** Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would take from its group. */
     sharing = true;
+
+    /**
+     * Whether a walk reads the row it is in: a condition of a quantified path pattern may then read a variable bound
+     * outside it.
+     */
+    readonly walksReadRow: boolean = true;
 
     /** The functions a query of the statement calls, which it declares before it: see {@link declare}. */
     private readonly functions: string[] = [];
@@ -188,6 +195,56 @@ export abstract class SqlCypherCompiler {
     /** `a op b` of the JSON numbers `a` and `b`, as JSON: `operator` is `+`, `-`, `*` or `/`. */
     arithmetic(a: string, b: string, operator: string): string {
         return this.scalar(`(${this.number(a)} ${operator} ${this.number(b)})`);
+    }
+
+    /**
+     * The condition that the relationship row `edge` leaves the node whose id is `at` in `direction`, and the id of the
+     * node it reaches.
+     */
+    leaves(edge: string, direction: Direction, at: string): [string, string] {
+        switch (direction) {
+            case 'OUTGOING':
+                return [`${edge}.src = ${at}`, `${edge}.dst`];
+            case 'INCOMING':
+                return [`${edge}.dst = ${at}`, `${edge}.src`];
+            default:
+                // Either way, and a relationship from a node to itself once.
+                return [
+                    `(${edge}.src = ${at} OR ${edge}.dst = ${at})`,
+                    `CASE WHEN ${edge}.src = ${at} THEN ${edge}.dst ELSE ${edge}.src END`
+                ];
+        }
+    }
+
+    /**
+     * The joins of a walk's step from the node whose id is `at`: each hop's relationship, and each node a condition
+     * reads. Gives them, the ids of the nodes the hops reach, in turn, and that no two relationships of the step are one.
+     */
+    steps(walk: Walk, at: string): Steps {
+        if (walk.nodes.length !== walk.hops.length + 1) {
+            throw new DrivineError("A walk's step has one node more than it has hops.");
+        }
+        if (walk.backwards && walk.hops.length !== 1) {
+            throw new DrivineError('A walk of more than one hop a step is walked forwards.');
+        }
+        const joins: string[] = [];
+        const reached: string[] = [];
+        if (walk.nodes[0] !== undefined) {
+            joins.push(`JOIN ${this.nodes} ${walk.nodes[0]} ON ${walk.nodes[0]}.nid = ${at}`);
+        }
+        walk.hops.forEach((hop, i) => {
+            const [join, far] = this.leaves(hop.edge, hop.direction, reached[reached.length - 1] ?? at);
+            joins.push(`JOIN ${this.edges} ${hop.edge} ON ${join}`);
+            reached.push(far);
+            const node = walk.nodes[i + 1];
+            if (node !== undefined) {
+                joins.push(`JOIN ${this.nodes} ${node} ON ${node}.nid = ${far}`);
+            }
+        });
+        const distinct = walk.hops.flatMap((a, i) =>
+            walk.hops.slice(i + 1).map((b) => `${a.edge}.eid <> ${b.edge}.eid`)
+        );
+        return { joins, reached, distinct };
     }
 
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
@@ -385,7 +442,7 @@ export abstract class SqlCypherCompiler {
     /** The ids of the list `list` as rows named `alias`, with columns `id` and `ord`, in its order. */
     abstract idRows(list: string, alias: string): string;
 
-    /** A walk of a variable-length relationship: see {@link Walk}. */
+    /** A walk of a variable-length relationship or a quantified path pattern: see {@link Walk}. */
     abstract walk(walk: Walk): Walked;
 
     /**

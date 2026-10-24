@@ -86,6 +86,52 @@ describe('CypherReader', () => {
         expect(ranges('MATCH (a)-[:R]->+(b)-[:R]->*(c) RETURN a')).toEqual([{ min: 1 }, { min: 0 }]);
     });
 
+    it('reads a quantified path pattern as a relationship of its group, and a pattern in parentheses with no quantifier as the pattern', () => {
+        const match = CypherReader.read('MATCH (a) ((x:P)-[r:R]->(y) WHERE x.v < y.v){1,3} (b) RETURN a')
+            .clauses[0] as Match;
+        const where: Expression = {
+            kind: 'Binary',
+            operator: 'LESS_THAN',
+            left: { kind: 'Property', subject: variable('x'), key: 'v' },
+            right: { kind: 'Property', subject: variable('y'), key: 'v' }
+        };
+        const group = {
+            pattern: {
+                nodes: [
+                    { variable: 'x', labels: ['P'] },
+                    { variable: 'y', labels: [] }
+                ],
+                relationships: [{ variable: 'r', types: ['R'], direction: 'OUTGOING' }]
+            },
+            where
+        };
+        expect(match.patterns).toEqual([
+            {
+                nodes: [
+                    { variable: 'a', labels: [] },
+                    { variable: 'b', labels: [] }
+                ],
+                relationships: [{ types: [], direction: 'OUTGOING', range: { min: 1, max: 3 }, group }]
+            }
+        ]);
+        const patterns = (cypher: string) => (CypherReader.read(cypher).clauses[0] as Match).patterns;
+        expect(patterns('MATCH ((a)-[:R]->(b)) RETURN a')).toEqual(patterns('MATCH (a)-[:R]->(b) RETURN a'));
+        const [shortest] = patterns('MATCH p = shortestPath((a)-[:R*]->(b)) RETURN p');
+        expect(shortest.shortest).toEqual('ONE');
+        expect(shortest.relationships).toEqual([{ types: ['R'], direction: 'OUTGOING', range: {} }]);
+    });
+
+    it('joins a quantified path pattern with no node beside it to a node of no label of its own', () => {
+        // Opening the path, between two quantified path patterns, and closing it.
+        const [path] = (CypherReader.read('MATCH ((x)-[:R]->(y))+ ((p)-[:S]->(q)){2} RETURN x').clauses[0] as Match)
+            .patterns;
+        expect(path.nodes).toEqual([{ labels: [] }, { labels: [] }, { labels: [] }]);
+        expect(path.relationships.map((it) => [it.group?.pattern.nodes.map((n) => n.variable), it.range])).toEqual([
+            [['x', 'y'], { min: 1 }],
+            [['p', 'q'], { min: 2, max: 2 }]
+        ]);
+    });
+
     it('reads a chain of comparisons as their conjunction, with the grammar’s precedence', () => {
         expect(returned('RETURN 1 < x <= 5')).toEqual({
             kind: 'Binary',

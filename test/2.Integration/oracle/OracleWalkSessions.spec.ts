@@ -75,4 +75,19 @@ describeOnOracle('a walk on Oracle, run in two sessions', () => {
         ];
         expect(rows).toEqual([expected, expected]);
     });
+
+    it('gives the rows of a quantified path pattern either way around a cycle in each', async () => {
+        // The spec's writes.yaml, "Walks around a cycle": a repetition of two relationships either way.
+        const walk =
+            "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]-(m)-[:R]-(y))+ (n) RETURN [n.id, [v IN m | v.id]] ORDER BY n.id";
+        const rows = [];
+        for (const pm of managers) {
+            rows.push(await cypher(pm, walk));
+        }
+        const expected = [
+            ['b', ['c']],
+            ['c', ['b']]
+        ];
+        expect(rows).toEqual([expected, expected]);
+    });
 });

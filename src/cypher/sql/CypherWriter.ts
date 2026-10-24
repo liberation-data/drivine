@@ -39,6 +39,7 @@ import {
 } from '@/cypher/ast/Query';
 import {
     contains,
+    holdsSubquery,
     indent,
     isAggregate,
     literal,
@@ -51,7 +52,7 @@ import {
 } from '@/cypher/sql/CypherSyntax';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Select } from '@/cypher/sql/Select';
-import { Procedure } from '@/cypher/sql/Procedure';
+import { Procedure, Walk, Walked } from '@/cypher/sql/Procedure';
 import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { Temporals } from '@/cypher/sql/Temporals';
@@ -79,8 +80,8 @@ type Scope = Map<string, Value>;
 
 /**
  * The relationships one part of a pattern matched: one, its id `eids`, or with `many` those a variable-length
- * relationship walked, a list of ids. Of the `types` it may have; `nodes` is the list of the ids of the nodes it
- * reaches after the one it starts from.
+ * relationship or a quantified path pattern walked, a list of ids. Of the `types` it may have; `nodes` is the list of
+ * the ids of the nodes it reaches after the one it starts from.
  */
 interface Hop {
     eids: string;
@@ -189,6 +190,9 @@ function optional<T>(value: T | undefined): T[] {
 export class CypherWriter {
     private readonly logger = new DrivineLogger(CypherWriter.name);
     private counter = 0;
+
+    /** Whether a quantified path pattern's conditions are being compiled: what they hold is in its walk's step. */
+    private stepping = false;
 
     /** The procedure's statements, in order. */
     private readonly body: string[] = [];
@@ -740,6 +744,18 @@ export class CypherWriter {
         const before = select.scope;
         const bound = pattern.nodes.map((node) => this.patternNode(select, node));
         pattern.relationships.forEach((relationship, i) => {
+            if (relationship.group) {
+                hops.push(
+                    this.quantified(
+                        select,
+                        relationship,
+                        bound[i].nid,
+                        bound[i + 1].nid,
+                        this.seed(pattern.nodes[i], before)
+                    )
+                );
+                return;
+            }
             if (relationship.range) {
                 // Walked from its far node when only that one is pinned: the same relationships, read backwards.
                 hops.push(
@@ -832,7 +848,7 @@ export class CypherWriter {
      */
     private shortest(select: Select, pattern: Pattern, where?: Expression): void {
         const relationship = pattern.relationships.length === 1 ? pattern.relationships[0] : undefined;
-        if (!relationship?.range) {
+        if (!relationship?.range || relationship.group) {
             unsupported('A shortest path of anything but one variable-length relationship');
         }
         const inner = new Select(select.scope);
@@ -940,13 +956,13 @@ export class CypherWriter {
                 ? [this.propertiesMatch(`${edge}.props`, relationship.properties, select.scope)]
                 : [])
         ];
-        const walked = this.sql.walk({
+        const walked = this.walked({
             from,
             to,
             name: this.alias('p'),
             step: this.alias('w'),
-            edge,
-            direction: relationship.direction,
+            hops: [{ edge, direction: relationship.direction }],
+            nodes: [undefined, undefined],
             min: range.min ?? 1,
             max: range.max,
             conditions,
@@ -960,6 +976,156 @@ export class CypherWriter {
             select.bind(relationship.variable, this.relationshipList(walked.eids));
         }
         return { eids: walked.eids, many: true, types: relationship.types, nodes: walked.nids };
+    }
+
+    /**
+     * A quantified path pattern, `((a)-[r:R]->(b) WHERE …){min,max}`, from the node `from` to the node `to`: a walk whose
+     * each step is a repetition of the group's pattern, that takes a relationship no more than once, as a walk of a
+     * variable-length relationship does. Each variable of the group is bound to the list of what it matched in each
+     * repetition, in turn.
+     */
+    private quantified(
+        select: Select,
+        relationship: RelationshipPattern,
+        from: string,
+        to: string,
+        seed: ((row: string) => string) | undefined
+    ): Hop {
+        const group = relationship.group!;
+        const inner = group.pattern;
+        const rows = inner.nodes.map(() => this.alias('n'));
+        const links = inner.relationships.map(() => this.alias('e'));
+        const scope: [string, Value][] = [
+            ...inner.nodes.flatMap((node, i): [string, Value][] =>
+                node.variable !== undefined ? [[node.variable, nodeOf(rows[i])]] : []
+            ),
+            ...inner.relationships.flatMap((r, i): [string, Value][] =>
+                r.variable !== undefined ? [[r.variable, relationshipOf(links[i])]] : []
+            )
+        ];
+        const names = scope.map(([variable]) => variable);
+        new Set(names).forEach((variable) => {
+            if (names.filter((it) => it === variable).length > 1) {
+                unsupported('A variable named twice in a quantified path pattern');
+            }
+            if (select.scope.has(variable)) {
+                throw new DrivineError(`${variable} is bound outside the quantified path pattern that names it.`);
+            }
+        });
+        const tests = [
+            ...inner.nodes.flatMap((it) => (it.properties ? [it.properties] : [])),
+            ...inner.relationships.flatMap((it) => (it.properties ? [it.properties] : [])),
+            ...(group.where ? [group.where] : [])
+        ];
+        const read = new Set(tests.flatMap((it) => [...variablesIn(it)]));
+        // A subquery reads every variable, for variablesIn names none of a subquery's: as evaluate takes it.
+        const subquery = tests.some(holdsSubquery);
+        if (!this.sql.walksReadRow && [...read].some((it) => select.scope.has(it))) {
+            unsupported('On Oracle, a quantified path pattern that reads a variable from outside it');
+        }
+        if (!this.sql.walksReadRow && subquery && select.scope.size > 0) {
+            unsupported('On Oracle, a subquery in a quantified path pattern that may read a variable from outside it');
+        }
+        const within: Scope = new Map([...select.scope, ...scope]);
+        const outer = this.stepping;
+        this.stepping = true;
+        let conditions: string[];
+        try {
+            conditions = [
+                ...inner.nodes.flatMap((node, i) => [
+                    ...(node.labels.length > 0 ? [this.sql.hasLabels(`${rows[i]}.labels`, node.labels)] : []),
+                    ...(node.properties ? [this.propertiesMatch(`${rows[i]}.props`, node.properties, within)] : [])
+                ]),
+                ...inner.relationships.flatMap((r, i) => [
+                    ...optional(this.types(`${links[i]}.type`, r.types)),
+                    ...(r.properties ? [this.propertiesMatch(`${links[i]}.props`, r.properties, within)] : [])
+                ]),
+                ...(group.where ? [this.condition(this.expression(group.where, within))] : [])
+            ];
+        } finally {
+            this.stepping = outer;
+        }
+        // A node is joined to the step where a condition reads it.
+        const joined = inner.nodes.map((node, i) =>
+            (subquery && node.variable !== undefined) ||
+            node.labels.length > 0 ||
+            node.properties !== undefined ||
+            (node.variable !== undefined && read.has(node.variable))
+                ? rows[i]
+                : undefined
+        );
+        const range = relationship.range!;
+        const walked = this.walked({
+            from,
+            to,
+            name: this.alias('p'),
+            step: this.alias('w'),
+            hops: inner.relationships.map((r, i) => ({ edge: links[i], direction: r.direction })),
+            nodes: joined,
+            min: range.min ?? 1,
+            max: range.max,
+            conditions,
+            backwards: false,
+            seed
+        });
+        select.source(walked.source);
+        select.where.push(walked.condition);
+        // The step's nodes and relationships, k of each a repetition, in turn: each variable is every k-th of them.
+        const k = inner.relationships.length;
+        const nids = this.sql.joinIds([this.sql.ids(from), walked.nids]);
+        inner.nodes.forEach((node, i) => {
+            if (node.variable !== undefined) {
+                select.bind(node.variable, {
+                    kind: 'Entities',
+                    ids: this.every(nids, i, k, k - i),
+                    relationships: false
+                });
+            }
+        });
+        inner.relationships.forEach((r, i) => {
+            if (r.variable !== undefined) {
+                select.bind(r.variable, {
+                    kind: 'Entities',
+                    ids: this.every(walked.eids, i, k, 0),
+                    relationships: true
+                });
+            }
+        });
+        const types = inner.relationships.every((it) => it.types.length > 0)
+            ? [...new Set(inner.relationships.flatMap((it) => it.types))]
+            : [];
+        return { eids: walked.eids, many: true, types, nodes: walked.nids };
+    }
+
+    /**
+     * The ids of the store's list `list` from the one after the first `first`, every `stride`-th, short of the last
+     * `leave`, as a JSON list in its order.
+     */
+    private every(list: string, first: number, stride: number, leave: number): string {
+        const u = this.alias('u');
+        const v = this.alias('v');
+        const listed = this.sql.comparable(
+            json(this.sql.aggregateList(this.sql.scalar(`${v}.id`), `${v}.ord`), { ordered: true })
+        );
+        return (
+            `(SELECT ${listed} FROM (SELECT ${u}.id, ${u}.ord, COUNT(*) OVER () AS cnt FROM ${this.sql.idRows(
+                list,
+                u
+            )}) ${v} ` +
+            `WHERE ${v}.ord > ${first} AND MOD(${v}.ord - ${
+                first + 1
+            }, ${stride}) = 0 AND ${v}.ord <= ${v}.cnt - ${leave})`
+        );
+    }
+
+    /** {@link SqlCypherCompiler.walk}'s rows. On Oracle, no walk is in another's step, for its recursive query holds no `WITH` of its own. */
+    private walked(walk: Walk): Walked {
+        if (!this.sql.walksReadRow && this.stepping) {
+            unsupported(
+                'On Oracle, a variable-length relationship or quantified path pattern in a subquery of a quantified path pattern'
+            );
+        }
+        return this.sql.walk(walk);
     }
 
     /** The nodes whose ids are the store's list `nids`, in its order: null where the list is. */
@@ -1426,6 +1592,9 @@ export class CypherWriter {
         }
         const ids = pattern.nodes.map((node) => this.createNode(node));
         pattern.relationships.forEach((relationship, i) => {
+            if (relationship.group) {
+                unsupported('A quantified path pattern in CREATE or MERGE');
+            }
             if (relationship.range) {
                 unsupported('A variable-length relationship in CREATE or MERGE');
             }
