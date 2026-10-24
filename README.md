@@ -345,6 +345,25 @@ export class UserNode {
 }
 ```
 
+`@EmptyWhenAbsent` reads the kind of collection from the type TypeScript records for the field: `[]` for an array, an
+empty `Set` for a set, and `{}` for an object or a map. A set is stored as a list, and such a field loads it back as
+a set.
+TypeScript records a list declared with a union, such as `string[] | null` under strict null checks, as `Object`, as it
+records a map, so name the kind for such a field, or declare it `tags?: string[]`:
+
+```typescript
+@EmptyWhenAbsent({ kind: 'array' }) tags: string[] | null;     // absent loads as [], not {}
+@EmptyWhenAbsent({ kind: 'set' }) badges: Set<string> | null;  // absent loads as an empty Set
+```
+
+A kind the declared type contradicts, and a field that holds no collection, such as a `string`, are refused when the
+model is built.
+
+Storing a set as a list is a change from 3.2, which wrote a set as it was given: Oracle and Postgres held it as `{}`,
+and Memgraph as an empty map, without its items. An `@EmptyWhenAbsent` set loads such a `{}` as an empty set, and its
+next save stores it as a list. The refusal of `@EmptyWhenAbsent` on a field that holds no collection is new too: such
+a field used to load `{}`.
+
 #### 2. RelationshipFragment: a Relationship's Properties
 
 A `@RelationshipFragment` holds the properties of a relationship, and the node it leads to:

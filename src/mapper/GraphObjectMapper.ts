@@ -1,7 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { Stamps } from '@/model/Stamps';
 import { ModelRegistry } from '@/model/ModelRegistry';
-import { FieldMapping } from '@/model/FieldMapping';
+import { emptyCollection, FieldMapping } from '@/model/FieldMapping';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
@@ -215,7 +215,17 @@ export class GraphObjectMapper {
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         mapping.emptyWhenAbsent.forEach((kind, field) => {
             if (instance[field] == null) {
-                instance[field] = kind === 'array' ? [] : {};
+                instance[field] = emptyCollection(kind);
+            } else if (kind === 'set' && Array.isArray(instance[field])) {
+                // A store holds a set as a list.
+                instance[field] = new Set(instance[field]);
+            } else if (
+                kind === 'set' &&
+                instance[field].constructor === Object &&
+                Object.keys(instance[field]).length === 0
+            ) {
+                // A set saved before sets were stored as lists: JSON text, and Memgraph, held it as {}, without items.
+                instance[field] = new Set();
             }
         });
         return instance;

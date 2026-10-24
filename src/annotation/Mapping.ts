@@ -1,4 +1,4 @@
-import { definePropertyMetadata } from '@/annotation/Metadata';
+import { definePropertyMetadata, EmptyWhenAbsentOptions } from '@/annotation/Metadata';
 
 /**
  * Stores the property as a JSON string, for a value an engine can't store as a property: a list of maps, a map, or a
@@ -18,10 +18,15 @@ export function Default(): PropertyDecorator {
         definePropertyMetadata(prototype, String(property), { default: true });
 }
 
-/** Loads an absent or null collection as an empty one: `[]` for an array, `{}` for an object. */
-export function EmptyWhenAbsent(): PropertyDecorator {
+/**
+ * Loads an absent or null collection as an empty one: `[]` for an array, an empty `Set` for a set, `{}` for an object
+ * or a map. The kind is read from the property's declared type. TypeScript records a union, such as
+ * `string[] | null` under strict null checks, as Object, which can't be told from a map: name the kind for such a
+ * field, `@EmptyWhenAbsent({ kind: 'array' })`, or declare it `tags?: string[]`.
+ */
+export function EmptyWhenAbsent(options: EmptyWhenAbsentOptions = {}): PropertyDecorator {
     return (prototype: object, property: string | symbol) =>
-        definePropertyMetadata(prototype, String(property), { emptyWhenAbsent: true });
+        definePropertyMetadata(prototype, String(property), { emptyWhenAbsent: { kind: options.kind } });
 }
 
 /**
