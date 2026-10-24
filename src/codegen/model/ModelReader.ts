@@ -414,7 +414,9 @@ export class ModelReader {
         const field = this.field(prop);
         const hops = this.keyed(path, ['hops']).hops;
         const options = this.options(path, `@GraphPath ${field}`, 1);
-        if (Array.isArray(hops) && hops.every(isObject) && (!hops.length || hops.some((it) => !it.type))) {
+        // A type given that can't be read is kept, as undefined, apart from one left out.
+        const untyped = (it: Record<string, unknown>): boolean => !('type' in it) || it.type === '';
+        if (Array.isArray(hops) && hops.every(isObject) && (!hops.length || hops.some(untyped))) {
             throw new Error(`@GraphPath on ${field} needs at least one hop, each with a type.`);
         }
         // A hop read wrong would lead the path elsewhere: hops that can't be read are a problem.
@@ -701,8 +703,15 @@ export class ModelReader {
         );
     }
 
+    /** A class's kind, as ModelRegistry's kindOf has it: that of the nearest class in its chain that declares one. */
     private kindOf(decl: TS.ClassDeclaration): string | undefined {
-        return KINDS.find((it) => this.decorator(decl, it));
+        for (const it of this.chain(decl)) {
+            const kind = KINDS.find((name) => this.decorator(it, name));
+            if (kind) {
+                return kind;
+            }
+        }
+        return undefined;
     }
 
     // Types

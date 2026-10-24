@@ -627,6 +627,25 @@ describe('Reading constants and types', () => {
         expect(read(dir).views.map((it: any) => it.id)).toEqual(['src/A#V']);
     });
 
+    it('takes a class that inherits its kind, as ModelRegistry does, as one a field may hold', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphRelationship, GraphView, NodeFragment, Root } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                'export class Sub extends A {}',
+                '@GraphView()',
+                "export class V { @Root() a: Sub; @GraphRelationship({ type: 'T', target: () => Sub }) to: Sub[]; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([]);
+        const view = read(dir).views[0];
+        expect(view.root).toEqual({ field: 'a', fragment: 'src/A#Sub' });
+        expect(view.relationships[0].target).toEqual('src/A#Sub');
+    });
+
     it('names a path that orders more than one hop, as ModelRegistry does', () => {
         const dir = project({
             'src/A.ts': [
@@ -821,7 +840,7 @@ describe('Reading constants and types', () => {
     it('names a stored name, a relationship type or a path it cannot read, rather than write them wrong', () => {
         const dir = project({
             'src/A.ts': [
-                "import { Count, GraphPath, GraphProperty, GraphRelationship, GraphView, NodeFragment, Root, SortedBy } from '@liberation-data/drivine';",
+                "import { Count, GraphPath, GraphProperty, GraphRelationship, GraphView, hop, NodeFragment, Root, SortedBy } from '@liberation-data/drivine';",
                 "const name = (): string => 'n';",
                 "const hops = () => [{ type: 'TO' }];",
                 "@NodeFragment({ labels: ['A'] })",
@@ -837,7 +856,9 @@ describe('Reading constants and types', () => {
                 '@GraphView()',
                 'export class Y { @Root() b: B; @Count(name()) n: number; }',
                 '@GraphView()',
-                "export class Z { @Root() b: B; @SortedBy(name()) @GraphRelationship({ type: 'TO', target: () => B }) to: B[]; }"
+                "export class Z { @Root() b: B; @SortedBy(name()) @GraphRelationship({ type: 'TO', target: () => B }) to: B[]; }",
+                '@GraphView()',
+                'export class Z2 { @Root() b: B; @GraphPath([hop(name()), { type: name() }]) far: B; }'
             ].join('\n')
         });
         const warnings: string[] = [];
@@ -848,7 +869,8 @@ describe('Reading constants and types', () => {
             "Drivine model file: src/A#W: Can't read the hops of @GraphPath W.far. Name each with a literal, a constant or hop().",
             "Drivine model file: src/A#X: Can't read the hops of @GraphPath X.far. Name each with a literal, a constant or hop().",
             "Drivine model file: src/A#Y: Can't read the type of Y.n. Name it with a literal or a constant.",
-            "Drivine model file: src/A#Z: Can't read what @SortedBy Z.to sorts by. Name it with a literal or a constant."
+            "Drivine model file: src/A#Z: Can't read what @SortedBy Z.to sorts by. Name it with a literal or a constant.",
+            "Drivine model file: src/A#Z2: Can't read the hops of @GraphPath Z2.far. Name each with a literal, a constant or hop()."
         ]);
         expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#B']);
         expect(read(dir).views).toEqual([]);
@@ -1057,6 +1079,7 @@ describe('drivine model', () => {
         expect(main(['--help'], out)).toEqual(0);
         expect(main(['other'], out)).toEqual(1);
         expect(main(['model', '--project'], out)).toEqual(1);
+        expect(main(['model', '--project', '--check'], out)).toEqual(1);
         // A mistyped --check writes nothing, and fails, rather than passing.
         const dir = copy(FIXTURE);
         expect(main(['model', '--project', path.join(dir, 'tsconfig.json'), '--chek'], out)).toEqual(1);

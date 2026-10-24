@@ -1853,7 +1853,8 @@ It reads your source with your project's own TypeScript compiler, rather than lo
 decorator marks leaves nothing at run time: so it needs `typescript` installed, and runs none of your code. Each
 class's id is its file's path from the package and its name, `src/fragments/Person#Person`. A decorator's arguments
 are read as the compiler can tell them: literals, constants, enum members, and `() => Class`. It names what it can't
-read, such as a label a function gives, and leaves that class out of the file.
+read, such as a label a function gives, and any class Drivine would refuse when it loads it, and leaves that class out
+of the file.
 
 Keep the file in source control, as you would a lock file: a change to the model shows in review, Studio can read it
 straight from your repository, and `--check` in CI says when it is stale. A class you remove stays in the file, marked

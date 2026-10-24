@@ -59,5 +59,7 @@ function projectOf(options: string[]): string | undefined {
     const at = options.indexOf('--project');
     // A mistyped --check must not pass in CI by writing the file instead.
     const unknown = options.filter((it, i) => it !== '--check' && i !== at && (at < 0 || i !== at + 1));
-    return unknown.length ? undefined : at >= 0 ? options[at + 1] : 'tsconfig.json';
+    const project = at >= 0 ? options[at + 1] : 'tsconfig.json';
+    // --project with no path after it, as in `--project --check`, names no project.
+    return unknown.length || project?.startsWith('--') ? undefined : project;
 }
