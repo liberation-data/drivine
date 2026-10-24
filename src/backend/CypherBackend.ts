@@ -228,6 +228,10 @@ export class CypherBackend implements GraphBackend {
         return QueryRenderer.render(fn, target, this.grammar, NODE_ALIAS);
     }
 
+    written(predicate: string): string {
+        return predicate;
+    }
+
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
         return QueryRenderer.renderWhere(fn, target, this.grammar, NODE_ALIAS);
     }
