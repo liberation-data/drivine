@@ -50,7 +50,11 @@ export abstract class SqlCypherCompiler {
     /** Whether the statement is a procedure, which declares no function of its own a query of it may call. */
     procedural = false;
 
-    /** Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would take from its group. */
+    /**
+     * Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would
+     * take from its group, nor in a term a projection beside a variable-length walk sorts by that is none of its items
+     * (see `CypherWriter.sorts`).
+     */
     sharing = true;
 
     /**

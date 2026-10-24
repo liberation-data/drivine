@@ -6,6 +6,12 @@ export class Select {
     readonly where: string[] = [];
     readonly bound: Map<string, Value> = new Map();
 
+    /**
+     * Whether a variable-length walk is among its sources, or among those of a `WITH` it reads: a term it sorts by is
+     * then bound in no subquery (see `CypherWriter.sorts`).
+     */
+    walks = false;
+
     /** The order its rows are read in, where it has one: each term, and whether it descends. */
     readonly order: [string, boolean][] = [];
 

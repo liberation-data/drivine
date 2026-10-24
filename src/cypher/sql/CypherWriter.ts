@@ -522,6 +522,7 @@ export class CypherWriter {
         const projected = this.project(select, clause.projection, false);
         const name = this.alias('w');
         const next = new Select(outer);
+        next.walks = select.walks;
         next.source(`(\n${indent(projected.sql)}\n) ${name}`);
         projected.scope.forEach((value, variable) => next.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => next.order.push([`${name}.${column}`, descending]));
@@ -990,6 +991,7 @@ export class CypherWriter {
             seed
         });
         select.source(walked.source);
+        select.walks = true;
         select.where.push(walked.condition);
         // A variable on it is the list of its relationships.
         if (relationship.variable !== undefined) {
@@ -1089,6 +1091,7 @@ export class CypherWriter {
             seed
         });
         select.source(walked.source);
+        select.walks = true;
         select.where.push(walked.condition);
         // The step's nodes and relationships, k of each a repetition, in turn: each variable is every k-th of them.
         const k = inner.relationships.length;
@@ -2049,9 +2052,18 @@ export class CypherWriter {
                 after.set(column, this.sortable(this.expression(sort.expression, byName)));
             } else {
                 // One that aggregates reads the rows it aggregates, as an item does; so does one that reads an aggregate
-                // distinctFirst worked out first, which no item is.
+                // distinctFirst worked out first, which no item is. Beside a variable-length walk it binds no value in a
+                // subquery: carried out of a WITH's query, one so bound closes Oracle's (23.26) session (ORA-03113), as
+                // `WITH b ORDER BY toString(coalesce(b.name, b.title))` did, its argument long enough to be bound. Elsewhere
+                // it does, so operations nested in it compile to a statement that grows with them, not exponentially.
                 const scope = new Map([...select.scope, ...compiled]);
-                carried(column, () => this.expression(sort.expression, scope), sort.expression);
+                const term = (): void =>
+                    carried(column, () => this.expression(sort.expression, scope), sort.expression);
+                if (select.walks) {
+                    this.unshared(term);
+                } else {
+                    term();
+                }
             }
             return [column, sort.descending];
         });
@@ -2277,9 +2289,11 @@ export class CypherWriter {
 
     /** `work`, with no value bound in a subquery where `expression` aggregates: see {@link SqlCypherCompiler.sharing}. */
     private aggregating<T>(expression: Expression, work: () => T): T {
-        if (!contains(expression, isAggregate)) {
-            return work();
-        }
+        return contains(expression, isAggregate) ? this.unshared(work) : work();
+    }
+
+    /** `work`, with no value bound in a subquery: see {@link SqlCypherCompiler.sharing}. */
+    private unshared<T>(work: () => T): T {
         const was = this.sql.sharing;
         this.sql.sharing = false;
         try {
