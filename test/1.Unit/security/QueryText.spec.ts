@@ -49,6 +49,12 @@ describe('query text from data', () => {
             expect(hasLabels('n', [`x"y'z`])).toEqual(`JSON_EXISTS(n.labels, '$?(@ == "x\\"y''z")')`);
             expect(hasLabels('n', ['x\\") || 1'])).toEqual(`JSON_EXISTS(n.labels, '$?(@ == "x\\\\\\") || 1")')`);
         });
+
+        it("should escape a label after the first alike, in the text it's found in", () => {
+            expect(hasLabels('n', ['A', `x\\"') > 0 OR 1 = 1 --`])).toEqual(
+                `JSON_EXISTS(n.labels, '$?(@ == "A")') AND INSTR(JSON_SERIALIZE(n.labels), '"x\\\\\\"'') > 0 OR 1 = 1 --"') > 0`
+            );
+        });
     });
 
     describe('skip and limit', () => {

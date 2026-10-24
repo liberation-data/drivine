@@ -16,6 +16,11 @@ import {
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Neo4j plans each save statement the first time it sees it. A test here saves a view in a few shapes, each planned
+// anew in about 200 ms and then run in about 10: one test took 1.4 s with the plans cold and 64 ms warm. On CI, beside
+// the suites running in parallel, it can pass Jest's 5 seconds.
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['StampTest', 'Person'] })
 class Person {
     @NodeId() id: string;
