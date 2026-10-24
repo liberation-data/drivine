@@ -41,9 +41,10 @@ export interface RelationshipValue {
 
 /**
  * A list of nodes, or with `relationships` of relationships: `ids`, the JSON list of their ids, in order. It is given as
- * their properties, and read as the nodes or relationships themselves where it is unwound, so a write reaches them.
- * Where `collect` gathers it, `gathered` is the JSON list of their properties, gathered beside the ids, for a store
- * reads no aggregate of the query it is in from a subquery.
+ * their properties, and read as the nodes or relationships themselves where it is unwound, so a write reaches them,
+ * and where it is compared, indexed, searched with `IN` or iterated, so they compare by their ids. Where `collect` gathers
+ * it, `gathered` is the JSON list of their properties, gathered beside the ids, for a store reads no aggregate of the
+ * query it is in from a subquery.
  */
 export interface EntitiesValue {
     readonly kind: 'Entities';

@@ -1580,7 +1580,9 @@ const names = await pm.query<string>(
 - The graph's tables must be there. Oracle makes them on its first connection; on Postgres an object manager makes them,
   so a persistence manager that runs Cypher on a graph no object manager has worked on runs
   `new QuerySpecification(new PostgresGraph(graph).ensuring)` first.
-- A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties.
+- A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties,
+  and so is each node or relationship of a list of them (`collect(n)`, `nodes(p)`); compared, indexed, searched with
+  `IN` or iterated, its items are the nodes themselves, so two with equal properties differ.
 - A statement that writes (`CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`, `FOREACH`) runs as one statement, applied whole
   or not at all: an anonymous PL/SQL block on Oracle, and a function of the session's own (`pg_temp`) on Postgres.
 - Variable-length relationships (`-[:R*1..3]->`, `-[:R]->{1,3}`) and quantified path patterns
@@ -1591,6 +1593,8 @@ const names = await pm.query<string>(
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A slice of a list
   (list[from..to]) is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own.
+- A parameter is bound as JSON, so a number that is whole is a whole number, though it was written `2.0`:
+  `toString($f)` of it gives `'2'`, where Neo4j, which the driver sends a number to as a float, gives `'2.0'`.
 
 ## Schema Management (Indexes & Constraints)
 

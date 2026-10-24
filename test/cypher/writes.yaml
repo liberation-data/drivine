@@ -129,6 +129,14 @@ cases:
         parameters: {n: 9007199254740993}
         rows: ["big"]
 
+  - name: "Text that holds a dollar quote"
+    description: "A write whose text holds $cy$, or another dollar-quote tag, writes it as text."
+    steps:
+      - cypher: "CREATE (n:CyWrite {name: 'a$cy$b', other: '$cy1$ $$ $cy_$'}) RETURN [n.name, n.other]"
+        rows: [["a$cy$b", "$cy1$ $$ $cy_$"]]
+      - cypher: "MATCH (n:CyWrite) RETURN [n.name, n.other]"
+        rows: [["a$cy$b", "$cy1$ $$ $cy_$"]]
+
   - name: "SET and REMOVE on nodes"
     description: "SET writes properties, maps (null removes a key) and labels; REMOVE takes them away."
     steps:
@@ -204,6 +212,21 @@ cases:
         parameters: {title: "Notes"}
         rows: [["Notes", 1]]
 
+  - name: "Reading clauses straight after a write"
+    description: "A reading clause straight after a writing clause, with no WITH between them, reads the rows the write leaves."
+    steps:
+      - cypher: "CREATE (n:CyWrite {name: 'A'}) UNWIND [1, 2, 3] AS x RETURN count(x)"
+        rows: [3]
+      - cypher: "MATCH (n:CyWrite) SET n.seen = true UNWIND [n.name, 'B'] AS x RETURN x ORDER BY x"
+        rows: ["A", "B"]
+      - cypher: "MERGE (n:CyWrite {name: 'A'}) UNWIND [1, 2] AS x CREATE (:CyWrite {name: n.name + toString(x)})"
+      - cypher: "CREATE (n:CyWrite {name: 'C'}) WITH n MATCH (m:CyWrite) RETURN count(m)"
+        rows: [4]
+      - cypher: "CREATE (n:CyWrite {name: 'D'}) MATCH (m:CyWrite) RETURN count(m)"
+        rows: [5]
+      - cypher: "MATCH (n:CyWrite {name: 'D'}) DELETE n UNWIND [1] AS x MATCH (m:CyWrite) RETURN count(m)"
+        rows: [4]
+
   - name: "Row order through writes"
     description: "Rows keep their order through writes; a WITH between writes orders, filters and counts them."
     steps:
@@ -274,6 +297,25 @@ cases:
       - cypher: "MATCH (n:CyWrite) SET n.degree = COUNT { (n)--() }, n.leaf = NOT EXISTS { MATCH (n)-[:NEXT]->() } RETURN [n.id, n.degree, n.leaf] ORDER BY n.id"
         rows: [["a", 2, false], ["b", 2, false], ["c", 1, true], ["d", 1, true]]
 
+  - name: "SET from a subquery inside a list expression"
+    description: "A COUNT { } or EXISTS { } inside any(), a list comprehension or reduce() in a write reads the row being written."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (n:CyWrite) SET n.busy = any(k IN [1] WHERE COUNT { (n)-->() } >= k) RETURN [n.id, n.busy] ORDER BY n.id"
+        rows: [["a", true], ["b", true], ["c", false], ["d", false]]
+      - cypher: "MATCH (n:CyWrite) SET n.out = [k IN [1, 2] | COUNT { (n)-->() } * k] RETURN [n.id, n.out] ORDER BY n.id"
+        rows: [["a", [2, 4]], ["b", [1, 2]], ["c", [0, 0]], ["d", [0, 0]]]
+      - cypher: "MATCH (n:CyWrite) SET n.leaf = size([k IN [1] WHERE NOT EXISTS { (n)-->() }]) = 1 RETURN [n.id, n.leaf] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+      - except: [oracle]
+        cypher: "MATCH (n:CyWrite) SET n.total = reduce(t = 0, k IN [1, 2] | t + COUNT { (n)-->() }) RETURN [n.id, n.total] ORDER BY n.id"
+        rows: [["a", 4], ["b", 2], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (n:CyWrite) SET n.kids = [(n)-->(m) | m.id] RETURN [n.id, n.kids] ORDER BY n.id"
+        unorderedLists: true
+        rows: [["a", ["b", "d"]], ["b", ["c"]], ["c", []], ["d", []]]
+      - cypher: "MATCH (n:CyWrite) SET n.self = COUNT { (m:CyWrite {id: n.id}) } RETURN [n.id, n.self] ORDER BY n.id"
+        rows: [["a", 1], ["b", 1], ["c", 1], ["d", 1]]
+
   - name: "FOREACH"
     description: "FOREACH runs its clauses for each item, and leaves the rows as they were."
     steps:
@@ -332,6 +374,18 @@ cases:
         cypher: "MATCH (x:CyWrite) WHERE x.id STARTS WITH 'batch' RETURN count(x)"
         rows: [3]
 
+  - name: "CALL that writes keeps the outer variables"
+    description: "A variable bound again inside a CALL { } that writes and returns rows keeps its own value outside it."
+    steps:
+      - cypher: "WITH 'outer' AS a CALL { WITH a WITH 'inner' AS a CREATE (:CyWrite {name: a}) RETURN 1 AS one } RETURN [a, one]"
+        rows: [["outer", 1]]
+      - cypher: "MATCH (n:CyWrite) RETURN n.name"
+        rows: ["inner"]
+      - cypher: "MATCH (n:CyWrite {name: 'inner'}) CALL { WITH n MATCH (m:CyWrite {name: 'inner'}) CREATE (o:CyWrite {name: 'other'}) WITH o AS n SET n.made = true RETURN n.name AS made } RETURN [n.name, made]"
+        rows: [["inner", "other"]]
+      - cypher: "WITH 'outer' AS a CALL (a) { WITH 'inner' AS b CREATE (:CyWrite {name: b}) RETURN b + '!' AS c } RETURN [a, c]"
+        rows: [["outer", "inner!"]]
+
   - name: "Writing through lists"
     description: "A list of nodes or relationships refers to them, so writing to an item writes to the node."
     steps:
@@ -361,6 +415,18 @@ cases:
       - note: A path, and a list of its nodes, that are null, carried past a write.
         cypher: "MATCH (c:CyWrite {id: 'c'}) OPTIONAL MATCH p = (c)-[:NEXT]->() WITH p, nodes(p) AS ns CREATE (:CyWrite {id: 'y'}) RETURN [length(p), ns, p IS NULL]"
         rows: [[null, null, true]]
+
+  - name: "Nodes with equal properties are different"
+    description: "Two nodes with the same properties are different, as items of a list too, and collect(DISTINCT) keeps both."
+    steps:
+      - cypher: "CREATE (a:CyWrite {v: 1}), (b:CyWrite {v: 1}) RETURN [a = b, [a] = [b], a IN [b], a IN [a], [a] = [a]]"
+        rows: [[false, false, false, true, true]]
+      - cypher: "MATCH (n:CyWrite) WITH collect(n) AS ns RETURN [ns[0] = ns[1], ns[0] = ns[0], size([x IN ns WHERE x = ns[0]])]"
+        rows: [[false, true, 1]]
+      - cypher: "MATCH (n:CyWrite) RETURN [count(DISTINCT n), size(collect(DISTINCT n))]"
+        rows: [[2, 2]]
+      - cypher: "MATCH (n:CyWrite) WITH collect(n) AS ns UNWIND ns AS n RETURN count(DISTINCT n)"
+        rows: [2]
 
   - name: "Walks around a cycle"
     description: "A walk around a directed cycle takes each relationship once, and so comes back to the node it started from once."
@@ -404,6 +470,27 @@ cases:
       - cypher: "MATCH (n:CyWrite {reached: true}) RETURN n.id ORDER BY n.id"
         except: [memgraph, falkordb, neptune]
         rows: ["b", "c"]
+
+  - name: "A parameter past 32 KB"
+    description: "A write binds a parameter whose JSON is past 32 KB, and writes it as it went. Oracle compares no JSON that long, so the value is only read back."
+    steps:
+      - cypher: "CREATE (n:CyWrite {id: 1, text: $big}) RETURN n.id"
+        parameters: {big: {$repeat: "x", times: 40000}}
+        rows: [1]
+      - cypher: "MERGE (n:CyWrite {id: $props.id}) SET n += $props RETURN n.id"
+        parameters: {props: {id: 2, more: {$repeat: "z", times: 40000}}}
+        rows: [2]
+      - cypher: "MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id"
+        rows: [{id: 1, text: {$repeat: "x", times: 40000}}, {id: 2, more: {$repeat: "z", times: 40000}}]
+
+  - name: "A float with no fraction"
+    description: "A float that is a whole number, such as 2.0, is written and read back as a float."
+    steps:
+      - cypher: "CREATE (n:CyWrite {f: $f, g: 3.0}) SET n += $m RETURN [n.f, n.g, n.h]"
+        parameters: {f: 2.0, m: {h: 4.0}}
+        rows: [[2.0, 3.0, 4.0]]
+      - cypher: "MATCH (n:CyWrite) RETURN properties(n)"
+        rows: [{f: 2.0, g: 3.0, h: 4.0}]
 
   - name: "Write refused on SQL stores"
     description: "Write syntax the compiler doesn't handle yet is refused on SQL stores, naming what it is."

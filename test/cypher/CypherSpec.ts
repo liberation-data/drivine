@@ -45,14 +45,52 @@ const GROUPS: Record<string, string[]> = {
     sql: ['postgres', 'oracle', 'sqlite']
 };
 
+/** Why a step is skipped here, and what the step holds for that to be so: one that no longer holds it fails. */
+interface Skip {
+    why: string;
+    /** The stores or groups it is skipped on: every store where it is left out. */
+    on?: string[];
+    holds: (step: CypherStep) => boolean;
+}
+
+/** A JavaScript number holds no whole number beyond 2^53: these steps bind or expect one, such as 9007199254740993. */
+const BEYOND_2_53: Skip = {
+    why: 'a number beyond 2^53',
+    holds: (step) => /[0-9]{16}/.test(JSON.stringify(step, replacer))
+};
+
+/**
+ * A JavaScript number does not tell a float that is a whole number, 2.0, from the whole number 2, so a SQL store, which
+ * binds a parameter as JSON, binds such a parameter as a whole number: these steps bind one, and expect it back as a
+ * float. Neo4j's driver sends a number as a float, so Neo4j runs them. The spec reads a whole number as a `bigint`, so a
+ * parameter that is a `number` and whole was written as a float.
+ */
+const WHOLE_FLOAT_PARAMETER: Skip = {
+    why: 'a float parameter that is a whole number',
+    on: ['sql'],
+    holds: (step) => wholeFloat(step.parameters)
+};
+
+function wholeFloat(value: any): boolean {
+    if (typeof value === 'number') {
+        return Number.isInteger(value);
+    }
+    return value !== null && typeof value === 'object' && Object.values(value).some(wholeFloat);
+}
+
 /**
  * The steps a store here does not run, by file, case and step (from 1), and why. Nothing else is skipped: a store that
- * differs says so with `except` in the spec.
+ * differs says so with `except` in the spec. The spec's README names the steps beyond 2^53 as those such a library
+ * skips; the whole float parameter's is skipped for the same cause, what a JavaScript number cannot hold.
  */
-const SKIPPED: Record<string, Record<string, number[]>> = {
-    // A JavaScript number holds no whole number beyond 2^53, and these steps bind or expect one (9007199254740993):
-    // the spec's README names them as the steps such a library skips.
-    'writes.yaml': { 'Typical app round trip': [19, 20, 21] }
+const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
+    'queries.yaml': {
+        // The greatest whole number and the least, written as literals.
+        'Integer bounds': [[1], BEYOND_2_53],
+        // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0".
+        'A float parameter with no fraction': [[1], WHOLE_FLOAT_PARAMETER]
+    },
+    'writes.yaml': { 'Typical app round trip': [[19, 20, 21], BEYOND_2_53] }
 };
 
 /**
@@ -65,19 +103,24 @@ export function loadSpec(file: string): CypherSpec {
 
 /** Whether `step` runs on `store`, by its name or a group it is in. */
 export function runsOn(step: CypherStep, store: string): boolean {
-    const named = (names: string[]): boolean => names.some((it) => it === store || GROUPS[it]?.includes(store));
-    return (step.only === undefined || named(step.only)) && !named(step.except ?? []);
+    return (step.only === undefined || named(step.only, store)) && !named(step.except ?? [], store);
 }
 
-/** Whether the step at `index` (from 0) of `case` in `file` is skipped here: see {@link SKIPPED}. */
-export function skipped(file: string, cypherCase: CypherCase, index: number): boolean {
-    const steps = SKIPPED[file]?.[cypherCase.name] ?? [];
-    if (steps.includes(index + 1) && !/[0-9]{16}/.test(JSON.stringify(cypherCase.steps[index], replacer))) {
-        throw new Error(
-            `${file}, ${cypherCase.name}, step ${index + 1} is skipped for a number beyond 2^53, and has none.`
-        );
+/** Whether `names` names `store`, or a group it is in. */
+function named(names: string[], store: string): boolean {
+    return names.some((it) => it === store || GROUPS[it]?.includes(store));
+}
+
+/** Whether the step at `index` (from 0) of `case` in `file` is skipped on `store`: see {@link SKIPPED}. */
+export function skipped(file: string, cypherCase: CypherCase, index: number, store: string): boolean {
+    const [steps, skip] = SKIPPED[file]?.[cypherCase.name] ?? [[], undefined];
+    if (!skip || !steps.includes(index + 1)) {
+        return false;
     }
-    return steps.includes(index + 1);
+    if (!skip.holds(cypherCase.steps[index])) {
+        throw new Error(`${file}, ${cypherCase.name}, step ${index + 1} is skipped for ${skip.why}, and has none.`);
+    }
+    return skip.on === undefined || named(skip.on, store);
 }
 
 /** A statement as drivine4j's runner gives it, its indent and the blank lines around it taken off. */

@@ -155,7 +155,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 await query(spec.graph);
             }
             for (let i = 0; i < cypherCase.steps.length; i++) {
-                if (runsOn(cypherCase.steps[i], store.name) && !skipped(file, cypherCase, i)) {
+                if (runsOn(cypherCase.steps[i], store.name) && !skipped(file, cypherCase, i, store.name)) {
                     await check(cypherCase, i, store.name, async (step) => query(step.cypher, step.parameters ?? {}));
                 }
             }
@@ -193,6 +193,309 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             const [a, b] = await query('UNWIND [1, 2] AS x RETURN randomUUID()');
             expect(a).not.toEqual(b);
             expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+        });
+
+        it('toString of a float that is a whole number keeps its fraction, as in Cypher', async () => {
+            // Not in the spec, whose case binds the float as a parameter, which a JavaScript number cannot keep a float.
+            // Oracle writes a double of 2 as 2 (liberation-data/drivine#243). A quotient is left out: on Postgres it keeps
+            // numeric's scale (liberation-data/drivine#245).
+            const [row] = await query(
+                'RETURN [toString(2.0), toString(2.5), toString(1.5 * 2), toString(7), toString(-3.0)]'
+            );
+            expect(row).toEqual(['2.0', '2.5', '3.0', '7', '-3.0']);
+            expect(await query("RETURN toString('a')")).toEqual(['a']);
+            // A float too small for Oracle's NUMBER, which reads it as 0, a whole number.
+            expect(Number((await query('RETURN toString(1.0E-200)'))[0])).toEqual(1e-200);
+        });
+
+        it('toString of a float that is a whole number, written and read back, keeps its fraction', async () => {
+            expect(await query('CREATE (n:CyWrite {g: 3.0}) RETURN toString(n.g)')).toEqual(['3.0']);
+            expect(await query('MATCH (n:CyWrite) RETURN toString(n.g)')).toEqual(['3.0']);
+        });
+
+        /** Writes the graph of the spec's `queries.yaml`, which the tests that read it start from. */
+        const seed = async (): Promise<void> => {
+            await query(trimIndent(loadSpec('queries.yaml').graph!));
+        };
+
+        it('a walk returns and sorts by toString of a long expression of where it ends', async () => {
+            await seed();
+            // On Oracle toString reads its argument twice, so one this long is bound in a subquery: beside a walk, as
+            // drivine4j#162's sort was.
+            const walk = "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN toString(coalesce(b.name, b.title)) AS n";
+            const rows = [
+                'Carrie',
+                'Johnny Mnemonic',
+                'Keanu',
+                'The Matrix',
+                'The Matrix',
+                'The Matrix',
+                'The Matrix Reloaded',
+                'The Matrix Reloaded'
+            ];
+            expect((await query(walk)).sort()).toEqual(rows);
+            expect(await query(`${walk} ORDER BY n`)).toEqual(rows);
+        });
+
+        it('collect(DISTINCT) beside grouping keys, other aggregates, an order, a page and a variable outside its aggregates', async () => {
+            // Not in the spec: distinctFirst's grouping WITH, and the projection over it.
+            await seed();
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, count(*) + size(collect(DISTINCT m.title)) ORDER BY count(*) DESC, p.name SKIP 1 LIMIT 1'
+                )
+            ).toEqual([['Carrie', 4]]);
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, collect(DISTINCT m) AS ms WHERE size(ms) > 1 RETURN p.name, size(ms) ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 2],
+                ['Keanu', 3]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, size(collect(DISTINCT m.title)) + p.born AS x RETURN p.name, x ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 1969],
+                ['Keanu', 1967],
+                ['Laurence', 1962]
+            ]);
+        });
+
+        it('collect(DISTINCT) in a DISTINCT projection ordered by a key property or an aggregate no item is', async () => {
+            // Not in the spec: the projection over distinctFirst's grouping WITH orders by what that WITH holds.
+            await seed();
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH DISTINCT p, size(collect(DISTINCT m.title)) AS n ORDER BY p.born DESC RETURN p.name, n'
+                )
+            ).toEqual([
+                ['Carrie', 2],
+                ['Keanu', 3],
+                ['Laurence', 1]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name, size(collect(DISTINCT m.title)) ORDER BY count(*)'
+                )
+            ).toEqual([
+                ['Laurence', 1],
+                ['Carrie', 2],
+                ['Keanu', 3]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS name, m.title AS t ' +
+                        "RETURN name AS nm, size(collect(DISTINCT t)) ORDER BY any(x IN collect(DISTINCT t) WHERE x STARTS WITH 'J' AND name = 'Keanu'), nm"
+                )
+            ).toEqual([
+                ['Carrie', 2],
+                ['Laurence', 1],
+                ['Keanu', 3]
+            ]);
+        });
+
+        it('collect(DISTINCT) beside an item named after a variable another item is, ordered by that name', async () => {
+            // Not in the spec: in an order term, an item's name is that item, not the variable it shadows.
+            await seed();
+            const rows = await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS person, p.name AS p, size(collect(DISTINCT m.title)) ORDER BY toLower(p)'
+            );
+            expect(rows.map((it) => it.slice(1))).toEqual([
+                ['Carrie', 2],
+                ['Keanu', 3],
+                ['Laurence', 1]
+            ]);
+        });
+
+        it('an item of the relationships collect gathers is read in the projection that gathers them', async () => {
+            // Not in the spec: Oracle reads no aggregate from a subquery, so the item is read from what collect gathered.
+            await seed();
+            expect(
+                await query(
+                    "MATCH (p:Person)-[r:ACTED_IN]->() WHERE p.name <> 'Keanu' RETURN p.name, collect(r)[0].role ORDER BY p.name"
+                )
+            ).toEqual([
+                ['Carrie', 'Trinity'],
+                ['Laurence', 'Morpheus']
+            ]);
+            expect(
+                await query(
+                    "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() MATCH (:Person {name: 'Carrie'})-[s:ACTED_IN]->() " +
+                        'RETURN size(collect(r) + collect(s)), (collect(r) + collect(s))[0].role, (collect(r) + collect(s))[-1].role'
+                )
+            ).toEqual([[4, 'Morpheus', 'Trinity']]);
+            expect(
+                await query(
+                    "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() WITH collect(r) AS rs RETURN rs[9] IS NULL, rs[-9] IS NULL"
+                )
+            ).toEqual([[true, true]]);
+        });
+
+        it('collect(DISTINCT) under a comprehension, a quantifier or a reduce that names a grouping key in its body', async () => {
+            // Not in the spec: distinctFirst's grouping WITH keeps each variable such a body names, outside the aggregate.
+            await seed();
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS name, m.title AS t ' +
+                        'RETURN name, size([x IN collect(DISTINCT t) WHERE x <> name]), any(x IN collect(DISTINCT t) WHERE x = name), ' +
+                        'reduce(n = 0, x IN collect(DISTINCT t) | n + size(name)) ORDER BY name'
+                )
+            ).toEqual([
+                ['Carrie', 2, false, 12],
+                ['Keanu', 3, false, 15],
+                ['Laurence', 1, false, 8]
+            ]);
+        });
+
+        it('collect(DISTINCT) beside a pattern or a subquery that names a grouping key', async () => {
+            // Not in the spec: distinctFirst's grouping WITH keeps each variable a pattern or a subquery names, outside the
+            // aggregate.
+            await seed();
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, size(collect(DISTINCT m.title)) + COUNT { (p)-[:KNOWS]->() } AS x, ' +
+                        'size([(p)-[:KNOWS]->(f) | f.name] + collect(DISTINCT m.title)) AS y, ' +
+                        "size(collect(DISTINCT m.title)) > 2 OR EXISTS { (p)-[:KNOWS]->(:Person {name: 'Keanu'}) } AS z " +
+                        'RETURN p.name, x, y, z ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 2, 2, false],
+                ['Keanu', 4, 4, true],
+                ['Laurence', 2, 2, true]
+            ]);
+        });
+
+        it('collect(DISTINCT) of dates keeps each once, as dates', async () => {
+            // Not in the spec: what distinctFirst keeps of a collection is still of the kind collect gathered.
+            const dates = "UNWIND [date('2020-01-01'), date('2020-01-01'), date('2021-05-01')] AS d";
+            expect(await query(`${dates} WITH collect(DISTINCT d) AS ds RETURN [x IN ds | x.year]`)).toEqual([
+                [2020, 2021]
+            ]);
+            expect(await query(`${dates} RETURN collect(DISTINCT d)[1].month`)).toEqual([5]);
+        });
+
+        it('a float that is a whole number, collected once each, stays a float', async () => {
+            // Not in the spec yet: what distinctFirst keeps of a collection is the items collect gathered, not their text read
+            // back. A JavaScript number does not tell 1.0 from 1, so toString tells them apart.
+            expect(
+                await query('UNWIND [1.0, 2.5, 1.0] AS x WITH collect(DISTINCT x) AS xs RETURN [x IN xs | toString(x)]')
+            ).toEqual([['1.0', '2.5']]);
+        });
+
+        it('an item past 4,000 bytes, and a map with its keys in another order, collected once each', async () => {
+            // Not in the spec yet: Oracle keeps each item once as JSON compares items, not as their text does.
+            const big = 'y'.repeat(5_000);
+            expect(await query("UNWIND [[$b], [$b], 'a'] AS x RETURN collect(DISTINCT x)", { b: big })).toEqual([
+                [[big], 'a']
+            ]);
+            expect(await query('UNWIND [{a: 1, b: 2}, {b: 2, a: 1}] AS x RETURN collect(DISTINCT x)')).toEqual([
+                [{ a: 1, b: 2 }]
+            ]);
+        });
+
+        it('a walk sorts by coalesce of an aggregate collected once each, and a DISTINCT projection by coalesce of an item', async () => {
+            // Not in the spec yet: an order term that reads an aggregate distinctFirst worked out first is carried out,
+            // beside a walk, as the sort of liberation-data/drivine#230 is.
+            await seed();
+            expect(
+                await query(
+                    "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN coalesce(b.name, b.title) AS n, count(*) " +
+                        'ORDER BY coalesce(head(collect(DISTINCT b.born)), 0), n'
+                )
+            ).toEqual([
+                ['Johnny Mnemonic', 1],
+                ['The Matrix', 3],
+                ['The Matrix Reloaded', 2],
+                ['Keanu', 1],
+                ['Carrie', 1]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name AS n, collect(DISTINCT m.title) AS ts ' +
+                        "ORDER BY coalesce(ts[2], 'zz'), n SKIP 1 LIMIT 2"
+                )
+            ).toEqual([
+                ['Carrie', ['The Matrix', 'The Matrix Reloaded']],
+                ['Laurence', ['The Matrix']]
+            ]);
+        });
+
+        it("an item of a pattern comprehension's relationships is compared by its id", async () => {
+            // Not in the spec: a pattern comprehension gathers their properties beside their ids, as collect does, but in a
+            // subquery.
+            await seed();
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) WITH [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r] AS rs, a " +
+                        "RETURN [[(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][0] = [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][1], " +
+                        "[(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][1] IN rs, [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][0].role = 'Neo']"
+                )
+            ).toEqual([[false, true, true]]);
+        });
+
+        it('a list comprehension over nodes or relationships that keeps them gives a list of them, compared by id', async () => {
+            // Not in the spec: what entityComprehension keeps, with no projection or one of the item, is still a list of nodes
+            // or relationships.
+            await seed();
+            expect(
+                await query(
+                    "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN {role: 'Neo'}]->() WITH collect(r) AS rs " +
+                        'RETURN [[x IN rs WHERE x <> rs[0]][0] = rs[1], [x IN rs | x][0] = rs[1], size([x IN rs WHERE x = rs[0] | x]), ' +
+                        'rs[0] IN [x IN rs WHERE x <> rs[0]], [x IN rs | x.role]]'
+                )
+            ).toEqual([[true, false, 1, false, ['Neo', 'Neo']]]);
+            expect(
+                await query(
+                    "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*2]->(b) " +
+                        "RETURN [[n IN nodes(p) WHERE n.name <> 'Laurence'][0] = nodes(p)[1], b IN [n IN nodes(p) | n], [n IN nodes(p) WHERE n = b | n.name]]"
+                )
+            ).toEqual([[true, true, ['Carrie']]]);
+        });
+
+        it("a path's nodes or relationships added together are a list of them, and of no path, null", async () => {
+            // Not in the spec: lists of nodes no collect gathers, added, indexed and iterated by id; over a null list, null.
+            await seed();
+            expect(
+                await query(
+                    "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*2]->() " +
+                        'RETURN [size(nodes(p) + nodes(p)), (nodes(p) + nodes(p))[3] = nodes(p)[0], (nodes(p) + nodes(p))[3] = nodes(p)[1], ' +
+                        '[n IN nodes(p) + nodes(p) | n.name], relationships(p)[1] IN relationships(p) + relationships(p), size(relationships(p) + relationships(p))]'
+                )
+            ).toEqual([[6, true, false, ['Laurence', 'Keanu', 'Carrie', 'Laurence', 'Keanu', 'Carrie'], true, 4]]);
+            expect(
+                await query(
+                    'OPTIONAL MATCH p = (:Nope)-->() RETURN [[n IN nodes(p) | n.name], [n IN nodes(p) WHERE true], nodes(p)[0]]'
+                )
+            ).toEqual([[null, null, null]]);
+        });
+
+        it('CALLs that write, nested, give each row its own variables with the nodes they return', async () => {
+            // Not in the spec: a caller row at each depth, merged with a node returned from below it.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS x CALL { WITH x CREATE (a:CyWrite {x: x}) WITH a, x ' +
+                        'CALL { WITH a, x CREATE (b:CyWrite {y: x * 10}) RETURN b } RETURN a, b } RETURN [x, a.x, b.y]'
+                )
+            ).toEqual([
+                [1, 1, 10],
+                [2, 2, 20]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS i CALL { WITH i CREATE (n:CyWrite {i: i}) RETURN n } SET n.j = i * 10 RETURN [i, n.i, n.j] ORDER BY i'
+                )
+            ).toEqual([
+                [1, 1, 10],
+                [2, 2, 20]
+            ]);
+            expect(
+                await query(
+                    "WITH date('2020-01-02') AS d CALL { CREATE (n:CyWrite) RETURN date('2021-03-04') AS e } RETURN [d.year, e.month]"
+                )
+            ).toEqual([[2020, 3]]);
         });
 
         it('a day and a moment are their ISO text', async () => {

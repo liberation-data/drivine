@@ -55,13 +55,15 @@ oC_SingleQuery
                | oC_MultiPartQuery
                ;
 
+// drivine4j: a reading clause may follow an updating clause with no WITH between them, `CREATE (n) UNWIND [1, 2] AS x
+// RETURN x`, as in Neo4j's Cypher. A query that returns nothing still ends in an updating clause.
 oC_SinglePartQuery
                :  ( ( oC_ReadingClause SP? )* oC_Return )
-                   | ( ( oC_ReadingClause SP? )* oC_UpdatingClause ( SP? oC_UpdatingClause )* ( SP? oC_Return )? )
+                   | ( ( oC_ReadingClause SP? )* oC_UpdatingClause ( ( SP? oC_ReadingClause )* SP? oC_UpdatingClause )* ( ( SP? oC_ReadingClause )* SP? oC_Return )? )
                    ;
 
 oC_MultiPartQuery
-              :  ( ( oC_ReadingClause SP? )* ( oC_UpdatingClause SP? )* oC_With SP? )+ oC_SinglePartQuery ;
+              :  ( ( ( oC_ReadingClause | oC_UpdatingClause ) SP? )* oC_With SP? )+ oC_SinglePartQuery ;
 
 oC_UpdatingClause
               :  oC_Create

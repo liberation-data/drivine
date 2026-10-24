@@ -10,7 +10,7 @@ import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
 
-const { PARAMS, ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, NESTING, DOOMED }: typeof Procedure =
+const { PARAMS, ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, CALLER, NESTING, DOOMED }: typeof Procedure =
     Procedure;
 
 /** The cursor a procedure returns its rows by. */
@@ -212,15 +212,22 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         } NULL ON NULL RETURNING JSON), JSON('[]'))`;
     }
 
-    /**
-     * `JSON_ARRAYAGG` leaves nulls out, and takes no `DISTINCT`: distinct values are gathered as their text, which
-     * `LISTAGG` keeps once each.
-     */
-    collect(value: string, distinct: boolean, order?: string): string {
-        if (distinct) {
-            return `JSON('[' || LISTAGG(DISTINCT JSON_SERIALIZE(${value}), ',') WITHIN GROUP (ORDER BY JSON_SERIALIZE(${value})) || ']')`;
-        }
+    /** `JSON_ARRAYAGG` leaves nulls out. */
+    collect(value: string, order?: string): string {
         return `COALESCE(JSON_ARRAYAGG(${value}${order ? ` ORDER BY ${order}` : ''} RETURNING JSON), JSON('[]'))`;
+    }
+
+    /**
+     * Each item where it is first among those equal to it as `JSON` compares them, kept as it is: not by its text, which is
+     * at most 4,000 bytes and keeps a map's keys in the order written, and not read back from it, which would read a float
+     * that is a whole number, `2.0`, as the number 2.
+     */
+    distinctItems(list: string): string {
+        return (
+            "(SELECT COALESCE(JSON_ARRAYAGG(d.item ORDER BY d.item_no RETURNING JSON), JSON('[]')) " +
+            'FROM (SELECT e.item_no, e.item, ROW_NUMBER() OVER (PARTITION BY e.item ORDER BY e.item_no) AS n ' +
+            `FROM ${this.elements(list, 'e')}) d WHERE d.n = 1)`
+        );
     }
 
     /** Of the values of the kind that comes first, or last, as `kindOrder` orders them. */
@@ -283,7 +290,18 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             tolower: () => `JSON_SCALAR(LOWER(${this.text(json)}))`,
             toupper: () => `JSON_SCALAR(UPPER(${this.text(json)}))`,
             trim: () => `JSON_SCALAR(TRIM(${this.text(json)}))`,
-            tostring: () => `JSON_SCALAR(JSON_VALUE(${json}, '$'))`,
+            // A float that is a whole number is written with its fraction, 2.0, as in Cypher: Oracle writes a double of 2 as
+            // 2. Whole as the double it is: a double too small for a NUMBER, 1e-200, is the NUMBER 0.
+            tostring: () =>
+                this.shared([json], ([x]) => {
+                    const n = `JSON_VALUE(${x}, '$' RETURNING NUMBER)`;
+                    return (
+                        `CASE WHEN ${kind(
+                            x
+                        )} = 'double' AND ABS(${n}) < 1e15 AND JSON_VALUE(${x}, '$' RETURNING BINARY_DOUBLE) = TRUNC(${n}) ` +
+                        `THEN JSON_SCALAR(TO_CHAR(TRUNC(${n})) || '.0') ELSE JSON_SCALAR(JSON_VALUE(${x}, '$')) END`
+                    );
+                }),
             tointeger: () => `JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR)))`,
             tofloat: () => `JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR))`,
             head: () => `JSON_QUERY(${json}, '$[0]' RETURNING JSON)`,
@@ -506,7 +524,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     procedure(body: string[]): ProcedureCall {
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} JSON;`,
-            `    ${GATHERED}${i + 1} JSON;`
+            `    ${GATHERED}${i + 1} JSON;`,
+            `    ${CALLER}${i + 1} JSON;`
         ]);
         const sql = [
             'DECLARE',

@@ -38,12 +38,15 @@ import {
     With
 } from '@/cypher/ast/Query';
 import {
+    children,
     contains,
+    DISTINCT_ITEMS,
     holdsSubquery,
     indent,
     isAggregate,
     literal,
     parametersIn,
+    replaced,
     unsupported,
     variablesIn,
     variablesOfPattern,
@@ -69,8 +72,22 @@ import {
 } from '@/cypher/sql/Value';
 import { columns, columnsOf, groupKeys, PENDING } from '@/cypher/sql/ValueColumns';
 
-const { ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, NESTING, DOOMED, RECORD, MATCHED }: typeof Procedure =
-    Procedure;
+const {
+    ROWS,
+    OUT,
+    ROW,
+    VALUE,
+    ID,
+    COUNT,
+    FOUND,
+    SAVED,
+    GATHERED,
+    CALLER,
+    NESTING,
+    DOOMED,
+    RECORD,
+    MATCHED
+}: typeof Procedure = Procedure;
 
 /** What a variable a row holds is. */
 type Kind = 'NODE' | 'RELATIONSHIP' | 'VALUE' | 'NODES' | 'RELATIONSHIPS' | 'PATH';
@@ -107,6 +124,8 @@ interface Projected {
 interface Sorted {
     sorts: [string, boolean][];
     after: Map<string, string>;
+    /** What sorts each term carried out of the query as a column, of that column. */
+    sorted: Map<string, (column: string) => string>;
 }
 
 /** The names of a shortest path's ends where its pattern gives none, which no statement can write unquoted. */
@@ -310,6 +329,7 @@ export class CypherWriter {
             ),
         count: (call) => json(this.sql.scalar(`count(${call.distinct}${this.countable(call.one())})`)),
         collect: (call) => this.collectFunction(call),
+        [DISTINCT_ITEMS]: (call) => this.distinctItemsFunction(call),
         sum: (call) => json(this.sql.scalar(`COALESCE(sum(${call.distinct}${this.numberOf(call.one())}), 0)`)),
         avg: (call) => json(this.sql.scalar(this.sql.float(`avg(${call.distinct}${this.numberOf(call.one())})`))),
         min: (call) => json(this.sql.extreme(this.sql.comparable(this.asJson(call.one())), true)),
@@ -1355,15 +1375,14 @@ export class CypherWriter {
     }
 
     /**
-     * `value`, worked out over the row in `ROW`, into `variable`: `expressions` are what it reads. A subquery among them
-     * reads every variable of the row, for {@link variablesIn} names none of a subquery's.
+     * `value`, worked out over the row in `ROW`, into `variable`: `expressions` are what it reads. A subquery among them,
+     * in a comprehension's, a quantifier's or a reduce's expression too, reads every variable of the row, for
+     * {@link variablesIn} names none of a subquery's.
      */
     private evaluate(variable: string, expressions: (Expression | undefined)[], value: (scope: Scope) => string): void {
         const read = expressions.filter((it): it is Expression => it !== undefined);
         const select = this.row(
-            read.some((it) => contains(it, (e) => e.kind === 'Subquery'))
-                ? undefined
-                : new Set(read.flatMap((it) => [...variablesIn(it)]))
+            read.some(holdsSubquery) ? undefined : new Set(read.flatMap((it) => [...variablesIn(it)]))
         );
         this.emit([`SELECT ${value(select.scope)} INTO ${variable}`, ...this.from(select)].join('\n') + ';');
     }
@@ -1431,7 +1450,8 @@ export class CypherWriter {
     /**
      * A `CALL { … }` that writes, over the rows in `ROWS`: its clauses written for each row alone, in turn, as a graph
      * engine writes them, so what one row writes is there for the next to read. One that returns nothing leaves the rows
-     * as it found them; one that returns adds what it returns to each row it gives.
+     * as it found them; one that returns adds what it returns to each row it gives, the row's own variables as they were
+     * before the call, whatever it bound to their names inside it.
      */
     private callWriting(call: Call): void {
         if (call.optional) {
@@ -1450,38 +1470,56 @@ export class CypherWriter {
         }
         const kept = `${SAVED}${++this.nesting}`;
         const gathered = `${GATHERED}${this.nesting}`;
+        const caller = `${CALLER}${this.nesting}`;
         const before = new Map(this.kinds);
         const carriedBefore = new Map(this.carried);
+        const returnedKinds = new Map<string, Kind>();
+        const returnedCarried = new Map<string, JsonValue>();
         this.emit(`${kept} := ${ROWS};`);
         if (returned) {
             this.assign(gathered, this.sql.literalJson([]));
         }
         this.eachRow(kept, () => {
+            if (returned) {
+                this.emit(`${caller} := ${RECORD}.item;`);
+            }
             let select = this.rows();
             for (const clause of this.imported(call.query.clauses)) {
-                if (clause.kind === 'Return') {
-                    // What it returns joins what the row held.
-                    const items: ProjectionItem[] = [
-                        ...[...before.keys()].map(
-                            (it): ProjectionItem => ({ expression: { kind: 'Variable', name: it }, name: it })
-                        ),
-                        ...clause.projection.items
-                    ];
-                    select = this.with(select, {
-                        kind: 'With',
-                        projection: { ...clause.projection, star: false, items }
-                    });
-                } else {
-                    select = this.next(select, clause);
-                }
+                select =
+                    clause.kind === 'Return'
+                        ? this.with(select, { kind: 'With', projection: clause.projection })
+                        : this.next(select, clause);
             }
             if (returned) {
-                // The rows this row gives, after those of the rows before it.
+                // The rows this row gives, after those of the rows before it: each the row the call was written for,
+                // read from before the call, with what it returns. A name of the row it returns is the row's.
                 this.carry(select);
+                const names = [...this.kinds.keys()].filter((it) => !before.has(it));
+                names.forEach((it) => returnedKinds.set(it, this.kinds.get(it)!));
+                this.carried.forEach((value, it) => {
+                    if (names.includes(it)) {
+                        returnedCarried.set(it, value);
+                    }
+                });
                 const [g, a, b] = [this.alias('g'), this.alias('g'), this.alias('g')];
+                const row = this.sql.comparable(
+                    json(
+                        this.sql.jsonObject([
+                            ...[...before.keys()].map((it): [string, string] => [
+                                this.key(it),
+                                this.sql.propertyOf(caller, this.key(it))
+                            ]),
+                            ...names.map((it): [string, string] => [
+                                this.key(it),
+                                this.sql.propertyOf(`${b}.item`, this.key(it))
+                            ])
+                        ]),
+                        { ordered: true }
+                    )
+                );
                 const both =
                     `SELECT 1 AS part, ${a}.item_no, ${a}.item FROM ${this.sql.elements(gathered, a)} UNION ALL ` +
-                    `SELECT 2 AS part, ${b}.item_no, ${b}.item FROM ${this.sql.elements(ROWS, b)}`;
+                    `SELECT 2 AS part, ${b}.item_no, ${row} AS item FROM ${this.sql.elements(ROWS, b)}`;
                 const all = this.sql.comparable(
                     json(this.sql.aggregateList(`${g}.item`, `${g}.part, ${g}.item_no`), { ordered: true })
                 );
@@ -1490,6 +1528,7 @@ export class CypherWriter {
         });
         if (returned) {
             this.emit(`${ROWS} := ${gathered};`);
+            this.restore(new Map([...before, ...returnedKinds]), new Map([...carriedBefore, ...returnedCarried]));
         } else {
             this.emit(`${ROWS} := ${kept};`);
             this.restore(before, carriedBefore);
@@ -1853,15 +1892,22 @@ export class CypherWriter {
      */
     private project(select: Select, projection: Projection, final: boolean): Projected {
         const items: ProjectionItem[] = [
+            // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             ...(projection.star
-                ? [...select.bound.keys()].map(
-                      (it): ProjectionItem => ({ expression: { kind: 'Variable', name: it }, name: it })
-                  )
+                ? [...select.bound.keys()]
+                      .sort()
+                      .map((it): ProjectionItem => ({ expression: { kind: 'Variable', name: it }, name: it }))
                 : []),
             ...projection.items
         ];
         if (items.length === 0) {
             throw new DrivineError('A projection has at least one item.');
+        }
+        // Before distinctFirst, which names each variable it groups by as an item of its own.
+        this.requireExplicitGrouping(items);
+        const grouped = this.distinctFirst(select, projection, items);
+        if (grouped) {
+            return this.project(grouped[0], grouped[1], final);
         }
         const held = this.heldFirst(select, projection, items);
         if (held) {
@@ -1876,7 +1922,6 @@ export class CypherWriter {
                     'list of its items, as Drivine gives a row of several columns.'
             );
         }
-        this.requireExplicitGrouping(items);
         this.rowOrder = this.orderOf(select);
         const compiled = items.map((item): [string, Value] => [
             item.name,
@@ -1893,7 +1938,7 @@ export class CypherWriter {
         ]);
         const selectList = itemColumns.flatMap(([column, value]) => columns(value, column));
         const name = this.alias('p');
-        const { sorts, after }: Sorted = this.sorts(
+        const { sorts, after, sorted }: Sorted = this.sorts(
             select,
             projection,
             items,
@@ -1910,10 +1955,11 @@ export class CypherWriter {
             ...optional(select.whereClause()),
             ...(groupBy.length > 0 ? [`GROUP BY ${groupBy.join(', ')}`] : [])
         ].join('\n');
-        const outerColumns = this.outerColumns(final, itemColumns, name, sorts, after);
-        const ordered = sorts.map(
-            ([column, descending]) => `${after.get(column) ?? `${name}.${column}`}${descending ? ' DESC' : ''}`
-        );
+        // What sorts a term in the query that reads this one: worked out there, of the column carried out, or that column.
+        const sortedBy = (column: string): string =>
+            after.get(column) ?? sorted.get(column)?.(`${name}.${column}`) ?? `${name}.${column}`;
+        const outerColumns = this.outerColumns(final, itemColumns, name, sorts, sortedBy);
+        const ordered = sorts.map(([column, descending]) => `${sortedBy(column)}${descending ? ' DESC' : ''}`);
         const outer = [
             `SELECT ${outerColumns}`,
             `FROM (\n${indent(inner)}\n) ${name}`,
@@ -1936,7 +1982,7 @@ export class CypherWriter {
         itemColumns: [string, Value][],
         name: string,
         sorts: [string, boolean][],
-        after: Map<string, string>
+        sortedBy: (column: string) => string
     ): string {
         if (final) {
             const values = itemColumns.map(([column, value]) => this.asJson(columnsOf(value, name, column)));
@@ -1946,7 +1992,7 @@ export class CypherWriter {
             ...itemColumns.flatMap(([column, value]) =>
                 columns(value, column).map((it) => `${name}.${it.substring(it.lastIndexOf(' AS ') + 4)}`)
             ),
-            ...sorts.map(([column]) => (after.has(column) ? `${after.get(column)} AS ${column}` : `${name}.${column}`))
+            ...sorts.map(([column]) => `${sortedBy(column)} AS ${column}`)
         ].join(', ');
     }
 
@@ -1978,29 +2024,39 @@ export class CypherWriter {
             items.map((item, i) => [item.name, columnsOf(itemColumns[i][1], name, itemColumns[i][0])])
         );
         const after = new Map<string, string>();
+        // A term worked out in the query is sorted by in the query that reads it: the value carried out as a column, and
+        // what sorts it (JSON's null as SQL's) worked out of that column. Oracle (23.26), sorting by a value that reads
+        // the row more than once beside a variable-length walk, closes the session.
+        const sorted = new Map<string, (column: string) => string>();
+        const carried = (column: string, value: () => Value, aggregates: Expression): void => {
+            const [carriedValue, sorts] = this.aggregating(aggregates, () => this.sortTerm(value()));
+            selectList.push(`${carriedValue} AS ${column}`);
+            sorted.set(column, sorts);
+        };
         const sorts = projection.orderBy.map((sort, i): [string, boolean] => {
             const column = `s${i + 1}`;
             // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.
             const item = items.findIndex((it) => sameExpression(it.expression, sort.expression));
             if (item >= 0) {
-                selectList.push(
-                    `${this.aggregating(sort.expression, () => this.sortable(compiled[item][1]))} AS ${column}`
-                );
-            } else if (compared && !contains(sort.expression, isAggregate)) {
+                carried(column, () => compiled[item][1], sort.expression);
+            } else if (
+                compared &&
+                !contains(
+                    sort.expression,
+                    (it) => isAggregate(it) || (it.kind === 'Variable' && it.name.startsWith('#aggregate'))
+                )
+            ) {
                 after.set(column, this.sortable(this.expression(sort.expression, byName)));
             } else {
-                // One that aggregates reads the rows it aggregates, as an item does.
+                // One that aggregates reads the rows it aggregates, as an item does; so does one that reads an aggregate
+                // distinctFirst worked out first, which no item is.
                 const scope = new Map([...select.scope, ...compiled]);
-                selectList.push(
-                    `${this.aggregating(sort.expression, () =>
-                        this.sortable(this.expression(sort.expression, scope))
-                    )} AS ${column}`
-                );
+                carried(column, () => this.expression(sort.expression, scope), sort.expression);
             }
             return [column, sort.descending];
         });
         if (sorts.length > 0 || compared) {
-            return { sorts, after };
+            return { sorts, after, sorted };
         }
         return {
             sorts: select.order.map(([term, descending], i): [string, boolean] => {
@@ -2008,7 +2064,8 @@ export class CypherWriter {
                 selectList.push(`${term} AS ${column}`);
                 return [column, descending];
             }),
-            after
+            after,
+            sorted
         };
     }
 
@@ -2074,6 +2131,148 @@ export class CypherWriter {
             orderBy: projection.orderBy.map((it) => ({ ...it, expression: keyed(it.expression) }))
         };
         return [this.with(select, { kind: 'With', projection: withProjection }), keyedProjection];
+    }
+
+    /**
+     * Where a projection holds `collect(DISTINCT …)`, the rows `select` reads grouped first, in a `WITH` of their own:
+     * each item that does not aggregate a key of its own; each variable an aggregating item names beside its aggregates,
+     * in a body, a pattern or a subquery it holds too, and each key an aggregating order term names; and each aggregate,
+     * the items' and the order terms', `collect(DISTINCT …)` collected without its `DISTINCT`. Then the projection, over
+     * those, keeps each item of such a collection once, where it is first, as a graph engine does: by its id for a node
+     * or a relationship, not its properties. An order term, or a part of one, that is an item is read by the item's name.
+     * A store dedupes no aggregate in the query that makes it, and Oracle's `LISTAGG`, which does, gives at most 4,000
+     * bytes. Undefined where the projection collects nothing distinct.
+     */
+    private distinctFirst(
+        select: Select,
+        projection: Projection,
+        items: ProjectionItem[]
+    ): [Select, Projection] | undefined {
+        const collectsDistinct = (expression: Expression): boolean =>
+            expression.kind === 'Function' && expression.distinct && expression.name.toLowerCase() === 'collect';
+        const terms = [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)];
+        if (!terms.some((it) => contains(it, collectsDistinct))) {
+            return undefined;
+        }
+        // Named as no variable is, unless quoted so.
+        const keys = new Map<string, [Expression, string]>();
+        items
+            .filter((it) => !contains(it.expression, isAggregate))
+            .forEach((it) => keys.set(expressionKey(it.expression), [it.expression, `#group${++this.counter}`]));
+        const aggregates = new Map<string, [Expression, string]>();
+        terms.forEach((term) =>
+            contains(term, (it) => {
+                if (isAggregate(it) && !aggregates.has(expressionKey(it))) {
+                    aggregates.set(expressionKey(it), [it, `#aggregate${++this.counter}`]);
+                }
+                return false;
+            })
+        );
+        const keyed = [...keys.values()].flatMap(([expression]) =>
+            expression.kind === 'Variable' ? [expression.name] : []
+        );
+        // A comprehension's, a quantifier's or a reduce's body is kept as it is, so a variable it names outside its own is
+        // kept too, and so is a pattern's or a subquery's. A subquery may name any variable: each the projection groups by
+        // is kept.
+        const own = (names: string[], ...bound: string[]): string[] => names.filter((it) => !bound.includes(it));
+        const inner = (expression: Expression): string[] => {
+            switch (expression.kind) {
+                case 'ListComprehension':
+                    return own(
+                        [expression.where, expression.projection].flatMap((it) => (it ? named(it) : [])),
+                        expression.variable
+                    );
+                case 'Quantifier':
+                    return own(expression.where ? named(expression.where) : [], expression.variable);
+                case 'Reduce':
+                    return own(named(expression.expression), expression.accumulator, expression.variable);
+                case 'PatternComprehension':
+                case 'PatternPredicate':
+                case 'Exists':
+                    return [...variablesIn(expression)];
+                case 'Subquery':
+                    return keyed;
+                default:
+                    return [];
+            }
+        };
+        const named = (expression: Expression): string[] =>
+            isAggregate(expression)
+                ? []
+                : [
+                      ...new Set([
+                          ...variablesOutsideAggregates(expression),
+                          ...inner(expression),
+                          ...children(expression).flatMap(named)
+                      ])
+                  ];
+        const aggregating = (expression: Expression): boolean => contains(expression, isAggregate);
+        // An order term that aggregates may name a key too, by the variable the projection groups by.
+        const beside = [
+            ...new Set([
+                ...items.filter((it) => aggregating(it.expression)).flatMap((it) => named(it.expression)),
+                ...projection.orderBy
+                    .filter((it) => aggregating(it.expression))
+                    .flatMap((it) => named(it.expression))
+                    .filter((it) => keyed.includes(it))
+            ])
+        ].filter((it) => select.scope.has(it));
+        const grouped: Projection = {
+            distinct: false,
+            star: false,
+            items: [
+                ...[...keys.values()].map(([expression, name]): ProjectionItem => ({ expression, name })),
+                ...beside.map((it): ProjectionItem => ({ expression: { kind: 'Variable', name: it }, name: it })),
+                ...[...aggregates.values()].map(
+                    ([aggregate, name]): ProjectionItem => ({
+                        expression:
+                            collectsDistinct(aggregate) && aggregate.kind === 'Function'
+                                ? { ...aggregate, distinct: false }
+                                : aggregate,
+                        name
+                    })
+                )
+            ],
+            orderBy: []
+        };
+        const kept = (term: Expression): Expression | undefined => {
+            const key = keys.get(expressionKey(term));
+            if (key) {
+                return { kind: 'Variable', name: key[1] };
+            }
+            const aggregate = aggregates.get(expressionKey(term));
+            if (!aggregate) {
+                return undefined;
+            }
+            return collectsDistinct(term)
+                ? {
+                      kind: 'Function',
+                      name: DISTINCT_ITEMS,
+                      distinct: false,
+                      arguments: [{ kind: 'Variable', name: aggregate[1] }]
+                  }
+                : { kind: 'Variable', name: aggregate[1] };
+        };
+        // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
+        // can only be; a variable an item is named after is that item, not the variable of that name before it.
+        const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
+        const aliases = new Set(items.map((it) => it.name));
+        const keptProjection: Projection = {
+            ...projection,
+            star: false,
+            items: items.map((it) => ({ ...it, expression: replaced(it.expression, kept) })),
+            orderBy: projection.orderBy.map((sort) => ({
+                ...sort,
+                expression: replaced(sort.expression, (term) => {
+                    if (term.kind === 'Variable' && aliases.has(term.name)) {
+                        return term;
+                    }
+                    const item = itemNames.get(expressionKey(term));
+                    return item !== undefined ? { kind: 'Variable', name: item } : kept(term);
+                })
+            }))
+        };
+        return [this.with(select, { kind: 'With', projection: grouped }), keptProjection];
     }
 
     /** `work`, with no value bound in a subquery where `expression` aggregates: see {@link SqlCypherCompiler.sharing}. */
@@ -2181,6 +2380,13 @@ export class CypherWriter {
         if (typeof known === 'string') {
             return this.property(this.expression(index.subject, scope), known);
         }
+        // An item of a list of nodes or relationships is the node or the relationship, so it is compared by its id; of one
+        // collect gathers in this query, its properties, for a store reads no aggregate from a subquery. A pattern
+        // comprehension gathers its properties too, but in a subquery of its own, so its item is read by id.
+        const value = listed();
+        if (value.kind === 'Entities' && !contains(index.subject, isAggregate)) {
+            return this.entityAt(value, at);
+        }
         if (typeof known === 'number' || typeof known === 'bigint' || known instanceof CypherFloat) {
             return json(this.sql.element(subject(), at), { temporal: this.itemsOf(listed()) });
         }
@@ -2210,8 +2416,98 @@ export class CypherWriter {
         return undefined;
     }
 
+    /**
+     * The node or the relationship at `at` in `entities`: its id read from the list, and its columns from its row, so it is
+     * compared by its id as a node bound by a pattern is. Null where the list has no such item.
+     */
+    private entityAt(entities: EntitiesValue, at: string): Value {
+        const id = this.sql.idOf(this.sql.element(entities.ids, at));
+        const row = this.alias(entities.relationships ? 'e' : 'n');
+        const [table, key] = entities.relationships ? [this.sql.edges, 'eid'] : [this.sql.nodes, 'nid'];
+        const column = (name: string): string =>
+            `(SELECT ${row}.${name} FROM ${table} ${row} WHERE ${row}.${key} = ${id})`;
+        return entities.relationships
+            ? {
+                  kind: 'Relationship',
+                  eid: column('eid'),
+                  src: column('src'),
+                  dst: column('dst'),
+                  type: column('type'),
+                  props: column('props')
+              }
+            : {
+                  kind: 'Node',
+                  nid: column('nid'),
+                  labels: column('labels'),
+                  props: column('props'),
+                  stamp: column('stamp')
+              };
+    }
+
+    /**
+     * The rows of the list of ids `ids`, as a `FROM` names them under `name`, each joined to the row of its node or, of
+     * `relationships`, its relationship; and the item each row is, that node or relationship.
+     */
+    private entityItems(ids: string, relationships: boolean, name: string): [string, Value] {
+        const row = this.alias(relationships ? 'e' : 'n');
+        const [table, key, item] = relationships
+            ? [this.sql.edges, 'eid', relationshipOf(row)]
+            : [this.sql.nodes, 'nid', nodeOf(row)];
+        return [
+            `FROM ${this.sql.elements(ids, name)} LEFT JOIN ${table} ${row} ON ${row}.${key} = ${this.sql.idOf(
+                `${name}.item`
+            )}`,
+            item
+        ];
+    }
+
     private listComprehension(comprehension: ListComprehension, scope: Scope): Value {
         const listed = this.expression(comprehension.list, scope);
+        return listed.kind === 'Entities'
+            ? this.entityComprehension(comprehension, listed, scope)
+            : this.valueComprehension(comprehension, listed, scope);
+    }
+
+    /**
+     * A list comprehension over a list of nodes or relationships: each item is the node or the relationship, and what it
+     * keeps of them, with no projection or one of nodes or relationships, is a list of them.
+     */
+    private entityComprehension(comprehension: ListComprehension, listed: EntitiesValue, scope: Scope): Value {
+        const name = this.alias('x');
+        let kind: Value | undefined;
+        const list = this.sql.shared([listed.ids], ([ids]) => {
+            const [from, item] = this.entityItems(ids, listed.relationships, name);
+            const inner: Scope = new Map([...scope, [comprehension.variable, item]]);
+            const projected = comprehension.projection ? this.expression(comprehension.projection, inner) : item;
+            kind = projected;
+            const filter = comprehension.where
+                ? ` WHERE ${this.condition(this.expression(comprehension.where, inner))}`
+                : '';
+            const value =
+                projected.kind === 'Node'
+                    ? this.sql.scalar(projected.nid)
+                    : projected.kind === 'Relationship'
+                    ? this.sql.scalar(projected.eid)
+                    : this.asJson(projected).sql;
+            // Of null, null, as in Cypher, and not an empty list.
+            return `CASE WHEN ${ids} IS NOT NULL THEN (SELECT ${this.sql.aggregateList(
+                value,
+                `${name}.item_no`
+            )} ${from}${filter}) END`;
+        });
+        const projected = kind as Value | undefined;
+        if (projected?.kind === 'Node' || projected?.kind === 'Relationship') {
+            return {
+                kind: 'Entities',
+                ids: this.sql.comparable(json(list, { ordered: true })),
+                relationships: projected.kind === 'Relationship'
+            };
+        }
+        return json(list, { ordered: true, items: projected?.kind === 'Json' ? projected.temporal : undefined });
+    }
+
+    /** A list comprehension over a list of values. */
+    private valueComprehension(comprehension: ListComprehension, listed: Value, scope: Scope): Value {
         const list = this.sql.comparable(this.asJson(listed));
         const name = this.alias('x');
         const inner: Scope = new Map([
@@ -2336,21 +2632,32 @@ export class CypherWriter {
 
     private quantifier(quantifier: Quantifier, scope: Scope): Value {
         const listed = this.expression(quantifier.list, scope);
-        const list = this.sql.comparable(this.asJson(listed));
         const name = this.alias('q');
-        const inner: Scope = new Map([
-            ...scope,
-            [quantifier.variable, json(`${name}.item`, { temporal: this.itemsOf(listed) })]
-        ]);
-        const condition = quantifier.where ? this.condition(this.expression(quantifier.where, inner)) : 'TRUE';
-        const from = `FROM ${this.sql.elements(list, name)}`;
-        const tests = {
-            ANY: `EXISTS (SELECT 1 ${from} WHERE ${condition})`,
-            ALL: `NOT EXISTS (SELECT 1 ${from} WHERE NOT (${condition}))`,
-            NONE: `NOT EXISTS (SELECT 1 ${from} WHERE ${condition})`,
-            SINGLE: `(SELECT count(*) ${from} WHERE ${condition}) = 1`
+        const quantified = (from: string, item: Value): string => {
+            const inner: Scope = new Map([...scope, [quantifier.variable, item]]);
+            const condition = quantifier.where ? this.condition(this.expression(quantifier.where, inner)) : 'TRUE';
+            const tests = {
+                ANY: `EXISTS (SELECT 1 ${from} WHERE ${condition})`,
+                ALL: `NOT EXISTS (SELECT 1 ${from} WHERE NOT (${condition}))`,
+                NONE: `NOT EXISTS (SELECT 1 ${from} WHERE ${condition})`,
+                SINGLE: `(SELECT count(*) ${from} WHERE ${condition}) = 1`
+            };
+            return tests[quantifier.of];
         };
-        return bool(tests[quantifier.of]);
+        // Over a list of nodes or relationships, each item is the node or the relationship, read from its table.
+        if (listed.kind === 'Entities') {
+            return bool(
+                this.sql.shared([listed.ids], ([ids]) =>
+                    quantified(...this.entityItems(ids, listed.relationships, name))
+                )
+            );
+        }
+        return bool(
+            quantified(
+                `FROM ${this.sql.elements(this.sql.comparable(this.asJson(listed)), name)}`,
+                json(`${name}.item`, { temporal: this.itemsOf(listed) })
+            )
+        );
     }
 
     private exists(patterns: Pattern[], where: Expression | undefined, scope: Scope): BoolValue {
@@ -2705,8 +3012,25 @@ export class CypherWriter {
             );
         }
         const operations: Partial<Record<BinaryOperator, () => Value>> = {
-            // Two lists of items of one kind are, together, a list of that kind.
             ADD: () => {
+                // Two lists of nodes, or of relationships, are together a list of them.
+                if (
+                    left.kind === 'Entities' &&
+                    right.kind === 'Entities' &&
+                    left.relationships === right.relationships
+                ) {
+                    const gathered =
+                        left.gathered !== undefined || right.gathered !== undefined
+                            ? sql.shared([a, b], ([x, y]) => sql.add(x, y))
+                            : undefined;
+                    return {
+                        kind: 'Entities',
+                        ids: sql.shared([left.ids, right.ids], ([x, y]) => sql.add(x, y)),
+                        relationships: left.relationships,
+                        gathered
+                    };
+                }
+                // Two lists of items of one kind are, together, a list of that kind.
                 const items = this.itemsOf(left);
                 return json(
                     sql.shared([a, b], ([x, y]) => sql.add(x, y)),
@@ -2732,6 +3056,18 @@ export class CypherWriter {
             POWER: () => json(sql.scalar(sql.float(`power(${sql.number(a)}, ${sql.number(b)})`))),
             IN: () => {
                 const i = this.alias('i');
+                // A node or a relationship is in a list of them where its id is.
+                if (right.kind === 'Entities') {
+                    const id =
+                        left.kind === 'Node' && !right.relationships
+                            ? sql.scalar(left.nid)
+                            : left.kind === 'Relationship' && right.relationships
+                            ? sql.scalar(left.eid)
+                            : undefined;
+                    if (id !== undefined) {
+                        return bool(`EXISTS (SELECT 1 FROM ${sql.elements(right.ids, i)} WHERE ${i}.item = ${id})`);
+                    }
+                }
                 return bool(`EXISTS (SELECT 1 FROM ${sql.elements(b, i)} WHERE ${i}.item = ${a})`);
             },
             STARTS_WITH: () => bool(sql.shared([sql.text(a), sql.text(b)], ([x, y]) => sql.startsWith(x, y))),
@@ -2759,8 +3095,7 @@ export class CypherWriter {
         if (left.kind === 'Relationship' && right.kind === 'Relationship') {
             return `${left.eid} = ${right.eid}`;
         }
-        const a = this.sql.comparable(this.asJson(left));
-        const b = this.sql.comparable(this.asJson(right));
+        const [a, b] = this.equated(left, right);
         const given = written ? this.given(written) : undefined;
         const indexed =
             typeof given === 'string' || typeof given === 'boolean' ? this.sql.indexedEquality(a, b) : undefined;
@@ -2777,6 +3112,14 @@ export class CypherWriter {
                           )} THEN ${x} = ${y} END`
                   );
         return indexed !== undefined ? `(${indexed} AND ${equal})` : equal;
+    }
+
+    /** What {@link equality} compares of two values: two lists of nodes, or of relationships, their ids, item by item. */
+    private equated(left: Value, right: Value): [string, string] {
+        if (left.kind === 'Entities' && right.kind === 'Entities' && left.relationships === right.relationships) {
+            return [left.ids, right.ids];
+        }
+        return [this.sql.comparable(this.asJson(left)), this.sql.comparable(this.asJson(right))];
     }
 
     /**
@@ -2914,22 +3257,41 @@ export class CypherWriter {
         return subject;
     }
 
+    /** `collect`. collect(DISTINCT …) is collected in a `WITH` of its own, then kept once each: see {@link distinctFirst}. */
     private collectFunction(call: Invocation): Value {
+        if (call.fn.distinct) {
+            throw new Error('collect(DISTINCT …) is gathered by distinctFirst');
+        }
         const gathered = call.one();
-        const distinct = call.fn.distinct;
         // Nodes or relationships are gathered as their ids, so a list of them is still of them.
         if (gathered.kind === 'Node' || gathered.kind === 'Relationship') {
             const id = gathered.kind === 'Node' ? gathered.nid : gathered.eid;
             return {
                 kind: 'Entities',
-                ids: this.gatheredIds(`CASE WHEN ${id} IS NOT NULL THEN ${this.sql.scalar(id)} END`, distinct),
+                ids: this.gatheredIds(`CASE WHEN ${id} IS NOT NULL THEN ${this.sql.scalar(id)} END`),
                 relationships: gathered.kind === 'Relationship',
-                gathered: this.collected(gathered, distinct)
+                gathered: this.collected(gathered)
             };
         }
-        return json(this.collected(gathered, distinct), {
+        return json(this.collected(gathered), {
             ordered: true,
             items: gathered.kind === 'Json' ? gathered.temporal : undefined
+        });
+    }
+
+    /** The items of a list once each, where each is first: nodes or relationships by their ids, not their properties. */
+    private distinctItemsFunction(call: Invocation): Value {
+        const list = call.one();
+        if (list.kind === 'Entities') {
+            return {
+                kind: 'Entities',
+                ids: this.sql.comparable(json(this.sql.distinctItems(list.ids), { ordered: true })),
+                relationships: list.relationships
+            };
+        }
+        return json(this.sql.distinctItems(this.sql.comparable(this.asJson(list))), {
+            ordered: true,
+            items: list.kind === 'Json' ? list.items : undefined
         });
     }
 
@@ -3026,13 +3388,13 @@ export class CypherWriter {
     }
 
     /** The values `value` of a group, gathered as `collect` gathers them, as JSON. */
-    private collected(value: Value, distinct: boolean): string {
-        return this.sql.collect(this.collectable(value, distinct), distinct, this.rowOrder);
+    private collected(value: Value): string {
+        return this.sql.collect(this.collectable(value), this.rowOrder);
     }
 
     /** The ids `id` of a group, gathered as `collect` gathers them, as JSON that compares. */
-    private gatheredIds(id: string, distinct: boolean): string {
-        return this.sql.comparable(json(this.sql.collect(id, distinct, this.rowOrder), { ordered: true }));
+    private gatheredIds(id: string): string {
+        return this.sql.comparable(json(this.sql.collect(id, this.rowOrder), { ordered: true }));
     }
 
     /** What `count` counts of a value: a node by its row, anything else by its value, nulls not counted. */
@@ -3053,17 +3415,16 @@ export class CypherWriter {
 
     /**
      * What `collect` gathers of a value: nulls are left out, as Cypher's `collect` leaves them out, JSON's null among
-     * them, as a list's item or a map's entry may be. Gathered once each, with `distinct`, a value is what compares:
-     * Postgres compares no `json` a map or a list is built as.
+     * them, as a list's item or a map's entry may be.
      */
-    private collectable(value: Value, distinct: boolean): string {
+    private collectable(value: Value): string {
         if (value.kind === 'Node') {
             return `CASE WHEN ${value.nid} IS NOT NULL THEN ${this.asJson(value).sql} END`;
         }
         if (value.kind === 'Json' && !value.ordered) {
             return this.sql.nullIfJsonNull(value.sql);
         }
-        return distinct ? this.sql.comparable(this.asJson(value)) : this.asJson(value).sql;
+        return this.asJson(value).sql;
     }
 
     // ----- Conversions -----
@@ -3105,14 +3466,21 @@ export class CypherWriter {
      * list the statement builds holds it, is SQL's null, which comes last, as a graph engine orders null.
      */
     private sortable(value: Value): string {
+        const [carried, sorts] = this.sortTerm(value);
+        return sorts(carried);
+    }
+
+    /** What {@link sortable} sorts `value` by, in two: the value as a column carries it, and what sorts it, of that column. */
+    private sortTerm(value: Value): [string, (column: string) => string] {
         if (value.kind === 'Bool') {
-            return value.sql;
+            return [value.sql, (it) => it];
         }
         // A zoned value the statement makes sorts as the moment it is, whatever its offset.
         if (value.kind === 'Json' && value.temporal?.zoned) {
-            return this.temporals.moment(this.sql.text(this.sql.comparable(value)), value.temporal);
+            const temporal = value.temporal;
+            return [this.sql.comparable(value), (it) => this.temporals.moment(this.sql.text(it), temporal)];
         }
-        return this.sql.nullIfJsonNull(this.sql.comparable(this.asJson(value)));
+        return [this.sql.comparable(this.asJson(value)), (it) => this.sql.nullIfJsonNull(it)];
     }
 }
 

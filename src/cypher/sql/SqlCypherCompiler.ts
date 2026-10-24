@@ -379,11 +379,14 @@ export abstract class SqlCypherCompiler {
     /** The values `value` of a group, or of a query's rows ordered by `order`, as a JSON list: empty where there are none. */
     abstract aggregateList(value: string, order?: string): string;
 
+    /** `collect`: the values `value` of a group that are not null, as a JSON list, in the `order` of the rows where they have one. */
+    abstract collect(value: string, order?: string): string;
+
     /**
-     * `collect`: the values `value` of a group that are not null, as a JSON list, in the `order` of the rows where they
-     * have one; once each with `distinct`, in no order.
+     * The items of the JSON list `list` once each, where each is first: what `collect(DISTINCT …)` keeps of what a `WITH`
+     * before it collected, for a store dedupes no aggregate in the query that makes it.
      */
-    abstract collect(value: string, distinct: boolean, order?: string): string;
+    abstract distinctItems(list: string): string;
 
     /** `min` or `max` of the JSON values `value` of a group: of values of several kinds, as {@link kindOrder} orders them. */
     abstract extreme(value: string, min: boolean): string;

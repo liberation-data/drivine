@@ -171,6 +171,22 @@ cases:
         error: "A relationship after a quantified path pattern has a node between them."
       - cypher: "MATCH (a) ((x)-[:R]->(y)){0} (b) RETURN a"
         error: "A quantified path pattern's quantifier has a maximum of at least 1."
+      - cypher: "MATCH (a)-[:R]->{} (b) RETURN a"
+        error: "A quantifier in braces has a bound in them, as in {2} or {1,3}."
+      - cypher: "MATCH (a) ((x)-[:R]->(y)){} (b) RETURN a"
+        error: "A quantifier in braces has a bound in them, as in {2} or {1,3}."
+      - cypher: "MATCH (a)-[:R]->{3,1} (b) RETURN a"
+        error: "A quantifier's least bound is at most its greatest, and 3 is more than 1."
+      - cypher: "MATCH (a) ((x)-[:R]->(y)){3,1} (b) RETURN a"
+        error: "A quantifier's least bound is at most its greatest, and 3 is more than 1."
+
+  - name: "Whole number too large"
+    description: "A whole number written past the least or greatest 64-bit integer is refused."
+    steps:
+      - cypher: "RETURN 9223372036854775808"
+        error: "9223372036854775808 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807."
+      - cypher: "RETURN -9223372036854775809"
+        error: "-9223372036854775809 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807."
 
   - name: "Write to a non-entity"
     description: "A write to an undefined variable, or to something that isn't a node or relationship, is refused."
