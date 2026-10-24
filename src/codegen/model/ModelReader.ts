@@ -38,6 +38,7 @@ export class ModelReader {
     private readonly checker: TS.TypeChecker;
     private readonly strictNulls: boolean;
     private readonly problems: string[] = [];
+    private drivineExports?: Map<TS.Symbol, string>;
 
     /**
      * @param ts the TypeScript compiler, as the project has it.
@@ -866,7 +867,11 @@ export class ModelReader {
                 if (nearer) {
                     continue;
                 }
-                const type = this.checker.getTypeAtLocation(named);
+                // As the class has it: a field a generic superclass declares, of the type the class gives it.
+                const symbol = this.checker.getPropertyOfType(this.checker.getTypeAtLocation(chain[0]), name);
+                const type = symbol
+                    ? this.checker.getTypeOfSymbolAtLocation(symbol, chain[0])
+                    : this.checker.getTypeAtLocation(named);
                 found.set(name, {
                     name,
                     decorated: named,
@@ -952,25 +957,37 @@ export class ModelReader {
     }
 
     /**
-     * The name Drivine exports what an expression names under, when it is imported from Drivine rather than declared
-     * here or taken from another library: `NodeFragment` for `NodeFragment`, for `Fragment` imported as
-     * `{ NodeFragment as Fragment }`, and for `drivine.NodeFragment` with `import * as drivine`.
+     * The name Drivine exports what an expression names under, when it is Drivine's rather than declared here or taken
+     * from another library: `NodeFragment` for `NodeFragment`, for `Fragment` imported as `{ NodeFragment as Fragment }`,
+     * for `drivine.NodeFragment` with `import * as drivine`, and for any of these through a module that re-exports it.
      */
     private drivineName(node: TS.Expression): string | undefined {
         const ts = this.ts;
-        const qualified = ts.isPropertyAccessExpression(node);
-        const named = qualified ? node.expression : node;
-        const declaration = ts.isIdentifier(named)
-            ? this.checker.getSymbolAtLocation(named)?.declarations?.[0]
-            : undefined;
-        if (!qualified && declaration && ts.isImportSpecifier(declaration)) {
-            const name = (declaration.propertyName ?? declaration.name).text;
-            return isDrivine(ts, declaration.parent.parent.parent.moduleSpecifier) ? name : undefined;
+        const symbol = this.checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node) ? node.name : node);
+        return symbol && this.exported().get(this.resolved(symbol));
+    }
+
+    /** What Drivine exports, by what each export is, from every module the program imports or re-exports it in. */
+    private exported(): Map<TS.Symbol, string> {
+        const ts = this.ts;
+        if (!this.drivineExports) {
+            this.drivineExports = new Map();
+            for (const statement of this.program.getSourceFiles().flatMap((it) => [...it.statements])) {
+                const module =
+                    ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)
+                        ? statement.moduleSpecifier
+                        : undefined;
+                const symbol = module && isDrivine(ts, module) ? this.checker.getSymbolAtLocation(module) : undefined;
+                for (const it of symbol ? this.checker.getExportsOfModule(symbol) : []) {
+                    this.drivineExports.set(this.resolved(it), it.name);
+                }
+            }
         }
-        if (qualified && declaration && ts.isNamespaceImport(declaration)) {
-            return isDrivine(ts, declaration.parent.parent.moduleSpecifier) ? node.name.text : undefined;
-        }
-        return undefined;
+        return this.drivineExports;
+    }
+
+    private resolved(symbol: TS.Symbol): TS.Symbol {
+        return symbol.flags & this.ts.SymbolFlags.Alias ? this.checker.getAliasedSymbol(symbol) : symbol;
     }
 
     /** A decorator's arguments, each as its value: what the compiler can tell of it. */
@@ -1052,16 +1069,24 @@ export class ModelReader {
         return NOTHING;
     }
 
-    private object(node: TS.ObjectLiteralExpression): Record<string, unknown> {
+    /** An object's entries, the last given of each; none when it spreads one that can't be read. */
+    private object(node: TS.ObjectLiteralExpression): Record<string, unknown> | undefined {
         const ts = this.ts;
         const object: Record<string, unknown> = {};
         for (const it of node.properties) {
             if (ts.isPropertyAssignment(it) && (ts.isIdentifier(it.name) || ts.isStringLiteral(it.name))) {
+                delete object[it.name.text];
                 if (!this.isNone(it.initializer)) {
                     object[it.name.text] = this.value(it.initializer);
                 }
             } else if (ts.isShorthandPropertyAssignment(it)) {
                 object[it.name.text] = this.value(it.name);
+            } else if (ts.isSpreadAssignment(it)) {
+                const spread = this.value(it.expression);
+                if (!isObject(spread)) {
+                    return undefined;
+                }
+                Object.assign(object, spread);
             }
         }
         return object;
@@ -1081,12 +1106,13 @@ export class ModelReader {
         if (type.isStringLiteral() || type.isNumberLiteral()) {
             return type.value;
         }
-        if (ts.isPropertyAccessExpression(node)) {
-            // A member of a constant object, `as const` or not.
+        if (!ts.isIdentifier(node)) {
+            // A member of a constant object, `as const` or not, as `Labels.A` or `Labels['A']`.
             const object = this.value(node.expression);
-            return isObject(object) ? object[node.name.text] : undefined;
+            const key = ts.isPropertyAccessExpression(node) ? node.name.text : this.value(node.argumentExpression);
+            return isObject(object) && isString(key) ? object[key] : undefined;
         }
-        return ts.isIdentifier(node) ? this.declared(node) : undefined;
+        return this.declared(node);
     }
 
     /** What a name declares: an enum's members' values, as @NodeLabels takes them; a constant's value; a class. */

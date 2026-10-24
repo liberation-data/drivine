@@ -367,6 +367,42 @@ describe("Reading Drivine's decorators", () => {
         ]);
     });
 
+    it("reads them through a module of the application's that re-exports them", () => {
+        const model = written({
+            'src/model/index.ts': [
+                "export * from '@liberation-data/drivine';",
+                "export { NodeId as Id } from '@liberation-data/drivine';"
+            ].join('\n'),
+            'src/A.ts': [
+                "import { NodeFragment, Id } from './model';",
+                "import * as model from './model';",
+                "@NodeFragment({ labels: ['A'] })",
+                "export class A { @Id() key: string; @model.GraphProperty('full_name') name: string; }"
+            ].join('\n')
+        });
+        const a = byId(model.fragments, 'src/A#A');
+        expect(a.nodeId).toEqual('key');
+        expect(a.properties.find((it: any) => it.name === 'name').stored).toEqual('full_name');
+    });
+
+    it('types a field a generic superclass declares as the class gives it', () => {
+        const model = written({
+            'src/Entity.ts': [
+                "import { NodeId } from '@liberation-data/drivine';",
+                'export abstract class Entity<ID> { @NodeId() id!: ID; }'
+            ].join('\n'),
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "import { Entity } from './Entity';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A extends Entity<string> {}'
+            ].join('\n')
+        });
+        expect(byId(model.fragments, 'src/A#A').properties).toEqual([
+            expect.objectContaining({ name: 'id', type: 'string', nullable: false, source: 'string' })
+        ]);
+    });
+
     it("keeps a superclass's decorators on a field a subclass declares again without them, as at run time", () => {
         const model = written({
             'src/A.ts': [
@@ -1155,6 +1191,49 @@ describe('Reading constants and types', () => {
         expect(warnings).toEqual([]);
         expect(entry.labels).toEqual(['A', 'Extra']);
         expect(entry.bags).toEqual([{ field: 'meta', prefix: 'meta.', type: 'string' }]);
+    });
+
+    it("reads an object's spreads of constants, the last given of each option, and a member named in brackets", () => {
+        const dir = project({
+            'src/options.ts': [
+                "export const base = { labels: ['A'] };",
+                "export const incoming = { direction: 'INCOMING', required: true } as const;",
+                "export const Types = { TO: 'TO' };"
+            ].join('\n'),
+            'src/A.ts': [
+                "import { GraphRelationship, GraphView, NodeFragment, Root } from '@liberation-data/drivine';",
+                "import { base, incoming, Types } from './options';",
+                '@NodeFragment({ ...base })',
+                'export class A { id: string; }',
+                '@GraphView()',
+                'export class V {',
+                '    @Root() a: A;',
+                "    @GraphRelationship({ ...incoming, type: Types['TO'], required: undefined, target: () => A }) to: A[];",
+                '}'
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([]);
+        expect(byId(read(dir).fragments, 'src/A#A').labels).toEqual(['A']);
+        expect(byId(read(dir).views, 'src/A#V').relationships).toEqual([
+            expect.objectContaining({ field: 'to', type: 'TO', direction: 'INCOMING', required: false })
+        ]);
+    });
+
+    it('names a fragment whose options spread what it cannot read, rather than write them without it', () => {
+        const { warnings, entry }: Written = fragment({
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "const options = (): { labels: string[] } => ({ labels: ['A'] });",
+                '@NodeFragment({ ...options() })',
+                'export class A { id: string; }'
+            ].join('\n')
+        });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#A: Can't read the options of @NodeFragment A. Name it with a literal or a constant."
+        ]);
+        expect(entry).toBeUndefined();
     });
 
     it('reads a field whose name is in quotes, as a load maps it', () => {
