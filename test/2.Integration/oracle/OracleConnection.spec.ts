@@ -133,6 +133,47 @@ describeOnOracle('Oracle connection', () => {
         }
     });
 
+    it("should find a label after the first by its whole text as the labels' JSON writes it", async () => {
+        const graph = new OracleGraph('drivine_labels_text_test');
+        const drop = async (): Promise<void> => {
+            for (const statement of [
+                `DROP PROPERTY GRAPH IF EXISTS ${graph.name}`,
+                `DROP TABLE IF EXISTS ${graph.edges} PURGE`,
+                `DROP TABLE IF EXISTS ${graph.nodes} PURGE`
+            ]) {
+                await pm.execute(new QuerySpecification(statement));
+            }
+        };
+        await drop();
+        try {
+            await pm.execute(new QuerySpecification(graph.ensuring));
+            for (const labels of [
+                ['Pet', 'Dogs'],
+                ['Pet', 'Dog', `it's "q"`, 'c\\d', 'Ünïcødé']
+            ]) {
+                const json = JSON.stringify(labels).replace(/'/g, "''");
+                await pm.execute(
+                    new QuerySpecification(
+                        `INSERT INTO ${graph.nodes} (labels, props) VALUES (JSON('${json}'), JSON('{}'))`
+                    )
+                );
+            }
+            const count = async (labels: string[]): Promise<number> =>
+                (
+                    await pm.query<number>(
+                        new QuerySpecification(
+                            `SELECT COUNT(*) AS "n" FROM ${graph.nodes} n WHERE ${hasLabels('n', labels)}`
+                        )
+                    )
+                )[0];
+            expect(await count(['Pet', 'Dog'])).toEqual(1);
+            expect(await count(['Pet', 'og'])).toEqual(0);
+            expect(await count(['Pet', `it's "q"`, 'c\\d', 'Ünïcødé'])).toEqual(1);
+        } finally {
+            await drop();
+        }
+    });
+
     it('should read a cursor in batches', async () => {
         const connection = await DatabaseRegistry.getInstance().connectionProvider('ORACLE')!.connect();
         try {

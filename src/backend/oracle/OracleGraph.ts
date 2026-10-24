@@ -72,7 +72,7 @@ END;`;
 
 /** A JSON path step naming a key, quoted: `."metadata.source"`. */
 export function jsonKey(name: string): string {
-    return `."${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "''")}"`;
+    return `."${escapedLabel(name)}"`;
 }
 
 /**
@@ -107,7 +107,7 @@ export function relatedSubquery(...hints: string[]): string {
 /**
  * A predicate that holds when the node row `alias` carries every one of the labels. A label may come from data (a
  * `@NodeLabels` filter's value, a search's partition label): it is escaped as `jsonKey` escapes a name, the backslash
- * first, for the JSON path's string and then the SQL literal around it.
+ * first, for the JSON string the path or the labels' text holds it in, and then the SQL literal around it.
  *
  * The first label is tested so the multivalue index over labels can answer it, and the rest by the labels' text, which
  * that index can't: when two tests of the labels are answered by the index, Oracle (23.26) finds no node the open
@@ -123,7 +123,7 @@ export function hasLabels(alias: string, labels: string[]): string {
         .join(' AND ');
 }
 
-/** A label as JSON writes it inside a string, the backslash first, in a SQL literal. */
+/** A label or a key as JSON writes it inside a string, the backslash first, in a SQL literal. */
 function escapedLabel(label: string): string {
     return label.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "''");
 }
