@@ -94,14 +94,14 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
     }
 }`;
 
-// A case of the Cypher spec's, which names no store, and the row each library's tests check it gives.
-const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNOWS</span>*]-&gt;(:<span class="t">Person</span> {name: <span class="s">'Carrie'</span>})
-          -[:<span class="t">ACTED_IN</span>]-&gt;(m {title: <span class="s">'The Matrix'</span>})
-<span class="k">WHERE</span> a.name = <span class="s">'Laurence'</span>
+// A walk of the Cypher spec's shape, over a graph of Breaking Bad, with the row it gave on each store named.
+const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNOWS</span>*]-&gt;(:<span class="t">Character</span> {name: <span class="s">'Jesse'</span>})
+          -[:<span class="t">APPEARS_IN</span>]-&gt;(e {title: <span class="s">'Pilot'</span>})
+<span class="k">WHERE</span> a.name = <span class="s">'Hank'</span>
 <span class="k">RETURN</span> [n <span class="k">IN</span> nodes(p) | coalesce(n.name, n.title)]
 
-<span class="c">// The row, tested on Neo4j, Postgres, Oracle and SQLite:</span>
-<span class="c">// ["Laurence", "Keanu", "Carrie", "The Matrix"]</span>`;
+<span class="c">// The row, on Neo4j, Postgres and Oracle:</span>
+<span class="c">// ["Hank", "Walter", "Jesse", "Pilot"]</span>`;
 ---
 
 <!doctype html>
