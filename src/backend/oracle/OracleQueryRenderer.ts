@@ -198,11 +198,12 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
      *
      * The expression is anchored in a group of its own, which POSIX can only write as one that captures: so each group
      * the caller wrote is one further on, and a backreference to it is renumbered to match (see {@link renumbered}).
+     * It ends at `\z`, the value's end, as Oracle's `$` also matches before a line break that ends it.
      */
     private matches(text: string, pattern: string): string {
         const ignoreCase = pattern.startsWith('(?i)');
         const body = renumbered(ignoreCase ? pattern.slice(4) : pattern);
-        return `REGEXP_LIKE(${text}, ${this.bind(`^(${body})$`)}${ignoreCase ? ", 'i'" : ''})`;
+        return `REGEXP_LIKE(${text}, ${this.bind(`^(${body})\\z`)}${ignoreCase ? ", 'i'" : ''})`;
     }
 }
 

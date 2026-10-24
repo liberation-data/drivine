@@ -530,6 +530,23 @@ cases:
         parameters: {f: 2.0, l: {$numberLong: "5"}}
         rows: [{$numberLong: "5"}]
 
+  - name: "One clock for a statement's writes"
+    description: "Every row a statement writes reads the same moment from the clock."
+    steps:
+      - cypher: "UNWIND range(1, 200) AS i CREATE (:CyWrite {at: localdatetime()})"
+        rows: []
+      - cypher: "MATCH (n:CyWrite) RETURN count(DISTINCT n.at)"
+        rows: [1]
+
+  - name: "Text named like the compiler's own"
+    description: "Texts and keys that read like names a compiled statement uses inside are written as they are."
+    steps:
+      - cypher: |
+          CREATE (n:CyWrite {name: 'cy_row', s: "it's cy_value", `cy_count`: 'cy_record.item'})
+          SET n.cy_id = 'cy_params'
+          RETURN properties(n)
+        rows: [{name: "cy_row", s: "it's cy_value", cy_count: "cy_record.item", cy_id: "cy_params"}]
+
   - name: "Write refused on SQL stores"
     description: "Write syntax the compiler doesn't handle yet is refused on SQL stores, naming what it is."
     steps:

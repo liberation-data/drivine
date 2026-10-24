@@ -16,19 +16,19 @@ describe('OracleQueryRenderer', () => {
     it('should hold an expression to the whole value', () => {
         const rendered = matching('a.*');
         expect(rendered.where).toEqual(`REGEXP_LIKE(JSON_VALUE(n.props, '$."name"'), $_q0)`);
-        expect(rendered.bindings).toEqual({ _q0: '^(a.*)$' });
+        expect(rendered.bindings).toEqual({ _q0: '^(a.*)\\z' });
     });
 
     it('should renumber a backreference for the group that anchors the expression', () => {
-        expect(bound('(A).*\\1')).toEqual('^((A).*\\2)$');
-        expect(bound('(a)(b)\\2\\1')).toEqual('^((a)(b)\\3\\2)$');
+        expect(bound('(A).*\\1')).toEqual('^((A).*\\2)\\z');
+        expect(bound('(a)(b)\\2\\1')).toEqual('^((a)(b)\\3\\2)\\z');
         // An escaped backslash, and a backslash in a bracket expression, are no backreferences.
-        expect(bound('a\\\\1')).toEqual('^(a\\\\1)$');
-        expect(bound('[\\1]x')).toEqual('^([\\1]x)$');
-        expect(bound('[]\\1](a)\\1')).toEqual('^([]\\1](a)\\2)$');
-        expect(bound('[^]\\1](a)\\1')).toEqual('^([^]\\1](a)\\2)$');
+        expect(bound('a\\\\1')).toEqual('^(a\\\\1)\\z');
+        expect(bound('[\\1]x')).toEqual('^([\\1]x)\\z');
+        expect(bound('[]\\1](a)\\1')).toEqual('^([]\\1](a)\\2)\\z');
+        expect(bound('[^]\\1](a)\\1')).toEqual('^([^]\\1](a)\\2)\\z');
         // An escaped bracket opens no bracket expression.
-        expect(bound('\\[(a)\\1]')).toEqual('^(\\[(a)\\2])$');
+        expect(bound('\\[(a)\\1]')).toEqual('^(\\[(a)\\2])\\z');
     });
 
     it('should refuse a reference to a ninth group, which would need a tenth', () => {
@@ -38,8 +38,8 @@ describe('OracleQueryRenderer', () => {
     it('should ignore case only for a leading case flag, which is taken off the expression', () => {
         const rendered = matching('(?i)a.*');
         expect(rendered.where).toEqual(`REGEXP_LIKE(JSON_VALUE(n.props, '$."name"'), $_q0, 'i')`);
-        expect(rendered.bindings).toEqual({ _q0: '^(a.*)$' });
+        expect(rendered.bindings).toEqual({ _q0: '^(a.*)\\z' });
         expect(matching('a(?i)b').where).not.toContain("'i'");
-        expect(bound('(?i)(a)\\1')).toEqual('^((a)\\2)$');
+        expect(bound('(?i)(a)\\1')).toEqual('^((a)\\2)\\z');
     });
 });

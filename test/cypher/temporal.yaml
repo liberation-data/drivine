@@ -171,6 +171,15 @@ cases:
                   zonedMinute: (time('10:00:00+02:00') - duration('PT45M')).minute,
                   zone: (time('10:00:00+02:00') - duration('PT45M')).timezone}
         rows: [{micro: 123456, nano: 123456000, milli: 123, nextMinute: 31, carried: 750, wrapped: 0, zonedMinute: 15, zone: "+02:00"}]
+      - note: A fraction no real number holds exactly, as .001, still gives its fields whole.
+        cypher: |
+          WITH localdatetime('2024-03-15T10:30:33.001') AS t, duration('PT33.007S') AS d
+          RETURN {milli: t.millisecond, micro: t.microsecond, durationMicros: d.microseconds, ofSecond: d.microsecondsOfSecond,
+                  hour: localtime('10:59:59.999999').hour, epochMillis: datetime('2024-03-15T10:30:33.123999Z').epochMillis}
+        rows: [{milli: 1, micro: 1000, durationMicros: 33007000, ofSecond: 7000, hour: 10, epochMillis: 1710498633123}]
+      - note: A duration made from a map keeps the fraction of a second its smaller units make.
+        cypher: "RETURN [toString(duration({milliseconds: 1500})), toString(duration({seconds: 1, microseconds: 7})), toString(duration({nanoseconds: 1000}))]"
+        rows: [["PT1.5S", "PT1.000007S", "PT0.000001S"]]
 
   - name: "Week-year fields, duration parts and zoned inequality"
     description: "A moment gives its week-year and offset fields, a duration its parts of a larger unit, and zoned values at different offsets are unequal."

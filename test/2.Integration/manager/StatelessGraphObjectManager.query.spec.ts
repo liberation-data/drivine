@@ -265,6 +265,21 @@ describe.each(stores)('query DSL on $name', (store) => {
             ]);
         });
 
+        // FalkorDB's =~ finds the expression anywhere in the text: FalkorDB/FalkorDB#2603.
+        (store.name === 'FALKORDB' ? it.skip : it)(
+            'should match the whole value, a line break that ends it included',
+            async () => {
+                await addIssue({ id: 'line', title: 'Typo in docs\n', state: 'line' });
+                try {
+                    expect(ids(await gom.loadAll(Issue, (q) => ({ where: q.title.matches('Typo in docs') })))).toEqual([
+                        'i3'
+                    ]);
+                } finally {
+                    await gom.deleteAll(Issue, (q) => ({ where: q.state.eq('line' as any) }));
+                }
+            }
+        );
+
         (store.name === 'FALKORDB' ? it.skip : it)(
             'should number the groups of a regular expression as it writes them',
             async () => {
