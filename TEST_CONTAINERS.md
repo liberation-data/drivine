@@ -61,11 +61,18 @@ Each type is chosen alone: a local Neo4j can run beside a FalkorDB container. `<
 ## Oracle
 
 The Oracle suites run only with `ORACLE_TESTS=true`, since the image is large and the database wants two gigabytes of
-memory. Without it the global setup drops the `ORACLE` datasource, and those suites are skipped.
+memory. Without it the global setup drops the `ORACLE` datasource, those suites are skipped, and the run says so once:
+
+```
+Oracle tests skipped: set ORACLE_TESTS=true to run them
+```
 
 ```bash
 ORACLE_TESTS=true npm test
 ```
+
+CI runs them in a job of its own, `test (Oracle)`: the whole suite with `ORACLE_TESTS=true`. Most of Oracle's tests are
+the shared suites, which run on each configured store, so there is no Oracle part to run alone.
 
 The container is the regular image and not a slim one, which has no Oracle Text: the full-text tests then search
 without an index. A local instance (`USE_LOCAL_ORACLE=true`) needs an ordinary user in a pluggable database, as the

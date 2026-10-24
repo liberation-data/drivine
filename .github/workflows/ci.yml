@@ -1,6 +1,6 @@
 # Lints, builds and tests Drivine on every push to master and every pull request. The tests run on test containers
-# (see TEST_CONTAINERS.md): Neo4j, Memgraph, FalkorDB and Postgres. Oracle, whose image is large, runs only when
-# ORACLE_TESTS=true, which CI leaves unset.
+# (see TEST_CONTAINERS.md): Neo4j, Memgraph, FalkorDB and Postgres. Oracle, whose image is large, runs in a job of its
+# own with ORACLE_TESTS=true. A local `npm test` leaves it out unless you set that, and says so.
 name: CI
 
 on:
@@ -23,3 +23,27 @@ jobs:
             - name: The built package loads
               run: node -e 'require("./dist/index.js"); require("./dist/testing/index.js")'
             - run: npm test
+
+    # The whole suite again, with Oracle. Oracle has few suites of its own to run alone: most of its tests are the
+    # shared suites, which run on each configured store (allStores(), sqlStores()) beside the graph engines.
+    oracle:
+        name: test (Oracle)
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            # The Oracle image and the other four leave the runner short of disk: drop toolchains Drivine doesn't use.
+            - name: Free disk space
+              run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+            - uses: actions/checkout@v7
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 24
+                  cache: npm
+            - run: npm ci
+            # Pulled here and not by the test setup, so the pull isn't counted against the container's startup
+            # timeout. The image is the one DrivineTestContainers names.
+            - name: Pull the Oracle image
+              run: docker pull gvenzl/oracle-free:23-faststart
+            - run: npm test
+              env:
+                  ORACLE_TESTS: true

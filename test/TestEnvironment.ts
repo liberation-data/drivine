@@ -1,6 +1,7 @@
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as clc from 'cli-color';
 import neo4j from 'neo4j-driver';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 
@@ -9,10 +10,13 @@ const ROOT = path.resolve(__dirname, '..');
 /** Set by the test runner once it has started the containers, so Jest's global setup leaves them be. */
 export const CONTAINERS_STARTED = 'DRIVINE_TEST_CONTAINERS_STARTED';
 
+const ORACLE_SKIPPED = 'Oracle tests skipped: set ORACLE_TESTS=true to run them';
+
 /**
  * Loads the tests' datasources: the shell wins, then your .env.test.local, then .env.test, since dotenv never
  * overrides a variable that is set. Oracle's are dropped unless ORACLE_TESTS=true: its image is large and the
- * database wants two gigabytes.
+ * database wants two gigabytes. A run without them says so, once: `npm test` and Jest's global setup each load the
+ * environment once per run, and the global setup doesn't when `npm test` has.
  */
 export function loadTestEnvironment(): void {
     dotenv.config({ path: path.join(ROOT, '.env.test.local') });
@@ -25,6 +29,7 @@ export function loadTestEnvironment(): void {
         Object.keys(process.env)
             .filter((key) => key.startsWith('ORACLE_DATABASE_'))
             .forEach((key) => (process.env[key] = ''));
+        process.stdout.write(`\n${clc.yellow.bold(ORACLE_SKIPPED)}\n\n`);
     }
 }
 
