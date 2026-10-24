@@ -25,8 +25,7 @@ export function main(args: string[], out: Output = TERMINAL): number {
         out.log(USAGE);
         return command === 'model' || command === '--help' || command === undefined ? 0 : 1;
     }
-    const at = rest.indexOf('--project');
-    const project = at >= 0 ? rest[at + 1] : 'tsconfig.json';
+    const project = projectOf(rest);
     if (!project) {
         out.error(USAGE);
         return 1;
@@ -53,4 +52,12 @@ export function main(args: string[], out: Output = TERMINAL): number {
             out.log(`Drivine model file: ${result.file} is current.`);
             return 0;
     }
+}
+
+/** The tsconfig.json `drivine model`'s options name, or undefined when they are not ones it knows. */
+function projectOf(options: string[]): string | undefined {
+    const at = options.indexOf('--project');
+    // A mistyped --check must not pass in CI by writing the file instead.
+    const unknown = options.filter((it, i) => it !== '--check' && i !== at && (at < 0 || i !== at + 1));
+    return unknown.length ? undefined : at >= 0 ? options[at + 1] : 'tsconfig.json';
 }

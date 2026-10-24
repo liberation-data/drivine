@@ -273,6 +273,27 @@ describe('Writing the model file', () => {
         expect(generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: quiet }).outcome).toEqual('empty');
     });
 
+    it("fails on a tsconfig.json it can't read, rather than read the source by the compiler's defaults", () => {
+        const dir = project({ 'src/A.ts': fragment('A') });
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        expect(() => generateModelFile({ project: path.join(dir, 'missing.json'), warn: quiet })).toThrow(
+            'could not be read as a tsconfig.json.'
+        );
+        fs.writeFileSync(tsconfig, JSON.stringify({ extends: './missing.json', include: ['src'] }));
+        expect(() => generateModelFile({ project: tsconfig, warn: quiet })).toThrow(/Cannot read file .*missing\.json/);
+        expect(fs.existsSync(path.join(dir, '.drivine'))).toBe(false);
+    });
+
+    it("names the projects a solution's tsconfig.json references, as it declares nothing itself", () => {
+        const dir = project({ 'src/A.ts': fragment('A') });
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        fs.renameSync(tsconfig, path.join(dir, 'tsconfig.app.json'));
+        fs.writeFileSync(tsconfig, JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }));
+        expect(() => generateModelFile({ project: tsconfig, warn: quiet })).toThrow(
+            /only references other projects. Name the one that declares the model with --project: .*tsconfig\.app\.json/
+        );
+    });
+
     it('names what it cannot read, and writes the rest', () => {
         const dir = project({
             'src/A.ts': fragment('A'),
@@ -365,11 +386,28 @@ describe('drivine model', () => {
         ]);
     });
 
+    it('says when the package turned it off, and when there is nothing to write', () => {
+        const { lines, out }: { lines: string[]; out: Output } = output();
+        const off = project({ 'src/A.ts': 'export class A {}\n' });
+        fs.writeFileSync(path.join(off, 'package.json'), JSON.stringify({ name: 'off', drivine: { model: false } }));
+        expect(main(['model', '--project', path.join(off, 'tsconfig.json')], out)).toEqual(0);
+        const empty = project({ 'src/A.ts': 'export class A {}\n' });
+        expect(main(['model', '--project', path.join(empty, 'tsconfig.json'), '--check'], out)).toEqual(0);
+        expect(lines).toEqual([
+            'Drivine model file: turned off in package.json.',
+            'Drivine model file: the project declares no fragments or views, so there is nothing to write.'
+        ]);
+    });
+
     it('says how it is used, and fails on what it does not know', () => {
         const { lines, out }: { lines: string[]; out: Output } = output();
         expect(main(['--help'], out)).toEqual(0);
         expect(main(['other'], out)).toEqual(1);
         expect(main(['model', '--project'], out)).toEqual(1);
+        // A mistyped --check writes nothing, and fails, rather than passing.
+        const dir = copy(FIXTURE);
+        expect(main(['model', '--project', path.join(dir, 'tsconfig.json'), '--chek'], out)).toEqual(1);
+        expect(fs.existsSync(path.join(dir, '.drivine'))).toBe(false);
         expect(lines.every((it) => it.startsWith('Usage: drivine model'))).toBe(true);
     });
 });

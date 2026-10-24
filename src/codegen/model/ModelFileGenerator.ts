@@ -65,9 +65,28 @@ function readProject(project: string, root: string): ReadModel {
     if (!config) {
         throw new Error(`Drivine model file: ${project} could not be read as a tsconfig.json.`);
     }
+    // Read on past a broken tsconfig.json, and the source would be read by the compiler's defaults, not the build's.
+    // One that finds no source is only an empty project.
+    const errors = config.errors.filter((it) => it.code !== NO_INPUTS);
+    if (errors.length) {
+        const messages = errors.map((it) => ts.flattenDiagnosticMessageText(it.messageText, '\n'));
+        throw new Error(`Drivine model file: ${project} could not be read as a tsconfig.json. ${messages.join(' ')}`);
+    }
+    // A solution's tsconfig.json declares nothing itself: its references do.
+    if (!config.fileNames.length && config.projectReferences?.length) {
+        const references = config.projectReferences.map((it) => path.relative(process.cwd(), it.path));
+        throw new Error(
+            `Drivine model file: ${project} only references other projects. Name the one that declares the model with --project: ${references.join(
+                ', '
+            )}.`
+        );
+    }
     const program = ts.createProgram({ rootNames: config.fileNames, options: config.options });
     return new ModelReader(ts, program, root).read();
 }
+
+/** The compiler's code for a tsconfig.json that finds no source. */
+const NO_INPUTS = 18003;
 
 function packageDir(from: string): string {
     for (let dir = from; ; dir = path.dirname(dir)) {
