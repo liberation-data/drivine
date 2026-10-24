@@ -1485,7 +1485,8 @@ Notes:
   engine gives: see [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres).
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`.
   A property of the root may be written as Cypher writes it, `n.name = $name` (or ``n.`a name` ``), and is read as that
-  property; a property compared with `true` or `false` is compared with the text a JSON boolean is read as.
+  property, as text; a property compared with `true` or `false` is compared with the text a JSON boolean is read as. To
+  compare one with a number, read it as a number in SQL.
 - A save is one block and checks the stamp, as on the graph engines. A save turned away by a deadlock (`ORA-00060`) or
   a serialization failure (`ORA-08177`) is run again. Another writer that changes a node in SQL should give it a new
   stamp: the first sixteen characters of `stamp` for its properties or labels, the last sixteen for its relationships.
@@ -1550,8 +1551,8 @@ Notes:
   engine gives: see [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres).
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`,
   e.g. `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name` (or
-  ``n.`a name` ``), and is read as that property; a property compared with `true` or `false` is compared with the text
-  a JSON boolean is read as.
+  ``n.`a name` ``), and is read as that property, as text; a property compared with `true` or `false` is compared with
+  the text a JSON boolean is read as. To compare one with a number, read it as a number in SQL.
 - A number is compared as a number only where one is stored: `'7'` is not `7`, as on the graph engines.
 - Text is ordered by the database's collation, so a page of mixed-case text may not be in the order Neo4j gives
   (`a, b, B` rather than `B, a, b`). The range indexes are made in that collation, so an order and a seek are read

@@ -73,6 +73,15 @@ describe('CypherShorthand', () => {
         expect(rewrite('true = n.locked')).toEqual("true = JSON_VALUE(n_.props, '$.locked')");
     });
 
+    it('should escape a name in backticks for the literal and the path it is written in', () => {
+        expect(rewrite("n.`it's` = 1")).toEqual("JSON_VALUE(n_.props, '$.\"it''s\"') = 1");
+        expect(rewrite('n.`a"b\\c` = 1')).toEqual('JSON_VALUE(n_.props, \'$."a\\"b\\\\c"\') = 1');
+        expect(rewrite('n.true = 1')).toEqual('JSON_VALUE(n_.props, \'$."true"\') = 1');
+        expect(new PostgresBackend().written("n.`it's` = 1 OR n.`x') = '' OR 1=1 --` = 2")).toEqual(
+            "(n.props ->> 'it''s') = 1 OR (n.props ->> 'x'') = '''' OR 1=1 --') = 2"
+        );
+    });
+
     it("should read a property on Postgres as Postgres reads one, and leave a graph engine's predicate as Cypher", () => {
         expect(new PostgresBackend().written("n.name = 'x' AND n.locked = true AND n.stamp IS NULL")).toEqual(
             "(n.props ->> 'name') = 'x' AND (n.props ->> 'locked') = 'true' AND n.stamp IS NULL"

@@ -139,6 +139,14 @@ describe.each(allStores())('loadNearest on $type', (engine) => {
             bindings: { context: 'b' }
         });
         expect(scoped.map((it) => it.value.id)).toEqual(['east']);
+        // Written as Cypher writes it, on every store: a SQL store reads n.contextId as that property.
+        const written = await gom.loadNearest(Proposition, [1, 0.1, 0], {
+            topK: 1,
+            searchK: 4,
+            where: 'n.contextId = $context',
+            bindings: { context: 'b' }
+        });
+        expect(written.map((it) => it.value.id)).toEqual(['east']);
         const typed = await gom.loadNearest(Proposition, [1, 0.1, 0], {
             topK: 1,
             searchK: 4,

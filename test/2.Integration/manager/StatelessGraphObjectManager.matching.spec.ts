@@ -124,6 +124,13 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
             bindings: { s: 's2' }
         });
         expect(scoped.map((it) => it.value.id)).toEqual(['c2']);
+        // Written as Cypher writes it, on every store: a SQL store reads n.sectionId as that property.
+        const written = await gom.loadMatching(Chunk, 'graph', {
+            topK: 10,
+            where: 'n.sectionId = $s',
+            bindings: { s: 's2' }
+        });
+        expect(written.map((it) => it.value.id)).toEqual(['c2']);
         const typed = await gom.loadMatching(Chunk, 'graph', { topK: 10, where: (q) => q.sectionId.eq('s2') });
         expect(typed.map((it) => it.value.id)).toEqual(['c2']);
         expect((await gom.loadMatching(Chunk, 'graph', { topK: 10, threshold: 1.01 })).length).toEqual(0);

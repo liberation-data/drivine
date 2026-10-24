@@ -139,6 +139,17 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
                 bindings: { back: 60 }
             })
         ).toEqual({ found: true, applied: true, changed: true });
+        // A property written as Cypher writes it is read as that property.
+        expect(await gom.patch(Session, 's1', { set: { summary: 'again' }, where: "n.summary = 'other'" })).toEqual({
+            found: true,
+            applied: false,
+            changed: false
+        });
+        expect(await gom.patch(Session, 's1', { set: { summary: 'again' }, where: "n.summary = 'patched'" })).toEqual({
+            found: true,
+            applied: true,
+            changed: true
+        });
     });
 
     it('should patch many, in order, making none', async () => {
