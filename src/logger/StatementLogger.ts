@@ -7,8 +7,8 @@ export class StatementLogger {
     constructor(readonly sessionId: string) {}
 
     log(query: QuerySpecification<any>, hrStart: [number, number]): void {
-        const hrEnd = process.hrtime(hrStart);
-        const uSec = Math.round(hrEnd[1] / 1000);
+        const [seconds, nanoseconds] = process.hrtime(hrStart);
+        const uSec = seconds * 1_000_000 + Math.round(nanoseconds / 1000);
         this.logger.verbose({
             ...query,
             sessionId: this.sessionId,
