@@ -845,6 +845,30 @@ describe('Reading constants and types', () => {
         expect(read(dir).views.map((it: any) => it.name)).toEqual(['Single']);
     });
 
+    it('says a relationship is a list only where TypeScript records an Array, as a load gives one only then', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphPath, GraphRelationship, GraphView, hop, NodeFragment, Root } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                '@GraphView()',
+                'export class V {',
+                '    @Root() a: A;',
+                "    @GraphRelationship({ type: 'T', target: () => A }) to: A[] | null;",
+                "    @GraphPath([hop('T')], { target: () => A }) far: A[] | undefined;",
+                "    @GraphRelationship({ type: 'T', target: () => A }) all?: A[];",
+                '}'
+            ].join('\n')
+        });
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: quiet });
+        // Under strict null checks, TypeScript records a list that may be null as Object, and a load gives one item.
+        expect(read(dir).views[0].relationships.map((it: any) => [it.field, it.many])).toEqual([
+            ['all', true],
+            ['far', false],
+            ['to', false]
+        ]);
+    });
+
     it('takes the class of a field that may be null without strict null checks, as TypeScript records it', () => {
         const dir = project({
             'src/A.ts': [

@@ -366,7 +366,8 @@ export class ModelReader {
     }
 
     private relationship(prop: Property): Entry {
-        const many = this.isList(prop.type);
+        // As ModelRegistry reads it: a list only where the field's metadata records an Array.
+        const many = this.designType(prop.decorated.type) === 'Array';
         const path = this.on(prop, 'GraphPath');
         if (path) {
             return this.path(prop, path, many);
