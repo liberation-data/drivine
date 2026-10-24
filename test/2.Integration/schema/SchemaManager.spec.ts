@@ -169,12 +169,21 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const one = await manager([SchemaCatalog.of(unique)], { mode: 'WARN', violationSampleSize: 1 }).enforce();
         const result = [...one.values()].flat()[0];
         expect([result.status, result.sample?.length]).toEqual(['VIOLATION', 1]);
-        // FalkorDB builds the constraint in the background, and reports at once that the build failed.
+        if (engine.type === DatabaseType.FALKORDB) {
+            // FalkorDB builds the constraint in the background and marks the build FAILED: the failed constraint is
+            // dropped, and the data read to confirm a VIOLATION, as in drivine4j, with an empty sample at size 0.
+            expect(await gom.constraints.ensure(unique, 0)).toEqual({ status: 'VIOLATION', spec: unique, sample: [] });
+            const left = await gom.persistenceManager.query<unknown>(
+                new QuerySpecification("CALL db.constraints() YIELD label WHERE label = 'ManagedDoc' RETURN label")
+            );
+            expect(left).toEqual([]);
+        }
+        // Elsewhere the engine refuses the constraint, and its refusal is thrown.
         await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow(
-            engine.type === DatabaseType.FALKORDB ? /FalkorDB could not build the uniqueness constraint/ : undefined
+            engine.type === DatabaseType.FALKORDB ? 'VIOLATION for the UNIQUE on ManagedDoc(id)' : undefined
         );
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
-        // Nothing the refusal left behind, such as FalkorDB's failed constraint, is in the way once the data allows it.
+        // Nothing the refusal left behind is in the way once the data allows the constraint.
         expect((await gom.constraints.ensure(unique)).status).toBe('CREATED');
     });
 

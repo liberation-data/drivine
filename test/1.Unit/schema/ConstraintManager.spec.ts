@@ -129,41 +129,116 @@ describe('ConstraintManager with an index in the way of a constraint', () => {
 
 describe('ConstraintManager on FalkorDB, which builds a constraint in the background', () => {
     const spec = uniquenessConstraint('Person', 'email');
+    const repeated = {
+        properties: { email: 'dup@example.com' },
+        count: 2,
+        nodes: [{ elementId: 1 }, { elementId: 2 }]
+    };
+    const other = { properties: { email: 'other@example.com' }, count: 2, nodes: [{ elementId: 3 }, { elementId: 4 }] };
 
-    /** A FalkorDB whose constraint, once made, is missing from the first `pending` listings and then has `status`. */
-    function falkorDb(status: 'OPERATED' | 'FAILED', pending: number = 1) {
+    /**
+     * A FalkorDB whose constraint, once made, is missing from the first `pending` listings and then has `status` until
+     * it is dropped. It answers the query for keys held more than once with `conflicts` in turn, the last one from then
+     * on, or fails it when that is an error.
+     */
+    function falkorDb(status: 'OPERATIONAL' | 'FAILED', pending: number = 1, ...conflicts: (unknown[] | Error)[]) {
         const ran: unknown[] = [];
         let made = false;
         let listings = 0;
+        let reads = 0;
         const answer = (statement: any): unknown[] => {
             ran.push(statement);
             if (statement?.native === 'CONSTRAINT_CREATE') {
                 made = true;
                 return [];
             }
+            if (statement?.native === 'CONSTRAINT_DROP') {
+                made = false;
+                return [];
+            }
             if (statement === FALKORDB_SCHEMA.listUniques.statement && made) {
                 listings++;
                 return listings <= pending ? [] : [{ label: 'Person', properties: ['email'], status }];
+            }
+            if (typeof statement === 'string' && statement.includes('holders > 1')) {
+                const answer = conflicts[Math.min(reads++, conflicts.length - 1)] ?? [];
+                if (answer instanceof Error) {
+                    throw answer;
+                }
+                return answer;
             }
             return [];
         };
         const executor = {
             run: async (statement: unknown) => Promise.resolve().then(() => answer(statement))
         } as unknown as SchemaExecutor;
-        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), ran };
+        const dropped = () => ran.some((it: any) => it?.native === 'CONSTRAINT_DROP');
+        const read = () => ran.filter((it) => typeof it === 'string' && it.includes('holders > 1'));
+        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), ran, dropped, read };
     }
 
     it('should wait for the constraint to be built', async () => {
-        expect(await falkorDb('OPERATED', 2).constraints.ensure(spec, 0)).toEqual({ status: 'CREATED', spec });
+        expect(await falkorDb('OPERATIONAL', 2).constraints.ensure(spec, 0)).toEqual({ status: 'CREATED', spec });
     });
 
-    it('should throw as soon as FalkorDB reports that the build failed, not after waiting out every attempt', async () => {
-        const store = falkorDb('FAILED');
+    it('should drop a constraint whose build failed, and give a VIOLATION with an empty sample at sample size 0', async () => {
+        const store = falkorDb('FAILED', 1, [repeated]);
         const started = Date.now();
-        await expect(store.constraints.ensure(spec, 0)).rejects.toThrow(
-            'FalkorDB could not build the uniqueness constraint on Person(email): nodes may hold the same values.'
-        );
+        expect(await store.constraints.ensure(spec, 0)).toEqual({ status: 'VIOLATION', spec, sample: [] });
         expect(Date.now() - started).toBeLessThan(1_000);
+        expect(store.dropped()).toBe(true);
+        // The data is read only after the build failed, to confirm the violation, for one key.
+        expect(store.read()).toEqual([FALKORDB_SCHEMA.conflicts(spec, 1)]);
+    });
+
+    it('should give the keys held more than once, up to the sample size, when the build fails after the data was read', async () => {
+        // Clean when ensure reads it first; two keys held more than once by the time the build fails.
+        const store = falkorDb('FAILED', 1, [], [repeated, other]);
+        expect(await store.constraints.ensure(spec, 2)).toEqual({
+            status: 'VIOLATION',
+            spec,
+            sample: [repeated, other]
+        });
+        expect(store.dropped()).toBe(true);
+        expect(store.read()).toEqual([FALKORDB_SCHEMA.conflicts(spec, 2), FALKORDB_SCHEMA.conflicts(spec, 2)]);
+    });
+
+    it('should drop a constraint whose build failed, and throw when no key is held more than once', async () => {
+        const store = falkorDb('FAILED', 1, []);
+        await expect(store.constraints.ensure(spec, 0)).rejects.toThrow(
+            'FalkorDB could not build the uniqueness constraint on Person(email), but no key it covers is held more than once.'
+        );
+        expect(store.dropped()).toBe(true);
+    });
+
+    it('should drop a constraint whose build failed, and throw, keeping why, when the data cannot be read', async () => {
+        const unreadable = new Error('Connection lost');
+        const store = falkorDb('FAILED', 1, unreadable);
+        const thrown = await store.constraints.ensure(spec, 0).catch((e) => e);
+        expect(thrown).toBeInstanceOf(DrivineError);
+        expect(thrown.message).toBe(
+            'FalkorDB could not build the uniqueness constraint on Person(email), and the data could not be read to see why.'
+        );
+        expect(thrown.rootCause).toBe(unreadable);
+        expect(store.dropped()).toBe(true);
+    });
+
+    it('should drop a constraint whose build failed, which list leaves out', async () => {
+        const ran: unknown[] = [];
+        const executor = {
+            run: async (statement: unknown) => {
+                ran.push(statement);
+                return Promise.resolve(
+                    statement === FALKORDB_SCHEMA.listUniques.statement
+                        ? [{ label: 'Person', properties: ['email'], status: 'FAILED' }]
+                        : []
+                );
+            }
+        } as unknown as SchemaExecutor;
+        const constraints = new ConstraintManager(executor, FALKORDB_SCHEMA);
+        expect(await constraints.list()).toEqual([]);
+        await constraints.drop(spec);
+        expect(ran).toContainEqual({ native: 'CONSTRAINT_DROP', label: 'Person', properties: ['email'] });
     });
 });
 

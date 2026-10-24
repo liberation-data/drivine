@@ -1633,9 +1633,11 @@ Schema statements run outside any transaction. `ensure` returns a result whose `
 | `BLOCKED_BY_INDEX` | Constraints only, on Neo4j: a plain range index over the same label and properties is in the way of it, and is named in `index`. Nothing changed: `ensure(spec, sampleSize, true)` drops the index and makes the constraint, whose own index serves the same lookups. A key held more than once keeps the index, as a `VIOLATION`. |
 | `RECREATED` | From `recreate(spec)`: the old item dropped and the new one made. |
 
-A sample size of 0, as in `ensure(spec, 0)`, skips reading the data, and a constraint the data breaks then throws the
-engine's refusal. On FalkorDB, which builds a constraint in the background, `ensure` throws as soon as FalkorDB marks
-the build failed.
+A sample size of 0, as in `ensure(spec, 0)`, skips reading the data first, and a constraint the data breaks then throws
+the engine's refusal. FalkorDB doesn't refuse one: it builds it in the background and marks the build failed. Drivine then
+drops the failed constraint, which enforces nothing, and reads the data: a key held more than once is a `VIOLATION`, as in
+drivine4j, with an empty sample at sample size 0. A build that fails with no key held more than once throws. Once the
+data is clean, `ensure` makes the constraint. `drop(spec)` also removes a constraint FalkorDB failed to build.
 
 A `VIOLATION`'s `sample` is a breaking change from 3.2. Each entry used to be the repeated value itself: one property's
 value as it is, or several properties' values as a list. Each entry is now a `ViolatingKey`, and the value is in its
