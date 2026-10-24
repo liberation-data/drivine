@@ -95,11 +95,7 @@ export class ModelReader {
     private classes(): TS.ClassDeclaration[] {
         const found: TS.ClassDeclaration[] = [];
         for (const file of this.program.getSourceFiles()) {
-            if (file.isDeclarationFile || this.program.isSourceFileFromExternalLibrary(file)) {
-                continue;
-            }
-            const relative = path.relative(this.root, file.fileName);
-            if (relative.startsWith('..') || relative.split(/[\\/]/).includes('node_modules')) {
+            if (!this.isOwn(file)) {
                 continue;
             }
             const visit = (node: TS.Node): void => {
@@ -111,6 +107,15 @@ export class ModelReader {
             visit(file);
         }
         return found;
+    }
+
+    /** Whether a file is the package's own source, rather than a declaration file or another package's. */
+    private isOwn(file: TS.SourceFile): boolean {
+        if (file.isDeclarationFile || this.program.isSourceFileFromExternalLibrary(file)) {
+            return false;
+        }
+        const relative = path.relative(this.root, file.fileName);
+        return !relative.startsWith('..') && !relative.split(/[\\/]/).includes('node_modules');
     }
 
     private fragment(decl: TS.ClassDeclaration, fragments: TS.ClassDeclaration[]): Entry {
@@ -188,7 +193,10 @@ export class ModelReader {
         return {
             id: this.id(decl),
             name: decl.name!.text,
-            target: { field: target.name, fragment: this.related(target, this.thunk(target, 'TargetNode')) },
+            target: {
+                field: target.name,
+                fragment: this.related(target, this.thunk(target, 'TargetNode'), ['NodeFragment', 'GraphView'])
+            },
             properties: properties
                 .filter((it) => it !== target)
                 .sort(byName)
@@ -206,7 +214,7 @@ export class ModelReader {
         return {
             id: this.id(decl),
             name: decl.name!.text,
-            root: { field: root.name, fragment: this.related(root, this.thunk(root, 'Root')) },
+            root: { field: root.name, fragment: this.related(root, this.thunk(root, 'Root'), ['NodeFragment']) },
             relationships: properties
                 .filter((it) => this.on(it, 'GraphRelationship') || this.on(it, 'GraphPath'))
                 .sort(byName)
@@ -266,11 +274,16 @@ export class ModelReader {
                 `Can't read the hops of @GraphPath ${field}. Name each with a literal, a constant or hop().`
             );
         }
+        // As ModelRegistry refuses it: a path is read in one order.
+        if (hops.filter((it) => it.orderBy).length > 1) {
+            throw new Error(`@GraphPath ${field} names an order on more than one hop; a path is read in one order.`);
+        }
         return {
             field: prop.name,
             target: this.related(
                 prop,
-                this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class')
+                this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class'),
+                ['NodeFragment']
             ),
             many,
             required: this.given(options, 'required', isBoolean, `whether ${field} is required`) ?? false,
@@ -451,9 +464,22 @@ export class ModelReader {
         return `${this.ts.findAncestor(prop.decorated, this.ts.isClassDeclaration)?.name?.text}.${prop.name}`;
     }
 
-    /** The id of what a relationship, a root or a target node leads to: the class its decorator names, or its type. */
-    private related(prop: Property, thunk: TS.ClassDeclaration | undefined): string {
-        return this.id(this.targetClass(prop, thunk));
+    /**
+     * The id of what a relationship, a root or a target node leads to: the class its decorator names, or its type. One
+     * of this package's classes that is not of a kind the field may hold is a problem, as ModelRegistry refuses it,
+     * rather than an id no entry has.
+     */
+    private related(prop: Property, thunk: TS.ClassDeclaration | undefined, kinds: string[] = KINDS): string {
+        const decl = this.targetClass(prop, thunk);
+        const kind = this.kindOf(decl);
+        if (this.isOwn(decl.getSourceFile()) && !(kind && kinds.includes(kind))) {
+            const what = kinds
+                .map((it) => `@${it}`)
+                .join(', ')
+                .replace(/, (?=[^,]*$)/, ' or ');
+            throw new Error(`${this.field(prop)} holds ${decl.name!.text}, which is not a ${what}.`);
+        }
+        return this.id(decl);
     }
 
     /** The class a `@Root` or `@TargetNode` names, when it names one. */
@@ -483,7 +509,7 @@ export class ModelReader {
     }
 
     private kindOf(decl: TS.ClassDeclaration): string | undefined {
-        return ['NodeFragment', 'RelationshipFragment', 'GraphView'].find((it) => this.decorator(decl, it));
+        return KINDS.find((it) => this.decorator(decl, it));
     }
 
     // Types
@@ -839,6 +865,9 @@ export class ModelReader {
         return declaration && ts.isClassDeclaration(declaration) ? declaration : undefined;
     }
 }
+
+/** The kinds of class a model file has an entry for. */
+const KINDS = ['NodeFragment', 'RelationshipFragment', 'GraphView'];
 
 /** A relationship's directions, the default first. */
 const DIRECTIONS = ['OUTGOING', 'INCOMING', 'UNDIRECTED'] as const;

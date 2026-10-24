@@ -594,6 +594,53 @@ describe('Reading constants and types', () => {
         expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#B']);
     });
 
+    it('names a field that holds a class of a kind it may not, as ModelRegistry does, rather than write an id no entry has', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphPath, GraphRelationship, GraphView, NodeFragment, RelationshipFragment, Root, TargetNode } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                'export class Plain { id: string; }',
+                '@GraphView()',
+                'export class V { @Root() a: A; }',
+                '@RelationshipFragment()',
+                'export class R { @TargetNode() to: R; }',
+                '@GraphView()',
+                'export class Rooted { @Root() v: V; }',
+                '@GraphView()',
+                "export class Pathed { @Root() a: A; @GraphPath([{ type: 'T' }]) far: V; }",
+                '@GraphView()',
+                "export class Related { @Root() a: A; @GraphRelationship({ type: 'T' }) to: Plain; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            'Drivine model file: src/A#R: R.to holds R, which is not a @NodeFragment or @GraphView.',
+            'Drivine model file: src/A#Rooted: Rooted.v holds V, which is not a @NodeFragment.',
+            'Drivine model file: src/A#Pathed: Pathed.far holds V, which is not a @NodeFragment.',
+            'Drivine model file: src/A#Related: Related.to holds Plain, which is not a @NodeFragment, @RelationshipFragment or @GraphView.'
+        ]);
+        expect(read(dir).views.map((it: any) => it.id)).toEqual(['src/A#V']);
+    });
+
+    it('names a path that orders more than one hop, as ModelRegistry does', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphPath, GraphView, hop, NodeFragment, Root } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                '@GraphView()',
+                "export class V { @Root() a: A; @GraphPath([hop('T', undefined, undefined, 'x'), { type: 'U', orderBy: 'y' }]) far: A; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            'Drivine model file: src/A#V: @GraphPath V.far names an order on more than one hop; a path is read in one order.'
+        ]);
+    });
+
     it('names a direction or an aggregate function it cannot read, rather than write the default', () => {
         const dir = project({
             'src/A.ts': [
