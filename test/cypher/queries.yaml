@@ -49,13 +49,25 @@ cases:
         rows: ["Carrie", "Hugo"]
 
   - name: "Whole number equals its float"
-    description: "1964 equals 1964.0, in a pattern or a WHERE."
+    description: "1964 equals 1964.0, in a pattern, a WHERE, an IN, a range or a RETURN, written or a parameter."
     steps:
       - cypher: "MATCH (p:Person {born: 1964.0}) RETURN p.name"
         rows: ["Keanu"]
       - cypher: "MATCH (p:Person) WHERE p.born = $born RETURN p.name"
         parameters: {born: 1964.0}
         rows: ["Keanu"]
+      - cypher: "MATCH (m:Movie {released: $r}) RETURN m.title"
+        parameters: {r: 1999.0}
+        rows: ["The Matrix"]
+      - cypher: "MATCH (m:Movie) WHERE m.released IN $rs RETURN m.title"
+        parameters: {rs: [1999.0, 1.5]}
+        rows: ["The Matrix"]
+      - cypher: "MATCH (p:Person) WHERE p.born >= $b AND p.born < $b + 1 RETURN p.name"
+        parameters: {b: 1964.0}
+        rows: ["Keanu"]
+      - cypher: "RETURN $f = 2"
+        parameters: {f: 2.0}
+        rows: [true]
 
   - name: "Integer bounds"
     description: "The least and greatest whole numbers are written as literals, and one past the greatest is refused."
@@ -946,8 +958,93 @@ cases:
         rows: [{$repeat: "a", times: 20000}, {$repeat: "b", times: 20000}]
 
   - name: "A float parameter with no fraction"
-    description: "A float parameter that is a whole number, such as 2.0, stays a float."
+    description: "A float parameter that is a whole number, such as 2.0, stays a float, nested in maps and lists, past a long's range, in a UNION, and in a parameter past 32 KB."
     steps:
       - cypher: "RETURN [$f, $f * 2, $f + 1, toString($f), $m.f]"
         parameters: {f: 2.0, m: {f: 3.0}}
         rows: [[2.0, 4.0, 3.0, "2.0", 3.0]]
+      - cypher: "RETURN $p"
+        parameters: {p: {a: [1.0, 2.5, {b: -3.0}], n: 4}}
+        rows: [{a: [1.0, 2.5, {b: -3.0}], n: 4}]
+      - cypher: "RETURN [$p.a[2].b, toString($f)]"
+        parameters: {p: {a: [1.0, 2.5, {b: -3.0}], n: 4}, f: -2.0}
+        rows: [[-3.0, "-2.0"]]
+      - note: "Postgres's jsonb reads a float past a long's range back as a whole number."
+        cypher: "RETURN [$big, $big * 2]"
+        parameters: {big: 1.0e+20}
+        except: [postgres]
+        rows: [[1.0e+20, 2.0e+20]]
+      - cypher: "RETURN $f AS x UNION ALL RETURN 1.5 AS x"
+        parameters: {f: 2.0}
+        unordered: true
+        rows: [2.0, 1.5]
+      - cypher: "RETURN $doc.n"
+        parameters: {doc: {text: {$repeat: "y", times: 40000}, n: 2.0}}
+        rows: [2.0]
+      - cypher: "RETURN [toString(2.5), toString(3), toString('a'), toString($f * 2)]"
+        parameters: {f: 2.0}
+        rows: [["2.5", "3", "a", "4.0"]]
+
+  - name: "A walk sorted in a WITH"
+    description: "A walk sorted by an expression of where it ends in a WITH, skipped and limited, keeps that order in the query that reads it."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b ORDER BY coalesce(b.name, b.title) DESC, b.released SKIP 1 LIMIT 4 RETURN coalesce(b.name, b.title)"
+        rows: ["The Matrix Reloaded", "The Matrix", "The Matrix", "The Matrix"]
+
+  - name: "A walk sorted by toString()"
+    description: "A walk returns toString() of an expression of where it ends, and sorted by it in a RETURN or a WITH, gives its rows in order."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN toString(coalesce(b.name, b.title)) AS n"
+        unordered: true
+        rows: ["Carrie", "Johnny Mnemonic", "Keanu", "The Matrix", "The Matrix", "The Matrix", "The Matrix Reloaded", "The Matrix Reloaded"]
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN toString(coalesce(b.name, b.title)) AS n ORDER BY n"
+        rows: ["Carrie", "Johnny Mnemonic", "Keanu", "The Matrix", "The Matrix", "The Matrix", "The Matrix Reloaded", "The Matrix Reloaded"]
+      - note: "The order term is not an item of the RETURN, so it is carried beside the walk."
+        cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN coalesce(b.name, b.title) ORDER BY toString(coalesce(b.name, b.title)) DESC"
+        rows: ["The Matrix Reloaded", "The Matrix Reloaded", "The Matrix", "The Matrix", "The Matrix", "Keanu", "Johnny Mnemonic", "Carrie"]
+      - note: "The order term is not an item of the WITH, so it is carried beside the walk."
+        cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b ORDER BY toString(coalesce(b.name, b.title)) RETURN coalesce(b.name, b.title)"
+        rows: ["Carrie", "Johnny Mnemonic", "Keanu", "The Matrix", "The Matrix", "The Matrix", "The Matrix Reloaded", "The Matrix Reloaded"]
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b ORDER BY toString(coalesce(b.name, b.title)) DESC SKIP 4 LIMIT 3 RETURN coalesce(b.name, b.title)"
+        rows: ["The Matrix", "Keanu", "Johnny Mnemonic"]
+      - note: "toString() of a number, and of null where a person has no released, which sorts last."
+        cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b ORDER BY toString(b.released), coalesce(b.name, b.title) RETURN coalesce(b.name, b.title)"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix", "The Matrix", "The Matrix Reloaded", "The Matrix Reloaded", "Carrie", "Keanu"]
+
+  - name: "Sorted by coalesce() of collect(DISTINCT)"
+    description: "A walk's groups sort by coalesce() of an aggregate collected once each, and a DISTINCT projection by coalesce() of an item of one."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN coalesce(b.name, b.title) AS n, count(*) ORDER BY coalesce(head(collect(DISTINCT b.born)), 0), n"
+        rows: [["Johnny Mnemonic", 1], ["The Matrix", 3], ["The Matrix Reloaded", 2], ["Keanu", 1], ["Carrie", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name AS n, collect(DISTINCT m.title) AS ts ORDER BY coalesce(ts[2], 'zz'), n SKIP 1 LIMIT 2"
+        unorderedLists: true
+        rows: [["Carrie", ["The Matrix", "The Matrix Reloaded"]], ["Laurence", ["The Matrix"]]]
+
+  - name: "collect(DISTINCT) compares values, not their text"
+    description: "collect(DISTINCT …) keeps a float that is a whole number a float, keeps an item past 4000 bytes, and keeps once two maps that differ only in the order of their keys."
+    steps:
+      - cypher: "UNWIND [1.0, 2.5, 1.0] AS x RETURN collect(DISTINCT x)"
+        rows: [[1.0, 2.5]]
+      - cypher: "UNWIND [1, 2] AS x RETURN x, collect(DISTINCT $f) ORDER BY x DESC"
+        parameters: {f: 2.0}
+        rows: [[2, [2.0]], [1, [2.0]]]
+      - cypher: "UNWIND [[$b], [$b], 'a'] AS x RETURN collect(DISTINCT x)"
+        parameters: {b: {$repeat: "y", times: 5000}}
+        rows: [[[{$repeat: "y", times: 5000}], "a"]]
+      - cypher: "UNWIND [{a: 1, b: 2}, {b: 2, a: 1}] AS x RETURN collect(DISTINCT x)"
+        rows: [[{a: 1, b: 2}]]
+
+  - name: "A map parameter keyed with $"
+    description: "A map parameter with a key that begins with $, such as extended JSON's $numberDouble, comes back the map it is, alone or beside a float that is a whole number."
+    steps:
+      - cypher: "RETURN $m"
+        parameters: {m: {$numberDouble: "1"}}
+        rows: [{$numberDouble: "1"}]
+      - note: "The float's extended JSON is the same text as the map's."
+        cypher: "RETURN [$f, $m]"
+        parameters: {f: 2.0, m: {$numberDouble: "2.0"}}
+        rows: [[2.0, {$numberDouble: "2.0"}]]
+      - note: "Beside a float that is a whole number in the same parameter."
+        cypher: "RETURN [$p.a, $p.m, $p.l]"
+        parameters: {p: {a: 2.5, b: 2.0, m: {$numberDouble: "1"}, l: {$numberLong: "5"}}}
+        rows: [[2.5, {$numberDouble: "1"}, {$numberLong: "5"}]]

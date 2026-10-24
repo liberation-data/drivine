@@ -33,6 +33,22 @@ describe('A compiled Cypher statement', () => {
         }
     );
 
+    it.each(compilers)(
+        'of a WITH sorted by a duration added to a stored value, which is none of its items, grows with each addition, not exponentially, on %s',
+        (_, compilerFor) => {
+            const compiler = compilerFor();
+            const added = (times: number) =>
+                'MATCH (c:Claim) WITH c ORDER BY ' +
+                '('.repeat(times) +
+                'c.day' +
+                " + duration('P1D'))".repeat(times) +
+                ' RETURN c.id';
+            const [one, two, four] = [1, 2, 4].map((it) => compiler.compile(added(it)).sql.length);
+            expect(one).toBeLessThan(40_000);
+            expect(four).toBeLessThan(3 * two);
+        }
+    );
+
     it.each(compilers)('of a sum of twice the terms is about twice as long on %s', (_, compilerFor) => {
         const compiler = compilerFor();
         const sum = (terms: number) =>

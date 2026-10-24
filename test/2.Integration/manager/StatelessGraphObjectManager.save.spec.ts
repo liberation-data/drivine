@@ -18,6 +18,12 @@ import {
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Neo4j plans each save statement the first time it sees it. A view's save is one statement of some 10 kB, a subquery
+// for each relationship, and plans in about half a second on a quiet machine, where it then runs in a millisecond or
+// two. A test saves a few shapes of view, each planned anew, so on CI, beside the suites running in parallel, it can pass
+// Jest's 5 seconds.
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['SaveTest', 'Person'] })
 class Person {
     @NodeId() uuid: string;
