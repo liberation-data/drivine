@@ -98,4 +98,28 @@ describe.each(allStores())('@EmptyWhenAbsent lists and sets on $type', (engine) 
         expect(loaded.codes).toEqual(new Set(['x', 'y']));
         expect(loaded.badges).toEqual(new Set(['gold']));
     });
+
+    it('should find a node by an item of a set, which it stores as a list', async () => {
+        await gom.save(listing('l4', { codes: new Set(['x', 'y']), badges: new Set(['gold']) }));
+        await gom.save(listing('l5', { codes: new Set(['z']) }));
+        const ids = async (where: (q: any) => any): Promise<string[]> =>
+            (await gom.loadAll(Listing, (q) => ({ where: where(q) }))).map((it) => it.id).sort();
+
+        expect(await ids((q) => q.codes.hasItem('y'))).toEqual(['l4']);
+        expect(await ids((q) => q.badges.hasItem('gold'))).toEqual(['l4']);
+    });
+
+    it('should load a set saved before sets were stored as lists, which a store held as {}, as an empty set', async () => {
+        // A Set was written as it was given: JSON text holds one as {}, and Memgraph a map.
+        if (engine.type === DatabaseType.NEO4J || engine.type === DatabaseType.FALKORDB) {
+            return; // Neo4j and FalkorDB refuse a map as a property, so none holds a set saved so.
+        }
+        await gom.save(listing('l3', { name: 'old', codes: {} as any }));
+        const loaded = (await gom.load(Listing, 'l3'))!;
+        expect(loaded.codes).toEqual(new Set());
+
+        await gom.save(listing('l3', { ...loaded, name: 'saved back', codes: new Set(['x']) }), { from: loaded });
+        expect((await stored()).codes).toEqual(['x']);
+        expect((await gom.load(Listing, 'l3'))!.codes).toEqual(new Set(['x']));
+    });
 });

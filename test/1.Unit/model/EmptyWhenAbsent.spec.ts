@@ -120,6 +120,12 @@ describe('@EmptyWhenAbsent', () => {
             expect(loaded.set).toEqual(new Set(['c', 'd']));
             expect(loaded.packedSet).toEqual(new Set(['e']));
         });
+
+        it('should load the {} a set saved before sets were stored as lists was held as as an empty set', () => {
+            const loaded = load({ set: {}, packedSet: '{}' });
+            expect(loaded.set).toEqual(new Set());
+            expect(loaded.packedSet).toEqual(new Set());
+        });
     });
 
     describe('a save', () => {

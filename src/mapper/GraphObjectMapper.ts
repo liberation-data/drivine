@@ -219,6 +219,13 @@ export class GraphObjectMapper {
             } else if (kind === 'set' && Array.isArray(instance[field])) {
                 // A store holds a set as a list.
                 instance[field] = new Set(instance[field]);
+            } else if (
+                kind === 'set' &&
+                instance[field].constructor === Object &&
+                Object.keys(instance[field]).length === 0
+            ) {
+                // A set saved before sets were stored as lists: JSON text, and Memgraph, held it as {}, without items.
+                instance[field] = new Set();
             }
         });
         return instance;
