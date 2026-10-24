@@ -54,6 +54,23 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it.each([
+        ['a list comprehension', '[z IN [1] WHERE COUNT { (y)-->() } > z]'],
+        ['a reduce', 'reduce(s = 0, z IN [1] | s + COUNT { (y)-->() }) > 0'],
+        ["a pattern's node properties", '(y)-[:S]->({k: COUNT { (y)-->() }})'],
+        ["a pattern's relationship properties", '(y)-[:S {k: COUNT { (y)-->() }}]->()']
+    ])(
+        'on Oracle, a subquery in %s in a quantified path pattern that may read a variable from outside it',
+        (_, test) => {
+            // Not in the spec, which has a subquery in a quantifier, a pattern comprehension and an EXISTS pattern.
+            const cypher = `MATCH (a) ((x)-[:R]->(y) WHERE ${test})+ (b) RETURN b`;
+            expect(() => new OracleCypherCompiler('g').compile(cypher)).toThrow(
+                'On Oracle, a subquery in a quantified path pattern that may read a variable from outside it is Cypher, and is not compiled to SQL yet.'
+            );
+            expect(() => new PostgresCypherCompiler('g').compile(cypher)).not.toThrow();
+        }
+    );
+
     it('a statement that is not Cypher, with where it goes wrong', () => {
         expect(() => new PostgresCypherCompiler('g').compile('MATCH (n RETURN n')).toThrow(
             "The statement is not Cypher, at line 1, column 10: no viable alternative at input 'MATCH (n RETURN'"

@@ -256,10 +256,15 @@ SHORTESTPATH : ( 'S' | 's' ) ( 'H' | 'h' ) ( 'O' | 'o' ) ( 'R' | 'r' ) ( 'T' | '
 
 ALLSHORTESTPATHS : ( 'A' | 'a' ) ( 'L' | 'l' ) ( 'L' | 'l' ) ( 'S' | 's' ) ( 'H' | 'h' ) ( 'O' | 'o' ) ( 'R' | 'r' ) ( 'T' | 't' ) ( 'E' | 'e' ) ( 'S' | 's' ) ( 'T' | 't' ) ( 'P' | 'p' ) ( 'A' | 'a' ) ( 'T' | 't' ) ( 'H' | 'h' ) ( 'S' | 's' ) ;
 
+// drivine4j: a path may hold quantified path patterns, `((a)-[:R]->(b) WHERE a.x < b.x){1,3}`, of Neo4j's Cypher and
+// GQL's, which openCypher's grammar does not have. One may open or close the path, or stand beside a node, which joins it.
 oC_PatternElement
-              :  ( oC_NodePattern ( SP? oC_PatternElementChain )* )
+              :  ( ( oC_NodePattern | oC_QuantifiedPathPattern ) ( SP? ( oC_PatternElementChain | oC_QuantifiedPathPattern | oC_NodePattern ) )* )
                   | ( '(' oC_PatternElement ')' )
                   ;
+
+oC_QuantifiedPathPattern
+                     :  '(' SP? oC_PatternElement ( SP? oC_Where )? SP? ')' SP? oC_PathQuantifier ;
 
 oC_RelationshipsPattern
                     :  oC_NodePattern ( SP? oC_PatternElementChain )+ ;

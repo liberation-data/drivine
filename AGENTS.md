@@ -19,7 +19,7 @@ These are read by all three libraries. Change them here only together with the o
 - **The store layout:** node and edge tables on Oracle and Postgres, labels and properties on the graph engines, and the stamp each node carries.
 - **The schema marker** (`_DrivineSchema`): its version and its inventory of items, including the `runtime:` and `runtime-stale:` entries.
 - **The golden statements:** `test/1.Unit/golden/statements.json` in Drivine for TypeScript is copied byte for byte to `tests/golden/statements.json` in drivine-python. A change to a statement that the goldens pin is made in both.
-- **The Cypher spec:** what each Cypher statement gives on each store, compiled to SQL or not, lives in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec). `scripts/sync-cypher-spec.sh <tag>` copies a tagged version into `test/cypher`, unchanged; the other two libraries copy the same tag. A change to what the compiler gives or refuses goes to the spec first.
+- **The Cypher spec:** what each Cypher statement gives on each store, compiled to SQL or not, lives in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec). `scripts/sync-cypher-spec.sh <tag>` copies a tagged version into `test/cypher`, unchanged; the other two libraries copy the same tag. `scripts/check-cypher-spec.sh`, run in CI, fails when a copy differs from its tag and warns when the spec has a later one. A change to what the compiler gives or refuses goes to the spec first.
 
 ## Pull requests
 

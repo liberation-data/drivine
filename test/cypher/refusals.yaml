@@ -129,6 +129,49 @@ cases:
       - cypher: "RETURN split('a,b')"
         error: "split() takes a text and a separator."
 
+  - name: "Quantified path patterns refused"
+    description: "A quantified path pattern the compiler doesn't compile, or that isn't Cypher, is refused."
+    steps:
+      - cypher: "MATCH (a:Person) ((x)-[:KNOWS]->(y) WHERE y.born > a.born)+ (b) RETURN b"
+        only: [oracle]
+        error: "On Oracle, a quantified path pattern that reads a variable from outside it is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH (a:Person) ((x)-[:KNOWS]->(y) WHERE EXISTS { MATCH (y)-[:ACTED_IN]->() })+ (b) RETURN b"
+        only: [oracle]
+        error: "On Oracle, a subquery in a quantified path pattern that may read a variable from outside it is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH () ((x)-[:KNOWS]->(y) WHERE EXISTS { MATCH (y) ((a)-[:ACTED_IN]->(b)){1} () })+ () RETURN x"
+        only: [oracle]
+        error: "On Oracle, a variable-length relationship or quantified path pattern in a subquery of a quantified path pattern is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH () ((x)-[:KNOWS]->(y) WHERE COUNT { (y)-[:ACTED_IN*]->() } > 1)+ () RETURN x"
+        only: [oracle]
+        error: "On Oracle, a variable-length relationship or quantified path pattern in a subquery of a quantified path pattern is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH () ((x)-[:KNOWS]->(y) WHERE EXISTS { MATCH shortestPath((y)-[:KNOWS*]->(:Person {name: 'Carrie'})) })+ () RETURN x"
+        only: [oracle]
+        error: "On Oracle, a variable-length relationship or quantified path pattern in a subquery of a quantified path pattern is Cypher, and is not compiled to SQL yet."
+      - cypher: "CREATE (a) ((x)-[:R]->(y)){2} (b)"
+        error: "A quantified path pattern in CREATE or MERGE is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH p = shortestPath((a) ((x)-[:R]->(y))+ (b)) RETURN p"
+        error: "A shortest path of anything but one variable-length relationship is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH (a) ((x)-[:R*1..2]->(y)){2} (b) RETURN a"
+        error: "A variable-length relationship in a quantified path pattern is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH (a) ((x)-[:R]->(y)-[:R]->(x)){2} (b) RETURN a"
+        error: "A variable named twice in a quantified path pattern is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH (a) (((x)-[:R]->(y)){2}){2} (b) RETURN a"
+        error: "A quantified path pattern holds no quantified path pattern."
+      - cypher: "MATCH (a) ((x)){2} (b) RETURN a"
+        error: "A quantified path pattern holds a relationship."
+      - cypher: "MATCH (a) (b) RETURN a"
+        error: "Two nodes of a path are side by side: a relationship or a quantified path pattern goes between them."
+      - cypher: "MATCH (x) MATCH (a) ((x)-[:R]->(y))+ (b) RETURN a"
+        error: "x is bound outside the quantified path pattern that names it."
+      - note: "A node after it is bound outside it too, as Neo4j refuses."
+        cypher: "MATCH (a) ((x)-[:R]->(y))+ (y) RETURN a"
+        error: "y is bound outside the quantified path pattern that names it."
+      - note: "Neo4j refuses both too."
+        cypher: "MATCH (a) ((x)-[:R]->(y)){1} -[:R]->(b) RETURN a"
+        error: "A relationship after a quantified path pattern has a node between them."
+      - cypher: "MATCH (a) ((x)-[:R]->(y)){0} (b) RETURN a"
+        error: "A quantified path pattern's quantifier has a maximum of at least 1."
+
   - name: "Write to a non-entity"
     description: "A write to an undefined variable, or to something that isn't a node or relationship, is refused."
     steps:

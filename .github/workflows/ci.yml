@@ -9,6 +9,15 @@ on:
     pull_request:
 
 jobs:
+    # The Cypher spec's copies in test/cypher are the tag VERSION names, unchanged, and a later tag is shown as a
+    # warning.
+    cypher-spec:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - name: Check the Cypher spec
+              run: scripts/check-cypher-spec.sh
+
     build:
         runs-on: ubuntu-latest
         steps:

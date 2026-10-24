@@ -4,7 +4,7 @@ import { indent, literal } from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { PostgresTemporalSql } from '@/cypher/sql/PostgresTemporalSql';
-import { Procedure, ProcedureCall, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
@@ -252,18 +252,11 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
     /** A lateral recursive query from the node walked from, which reads its row. */
     walk(walk: Walk): Walked {
         const w = walk.step;
-        const e = walk.edge;
-        const [join, far] = {
-            OUTGOING: [`${e}.src = ${w}.nid`, `${e}.dst`],
-            INCOMING: [`${e}.dst = ${w}.nid`, `${e}.src`],
-            // Either way, and a relationship from a node to itself once.
-            EITHER: [
-                `(${e}.src = ${w}.nid OR ${e}.dst = ${w}.nid)`,
-                `CASE WHEN ${e}.src = ${w}.nid THEN ${e}.dst ELSE ${e}.src END`
-            ]
-        }[walk.direction];
+        const { joins, reached, distinct }: Steps = this.steps(walk, `${w}.nid`);
+        const eids = walk.hops.map((it) => `${it.edge}.eid`);
         const conditions = [
-            `${e}.eid <> ALL (${w}.eids)`,
+            ...eids.map((it) => `${it} <> ALL (${w}.eids)`),
+            ...distinct,
             ...(walk.max !== undefined ? [`${w}.depth < ${walk.max}`] : []),
             ...walk.conditions
         ];
@@ -273,9 +266,12 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             '    UNION ALL',
             // Walked backwards, each node it leaves goes first, so its nodes end with the one it started from.
             walk.backwards
-                ? `    SELECT ${far}, ${w}.depth + 1, ${w}.nid || ${w}.nids, ${e}.eid || ${w}.eids`
-                : `    SELECT ${far}, ${w}.depth + 1, ${w}.nids || ${far}, ${w}.eids || ${e}.eid`,
-            `    FROM ${w} JOIN ${this.edges} ${e} ON ${join}`,
+                ? `    SELECT ${reached[0]}, ${w}.depth + 1, ${w}.nid || ${w}.nids, ${eids[0]} || ${w}.eids`
+                : `    SELECT ${reached[reached.length - 1]}, ${w}.depth + 1, ${w}.nids || ARRAY[${reached.join(
+                      ', '
+                  )}], ${w}.eids || ARRAY[${eids.join(', ')}]`,
+            `    FROM ${w}`,
+            ...joins.map((it) => `    ${it}`),
             `    WHERE ${conditions.join(' AND ')}`,
             ')',
             `SELECT nid, nids, eids FROM ${w} WHERE depth >= ${walk.min}`

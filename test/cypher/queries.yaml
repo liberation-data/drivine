@@ -460,6 +460,144 @@ cases:
       - cypher: "MATCH (:Person {name: 'Laurence'})-[r:KNOWS]->*(p) RETURN [p.name, size(r)] ORDER BY size(r)"
         rows: [["Laurence", 0], ["Keanu", 1], ["Carrie", 2]]
 
+  - name: "Quantified path patterns"
+    description: "A quantified path pattern repeats a pattern of nodes and relationships, its variables lists of what each repetition matched."
+    steps:
+      - cypher: "MATCH (:Person {name: 'Laurence'}) ((x:Person)-[r:KNOWS]->(y:Person)){1,2} (b) RETURN [b.name, [n IN x | n.name], [n IN y | n.name], size(r)] ORDER BY size(r)"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu", ["Laurence"], ["Keanu"], 1], ["Carrie", ["Laurence", "Keanu"], ["Keanu", "Carrie"], 2]]
+      - note: "Its WHERE is met by each repetition."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE y.born < 1966)+ (b) RETURN b.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Keanu"]
+      - note: "A repetition of two relationships takes neither twice, in it or in another."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((:Person)-[:ACTED_IN]->(m:Movie)<-[:ACTED_IN]-(:Person)){1,2} (b) RETURN [[n IN m | n.title], b.name]"
+        except: [memgraph, falkordb, neptune]
+        unordered: true
+        rows: [[["The Matrix"], "Keanu"], [["The Matrix"], "Carrie"], [["The Matrix", "The Matrix Reloaded"], "Carrie"], [["The Matrix", "The Matrix Reloaded"], "Keanu"]]
+      - note: "No repetition at all is the node it starts from."
+        cypher: "MATCH (a:Person {name: 'Hugo'}) ((x)-[:KNOWS]->(y))* (b) RETURN [b.name, size(x), a = b]"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Hugo", 0, true]]
+      - cypher: "MATCH p = (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){2} (b) RETURN [length(p), [n IN nodes(p) | n.name]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[2, ["Laurence", "Keanu", "Carrie"]]]
+      - note: "A path pattern may be the quantified path pattern alone."
+        cypher: "MATCH ((x:Person)-[:KNOWS]->(y:Person)){2} RETURN [n IN x | n.name]"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Laurence", "Keanu"]]
+      - note: "Its variables are lists to the rest of the MATCH."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y))+ (b) WHERE size(x) = 2 RETURN b.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Carrie"]
+      - note: "A quantified path pattern between two others, its nodes joined to theirs."
+        cypher: "MATCH (a:Person {name: 'Laurence'})-[:KNOWS]->(k) ((x)-[:KNOWS]->(y)){1} (c)-[:ACTED_IN]->(m {title: 'The Matrix Reloaded'}) RETURN [k.name, c.name]"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu", "Carrie"]]
+      - note: "Its relationships' variable is the list of each repetition's, read either way, with properties of a parameter."
+        cypher: "MATCH (:Movie {title: $title}) ((m)<-[r:ACTED_IN {role: $role}]-(p:Person)){1} (b) RETURN [b.name, [x IN r | x.role]]"
+        parameters: {title: "The Matrix", role: "Neo"}
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu", ["Neo"]]]
+      - cypher: "MATCH (:Person {name: 'Carrie'}) ((x)-[:KNOWS]-(y)){1,2} (b) RETURN b.name ORDER BY b.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Keanu", "Laurence"]
+      - note: "An OPTIONAL MATCH keeps the row where no repetition reaches a node."
+        cypher: "MATCH (p:Person) OPTIONAL MATCH (p) ((x)-[:KNOWS]->(y))+ (b:Person {name: 'Carrie'}) RETURN [p.name, size(x)] ORDER BY p.name"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Carrie", null], ["Hugo", null], ["Keanu", 1], ["Laurence", 2]]
+      - cypher: "MATCH (p:Person) WHERE EXISTS { MATCH (p) ((x)-[:KNOWS]->(y)){2} (b) } RETURN p.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Laurence"]
+      - note: "Two quantified path patterns side by side share the node between them."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((a)-[:KNOWS]->(b)){1} ((c)-[:ACTED_IN]->(d)){1} RETURN [[n IN c | n.name], [n IN d | n.title]] ORDER BY d[0].title"
+        except: [memgraph, falkordb, neptune]
+        rows: [[["Keanu"], ["Johnny Mnemonic"]], [["Keanu"], ["The Matrix"]], [["Keanu"], ["The Matrix Reloaded"]]]
+      - note: "A walk from a node it reaches: only the far node is given."
+        cypher: "MATCH (a) ((x)-[:KNOWS]->(y)){2} (:Person {name: 'Carrie'}) RETURN a.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Laurence"]
+      - note: "Its relationships are not another part of the pattern's."
+        cypher: "MATCH (:Person {name: 'Laurence'})-[:KNOWS]->(k) ((x)-[:KNOWS]-(y)){1} (c) RETURN c.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Carrie"]
+      - note: "Each variable of a repetition of two relationships is the list of its own of each."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((a)-[r1:ACTED_IN]->(m)<-[r2:ACTED_IN]-(c)){2} (b) RETURN [[n IN a | n.name], [n IN m | n.title], [n IN c | n.name], [x IN r1 | x.role], [x IN r2 | x.role]]"
+        except: [memgraph, falkordb, neptune]
+        unordered: true
+        rows: [[["Laurence", "Carrie"], ["The Matrix", "The Matrix Reloaded"], ["Carrie", "Keanu"], ["Morpheus", "Trinity"], ["Trinity", "Neo"]], [["Laurence", "Keanu"], ["The Matrix", "The Matrix Reloaded"], ["Keanu", "Carrie"], ["Morpheus", "Neo"], ["Neo", "Trinity"]]]
+      - note: "A walk may come back to a node it left."
+        cypher: "MATCH (:Movie {title: 'The Matrix'}) ((x)<-[:ACTED_IN]-(p)-[:ACTED_IN]->(y)){1,2} (b) RETURN [b.title, [n IN p | n.name]]"
+        except: [memgraph, falkordb, neptune]
+        unordered: true
+        rows: [["Johnny Mnemonic", ["Carrie", "Keanu"]], ["Johnny Mnemonic", ["Keanu"]], ["The Matrix", ["Carrie", "Keanu"]], ["The Matrix", ["Keanu", "Carrie"]], ["The Matrix Reloaded", ["Carrie"]], ["The Matrix Reloaded", ["Keanu"]]]
+      - note: "Its variables unwind to the nodes, and are kept by WITH."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){2} (b) WITH y UNWIND y AS n RETURN n.name"
+        except: [memgraph, falkordb, neptune]
+        rows: ["Keanu", "Carrie"]
+      - cypher: "MATCH (p:Person) RETURN [p.name, COUNT { MATCH (p) ((x)-[:KNOWS]->(y))+ (b) }] ORDER BY p.name"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Carrie", 0], ["Hugo", 0], ["Keanu", 1], ["Laurence", 2]]
+      - note: "Its WHERE may read a node from outside it. Oracle's walks read nothing of the row they are in: refusals.yaml."
+        cypher: "MATCH (a:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE y.born > a.born)+ (b) RETURN b.name ORDER BY b.name"
+        except: [memgraph, falkordb, neptune, oracle]
+        rows: ["Carrie", "Keanu"]
+      - note: "A variable of a quantified path pattern is a list to size(), head(), last() and an index."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){2} (b) RETURN [size(x), head(x).name, x[1].name, last(y).name, x[-1].name]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[2, "Laurence", "Keanu", "Carrie", "Keanu"]]
+      - note: "Returned whole, it is its nodes' properties; two are equal where their nodes are."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){2} (b) RETURN [x, [x = y, x = x, x[1] = y[0], x <> y]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[[{name: "Laurence", born: 1961}, {name: "Keanu", born: 1964}], [false, true, true, true]]]
+      - note: "collect() gathers it from each row, and a relationship variable is its relationships."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[r:KNOWS]->(y))+ (b) WITH x, r ORDER BY size(x) RETURN [collect(x), collect(r)]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[[[{name: "Laurence", born: 1961}], [{name: "Laurence", born: 1961}, {name: "Keanu", born: 1964}]], [[{}], [{}, {}]]]]
+      - cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y)){2} (b) RETURN [p IN y WHERE p.born > 1965 | p.name]"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Carrie"]]
+      - note: "No repetition at all binds empty lists, and an OPTIONAL MATCH that finds none binds null."
+        cypher: "MATCH (p:Person) OPTIONAL MATCH (p) ((x)-[:KNOWS]->(y)){0,2} (b:Person {name: 'Laurence'}) RETURN [p.name, x, y] ORDER BY p.name"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Carrie", null, null], ["Hugo", null, null], ["Keanu", null, null], ["Laurence", [], []]]
+      - cypher: "MATCH p = (:Person {name: 'Laurence'}) ((a)-[:ACTED_IN]->(m)<-[:ACTED_IN]-(c)){1} (b) RETURN [length(p), size(relationships(p)), [n IN nodes(p) | coalesce(n.name, n.title)]]"
+        except: [memgraph, falkordb, neptune]
+        unordered: true
+        rows: [[2, 2, ["Laurence", "The Matrix", "Keanu"]], [2, 2, ["Laurence", "The Matrix", "Carrie"]]]
+      - note: "Its WHERE may read its relationships, and match a pattern of its nodes."
+        cypher: "MATCH (:Person {name: 'Keanu'}) ((x)-[r:ACTED_IN]->(m) WHERE r.role = 'Neo' AND NOT (m)<-[:ACTED_IN]-(:Person {name: 'Laurence'})){1} (b) RETURN b.title"
+        except: [memgraph, falkordb, neptune]
+        rows: ["The Matrix Reloaded"]
+      - note: "Its WHERE may read a node of its own MATCH, after it. Oracle's walks read nothing of the row they are in."
+        cypher: "MATCH (a:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE y.born <= b.born)+ (b:Person {name: 'Carrie'}) RETURN size(x)"
+        except: [memgraph, falkordb, neptune, oracle]
+        rows: [2]
+      - note: "Its WHERE may hold a subquery of its nodes."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE COUNT { (y)-[:ACTED_IN]->() } >= 2)+ () RETURN [n IN y | n.name] ORDER BY size(y)"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu"], ["Keanu", "Carrie"]]
+      - note: "Oracle's walks read nothing of the row they are in, which a subquery may: refusals.yaml."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE EXISTS { MATCH (y)-[:ACTED_IN]->(:Movie {title: 'Johnny Mnemonic'}) })+ (b) RETURN b.name"
+        except: [memgraph, falkordb, neptune, oracle]
+        rows: ["Keanu"]
+      - note: "A subquery of its WHERE may walk a pattern of its own. Oracle's recursive queries hold none of their own: refusals.yaml."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE EXISTS { MATCH (y) ((a)-[:ACTED_IN]->(b)){1} (:Movie {title: 'Johnny Mnemonic'}) })+ () RETURN [n IN y | n.name]"
+        except: [memgraph, falkordb, neptune, oracle]
+        rows: [["Keanu"]]
+      - note: "Its WHERE may hold a subquery in a quantifier's condition."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE any(k IN [2] WHERE COUNT { (y)-[:ACTED_IN]->() } >= k))+ () RETURN [n IN y | n.name] ORDER BY size(y)"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu"], ["Keanu", "Carrie"]]
+      - note: "Its WHERE may hold a subquery in a pattern comprehension's properties."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE size([(:Person {name: 'Keanu'})-[:ACTED_IN]->(m {title: CASE WHEN COUNT { (y)-[:ACTED_IN]->() } >= 2 THEN 'The Matrix' ELSE '-' END}) | m]) > 0)+ () RETURN [n IN y | n.name] ORDER BY size(y)"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu"], ["Keanu", "Carrie"]]
+      - note: "Its WHERE may hold a subquery in an EXISTS pattern's properties."
+        cypher: "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y) WHERE EXISTS { (:Person {name: 'Keanu'})-[:ACTED_IN]->(:Movie {title: CASE WHEN COUNT { (y)-[:ACTED_IN]->() } >= 2 THEN 'The Matrix' ELSE '-' END}) })+ () RETURN [n IN y | n.name] ORDER BY size(y)"
+        except: [memgraph, falkordb, neptune]
+        rows: [["Keanu"], ["Keanu", "Carrie"]]
+
   - name: "Shortest paths"
     description: "shortestPath gives the shortest match, and allShortestPaths every match of that length."
     steps:

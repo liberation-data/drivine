@@ -40,4 +40,19 @@ describe('A compiled Cypher statement', () => {
         const [short, long] = [8, 16].map((it) => compiler.compile(sum(it)).sql.length);
         expect(long).toBeLessThan(3 * short);
     });
+
+    it.each(compilers)(
+        'of a quantified path pattern of twice the hops, each node read by its WHERE, is about twice as long on %s',
+        (_, compilerFor) => {
+            const group = (hops: number) =>
+                'MATCH (a:Claim) ((n0)' +
+                Array.from({ length: hops }, (_, i) => `-[:R]->(n${i + 1})`).join('') +
+                ' WHERE ' +
+                Array.from({ length: hops }, (_, i) => `n${i}.v < n${i + 1}.v`).join(' AND ') +
+                '){1,3} (b) RETURN b';
+            const [short, long] = [4, 8].map((it) => compilerFor().compile(group(it)).sql.length);
+            expect(short).toBeLessThan(20_000);
+            expect(long).toBeLessThan(3 * short);
+        }
+    );
 });
