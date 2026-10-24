@@ -155,7 +155,10 @@ export class ModelReader {
             }
         }
         if (!labels.length) {
-            throw new Error(`@NodeFragment ${decl.name!.text} has no labels.`);
+            const name = decl.name!.text;
+            throw new Error(
+                `@NodeFragment ${name} has no labels. Give it at least one: @NodeFragment({ labels: ['${name}'] }).`
+            );
         }
 
         this.checkFragment(decl, this.decorated(chain), labels);
@@ -654,8 +657,9 @@ export class ModelReader {
 
     /**
      * The class TypeScript's decorator metadata records as a field's type, as it writes `design:type`: Array for a list,
-     * and none, which it records as Object, for an alias, an interface, a class imported as a type, or a union of more
-     * than one class, `null` and `undefined` among them under strict null checks.
+     * an alias of one among them, and none for an alias of anything else, an interface, or a union of more than one
+     * class, `null` and `undefined` among them under strict null checks, which it records as Object, or a class
+     * imported as a type, which it records as Function.
      */
     private designType(node: TS.TypeNode | undefined): TS.ClassDeclaration | 'Array' | undefined {
         const ts = this.ts;
@@ -688,6 +692,10 @@ export class ModelReader {
                 return undefined;
             }
             symbol = this.checker.getAliasedSymbol(symbol);
+        }
+        if (symbol && symbol.flags & ts.SymbolFlags.TypeAlias) {
+            const aliased = this.checker.getDeclaredTypeOfSymbol(symbol);
+            return this.checker.isArrayType(aliased) || this.checker.isTupleType(aliased) ? 'Array' : undefined;
         }
         if (['Array', 'ReadonlyArray'].includes(symbol?.getName() ?? '')) {
             return 'Array';

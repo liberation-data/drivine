@@ -589,7 +589,7 @@ describe('Reading constants and types', () => {
         const warnings: string[] = [];
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
         expect(warnings).toEqual([
-            'Drivine model file: src/A#A: @NodeFragment A has no labels.',
+            "Drivine model file: src/A#A: @NodeFragment A has no labels. Give it at least one: @NodeFragment({ labels: ['A'] }).",
             'Drivine model file: src/A#R: @RelationshipFragment R needs exactly one @TargetNode property, the node the ' +
                 'relationship leads to. It has 0.',
             "Drivine model file: src/A#V: Can't tell what V.to holds. Name its class in the decorator, e.g. () => Item."
@@ -798,6 +798,72 @@ describe('Reading constants and types', () => {
             'A',
             'R'
         ]);
+    });
+
+    it("takes a field's class as TypeScript records it: Array for each way of writing a list, none for a class imported as a type", () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { NodeFragment } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }'
+            ].join('\n'),
+            'src/V.ts': [
+                "import { GraphRelationship, GraphView, Root } from '@liberation-data/drivine';",
+                "import { A } from './A';",
+                "import type { A as OnlyA } from './A';",
+                'type As = A[];',
+                'type List<T> = T[];',
+                '@GraphView()',
+                "export class Generic { @Root() a: A; @GraphRelationship({ type: 'T' }) to: Array<A>; }",
+                '@GraphView()',
+                "export class Fixed { @Root() a: A; @GraphRelationship({ type: 'T' }) to: readonly A[]; }",
+                '@GraphView()',
+                "export class Wrapped { @Root() a: A; @GraphRelationship({ type: 'T' }) to: (A[]); }",
+                '@GraphView()',
+                "export class Aliased { @Root() a: A; @GraphRelationship({ type: 'T' }) to: As; }",
+                '@GraphView()',
+                "export class Listed { @Root() a: A; @GraphRelationship({ type: 'T' }) to: List<A>; }",
+                '@GraphView()',
+                "export class Typed { @Root() a: A; @GraphRelationship({ type: 'T' }) to: OnlyA; }",
+                '@GraphView()',
+                "export class Single { @Root() a: (A); @GraphRelationship({ type: 'T' }) to: A; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        const listed = (name: string) =>
+            `Drivine model file: src/V#${name}: ${name}.to is a list, and TypeScript does not keep the type of a ` +
+            "list's items. Name it: @GraphRelationship({ type: 'T', target: () => Item }).";
+        expect(warnings).toEqual([
+            listed('Generic'),
+            listed('Fixed'),
+            listed('Wrapped'),
+            listed('Aliased'),
+            listed('Listed'),
+            "Drivine model file: src/V#Typed: Can't tell what Typed.to holds. Name its class in the decorator, e.g. () => Item."
+        ]);
+        expect(read(dir).views.map((it: any) => it.name)).toEqual(['Single']);
+    });
+
+    it('takes the class of a field that may be null without strict null checks, as TypeScript records it', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { GraphRelationship, GraphView, NodeFragment, Root } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                '@GraphView()',
+                "export class V { @Root() a: A | null; @GraphRelationship({ type: 'T' }) to: A | undefined; }"
+            ].join('\n')
+        });
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        const config = JSON.parse(fs.readFileSync(tsconfig, 'utf8'));
+        config.compilerOptions.strict = false;
+        fs.writeFileSync(tsconfig, JSON.stringify(config));
+        const warnings: string[] = [];
+        generateModelFile({ project: tsconfig, warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([]);
+        const view = read(dir).views[0];
+        expect([view.root.fragment, view.relationships[0].target]).toEqual(['src/A#A', 'src/A#A']);
     });
 
     it('names a direction or an aggregate function it cannot read, rather than write the default', () => {
