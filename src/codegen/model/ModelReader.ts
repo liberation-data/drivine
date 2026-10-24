@@ -492,6 +492,21 @@ export class ModelReader {
         const vector = this.on(prop, 'VectorIndex');
         const vectorOptions = this.options(vector, `@VectorIndex ${this.field(prop)}`);
         const renamed = this.on(prop, 'GraphProperty');
+        // As ModelRegistry reads it: an empty list only where the field's metadata records an Array, and else {}.
+        // The class loads, so it is written, and the field is named, for a load gives it what its type does not say.
+        if (
+            this.on(prop, 'EmptyWhenAbsent') &&
+            typed.type === 'list' &&
+            this.designType(prop.decorated.type) !== 'Array'
+        ) {
+            this.problems.push(
+                `${this.id(
+                    this.ts.findAncestor(prop.decorated, this.ts.isClassDeclaration)!
+                )}: @EmptyWhenAbsent ${this.field(prop)} is a list TypeScript does not ` +
+                    `record as an Array, so a load gives {} for it, not []. Declare it as an array, optional with ? ` +
+                    `rather than | null.`
+            );
+        }
         return {
             name: prop.name,
             stored: renamed

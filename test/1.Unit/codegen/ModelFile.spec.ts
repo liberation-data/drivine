@@ -869,6 +869,33 @@ describe('Reading constants and types', () => {
         ]);
     });
 
+    it('names an @EmptyWhenAbsent list TypeScript does not record as an Array, as a load gives {} for it, and writes its class', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { EmptyWhenAbsent, NodeFragment } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { @EmptyWhenAbsent() tags?: string[]; @EmptyWhenAbsent() scores: Map<string, number>; }',
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B { @EmptyWhenAbsent() tags: string[] | null; }',
+                "@NodeFragment({ labels: ['C'] })",
+                'export class C { @EmptyWhenAbsent() tags: Set<string>; }'
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        const named = (name: string): string =>
+            `Drivine model file: src/A#${name}: @EmptyWhenAbsent ${name}.tags is a list TypeScript does not record ` +
+            'as an Array, so a load gives {} for it, not []. Declare it as an array, optional with ? rather than | null.';
+        expect(warnings).toEqual([named('B'), named('C')]);
+        const a = read(dir).fragments[0];
+        expect(a.properties.map((it: any) => [it.name, it.type, it.whenAbsent])).toEqual([
+            ['scores', 'map', 'empty'],
+            ['tags', 'list', 'empty']
+        ]);
+        // The classes load, so they are written.
+        expect(read(dir).fragments.map((it: any) => it.name)).toEqual(['A', 'B', 'C']);
+    });
+
     it('takes the class of a field that may be null without strict null checks, as TypeScript records it', () => {
         const dir = project({
             'src/A.ts': [
