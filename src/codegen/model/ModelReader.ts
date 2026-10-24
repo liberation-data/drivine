@@ -65,7 +65,7 @@ export class ModelReader {
 
     /** Every entry the package's own source declares, each list sorted by id; what it could not read, in `problems`. */
     read(): ReadModel {
-        const classes = this.classes();
+        const classes = this.classes().filter((it) => this.oneKind(it));
         const of = (decorator: string): TS.ClassDeclaration[] => classes.filter((it) => this.decorator(it, decorator));
         const fragments = of('NodeFragment');
         const model: ReadModel = {
@@ -80,6 +80,25 @@ export class ModelReader {
             model[key] = model[key].filter((it) => it.id).sort((a, b) => compare(a.id as string, b.id as string));
         }
         return model;
+    }
+
+    /**
+     * Whether a class is of one kind. One given two is refused as its module loads, by `defineClassMetadata`, which
+     * names the kind applied first, the decorator nearest the class, and the first other kind applied after it.
+     */
+    private oneKind(decl: TS.ClassDeclaration): boolean {
+        const kinds = this.drivineDecorators(decl)
+            .map((it) => this.drivineName(this.callee(it))!)
+            .filter((it) => KINDS.includes(it))
+            .reverse();
+        const other = kinds.find((it) => it !== kinds[0]);
+        if (other) {
+            const kind = (name: string): string => name.replace(/(?<=.)(?=[A-Z])/g, '_').toUpperCase();
+            this.problems.push(
+                `${this.id(decl)}: ${decl.name!.text} can't be both a ${kind(kinds[0])} and a ${kind(other)}.`
+            );
+        }
+        return !other;
     }
 
     private attempt(decl: TS.ClassDeclaration, read: () => Entry): Entry {
@@ -139,6 +158,7 @@ export class ModelReader {
             throw new Error(`@NodeFragment ${decl.name!.text} has no labels.`);
         }
 
+        this.checkFragment(decl, this.decorated(chain), labels);
         const properties = this.properties(chain).filter((it) => !this.on(it, 'GraphTransient'));
         const bags = properties.filter((it) => this.on(it, 'PropertyBag'));
         const labelSet = properties.find((it) => this.on(it, 'NodeLabels'));
@@ -151,13 +171,17 @@ export class ModelReader {
                 this.decorators(it, decorator).map((d) => {
                     const what = `@${decorator} on ${it.name!.text}`;
                     const options = this.options(d, what);
-                    return {
-                        kind,
-                        properties: this.given(options, 'properties', isStrings, `the properties of ${what}`) ?? []
-                    };
+                    const properties = this.given(options, 'properties', isStrings, `the properties of ${what}`);
+                    // As the decorator refuses it when the class is declared.
+                    if (!properties?.length) {
+                        throw new Error(
+                            `On a class, a ${kind.toUpperCase()} declaration names its properties: { properties: [...] }.`
+                        );
+                    }
+                    return { kind, properties };
                 })
             )
-        ).filter((it) => it.properties.length);
+        );
         const single = new Map(
             classIndexes.filter((it) => it.properties.length === 1).map((it) => [it.properties[0], it.kind])
         );
@@ -184,12 +208,74 @@ export class ModelReader {
         };
     }
 
-    private relationshipFragment(decl: TS.ClassDeclaration): Entry {
-        const properties = this.properties(this.chain(decl)).filter((it) => !this.on(it, 'GraphTransient'));
-        const target = properties.find((it) => this.on(it, 'TargetNode'));
-        if (!target) {
-            throw new Error(`@RelationshipFragment ${decl.name!.text} has no @TargetNode property.`);
+    /** What ModelRegistry refuses of a fragment's decorators, in the order it checks them. */
+    private checkFragment(decl: TS.ClassDeclaration, decorated: Property[], labels: string[]): void {
+        const name = decl.name!.text;
+        this.assertOnly(decl, decorated, FRAGMENT_MAPPINGS, 'a @NodeFragment');
+        const ids = this.marked(decorated, 'NodeId');
+        if (ids.length > 1) {
+            throw new Error(`${name} has ${ids.length} @NodeId properties (${ids.join(', ')}). A node has one id.`);
         }
+        const stamps = this.marked(decorated, 'NodeStamp');
+        if (stamps.length > 1) {
+            throw new Error(
+                `${name} has ${stamps.length} @NodeStamp properties (${stamps.join(', ')}). A node has one stamp.`
+            );
+        }
+        const stamp = decorated.find((it) => it.name === stamps[0]);
+        if (stamp && (this.on(stamp, 'GraphProperty') || this.on(stamp, 'GraphTransient') || stamp.name === ids[0])) {
+            throw new Error(`@NodeStamp ${name}.${stamp.name} can't carry another mapping decorator.`);
+        }
+        const marking = (decorator: string): Property[] => decorated.filter((it) => this.on(it, decorator));
+        this.checkBags(name, marking('PropertyBag'));
+        this.checkLabelSet(name, marking('NodeLabels'), labels);
+    }
+
+    private checkBags(name: string, bags: Property[]): void {
+        const read = bags.map((it) => this.bag(it) as { field: string; prefix: string; flat?: boolean });
+        if (read.filter((it) => it.flat).length > 1) {
+            throw new Error(`${name} has more than one flat @PropertyBag; a fragment may have one.`);
+        }
+        const prefixed = read.filter((it) => !it.flat);
+        const [a, b] =
+            prefixed.flatMap((one) =>
+                prefixed.filter((other) => other !== one && other.prefix.startsWith(one.prefix)).map((it) => [one, it])
+            )[0] ?? [];
+        if (a) {
+            throw new Error(
+                `The @PropertyBag namespaces of ${name}.${a.field} ('${a.prefix}') and ${b.field} ('${b.prefix}') ` +
+                    `overlap: one would read the other's entries.`
+            );
+        }
+    }
+
+    private checkLabelSet(name: string, sets: Property[], labels: string[]): void {
+        if (sets.length > 1) {
+            throw new Error(`${name} has ${sets.length} @NodeLabels fields; a fragment may have one.`);
+        }
+        const values = sets.length ? (this.labelSet(sets[0]).values as string[] | undefined) : undefined;
+        const fixed = (values?.filter((it) => labels.includes(it)) ?? []).join(', ');
+        const what = `@NodeLabels ${name}.${sets[0]?.name}`;
+        if (fixed) {
+            throw new Error(`${what} names ${fixed}, the fragment's own label: those are fixed.`);
+        }
+        if (values?.some((it) => it.startsWith('__drivine.'))) {
+            throw new Error(`${what} names a label beginning '__drivine.', which is reserved.`);
+        }
+    }
+
+    private relationshipFragment(decl: TS.ClassDeclaration): Entry {
+        const decorated = this.decorated(this.chain(decl));
+        this.assertOnly(decl, decorated, RELATIONSHIP_FRAGMENT_MAPPINGS, 'a @RelationshipFragment');
+        const targets = decorated.filter((it) => this.on(it, 'TargetNode'));
+        if (targets.length !== 1) {
+            throw new Error(
+                `@RelationshipFragment ${decl.name!.text} needs exactly one @TargetNode property, the node the ` +
+                    `relationship leads to. It has ${targets.length}.`
+            );
+        }
+        const target = targets[0];
+        const properties = this.properties(this.chain(decl)).filter((it) => !this.on(it, 'GraphTransient'));
         return {
             id: this.id(decl),
             name: decl.name!.text,
@@ -198,7 +284,7 @@ export class ModelReader {
                 fragment: this.related(target, this.thunk(target, 'TargetNode'), ['NodeFragment', 'GraphView'])
             },
             properties: properties
-                .filter((it) => it !== target)
+                .filter((it) => it.name !== target.name)
                 .sort(byName)
                 .map((it) => this.property(it, undefined))
         };
@@ -206,10 +292,8 @@ export class ModelReader {
 
     private view(decl: TS.ClassDeclaration): Entry {
         const properties = this.properties(this.chain(decl));
-        const root = properties.find((it) => this.on(it, 'Root'));
-        if (!root) {
-            throw new Error(`@GraphView ${decl.name!.text} has no @Root property.`);
-        }
+        this.checkView(decl, this.decorated(this.chain(decl)));
+        const root = properties.find((it) => this.on(it, 'Root'))!;
         const aggregates = properties.filter((it) => AGGREGATES.some((name) => this.on(it, name)));
         return {
             id: this.id(decl),
@@ -223,6 +307,61 @@ export class ModelReader {
         };
     }
 
+    /** What ModelRegistry refuses of a view's decorators before it reads its relationships. */
+    private checkView(decl: TS.ClassDeclaration, decorated: Property[]): void {
+        const name = decl.name!.text;
+        this.assertOnly(decl, decorated, VIEW_MAPPINGS, 'a @GraphView');
+        for (const it of decorated) {
+            const aggregate = AGGREGATES.some((decorator) => this.on(it, decorator));
+            const kinds = [aggregate, this.on(it, 'GraphRelationship'), this.on(it, 'GraphPath')].filter(Boolean);
+            if (this.on(it, 'ReadOnly') && !kinds.length) {
+                throw new Error(`@ReadOnly ${name}.${it.name} marks a relationship field; it has none.`);
+            }
+            if (kinds.length > 1) {
+                throw new Error(`${name}.${it.name} can be one of a relationship, a path or an aggregate.`);
+            }
+        }
+        const roots = this.marked(decorated, 'Root').length;
+        if (roots !== 1) {
+            throw new Error(`@GraphView ${name} needs exactly one @Root property. It has ${roots}.`);
+        }
+    }
+
+    /** As ModelRegistry refuses them: decorators that map a field of another kind of class. */
+    private assertOnly(decl: TS.ClassDeclaration, decorated: Property[], allowed: string[], what: string): void {
+        for (const prop of decorated) {
+            const misplaced = MAPPINGS.filter(([, names]) => names.some((it) => this.on(prop, it)))
+                .map(([shown]) => shown)
+                .filter((it) => !allowed.includes(it));
+            if (misplaced.length) {
+                throw new Error(`${decl.name!.text}.${prop.name}: ${misplaced.join(', ')} can't be used on ${what}.`);
+            }
+        }
+    }
+
+    /** The names of the fields a decorator marks. */
+    private marked(decorated: Property[], decorator: string): string[] {
+        return decorated.filter((it) => this.on(it, decorator)).map((it) => it.name);
+    }
+
+    /** A relationship's type, which ModelRegistry refuses, with `refused`, when it is left out or empty. */
+    private relationshipType(options: Record<string, unknown>, field: string, refused: string): string {
+        if (!('type' in options) || options.type === '') {
+            throw new Error(refused);
+        }
+        return this.named(options.type, `the type of ${field}`);
+    }
+
+    /** A list's class, which its decorator must name, as ModelRegistry asks: its metadata records only an Array. */
+    private assertNamed(prop: Property, target: TS.ClassDeclaration | undefined, how: string): void {
+        if (!target && this.designType(prop.decorated.type) === 'Array') {
+            const field = this.field(prop);
+            throw new Error(
+                `${field} is a list, and TypeScript does not keep the type of a list's items. Name it: ${how}.`
+            );
+        }
+    }
+
     private relationship(prop: Property): Entry {
         const many = this.isList(prop.type);
         const path = this.on(prop, 'GraphPath');
@@ -231,12 +370,19 @@ export class ModelReader {
         }
         const field = this.field(prop);
         const options = this.options(this.on(prop, 'GraphRelationship'), `@GraphRelationship ${field}`);
-        const type = this.named(options.type, `the type of ${field}`);
+        const type = this.relationshipType(options, field, `@GraphRelationship on ${field} needs a type.`);
         const target = this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class');
+        this.assertNamed(prop, target, `@GraphRelationship({ type: '${type}', target: () => Item })`);
+        const maxDepth = this.given(options, 'maxDepth', isNumber, `the maxDepth of ${field}`) ?? 1;
+        if (!Number.isInteger(maxDepth) || maxDepth < 1) {
+            throw new Error(`maxDepth on ${field} must be a whole number of at least 1.`);
+        }
         const into = this.kindOf(this.targetClass(prop, target));
-        const depth = this.given(options, 'maxDepth', isNumber, `the maxDepth of ${field}`) ?? 1;
-        // A relationship fragment is one relationship, whatever maxDepth says.
-        const maxDepth = into === 'RelationshipFragment' ? 1 : depth;
+        if (into === 'RelationshipFragment' && maxDepth > 1) {
+            throw new Error(
+                `${field} holds relationship fragments, which are one relationship each: maxDepth can't be above 1.`
+            );
+        }
         return {
             field: prop.name,
             type,
@@ -268,6 +414,9 @@ export class ModelReader {
         const field = this.field(prop);
         const hops = this.keyed(path, ['hops']).hops;
         const options = this.options(path, `@GraphPath ${field}`, 1);
+        if (Array.isArray(hops) && hops.every(isObject) && (!hops.length || hops.some((it) => !it.type))) {
+            throw new Error(`@GraphPath on ${field} needs at least one hop, each with a type.`);
+        }
         // A hop read wrong would lead the path elsewhere: hops that can't be read are a problem.
         if (!Array.isArray(hops) || !hops.length || !hops.every((it) => isObject(it) && typeof it.type === 'string')) {
             throw new Error(
@@ -278,13 +427,11 @@ export class ModelReader {
         if (hops.filter((it) => it.orderBy).length > 1) {
             throw new Error(`@GraphPath ${field} names an order on more than one hop; a path is read in one order.`);
         }
+        const target = this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class');
+        this.assertNamed(prop, target, '@GraphPath([...], { target: () => Item })');
         return {
             field: prop.name,
-            target: this.related(
-                prop,
-                this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class'),
-                ['NodeFragment']
-            ),
+            target: this.related(prop, target, ['NodeFragment']),
             many,
             required: this.given(options, 'required', isBoolean, `whether ${field} is required`) ?? false,
             readOnly: true,
@@ -312,11 +459,12 @@ export class ModelReader {
             return {
                 field: prop.name,
                 function: 'COUNT',
-                type: this.named(args.type, `the type of ${field}`),
+                type: this.relationshipType(args, field, `The aggregate ${field} needs a relationship type.`),
                 direction: this.oneOf(args, 'direction', DIRECTIONS, `the direction of ${field}`)
             };
         }
         const options = this.options(this.on(prop, 'Aggregate'), `@Aggregate ${field}`);
+        const type = this.relationshipType(options, field, `The aggregate ${field} needs a relationship type.`);
         const fn = this.oneOf(options, 'function', FUNCTIONS, `the function of ${field}`);
         const property = this.given(options, 'property', isString, `the property ${field} aggregates`) || undefined;
         // As ModelRegistry refuses it: only a count needs no property.
@@ -326,7 +474,7 @@ export class ModelReader {
         return {
             field: prop.name,
             function: fn,
-            type: this.named(options.type, `the type of ${field}`),
+            type,
             direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${field}`),
             property
         };
@@ -491,21 +639,66 @@ export class ModelReader {
     private readonly isClass = (value: unknown): value is TS.ClassDeclaration =>
         !!value && this.ts.isClassDeclaration(value as TS.Node);
 
+    /** The class a decorator names, or else, as ModelRegistry takes it, the class the field's metadata records. */
     private targetClass(prop: Property, thunk: TS.ClassDeclaration | undefined): TS.ClassDeclaration {
-        if (thunk) {
-            return thunk;
-        }
-        const type = this.nonNull(prop.type);
-        const element = this.isList(type) ? this.elementOf(type) : type;
-        const decl = element
-            ?.getSymbol()
-            ?.declarations?.find((it): it is TS.ClassDeclaration => this.ts.isClassDeclaration(it));
-        if (!decl) {
+        const decl = thunk ?? this.designType(prop.decorated.type);
+        if (!decl || decl === 'Array') {
             throw new Error(
                 `Can't tell what ${this.field(prop)} holds. Name its class in the decorator, e.g. () => Item.`
             );
         }
         return decl;
+    }
+
+    /**
+     * The class TypeScript's decorator metadata records as a field's type, as it writes `design:type`: Array for a list,
+     * and none, which it records as Object, for an alias, an interface, a class imported as a type, or a union of more
+     * than one class, `null` and `undefined` among them under strict null checks.
+     */
+    private designType(node: TS.TypeNode | undefined): TS.ClassDeclaration | 'Array' | undefined {
+        const ts = this.ts;
+        if (!node || !this.program.getCompilerOptions().emitDecoratorMetadata) {
+            return undefined;
+        }
+        if (ts.isParenthesizedTypeNode(node)) {
+            return this.designType(node.type);
+        }
+        if (ts.isUnionTypeNode(node)) {
+            const types = node.types
+                .filter((it) => this.strictNulls || !this.isNullish(it))
+                .map((it) => this.designType(it));
+            return types.every((it) => it === types[0]) ? types[0] : undefined;
+        }
+        if (ts.isArrayTypeNode(node) || ts.isTupleTypeNode(node)) {
+            return 'Array';
+        }
+        if (ts.isTypeOperatorNode(node)) {
+            return node.operator === ts.SyntaxKind.ReadonlyKeyword ? 'Array' : undefined;
+        }
+        return ts.isTypeReferenceNode(node) ? this.designReference(node) : undefined;
+    }
+
+    private designReference(node: TS.TypeReferenceNode): TS.ClassDeclaration | 'Array' | undefined {
+        const ts = this.ts;
+        let symbol = this.checker.getSymbolAtLocation(node.typeName);
+        if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+            if (symbol.declarations?.some((it) => ts.isTypeOnlyImportOrExportDeclaration(it))) {
+                return undefined;
+            }
+            symbol = this.checker.getAliasedSymbol(symbol);
+        }
+        if (['Array', 'ReadonlyArray'].includes(symbol?.getName() ?? '')) {
+            return 'Array';
+        }
+        return symbol?.declarations?.find((it): it is TS.ClassDeclaration => ts.isClassDeclaration(it));
+    }
+
+    private isNullish(node: TS.TypeNode): boolean {
+        const ts = this.ts;
+        return (
+            node.kind === ts.SyntaxKind.UndefinedKeyword ||
+            (ts.isLiteralTypeNode(node) && node.literal.kind === ts.SyntaxKind.NullKeyword)
+        );
     }
 
     private kindOf(decl: TS.ClassDeclaration): string | undefined {
@@ -623,21 +816,9 @@ export class ModelReader {
     private properties(chain: TS.ClassDeclaration[]): Property[] {
         const found = new Map<string, Property>();
         for (const decl of chain) {
-            const members: TS.Declaration[] = [];
-            for (const member of decl.members) {
-                if (this.ts.isPropertyDeclaration(member) && !this.isStatic(member)) {
-                    members.push(member);
-                }
-                if (this.ts.isConstructorDeclaration(member)) {
-                    members.push(...member.parameters.filter((it) => this.ts.getModifiers(it)?.length));
-                }
-            }
-            for (const member of members) {
-                const named = member as TS.PropertyDeclaration | TS.ParameterDeclaration;
-                if (!this.ts.isIdentifier(named.name)) {
-                    continue;
-                }
-                const nearer = found.get(named.name.text);
+            for (const named of this.members(decl)) {
+                const name = (named.name as TS.Identifier).text;
+                const nearer = found.get(name);
                 // A field a subclass declares again without Drivine's decorators keeps its superclass's, as at run time.
                 if (nearer && !this.drivineDecorators(nearer.decorated).length) {
                     nearer.decorated = named;
@@ -646,8 +827,8 @@ export class ModelReader {
                     continue;
                 }
                 const type = this.checker.getTypeAtLocation(named);
-                found.set(named.name.text, {
-                    name: named.name.text,
+                found.set(name, {
+                    name,
                     decorated: named,
                     type,
                     nullable: this.nullable(named, type)
@@ -655,6 +836,35 @@ export class ModelReader {
             }
         }
         return [...found.values()];
+    }
+
+    /** The instance properties a class declares, and those its constructor's parameters do, in order. */
+    private members(decl: TS.ClassDeclaration): Member[] {
+        const members: Member[] = [];
+        for (const member of decl.members) {
+            if (this.ts.isPropertyDeclaration(member) && !this.isStatic(member)) {
+                members.push(member);
+            }
+            if (this.ts.isConstructorDeclaration(member)) {
+                members.push(...member.parameters.filter((it) => this.ts.getModifiers(it)?.length));
+            }
+        }
+        return members.filter((it) => this.ts.isIdentifier(it.name));
+    }
+
+    /**
+     * The fields Drivine's decorators mark, in the order ModelRegistry has them: each where the furthest class that
+     * decorates it declares it, superclasses first.
+     */
+    private decorated(chain: TS.ClassDeclaration[]): Property[] {
+        const order = [...chain]
+            .reverse()
+            .flatMap((it) => this.members(it))
+            .filter((it) => this.drivineDecorators(it).length)
+            .map((it) => (it.name as TS.Identifier).text);
+        return this.properties(chain)
+            .filter((it) => order.includes(it.name))
+            .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
     }
 
     private isStatic(member: TS.PropertyDeclaration): boolean {
@@ -887,10 +1097,58 @@ interface Typed {
     values?: string[];
 }
 
+/** Each property decorator, as ModelRegistry names it, in the order it names them, and Drivine's decorators of it. */
+const MAPPINGS: [string, string[]][] = [
+    ['@Root', ['Root']],
+    ['@NodeId', ['NodeId']],
+    ['@NodeStamp', ['NodeStamp']],
+    ['@GraphRelationship', ['GraphRelationship']],
+    ['@GraphProperty', ['GraphProperty']],
+    ['@GraphTransient', ['GraphTransient']],
+    ['@TargetNode', ['TargetNode']],
+    ['@ReadOnly', ['ReadOnly']],
+    ['@Count or @Aggregate', AGGREGATES],
+    ['@GraphPath', ['GraphPath']],
+    ['@JsonPacked', ['JsonPacked']],
+    ['@Default', ['Default']],
+    ['@EmptyWhenAbsent', ['EmptyWhenAbsent']],
+    ['@SortedBy', ['SortedBy']],
+    ['@PropertyBag', ['PropertyBag']],
+    ['@NodeLabels', ['NodeLabels']],
+    ['a schema decorator', ['Unique', 'RangeIndex', 'FullTextIndex', 'VectorIndex']]
+];
+
+/** The decorators that shape how a plain field is stored, allowed on node and relationship fragments. */
+const STORED = [
+    '@GraphProperty',
+    '@GraphTransient',
+    '@JsonPacked',
+    '@Default',
+    '@EmptyWhenAbsent',
+    'a schema decorator'
+];
+
+/** The decorators each kind of class may carry on its fields, as ModelRegistry allows them. */
+const FRAGMENT_MAPPINGS = ['@NodeId', '@NodeStamp', '@PropertyBag', '@NodeLabels', ...STORED];
+
+const RELATIONSHIP_FRAGMENT_MAPPINGS = ['@TargetNode', ...STORED];
+
+const VIEW_MAPPINGS = [
+    '@Root',
+    '@GraphRelationship',
+    '@GraphTransient',
+    '@ReadOnly',
+    '@Count or @Aggregate',
+    '@GraphPath',
+    '@SortedBy'
+];
+
+type Member = TS.PropertyDeclaration | TS.ParameterDeclaration;
+
 interface Property {
     name: string;
     /** Where its Drivine decorators are: the nearest declaration that has any, or else its own. */
-    decorated: TS.PropertyDeclaration | TS.ParameterDeclaration;
+    decorated: Member;
     type: TS.Type;
     nullable: boolean | 'unknown';
 }

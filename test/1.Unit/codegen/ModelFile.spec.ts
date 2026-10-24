@@ -316,7 +316,9 @@ describe('Writing the model file', () => {
         });
         const warnings: string[] = [];
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
-        expect(warnings).toEqual(['Drivine model file: src/V#V: @GraphView V has no @Root property.']);
+        expect(warnings).toEqual([
+            'Drivine model file: src/V#V: @GraphView V needs exactly one @Root property. It has 0.'
+        ]);
         expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#A']);
         expect(read(dir).views).toEqual([]);
     });
@@ -588,7 +590,8 @@ describe('Reading constants and types', () => {
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
         expect(warnings).toEqual([
             'Drivine model file: src/A#A: @NodeFragment A has no labels.',
-            'Drivine model file: src/A#R: @RelationshipFragment R has no @TargetNode property.',
+            'Drivine model file: src/A#R: @RelationshipFragment R needs exactly one @TargetNode property, the node the ' +
+                'relationship leads to. It has 0.',
             "Drivine model file: src/A#V: Can't tell what V.to holds. Name its class in the decorator, e.g. () => Item."
         ]);
         expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#B']);
@@ -638,6 +641,143 @@ describe('Reading constants and types', () => {
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
         expect(warnings).toEqual([
             'Drivine model file: src/A#V: @GraphPath V.far names an order on more than one hop; a path is read in one order.'
+        ]);
+    });
+
+    it.each([
+        // Each class, and what ModelRegistry refuses of it.
+        [
+            "@GraphView() @NodeFragment({ labels: ['X'] }) export class Kinds { id: string; }",
+            "Kinds can't be both a NODE_FRAGMENT and a GRAPH_VIEW."
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Ids { @NodeId() a: string; @NodeId() b: string; }",
+            'Ids has 2 @NodeId properties (a, b). A node has one id.'
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Stamps { @NodeStamp() a: number; @NodeStamp() b: number; }",
+            'Stamps has 2 @NodeStamp properties (a, b). A node has one stamp.'
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Stamp { @NodeStamp() @GraphProperty('s') a: number; }",
+            "@NodeStamp Stamp.a can't carry another mapping decorator."
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Sorted { @SortedBy('x') a: string; }",
+            "Sorted.a: @SortedBy can't be used on a @NodeFragment."
+        ],
+        [
+            '@RelationshipFragment() export class Identified { @TargetNode() to: A; @NodeId() id: string; }',
+            "Identified.id: @NodeId can't be used on a @RelationshipFragment."
+        ],
+        [
+            '@GraphView() export class Indexed { @Root() a: A; @Unique() u: string; }',
+            "Indexed.u: a schema decorator can't be used on a @GraphView."
+        ],
+        [
+            '@GraphView() export class Marked { @Root() a: A; @ReadOnly() @GraphTransient() t: string; }',
+            '@ReadOnly Marked.t marks a relationship field; it has none.'
+        ],
+        [
+            "@GraphView() export class Both { @Root() a: A; @Count('T') @GraphRelationship({ type: 'T' }) to: A; }",
+            'Both.to can be one of a relationship, a path or an aggregate.'
+        ],
+        [
+            '@GraphView() export class Roots { @Root() a: A; @Root() b: A; }',
+            '@GraphView Roots needs exactly one @Root property. It has 2.'
+        ],
+        [
+            '@RelationshipFragment() export class Targets { @TargetNode() a: A; @TargetNode() b: A; }',
+            '@RelationshipFragment Targets needs exactly one @TargetNode property, the node the relationship leads to. It has 2.'
+        ],
+        [
+            "@GraphView() export class Untyped { @Root() a: A; @GraphRelationship({ type: '' }) to: A; }",
+            '@GraphRelationship on Untyped.to needs a type.'
+        ],
+        [
+            "@GraphView() export class Uncounted { @Root() a: A; @Count('') n: number; }",
+            'The aggregate Uncounted.n needs a relationship type.'
+        ],
+        [
+            "@GraphView() export class Shallow { @Root() a: A; @GraphRelationship({ type: 'T', maxDepth: 1.5 }) to: A; }",
+            'maxDepth on Shallow.to must be a whole number of at least 1.'
+        ],
+        [
+            "@GraphView() export class Deep { @Root() a: A; @GraphRelationship({ type: 'T', maxDepth: 2 }) to: R; }",
+            "Deep.to holds relationship fragments, which are one relationship each: maxDepth can't be above 1."
+        ],
+        [
+            "@GraphView() export class Listed { @Root() a: A; @GraphRelationship({ type: 'T' }) to: A[]; }",
+            "Listed.to is a list, and TypeScript does not keep the type of a list's items. Name it: " +
+                "@GraphRelationship({ type: 'T', target: () => Item })."
+        ],
+        [
+            "@GraphView() export class Pathed { @Root() a: A; @GraphPath([hop('T')]) far: A[]; }",
+            "Pathed.far is a list, and TypeScript does not keep the type of a list's items. Name it: " +
+                '@GraphPath([...], { target: () => Item }).'
+        ],
+        [
+            '@GraphView() export class Hopless { @Root() a: A; @GraphPath([]) far: A; }',
+            '@GraphPath on Hopless.far needs at least one hop, each with a type.'
+        ],
+        // TypeScript records Object as the type of an alias's field, and of a union's under strict null checks.
+        [
+            '@GraphView() export class Aliased { @Root() a: OfA; }',
+            "Can't tell what Aliased.a holds. Name its class in the decorator, e.g. () => Item."
+        ],
+        [
+            "@GraphView() export class Nullable { @Root() a: A; @GraphRelationship({ type: 'T' }) to: A | null; }",
+            "Can't tell what Nullable.to holds. Name its class in the decorator, e.g. () => Item."
+        ],
+        [
+            '@GraphView() export class Many { @Root() a: A[]; }',
+            "Can't tell what Many.a holds. Name its class in the decorator, e.g. () => Item."
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Sets { @NodeLabels() a: string[]; @NodeLabels() b: string[]; }",
+            'Sets has 2 @NodeLabels fields; a fragment may have one.'
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Own { @NodeLabels(['X', 'Y']) labels: string[]; }",
+            "@NodeLabels Own.labels names X, the fragment's own label: those are fixed."
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Reserved { @NodeLabels(['__drivine.y']) labels: string[]; }",
+            "@NodeLabels Reserved.labels names a label beginning '__drivine.', which is reserved."
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Flat { @PropertyBag({ flat: true }) a: Bag; @PropertyBag({ flat: true }) b: Bag; }",
+            'Flat has more than one flat @PropertyBag; a fragment may have one.'
+        ],
+        [
+            "@NodeFragment({ labels: ['X'] }) export class Overlap { @PropertyBag() a: Bag; @PropertyBag({ prefix: 'a.b' }) b: Bag; }",
+            "The @PropertyBag namespaces of Overlap.a ('a.') and b ('a.b.') overlap: one would read the other's entries."
+        ],
+        [
+            "@Unique() @NodeFragment({ labels: ['X'] }) export class Unindexed { id: string; }",
+            'On a class, a UNIQUE declaration names its properties: { properties: [...] }.'
+        ]
+    ])('names a class ModelRegistry refuses, as it does, rather than write it: %s', (source, warning) => {
+        const dir = project({
+            'src/A.ts': [
+                "import { Count, GraphPath, GraphProperty, GraphRelationship, GraphTransient, GraphView, hop, NodeFragment, NodeId, NodeLabels, NodeStamp, PropertyBag, ReadOnly, RelationshipFragment, Root, SortedBy, TargetNode, Unique } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { id: string; }',
+                '@RelationshipFragment()',
+                'export class R { @TargetNode() a: A; }',
+                'type OfA = A;',
+                'type Bag = Record<string, string>;',
+                source
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        const name = /class (\w+)/.exec(source)![1];
+        expect(warnings).toEqual([`Drivine model file: src/A#${name}: ${warning}`]);
+        const model = read(dir);
+        expect(model.fragments.concat(model.relationshipFragments, model.views).map((it: any) => it.name)).toEqual([
+            'A',
+            'R'
         ]);
     });
 
@@ -697,7 +837,7 @@ describe('Reading constants and types', () => {
                 '@GraphView()',
                 'export class Y { @Root() b: B; @Count(name()) n: number; }',
                 '@GraphView()',
-                "export class Z { @Root() b: B; @SortedBy(name()) @GraphRelationship({ type: 'TO' }) to: B[]; }"
+                "export class Z { @Root() b: B; @SortedBy(name()) @GraphRelationship({ type: 'TO', target: () => B }) to: B[]; }"
             ].join('\n')
         });
         const warnings: string[] = [];
@@ -906,7 +1046,9 @@ describe('drivine model', () => {
         expect(
             main(['model', '--project', path.join(dir, 'tsconfig.json')], { ...out, error: (it) => errors.push(it) })
         ).toEqual(0);
-        expect(errors).toEqual(['Drivine model file: src/V#V: @GraphView V has no @Root property.']);
+        expect(errors).toEqual([
+            'Drivine model file: src/V#V: @GraphView V needs exactly one @Root property. It has 0.'
+        ]);
         expect(lines).toEqual([expect.stringContaining('the project declares no fragments or views')]);
     });
 
