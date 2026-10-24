@@ -114,6 +114,13 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
             { page: '/agents', votes: 2, likes: 1 },
             { page: '/install', votes: 3, likes: 2 }
         ]);
+        // Written as Cypher writes it, on every store: a SQL store reads n.page and n.helpful as those properties.
+        const written = await gom.groups.load(Feedback, {
+            where: 'n.page IS NOT NULL',
+            keys: { page: key('page') },
+            aggregates: { votes: count(), likes: count('n.helpful = true') }
+        });
+        expect(written).toEqual(all);
         const march = await gom.groups.load(Feedback, {
             where: raw(
                 'n.page IS NOT NULL AND n.month >= $march',

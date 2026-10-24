@@ -1,4 +1,4 @@
-import { hasLabels, jsonKey, labelledValue, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
+import { drivine4jStep, hasLabels, jsonKey, labelledValue, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { OracleSideTable } from '@/backend/oracle/OracleSideTable';
 import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
 import { SchemaSpec } from '@/schema/SchemaCatalog';
@@ -35,16 +35,6 @@ const LABELLED_THERE =
 const UNIQUE_THERE =
     `u.kind IN (${recordedAs('UNIQUE').map(sqlText).join(', ')}) ` +
     'AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name))';
-
-/**
- * The step of a JSON path naming `key` as drivine4j writes it: bare where SQL would take it for an identifier, else
- * quoted as `jsonKey` quotes it, for the SQL literal it is written in.
- */
-function drivine4jStep(key: string): string {
-    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !['true', 'false', 'null'].includes(key)
-        ? key
-        : jsonKey(key).slice(1);
-}
 
 /** A block that runs `ddl`, an object another session made meanwhile (ORA-00955) taken as made. */
 function made(ddl: string): string {
