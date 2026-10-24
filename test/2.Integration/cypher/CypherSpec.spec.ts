@@ -219,6 +219,28 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ).toEqual([{ year: 2024, later: true }]);
         });
 
+        it("a parameter of the Neo4j driver's Integer is the whole number it holds, as a value and as a count", async () => {
+            // An app binds a whole number so for Neo4j, whose driver sends a JavaScript number as a float.
+            expect(await query('CREATE (n:CyWrite {i: $i}) RETURN n.i', { i: neo4j.int(1) })).toEqual([1]);
+            await query('CREATE (:CyWrite {i: 2}), (:CyWrite {i: 3})');
+            expect(
+                await query('MATCH (n:CyWrite) WHERE n.i >= $from RETURN n.i ORDER BY n.i LIMIT $n', {
+                    from: neo4j.int(2),
+                    n: neo4j.int(1)
+                })
+            ).toEqual([2]);
+        });
+
+        it("a parameter of a Buffer or an Int8Array, the Neo4j driver's bytes, is its base64 text, as drivine4j writes a byte array", async () => {
+            expect(await query('RETURN $bytes', { bytes: Buffer.from([1, 2, 255]) })).toEqual(['AQL/']);
+            expect(await query('RETURN $bytes', { bytes: new Int8Array([1, 2, -1]) })).toEqual(['AQL/']);
+        });
+
+        it('a parameter of a Set is the list of its items, as the Neo4j driver sends it', async () => {
+            await query('CREATE (:CyWrite {i: 1}), (:CyWrite {i: 2})');
+            expect(await query('MATCH (n:CyWrite) WHERE n.i IN $ids RETURN n.i', { ids: new Set([2]) })).toEqual([2]);
+        });
+
         it('a statement of hundreds of creates, each naming nodes made before it, makes them all', async () => {
             const clauses = Array.from({ length: 300 }, (__, i) => [
                 `CREATE (n${i}:CyWrite {i: ${i}})`,

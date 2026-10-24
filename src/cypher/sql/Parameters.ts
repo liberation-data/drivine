@@ -1,3 +1,4 @@
+import { isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { jsonText } from '@/cypher/sql/JsonText';
 
@@ -39,7 +40,10 @@ export class Parameters {
             return this.asJson(name);
         }
         const key = `_cy_${name}`;
-        this.bound[key] = value === null || value === undefined ? null : jsonText(value);
+        // Written once: an iterator gives its items only once, and a parameter is read where the statement names it.
+        if (!(key in this.bound)) {
+            this.bound[key] = value === null || value === undefined ? null : jsonText(value);
+        }
         return this.asJson(`$${key}`);
     }
 
@@ -50,7 +54,8 @@ export class Parameters {
             return this.asCount(name);
         }
         const key = `_cyn_${name}`;
-        this.bound[key] = value;
+        // The Neo4j driver's Integer, as a number the driver of the store binds.
+        this.bound[key] = isInt(value) ? BigInt(value.toString()) : value;
         return this.asCount(`$${key}`);
     }
 
