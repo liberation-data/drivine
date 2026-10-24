@@ -11,7 +11,9 @@ import '@fontsource/noto-serif/latin-400-italic.css';
 import '@fontsource/jetbrains-mono/latin-400.css';
 import '@fontsource/jetbrains-mono/latin-500.css';
 import headingFont from '@fontsource/ubuntu/files/ubuntu-latin-700-normal.woff2?url';
+import { Image } from 'astro:assets';
 import ocean from '../assets/hero-ocean.jpg';
+import studioCanvas from '../assets/studio-canvas.png';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 
@@ -91,6 +93,15 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
         person.bio containsIgnoreCase <span class="s">"lead"</span>
     }
 }`;
+
+// A case of the Cypher spec's, run on every store, and the row it gives on each.
+const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNOWS</span>*]-&gt;(:<span class="t">Person</span> {name: <span class="s">'Carrie'</span>})
+          -[:<span class="t">ACTED_IN</span>]-&gt;(m {title: <span class="s">'The Matrix'</span>})
+<span class="k">WHERE</span> a.name = <span class="s">'Laurence'</span>
+<span class="k">RETURN</span> [n <span class="k">IN</span> nodes(p) | coalesce(n.name, n.title)]
+
+<span class="c">// On all seven:</span>
+<span class="c">// ["Laurence", "Keanu", "Carrie", "The Matrix"]</span>`;
 ---
 
 <!doctype html>
@@ -99,7 +110,7 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Drivine: graph database client for TypeScript, Python and the JVM</title>
-        <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB, Oracle and Postgres." />
+        <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB, Oracle, Postgres and SQLite, with Cypher on all of them." />
         <link rel="icon" href={`${base}favicon.ico`} />
         <!-- The heading's font, which the largest paint (DRIVINE) waits for. -->
         <link rel="preload" href={headingFont} as="font" type="font/woff2" crossorigin />
@@ -214,6 +225,13 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
             .panel pre[hidden] { display: none; }
             .a { color: #7fd3c8; } .k { color: #f4a27c; } .s { color: #c8de8c; } .t { color: #9cc4f2; } .c { color: #8ba3aa; }
 
+            .cypher a { color: #7fd3c8; }
+            .cypher a:hover { color: #fff; }
+            .cypher .panel header { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #1c3d48; background: #0a2630; }
+            .cypher .panel header span { border: 1px solid #2b5562; border-radius: 999px; padding: 6px 12px; font-size: 14px; color: #d7e6e9; }
+            .cypher .panel header span.sql { border-color: #f08a5d; color: #fff; }
+            .cypher .panel footer { padding: 14px 26px 20px; font-size: 14px; line-height: 1.55; color: #9db8bf; border-top: 1px solid #1c3d48; }
+
             .features { padding: 96px 32px; }
             .features .wrap { display: flex; flex-direction: column; gap: 44px; }
             .features header { display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
@@ -233,6 +251,15 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
             .perf dt { font-size: 30px; font-weight: 700; color: var(--ink); }
             .perf dd { margin: 4px 0 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
             @media (max-width: 600px) { .perf .wrap { padding: 28px 22px; gap: 28px; } }
+
+            .studio { padding: 0 32px 96px; }
+            .studio .wrap { display: flex; flex-direction: column; gap: 36px; }
+            .studio header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+            .studio header > p:not(.eyebrow) { margin: 0; font-size: 18px; line-height: 1.65; color: var(--muted); }
+            .studio figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+            .studio img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 18px 40px rgba(2, 28, 38, 0.14); }
+            .studio figcaption { font-size: 15px; line-height: 1.5; color: var(--muted); }
+            .studio .note { margin: 0; font-size: 15px; color: #4a6670; }
 
             .backing { padding: 0 32px 72px; }
             .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
@@ -424,6 +451,34 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                 </div>
             </section>
 
+            <section class="compose cypher">
+                <div class="wrap">
+                    <div class="text">
+                        <p class="eyebrow">CYPHER EVERYWHERE</p>
+                        <h2>Write Cypher once. Run it on a graph engine, or on the database you already have.</h2>
+                        <p>
+                            Give a persistence manager a Cypher statement. Neo4j, Memgraph, FalkorDB and Neptune run it as
+                            written. On Postgres, Oracle and SQLite, Drivine compiles it to SQL over two tables, one of nodes
+                            and one of relationships, and gives back the same rows.
+                        </p>
+                        <ul>
+                            <li><span>Reads and writes. A statement that writes is applied whole or not at all.</span></li>
+                            <li><span>Variable-length relationships and quantified path patterns compile too.</span></li>
+                            <li><span>Cypher the compiler doesn’t take yet is refused by name, before the store is sent anything.</span></li>
+                            <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries on every store, says what each statement gives.</span></li>
+                        </ul>
+                    </div>
+                    <div class="panel">
+                        <header aria-label="Stores">
+                            <span>Neo4j</span><span>Memgraph</span><span>FalkorDB</span><span>Neptune</span>
+                            <span class="sql">Postgres</span><span class="sql">Oracle</span><span class="sql">SQLite</span>
+                        </header>
+<pre set:html={cypherSample} />
+                        <footer>Outlined: compiled to SQL. SQLite is drivine4j’s for now.</footer>
+                    </div>
+                </div>
+            </section>
+
             <section class="perf">
                 <div class="wrap">
                     <div class="text">
@@ -439,11 +494,37 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                             Neo4j, FalkorDB, Oracle and Postgres on a graph of 1.1 million nodes and 4.5 million relationships,
                             with the same Kotlin on each.
                         </p>
+                        <p>
+                            Postgres and Oracle have no index-free adjacency: a relationship is a row, found through a B-tree.
+                            Out to 275,000 paths, that walk cost them less for each path than Neo4j’s pointers did. What costs
+                            them is reading the nodes on the way. <a href="https://github.com/liberation-data/graph-bench#does-oracle-miss-index-free-adjacency">The numbers.</a>
+                        </p>
                     </div>
                     <dl class="stats">
                         <div><dt>1.2–3.5 ms</dt><dd>to load an issue with its repo, author, assignees, topics and comments, on every engine</dd></div>
                         <div><dt>1</dt><dd>statement for each load or save, however many relationships it has</dd></div>
+                        <div><dt>0.14 µs</dt><dd>for each path walked on Postgres and on Oracle, through an index, against 0.24 µs on Neo4j</dd></div>
                     </dl>
+                </div>
+            </section>
+
+            <section class="studio">
+                <div class="wrap">
+                    <header>
+                        <p class="eyebrow">DRIVINE STUDIO</p>
+                        <h2>See what a view loads.</h2>
+                        <p>
+                            Each library writes your model to <code>.drivine/model.json</code> as it builds. Drivine Studio reads
+                            it: drag a view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws
+                            what came back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or
+                            as a desktop app.
+                        </p>
+                    </header>
+                    <figure>
+                        <Image src={studioCanvas} widths={[800, 1600, 2400]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio: the catalogue of a model's views and fragments beside a canvas drawing issues, the people assigned to and raising them, and where they work" />
+                        <figcaption>One view on the canvas: each issue, who it’s assigned to, who raised it and where they work, loaded in one statement.</figcaption>
+                    </figure>
+                    <p class="note">Early days: run it from <a href="https://github.com/liberation-data/drivine-studio">source</a>.</p>
                 </div>
             </section>
 
@@ -463,9 +544,9 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
                     <p class="eyebrow">ENGINES</p>
                     <div class="chips">
                         <span>Neo4j</span><span>Memgraph</span><span>FalkorDB</span><span>Oracle · SQL/PGQ</span>
-                        <span>Postgres · SQL</span><span class="via">Amazon Neptune</span>
+                        <span>Postgres · SQL</span><span>SQLite · SQL</span><span class="via">Amazon Neptune</span>
                     </div>
-                    <p>Dashed: through the persistence manager.</p>
+                    <p>Dashed: through the persistence manager. SQLite: drivine4j.</p>
                 </div>
             </section>
 
