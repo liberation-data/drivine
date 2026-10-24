@@ -20,3 +20,28 @@ describe('A walk compiled for Oracle', () => {
         expect(sql).toMatch(/UNION ALL\s+SELECT \/\*\+ NO_ADAPTIVE_PLAN \*\/ /);
     });
 });
+
+/**
+ * A term a projection beside a variable-length walk sorts by, which is none of its items, is bound in no subquery: one
+ * so bound, carried out of a WITH's query, closed Oracle's (23.26) session (liberation-data/drivine#252). Elsewhere it
+ * is, so the statement grows with the operations nested in it, not exponentially.
+ */
+describe('A term sorted by beside a walk, compiled for Oracle', () => {
+    const sorted = 'WITH b ORDER BY toString(coalesce(b.name, b.title)) RETURN coalesce(b.name, b.title)';
+    const bound = /\bsh\d+\b/;
+
+    it.each([
+        ['of a variable-length walk', "MATCH (:Person {name: 'Laurence'})-[*]->(b) "],
+        ['of a quantified path pattern', "MATCH (:Person {name: 'Laurence'}) ((x)-[:KNOWS]->(y))+ (b) "],
+        ['of a walk a WITH before it reads', "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b "]
+    ])('is bound in no subquery, %s', (_, walk) => {
+        expect(new OracleCypherCompiler('g').compile(walk + sorted).sql).not.toMatch(bound);
+    });
+
+    it('is bound in a subquery with no walk', () => {
+        const sql = new OracleCypherCompiler('g').compile(
+            `MATCH (:Person {name: 'Laurence'})-->(b) WITH b ${sorted}`
+        ).sql;
+        expect(sql).toMatch(bound);
+    });
+});
