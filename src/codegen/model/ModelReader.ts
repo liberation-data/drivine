@@ -86,7 +86,7 @@ export class ModelReader {
         try {
             return read();
         } catch (e) {
-            this.problems.push(`${this.where(decl)}: ${e instanceof Error ? e.message : String(e)}`);
+            this.problems.push(`${this.id(decl)}: ${e instanceof Error ? e.message : String(e)}`);
             return {};
         }
     }
@@ -111,10 +111,6 @@ export class ModelReader {
             visit(file);
         }
         return found;
-    }
-
-    private where(decl: TS.ClassDeclaration): string {
-        return this.id(decl);
     }
 
     private fragment(decl: TS.ClassDeclaration, fragments: TS.ClassDeclaration[]): Entry {
@@ -170,7 +166,7 @@ export class ModelReader {
             // ModelRegistry.registerSubtype can add a subtype to any fragment in code, which the source doesn't show:
             // and a load gives the fragment itself for a node no subtype's labels match.
             subtypesComplete: false,
-            labelSet: labelSet ? this.labelSet(decl, labelSet) : undefined,
+            labelSet: labelSet ? this.labelSet(labelSet) : undefined,
             bags: bags.length ? bags.sort(byName).map((it) => this.bag(it)) : undefined,
             properties: plain.sort(byName).map((it) => this.property(it, single.get(it.name))),
             indexes: classIndexes.some((it) => it.properties.length > 1)
@@ -228,13 +224,14 @@ export class ModelReader {
             required?: boolean;
             target?: unknown;
         };
+        const type = this.named(options.type, `the type of ${this.field(prop)}`);
         const into = this.kindOf(this.targetClass(prop, options.target));
         // A relationship fragment is one relationship, whatever maxDepth says.
         const maxDepth = into === 'RelationshipFragment' ? 1 : options.maxDepth ?? 1;
         return {
             field: prop.name,
-            type: options.type,
-            direction: options.direction ?? 'OUTGOING',
+            type,
+            direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${this.field(prop)}`),
             target: this.related(prop, options.target),
             many,
             required: options.required ?? false,
@@ -248,23 +245,35 @@ export class ModelReader {
     private sortedBy(prop: Property): Entry | undefined {
         const sortedBy = this.on(prop, 'SortedBy');
         const [property, ascending] = this.args(sortedBy) as [string | undefined, boolean | undefined];
-        return sortedBy ? { property, ascending: ascending ?? true } : undefined;
+        if (!sortedBy) {
+            return undefined;
+        }
+        return {
+            property: this.named(property, `what @SortedBy ${this.field(prop)} sorts by`),
+            ascending: ascending ?? true
+        };
     }
 
     /** A path: never written, nor sorted, as ModelRegistry reads it. */
     private path(prop: Property, path: TS.Decorator, many: boolean): Entry {
         const [hops, options] = this.args(path) as [unknown, { target?: unknown; required?: boolean } | undefined];
+        // A hop read wrong would lead the path elsewhere: hops that can't be read are a problem.
+        if (!Array.isArray(hops) || !hops.length || !hops.every((it) => isObject(it) && typeof it.type === 'string')) {
+            throw new Error(
+                `Can't read the hops of @GraphPath ${this.field(prop)}. Name each with a literal, a constant or hop().`
+            );
+        }
         return {
             field: prop.name,
             target: this.related(prop, options?.target),
             many,
             required: options?.required ?? false,
             readOnly: true,
-            path: (Array.isArray(hops) ? hops : []).map((it: Record<string, unknown>) => {
+            path: hops.map((it: Record<string, unknown>) => {
                 const orderBy = typeof it.orderBy === 'string' && it.orderBy ? it.orderBy : undefined;
                 return {
                     type: it.type,
-                    direction: it.direction ?? 'OUTGOING',
+                    direction: this.oneOf(it, 'direction', DIRECTIONS, `the direction of a hop of ${this.field(prop)}`),
                     label: typeof it.label === 'string' && it.label ? it.label : undefined,
                     orderBy,
                     ascending: orderBy ? it.ascending ?? true : undefined
@@ -276,15 +285,26 @@ export class ModelReader {
     private aggregate(prop: Property): Entry {
         const count = this.on(prop, 'Count');
         if (count) {
-            const [type, direction] = this.args(count) as [string, string | undefined];
-            return { field: prop.name, function: 'COUNT', type, direction: direction ?? 'OUTGOING' };
+            const [type, ...direction] = this.args(count);
+            return {
+                field: prop.name,
+                function: 'COUNT',
+                type: this.named(type, `the type of ${this.field(prop)}`),
+                // Given or not, as the decorator's second argument.
+                direction: this.oneOf(
+                    direction.length ? { direction: direction[0] } : {},
+                    'direction',
+                    DIRECTIONS,
+                    `the direction of ${this.field(prop)}`
+                )
+            };
         }
         const options = (this.args(this.on(prop, 'Aggregate'))[0] ?? {}) as Record<string, unknown>;
         return {
             field: prop.name,
-            function: options.function,
-            type: options.type,
-            direction: options.direction ?? 'OUTGOING',
+            function: this.oneOf(options, 'function', FUNCTIONS, `the function of ${this.field(prop)}`),
+            type: this.named(options.type, `the type of ${this.field(prop)}`),
+            direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${this.field(prop)}`),
             property: options.property || undefined
         };
     }
@@ -294,9 +314,12 @@ export class ModelReader {
         const packed = !!this.on(prop, 'JsonPacked');
         const vector = this.on(prop, 'VectorIndex');
         const vectorOptions = (this.args(vector)[0] ?? {}) as { similarity?: string; dimensions?: number };
+        const renamed = this.on(prop, 'GraphProperty');
         return {
             name: prop.name,
-            stored: (this.args(this.on(prop, 'GraphProperty'))[0] as string | undefined) ?? prop.name,
+            stored: renamed
+                ? this.named(this.args(renamed)[0], `the name of @GraphProperty ${this.field(prop)}`)
+                : prop.name,
             // A packed value the format has no type for is JSON text, whatever it is in the code.
             type: packed && typed.type === 'any' ? 'json' : typed.type,
             of: typed.of,
@@ -328,13 +351,13 @@ export class ModelReader {
         };
     }
 
-    private labelSet(decl: TS.ClassDeclaration, prop: Property): Entry {
+    private labelSet(prop: Property): Entry {
         const decorator = this.on(prop, 'NodeLabels')!;
         const members = this.args(decorator)[0];
         const given = this.ts.isCallExpression(decorator.expression) && decorator.expression.arguments.length > 0;
         // Members read wrong would make a closed set open, or own labels it doesn't: ones that can't be read are a problem.
         if (given && !(Array.isArray(members) ? strings(members).length === members.length : isObject(members))) {
-            const field = `${decl.name!.text}.${prop.name}`;
+            const field = this.field(prop);
             throw new Error(
                 `Can't read the members of @NodeLabels ${field}. Name them with a list, an enum or a constant.`
             );
@@ -342,6 +365,34 @@ export class ModelReader {
         // As the decorator takes them: a list's, or an object's values that are strings.
         const values = given ? strings(Array.isArray(members) ? members : Object.values(members as object)) : undefined;
         return { field: prop.name, values };
+    }
+
+    /** A name a decorator gives, which a guess would write wrong: one that can't be read is a problem. */
+    private named(value: unknown, what: string): string {
+        if (typeof value !== 'string' || !value) {
+            throw new Error(`Can't read ${what}. Name it with a literal or a constant.`);
+        }
+        return value;
+    }
+
+    /**
+     * One of the values a decorator's option may take: the first when the option is not given, and a problem when it
+     * is given and can't be read, which the compiler can't tell from one left out.
+     */
+    private oneOf(options: Record<string, unknown>, key: string, allowed: readonly string[], what: string): string {
+        if (!(key in options)) {
+            return allowed[0];
+        }
+        const value = options[key];
+        if (typeof value !== 'string' || !allowed.includes(value)) {
+            throw new Error(`Can't read ${what}. Name it with ${allowed.join(', ')}, or a constant of one.`);
+        }
+        return value;
+    }
+
+    /** A field as `Class.field`, by the class whose declaration of it carries its decorators. */
+    private field(prop: Property): string {
+        return `${this.ts.findAncestor(prop.decorated, this.ts.isClassDeclaration)?.name?.text}.${prop.name}`;
     }
 
     /** The id of what a relationship, a root or a target node leads to: the class its decorator names, or its type. */
@@ -379,10 +430,7 @@ export class ModelReader {
     private enumerated(t: TS.Type): Typed | undefined {
         const members = t.isUnion() ? t.types : [t];
         const strings = members.every((it) => it.isStringLiteral());
-        if (t.isUnion() && strings) {
-            return { type: 'enum', values: members.map((it) => (it as TS.StringLiteralType).value).sort(compare) };
-        }
-        if (!(t.flags & this.ts.TypeFlags.EnumLike)) {
+        if (!(t.isUnion() && strings) && !(t.flags & this.ts.TypeFlags.EnumLike)) {
             return undefined;
         }
         return strings
@@ -507,7 +555,6 @@ export class ModelReader {
                 const type = this.checker.getTypeAtLocation(named);
                 found.set(named.name.text, {
                     name: named.name.text,
-                    decl: named,
                     decorated: named,
                     type,
                     nullable: this.nullable(named, type)
@@ -541,19 +588,19 @@ export class ModelReader {
     }
 
     private decorators(node: TS.Node, name: string): TS.Decorator[] {
-        return this.drivineDecorators(node).filter((it) => {
-            const callee = this.ts.isCallExpression(it.expression) ? it.expression.expression : it.expression;
-            return this.drivineName(callee) === name;
-        });
+        return this.drivineDecorators(node).filter((it) => this.drivineName(this.callee(it)) === name);
     }
 
     /** The decorators on a class or a field that Drivine exports, whatever the module imports them as. */
     private drivineDecorators(node: TS.Node): TS.Decorator[] {
         const all = this.ts.canHaveDecorators(node) ? this.ts.getDecorators(node) ?? [] : [];
-        return all.filter((it) => {
-            const callee = this.ts.isCallExpression(it.expression) ? it.expression.expression : it.expression;
-            return this.drivineName(callee) !== undefined;
-        });
+        return all.filter((it) => this.drivineName(this.callee(it)) !== undefined);
+    }
+
+    /** What a decorator names: `NodeFragment` of `@NodeFragment({ ... })` as of `@NodeFragment`. */
+    private callee(decorator: TS.Decorator): TS.Expression {
+        const expression = decorator.expression;
+        return this.ts.isCallExpression(expression) ? expression.expression : expression;
     }
 
     private on(prop: Property, name: string): TS.Decorator | undefined {
@@ -652,8 +699,9 @@ export class ModelReader {
             return body ? this.classOf(body) : undefined;
         }
         if (ts.isCallExpression(node) && this.drivineName(node.expression) === 'hop') {
-            const [type, direction, label, orderBy, ascending] = node.arguments.map((it) => this.value(it));
-            return { type, direction, label, orderBy, ascending };
+            // Keyed by the arguments given, so one left out is told from one that can't be read.
+            const names = ['type', 'direction', 'label', 'orderBy', 'ascending'];
+            return Object.fromEntries(node.arguments.map((it, i) => [names[i], this.value(it)]));
         }
         return NOTHING;
     }
@@ -721,6 +769,12 @@ export class ModelReader {
     }
 }
 
+/** A relationship's directions, the default first. */
+const DIRECTIONS = ['OUTGOING', 'INCOMING', 'UNDIRECTED'] as const;
+
+/** What @Aggregate computes, as Drivine's AggregateFunction names it. */
+const FUNCTIONS = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'] as const;
+
 /** Told apart from undefined, which an expression may be: what a reader has nothing to say of. */
 const NOTHING = Symbol('nothing');
 
@@ -732,7 +786,6 @@ interface Typed {
 
 interface Property {
     name: string;
-    decl: TS.PropertyDeclaration | TS.ParameterDeclaration;
     /** Where its Drivine decorators are: the nearest declaration that has any, or else its own. */
     decorated: TS.PropertyDeclaration | TS.ParameterDeclaration;
     type: TS.Type;

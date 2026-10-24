@@ -538,6 +538,79 @@ describe('Reading constants and types', () => {
         expect(entry).toBeUndefined();
     });
 
+    it('names a direction or an aggregate function it cannot read, rather than write the default', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { Aggregate, Count, Direction, GraphPath, GraphRelationship, GraphView, hop, NodeFragment, Root } from '@liberation-data/drivine';",
+                'const way = (): Direction => Direction.INCOMING;',
+                'const fn = (): any => "MAX";',
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B { id: string; }',
+                '@GraphView()',
+                "export class P { @Root() b: B; @GraphRelationship({ type: 'TO', direction: way() }) to: B; }",
+                '@GraphView()',
+                "export class Q { @Root() b: B; @GraphPath([hop('TO', way())]) far: B; }",
+                '@GraphView()',
+                "export class R { @Root() b: B; @Count('TO', way()) n: number; }",
+                '@GraphView()',
+                "export class S { @Root() b: B; @Aggregate({ function: fn(), type: 'TO', property: 'x' }) m: number; }",
+                '@GraphView()',
+                "export class T { @Root() b: B; @Count('TO') n: number; @GraphPath([hop('TO')]) far: B; @GraphRelationship({ type: 'TO' }) to: B; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#P: Can't read the direction of P.to. Name it with OUTGOING, INCOMING, UNDIRECTED, or a constant of one.",
+            "Drivine model file: src/A#Q: Can't read the direction of a hop of Q.far. Name it with OUTGOING, INCOMING, UNDIRECTED, or a constant of one.",
+            "Drivine model file: src/A#R: Can't read the direction of R.n. Name it with OUTGOING, INCOMING, UNDIRECTED, or a constant of one.",
+            "Drivine model file: src/A#S: Can't read the function of S.m. Name it with COUNT, SUM, AVG, MIN, MAX, or a constant of one."
+        ]);
+        // Left out, each takes its default.
+        const t = byId(read(dir).views, 'src/A#T');
+        expect(t.aggregates).toEqual([{ field: 'n', function: 'COUNT', type: 'TO', direction: 'OUTGOING' }]);
+        expect(t.relationships.map((it: any) => it.direction ?? it.path[0].direction)).toEqual([
+            'OUTGOING',
+            'OUTGOING'
+        ]);
+    });
+
+    it('names a stored name, a relationship type or a path it cannot read, rather than write them wrong', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { Count, GraphPath, GraphProperty, GraphRelationship, GraphView, NodeFragment, Root, SortedBy } from '@liberation-data/drivine';",
+                "const name = (): string => 'n';",
+                "const hops = () => [{ type: 'TO' }];",
+                "@NodeFragment({ labels: ['A'] })",
+                'export class A { @GraphProperty(name()) id: string; }',
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B { id: string; }',
+                '@GraphView()',
+                'export class V { @Root() b: B; @GraphRelationship({ type: name() }) next: B; }',
+                '@GraphView()',
+                'export class W { @Root() b: B; @GraphPath(hops()) far: B; }',
+                '@GraphView()',
+                "export class X { @Root() b: B; @GraphPath([{ type: 'TO' }, hops()[0]]) far: B; }",
+                '@GraphView()',
+                'export class Y { @Root() b: B; @Count(name()) n: number; }',
+                '@GraphView()',
+                "export class Z { @Root() b: B; @SortedBy(name()) @GraphRelationship({ type: 'TO' }) to: B[]; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([
+            "Drivine model file: src/A#A: Can't read the name of @GraphProperty A.id. Name it with a literal or a constant.",
+            "Drivine model file: src/A#V: Can't read the type of V.next. Name it with a literal or a constant.",
+            "Drivine model file: src/A#W: Can't read the hops of @GraphPath W.far. Name each with a literal, a constant or hop().",
+            "Drivine model file: src/A#X: Can't read the hops of @GraphPath X.far. Name each with a literal, a constant or hop().",
+            "Drivine model file: src/A#Y: Can't read the type of Y.n. Name it with a literal or a constant.",
+            "Drivine model file: src/A#Z: Can't read what @SortedBy Z.to sorts by. Name it with a literal or a constant."
+        ]);
+        expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#B']);
+        expect(read(dir).views).toEqual([]);
+    });
+
     it('reads unions of literals, tuples, and unknown and any', () => {
         const { entry }: Written = fragment({
             'src/A.ts': [
