@@ -39,23 +39,42 @@ export const Procedure = {
 };
 
 /**
- * A variable-length relationship's walk, from the node whose id is `from` to the one whose is `to`, as rows named
- * `name`: by relationships named `edge` in `direction` that meet `conditions`, to a depth from `min` to `max` (any, if
- * undefined). With `backwards` it is walked from the pattern's later node. `seed`, where there is one, is the condition
- * the node walked from meets of its own, over a node row.
+ * A walk from the node whose id is `from` to the one whose is `to`, as rows named `name`, to a depth from `min` to `max`
+ * (any, if undefined). Each step takes the `hops` in turn, from the node the step is at, and meets `conditions`: one hop
+ * for a variable-length relationship, a hop for each relationship of a quantified path pattern's. A node the conditions
+ * read is the row `nodes` names, at its place among the hops' nodes: the node the step is at first, then the far node of
+ * each hop. With `backwards` a walk of one hop is walked from the pattern's later node. `seed`, where there is one, is
+ * the condition the node walked from meets of its own, over a node row.
  */
 export interface Walk {
     from: string;
     to: string;
     name: string;
     step: string;
-    edge: string;
-    direction: Direction;
+    hops: WalkHop[];
+    nodes: (string | undefined)[];
     min: number;
     max?: number;
     conditions: string[];
     backwards: boolean;
     seed?: (row: string) => string;
+}
+
+/** A relationship a walk's step takes, the row `edge`, in `direction` from the node the step is at. */
+export interface WalkHop {
+    edge: string;
+    direction: Direction;
+}
+
+/**
+ * The joins of a walk's step, see {@link SqlCypherCompiler.steps}: each hop's relationship, and each node a condition
+ * reads; the ids of the nodes the hops reach, in turn, `reached`; and the conditions that no two relationships of the
+ * step are one, `distinct`.
+ */
+export interface Steps {
+    joins: string[];
+    reached: string[];
+    distinct: string[];
 }
 
 /**

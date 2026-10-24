@@ -28,6 +28,7 @@ import {
     OC_PropertiesContext,
     OC_PropertyExpressionContext,
     OC_PropertyLookupContext,
+    OC_QuantifiedPathPatternContext,
     OC_QueryContext,
     OC_RangeLiteralContext,
     OC_ReadingClauseContext,
@@ -302,34 +303,81 @@ function pattern(context: OC_PatternElementContext, variable: string | undefined
     if (inner) {
         return pattern(inner, variable);
     }
-    return chained(context.oC_NodePattern()!, context.oC_PatternElementChain(), variable);
+    const nodes: NodePattern[] = [];
+    const relationships: RelationshipPattern[] = [];
+    // A quantified path pattern with no node beside it is joined to a node of no label of its own.
+    for (const child of context.children) {
+        if (child instanceof OC_NodePatternContext) {
+            if (nodes.length > relationships.length) {
+                throw new DrivineError(
+                    'Two nodes of a path are side by side: a relationship or a quantified path pattern goes between them.'
+                );
+            }
+            nodes.push(node(child));
+        } else if (child instanceof OC_PatternElementChainContext) {
+            // Only after a quantified path pattern: Cypher puts a node between them.
+            if (nodes.length === relationships.length) {
+                throw new DrivineError('A relationship after a quantified path pattern has a node between them.');
+            }
+            relationships.push(link(child));
+            nodes.push(node(child.oC_NodePattern()));
+        } else if (child instanceof OC_QuantifiedPathPatternContext) {
+            if (nodes.length === relationships.length) {
+                nodes.push({ labels: [] });
+            }
+            relationships.push(quantifiedPath(child));
+        }
+    }
+    if (nodes.length === relationships.length) {
+        nodes.push({ labels: [] });
+    }
+    return { variable, nodes, relationships };
+}
+
+/** `((a)-[:R]->(b) WHERE …){1,3}`: a relationship of the pattern that repeats its own, between the nodes beside it. */
+function quantifiedPath(context: OC_QuantifiedPathPatternContext): RelationshipPattern {
+    const inner = pattern(context.oC_PatternElement(), undefined);
+    if (inner.relationships.length === 0) {
+        throw new DrivineError('A quantified path pattern holds a relationship.');
+    }
+    inner.relationships.forEach((relationship) => {
+        if (relationship.group) {
+            throw new DrivineError('A quantified path pattern holds no quantified path pattern.');
+        }
+        if (relationship.range) {
+            refuse('A variable-length relationship in a quantified path pattern');
+        }
+    });
+    const group = { pattern: inner, where: where(context.oC_Where()) };
+    const range = quantified(context.oC_PathQuantifier());
+    // As in Neo4j: a group that may repeat no times at most matches nothing of its own.
+    if (range.max === 0) {
+        throw new DrivineError("A quantified path pattern's quantifier has a maximum of at least 1.");
+    }
+    return { types: [], direction: 'OUTGOING', range, group };
 }
 
 function relationshipsPattern(context: OC_RelationshipsPatternContext, variable: string | undefined): Pattern {
-    return chained(context.oC_NodePattern(), context.oC_PatternElementChain(), variable);
-}
-
-function chained(
-    first: OC_NodePatternContext,
-    chains: OC_PatternElementChainContext[],
-    variable: string | undefined
-): Pattern {
-    const nodes = [node(first)];
+    const nodes = [node(context.oC_NodePattern())];
     const relationships: RelationshipPattern[] = [];
-    chains.forEach((chain) => {
-        const relationship = relationshipOf(chain.oC_RelationshipPattern());
-        const quantifier = chain.oC_PathQuantifier();
-        if (quantifier) {
-            if (relationship.range) {
-                refuse('A quantified relationship that has a range of its own');
-            }
-            relationships.push({ ...relationship, range: quantified(quantifier) });
-        } else {
-            relationships.push(relationship);
-        }
+    context.oC_PatternElementChain().forEach((chain) => {
+        relationships.push(link(chain));
         nodes.push(node(chain.oC_NodePattern()));
     });
     return { variable, nodes, relationships };
+}
+
+/** The relationship of a link of a path, `-[:R]->` or a quantified relationship, `-[:R]->{1,3}`. */
+function link(chain: OC_PatternElementChainContext): RelationshipPattern {
+    const relationship = relationshipOf(chain.oC_RelationshipPattern());
+    const quantifier = chain.oC_PathQuantifier();
+    if (!quantifier) {
+        return relationship;
+    }
+    if (relationship.range) {
+        refuse('A quantified relationship that has a range of its own');
+    }
+    return { ...relationship, range: quantified(quantifier) };
 }
 
 /** `+` is one or more, `*` any, `{n}` exactly n, and `{m,n}` from m to n, either bound left out. */
