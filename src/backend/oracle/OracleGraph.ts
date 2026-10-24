@@ -127,12 +127,14 @@ export function hasLabels(alias: string, labels: string[]): string {
 /**
  * A predicate that holds when the JSON array of labels `labels` holds `label`, told by its text. `JSON_SERIALIZE`
  * writes the array compactly, `["A","B"]`; with its brackets made commas and `,"` put after it, `,"A","B","`, each
- * label is `,"label","`, and the label is looked for as that. Matched there, the needle is a whole label. Its first
- * quote follows a comma, so isn't escaped: it opens a label or closes one. If it opens one, the label's text runs to
- * the first unescaped quote, which is the needle's own last one. If it closes one, a comma and an opening quote
- * follow, which the needle has only when the label is `,`, and then the quote after that closes a label `,`. The
- * label is written as `JSON_SERIALIZE` writes it ({@link serializedLabel}), so one holding a control character is
- * found, and one holding `","` is not taken for two. drivine4j's `OracleSql.holdsLabel` writes the same.
+ * label is `,"label","`, and the label is looked for as that. The trims take one bracket at each end, since a label's
+ * quote stands beside each, and no labels at all leave `,,"`, which holds no label. Matched there, the needle is a
+ * whole label. Its first quote follows a comma, so isn't escaped: it opens a label or closes one. If it opens one, the
+ * label's text runs to the first unescaped quote, which is the one that closes the needle's label. If it closes one, a
+ * comma and an opening quote follow, which the needle has only when the label is `,`, and then the quote after that
+ * closes a label `,`. The label is written as `JSON_SERIALIZE` writes it ({@link serializedLabel}), so one holding a
+ * control character is found, and one holding `","` is not taken for two. drivine4j's `OracleSql.holdsLabel` writes the
+ * same.
  */
 export function holdsLabel(labels: string, label: string): string {
     return `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(${labels}), ']'), '[') || ',"', ${sqlText(

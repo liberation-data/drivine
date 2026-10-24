@@ -1,11 +1,14 @@
 import { DatabaseRegistry, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
-import { hasLabels } from '@/backend/oracle/OracleGraph';
+import { hasLabels, holdsLabel, serializedLabel } from '@/backend/oracle/OracleGraph';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 
 jest.setTimeout(60_000);
 
 /** Each node of this suite has an id of this prefix, so it reads none another suite wrote. */
 const PREFIX = 'labeltext-';
+
+/** Labels that try the edges of the text a label is looked for in: brackets, quotes, commas and backslashes. */
+const EDGES = ['', '"', '[', ']', '\\', 'a\\', ',"', '","', '\u00e9 \u{1f600}', '$x'];
 
 /**
  * A label after the first is looked for by its text, among the labels as `JSON_SERIALIZE` writes them (see
@@ -69,6 +72,24 @@ describeOnOracle("a later label's text on Oracle", () => {
                 )
             );
         }
+        await pm.execute(
+            new QuerySpecification(
+                `INSERT INTO drivine_node (labels, props) VALUES (JSON($labels), JSON($props))`
+            ).bind({
+                labels: JSON.stringify(['Edge', ...EDGES]),
+                props: JSON.stringify({ id: `${PREFIX}edge` })
+            })
+        );
+        for (const [labels, id] of [
+            [`JSON('["Single"]')`, 'single'],
+            [`JSON('[]')`, 'none']
+        ]) {
+            await pm.execute(
+                new QuerySpecification(
+                    `INSERT INTO drivine_node (labels, props) VALUES (${labels}, JSON('{"id":"${PREFIX}${id}"}'))`
+                )
+            );
+        }
     });
 
     afterAll(async () => {
@@ -97,5 +118,57 @@ describeOnOracle("a later label's text on Oracle", () => {
         expect(await matching('Comma', ',')).toEqual(['lone']);
         expect(await carrying('Comma', 'a,')).toEqual(['comma']);
         expect(await carrying('Comma', ',b')).toEqual(['bracket']);
+    });
+
+    it('should find a later label of brackets, quotes, commas or backslashes whole, and nothing near it', async () => {
+        for (const label of EDGES) {
+            expect([label, await carrying('Edge', label)]).toEqual([label, ['edge']]);
+        }
+        for (const label of EDGES.filter((it) => it.length > 0)) {
+            expect([label, await matching('Edge', label)]).toEqual([label, ['edge']]);
+        }
+        for (const label of [
+            'a',
+            ',',
+            '\\\\',
+            'a\\\\',
+            '""',
+            '["',
+            '"]',
+            'Edge","',
+            '\u00e9',
+            '\u{1f600}',
+            'Edge",""'
+        ]) {
+            expect([label, await carrying('Edge', label)]).toEqual([label, []]);
+        }
+    });
+
+    it('should tell a node of one label or none by its text alike', async () => {
+        expect(await carrying('Single')).toEqual(['single']);
+        expect(await matching('Single')).toEqual(['single']);
+        expect(await carrying('Single', '')).toEqual([]);
+        expect(await carrying('Singl')).toEqual([]);
+        const held = async (label: string): Promise<string[]> =>
+            pm.query<string>(
+                new QuerySpecification(
+                    `SELECT JSON_VALUE(n.props, '$.id') FROM drivine_node n WHERE JSON_VALUE(n.props, '$.id') IN ` +
+                        `('${PREFIX}single', '${PREFIX}none') AND ${holdsLabel('n.labels', label)}`
+                )
+            );
+        expect(await held('Single')).toEqual([`${PREFIX}single`]);
+        expect(await held('')).toEqual([]);
+    });
+
+    it('should write a label as JSON_SERIALIZE writes it, for every character up to U+00FF and the others it escapes', async () => {
+        let text = '';
+        for (let code = 1; code <= 0xff; code++) {
+            text += String.fromCharCode(code);
+        }
+        text += '\u2027\u2028\u2029\u202a\ufeff\ufffd\u{1f600}';
+        const written = await pm.getOne<string>(
+            new QuerySpecification('SELECT JSON_SERIALIZE(JSON_ARRAY($text RETURNING JSON)) FROM dual').bind({ text })
+        );
+        expect(written).toEqual(`[${serializedLabel(text)}]`);
     });
 });
