@@ -9,7 +9,7 @@ export interface ReadModel {
     fragments: Entry[];
     relationshipFragments: Entry[];
     views: Entry[];
-    /** What could not be read, each with where it is. */
+    /** What could not be read, and what loads other than it is declared, each with where it is. */
     problems: string[];
 }
 

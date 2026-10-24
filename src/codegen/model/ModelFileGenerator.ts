@@ -11,7 +11,7 @@ export interface ModelFileOptions {
     project: string;
     /** Writes nothing, and says whether the file is current: for CI. */
     check?: boolean;
-    /** Told of what could not be read, and of a file it will not keep. */
+    /** Told of each of the problems, and of a file it will not keep. */
     warn?: (message: string) => void;
 }
 
@@ -21,7 +21,7 @@ export interface ModelFileResult {
     file: string;
     /** Written: the file held something else. Current: it held this already. Stale: `check`, and it held something else. Off: the package turned it off. Empty: nothing declared and no file before. */
     outcome: 'written' | 'current' | 'stale' | 'off' | 'empty';
-    /** What could not be read. */
+    /** What could not be read, and what loads other than it is declared. */
     problems: string[];
 }
 
