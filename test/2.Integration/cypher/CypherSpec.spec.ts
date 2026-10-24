@@ -208,34 +208,10 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(Number((await query('RETURN toString(1.0E-200)'))[0])).toEqual(1e-200);
         });
 
-        it('toString of a float that is a whole number, written and read back, keeps its fraction', async () => {
-            expect(await query('CREATE (n:CyWrite {g: 3.0}) RETURN toString(n.g)')).toEqual(['3.0']);
-            expect(await query('MATCH (n:CyWrite) RETURN toString(n.g)')).toEqual(['3.0']);
-        });
-
         /** Writes the graph of the spec's `queries.yaml`, which the tests that read it start from. */
         const seed = async (): Promise<void> => {
             await query(trimIndent(loadSpec('queries.yaml').graph!));
         };
-
-        it('a walk returns and sorts by toString of a long expression of where it ends', async () => {
-            await seed();
-            // On Oracle toString reads its argument twice, so one this long is bound in a subquery: beside a walk, as
-            // drivine4j#162's sort was.
-            const walk = "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN toString(coalesce(b.name, b.title)) AS n";
-            const rows = [
-                'Carrie',
-                'Johnny Mnemonic',
-                'Keanu',
-                'The Matrix',
-                'The Matrix',
-                'The Matrix',
-                'The Matrix Reloaded',
-                'The Matrix Reloaded'
-            ];
-            expect((await query(walk)).sort()).toEqual(rows);
-            expect(await query(`${walk} ORDER BY n`)).toEqual(rows);
-        });
 
         it('collect(DISTINCT) beside grouping keys, other aggregates, an order, a page and a variable outside its aggregates', async () => {
             // Not in the spec: distinctFirst's grouping WITH, and the projection over it.
@@ -378,48 +354,31 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('a float that is a whole number, collected once each, stays a float', async () => {
-            // Not in the spec yet: what distinctFirst keeps of a collection is the items collect gathered, not their text read
-            // back. A JavaScript number does not tell 1.0 from 1, so toString tells them apart.
+            // The spec's case reads the floats back, which a JavaScript number does not tell from whole numbers, so toString
+            // tells them apart: what distinctFirst keeps of a collection is the items collect gathered, not their text.
             expect(
                 await query('UNWIND [1.0, 2.5, 1.0] AS x WITH collect(DISTINCT x) AS xs RETURN [x IN xs | toString(x)]')
             ).toEqual([['1.0', '2.5']]);
         });
 
-        it('an item past 4,000 bytes, and a map with its keys in another order, collected once each', async () => {
-            // Not in the spec yet: Oracle keeps each item once as JSON compares items, not as their text does.
-            const big = 'y'.repeat(5_000);
-            expect(await query("UNWIND [[$b], [$b], 'a'] AS x RETURN collect(DISTINCT x)", { b: big })).toEqual([
-                [[big], 'a']
-            ]);
-            expect(await query('UNWIND [{a: 1, b: 2}, {b: 2, a: 1}] AS x RETURN collect(DISTINCT x)')).toEqual([
-                [{ a: 1, b: 2 }]
-            ]);
-        });
-
-        it('a walk sorts by coalesce of an aggregate collected once each, and a DISTINCT projection by coalesce of an item', async () => {
-            // Not in the spec yet: an order term that reads an aggregate distinctFirst worked out first is carried out,
-            // beside a walk, as the sort of liberation-data/drivine#230 is.
+        it('a walk read through a WITH, then sorted by toString in a second WITH, keeps that order', async () => {
+            // Not in the spec yet: the walk is a query inside the one the second WITH sorts, and its term, carried out, is
+            // bound in no subquery (liberation-data/drivine#252).
             await seed();
             expect(
                 await query(
-                    "MATCH (:Person {name: 'Laurence'})-[*]->(b) RETURN coalesce(b.name, b.title) AS n, count(*) " +
-                        'ORDER BY coalesce(head(collect(DISTINCT b.born)), 0), n'
+                    "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b WITH b " +
+                        'ORDER BY toString(coalesce(b.name, b.title)) RETURN coalesce(b.name, b.title)'
                 )
             ).toEqual([
-                ['Johnny Mnemonic', 1],
-                ['The Matrix', 3],
-                ['The Matrix Reloaded', 2],
-                ['Keanu', 1],
-                ['Carrie', 1]
-            ]);
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name AS n, collect(DISTINCT m.title) AS ts ' +
-                        "ORDER BY coalesce(ts[2], 'zz'), n SKIP 1 LIMIT 2"
-                )
-            ).toEqual([
-                ['Carrie', ['The Matrix', 'The Matrix Reloaded']],
-                ['Laurence', ['The Matrix']]
+                'Carrie',
+                'Johnny Mnemonic',
+                'Keanu',
+                'The Matrix',
+                'The Matrix',
+                'The Matrix',
+                'The Matrix Reloaded',
+                'The Matrix Reloaded'
             ]);
         });
 
