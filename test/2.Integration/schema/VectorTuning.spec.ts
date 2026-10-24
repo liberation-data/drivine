@@ -59,6 +59,13 @@ describe.each(allStores())('vector index tuning on $type', (engine) => {
             expect([listed.hnswM, listed.hnswEfConstruction, listed.efRuntime]).toEqual([24, 150, 20]);
         }
         expect((await gom.indexes.ensure(tuned)).status).toEqual('ALREADY_MATCHING');
+        if (engine.type === DatabaseType.NEO4J) {
+            const quantized = vectorIndex('TunedChunk', 'embedding', 4, 'COSINE', {
+                engineOptions: [neo4jVectorOptions({ quantizationEnabled: true })]
+            });
+            const drifted = await gom.indexes.ensure(quantized);
+            expect([drifted.status, drifted.found?.quantizationEnabled]).toEqual(['DRIFT', false]);
+        }
         // Unpinned is never drift.
         expect((await gom.indexes.ensure(vectorIndex('TunedChunk', 'embedding', 4))).status).toEqual(
             'ALREADY_MATCHING'
@@ -71,6 +78,16 @@ describe.each(allStores())('vector index tuning on $type', (engine) => {
             expect(result.found?.hnswM).toEqual(24);
             await gom.indexes.recreate(otherM);
             expect((await gom.indexes.ensure(otherM)).status).toEqual('ALREADY_MATCHING');
+        }
+        if (engine.type === DatabaseType.NEO4J) {
+            // Quantized reads back as true: `vector.quantization.type` other than NONE on Neo4j 2026.06 and later.
+            const quantized = vectorIndex('TunedChunk', 'embedding', 4, 'COSINE', {
+                engineOptions: [neo4jVectorOptions({ quantizationEnabled: true })]
+            });
+            await gom.indexes.recreate(quantized);
+            const listedQuantized = (await gom.indexes.list('VECTOR')).find((it) => it.label === 'TunedChunk')!;
+            expect(listedQuantized.quantizationEnabled).toBe(true);
+            expect((await gom.indexes.ensure(quantized)).status).toEqual('ALREADY_MATCHING');
         }
     });
 

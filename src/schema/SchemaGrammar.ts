@@ -139,7 +139,7 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
                 name: it.name,
                 dimensions: Number(it.config?.['vector.dimensions']),
                 similarity: String(it.config?.['vector.similarity_function']).toUpperCase() as SimilarityFunction,
-                quantizationEnabled: it.config?.['vector.quantization.enabled'] ?? undefined,
+                quantizationEnabled: quantizationEnabled(it.config),
                 hnswM: numberOrUndefined(it.config?.['vector.hnsw.m']),
                 hnswEfConstruction: numberOrUndefined(it.config?.['vector.hnsw.ef_construction'])
             }))
@@ -155,6 +155,7 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
         const config = [
             `\`vector.dimensions\`: ${spec.dimensions}`,
             `\`vector.similarity_function\`: '${spec.similarity.toLowerCase()}'`,
+            // `enabled`, not `type`: every Neo4j from 5 to 2026.10 accepts `enabled`, and those before 2026.06 refuse `type`.
             ...(tuning.quantizationEnabled !== undefined
                 ? [`\`vector.quantization.enabled\`: ${tuning.quantizationEnabled}`]
                 : []),
@@ -388,6 +389,20 @@ export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGr
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }
+}
+
+/**
+ * Whether a Neo4j vector index quantizes, as its `indexConfig` reports it. Neo4j up to 2026.05 reports
+ * `vector.quantization.enabled`. From 2026.06 it reports `vector.quantization.type` in its place: `NONE`, or the kind of
+ * quantization, `SCALAR` or `BINARY`. Undefined when it reports neither.
+ */
+function quantizationEnabled(config: Record<string, unknown> | undefined): boolean | undefined {
+    const type = config?.['vector.quantization.type'];
+    if (typeof type === 'string') {
+        return type.toUpperCase() !== 'NONE';
+    }
+    const enabled = config?.['vector.quantization.enabled'];
+    return typeof enabled === 'boolean' ? enabled : undefined;
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

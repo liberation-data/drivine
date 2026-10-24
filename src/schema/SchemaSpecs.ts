@@ -45,7 +45,11 @@ export interface VectorIndexSpec {
 /** Neo4j's own vector index options. An `hnswM` / `hnswEfConstruction` here wins over the portable one on Neo4j. */
 export interface Neo4jVectorOptions {
     engine: 'Neo4j';
-    /** Pins `vector.quantization.enabled`: quantization trades recall (and exact scores) for memory. */
+    /**
+     * Pins `vector.quantization.enabled`: quantization trades recall (and exact scores) for memory. Neo4j 2026.06 and
+     * later still take it, quantizing with their default kind when it is true, and report `vector.quantization.type`
+     * back instead, which reads as enabled unless it is `NONE`.
+     */
     quantizationEnabled?: boolean;
     hnswM?: number;
     hnswEfConstruction?: number;
