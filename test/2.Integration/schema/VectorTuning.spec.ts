@@ -79,6 +79,16 @@ describe.each(allStores())('vector index tuning on $type', (engine) => {
             await gom.indexes.recreate(otherM);
             expect((await gom.indexes.ensure(otherM)).status).toEqual('ALREADY_MATCHING');
         }
+        if (engine.type === DatabaseType.NEO4J) {
+            // Quantized reads back as true: `vector.quantization.type` other than NONE on Neo4j 2026.06 and later.
+            const quantized = vectorIndex('TunedChunk', 'embedding', 4, 'COSINE', {
+                engineOptions: [neo4jVectorOptions({ quantizationEnabled: true })]
+            });
+            await gom.indexes.recreate(quantized);
+            const listedQuantized = (await gom.indexes.list('VECTOR')).find((it) => it.label === 'TunedChunk')!;
+            expect(listedQuantized.quantizationEnabled).toBe(true);
+            expect((await gom.indexes.ensure(quantized)).status).toEqual('ALREADY_MATCHING');
+        }
     });
 
     it("should let a catalog spec's engine options win over the decorator's portable declaration", async () => {

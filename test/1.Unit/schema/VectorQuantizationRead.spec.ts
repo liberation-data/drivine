@@ -24,6 +24,22 @@ describe("Reading a Neo4j vector index's quantization", () => {
         );
     });
 
+    it('should read vector.quantization.type in any case', () => {
+        expect(quantizationReadFrom({ 'vector.quantization.type': 'none' })).toBe(false);
+        expect(quantizationReadFrom({ 'vector.quantization.type': 'scalar' })).toBe(true);
+    });
+
+    it('should read a vector.quantization.type Drivine does not know as quantized, since only NONE is not', () => {
+        expect(quantizationReadFrom({ 'vector.quantization.type': 'PRODUCT' })).toBe(true);
+    });
+
+    it('should ignore a vector.quantization.type that is not a string, in favour of vector.quantization.enabled', () => {
+        expect(quantizationReadFrom({ 'vector.quantization.type': 0, 'vector.quantization.enabled': false })).toBe(
+            false
+        );
+        expect(quantizationReadFrom({ 'vector.quantization.type': true })).toBeUndefined();
+    });
+
     it('should read neither as undefined, not as disabled', () => {
         expect(quantizationReadFrom({})).toBeUndefined();
     });
