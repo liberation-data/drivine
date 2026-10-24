@@ -379,9 +379,14 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         ].join('\n');
         const digest = createHash('sha256').update(text).digest('hex');
         const fn = `pg_temp.drivine_cypher_${digest.substring(0, 24)}`;
+        // The body is quoted with dollars, by a tag no text in it holds: a text of `$cy$` would end it early.
+        let quote = '$cy$';
+        for (let i = 1; text.includes(quote); i++) {
+            quote = `$cy${i}$`;
+        }
         return {
             setup: [
-                `CREATE OR REPLACE FUNCTION ${fn}(${PARAMS} jsonb) RETURNS SETOF json LANGUAGE plpgsql AS $cy$\n${text}\n$cy$;`
+                `CREATE OR REPLACE FUNCTION ${fn}(${PARAMS} jsonb) RETURNS SETOF json LANGUAGE plpgsql AS ${quote}\n${text}\n${quote};`
             ],
             sql: `SELECT cy.result FROM ${fn}(CAST($${PARAMETERS_OBJECT} AS jsonb)) AS cy (result)`
         };

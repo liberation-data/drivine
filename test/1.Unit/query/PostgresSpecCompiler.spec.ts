@@ -34,6 +34,13 @@ describe('PostgresSpecCompiler', () => {
         expect(compiled.parameters).toEqual([1, [2, 3]]);
     });
 
+    it('should rewrite a name past ASCII, as Cypher reads one, and end a name at a dollar', () => {
+        const spec = new QuerySpecification(`select $größe, $_x$1`).bind({ größe: 3, _x: 4 }).finalizedCopy('SQL');
+        const compiler = new PostgresSpecCompiler(spec);
+        expect(compiler.formattedStatement().trim()).toEqual('select $2, $1$1');
+        expect(compiler.formattedParams()).toEqual([4, 3]);
+    });
+
     it('should bind only the names the statement uses, as Postgres refuses one it does not', () => {
         const spec = new QuerySpecification(`select * from t where name = $name`)
             .bind({ name: 'Moon Girl', unused: 1, threshold: undefined })
