@@ -94,13 +94,13 @@ const ktSample = `<span class="a">@NodeFragment</span>(labels = [<span class="s"
     }
 }`;
 
-// A case of the Cypher spec's, run on every store, and the row it gives on each.
+// A case of the Cypher spec's, which names no store, and the row each library's tests check it gives.
 const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNOWS</span>*]-&gt;(:<span class="t">Person</span> {name: <span class="s">'Carrie'</span>})
           -[:<span class="t">ACTED_IN</span>]-&gt;(m {title: <span class="s">'The Matrix'</span>})
 <span class="k">WHERE</span> a.name = <span class="s">'Laurence'</span>
 <span class="k">RETURN</span> [n <span class="k">IN</span> nodes(p) | coalesce(n.name, n.title)]
 
-<span class="c">// On all seven:</span>
+<span class="c">// The row, tested on Neo4j, Postgres, Oracle and SQLite:</span>
 <span class="c">// ["Laurence", "Keanu", "Carrie", "The Matrix"]</span>`;
 ---
 
@@ -465,7 +465,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             <li><span>Reads and writes. A statement that writes is applied whole or not at all.</span></li>
                             <li><span>Variable-length relationships and quantified path patterns compile too.</span></li>
                             <li><span>Cypher the compiler doesn’t take yet is refused by name, before the store is sent anything.</span></li>
-                            <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries on every store, says what each statement gives.</span></li>
+                            <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries, says what each statement gives on each store.</span></li>
                         </ul>
                     </div>
                     <div class="panel">
@@ -474,7 +474,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             <span class="sql">Postgres</span><span class="sql">Oracle</span><span class="sql">SQLite</span>
                         </header>
 <pre set:html={cypherSample} />
-                        <footer>Outlined: compiled to SQL. SQLite is drivine4j’s for now.</footer>
+                        <footer>Outlined in orange: compiled to SQL. SQLite is drivine4j’s for now.</footer>
                     </div>
                 </div>
             </section>
@@ -514,9 +514,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <p class="eyebrow">DRIVINE STUDIO</p>
                         <h2>See what a view loads.</h2>
                         <p>
-                            Each library writes your model to <code>.drivine/model.json</code> as it builds. Drivine Studio reads
-                            it: drag a view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws
-                            what came back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or
+                            drivine4j writes your model to <code>.drivine/model.json</code> as it builds, and the other two
+                            libraries will too. Drivine Studio reads it: drag a view to the canvas and it loads
+                            as <code>loadAll</code> does, shows the Cypher, and draws what came back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or
                             as a desktop app.
                         </p>
                     </header>
