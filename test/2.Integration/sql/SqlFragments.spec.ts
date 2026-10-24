@@ -22,6 +22,12 @@ class Ticket {
 @NodeFragment({ labels: ['Urgent'] })
 class UrgentTicket extends Ticket {}
 
+@NodeFragment({ labels: ['SqlTest', 'Flag'] })
+class Flag {
+    @NodeId() id: string;
+    locked: boolean;
+}
+
 describe.each(sqlStores())('fragments on $name', (store) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
@@ -82,6 +88,19 @@ describe.each(sqlStores())('fragments on $name', (store) => {
         expect(await gom.delete(Ticket, 'gone1')).toBe(1);
         expect(await gom.deleteAll(Ticket, `${title} = 'x'`)).toBe(1);
         expect(await gom.count(Ticket)).toBe(3);
+    });
+
+    it('should read a property of the node written as Cypher writes it, n.title, in a raw where', async () => {
+        expect((await gom.loadAll(Ticket, 'n.title = $title', { title: 'Typo' })).map((it) => it.id)).toEqual(['t3']);
+        expect(await gom.count(Ticket, "n.title = 'Crash' OR n.`title` = 'Outage'")).toBe(2);
+        expect(await gom.count(Ticket, "n.title = 'n.title' OR n.stamp = 'aaaa:bbbb'")).toBe(1);
+        expect(await gom.delete(Ticket, 't1', { where: "n.title = 'y'" })).toBe(0);
+        await seed.node(['Ticket'], { id: 'gone3', title: 'z', ticket_no: 902 });
+        expect(await gom.deleteAll(Ticket, "n.title = 'z'")).toBe(1);
+        await seed.node(['Flag'], { id: 'f1', locked: true });
+        await seed.node(['Flag'], { id: 'f2', locked: false });
+        expect((await gom.loadAll(Flag, 'n.locked = true')).map((it) => it.id)).toEqual(['f1']);
+        expect((await gom.loadAll(Flag, 'n.locked <> TRUE')).map((it) => it.id)).toEqual(['f2']);
     });
 
     it('should take the query DSL', async () => {

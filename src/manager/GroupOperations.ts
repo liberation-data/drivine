@@ -36,7 +36,7 @@ export class GroupOperations {
         spec: GroupQuery<K, A> | ((q: RootRefs<T>) => GroupQuery<K, A>)
     ): Promise<GroupRow<K, A>[]> {
         const model = this.registry.fragment(source as ClassType);
-        const query = typeof spec === 'function' ? spec(rootRefs<T>(scopeOf(fragmentOf(model)))) : spec;
+        const query = this.written(typeof spec === 'function' ? spec(rootRefs<T>(scopeOf(fragmentOf(model)))) : spec);
         const targets = new Map<string, FragmentModel>();
         for (const [name, groupKey] of Object.entries(query.keys as Record<string, GroupKey>)) {
             if (groupKey.kind === 'path') {
@@ -74,5 +74,18 @@ export class GroupOperations {
             aggregates: { count: count() }
         });
         return new Map(rows.map((it) => [it.value, it.count ?? 0]));
+    }
+
+    /** The query with each predicate the caller wrote, its `where` and its aggregates' filters, as the store reads it. */
+    private written<Q extends GroupQuery<any, any>>(query: Q): Q {
+        const written = <W>(where: string | W | undefined): string | W | undefined =>
+            typeof where === 'string' && where ? this.backend.written(where) : where;
+        const aggregates = Object.fromEntries(
+            Object.entries((query.aggregates ?? {}) as Record<string, GroupAggregate>).map(([name, aggregate]) => [
+                name,
+                { ...aggregate, filter: written(aggregate.filter) }
+            ])
+        );
+        return { ...query, where: written(query.where), ...(query.aggregates ? { aggregates } : {}) };
     }
 }
