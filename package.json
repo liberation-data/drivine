@@ -27,6 +27,9 @@
         "**/*"
     ],
     "main": "index.js",
+    "bin": {
+        "drivine": "codegen/cli.js"
+    },
     "types": "index.d.ts",
     "scripts": {
         "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && node scripts/rewrite-paths.js dist && cp package.json dist/ && cp README.md LICENSE dist/",
@@ -57,7 +60,8 @@
         "class-validator": ">= 0.14.0",
         "neo4j-driver": "^5.27.0",
         "reflect-metadata": ">= ^0.1.13",
-        "testcontainers": ">= 10"
+        "testcontainers": ">= 10",
+        "typescript": ">= 5"
     },
     "dependencies": {
         "antlr4ng": "^3.0.16",
@@ -95,6 +99,7 @@
         "@typescript-eslint/eslint-plugin": "^8.71.2",
         "@typescript-eslint/parser": "^8.71.2",
         "acorn": "^8.11.2",
+        "ajv": "^8.20.0",
         "antlr4ng-cli": "^2.0.0",
         "class-transformer": "^0.5.1",
         "class-validator": "^0.14.0",
@@ -171,6 +176,9 @@
             "optional": true
         },
         "testcontainers": {
+            "optional": true
+        },
+        "typescript": {
             "optional": true
         }
     },

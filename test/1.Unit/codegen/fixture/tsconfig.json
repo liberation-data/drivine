@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "target": "es2018",
+        "strict": true,
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
+        "strictPropertyInitialization": false,
+        "skipLibCheck": true,
+        "baseUrl": ".",
+        "paths": {
+            "@liberation-data/drivine": ["../../../../src/index.ts"],
+            "@/*": ["../../../../src/*"]
+        }
+    },
+    "include": ["src/**/*.ts"]
+}

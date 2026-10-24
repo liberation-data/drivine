@@ -13,5 +13,8 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$dir"
 curl -fsSL "https://github.com/liberation-data/drivine-cypher-spec/archive/refs/tags/$tag.tar.gz" | tar -xz -C "$tmp" --strip-components=1
 cp "$tmp"/queries.yaml "$tmp"/writes.yaml "$tmp"/temporal.yaml "$tmp"/refusals.yaml "$tmp"/README.md "$dir"/
+# The model file's format, which the model file generator writes to.
+mkdir -p "$dir/model"
+cp "$tmp"/model/schema.json "$tmp"/model/README.md "$dir/model/"
 echo "$tag" > "$dir/VERSION"
 echo "The Cypher spec in $dir is now $tag."

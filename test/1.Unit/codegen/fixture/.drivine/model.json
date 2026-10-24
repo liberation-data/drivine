@@ -1,0 +1,484 @@
+{
+  "$comment": "Drivine model file: this module's fragments, relationship fragments and views, written by the build. Drivine Studio reads it to browse the model and query the data. Keep it in source control: the build rewrites it when the model changes, and CI checks that it is current. Format: https://github.com/liberation-data/drivine-cypher-spec/tree/main/model",
+  "format": "drivine-model/1",
+  "generator": {
+    "library": "drivine",
+    "version": "3.2.0",
+    "language": "typescript"
+  },
+  "module": "model-fixture",
+  "fragments": [
+    {
+      "id": "src/fragments/Author#Author",
+      "name": "Author",
+      "labels": [
+        "Author",
+        "Person"
+      ],
+      "nodeId": "uuid",
+      "stamp": true,
+      "subtypesComplete": false,
+      "labelSet": {
+        "field": "roles",
+        "values": [
+          "Admin",
+          "Editor"
+        ]
+      },
+      "bags": [
+        {
+          "field": "meta",
+          "prefix": "meta_",
+          "type": "string"
+        },
+        {
+          "field": "rest",
+          "prefix": "",
+          "flat": true,
+          "type": "float"
+        }
+      ],
+      "properties": [
+        {
+          "name": "active",
+          "stored": "active",
+          "type": "boolean",
+          "nullable": false,
+          "source": "boolean"
+        },
+        {
+          "name": "address",
+          "stored": "address",
+          "type": "json",
+          "nullable": false,
+          "packed": "json",
+          "source": "Address"
+        },
+        {
+          "name": "age",
+          "stored": "age",
+          "type": "float",
+          "nullable": true,
+          "source": "number"
+        },
+        {
+          "name": "big",
+          "stored": "big",
+          "type": "int",
+          "nullable": false,
+          "source": "bigint"
+        },
+        {
+          "name": "books",
+          "stored": "books",
+          "type": "list",
+          "of": "string",
+          "nullable": false,
+          "whenAbsent": "empty",
+          "source": "string[]"
+        },
+        {
+          "name": "born",
+          "stored": "born_on",
+          "type": "datetime",
+          "nullable": false,
+          "source": "Date"
+        },
+        {
+          "name": "embedding",
+          "stored": "embedding",
+          "type": "list",
+          "of": "float",
+          "nullable": false,
+          "vector": {
+            "similarity": "EUCLIDEAN"
+          },
+          "source": "number[]"
+        },
+        {
+          "name": "name",
+          "stored": "name",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        },
+        {
+          "name": "nickname",
+          "stored": "nickname",
+          "type": "string",
+          "nullable": true,
+          "source": "string"
+        },
+        {
+          "name": "rank",
+          "stored": "rank",
+          "type": "float",
+          "nullable": false,
+          "whenAbsent": "default",
+          "source": "number"
+        },
+        {
+          "name": "role",
+          "stored": "role",
+          "type": "enum",
+          "values": [
+            "Admin",
+            "Editor"
+          ],
+          "nullable": false,
+          "source": "Role"
+        },
+        {
+          "name": "scores",
+          "stored": "scores",
+          "type": "map",
+          "of": "float",
+          "nullable": false,
+          "source": "Map<string, number>"
+        },
+        {
+          "name": "status",
+          "stored": "status",
+          "type": "enum",
+          "values": [
+            "active",
+            "away"
+          ],
+          "nullable": false,
+          "source": "\"active\" | \"away\""
+        },
+        {
+          "name": "tags",
+          "stored": "tags",
+          "type": "list",
+          "of": "string",
+          "nullable": false,
+          "source": "string[]"
+        },
+        {
+          "name": "uuid",
+          "stored": "uuid",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        }
+      ]
+    },
+    {
+      "id": "src/fragments/Organization#Organization",
+      "name": "Organization",
+      "labels": [
+        "Organization"
+      ],
+      "nodeId": "uuid",
+      "subtypesComplete": false,
+      "properties": [
+        {
+          "name": "city",
+          "stored": "city",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        },
+        {
+          "name": "founded",
+          "stored": "founded",
+          "type": "datetime",
+          "nullable": false,
+          "index": "range",
+          "source": "Date"
+        },
+        {
+          "name": "motto",
+          "stored": "motto",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        },
+        {
+          "name": "name",
+          "stored": "name",
+          "type": "string",
+          "nullable": false,
+          "index": "fullText",
+          "source": "string"
+        },
+        {
+          "name": "uuid",
+          "stored": "uuid",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        }
+      ],
+      "indexes": [
+        {
+          "kind": "unique",
+          "properties": [
+            "name",
+            "city"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "src/fragments/Person#Person",
+      "name": "Person",
+      "labels": [
+        "Person"
+      ],
+      "nodeId": "uuid",
+      "subtypes": [
+        "src/fragments/Author#Author"
+      ],
+      "subtypesComplete": false,
+      "properties": [
+        {
+          "name": "active",
+          "stored": "active",
+          "type": "boolean",
+          "nullable": false,
+          "source": "boolean"
+        },
+        {
+          "name": "address",
+          "stored": "address",
+          "type": "json",
+          "nullable": false,
+          "packed": "json",
+          "source": "Address"
+        },
+        {
+          "name": "age",
+          "stored": "age",
+          "type": "float",
+          "nullable": true,
+          "source": "number"
+        },
+        {
+          "name": "big",
+          "stored": "big",
+          "type": "int",
+          "nullable": false,
+          "source": "bigint"
+        },
+        {
+          "name": "born",
+          "stored": "born_on",
+          "type": "datetime",
+          "nullable": false,
+          "source": "Date"
+        },
+        {
+          "name": "embedding",
+          "stored": "embedding",
+          "type": "list",
+          "of": "float",
+          "nullable": false,
+          "vector": {
+            "similarity": "EUCLIDEAN"
+          },
+          "source": "number[]"
+        },
+        {
+          "name": "name",
+          "stored": "name",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        },
+        {
+          "name": "nickname",
+          "stored": "nickname",
+          "type": "string",
+          "nullable": true,
+          "source": "string"
+        },
+        {
+          "name": "role",
+          "stored": "role",
+          "type": "enum",
+          "values": [
+            "Admin",
+            "Editor"
+          ],
+          "nullable": false,
+          "source": "Role"
+        },
+        {
+          "name": "scores",
+          "stored": "scores",
+          "type": "map",
+          "of": "float",
+          "nullable": false,
+          "source": "Map<string, number>"
+        },
+        {
+          "name": "status",
+          "stored": "status",
+          "type": "enum",
+          "values": [
+            "active",
+            "away"
+          ],
+          "nullable": false,
+          "source": "\"active\" | \"away\""
+        },
+        {
+          "name": "tags",
+          "stored": "tags",
+          "type": "list",
+          "of": "string",
+          "nullable": false,
+          "source": "string[]"
+        },
+        {
+          "name": "uuid",
+          "stored": "uuid",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        }
+      ]
+    }
+  ],
+  "relationshipFragments": [
+    {
+      "id": "src/fragments/WorkHistory#WorkHistory",
+      "name": "WorkHistory",
+      "target": {
+        "field": "target",
+        "fragment": "src/fragments/Organization#Organization"
+      },
+      "properties": [
+        {
+          "name": "role",
+          "stored": "role",
+          "type": "string",
+          "nullable": false,
+          "source": "string"
+        },
+        {
+          "name": "since",
+          "stored": "since",
+          "type": "datetime",
+          "nullable": false,
+          "source": "Date"
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "id": "src/views/PersonCareer#PersonCareer",
+      "name": "PersonCareer",
+      "root": {
+        "field": "person",
+        "fragment": "src/fragments/Person#Person"
+      },
+      "relationships": [
+        {
+          "field": "chain",
+          "type": "REPORTS_TO",
+          "direction": "OUTGOING",
+          "target": "src/fragments/Person#Person",
+          "many": true,
+          "required": false,
+          "maxDepth": 3,
+          "sortedBy": {
+            "property": "name",
+            "ascending": false
+          },
+          "readOnly": true
+        },
+        {
+          "field": "far",
+          "target": "src/fragments/Organization#Organization",
+          "many": true,
+          "required": false,
+          "readOnly": true,
+          "path": [
+            {
+              "type": "A",
+              "direction": "OUTGOING"
+            },
+            {
+              "type": "B",
+              "direction": "INCOMING",
+              "label": "Mid",
+              "orderBy": "at",
+              "ascending": false
+            }
+          ]
+        },
+        {
+          "field": "history",
+          "type": "WORKS_FOR",
+          "direction": "OUTGOING",
+          "target": "src/fragments/WorkHistory#WorkHistory",
+          "many": true,
+          "required": false
+        },
+        {
+          "field": "manager",
+          "type": "MANAGES",
+          "direction": "INCOMING",
+          "target": "src/fragments/Person#Person",
+          "many": false,
+          "required": true
+        },
+        {
+          "field": "mentor",
+          "type": "MENTORS",
+          "direction": "OUTGOING",
+          "target": "src/fragments/Person#Person",
+          "many": false,
+          "required": false,
+          "readOnly": true
+        }
+      ],
+      "aggregates": [
+        {
+          "field": "jobs",
+          "function": "COUNT",
+          "type": "WORKS_FOR",
+          "direction": "OUTGOING"
+        },
+        {
+          "field": "latest",
+          "function": "MAX",
+          "type": "WORKS_FOR",
+          "direction": "OUTGOING",
+          "property": "since"
+        }
+      ]
+    },
+    {
+      "id": "src/views/Team#Team",
+      "name": "Team",
+      "root": {
+        "field": "lead",
+        "fragment": "src/fragments/Person#Person"
+      },
+      "relationships": [
+        {
+          "field": "careers",
+          "type": "LEADS",
+          "direction": "OUTGOING",
+          "target": "src/views/PersonCareer#PersonCareer",
+          "many": true,
+          "required": false
+        },
+        {
+          "field": "teams",
+          "type": "IN",
+          "direction": "OUTGOING",
+          "target": "src/views/Team#Team",
+          "many": true,
+          "required": false,
+          "maxDepth": 2
+        }
+      ]
+    }
+  ]
+}

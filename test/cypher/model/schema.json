@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liberation-data/drivine-cypher-spec/model/schema.json",
+  "title": "Drivine model file",
+  "description": "A Drivine model: its fragments, relationship fragments and views, and how each is stored. See model/README.md.",
+  "type": "object",
+  "required": ["format", "generator", "module", "fragments", "relationshipFragments", "views"],
+  "properties": {
+    "$comment": { "type": "string" },
+    "format": { "const": "drivine-model/1" },
+    "generator": {
+      "type": "object",
+      "required": ["library", "version", "language"],
+      "properties": {
+        "library": { "enum": ["drivine4j", "drivine", "drivine-python"] },
+        "version": { "type": "string" },
+        "language": { "enum": ["java", "kotlin", "typescript", "python"] }
+      }
+    },
+    "module": { "type": "string", "minLength": 1 },
+    "fragments": { "type": "array", "items": { "$ref": "#/$defs/fragment" } },
+    "relationshipFragments": { "type": "array", "items": { "$ref": "#/$defs/relationshipFragment" } },
+    "views": { "type": "array", "items": { "$ref": "#/$defs/view" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "direction": { "enum": ["OUTGOING", "INCOMING", "UNDIRECTED"] },
+    "type": {
+      "enum": [
+        "string", "int", "float", "boolean", "uuid",
+        "date", "time", "localTime", "datetime", "localDatetime", "duration",
+        "enum", "list", "map", "json", "any"
+      ]
+    },
+    "fragment": {
+      "type": "object",
+      "required": ["id", "name", "labels", "properties"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "removed": { "type": "boolean" },
+        "labels": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "nodeId": { "$ref": "#/$defs/name" },
+        "stamp": { "type": "boolean" },
+        "subtypes": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "subtypesComplete": { "type": "boolean" },
+        "labelSet": {
+          "type": "object",
+          "required": ["field"],
+          "properties": {
+            "field": { "$ref": "#/$defs/name" },
+            "values": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "bags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "prefix"],
+            "properties": {
+              "field": { "$ref": "#/$defs/name" },
+              "prefix": { "type": "string" },
+              "flat": { "type": "boolean" },
+              "type": { "$ref": "#/$defs/type" }
+            }
+          }
+        },
+        "properties": { "type": "array", "items": { "$ref": "#/$defs/property" } },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "properties"],
+            "properties": {
+              "kind": { "enum": ["unique", "range", "fullText"] },
+              "properties": { "type": "array", "items": { "$ref": "#/$defs/name" }, "minItems": 2 }
+            }
+          }
+        }
+      }
+    },
+    "property": {
+      "type": "object",
+      "required": ["name", "stored", "type", "nullable"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "stored": { "$ref": "#/$defs/name" },
+        "type": { "$ref": "#/$defs/type" },
+        "of": { "$ref": "#/$defs/type" },
+        "values": { "type": "array", "items": { "type": "string" } },
+        "nullable": { "enum": [true, false, "unknown"] },
+        "whenAbsent": { "enum": ["default", "empty"] },
+        "packed": { "const": "json" },
+        "readOnly": { "type": "boolean" },
+        "index": { "enum": ["unique", "range", "text", "fullText"] },
+        "vector": {
+          "type": "object",
+          "required": ["similarity"],
+          "properties": {
+            "similarity": { "enum": ["COSINE", "EUCLIDEAN"] },
+            "dimensions": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "source": { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "enum": ["list", "map"] } } }, "then": { "required": ["of"] } },
+        { "if": { "properties": { "type": { "const": "enum" } } }, "then": { "required": ["values"] } }
+      ]
+    },
+    "relationshipFragment": {
+      "type": "object",
+      "required": ["id", "name", "target", "properties"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "removed": { "type": "boolean" },
+        "target": {
+          "type": "object",
+          "required": ["field", "fragment"],
+          "properties": {
+            "field": { "$ref": "#/$defs/name" },
+            "fragment": { "$ref": "#/$defs/id" }
+          }
+        },
+        "properties": { "type": "array", "items": { "$ref": "#/$defs/property" } }
+      }
+    },
+    "view": {
+      "type": "object",
+      "required": ["id", "name", "root", "relationships"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/name" },
+        "removed": { "type": "boolean" },
+        "root": {
+          "type": "object",
+          "required": ["field", "fragment"],
+          "properties": {
+            "field": { "$ref": "#/$defs/name" },
+            "fragment": { "$ref": "#/$defs/id" }
+          }
+        },
+        "relationships": { "type": "array", "items": { "$ref": "#/$defs/relationship" } },
+        "aggregates": { "type": "array", "items": { "$ref": "#/$defs/aggregate" } }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": ["field", "target", "many", "required"],
+      "properties": {
+        "field": { "$ref": "#/$defs/name" },
+        "type": { "type": "string", "minLength": 1 },
+        "direction": { "$ref": "#/$defs/direction" },
+        "target": { "$ref": "#/$defs/id" },
+        "many": { "type": "boolean" },
+        "required": { "type": "boolean" },
+        "maxDepth": { "type": "integer", "minimum": 1 },
+        "sortedBy": {
+          "type": "object",
+          "required": ["property"],
+          "properties": {
+            "property": { "type": "string", "minLength": 1 },
+            "ascending": { "type": "boolean" }
+          }
+        },
+        "readOnly": { "type": "boolean" },
+        "path": { "type": "array", "items": { "$ref": "#/$defs/hop" }, "minItems": 1 }
+      },
+      "oneOf": [
+        { "required": ["type", "direction"], "not": { "required": ["path"] } },
+        { "required": ["path"], "not": { "anyOf": [{ "required": ["type"] }, { "required": ["direction"] }] } }
+      ]
+    },
+    "hop": {
+      "type": "object",
+      "required": ["type", "direction"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "direction": { "$ref": "#/$defs/direction" },
+        "label": { "type": "string", "minLength": 1 },
+        "orderBy": { "type": "string", "minLength": 1 },
+        "ascending": { "type": "boolean" }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "required": ["field", "function", "type", "direction"],
+      "properties": {
+        "field": { "$ref": "#/$defs/name" },
+        "function": { "enum": ["COUNT", "SUM", "AVG", "MIN", "MAX"] },
+        "type": { "type": "string", "minLength": 1 },
+        "direction": { "$ref": "#/$defs/direction" },
+        "property": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "function": { "not": { "const": "COUNT" } } } },
+      "then": { "required": ["property"] }
+    }
+  }
+}
