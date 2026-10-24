@@ -21,8 +21,8 @@ const GRAPH = 'cypher';
 /**
  * The Neo4j the spec runs on, `neo4j:latest` as in drivine4j, so a new Neo4j that gives other rows shows up at once.
  * It is a container of its own: the spec's statements match labels other suites write (`Person`, `Movie`), and Neo4j
- * 5, the other suites', refuses two of them (a date added to a text, and an order by an aggregate of a variable no
- * item names). `CYPHER_SPEC_NEO4J_IMAGE` picks another.
+ * 5, which the other suites run on when `NEO4J_TEST_IMAGE` names it, refuses two of them (a date added to a text, and
+ * an order by an aggregate of a variable no item names). `CYPHER_SPEC_NEO4J_IMAGE` picks another.
  */
 const SPEC_NEO4J_IMAGE = process.env.CYPHER_SPEC_NEO4J_IMAGE ?? 'neo4j:latest';
 

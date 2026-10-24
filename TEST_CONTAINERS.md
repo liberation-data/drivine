@@ -52,11 +52,15 @@ Each type is chosen alone: a local Neo4j can run beside a FalkorDB container. `<
 
 | Backend  | Image                             | Container's settings                                         |
 |----------|-----------------------------------|--------------------------------------------------------------|
-| Neo4j    | `neo4j:5.26-community`            | user `neo4j`, password `drivine-test`                        |
+| Neo4j    | `neo4j:5.26-community`, and `neo4j:latest` for Drivine's own tests | user `neo4j`, password `drivine-test` |
 | Memgraph | `memgraph/memgraph:3.12.0`        | no auth                                                      |
 | FalkorDB | `falkordb/falkordb:6.0.0`         | the graph is the datasource's `DATABASE_NAME`                |
 | Postgres | `pgvector/pgvector:pg16`          | user `drivine`, password `drivine-test`, the datasource's database |
 | Oracle   | `gvenzl/oracle-free:23-faststart` | user `drivine`, password `drivine-test`, service `FREEPDB1`  |
+
+Drivine's own tests set `NEO4J_TEST_IMAGE=neo4j:latest` in `.env.test`, as drivine4j and drivine-python test on the
+latest Neo4j, so a Neo4j release that changes what Drivine reads or writes shows up at once. The default above is what
+`@liberation-data/drivine/testing` starts for your tests (see [In Your Own Tests](#in-your-own-tests)).
 
 ## The Cypher spec
 
@@ -64,7 +68,8 @@ The Cypher spec's suite (`test/2.Integration/cypher`, run from `test/cypher`, se
 Neo4j, Postgres and Oracle. On Postgres and Oracle it writes a graph of its own, `cypher`, so no other suite's nodes are
 among its rows. On Neo4j it starts a container of its own, `neo4j:latest`, as drivine4j does, so a Neo4j release that
 gives other rows shows up at once. It can't share the other suites' Neo4j: its statements match labels they write
-(`Person`, `Movie`) while they run, and Neo4j 5 refuses two of its statements.
+(`Person`, `Movie`) while they run, and Neo4j 5, which the other suites run on with `NEO4J_TEST_IMAGE` set to it,
+refuses two of its statements.
 `CYPHER_SPEC_NEO4J_IMAGE` picks another image; with `USE_LOCAL_NEO4J=true` it runs on your Neo4j instead, which should
 be as recent. Before each case it empties the whole graph, as the spec asks, so on a local Neo4j it deletes every node
 there.
