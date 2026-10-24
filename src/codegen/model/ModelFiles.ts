@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Entry, ReadModel } from '@/codegen/model/ModelReader';
 
+/** The format and its major version, which a reader checks before it reads the rest. */
 export const FORMAT = 'drivine-model/1';
 
 /** Word for word what the format asks every library to write. */

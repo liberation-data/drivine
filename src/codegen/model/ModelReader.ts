@@ -63,6 +63,7 @@ export class ModelReader {
         return `${file.replace(/\.(d\.)?[cm]?tsx?$/, '')}#${decl.name!.text}`;
     }
 
+    /** Every entry the package's own source declares, each list sorted by id; what it could not read, in `problems`. */
     read(): ReadModel {
         const classes = this.classes();
         const of = (decorator: string): TS.ClassDeclaration[] => classes.filter((it) => this.decorator(it, decorator));
@@ -160,6 +161,9 @@ export class ModelReader {
             nodeId: properties.find((it) => this.on(it, 'NodeId'))?.name,
             stamp: stamp.length ? true : undefined,
             subtypes: subtypes.length ? subtypes.sort(compare) : undefined,
+            // ModelRegistry.registerSubtype can add a subtype to any fragment in code, which the source doesn't show:
+            // and a load gives the fragment itself for a node no subtype's labels match.
+            subtypesComplete: false,
             labelSet: labelSet ? this.labelSet(labelSet) : undefined,
             bags: bags.length ? bags.sort(byName).map((it) => this.bag(it)) : undefined,
             properties: plain.sort(byName).map((it) => this.property(it, single.get(it.name))),
@@ -466,13 +470,22 @@ export class ModelReader {
             }
             for (const member of members) {
                 const named = member as TS.PropertyDeclaration | TS.ParameterDeclaration;
-                if (!this.ts.isIdentifier(named.name) || found.has(named.name.text)) {
+                if (!this.ts.isIdentifier(named.name)) {
+                    continue;
+                }
+                const nearer = found.get(named.name.text);
+                // A field a subclass declares again without Drivine's decorators keeps its superclass's, as at run time.
+                if (nearer && !this.drivineDecorators(nearer.decorated).length) {
+                    nearer.decorated = named;
+                }
+                if (nearer) {
                     continue;
                 }
                 const type = this.checker.getTypeAtLocation(named);
                 found.set(named.name.text, {
                     name: named.name.text,
                     decl: named,
+                    decorated: named,
                     type,
                     nullable: this.nullable(named, type)
                 });
@@ -504,26 +517,45 @@ export class ModelReader {
     }
 
     private decorators(node: TS.Node, name: string): TS.Decorator[] {
+        return this.drivineDecorators(node).filter((it) => {
+            const callee = this.ts.isCallExpression(it.expression) ? it.expression.expression : it.expression;
+            return this.drivineName(callee) === name;
+        });
+    }
+
+    /** The decorators on a class or a field that Drivine exports, whatever the module imports them as. */
+    private drivineDecorators(node: TS.Node): TS.Decorator[] {
         const all = this.ts.canHaveDecorators(node) ? this.ts.getDecorators(node) ?? [] : [];
         return all.filter((it) => {
             const callee = this.ts.isCallExpression(it.expression) ? it.expression.expression : it.expression;
-            return this.ts.isIdentifier(callee) && callee.text === name && this.fromDrivine(callee);
+            return this.drivineName(callee) !== undefined;
         });
     }
 
     private on(prop: Property, name: string): TS.Decorator | undefined {
-        return this.decorator(prop.decl, name);
+        return this.decorator(prop.decorated, name);
     }
 
-    /** Whether the name is imported from Drivine, not declared here or taken from another library. */
-    private fromDrivine(identifier: TS.Identifier): boolean {
-        const symbol = this.checker.getSymbolAtLocation(identifier);
-        const declaration = symbol?.declarations?.[0];
-        if (!declaration || !this.ts.isImportSpecifier(declaration)) {
-            return false;
+    /**
+     * The name Drivine exports what an expression names under, when it is imported from Drivine rather than declared
+     * here or taken from another library: `NodeFragment` for `NodeFragment`, for `Fragment` imported as
+     * `{ NodeFragment as Fragment }`, and for `drivine.NodeFragment` with `import * as drivine`.
+     */
+    private drivineName(node: TS.Expression): string | undefined {
+        const ts = this.ts;
+        const qualified = ts.isPropertyAccessExpression(node);
+        const named = qualified ? node.expression : node;
+        const declaration = ts.isIdentifier(named)
+            ? this.checker.getSymbolAtLocation(named)?.declarations?.[0]
+            : undefined;
+        if (!qualified && declaration && ts.isImportSpecifier(declaration)) {
+            const name = (declaration.propertyName ?? declaration.name).text;
+            return isDrivine(ts, declaration.parent.parent.parent.moduleSpecifier) ? name : undefined;
         }
-        const specifier = declaration.parent.parent.parent.moduleSpecifier;
-        return this.ts.isStringLiteral(specifier) && DRIVINE.test(specifier.text);
+        if (qualified && declaration && ts.isNamespaceImport(declaration)) {
+            return isDrivine(ts, declaration.parent.parent.moduleSpecifier) ? node.name.text : undefined;
+        }
+        return undefined;
     }
 
     /** A decorator's arguments, each as its value: what the compiler can tell of it. */
@@ -592,9 +624,9 @@ export class ModelReader {
                 : (node.body as TS.Expression);
             return body ? this.classOf(body) : undefined;
         }
-        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'hop') {
+        if (ts.isCallExpression(node) && this.drivineName(node.expression) === 'hop') {
             const [type, direction, label, orderBy, ascending] = node.arguments.map((it) => this.value(it));
-            return this.fromDrivine(node.expression) ? { type, direction, label, orderBy, ascending } : undefined;
+            return { type, direction, label, orderBy, ascending };
         }
         return NOTHING;
     }
@@ -661,9 +693,15 @@ interface Typed {
 interface Property {
     name: string;
     decl: TS.PropertyDeclaration | TS.ParameterDeclaration;
+    /** Where its Drivine decorators are: the nearest declaration that has any, or else its own. */
+    decorated: TS.PropertyDeclaration | TS.ParameterDeclaration;
     type: TS.Type;
     nullable: boolean | 'unknown';
 }
+
+/** Whether an import's module is Drivine. */
+const isDrivine = (ts: typeof TS, module: TS.Expression): boolean =>
+    ts.isStringLiteral(module) && DRIVINE.test(module.text);
 
 const strings = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((it): it is string => typeof it === 'string') : [];

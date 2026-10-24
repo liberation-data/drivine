@@ -16,6 +16,7 @@
         "WebUser"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "anonymousToken",
@@ -48,6 +49,7 @@
         "Chunk"
       ],
       "nodeId": "id",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "containerSectionId",
@@ -81,6 +83,7 @@
         "GithubPerson"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "bio",
@@ -119,6 +122,7 @@
         "GuideUser"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "guideProgress",
@@ -143,6 +147,7 @@
         "Issue"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "body",
@@ -208,6 +213,7 @@
         "OddlyStored"
       ],
       "nodeId": "id",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "greeting",
@@ -253,6 +259,7 @@
         "Organization"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "name",
@@ -278,6 +285,7 @@
         "Mapped"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "bio",
@@ -310,6 +318,7 @@
         "WebUser"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "displayName",
@@ -341,6 +350,7 @@
         "SampleArticle"
       ],
       "nodeId": "id",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "body",
@@ -366,6 +376,7 @@
         "SampleDoc"
       ],
       "nodeId": "id",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "embedding",
@@ -401,6 +412,7 @@
         "SampleResolver"
       ],
       "nodeId": "id",
+      "subtypesComplete": false,
       "bags": [
         {
           "field": "metadata",
@@ -433,6 +445,7 @@
       ],
       "nodeId": "id",
       "stamp": true,
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "id",
@@ -461,6 +474,7 @@
         "src/fragment/AnonymousWebUser#AnonymousWebUser",
         "src/fragment/RegisteredWebUser#RegisteredWebUser"
       ],
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "displayName",

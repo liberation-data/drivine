@@ -5,6 +5,7 @@ import { FILE, model, previous, text, write } from '@/codegen/model/ModelFiles';
 import { ModelReader } from '@/codegen/model/ModelReader';
 import type { ReadModel } from '@/codegen/model/ModelReader';
 
+/** What to write the model file from, and how. */
 export interface ModelFileOptions {
     /** The project's tsconfig.json. The package is the nearest directory above it with a package.json. */
     project: string;
@@ -14,6 +15,7 @@ export interface ModelFileOptions {
     warn?: (message: string) => void;
 }
 
+/** What became of the model file, for the command to say, and to fail on in CI. */
 export interface ModelFileResult {
     /** Where the file is, or would be. */
     file: string;

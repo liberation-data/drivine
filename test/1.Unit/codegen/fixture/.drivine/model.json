@@ -17,6 +17,7 @@
       ],
       "nodeId": "uuid",
       "stamp": true,
+      "subtypesComplete": false,
       "labelSet": {
         "field": "roles",
         "values": [
@@ -170,6 +171,7 @@
         "Organization"
       ],
       "nodeId": "uuid",
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "city",
@@ -229,6 +231,7 @@
       "subtypes": [
         "src/fragments/Author#Author"
       ],
+      "subtypesComplete": false,
       "properties": [
         {
           "name": "active",

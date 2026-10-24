@@ -100,6 +100,8 @@ describe('The model file', () => {
 
     it('says the subtypes a load may give, and takes the labels and fields a subtype inherits', () => {
         expect(byId(model.fragments, 'src/fragments/Person#Person').subtypes).toEqual(['src/fragments/Author#Author']);
+        // One registered in code with ModelRegistry.registerSubtype is not in the source, so no list is complete.
+        expect(model.fragments.map((it: any) => it.subtypesComplete)).toEqual([false, false, false]);
         const author = byId(model.fragments, 'src/fragments/Author#Author');
         expect(author.properties.map((it: any) => it.name)).toContain('nickname');
     });
@@ -281,6 +283,65 @@ describe('Writing the model file', () => {
         expect(warnings).toEqual(['Drivine model file: src/V#V: @GraphView V has no @Root property.']);
         expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#A']);
         expect(read(dir).views).toEqual([]);
+    });
+});
+
+describe("Reading Drivine's decorators", () => {
+    const written = (files: Record<string, string>): any => {
+        const dir = project(files);
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([]);
+        return read(dir);
+    };
+
+    it('reads them imported under other names', () => {
+        const model = written({
+            'src/A.ts': [
+                "import { NodeFragment as Fragment, GraphProperty as Stored } from '@liberation-data/drivine';",
+                "@Fragment({ labels: ['A'] })",
+                "export class A { @Stored('full_name') name: string; }"
+            ].join('\n')
+        });
+        expect(byId(model.fragments, 'src/A#A').properties).toEqual([
+            expect.objectContaining({ name: 'name', stored: 'full_name' })
+        ]);
+    });
+
+    it('reads them from a namespace import', () => {
+        const model = written({
+            'src/A.ts': [
+                "import * as drivine from '@liberation-data/drivine';",
+                "@drivine.NodeFragment({ labels: ['A'] })",
+                "export class A { @drivine.NodeId() id: string; @drivine.GraphProperty('full_name') name: string; }",
+                '@drivine.GraphView()',
+                'export class V {',
+                '    @drivine.Root() a: A;',
+                "    @drivine.GraphPath([drivine.hop('TO', drivine.Direction.INCOMING)]) far: A;",
+                '}'
+            ].join('\n')
+        });
+        const a = byId(model.fragments, 'src/A#A');
+        expect(a.nodeId).toEqual('id');
+        expect(a.properties.find((it: any) => it.name === 'name').stored).toEqual('full_name');
+        expect(byId(model.views, 'src/A#V').relationships).toEqual([
+            expect.objectContaining({ field: 'far', path: [{ type: 'TO', direction: 'INCOMING' }] })
+        ]);
+    });
+
+    it("keeps a superclass's decorators on a field a subclass declares again without them, as at run time", () => {
+        const model = written({
+            'src/A.ts': [
+                "import { GraphProperty, NodeFragment } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['A'] })",
+                "export class A { @GraphProperty('full_name') name: string | undefined; }",
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B extends A { declare name: string; }'
+            ].join('\n')
+        });
+        expect(byId(model.fragments, 'src/A#B').properties).toEqual([
+            expect.objectContaining({ name: 'name', stored: 'full_name', nullable: false })
+        ]);
     });
 });
 
