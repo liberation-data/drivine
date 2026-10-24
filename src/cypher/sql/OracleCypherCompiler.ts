@@ -353,6 +353,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             ...(walk.max !== undefined ? [`${w}.depth < ${walk.max}`] : []),
             ...walk.conditions
         ];
+        // Oracle adapts a step's plan as the statement runs, and a second session that runs the statement then finds no
+        // rows where a walk either way goes around a cycle (liberation-data/drivine4j#182): no plan adapts.
+        const select = 'SELECT /*+ NO_ADAPTIVE_PLAN */';
         const text = [
             `WITH ${w} (src, nid, depth, nids, eids) AS (`,
             `    SELECT ${n}.nid, ${n}.nid, 0, CAST(',' AS VARCHAR2(4000)), CAST(',' AS VARCHAR2(4000))`,
@@ -360,8 +363,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             '    UNION ALL',
             // Walked backwards, each node it leaves goes first, so its nodes end with the one it started from.
             walk.backwards
-                ? `    SELECT ${w}.src, ${far}, ${w}.depth + 1, ',' || ${w}.nid || ${w}.nids, ',' || ${e}.eid || ${w}.eids`
-                : `    SELECT ${w}.src, ${far}, ${w}.depth + 1, ${w}.nids || ${far} || ',', ${w}.eids || ${e}.eid || ','`,
+                ? `    ${select} ${w}.src, ${far}, ${w}.depth + 1, ',' || ${w}.nid || ${w}.nids, ',' || ${e}.eid || ${w}.eids`
+                : `    ${select} ${w}.src, ${far}, ${w}.depth + 1, ${w}.nids || ${far} || ',', ${w}.eids || ${e}.eid || ','`,
             `    FROM ${w} JOIN ${this.edges} ${e} ON ${join}`,
             `    WHERE ${conditions.join(' AND ')}`,
             ')',
