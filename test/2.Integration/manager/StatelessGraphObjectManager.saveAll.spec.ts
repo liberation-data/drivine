@@ -22,6 +22,11 @@ import {
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Saving 1500 fragments on Neo4j is two statements of a thousand rows and five hundred, each planned the first time in
+// about 200 ms, whose MERGEs find each node by a label scan, as the suite makes no index: 0.9 s cold, 0.3 s warm. On CI,
+// beside the suites running in parallel, it can pass Jest's 5 seconds.
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['BatchTest', 'Chunk'] })
 class Chunk {
     @NodeId() id: string;
