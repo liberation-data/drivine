@@ -53,6 +53,11 @@ export interface SchemaGrammar {
     /** A statement listing range indexes, and how to read its rows. */
     listRanges: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listUniques: { statement: string; read: (rows: any[]) => SchemaItem[] };
+    /**
+     * Where a uniqueness constraint is built in the background (FalkorDB), a statement listing the ones whose build
+     * failed, as when two nodes hold the same values, and how to read its rows.
+     */
+    listFailedUniques?: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listVectors: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listFullTexts: { statement: string; read: (rows: any[]) => SchemaItem[] };
     createRange(spec: RangeIndexSpec): string[];
@@ -290,6 +295,10 @@ export const MEMGRAPH_SCHEMA: SchemaGrammar = {
  * FalkorDB indexes each property of a label on its own, so a composite range index is one per property, and present
  * when each is. Its uniqueness constraints are a Redis command, and need a range index over their properties.
  */
+const FALKORDB_UNIQUES =
+    "CALL db.constraints() YIELD type, label, properties, entitytype, status WHERE type = 'UNIQUE' AND entitytype = 'NODE' " +
+    'RETURN {label: label, properties: properties, status: status}';
+
 export const FALKORDB_SCHEMA: SchemaGrammar = {
     conflicts: cypherConflicts('id'),
     engine: 'FalkorDB',
@@ -365,11 +374,14 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     createUnique: (spec) => [{ native: 'CONSTRAINT_CREATE', label: spec.label, properties: spec.properties }],
     dropUnique: (spec) => [{ native: 'CONSTRAINT_DROP', label: spec.label, properties: spec.properties }],
     listUniques: {
-        statement:
-            "CALL db.constraints() YIELD type, label, properties, entitytype, status WHERE type = 'UNIQUE' AND entitytype = 'NODE' " +
-            'RETURN {label: label, properties: properties, status: status}',
+        statement: FALKORDB_UNIQUES,
         read: (rows) =>
             rows.filter((it) => it.status !== 'FAILED').map((it) => ({ label: it.label, properties: it.properties }))
+    },
+    listFailedUniques: {
+        statement: FALKORDB_UNIQUES,
+        read: (rows) =>
+            rows.filter((it) => it.status === 'FAILED').map((it) => ({ label: it.label, properties: it.properties }))
     }
 };
 

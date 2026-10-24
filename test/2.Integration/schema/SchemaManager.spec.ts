@@ -169,8 +169,13 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const one = await manager([SchemaCatalog.of(unique)], { mode: 'WARN', violationSampleSize: 1 }).enforce();
         const result = [...one.values()].flat()[0];
         expect([result.status, result.sample?.length]).toEqual(['VIOLATION', 1]);
-        await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow();
+        // FalkorDB builds the constraint in the background, and reports at once that the build failed.
+        await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow(
+            engine.type === DatabaseType.FALKORDB ? /FalkorDB could not build the uniqueness constraint/ : undefined
+        );
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
+        // Nothing the refusal left behind, such as FalkorDB's failed constraint, is in the way once the data allows it.
+        expect((await gom.constraints.ensure(unique)).status).toBe('CREATED');
     });
 
     it('should name the conflicting nodes in a violation, by their own ids and by the node id given', async () => {

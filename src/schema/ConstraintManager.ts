@@ -107,6 +107,17 @@ export class ConstraintManager {
         return (await this.list()).some((it) => it.label === spec.label && same(it.properties, spec.properties));
     }
 
+    /** Whether the engine reports that its build of the constraint failed. */
+    private async failed(spec: UniquenessConstraintSpec): Promise<boolean> {
+        const listing = this.grammar.listFailedUniques;
+        if (!listing) {
+            return false;
+        }
+        return listing
+            .read(await this.executor.run(listing.statement))
+            .some((it) => it.label === spec.label && same(it.properties, spec.properties));
+    }
+
     /** Up to `sampleSize` keys held more than once, each naming up to `sampleSize` of the nodes that hold it. */
     private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<ViolatingKey[]> {
         return (await this.executor.run(this.grammar.conflicts(spec, sampleSize))) as ViolatingKey[];
@@ -142,6 +153,12 @@ export class ConstraintManager {
         for (let attempt = 0; attempt < 50; attempt++) {
             if (await this.exists(spec)) {
                 return;
+            }
+            if (await this.failed(spec)) {
+                throw new DrivineError(
+                    `${this.grammar.engine} could not build the uniqueness constraint on ` +
+                        `${spec.label}(${spec.properties.join(', ')}): nodes may hold the same values.`
+                );
             }
             await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
         }
