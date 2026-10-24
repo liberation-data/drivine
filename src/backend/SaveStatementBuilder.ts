@@ -3,6 +3,7 @@ import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { DrivineError } from '@/DrivineError';
+import { emptyCollection } from '@/model/FieldMapping';
 import { FragmentModel, PropertyBagModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
@@ -274,9 +275,10 @@ export class SaveStatementBuilder {
         // What a load gives a field of a node that holds no property for it: the class's initializer, or an empty
         // collection.
         const initial: any = plainToInstance(model.type as any, {});
-        const absent = (field: string): any =>
-            initial[field] ??
-            (model.emptyWhenAbsent.get(field) === 'array' ? [] : model.emptyWhenAbsent.has(field) ? {} : undefined);
+        const absent = (field: string): any => {
+            const kind = model.emptyWhenAbsent.get(field);
+            return initial[field] ?? (kind ? emptyCollection(kind) : undefined);
+        };
         const fields = [...new Set([...Object.keys(initial), ...model.graphProperties.keys(), ...Object.keys(loaded)])]
             .filter(
                 (it) =>
@@ -342,7 +344,7 @@ export class SaveStatementBuilder {
      */
     private packedAsLoaded(property: string, value: any): any {
         const held = this.options.loadedProperties?.[property];
-        return held != null ? asCompared(held) : JSON.stringify(value);
+        return held != null ? asCompared(held) : JSON.stringify(value instanceof Set ? [...value] : value);
     }
 
     private removals(
@@ -745,8 +747,10 @@ export function propsOf(
             continue;
         }
         if (value != null || clearNulls) {
+            // A set is stored as a list: no store holds a set, and JSON text would hold one as {}.
+            const stored = value instanceof Set ? [...value] : value;
             props[model.graphProperties.get(field) ?? field] =
-                value != null && model.jsonPacked?.has(field) ? JSON.stringify(value) : value ?? null;
+                stored != null && model.jsonPacked?.has(field) ? JSON.stringify(stored) : stored ?? null;
         }
     }
     return props;
@@ -863,7 +867,9 @@ function skipped(
  * it can't be given back as: a temporal value as a Date, which the Neo4j driver sends as an empty map, unequal to any
  * property, so the save would be refused each time.
  */
-function asCompared(value: any): any {
+function asCompared(loaded: any): any {
+    // A set is stored as a list, in the order it holds its items: a load of one keeps the list's order.
+    const value = loaded instanceof Set ? [...loaded] : loaded;
     const plain = (it: any): boolean => it == null || ['string', 'number', 'boolean', 'bigint'].includes(typeof it);
     return (Array.isArray(value) ? value.every(plain) : plain(value)) ? value : null;
 }

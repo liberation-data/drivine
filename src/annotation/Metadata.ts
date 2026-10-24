@@ -43,6 +43,17 @@ export interface RelationshipOptions {
     target?: ClassThunk;
 }
 
+/** The kind of empty collection an `@EmptyWhenAbsent` field loads as: `[]`, an empty `Set`, or `{}`. */
+export type EmptyCollectionKind = 'array' | 'set' | 'object';
+
+export interface EmptyWhenAbsentOptions {
+    /**
+     * The kind of collection the field holds. Defaults to the kind its declared type names: Array, Set, or Object or
+     * Map. Give it where TypeScript records a list as Object: one declared with a union, such as `string[] | null`.
+     */
+    kind?: EmptyCollectionKind;
+}
+
 export interface PropertyMetadata {
     root?: { target?: ClassThunk };
     nodeId?: boolean;
@@ -63,7 +74,7 @@ export interface PropertyMetadata {
         hnswEfConstruction?: number;
     }[];
     default?: boolean;
-    emptyWhenAbsent?: boolean;
+    emptyWhenAbsent?: EmptyWhenAbsentOptions;
     sortedBy?: { property: string; ascending: boolean };
     aggregate?: { function: string; type: string; property?: string; direction?: Direction };
     path?: {

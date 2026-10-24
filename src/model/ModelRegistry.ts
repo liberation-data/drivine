@@ -5,6 +5,7 @@ import {
     subtypesOf,
     Direction,
     ownClassMetadata,
+    EmptyCollectionKind,
     PropertyMetadata,
     propertyMetadata
 } from '@/annotation/Metadata';
@@ -31,6 +32,9 @@ const MAPPING_KEYS: (keyof PropertyMetadata)[] = [
     'emptyWhenAbsent',
     'schema'
 ];
+
+/** Declared types no collection is recorded as: an `@EmptyWhenAbsent` field of one is refused. */
+const SCALAR_TYPES: Function[] = [String, Number, Boolean, BigInt, Date, Symbol];
 
 export class ModelRegistry {
     private readonly fragments = new Map<Function, FragmentModel>();
@@ -189,7 +193,7 @@ export class ModelRegistry {
                     ])
             ),
             nodeLabels: this.nodeLabels(type, properties, [...labels]),
-            ...this.fieldMapping(properties),
+            ...this.fieldMapping(type, properties),
             graphProperties
         };
         // A catalog's vector index over a field without @VectorIndex is refused here as well as when the catalog is
@@ -221,7 +225,7 @@ export class ModelRegistry {
             type,
             targetField,
             target,
-            ...this.fieldMapping(properties)
+            ...this.fieldMapping(type, properties)
         };
     }
 
@@ -499,7 +503,7 @@ export class ModelRegistry {
         return bags;
     }
 
-    private fieldMapping(properties: Map<string, PropertyMetadata>): FieldMapping {
+    private fieldMapping(type: Function, properties: Map<string, PropertyMetadata>): FieldMapping {
         const where = (key: keyof PropertyMetadata): string[] =>
             [...properties].filter(([, it]) => it[key]).map(([field]) => field);
         return {
@@ -510,10 +514,33 @@ export class ModelRegistry {
             emptyWhenAbsent: new Map(
                 where('emptyWhenAbsent').map((field) => [
                     field,
-                    properties.get(field)!.designType === Array ? 'array' : 'object'
+                    this.emptyCollectionKind(type, field, properties.get(field)!)
                 ])
             )
         };
+    }
+
+    /**
+     * What an `@EmptyWhenAbsent` field loads as where the node holds nothing for it: the kind the decorator names, or
+     * else the kind of its declared type. TypeScript records a list declared with a union, such as `string[] | null`,
+     * as Object, as it records a map, so a field TypeScript records as Object loads as `{}` unless the kind is named.
+     */
+    private emptyCollectionKind(type: Function, field: string, metadata: PropertyMetadata): EmptyCollectionKind {
+        const declared = metadata.designType;
+        const where = `@EmptyWhenAbsent ${type.name}.${field}`;
+        if (declared && SCALAR_TYPES.includes(declared)) {
+            throw new DrivineError(`${where} loads an empty collection, but the field holds a ${declared.name}.`);
+        }
+        const read: EmptyCollectionKind | undefined =
+            declared === Array ? 'array' : declared === Set ? 'set' : declared === Map ? 'object' : undefined;
+        const named = metadata.emptyWhenAbsent!.kind;
+        if (named && read && named !== read) {
+            throw new DrivineError(
+                `${where} names the kind '${named}', but the field is declared a ${declared!.name}, which loads as ` +
+                    `'${read}'.`
+            );
+        }
+        return named ?? read ?? 'object';
     }
 
     private graphProperties(properties: Map<string, PropertyMetadata>): Map<string, string> {
