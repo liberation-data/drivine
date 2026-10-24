@@ -46,6 +46,7 @@ Its design goals:
 - [Schema Management](#schema-management-indexes--constraints)
 - [Multi-Database Support](#multi-database-support)
 - [Security](#security)
+- [The Model File](#the-model-file)
 - [Testing](#testing)
 - [The Sample App](#the-sample-app)
 
@@ -1834,6 +1835,34 @@ What stays yours to guard:
 - **`matches()`** takes a regular expression: a user's value changes what it matches. Escape it for a literal match.
 - **Transport security** is the connection's: on Neo4j and Memgraph use the protocol `bolt+s` or `neo4j+s`
   (`DATABASE_PROTOCOL`). FalkorDB's and Postgres's providers take no TLS options yet.
+
+## The Model File
+
+`drivine model` writes `.drivine/model.json` beside your `package.json`: your fragments, relationship fragments and
+views, and how each is stored, in the [format](https://github.com/liberation-data/drivine-cypher-spec/tree/main/model)
+drivine4j and drivine-python write too. [Drivine Studio](https://github.com/liberation-data/drivine-studio) reads it to
+browse your model and load it, with the Cypher `loadAll` runs, without your application running.
+
+```sh
+npx drivine model                       # reads ./tsconfig.json
+npx drivine model --project tsconfig.app.json
+npx drivine model --check               # writes nothing; fails when the file is not current, for CI
+```
+
+It reads your source with your project's own TypeScript compiler, rather than loading your classes, since a field no
+decorator marks leaves nothing at run time: so it needs `typescript` installed, and runs none of your code. Each
+class's id is its file's path from the package and its name, `src/fragments/Person#Person`. A decorator's arguments
+are read as the compiler can tell them: literals, constants, enum members, and `() => Class`.
+
+Keep the file in source control, as you would a lock file: a change to the model shows in review, Studio can read it
+straight from your repository, and `--check` in CI says when it is stale. A class you remove stays in the file, marked
+`"removed": true`, as the store may still hold its nodes; delete the entry by hand once it does not. The file is
+written only when it changes. `"drivine": { "model": false }` in `package.json` turns it off.
+
+TypeScript can't say all the format can: a `number` is written as a `float`, an id held as a `string` as a `string`,
+and a field's nullness as `"unknown"` without `strictNullChecks`.
+
+The sample app's file is [`sample/.drivine/model.json`](sample/.drivine/model.json).
 
 ## Testing
 

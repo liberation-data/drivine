@@ -1,0 +1,674 @@
+import * as path from 'path';
+import type * as TS from 'typescript';
+
+/** One entry of the model file: its keys in the order the format's schema lists them; undefined ones left out. */
+export type Entry = Record<string, unknown>;
+
+/** What a module declares, read from its source. */
+export interface ReadModel {
+    fragments: Entry[];
+    relationshipFragments: Entry[];
+    views: Entry[];
+    /** What could not be read, each with where it is. */
+    problems: string[];
+}
+
+/** The package Drivine's decorators are imported from, its subpaths among them. */
+const DRIVINE = /^@liberation-data\/drivine(\/.*)?$/;
+
+/** Each index decorator and its kind in the format: first wins when a property has several. */
+const INDEXES: [string, string][] = [
+    ['Unique', 'unique'],
+    ['RangeIndex', 'range'],
+    ['FullTextIndex', 'fullText']
+];
+
+/** The decorators that map a view's field to something other than its root. */
+const AGGREGATES = ['Count', 'Aggregate'];
+
+/**
+ * Reads a module's `@NodeFragment`, `@RelationshipFragment` and `@GraphView` classes from their source, with the
+ * TypeScript compiler, as the model file describes them: what each stores, and under which names, as ModelRegistry
+ * reads the same classes when the application runs. Read from the source rather than from the classes once loaded,
+ * since a field no decorator marks leaves nothing at run time, and its type is known only to the compiler.
+ *
+ * A decorator's arguments are read as the compiler can tell them: literals, constants, enum members, and `() => Class`.
+ */
+export class ModelReader {
+    private readonly checker: TS.TypeChecker;
+    private readonly strictNulls: boolean;
+    private readonly problems: string[] = [];
+
+    /**
+     * @param ts the TypeScript compiler, as the project has it.
+     * @param program the project's program.
+     * @param root the package's directory, which ids are relative to.
+     */
+    constructor(
+        private readonly ts: typeof TS,
+        private readonly program: TS.Program,
+        private readonly root: string
+    ) {
+        this.checker = program.getTypeChecker();
+        const options = program.getCompilerOptions();
+        this.strictNulls = !!(options.strictNullChecks ?? options.strict);
+    }
+
+    /**
+     * The id of a class: its file's path from the package's directory, without the extension, and its name, as
+     * `src/fragments/Person#Person`.
+     */
+    id(decl: TS.ClassDeclaration): string {
+        const file = path.relative(this.root, decl.getSourceFile().fileName).replace(/\\/g, '/');
+        return `${file.replace(/\.(d\.)?[cm]?tsx?$/, '')}#${decl.name!.text}`;
+    }
+
+    read(): ReadModel {
+        const classes = this.classes();
+        const of = (decorator: string): TS.ClassDeclaration[] => classes.filter((it) => this.decorator(it, decorator));
+        const fragments = of('NodeFragment');
+        const model: ReadModel = {
+            fragments: fragments.map((it) => this.attempt(it, () => this.fragment(it, fragments))),
+            relationshipFragments: of('RelationshipFragment').map((it) =>
+                this.attempt(it, () => this.relationshipFragment(it))
+            ),
+            views: of('GraphView').map((it) => this.attempt(it, () => this.view(it))),
+            problems: this.problems
+        };
+        for (const key of ['fragments', 'relationshipFragments', 'views'] as const) {
+            model[key] = model[key].filter((it) => it.id).sort((a, b) => compare(a.id as string, b.id as string));
+        }
+        return model;
+    }
+
+    private attempt(decl: TS.ClassDeclaration, read: () => Entry): Entry {
+        try {
+            return read();
+        } catch (e) {
+            this.problems.push(`${this.where(decl)}: ${e instanceof Error ? e.message : String(e)}`);
+            return {};
+        }
+    }
+
+    /** Every class the package's own source declares. */
+    private classes(): TS.ClassDeclaration[] {
+        const found: TS.ClassDeclaration[] = [];
+        for (const file of this.program.getSourceFiles()) {
+            if (file.isDeclarationFile || this.program.isSourceFileFromExternalLibrary(file)) {
+                continue;
+            }
+            const relative = path.relative(this.root, file.fileName);
+            if (relative.startsWith('..') || relative.split(/[\\/]/).includes('node_modules')) {
+                continue;
+            }
+            const visit = (node: TS.Node): void => {
+                if (this.ts.isClassDeclaration(node) && node.name) {
+                    found.push(node);
+                }
+                this.ts.forEachChild(node, visit);
+            };
+            visit(file);
+        }
+        return found;
+    }
+
+    private where(decl: TS.ClassDeclaration): string {
+        return this.id(decl);
+    }
+
+    private fragment(decl: TS.ClassDeclaration, fragments: TS.ClassDeclaration[]): Entry {
+        const chain = this.chain(decl);
+        const labels: string[] = [];
+        for (const it of chain) {
+            const options = this.args(this.decorator(it, 'NodeFragment'))[0] as { labels?: unknown } | undefined;
+            for (const label of strings(options?.labels)) {
+                if (!labels.includes(label)) {
+                    labels.push(label);
+                }
+            }
+        }
+        if (!labels.length) {
+            throw new Error(`@NodeFragment ${decl.name!.text} has no labels.`);
+        }
+
+        const properties = this.properties(chain).filter((it) => !this.on(it, 'GraphTransient'));
+        const bags = properties.filter((it) => this.on(it, 'PropertyBag'));
+        const labelSet = properties.find((it) => this.on(it, 'NodeLabels'));
+        const stamp = properties.filter((it) => this.on(it, 'NodeStamp'));
+        const plain = properties.filter((it) => !bags.includes(it) && !stamp.includes(it) && it !== labelSet);
+
+        // A class's index over one property is that property's own.
+        const classIndexes = INDEXES.flatMap(([decorator, kind]) =>
+            chain.flatMap((it) =>
+                this.decorators(it, decorator).map((d) => ({
+                    kind,
+                    properties: strings((this.args(d)[0] as { properties?: unknown } | undefined)?.properties)
+                }))
+            )
+        ).filter((it) => it.properties.length);
+        const single = new Map(
+            classIndexes.filter((it) => it.properties.length === 1).map((it) => [it.properties[0], it.kind])
+        );
+        const subtypes = fragments
+            .filter((it) => it !== decl && this.chain(it).includes(decl))
+            .map((it) => this.id(it));
+
+        return {
+            id: this.id(decl),
+            name: decl.name!.text,
+            labels,
+            nodeId: properties.find((it) => this.on(it, 'NodeId'))?.name,
+            stamp: stamp.length ? true : undefined,
+            subtypes: subtypes.length ? subtypes.sort(compare) : undefined,
+            labelSet: labelSet ? this.labelSet(labelSet) : undefined,
+            bags: bags.length ? bags.sort(byName).map((it) => this.bag(it)) : undefined,
+            properties: plain.sort(byName).map((it) => this.property(it, single.get(it.name))),
+            indexes: classIndexes.some((it) => it.properties.length > 1)
+                ? classIndexes.filter((it) => it.properties.length > 1)
+                : undefined
+        };
+    }
+
+    private relationshipFragment(decl: TS.ClassDeclaration): Entry {
+        const properties = this.properties(this.chain(decl)).filter((it) => !this.on(it, 'GraphTransient'));
+        const target = properties.find((it) => this.on(it, 'TargetNode'));
+        if (!target) {
+            throw new Error(`@RelationshipFragment ${decl.name!.text} has no @TargetNode property.`);
+        }
+        return {
+            id: this.id(decl),
+            name: decl.name!.text,
+            target: { field: target.name, fragment: this.related(target, this.args(this.on(target, 'TargetNode'))[0]) },
+            properties: properties
+                .filter((it) => it !== target)
+                .sort(byName)
+                .map((it) => this.property(it, undefined))
+        };
+    }
+
+    private view(decl: TS.ClassDeclaration): Entry {
+        const properties = this.properties(this.chain(decl));
+        const root = properties.find((it) => this.on(it, 'Root'));
+        if (!root) {
+            throw new Error(`@GraphView ${decl.name!.text} has no @Root property.`);
+        }
+        const aggregates = properties.filter((it) => AGGREGATES.some((name) => this.on(it, name)));
+        return {
+            id: this.id(decl),
+            name: decl.name!.text,
+            root: { field: root.name, fragment: this.related(root, this.args(this.on(root, 'Root'))[0]) },
+            relationships: properties
+                .filter((it) => this.on(it, 'GraphRelationship') || this.on(it, 'GraphPath'))
+                .sort(byName)
+                .map((it) => this.relationship(it)),
+            aggregates: aggregates.length ? aggregates.sort(byName).map((it) => this.aggregate(it)) : undefined
+        };
+    }
+
+    private relationship(prop: Property): Entry {
+        const many = this.isList(prop.type);
+        const path = this.on(prop, 'GraphPath');
+        if (path) {
+            return this.path(prop, path, many);
+        }
+        const options = (this.args(this.on(prop, 'GraphRelationship'))[0] ?? {}) as {
+            type?: string;
+            direction?: string;
+            maxDepth?: number;
+            required?: boolean;
+            target?: unknown;
+        };
+        const into = this.kindOf(this.targetClass(prop, options.target));
+        // A relationship fragment is one relationship, whatever maxDepth says.
+        const maxDepth = into === 'RelationshipFragment' ? 1 : options.maxDepth ?? 1;
+        return {
+            field: prop.name,
+            type: options.type,
+            direction: options.direction ?? 'OUTGOING',
+            target: this.related(prop, options.target),
+            many,
+            required: options.required ?? false,
+            maxDepth: maxDepth > 1 ? maxDepth : undefined,
+            sortedBy: this.sortedBy(prop),
+            // As ModelRegistry marks it: a list of fragments read over several hops is never written.
+            readOnly: this.on(prop, 'ReadOnly') || (maxDepth > 1 && into !== 'GraphView') ? true : undefined
+        };
+    }
+
+    private sortedBy(prop: Property): Entry | undefined {
+        const sortedBy = this.on(prop, 'SortedBy');
+        const [property, ascending] = this.args(sortedBy) as [string | undefined, boolean | undefined];
+        return sortedBy ? { property, ascending: ascending ?? true } : undefined;
+    }
+
+    /** A path: never written, nor sorted, as ModelRegistry reads it. */
+    private path(prop: Property, path: TS.Decorator, many: boolean): Entry {
+        const [hops, options] = this.args(path) as [unknown, { target?: unknown; required?: boolean } | undefined];
+        return {
+            field: prop.name,
+            target: this.related(prop, options?.target),
+            many,
+            required: options?.required ?? false,
+            readOnly: true,
+            path: (Array.isArray(hops) ? hops : []).map((it: Record<string, unknown>) => {
+                const orderBy = typeof it.orderBy === 'string' && it.orderBy ? it.orderBy : undefined;
+                return {
+                    type: it.type,
+                    direction: it.direction ?? 'OUTGOING',
+                    label: typeof it.label === 'string' && it.label ? it.label : undefined,
+                    orderBy,
+                    ascending: orderBy ? it.ascending ?? true : undefined
+                };
+            })
+        };
+    }
+
+    private aggregate(prop: Property): Entry {
+        const count = this.on(prop, 'Count');
+        if (count) {
+            const [type, direction] = this.args(count) as [string, string | undefined];
+            return { field: prop.name, function: 'COUNT', type, direction: direction ?? 'OUTGOING' };
+        }
+        const options = (this.args(this.on(prop, 'Aggregate'))[0] ?? {}) as Record<string, unknown>;
+        return {
+            field: prop.name,
+            function: options.function,
+            type: options.type,
+            direction: options.direction ?? 'OUTGOING',
+            property: options.property || undefined
+        };
+    }
+
+    private property(prop: Property, classIndex: string | undefined): Entry {
+        const typed = this.typed(prop.type);
+        const packed = !!this.on(prop, 'JsonPacked');
+        const vector = this.on(prop, 'VectorIndex');
+        const vectorOptions = (this.args(vector)[0] ?? {}) as { similarity?: string; dimensions?: number };
+        return {
+            name: prop.name,
+            stored: (this.args(this.on(prop, 'GraphProperty'))[0] as string | undefined) ?? prop.name,
+            // A packed value the format has no type for is JSON text, whatever it is in the code.
+            type: packed && typed.type === 'any' ? 'json' : typed.type,
+            of: typed.of,
+            values: typed.values,
+            nullable: prop.nullable,
+            whenAbsent: this.on(prop, 'Default') ? 'default' : this.on(prop, 'EmptyWhenAbsent') ? 'empty' : undefined,
+            packed: packed ? 'json' : undefined,
+            index: INDEXES.find(([decorator]) => this.on(prop, decorator))?.[1] ?? classIndex,
+            vector: vector
+                ? { similarity: vectorOptions.similarity ?? 'COSINE', dimensions: vectorOptions.dimensions }
+                : undefined,
+            source: this.checker.typeToString(this.nonNull(prop.type))
+        };
+    }
+
+    private bag(prop: Property): Entry {
+        const options = (this.args(this.on(prop, 'PropertyBag'))[0] ?? {}) as {
+            prefix?: string;
+            delimiter?: string;
+            flat?: boolean;
+        };
+        const flat = options.flat ?? false;
+        return {
+            field: prop.name,
+            // As ModelRegistry resolves it: a flat bag stores each entry under its bare key.
+            prefix: flat ? '' : `${options.prefix ?? prop.name}${options.delimiter ?? '.'}`,
+            flat: flat ? true : undefined,
+            type: this.typed(prop.type).of ?? 'any'
+        };
+    }
+
+    private labelSet(prop: Property): Entry {
+        const members = this.args(this.on(prop, 'NodeLabels'))[0];
+        const values =
+            members === undefined ? undefined : Array.isArray(members) ? members : Object.values(members as object);
+        return { field: prop.name, values: values?.filter((it): it is string => typeof it === 'string') };
+    }
+
+    /** The id of what a relationship, a root or a target node leads to: the class its decorator names, or its type. */
+    private related(prop: Property, thunk: unknown): string {
+        return this.id(this.targetClass(prop, thunk));
+    }
+
+    private targetClass(prop: Property, thunk: unknown): TS.ClassDeclaration {
+        if (thunk && this.ts.isClassDeclaration(thunk as TS.Node)) {
+            return thunk as TS.ClassDeclaration;
+        }
+        const type = this.nonNull(prop.type);
+        const element = this.isList(type) ? this.elementOf(type) : type;
+        const decl = element
+            ?.getSymbol()
+            ?.declarations?.find((it): it is TS.ClassDeclaration => this.ts.isClassDeclaration(it));
+        if (!decl) {
+            throw new Error(`Can't tell what ${prop.name} holds. Name its class in the decorator, e.g. () => Item.`);
+        }
+        return decl;
+    }
+
+    private kindOf(decl: TS.ClassDeclaration): string | undefined {
+        return ['NodeFragment', 'RelationshipFragment', 'GraphView'].find((it) => this.decorator(decl, it));
+    }
+
+    // Types
+
+    private typed(type: TS.Type): Typed {
+        const t = this.nonNull(type);
+        return this.enumerated(t) ?? this.scalar(t) ?? this.collection(t) ?? { type: 'any' };
+    }
+
+    /** A union of string literals, or an enum: a string enum's values, or a number enum's numbers. */
+    private enumerated(t: TS.Type): Typed | undefined {
+        const members = t.isUnion() ? t.types : [t];
+        const strings = members.every((it) => it.isStringLiteral());
+        if (t.isUnion() && strings) {
+            return { type: 'enum', values: members.map((it) => (it as TS.StringLiteralType).value).sort(compare) };
+        }
+        if (!(t.flags & this.ts.TypeFlags.EnumLike)) {
+            return undefined;
+        }
+        return strings
+            ? { type: 'enum', values: members.map((it) => (it as TS.StringLiteralType).value).sort(compare) }
+            : { type: 'int' };
+    }
+
+    private scalar(t: TS.Type): Typed | undefined {
+        const flags = this.ts.TypeFlags;
+        const kinds: [number, string][] = [
+            [flags.String | flags.StringLiteral | flags.TemplateLiteral, 'string'],
+            [flags.Number | flags.NumberLiteral, 'float'],
+            [flags.BigInt | flags.BigIntLiteral, 'int'],
+            [flags.Boolean | flags.BooleanLiteral, 'boolean']
+        ];
+        const kind = kinds.find(([flag]) => t.flags & flag)?.[1];
+        if (kind) {
+            return { type: kind };
+        }
+        return t.getSymbol()?.getName() === 'Date' ? { type: 'datetime' } : undefined;
+    }
+
+    /** A list, of its elements' type, or a map, of its values'. */
+    private collection(t: TS.Type): Typed | undefined {
+        if (this.isList(t)) {
+            const element = this.elementOf(t);
+            return { type: 'list', of: element ? this.typed(element).type : 'any' };
+        }
+        const name = t.getSymbol()?.getName();
+        const indexed = this.checker.getIndexInfoOfType(t, this.ts.IndexKind.String)?.type;
+        if (name !== 'Map' && !indexed) {
+            return undefined;
+        }
+        const value = name === 'Map' ? this.checker.getTypeArguments(t as TS.TypeReference)[1] : indexed;
+        return { type: 'map', of: value ? this.typed(value).type : 'any' };
+    }
+
+    /** Whether a value of the type is a list: an array, a tuple or a Set. */
+    private isList(type: TS.Type): boolean {
+        const t = this.nonNull(type);
+        return (
+            this.checker.isArrayType(t) ||
+            this.checker.isTupleType(t) ||
+            ['Set', 'ReadonlySet', 'ReadonlyArray'].includes(t.getSymbol()?.getName() ?? '')
+        );
+    }
+
+    private elementOf(type: TS.Type): TS.Type | undefined {
+        const args = this.checker.getTypeArguments(this.nonNull(type) as TS.TypeReference);
+        return args[0];
+    }
+
+    private nonNull(type: TS.Type): TS.Type {
+        return this.checker.getNonNullableType(type);
+    }
+
+    // Classes and their properties
+
+    /** The class and the classes it extends, nearest first, as ModelRegistry's classChain has them. */
+    private chain(decl: TS.ClassDeclaration): TS.ClassDeclaration[] {
+        const chain: TS.ClassDeclaration[] = [];
+        for (let it: TS.ClassDeclaration | undefined = decl; it && !chain.includes(it); it = this.superclass(it)) {
+            chain.push(it);
+        }
+        return chain;
+    }
+
+    private superclass(decl: TS.ClassDeclaration): TS.ClassDeclaration | undefined {
+        const extended = decl.heritageClauses?.find((it) => it.token === this.ts.SyntaxKind.ExtendsKeyword)?.types[0];
+        if (!extended) {
+            return undefined;
+        }
+        return this.classOf(extended.expression);
+    }
+
+    /** The class an expression names, through imports. */
+    private classOf(node: TS.Node): TS.ClassDeclaration | undefined {
+        let symbol = this.checker.getSymbolAtLocation(node);
+        if (symbol && symbol.flags & this.ts.SymbolFlags.Alias) {
+            symbol = this.checker.getAliasedSymbol(symbol);
+        }
+        return symbol?.declarations?.find((it): it is TS.ClassDeclaration => this.ts.isClassDeclaration(it));
+    }
+
+    /**
+     * The fields of a class and those it inherits, a subclass's declaration of a field over its superclass's: the
+     * instance properties it declares, and those its constructor's parameters do.
+     */
+    private properties(chain: TS.ClassDeclaration[]): Property[] {
+        const found = new Map<string, Property>();
+        for (const decl of chain) {
+            const members: TS.Declaration[] = [];
+            for (const member of decl.members) {
+                if (this.ts.isPropertyDeclaration(member) && !this.isStatic(member)) {
+                    members.push(member);
+                }
+                if (this.ts.isConstructorDeclaration(member)) {
+                    members.push(...member.parameters.filter((it) => this.ts.getModifiers(it)?.length));
+                }
+            }
+            for (const member of members) {
+                const named = member as TS.PropertyDeclaration | TS.ParameterDeclaration;
+                if (!this.ts.isIdentifier(named.name) || found.has(named.name.text)) {
+                    continue;
+                }
+                const type = this.checker.getTypeAtLocation(named);
+                found.set(named.name.text, {
+                    name: named.name.text,
+                    decl: named,
+                    type,
+                    nullable: this.nullable(named, type)
+                });
+            }
+        }
+        return [...found.values()];
+    }
+
+    private isStatic(member: TS.PropertyDeclaration): boolean {
+        return !!this.ts.getModifiers(member)?.some((it) => it.kind === this.ts.SyntaxKind.StaticKeyword);
+    }
+
+    private nullable(decl: TS.PropertyDeclaration | TS.ParameterDeclaration, type: TS.Type): boolean | 'unknown' {
+        if (decl.questionToken) {
+            return true;
+        }
+        // Without strict null checks, the compiler erases `| undefined` and `| null`, and can't say.
+        if (!this.strictNulls) {
+            return 'unknown';
+        }
+        return type !== this.nonNull(type);
+    }
+
+    // Decorators
+
+    /** A Drivine decorator on a class or a field, by name, imported from Drivine rather than from elsewhere. */
+    private decorator(node: TS.Node, name: string): TS.Decorator | undefined {
+        return this.decorators(node, name)[0];
+    }
+
+    private decorators(node: TS.Node, name: string): TS.Decorator[] {
+        const all = this.ts.canHaveDecorators(node) ? this.ts.getDecorators(node) ?? [] : [];
+        return all.filter((it) => {
+            const callee = this.ts.isCallExpression(it.expression) ? it.expression.expression : it.expression;
+            return this.ts.isIdentifier(callee) && callee.text === name && this.fromDrivine(callee);
+        });
+    }
+
+    private on(prop: Property, name: string): TS.Decorator | undefined {
+        return this.decorator(prop.decl, name);
+    }
+
+    /** Whether the name is imported from Drivine, not declared here or taken from another library. */
+    private fromDrivine(identifier: TS.Identifier): boolean {
+        const symbol = this.checker.getSymbolAtLocation(identifier);
+        const declaration = symbol?.declarations?.[0];
+        if (!declaration || !this.ts.isImportSpecifier(declaration)) {
+            return false;
+        }
+        const specifier = declaration.parent.parent.parent.moduleSpecifier;
+        return this.ts.isStringLiteral(specifier) && DRIVINE.test(specifier.text);
+    }
+
+    /** A decorator's arguments, each as its value: what the compiler can tell of it. */
+    private args(decorator: TS.Decorator | undefined): unknown[] {
+        if (!decorator || !this.ts.isCallExpression(decorator.expression)) {
+            return [];
+        }
+        return decorator.expression.arguments.map((it) => this.value(it));
+    }
+
+    /**
+     * An expression's value, as far as the compiler can tell it without running it: a literal, a list, an object, a
+     * constant or an enum member, a call of Drivine's `hop`, or, for `() => Class`, the class.
+     */
+    private value(node: TS.Expression): unknown {
+        const ts = this.ts;
+        if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+            return this.value(node.expression);
+        }
+        for (const read of [this.literal, this.structure, this.reference]) {
+            const found = read.call(this, node);
+            if (found !== NOTHING) {
+                return found;
+            }
+        }
+        return undefined;
+    }
+
+    /** A string, a number, a boolean, or none. */
+    private literal(node: TS.Expression): unknown {
+        const ts = this.ts;
+        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+            return node.text;
+        }
+        if (ts.isNumericLiteral(node)) {
+            return Number(node.text);
+        }
+        if (
+            ts.isPrefixUnaryExpression(node) &&
+            node.operator === ts.SyntaxKind.MinusToken &&
+            ts.isNumericLiteral(node.operand)
+        ) {
+            return -Number(node.operand.text);
+        }
+        const keywords: Partial<Record<TS.SyntaxKind, unknown>> = {
+            [ts.SyntaxKind.TrueKeyword]: true,
+            [ts.SyntaxKind.FalseKeyword]: false,
+            [ts.SyntaxKind.NullKeyword]: undefined,
+            [ts.SyntaxKind.UndefinedKeyword]: undefined
+        };
+        return node.kind in keywords ? keywords[node.kind] : NOTHING;
+    }
+
+    /** A list, an object, `() => Class`, or a call of Drivine's `hop`. */
+    private structure(node: TS.Expression): unknown {
+        const ts = this.ts;
+        if (ts.isArrayLiteralExpression(node)) {
+            return node.elements.map((it) => this.value(it));
+        }
+        if (ts.isObjectLiteralExpression(node)) {
+            return this.object(node);
+        }
+        if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+            const body = ts.isBlock(node.body)
+                ? node.body.statements.find(ts.isReturnStatement)?.expression
+                : (node.body as TS.Expression);
+            return body ? this.classOf(body) : undefined;
+        }
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'hop') {
+            const [type, direction, label, orderBy, ascending] = node.arguments.map((it) => this.value(it));
+            return this.fromDrivine(node.expression) ? { type, direction, label, orderBy, ascending } : undefined;
+        }
+        return NOTHING;
+    }
+
+    private object(node: TS.ObjectLiteralExpression): Record<string, unknown> {
+        const ts = this.ts;
+        const object: Record<string, unknown> = {};
+        for (const it of node.properties) {
+            if (ts.isPropertyAssignment(it) && (ts.isIdentifier(it.name) || ts.isStringLiteral(it.name))) {
+                object[it.name.text] = this.value(it.initializer);
+            } else if (ts.isShorthandPropertyAssignment(it)) {
+                object[it.name.text] = this.value(it.name);
+            }
+        }
+        return object;
+    }
+
+    /** An enum member, or a constant the compiler knows the value of; an enum, passed whole; or a class. */
+    private reference(node: TS.Expression): unknown {
+        const ts = this.ts;
+        if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node) && !ts.isIdentifier(node)) {
+            return NOTHING;
+        }
+        const constant = this.checker.getConstantValue(node as TS.PropertyAccessExpression);
+        if (constant !== undefined) {
+            return constant;
+        }
+        const type = this.checker.getTypeAtLocation(node);
+        if (type.isStringLiteral() || type.isNumberLiteral()) {
+            return type.value;
+        }
+        return ts.isIdentifier(node) ? this.declared(node) : undefined;
+    }
+
+    /** What a name declares: an enum's members' values, as @NodeLabels takes them; a constant's value; a class. */
+    private declared(node: TS.Identifier): unknown {
+        const ts = this.ts;
+        let symbol = this.checker.getSymbolAtLocation(node);
+        if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+            symbol = this.checker.getAliasedSymbol(symbol);
+        }
+        const declaration = symbol?.declarations?.[0];
+        if (declaration && ts.isEnumDeclaration(declaration)) {
+            return Object.fromEntries(
+                declaration.members.map((it) => [it.name.getText(), this.checker.getConstantValue(it)])
+            );
+        }
+        if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
+            return this.value(declaration.initializer);
+        }
+        return declaration && ts.isClassDeclaration(declaration) ? declaration : undefined;
+    }
+}
+
+/** Told apart from undefined, which an expression may be: what a reader has nothing to say of. */
+const NOTHING = Symbol('nothing');
+
+interface Typed {
+    type: string;
+    of?: string;
+    values?: string[];
+}
+
+interface Property {
+    name: string;
+    decl: TS.PropertyDeclaration | TS.ParameterDeclaration;
+    type: TS.Type;
+    nullable: boolean | 'unknown';
+}
+
+const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((it): it is string => typeof it === 'string') : [];
+
+/** Sorts as the format asks, by code point, the same whatever the machine's locale. */
+const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+const byName = (a: Property, b: Property): number => compare(a.name, b.name);
