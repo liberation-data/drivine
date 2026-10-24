@@ -117,14 +117,14 @@ export class ModelReader {
         const chain = this.chain(decl);
         const labels: string[] = [];
         for (const it of chain) {
-            const options = this.args(this.decorator(it, 'NodeFragment'))[0] as { labels?: unknown } | undefined;
+            const options = this.options(this.decorator(it, 'NodeFragment'), `@NodeFragment ${it.name!.text}`);
             // A label read wrong would name nodes the fragment never loads: one that can't be read is a problem.
-            if (Array.isArray(options?.labels) && strings(options.labels).length !== options.labels.length) {
+            if (Array.isArray(options.labels) && strings(options.labels).length !== options.labels.length) {
                 throw new Error(
                     `Can't read the labels of @NodeFragment ${it.name!.text}. Name each with a literal or a constant.`
                 );
             }
-            for (const label of strings(options?.labels)) {
+            for (const label of strings(options.labels)) {
                 if (!labels.includes(label)) {
                     labels.push(label);
                 }
@@ -143,10 +143,14 @@ export class ModelReader {
         // A class's index over one property is that property's own.
         const classIndexes = INDEXES.flatMap(([decorator, kind]) =>
             chain.flatMap((it) =>
-                this.decorators(it, decorator).map((d) => ({
-                    kind,
-                    properties: strings((this.args(d)[0] as { properties?: unknown } | undefined)?.properties)
-                }))
+                this.decorators(it, decorator).map((d) => {
+                    const what = `@${decorator} on ${it.name!.text}`;
+                    const options = this.options(d, what);
+                    return {
+                        kind,
+                        properties: this.given(options, 'properties', isStrings, `the properties of ${what}`) ?? []
+                    };
+                })
             )
         ).filter((it) => it.properties.length);
         const single = new Map(
@@ -184,7 +188,7 @@ export class ModelReader {
         return {
             id: this.id(decl),
             name: decl.name!.text,
-            target: { field: target.name, fragment: this.related(target, this.args(this.on(target, 'TargetNode'))[0]) },
+            target: { field: target.name, fragment: this.related(target, this.thunk(target, 'TargetNode')) },
             properties: properties
                 .filter((it) => it !== target)
                 .sort(byName)
@@ -202,7 +206,7 @@ export class ModelReader {
         return {
             id: this.id(decl),
             name: decl.name!.text,
-            root: { field: root.name, fragment: this.related(root, this.args(this.on(root, 'Root'))[0]) },
+            root: { field: root.name, fragment: this.related(root, this.thunk(root, 'Root')) },
             relationships: properties
                 .filter((it) => this.on(it, 'GraphRelationship') || this.on(it, 'GraphPath'))
                 .sort(byName)
@@ -217,24 +221,21 @@ export class ModelReader {
         if (path) {
             return this.path(prop, path, many);
         }
-        const options = (this.args(this.on(prop, 'GraphRelationship'))[0] ?? {}) as {
-            type?: string;
-            direction?: string;
-            maxDepth?: number;
-            required?: boolean;
-            target?: unknown;
-        };
-        const type = this.named(options.type, `the type of ${this.field(prop)}`);
-        const into = this.kindOf(this.targetClass(prop, options.target));
+        const field = this.field(prop);
+        const options = this.options(this.on(prop, 'GraphRelationship'), `@GraphRelationship ${field}`);
+        const type = this.named(options.type, `the type of ${field}`);
+        const target = this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class');
+        const into = this.kindOf(this.targetClass(prop, target));
+        const depth = this.given(options, 'maxDepth', isNumber, `the maxDepth of ${field}`) ?? 1;
         // A relationship fragment is one relationship, whatever maxDepth says.
-        const maxDepth = into === 'RelationshipFragment' ? 1 : options.maxDepth ?? 1;
+        const maxDepth = into === 'RelationshipFragment' ? 1 : depth;
         return {
             field: prop.name,
             type,
-            direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${this.field(prop)}`),
-            target: this.related(prop, options.target),
+            direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${field}`),
+            target: this.related(prop, target),
             many,
-            required: options.required ?? false,
+            required: this.given(options, 'required', isBoolean, `whether ${field} is required`) ?? false,
             maxDepth: maxDepth > 1 ? maxDepth : undefined,
             sortedBy: this.sortedBy(prop),
             // As ModelRegistry marks it: a list of fragments read over several hops is never written.
@@ -244,68 +245,77 @@ export class ModelReader {
 
     private sortedBy(prop: Property): Entry | undefined {
         const sortedBy = this.on(prop, 'SortedBy');
-        const [property, ascending] = this.args(sortedBy) as [string | undefined, boolean | undefined];
         if (!sortedBy) {
             return undefined;
         }
+        const args = this.keyed(sortedBy, ['property', 'ascending']);
         return {
-            property: this.named(property, `what @SortedBy ${this.field(prop)} sorts by`),
-            ascending: ascending ?? true
+            property: this.named(args.property, `what @SortedBy ${this.field(prop)} sorts by`),
+            ascending: this.given(args, 'ascending', isBoolean, `which way @SortedBy ${this.field(prop)} sorts`) ?? true
         };
     }
 
     /** A path: never written, nor sorted, as ModelRegistry reads it. */
     private path(prop: Property, path: TS.Decorator, many: boolean): Entry {
-        const [hops, options] = this.args(path) as [unknown, { target?: unknown; required?: boolean } | undefined];
+        const field = this.field(prop);
+        const hops = this.keyed(path, ['hops']).hops;
+        const options = this.options(path, `@GraphPath ${field}`, 1);
         // A hop read wrong would lead the path elsewhere: hops that can't be read are a problem.
         if (!Array.isArray(hops) || !hops.length || !hops.every((it) => isObject(it) && typeof it.type === 'string')) {
             throw new Error(
-                `Can't read the hops of @GraphPath ${this.field(prop)}. Name each with a literal, a constant or hop().`
+                `Can't read the hops of @GraphPath ${field}. Name each with a literal, a constant or hop().`
             );
         }
         return {
             field: prop.name,
-            target: this.related(prop, options?.target),
+            target: this.related(
+                prop,
+                this.given(options, 'target', this.isClass, `the class ${field} holds`, '() => Class')
+            ),
             many,
-            required: options?.required ?? false,
+            required: this.given(options, 'required', isBoolean, `whether ${field} is required`) ?? false,
             readOnly: true,
             path: hops.map((it: Record<string, unknown>) => {
-                const orderBy = typeof it.orderBy === 'string' && it.orderBy ? it.orderBy : undefined;
+                const hop = `a hop of ${field}`;
+                const orderBy = this.given(it, 'orderBy', isString, `what ${hop} sorts by`) || undefined;
                 return {
                     type: it.type,
-                    direction: this.oneOf(it, 'direction', DIRECTIONS, `the direction of a hop of ${this.field(prop)}`),
-                    label: typeof it.label === 'string' && it.label ? it.label : undefined,
+                    direction: this.oneOf(it, 'direction', DIRECTIONS, `the direction of ${hop}`),
+                    label: this.given(it, 'label', isString, `the label of ${hop}`) || undefined,
                     orderBy,
-                    ascending: orderBy ? it.ascending ?? true : undefined
+                    ascending: orderBy
+                        ? this.given(it, 'ascending', isBoolean, `which way ${hop} sorts`) ?? true
+                        : undefined
                 };
             })
         };
     }
 
     private aggregate(prop: Property): Entry {
+        const field = this.field(prop);
         const count = this.on(prop, 'Count');
         if (count) {
-            const [type, ...direction] = this.args(count);
+            const args = this.keyed(count, ['type', 'direction']);
             return {
                 field: prop.name,
                 function: 'COUNT',
-                type: this.named(type, `the type of ${this.field(prop)}`),
-                // Given or not, as the decorator's second argument.
-                direction: this.oneOf(
-                    direction.length ? { direction: direction[0] } : {},
-                    'direction',
-                    DIRECTIONS,
-                    `the direction of ${this.field(prop)}`
-                )
+                type: this.named(args.type, `the type of ${field}`),
+                direction: this.oneOf(args, 'direction', DIRECTIONS, `the direction of ${field}`)
             };
         }
-        const options = (this.args(this.on(prop, 'Aggregate'))[0] ?? {}) as Record<string, unknown>;
+        const options = this.options(this.on(prop, 'Aggregate'), `@Aggregate ${field}`);
+        const fn = this.oneOf(options, 'function', FUNCTIONS, `the function of ${field}`);
+        const property = this.given(options, 'property', isString, `the property ${field} aggregates`) || undefined;
+        // As ModelRegistry refuses it: only a count needs no property.
+        if (fn !== 'COUNT' && !property) {
+            throw new Error(`The ${fn} ${field} needs the property it aggregates.`);
+        }
         return {
             field: prop.name,
-            function: this.oneOf(options, 'function', FUNCTIONS, `the function of ${this.field(prop)}`),
-            type: this.named(options.type, `the type of ${this.field(prop)}`),
-            direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${this.field(prop)}`),
-            property: options.property || undefined
+            function: fn,
+            type: this.named(options.type, `the type of ${field}`),
+            direction: this.oneOf(options, 'direction', DIRECTIONS, `the direction of ${field}`),
+            property
         };
     }
 
@@ -313,7 +323,7 @@ export class ModelReader {
         const typed = this.typed(prop.type);
         const packed = !!this.on(prop, 'JsonPacked');
         const vector = this.on(prop, 'VectorIndex');
-        const vectorOptions = (this.args(vector)[0] ?? {}) as { similarity?: string; dimensions?: number };
+        const vectorOptions = this.options(vector, `@VectorIndex ${this.field(prop)}`);
         const renamed = this.on(prop, 'GraphProperty');
         return {
             name: prop.name,
@@ -328,24 +338,28 @@ export class ModelReader {
             whenAbsent: this.on(prop, 'Default') ? 'default' : this.on(prop, 'EmptyWhenAbsent') ? 'empty' : undefined,
             packed: packed ? 'json' : undefined,
             index: INDEXES.find(([decorator]) => this.on(prop, decorator))?.[1] ?? classIndex,
-            vector: vector
-                ? { similarity: vectorOptions.similarity ?? 'COSINE', dimensions: vectorOptions.dimensions }
-                : undefined,
+            vector: vector ? this.vector(prop, vectorOptions) : undefined,
             source: this.checker.typeToString(this.nonNull(prop.type, true))
         };
     }
 
-    private bag(prop: Property): Entry {
-        const options = (this.args(this.on(prop, 'PropertyBag'))[0] ?? {}) as {
-            prefix?: string;
-            delimiter?: string;
-            flat?: boolean;
+    private vector(prop: Property, options: Record<string, unknown>): Entry {
+        return {
+            similarity: this.oneOf(options, 'similarity', SIMILARITIES, `the similarity of ${this.field(prop)}`),
+            dimensions: this.given(options, 'dimensions', isNumber, `the dimensions of ${this.field(prop)}`)
         };
-        const flat = options.flat ?? false;
+    }
+
+    private bag(prop: Property): Entry {
+        const what = `@PropertyBag ${this.field(prop)}`;
+        const options = this.options(this.on(prop, 'PropertyBag'), what);
+        const flat = this.given(options, 'flat', isBoolean, `whether ${what} is flat`) ?? false;
+        const prefix = (): string => this.given(options, 'prefix', isString, `the prefix of ${what}`) ?? prop.name;
+        const delimiter = (): string => this.given(options, 'delimiter', isString, `the delimiter of ${what}`) ?? '.';
         return {
             field: prop.name,
             // As ModelRegistry resolves it: a flat bag stores each entry under its bare key.
-            prefix: flat ? '' : `${options.prefix ?? prop.name}${options.delimiter ?? '.'}`,
+            prefix: flat ? '' : `${prefix()}${delimiter()}`,
             flat: flat ? true : undefined,
             type: this.typed(prop.type).of ?? 'any'
         };
@@ -380,14 +394,56 @@ export class ModelReader {
      * is given and can't be read, which the compiler can't tell from one left out.
      */
     private oneOf(options: Record<string, unknown>, key: string, allowed: readonly string[], what: string): string {
+        const is = (value: unknown): value is string => typeof value === 'string' && allowed.includes(value);
+        return this.given(options, key, is, what, `${allowed.join(', ')}, or a constant of one`) ?? allowed[0];
+    }
+
+    /**
+     * An option a decorator may leave out: undefined when it is not given, and a problem when it is given and can't be
+     * read, rather than the default it would otherwise be written as.
+     */
+    private given<T>(
+        options: Record<string, unknown>,
+        key: string,
+        is: (value: unknown) => value is T,
+        what: string,
+        how: string = 'a literal or a constant'
+    ): T | undefined {
         if (!(key in options)) {
-            return allowed[0];
+            return undefined;
         }
         const value = options[key];
-        if (typeof value !== 'string' || !allowed.includes(value)) {
-            throw new Error(`Can't read ${what}. Name it with ${allowed.join(', ')}, or a constant of one.`);
+        if (!is(value)) {
+            throw new Error(`Can't read ${what}. Name it with ${how}.`);
         }
         return value;
+    }
+
+    /** A decorator's options object: none when it is not given, and a problem when it is given and can't be read. */
+    private options(decorator: TS.Decorator | undefined, what: string, index: number = 0): Record<string, unknown> {
+        const names = [...Array(index + 1).keys()].map(String);
+        return this.given(this.keyed(decorator, names), names[index], isObject, `the options of ${what}`) ?? {};
+    }
+
+    /** A decorator's arguments, keyed by the names given, each left out when it is not given, or given as none. */
+    private keyed(decorator: TS.Decorator | undefined, names: string[]): Record<string, unknown> {
+        if (!decorator || !this.ts.isCallExpression(decorator.expression)) {
+            return {};
+        }
+        return this.positional(decorator.expression.arguments, names);
+    }
+
+    private positional(args: TS.NodeArray<TS.Expression>, names: string[]): Record<string, unknown> {
+        return Object.fromEntries(
+            args.flatMap((it, i) => (i < names.length && !this.isNone(it) ? [[names[i], this.value(it)]] : []))
+        );
+    }
+
+    /** Whether an expression is `undefined` or `null`, which leaves an option out as surely as not giving it. */
+    private isNone(node: TS.Expression): boolean {
+        const ts = this.ts;
+        const bare = this.bare(node);
+        return bare.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(bare) && bare.text === 'undefined');
     }
 
     /** A field as `Class.field`, by the class whose declaration of it carries its decorators. */
@@ -396,13 +452,22 @@ export class ModelReader {
     }
 
     /** The id of what a relationship, a root or a target node leads to: the class its decorator names, or its type. */
-    private related(prop: Property, thunk: unknown): string {
+    private related(prop: Property, thunk: TS.ClassDeclaration | undefined): string {
         return this.id(this.targetClass(prop, thunk));
     }
 
-    private targetClass(prop: Property, thunk: unknown): TS.ClassDeclaration {
-        if (thunk && this.ts.isClassDeclaration(thunk as TS.Node)) {
-            return thunk as TS.ClassDeclaration;
+    /** The class a `@Root` or `@TargetNode` names, when it names one. */
+    private thunk(prop: Property, decorator: string): TS.ClassDeclaration | undefined {
+        const args = this.keyed(this.on(prop, decorator), ['target']);
+        return this.given(args, 'target', this.isClass, `the class ${this.field(prop)} holds`, '() => Class');
+    }
+
+    private readonly isClass = (value: unknown): value is TS.ClassDeclaration =>
+        !!value && this.ts.isClassDeclaration(value as TS.Node);
+
+    private targetClass(prop: Property, thunk: TS.ClassDeclaration | undefined): TS.ClassDeclaration {
+        if (thunk) {
+            return thunk;
         }
         const type = this.nonNull(prop.type);
         const element = this.isList(type) ? this.elementOf(type) : type;
@@ -642,17 +707,20 @@ export class ModelReader {
      * constant or an enum member, a call of Drivine's `hop`, or, for `() => Class`, the class.
      */
     private value(node: TS.Expression): unknown {
-        const ts = this.ts;
-        if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
-            return this.value(node.expression);
-        }
         for (const read of [this.literal, this.structure, this.reference]) {
-            const found = read.call(this, node);
+            const found = read.call(this, this.bare(node));
             if (found !== NOTHING) {
                 return found;
             }
         }
         return undefined;
+    }
+
+    /** The expression inside parentheses, `as` and `satisfies`, which leave its value as it is. */
+    private bare(node: TS.Expression): TS.Expression {
+        const ts = this.ts;
+        const wrapped = ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node);
+        return wrapped ? this.bare(node.expression) : node;
     }
 
     /** A string, a number, a boolean, or none. */
@@ -700,8 +768,7 @@ export class ModelReader {
         }
         if (ts.isCallExpression(node) && this.drivineName(node.expression) === 'hop') {
             // Keyed by the arguments given, so one left out is told from one that can't be read.
-            const names = ['type', 'direction', 'label', 'orderBy', 'ascending'];
-            return Object.fromEntries(node.arguments.map((it, i) => [names[i], this.value(it)]));
+            return this.positional(node.arguments, ['type', 'direction', 'label', 'orderBy', 'ascending']);
         }
         return NOTHING;
     }
@@ -711,7 +778,9 @@ export class ModelReader {
         const object: Record<string, unknown> = {};
         for (const it of node.properties) {
             if (ts.isPropertyAssignment(it) && (ts.isIdentifier(it.name) || ts.isStringLiteral(it.name))) {
-                object[it.name.text] = this.value(it.initializer);
+                if (!this.isNone(it.initializer)) {
+                    object[it.name.text] = this.value(it.initializer);
+                }
             } else if (ts.isShorthandPropertyAssignment(it)) {
                 object[it.name.text] = this.value(it.name);
             }
@@ -772,6 +841,9 @@ export class ModelReader {
 /** A relationship's directions, the default first. */
 const DIRECTIONS = ['OUTGOING', 'INCOMING', 'UNDIRECTED'] as const;
 
+/** How a vector index compares, the default first. */
+const SIMILARITIES = ['COSINE', 'EUCLIDEAN'] as const;
+
 /** What @Aggregate computes, as Drivine's AggregateFunction names it. */
 const FUNCTIONS = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'] as const;
 
@@ -799,6 +871,14 @@ const isDrivine = (ts: typeof TS, module: TS.Expression): boolean =>
 /** An object a decorator's argument or a constant is, as `object` reads it: not a list, nor one of the compiler's nodes. */
 const isObject = (value: unknown): value is Record<string, unknown> =>
     !!value && Object.getPrototypeOf(value) === Object.prototype;
+
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+
+const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
 const strings = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((it): it is string => typeof it === 'string') : [];

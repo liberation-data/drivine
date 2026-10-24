@@ -611,6 +611,123 @@ describe('Reading constants and types', () => {
         expect(read(dir).views).toEqual([]);
     });
 
+    it('names any other option it cannot read, rather than write its default', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { Aggregate, AggregateFunction, Direction, GraphPath, GraphRelationship, GraphView, hop, NodeFragment, PropertyBag, RelationshipFragment, Root, SortedBy, TargetNode, Unique, VectorIndex } from '@liberation-data/drivine';",
+                "const text = (): string => 'x';",
+                'const flag = (): boolean => true;',
+                'const count = (): number => 2;',
+                "const similarity = (): 'COSINE' => 'COSINE';",
+                'const options = (): any => ({});',
+                'const pick = (): any => B;',
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B { id: string; }',
+                "@NodeFragment({ labels: ['F1'] })",
+                'export class F1 { @PropertyBag({ prefix: text() }) bag: Record<string, string>; }',
+                "@NodeFragment({ labels: ['F2'] })",
+                'export class F2 { @PropertyBag({ flat: flag() }) bag: Record<string, string>; }',
+                "@NodeFragment({ labels: ['F3'] })",
+                'export class F3 { @PropertyBag(options()) bag: Record<string, string>; }',
+                "@NodeFragment({ labels: ['F4'] })",
+                'export class F4 { @VectorIndex({ similarity: similarity() }) v: number[]; }',
+                "@NodeFragment({ labels: ['F5'] })",
+                'export class F5 { @VectorIndex({ dimensions: count() }) v: number[]; }',
+                "@NodeFragment({ labels: ['F6'] })",
+                "@Unique({ properties: [text(), 'id'] })",
+                'export class F6 { id: string; }',
+                '@RelationshipFragment()',
+                'export class R { @TargetNode(() => pick()) b: B; }',
+                '@GraphView()',
+                "export class V1 { @Root() b: B; @GraphRelationship({ type: 'T', maxDepth: count() }) to: B; }",
+                '@GraphView()',
+                "export class V2 { @Root() b: B; @GraphRelationship({ type: 'T', required: flag() }) to: B; }",
+                '@GraphView()',
+                "export class V3 { @Root() b: B; @GraphRelationship({ type: 'T', target: () => pick() }) to: B; }",
+                '@GraphView()',
+                'export class V4 { @Root(() => pick()) b: B; }',
+                '@GraphView()',
+                "export class V5 { @Root() b: B; @SortedBy('id', flag()) @GraphRelationship({ type: 'T', target: () => B }) to: B[]; }",
+                '@GraphView()',
+                "export class V6 { @Root() b: B; @GraphPath([hop('T', Direction.OUTGOING, text())]) far: B; }",
+                '@GraphView()',
+                "export class V7 { @Root() b: B; @GraphPath([hop('T', Direction.OUTGOING, undefined, text())]) far: B; }",
+                '@GraphView()',
+                "export class V8 { @Root() b: B; @GraphPath([hop('T', Direction.OUTGOING, undefined, 'id', flag())]) far: B; }",
+                '@GraphView()',
+                "export class V9 { @Root() b: B; @GraphPath([{ type: 'T' }], { required: flag() }) far: B; }",
+                '@GraphView()',
+                "export class V10 { @Root() b: B; @Aggregate({ function: AggregateFunction.SUM, type: 'T', property: text() }) m: number; }",
+                '@GraphView()',
+                "export class V11 { @Root() b: B; @Aggregate({ function: AggregateFunction.SUM, type: 'T' }) m: number; }"
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        const literal = 'Name it with a literal or a constant.';
+        expect(warnings).toEqual(
+            [
+                `src/A#F1: Can't read the prefix of @PropertyBag F1.bag. ${literal}`,
+                `src/A#F2: Can't read whether @PropertyBag F2.bag is flat. ${literal}`,
+                `src/A#F3: Can't read the options of @PropertyBag F3.bag. ${literal}`,
+                "src/A#F4: Can't read the similarity of F4.v. Name it with COSINE, EUCLIDEAN, or a constant of one.",
+                `src/A#F5: Can't read the dimensions of F5.v. ${literal}`,
+                `src/A#F6: Can't read the properties of @Unique on F6. ${literal}`,
+                "src/A#R: Can't read the class R.b holds. Name it with () => Class.",
+                `src/A#V1: Can't read the maxDepth of V1.to. ${literal}`,
+                `src/A#V2: Can't read whether V2.to is required. ${literal}`,
+                "src/A#V3: Can't read the class V3.to holds. Name it with () => Class.",
+                "src/A#V4: Can't read the class V4.b holds. Name it with () => Class.",
+                `src/A#V5: Can't read which way @SortedBy V5.to sorts. ${literal}`,
+                `src/A#V6: Can't read the label of a hop of V6.far. ${literal}`,
+                `src/A#V7: Can't read what a hop of V7.far sorts by. ${literal}`,
+                `src/A#V8: Can't read which way a hop of V8.far sorts. ${literal}`,
+                `src/A#V9: Can't read whether V9.far is required. ${literal}`,
+                `src/A#V10: Can't read the property V10.m aggregates. ${literal}`,
+                // As ModelRegistry refuses it.
+                'src/A#V11: The SUM V11.m needs the property it aggregates.'
+            ].map((it) => `Drivine model file: ${it}`)
+        );
+        expect(read(dir).fragments.map((it: any) => it.id)).toEqual(['src/A#B']);
+        expect(read(dir).relationshipFragments).toEqual([]);
+        expect(read(dir).views).toEqual([]);
+    });
+
+    it('takes an option given as undefined or null as left out, as the decorator does', () => {
+        const dir = project({
+            'src/A.ts': [
+                "import { Count, GraphPath, GraphRelationship, GraphView, hop, NodeFragment, PropertyBag, Root } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['B'] })",
+                'export class B { id: string; @PropertyBag({ prefix: undefined, flat: null as any }) bag: Record<string, string>; }',
+                '@GraphView()',
+                'export class V {',
+                '    @Root(undefined) b: B;',
+                "    @GraphRelationship({ type: 'T', direction: undefined, maxDepth: undefined, required: undefined }) to: B;",
+                "    @GraphPath([hop('T', undefined, undefined, 'id')], { target: () => B }) far: B[];",
+                "    @Count('T', undefined) n: number;",
+                '}'
+            ].join('\n')
+        });
+        const warnings: string[] = [];
+        generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
+        expect(warnings).toEqual([]);
+        expect(read(dir).fragments[0].bags).toEqual([{ field: 'bag', prefix: 'bag.', type: 'string' }]);
+        const view = read(dir).views[0];
+        expect(view.root).toEqual({ field: 'b', fragment: 'src/A#B' });
+        expect(view.relationships).toEqual([
+            {
+                field: 'far',
+                target: 'src/A#B',
+                many: true,
+                required: false,
+                readOnly: true,
+                path: [{ type: 'T', direction: 'OUTGOING', orderBy: 'id', ascending: true }]
+            },
+            { field: 'to', type: 'T', direction: 'OUTGOING', target: 'src/A#B', many: false, required: false }
+        ]);
+        expect(view.aggregates).toEqual([{ field: 'n', function: 'COUNT', type: 'T', direction: 'OUTGOING' }]);
+    });
+
     it('reads unions of literals, tuples, and unknown and any', () => {
         const { entry }: Written = fragment({
             'src/A.ts': [
