@@ -4,6 +4,7 @@ import {
     PersistenceManager,
     QuerySpecification
 } from '@liberation-data/drivine';
+import { hasLabels, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 
 describeOnOracle('Oracle connection', () => {
@@ -96,6 +97,40 @@ describeOnOracle('Oracle connection', () => {
             new QuerySpecification("SELECT id AS \"id\" FROM drivine_conn_test WHERE id IN ('rolled', 'kept')")
         );
         expect(ids).toEqual(['kept']);
+    });
+
+    it('should find a node of several labels a transaction has written and not committed by a test of them all', async () => {
+        const graph = new OracleGraph('drivine_labels_test');
+        const drop = async (): Promise<void> => {
+            for (const statement of [
+                `DROP PROPERTY GRAPH IF EXISTS ${graph.name}`,
+                `DROP TABLE IF EXISTS ${graph.edges} PURGE`,
+                `DROP TABLE IF EXISTS ${graph.nodes} PURGE`
+            ]) {
+                await pm.execute(new QuerySpecification(statement));
+            }
+        };
+        await drop();
+        await pm.execute(new QuerySpecification(graph.ensuring));
+        const connection = await DatabaseRegistry.getInstance().connectionProvider('ORACLE')!.connect();
+        try {
+            await connection.startTransaction();
+            await connection.query(
+                new QuerySpecification(
+                    `INSERT INTO ${graph.nodes} (labels, props) VALUES (JSON('["Dog", "Animal"]'), JSON('{}'))`
+                )
+            );
+            const found = await connection.query<number>(
+                new QuerySpecification(
+                    `SELECT COUNT(*) AS "n" FROM ${graph.nodes} n WHERE ${hasLabels('n', ['Dog', 'Animal'])}`
+                )
+            );
+            expect(found).toEqual([1]);
+        } finally {
+            await connection.rollbackTransaction();
+            await connection.release();
+            await drop();
+        }
     });
 
     it('should read a cursor in batches', async () => {

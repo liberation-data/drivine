@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle';
+import { hasLabels } from '@/backend/oracle/OracleGraph';
 
 /** What drivine4j wrote of a store's schema on Oracle, and the names it gives objects (see its `source`). */
 const DRIVINE4J = JSON.parse(fs.readFileSync(path.join(__dirname, '../golden/drivine4j-oracle-schema.json'), 'utf8'));
@@ -35,5 +36,13 @@ describe('OracleGraph', () => {
         for (const it of names) {
             expect(new OracleGraph(it.graph).objectName(it.kind, it.parts)).toEqual(it.name);
         }
+    });
+
+    it('should test the first label through the index over labels, and the rest by their text, as drivine4j does', () => {
+        expect(hasLabels('n', ['A'])).toEqual(`JSON_EXISTS(n.labels, '$?(@ == "A")')`);
+        expect(hasLabels('n', ['A', 'B', `it's "q"`])).toEqual(
+            `JSON_EXISTS(n.labels, '$?(@ == "A")') AND INSTR(JSON_SERIALIZE(n.labels), '"B"') > 0 AND ` +
+                `INSTR(JSON_SERIALIZE(n.labels), '"it''s \\"q\\""') > 0`
+        );
     });
 });
