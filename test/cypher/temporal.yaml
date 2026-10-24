@@ -1,0 +1,434 @@
+# openCypher's temporal values: their fields, arithmetic and comparisons, run from an empty graph. See README.md.
+# A graph engine's driver gives a temporal value as one of its own, and a SQL store gives its ISO text, so the
+# cases read a value's fields; the text is read only where the step runs on the SQL stores alone.
+label: CyTemporal
+
+cases:
+  - name: "Fields of a date, time and moment"
+    description: "A date, a time and a moment made from text or a map give their fields."
+    steps:
+      - cypher: "WITH date('2024-03-15') AS d RETURN {year: d.year, month: d.month, day: d.day, dayOfWeek: d.dayOfWeek, ordinalDay: d.ordinalDay, week: d.week, quarter: d.quarter}"
+        rows: [{year: 2024, month: 3, day: 15, dayOfWeek: 5, ordinalDay: 75, week: 11, quarter: 1}]
+      - cypher: |
+          WITH datetime('2024-03-15T10:30:45.123+02:00') AS t
+          RETURN {hour: t.hour, minute: t.minute, second: t.second, millisecond: t.millisecond, offsetMinutes: t.offsetMinutes, timezone: t.timezone, epochMillis: t.epochMillis}
+        rows: [{hour: 10, minute: 30, second: 45, millisecond: 123, offsetMinutes: 120, timezone: "+02:00", epochMillis: 1710491445123}]
+      - cypher: |
+          RETURN {leap: date({year: 2024, month: 2, day: 29}).ordinalDay,
+                  noon: datetime({year: 2024, month: 1, day: 1, hour: 12, timezone: 'Z'}).epochSeconds,
+                  local: localtime('10:30').hour, zoned: time('10:30:00Z').minute,
+                  minutes: localdatetime({year: 2024, month: 1, day: 1, hour: 9, minute: 45}).minute}
+        rows: [{leap: 60, noon: 1704110400, local: 10, zoned: 30, minutes: 45}]
+
+  - name: "Fields of a duration"
+    description: "A duration made from text or a map gives its fields."
+    steps:
+      - cypher: |
+          WITH duration('P1Y2M3DT4H5M6S') AS d
+          RETURN {years: d.years, months: d.months, monthsOfYear: d.monthsOfYear, days: d.days, hours: d.hours,
+                  minutes: d.minutes, minutesOfHour: d.minutesOfHour, seconds: d.seconds, secondsOfMinute: d.secondsOfMinute}
+        rows: [{years: 1, months: 14, monthsOfYear: 2, days: 3, hours: 4, minutes: 245, minutesOfHour: 5, seconds: 14706, secondsOfMinute: 6}]
+      - cypher: "WITH duration({days: 1, hours: 12}) AS d RETURN {days: d.days, hours: d.hours}"
+        rows: [{days: 1, hours: 12}]
+
+  - name: "Adding durations"
+    description: "A duration added to a moment lands on the month's last day if the day doesn't exist; durations add to each other."
+    steps:
+      - cypher: |
+          RETURN {endOfFebruary: (date('2024-01-31') + duration('P1M')).day,
+                  nextDay: (datetime('2024-03-15T23:30:00Z') + duration('PT1H')).day,
+                  fortnightBefore: (date('2024-03-15') - duration('P15D')).month,
+                  days: (duration('P1D') + duration('PT12H')).days,
+                  hours: (duration('P1D') + duration('PT12H')).hours,
+                  doubled: (duration('PT1H') * 2).minutes}
+        rows: [{endOfFebruary: 29, nextDay: 16, fortnightBefore: 2, days: 1, hours: 12, doubled: 120}]
+      - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')}), (:CyTemporal {id: 'b', day: date('2024-01-01')})"
+      - note: "A moment read from the store, its kind told by its text."
+        cypher: "MATCH (n:CyTemporal) RETURN (n.day + duration('P1D')).day ORDER BY n.id"
+        rows: [16, 2]
+      - note: "Bound values nested in one another, which Postgres would pull up and write out again as it plans, out of memory."
+        cypher: "MATCH (n:CyTemporal) RETURN (n.day + duration({days: $days})).day ORDER BY n.id"
+        parameters: {days: 3}
+        rows: [18, 4]
+
+  - name: "Comparing moments"
+    description: "Moments compare as instants whatever their offsets; durations compare only as equal or not."
+    steps:
+      - cypher: |
+          RETURN {before: date('2024-03-15') < date('2024-03-16'),
+                  otherOffset: datetime('2024-03-15T10:00:00+02:00') = datetime('2024-03-15T08:00:00Z'),
+                  earlier: datetime('2024-03-15T10:00:00+02:00') < datetime('2024-03-15T08:00:01Z'),
+                  durations: duration('P1D') = duration('PT24H')}
+        rows: [{before: true, otherOffset: false, earlier: true, durations: false}]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: '2024-06-01T00:00:00Z'}), (:CyTemporal {id: 'b', at: '2023-12-31T23:00:00-02:00'}), (:CyTemporal {id: 'c', at: '2023-06-01T00:00:00Z'})"
+      - cypher: "MATCH (n:CyTemporal) WHERE datetime(n.at) > datetime('2024-01-01T00:00:00Z') RETURN n.id ORDER BY n.id"
+        rows: ["a", "b"]
+
+  - name: "duration.between"
+    description: "The duration between two moments is in months, then days, then seconds, or in one unit with inDays, inSeconds or inMonths."
+    steps:
+      - cypher: |
+          WITH duration.between(date('2024-01-15'), date('2024-03-20')) AS d
+          RETURN {months: d.months, days: d.days,
+                  inDays: duration.inDays(date('2024-01-01'), date('2024-03-01')).days,
+                  inSeconds: duration.inSeconds(datetime('2024-01-01T00:00:00Z'), datetime('2024-01-01T01:00:00Z')).seconds,
+                  inMonths: duration.inMonths(date('2024-01-31'), date('2024-03-01')).months}
+        rows: [{months: 2, days: 5, inDays: 60, inSeconds: 3600, inMonths: 1}]
+
+  - name: "Truncation and the statement's moment"
+    description: "A moment truncates to a unit, and every clock function in a statement reads the same moment."
+    steps:
+      - cypher: |
+          RETURN {firstOfMonth: date.truncate('month', date('2024-03-15')).day,
+                  onTheHour: datetime.truncate('hour', datetime('2024-03-15T10:30:45Z')).minute,
+                  midnight: datetime.truncate('day', datetime('2024-03-15T10:30:45Z')).hour,
+                  one: date.statement() = date(), clock: localtime() = localtime.statement(), time: time() = time.statement(),
+                  local: localdatetime() = localdatetime.statement()}
+        rows: [{firstOfMonth: 1, onTheHour: 0, midnight: 0, one: true, clock: true, time: true, local: true}]
+
+  - name: "Adding a month to a month's last day"
+    description: "A month added to the last day of a month keeps the day where the next month has it."
+    steps:
+      - cypher: |
+          RETURN {leap: (date('2024-02-29') + duration('P1M')).day,
+                  april: (date('2024-04-30') + duration('P1M')).day,
+                  back: (date('2024-03-31') - duration('P1M')).day,
+                  clockDay: (localdatetime('2024-02-29T10:30:00.5') + duration('P1M')).day,
+                  clockMillis: (localdatetime('2024-02-29T10:30:00.5') + duration('P1M')).millisecond}
+        rows: [{leap: 29, april: 30, back: 29, clockDay: 29, clockMillis: 500}]
+
+  - name: "Calendar months between moments"
+    description: "The months between two moments are whole calendar months, for times too and across offsets."
+    steps:
+      - cypher: |
+          RETURN {lastDaysMonths: duration.between(date('2024-01-31'), date('2024-02-29')).months,
+                  lastDaysDays: duration.between(date('2024-01-31'), date('2024-02-29')).days,
+                  earlierMonths: duration.between(datetime('2024-01-15T12:00:00Z'), datetime('2024-02-15T06:00:00Z')).months,
+                  earlierDays: duration.between(datetime('2024-01-15T12:00:00Z'), datetime('2024-02-15T06:00:00Z')).days,
+                  earlierHours: duration.between(datetime('2024-01-15T12:00:00Z'), datetime('2024-02-15T06:00:00Z')).hours,
+                  backMonths: duration.between(date('2024-03-20'), date('2024-01-15')).months,
+                  backDays: duration.between(date('2024-03-20'), date('2024-01-15')).days,
+                  times: duration.between(time('10:00:00+02:00'), time('09:30:00Z')).minutes,
+                  localTimes: duration.between(localtime('10:00'), localtime('09:00')).hours,
+                  offsets: duration.between(datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T10:00:00Z')).hours,
+                  mixedDays: duration.between(date('2024-01-01'), datetime('2024-01-02T12:00:00+01:00')).days,
+                  mixedHours: duration.between(date('2024-01-01'), datetime('2024-01-02T12:00:00+01:00')).hours}
+        rows:
+          - lastDaysMonths: 0
+            lastDaysDays: 29
+            earlierMonths: 0
+            earlierDays: 30
+            earlierHours: 18
+            backMonths: -2
+            backDays: -5
+            times: 90
+            localTimes: -1
+            offsets: 2
+            mixedDays: 1
+            mixedHours: 12
+
+  - name: "Offset without a colon"
+    description: "An offset written without a colon, like +0200, is read as the offset it is."
+    steps:
+      - cypher: "WITH datetime('2024-03-15T10:30:00+0200') AS t RETURN {timezone: t.timezone, offsetMinutes: t.offsetMinutes, hour: t.hour, epochMillis: t.epochMillis}"
+        rows: [{timezone: "+02:00", offsetMinutes: 120, hour: 10, epochMillis: 1710491400000}]
+      - cypher: "WITH time('10:15-0530') AS t RETURN {timezone: t.timezone, minute: t.minute}"
+        rows: [{timezone: "-05:30", minute: 15}]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: '2024-03-15T10:30:00+0200'})"
+      - cypher: "MATCH (n:CyTemporal) WITH datetime(n.at) AS t RETURN {timezone: t.timezone, offsetMinutes: t.offsetMinutes, hour: t.hour, epochMillis: t.epochMillis}"
+        rows: [{timezone: "+02:00", offsetMinutes: 120, hour: 10, epochMillis: 1710491400000}]
+
+  - name: "Zero offset is UTC"
+    description: "A zero offset, however it's written, is UTC's Z."
+    steps:
+      - cypher: "WITH datetime('2024-03-15T10:00:00+00:00') AS t RETURN {offset: t.offset, timezone: t.timezone, utc: t = datetime('2024-03-15T10:00:00Z'), time: time('10:00-0000').offset}"
+        rows: [{offset: "Z", timezone: "Z", utc: true, time: "Z"}]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: '2024-03-15T10:00:00+00:00'})"
+      - cypher: |
+          MATCH (n:CyTemporal) WITH datetime(n.at) AS t
+          RETURN {offset: t.offset, timezone: (t + duration('PT1H')).timezone, utc: t = datetime('2024-03-15T10:00:00Z'), time: time(t).offset}
+        rows: [{offset: "Z", timezone: "Z", utc: true, time: "Z"}]
+
+  - name: "Negative, weekly and fractional durations"
+    description: "A duration can be negative, in weeks, or a fraction of a second."
+    steps:
+      - cypher: |
+          WITH duration('-P1DT2H') AS n, duration('P2W') AS w, duration('PT1.5S') AS f
+          RETURN {days: n.days, hours: n.hours, weekDays: w.days, weeks: w.weeks, millis: f.milliseconds, secs: f.seconds,
+                  mapWeeks: duration({weeks: 1, days: 1}).days, dayBefore: (date('2024-03-01') + duration('-P1D')).day,
+                  weekLater: (date('2024-03-15') + duration('P1W')).day}
+        rows: [{days: -1, hours: -2, weekDays: 14, weeks: 2, millis: 1500, secs: 1, mapWeeks: 8, dayBefore: 29, weekLater: 22}]
+
+  - name: "Fractions of a second and wrapping times"
+    description: "A moment keeps the fraction of its second, and a time of day wraps past midnight."
+    steps:
+      - cypher: |
+          WITH datetime('2024-03-15T10:30:45.123456Z') AS t
+          RETURN {micro: t.microsecond, nano: t.nanosecond, milli: t.millisecond,
+                  nextMinute: (datetime('2024-03-15T10:30:59.999Z') + duration('PT0.002S')).minute,
+                  carried: (localtime('10:30:45.5') + duration('PT0.25S')).millisecond,
+                  wrapped: (localtime('23:30') + duration('PT1H')).hour,
+                  zonedMinute: (time('10:00:00+02:00') - duration('PT45M')).minute,
+                  zone: (time('10:00:00+02:00') - duration('PT45M')).timezone}
+        rows: [{micro: 123456, nano: 123456000, milli: 123, nextMinute: 31, carried: 750, wrapped: 0, zonedMinute: 15, zone: "+02:00"}]
+
+  - name: "Week-year fields, duration parts and zoned inequality"
+    description: "A moment gives its week-year and offset fields, a duration its parts of a larger unit, and zoned values at different offsets are unequal."
+    steps:
+      - cypher: |
+          WITH datetime('2024-12-30T10:00:00Z') AS t, datetime('2024-03-15T10:00:00-05:30') AS u
+          RETURN {weekYear: t.weekYear, week: t.week, weekDay: t.weekDay, offset: u.offset, offsetSeconds: u.offsetSeconds,
+                  unequal: datetime('2024-03-15T10:00:00+02:00') <> datetime('2024-03-15T08:00:00Z'), same: t <> datetime('2024-12-30T10:00:00Z'),
+                  ordered: (duration('P1D') < duration('P2D')) IS NULL, transaction: datetime.transaction().year > 2000, realtime: date.realtime().year > 2000}
+        rows: [{weekYear: 2025, week: 1, weekDay: 1, offset: "-05:30", offsetSeconds: -19800, unequal: true, same: false, ordered: true, transaction: true, realtime: true}]
+      - cypher: |
+          WITH duration('P1Y8M17DT3H4M5.006007S') AS d
+          RETURN {quarters: d.quarters, quartersOfYear: d.quartersOfYear, monthsOfQuarter: d.monthsOfQuarter, weeks: d.weeks, daysOfWeek: d.daysOfWeek,
+                  ms: d.millisecondsOfSecond, us: d.microsecondsOfSecond, ns: d.nanosecondsOfSecond, minutesOfHour: duration('PT-90M').minutesOfHour}
+        rows: [{quarters: 6, quartersOfYear: 2, monthsOfQuarter: 2, weeks: 2, daysOfWeek: 3, ms: 6, us: 6007, ns: 6007000, minutesOfHour: -30}]
+
+  - name: "Dividing and scaling durations"
+    description: "A duration is divided and multiplied."
+    steps:
+      - cypher: |
+          RETURN {quarterHour: (duration('PT1H') / 4).minutes, halfMonthDays: (duration('P1M') / 2).days,
+                  halfMonthHours: (duration('P1M') / 2).hours, tripled: (3 * duration('P1D')).days, halfDay: (duration('P1D') * 0.5).hours}
+        rows: [{quarterHour: 15, halfMonthDays: 15, halfMonthHours: 5, tripled: 3, halfDay: 12}]
+
+  - name: "Truncating to each unit"
+    description: "A moment truncates to each unit, keeping its offset; times and dates truncate too."
+    steps:
+      - cypher: |
+          WITH datetime('2024-05-15T10:30:45.123456+02:00') AS t
+          WITH datetime.truncate('year', t) AS year, datetime.truncate('quarter', t) AS quarter, datetime.truncate('month', t) AS month,
+               datetime.truncate('week', t) AS week, datetime.truncate('day', t) AS day, datetime.truncate('hour', t) AS hour,
+               datetime.truncate('minute', t) AS minute, datetime.truncate('second', t) AS second, datetime.truncate('millisecond', t) AS millisecond
+          RETURN {year: [year.month, year.day, year.hour, year.minute, year.second, year.microsecond],
+                  quarter: [quarter.month, quarter.day, quarter.hour, quarter.minute, quarter.second, quarter.microsecond],
+                  month: [month.month, month.day, month.hour, month.minute, month.second, month.microsecond],
+                  week: [week.month, week.day, week.hour, week.minute, week.second, week.microsecond],
+                  day: [day.month, day.day, day.hour, day.minute, day.second, day.microsecond],
+                  hour: [hour.month, hour.day, hour.hour, hour.minute, hour.second, hour.microsecond],
+                  minute: [minute.month, minute.day, minute.hour, minute.minute, minute.second, minute.microsecond],
+                  second: [second.month, second.day, second.hour, second.minute, second.second, second.microsecond],
+                  millisecond: [millisecond.month, millisecond.day, millisecond.hour, millisecond.minute, millisecond.second, millisecond.microsecond],
+                  zone: day.timezone}
+        rows:
+          - year: [1, 1, 0, 0, 0, 0]
+            quarter: [4, 1, 0, 0, 0, 0]
+            month: [5, 1, 0, 0, 0, 0]
+            week: [5, 13, 0, 0, 0, 0]
+            day: [5, 15, 0, 0, 0, 0]
+            hour: [5, 15, 10, 0, 0, 0]
+            minute: [5, 15, 10, 30, 0, 0]
+            second: [5, 15, 10, 30, 45, 0]
+            millisecond: [5, 15, 10, 30, 45, 123000]
+            zone: "+02:00"
+      - cypher: |
+          RETURN {localHour: localtime.truncate('hour', localtime('10:30:45')).minute,
+                  timeZone: time.truncate('minute', time('10:30:45+02:00')).timezone,
+                  timeSecond: time.truncate('minute', time('10:30:45+02:00')).second,
+                  monday: date.truncate('week', date('2024-05-15')).day,
+                  firstOfMonth: date.truncate('month', datetime('2024-05-15T10:30:00Z')).day,
+                  localMidnight: localdatetime.truncate('day', datetime('2024-05-15T10:30:00Z')).hour}
+        rows: [{localHour: 0, timeZone: "+02:00", timeSecond: 0, monday: 13, firstOfMonth: 1, localMidnight: 0}]
+
+  - name: "Moments from maps with fractions and offsets"
+    description: "A moment or time made from a map takes its fraction of a second and its offset."
+    steps:
+      - cypher: |
+          RETURN {millis: datetime({year: 2024, month: 3, day: 15, hour: 10, minute: 30, second: 45, millisecond: 123, timezone: '+02:00'}).epochMillis,
+                  zone: datetime({year: 2024, month: 3, day: 15, hour: 10, timezone: '+02:00'}).timezone,
+                  offset: time({hour: 10, minute: 30, timezone: '+02:00'}).offsetMinutes,
+                  micro: localtime({hour: 10, minute: 30, second: 5, microsecond: 7}).microsecond,
+                  nano: localtime({hour: 1, minute: 0, second: 0, nanosecond: 5000}).microsecond}
+        rows: [{millis: 1710491445123, zone: "+02:00", offset: 120, micro: 7, nano: 5}]
+
+  - name: "Converting between temporal kinds"
+    description: "A temporal value of one kind is made from a value of another."
+    steps:
+      - cypher: |
+          WITH datetime('2024-03-15T23:30:00-02:00') AS t
+          RETURN {day: date(t).day, hour: localdatetime(t).hour, zone: time(t).timezone, clock: localtime(t).minute,
+                  midnight: date(localdatetime('2024-03-15T10:30')).day}
+        rows: [{day: 15, hour: 23, zone: "-02:00", clock: 30, midnight: 15}]
+
+  - name: "Temporal null"
+    description: "A temporal value of null is null, through functions, arithmetic and fields."
+    steps:
+      - cypher: |
+          RETURN {date: date(null) IS NULL, datetime: datetime(null) IS NULL, duration: duration(null) IS NULL,
+                  plus: (null + duration('P1D')) IS NULL, field: date(null).year IS NULL,
+                  between: duration.between(date(null), date('2024-03-15')) IS NULL, times: (duration('P1D') * null) IS NULL,
+                  sum: (duration('P1D') + duration(null)) IS NULL, moved: (date('2024-03-15') + duration(null)) IS NULL,
+                  days: duration(null).days IS NULL}
+        rows: [{date: true, datetime: true, duration: true, plus: true, field: true, between: true, times: true, sum: true, moved: true, days: true}]
+      - cypher: "CREATE (:CyTemporal {id: 'a', to: date('2024-03-15')})"
+      - note: "A property the node doesn't have."
+        cypher: "MATCH (n:CyTemporal) RETURN duration.between(n.from, n.to) IS NULL"
+        rows: [true]
+      - note: "A moment or time made of it, and moved, is null, and is written as no property."
+        cypher: |
+          MATCH (n:CyTemporal) SET n.next = datetime(n.at) + duration('P1D')
+          RETURN [datetime(n.at) + duration('P1D'), localdatetime(n.at) + duration('P1D'), time(n.at) + duration('PT1H'),
+                  localtime(n.at) + duration('PT1H'), n.next IS NULL]
+        rows: [[null, null, null, null, true]]
+
+  - name: "Temporal round trip through the store"
+    description: "A temporal value written to the store is read back as the value it was."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime('2024-03-15T10:30:00+02:00'), day: date('2024-03-15'), d: duration('P1M2D')})"
+      - cypher: |
+          MATCH (n:CyTemporal)
+          RETURN {hour: n.at.hour, zone: n.at.timezone, months: n.d.months, days: n.d.days, plus: (date('2024-01-31') + n.d).day,
+                  minus: (n.day - duration('P1D')).day, durationPlus: (n.d + duration('P1D')).days,
+                  otherOffset: n.at = datetime('2024-03-15T08:30:00Z'), same: datetime(n.at) = datetime('2024-03-15T10:30:00+02:00'),
+                  later: (duration('P1D') + n.day).month, reversed: (n.d + date('2024-01-31')).day,
+                  shorter: (duration('P1M3D') - n.d).days}
+        rows: [{hour: 10, zone: "+02:00", months: 1, days: 2, plus: 2, minus: 14, durationPlus: 3, otherOffset: false, same: true, later: 3, reversed: 2, shorter: 1}]
+
+  - name: "Temporal values through WITH, ORDER BY and collect"
+    description: "A temporal value is carried through WITH, ORDER BY and collect."
+    steps:
+      - cypher: "UNWIND [date('2024-03-15'), date('2024-01-02')] AS d WITH d ORDER BY d RETURN collect(d.month)"
+        rows: [[1, 3]]
+      - cypher: "UNWIND [datetime('2024-03-15T10:00:00+02:00')] AS t WITH collect(t) AS ts RETURN [x IN ts | x.hour]"
+        rows: [[10]]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime('2024-03-15T10:00:00+02:00')}), (:CyTemporal {id: 'b', at: datetime('2024-03-15T09:00:00Z')})"
+      - cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY datetime(n.at)"
+        rows: ["a", "b"]
+      - note: "Bound by a WITH, a zoned value keeps its kind: it sorts and compares as the moment it is."
+        cypher: "MATCH (n:CyTemporal) WITH n, datetime(n.at) AS t RETURN n.id ORDER BY t"
+        rows: ["a", "b"]
+      - cypher: "WITH datetime('2024-03-15T10:00:00+02:00') AS a, datetime('2024-03-15T09:00:00Z') AS b RETURN a < b"
+        rows: [true]
+
+  - name: "Temporal kind through expressions"
+    description: "A temporal value keeps its kind through coalesce, CASE, a list, UNWIND, an index, collect and a list comprehension."
+    steps:
+      - cypher: |
+          RETURN {coalesce: (coalesce(null, duration('PT1H')) * 2).minutes,
+                  case: (CASE WHEN true THEN duration('PT1H') ELSE duration('PT2H') END * 2).minutes,
+                  index: ([duration('PT1H')][0] * 2).minutes, comprehension: [d IN [duration('PT1H')] | (d * 2).minutes],
+                  projected: [x IN [d IN [duration('PT1H')] | d * 2] | (x * 2).minutes]}
+        rows: [{coalesce: 120, case: 120, index: 120, comprehension: [120], projected: [240]}]
+      - cypher: "UNWIND [duration('PT1H'), duration('PT2H')] AS d RETURN (d * 2).minutes"
+        rows: [120, 240]
+      - cypher: "WITH [duration('PT1H')] AS ds, 0 AS i RETURN (ds[i] * 2).minutes"
+        rows: [120]
+      - cypher: "UNWIND [duration('PT1H')] AS d WITH collect(d) AS ds RETURN [x IN ds | (x * 2).minutes]"
+        rows: [[120]]
+      - note: "A zoned value so kept sorts as the moment it is, whatever its offset."
+        cypher: "WITH [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS ts UNWIND ts AS t RETURN t.hour ORDER BY t"
+        rows: [10, 9]
+      - note: "A list reversed, its tail, or two lists of one kind together, keep their items' kind."
+        cypher: "UNWIND reverse([datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00')]) AS t RETURN t.hour ORDER BY t"
+        rows: [10, 9]
+      - cypher: "UNWIND tail([datetime('2024-01-01T00:00:00Z'), datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00')]) AS t RETURN t.hour ORDER BY t"
+        rows: [10, 9]
+      - cypher: "UNWIND [datetime('2024-03-15T09:00:00Z')] + [datetime('2024-03-15T10:00:00+02:00')] AS t RETURN t.hour ORDER BY t"
+        rows: [10, 9]
+      - cypher: "UNWIND [1, 2] AS i WITH CASE i WHEN 1 THEN datetime('2024-03-15T10:00:00+02:00') ELSE datetime('2024-03-15T09:00:00Z') END AS t RETURN t.hour ORDER BY t"
+        rows: [10, 9]
+
+  - name: "Zoned kind through quantifiers, reduce and writes"
+    description: "A zoned value keeps its kind in a quantifier, reduce, a pattern comprehension and a statement that writes."
+    steps:
+      - cypher: |
+          WITH [datetime('2024-03-15T10:00:00+02:00')] AS xs, [datetime('2024-03-15T09:00:00Z')] AS ys
+          RETURN any(x IN xs WHERE any(y IN ys WHERE x < y))
+        rows: [true]
+      - cypher: |
+          WITH [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS ts
+          RETURN reduce(m = null, t IN ts | CASE WHEN m IS NULL OR t < m THEN t ELSE m END).hour
+        rows: [10]
+      - cypher: "WITH datetime('2024-03-15T10:00:00+02:00') AS a, datetime('2024-03-15T09:00:00Z') AS b RETURN reduce(s = false, x IN [1] | a < b)"
+        rows: [true]
+      - cypher: "CREATE (x:CyTemporal {id: 'x'}), (x)-[:AT]->(:CyTemporal {id: 'a', at: datetime('2024-03-15T10:00:00+02:00')}), (x)-[:AT]->(:CyTemporal {id: 'b', at: datetime('2024-03-15T09:00:00Z')})"
+      - cypher: "MATCH (x:CyTemporal {id: 'x'}) UNWIND [(x)-->(m) | datetime(m.at)] AS t RETURN t.hour ORDER BY t"
+        rows: [10, 9]
+      - cypher: "WITH datetime('2024-03-15T10:00:00+02:00') AS a, datetime('2024-03-15T09:00:00Z') AS b CREATE (:CyTemporal {id: 'c'}) RETURN a < b"
+        rows: [true]
+      - note: "Through writes one after another, and of the value a later WITH gives a variable again."
+        cypher: |
+          CREATE (n:CyTemporal {id: 'd'}) WITH n, datetime('2024-03-15T10:00:00+02:00') AS a SET n.x = 1
+          WITH n, a, datetime('2024-03-15T09:00:00Z') AS b SET n.y = 2 RETURN a < b
+        rows: [true]
+      - cypher: "WITH duration('P1D') AS a CREATE (n:CyTemporal {id: 'e'}) WITH n, datetime('2024-03-15T10:00:00+02:00') AS a SET n.v = 1 RETURN a.hour"
+        rows: [10]
+      - note: "A variable a FOREACH or a CALL { … } binds again within is, after it, the value it was."
+        cypher: "WITH datetime('2024-03-15T10:00:00+02:00') AS x FOREACH (x IN [duration('P1D')] | CREATE (:CyTemporal {id: 'f'})) RETURN x.hour"
+        rows: [10]
+      - cypher: "WITH datetime('2024-03-15T10:00:00+02:00') AS a CALL { WITH a WITH duration('P1D') AS a CREATE (:CyTemporal {id: 'g', d: a}) } RETURN a.hour"
+        rows: [10]
+
+  - name: "Temporal values from CALL"
+    description: "A temporal value returned by CALL { } keeps its kind, and a UNION's takes the kind each query gives it."
+    steps:
+      - cypher: "CALL { RETURN duration('PT1H') AS d } RETURN (d * 2).minutes"
+        rows: [120]
+      - cypher: "CALL { RETURN date('2024-03-01') AS d } RETURN (d + duration('P1M')).month"
+        rows: [4]
+      - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')})"
+      - cypher: "MATCH (n:CyTemporal) CALL { WITH n RETURN n.day AS d } RETURN (d + duration('P1D')).day"
+        rows: [16]
+      - cypher: "MATCH (n:CyTemporal) CALL { WITH n CALL { WITH n RETURN n.day + duration('P1D') AS e } RETURN e AS d } RETURN (d + duration('P1D')).day"
+        rows: [17]
+      - note: "A value of a UNION is of a kind where each of its queries makes it of that one, else of the kind its text tells."
+        cypher: "CREATE (:CyTemporal {id: 'b', day: datetime('2023-12-31T23:30:00-02:00')})"
+      - cypher: "CALL { RETURN date('2024-03-01') AS d UNION ALL MATCH (n:CyTemporal) RETURN n.day AS d } RETURN d.year ORDER BY toString(d)"
+        rows: [2023, 2024, 2024]
+
+  - name: "Temporal values added to lists and text"
+    description: "A temporal value is added to a list or a text as any value is."
+    steps:
+      - cypher: |
+          WITH ['x'] AS list, 'Due ' AS due
+          RETURN {appended: size(list + date('2024-03-15')), prepended: size(datetime('2024-03-15T10:00:00Z') + list),
+                  duration: size(list + duration('P1D')), durationFirst: size(duration('P1D') + list),
+                  text: due + date('2024-03-15'), durationText: 'Every ' + duration('P1D')}
+        rows: [{appended: 2, prepended: 2, duration: 2, durationFirst: 2, text: "Due 2024-03-15", durationText: "Every P1D"}]
+      - note: "What a moment is added to is a list or a text again, of no temporal kind."
+        cypher: "WITH 'Due ' AS due WITH due + date('2024-03-15') AS label RETURN label = 'Due 2024-03-15'"
+        rows: [true]
+      - cypher: "WITH ['x'] AS list RETURN size((list + datetime('2024-03-15T10:00:00Z')) + duration('P1D'))"
+        rows: [3]
+      - cypher: "CREATE (:CyTemporal {id: 'a', history: [date('2024-01-01')]})"
+      - cypher: "MATCH (n:CyTemporal) SET n.history = n.history + date('2024-03-15') RETURN [d IN n.history | d.day]"
+        rows: [[1, 15]]
+
+  - name: "Map entries named like temporal fields"
+    description: "A map's entry named like a temporal field (day, year, hours, timezone) is just the entry."
+    steps:
+      - cypher: "UNWIND [{day: 3, year: 2020, hours: 4, timezone: 'x'}] AS r RETURN {day: r.day, year: r.year, hours: r.hours, timezone: r.timezone}"
+        rows: [{day: 3, year: 2020, hours: 4, timezone: "x"}]
+
+  - name: "Temporal functions on stored values"
+    description: "A temporal value read from the store truncates, becomes a duration, and gives the duration between it and another."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime('2024-03-15T10:30:00+02:00'), from: date('2024-01-15'), to: date('2024-03-20'), d: duration('P1M2D')})"
+      - cypher: |
+          MATCH (n:CyTemporal)
+          RETURN {minute: datetime.truncate('hour', n.at).minute, zone: datetime.truncate('day', n.at).timezone,
+                  months: duration.between(n.from, n.to).months, days: duration.between(n.from, n.to).days,
+                  inDays: duration.inDays(n.from, n.to).days, durationDays: duration(toString(n.d)).days}
+        rows: [{minute: 0, zone: "+02:00", months: 2, days: 5, inDays: 65, durationDays: 2}]
+
+  - name: "Dates take whole days of a duration"
+    description: "A date takes a duration's time in whole days."
+    steps:
+      - cypher: "RETURN {hourBefore: (date('2024-03-15') - duration('PT1H')).day, dayAndHourBefore: (date('2024-03-15') - duration('PT25H')).day, dayAndHourAfter: (date('2024-03-15') + duration('PT25H')).day}"
+        rows: [{hourBefore: 15, dayAndHourBefore: 14, dayAndHourAfter: 16}]
+      - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')})"
+      - note: "A date read from the store, its kind told by its text."
+        cypher: "MATCH (n:CyTemporal) RETURN [(n.day - duration('PT1H')).day, (n.day - duration('PT25H')).day]"
+        rows: [[15, 14]]
+
+  - name: "ISO text on SQL stores"
+    description: "On a SQL store a temporal value comes back as its ISO text."
+    steps:
+      - only: [sql]
+        cypher: |
+          RETURN [date('2024-03-15'), datetime('2024-03-15T10:30:45.123+02:00'), localdatetime('2024-03-15T10:30'), localtime('10:30'),
+                  duration('P1Y2M3DT4H5M6S'), duration({days: 1, hours: 12}), duration('PT0S'), time('10:30+0200')]
+        rows: [["2024-03-15", "2024-03-15T10:30:45.123+02:00", "2024-03-15T10:30:00", "10:30:00", "P1Y2M3DT4H5M6S", "P1DT12H", "PT0S", "10:30:00+02:00"]]

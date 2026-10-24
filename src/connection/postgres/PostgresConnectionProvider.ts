@@ -35,7 +35,7 @@ export class PostgresConnectionProvider implements ConnectionProvider {
         if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
             await this.setSessionId(client);
         }
-        return new PostgresConnection(client, new PostgresResultMapper());
+        return new PostgresConnection(client, new PostgresResultMapper(), this.graphName);
     }
 
     async end(): Promise<void> {

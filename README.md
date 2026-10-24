@@ -1481,6 +1481,8 @@ Notes:
 
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher. A statement that writes and returns
   rows is a PL/SQL block that hands them back with `DBMS_SQL.RETURN_RESULT`.
+- A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
+  engine gives: see [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres).
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`.
 - A save is one block and checks the stamp, as on the graph engines. A save turned away by a deadlock (`ORA-00060`) or
   a serialization failure (`ORA-08177`) is run again. Another writer that changes a node in SQL should give it a new
@@ -1542,6 +1544,8 @@ Notes:
 
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher, and a statement is bound only the
   ones it names.
+- A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
+  engine gives: see [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres).
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`,
   e.g. `(n.props ->> 'name') = $name`.
 - A number is compared as a number only where one is stored: `'7'` is not `7`, as on the graph engines.
@@ -1557,6 +1561,31 @@ Notes:
   approximate through it, and exact with no index made. A full-text index is a trigram index over the text a search
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
   `"phrase"`, `+must`, `-not` and a `prefix*`.
+
+### Cypher on Oracle and Postgres
+
+A Cypher statement given to a `PersistenceManager` on Oracle or Postgres is compiled to SQL over the graph's tables, so
+a statement written for a graph engine runs there and gives the same rows. The compiler is drivine4j's, ported: what a
+statement gives on each store, compiled or not, is the shared
+[Cypher spec](https://github.com/liberation-data/drivine-cypher-spec), which Drivine's tests run on Neo4j, Postgres
+and Oracle.
+
+```typescript
+const names = await pm.query<string>(
+    new QuerySpecification(cypherStatement('MATCH (p:Person)-[:KNOWS]->(f) WHERE p.name = $name RETURN f.name')).bind({ name: 'Keanu' })
+);
+```
+
+- A statement must say it is Cypher: a statement of no language is SQL on these stores.
+- The graph's tables must be there. Oracle makes them on its first connection; on Postgres an object manager makes them,
+  so a persistence manager that runs Cypher on a graph no object manager has worked on runs
+  `new QuerySpecification(new PostgresGraph(graph).ensuring)` first.
+- A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties.
+- A statement that writes (`CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`, `FOREACH`) runs as one statement, applied whole
+  or not at all: an anonymous PL/SQL block on Oracle, and a function of the session's own (`pg_temp`) on Postgres.
+- Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A slice of a list
+  (list[from..to]) is Cypher, and is not compiled to SQL yet.`
+- A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own.
 
 ## Schema Management (Indexes & Constraints)
 

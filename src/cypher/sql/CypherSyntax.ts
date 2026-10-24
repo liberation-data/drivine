@@ -1,0 +1,160 @@
+import { DrivineError } from '@/DrivineError';
+import { Expression } from '@/cypher/ast/Expression';
+import { Pattern } from '@/cypher/ast/Pattern';
+import { Clause } from '@/cypher/ast/Query';
+
+/** The functions that aggregate the rows of a group. */
+const AGGREGATES = ['count', 'collect', 'sum', 'avg', 'min', 'max'];
+
+/** A string as a SQL literal. */
+export function literal(text: string): string {
+    return `'${text.replace(/'/g, "''")}'`;
+}
+
+/** `text`, each line indented a step. */
+export function indent(text: string): string {
+    return text
+        .split('\n')
+        .map((it) => `    ${it}`)
+        .join('\n');
+}
+
+/** Cypher the compiler does not take: refused by name, so the caller is told what, and not that the SQL failed. */
+export function unsupported(construct: string): never {
+    throw new DrivineError(`${construct} is Cypher, and is not compiled to SQL yet.`);
+}
+
+/** Whether `clause` writes, which makes its statement a procedure. */
+export function writes(clause: Clause): boolean {
+    switch (clause.kind) {
+        case 'Create':
+        case 'Merge':
+        case 'Set':
+        case 'Remove':
+        case 'Delete':
+        case 'Foreach':
+            return true;
+        case 'Call':
+            return [...clause.query.clauses, ...clause.query.unions.flatMap((it) => it.clauses)].some(writes);
+        default:
+            return false;
+    }
+}
+
+export function isAggregate(expression: Expression): boolean {
+    return (
+        expression.kind === 'CountStar' ||
+        (expression.kind === 'Function' && AGGREGATES.includes(expression.name.toLowerCase()))
+    );
+}
+
+/** Whether `expression` holds an expression `test` holds of, outside a nested query of its own. */
+export function contains(expression: Expression, test: (expression: Expression) => boolean): boolean {
+    return test(expression) || children(expression).some((it) => contains(it, test));
+}
+
+/** The variables `expression` names outside its aggregates: what an aggregating projection is grouped by. */
+export function variablesOutsideAggregates(expression: Expression): Set<string> {
+    if (isAggregate(expression)) {
+        return new Set();
+    }
+    if (expression.kind === 'Variable') {
+        return new Set([expression.name]);
+    }
+    const inner = children(expression).flatMap((it) => [...variablesOutsideAggregates(it)]);
+    return new Set(expression.kind === 'MapProjection' ? [expression.variable, ...inner] : inner);
+}
+
+/**
+ * Every variable `expression` names, its nested queries' and comprehensions' among them: a name a comprehension binds
+ * of its own may be among them too, which costs no more than a variable read that is not needed.
+ */
+export function variablesIn(expression: Expression): Set<string> {
+    const of = (...expressions: (Expression | undefined)[]): string[] =>
+        expressions.flatMap((it) => (it ? [...variablesIn(it)] : []));
+    switch (expression.kind) {
+        case 'Variable':
+            return new Set([expression.name]);
+        case 'MapProjection':
+            return new Set([
+                expression.variable,
+                ...expression.elements.flatMap((it) => (it.kind === 'Variable' ? [it.name] : [])),
+                ...of(...children(expression))
+            ]);
+        case 'ListComprehension':
+            return new Set(of(expression.list, expression.where, expression.projection));
+        case 'Quantifier':
+            return new Set(of(expression.list, expression.where));
+        case 'Reduce':
+            return new Set(of(expression.initial, expression.list, expression.expression));
+        case 'PatternComprehension':
+            return new Set([...variablesOfPattern(expression.pattern), ...of(expression.where, expression.projection)]);
+        case 'PatternPredicate':
+            return variablesOfPattern(expression.pattern);
+        case 'Exists':
+            return new Set([
+                ...expression.patterns.flatMap((it) => [...variablesOfPattern(it)]),
+                ...of(expression.where)
+            ]);
+        default:
+            return new Set(of(...children(expression)));
+    }
+}
+
+/** Every parameter `expression` names, in any expression it holds. */
+export function parametersIn(expression: Expression): Set<string> {
+    const of = (...expressions: (Expression | undefined)[]): string[] =>
+        expressions.flatMap((it) => (it ? [...parametersIn(it)] : []));
+    switch (expression.kind) {
+        case 'Parameter':
+            return new Set([expression.name]);
+        case 'ListComprehension':
+            return new Set(of(expression.list, expression.where, expression.projection));
+        case 'Quantifier':
+            return new Set(of(expression.list, expression.where));
+        case 'Reduce':
+            return new Set(of(expression.initial, expression.list, expression.expression));
+        case 'PatternComprehension':
+            return new Set(of(expression.where, expression.projection));
+        default:
+            return new Set(of(...children(expression)));
+    }
+}
+
+/** Every variable `pattern` names, of its parts or in their properties. */
+export function variablesOfPattern(pattern: Pattern): Set<string> {
+    return new Set(
+        [...pattern.nodes, ...pattern.relationships].flatMap((part) => [
+            ...(part.variable ? [part.variable] : []),
+            ...(part.properties ? [...variablesIn(part.properties)] : [])
+        ])
+    );
+}
+
+/** The expressions an expression of each kind holds that are read in its own scope: none, for a kind not here. */
+const CHILDREN: { [K in Expression['kind']]?: (expression: Extract<Expression, { kind: K }>) => Expression[] } = {
+    Property: (it) => [it.subject],
+    HasLabels: (it) => [it.subject],
+    ListLiteral: (it) => it.items,
+    MapLiteral: (it) => it.entries.map(([, value]) => value),
+    MapProjection: (it) => it.elements.flatMap((element) => (element.kind === 'Entry' ? [element.value] : [])),
+    Binary: (it) => [it.left, it.right],
+    Unary: (it) => [it.operand],
+    Index: (it) => [it.subject, it.index],
+    Slice: (it) => present(it.subject, it.from, it.to),
+    Function: (it) => it.arguments,
+    Case: (it) => [...present(it.subject, it.otherwise), ...it.alternatives.flatMap(([key, value]) => [key, value])],
+    ListComprehension: (it) => [it.list],
+    Quantifier: (it) => [it.list],
+    Reduce: (it) => [it.initial, it.list]
+};
+
+/** The expressions `expression` holds that are read in its own scope. */
+export function children(expression: Expression): Expression[] {
+    const of = CHILDREN[expression.kind] as ((expression: Expression) => Expression[]) | undefined;
+    return of ? of(expression) : [];
+}
+
+function present(...expressions: (Expression | undefined)[]): Expression[] {
+    return expressions.filter((it): it is Expression => it !== undefined);
+}
