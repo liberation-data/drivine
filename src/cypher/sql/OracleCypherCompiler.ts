@@ -55,7 +55,7 @@ function kind(json: string): string {
  * what the node walked from meets of its own, and carries the node it started from.
  */
 export class OracleCypherCompiler extends SqlCypherCompiler {
-    readonly temporalSql: TemporalSql = new OracleTemporalSql(this.sharedList);
+    readonly temporalSql: TemporalSql = new OracleTemporalSql(this.sharedList, () => this.procedural);
     readonly noIds = "','";
     /** `ROW_NUMBER()` takes an order of its own; `ROWNUM` counts the rows as the query gives them. */
     readonly rowNumber = 'ROWNUM';
@@ -479,11 +479,16 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `SELECT /*+ NO_MERGE */ * FROM (\n${indent(query)}\n)`;
     }
 
-    /** Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. */
+    /**
+     * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
+     * matches, as `=~` asks: it starts at `\A` and ends at `\z`, the text's start and end, which `(?m)` leaves as they are,
+     * and Oracle's `$` also matches before a line break that ends the text. Under `(?m)`, Oracle's own `^` and `$` match
+     * at a line break only where nothing in the pattern reads past it: `x$\n^ab` matches no text.
+     */
     matches(text: string, pattern: string): string {
         return this.shared([pattern], ([p]) => {
             const flags = `REGEXP_SUBSTR(${p}, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)`;
-            return `REGEXP_LIKE(${text}, '^(' || REGEXP_REPLACE(${p}, '^\\(\\?[a-z]+\\)', '') || ')$', NVL(REPLACE(${flags}, 's', 'n'), 'c'))`;
+            return `REGEXP_LIKE(${text}, '\\A(' || REGEXP_REPLACE(${p}, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE(${flags}, 's', 'n'), 'c'))`;
         });
     }
 
@@ -537,8 +542,11 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `    ${FOUND} BOOLEAN;`,
             `    ${DOOMED} JSON;`,
             `    ${CURSOR} SYS_REFCURSOR;`,
+            `    ${OracleTemporalSql.NOW} TIMESTAMP;`,
             ...saved.flat(),
             'BEGIN',
+            // The clock is read once, by a query: see OracleTemporalSql's now.
+            `    SELECT ${OracleTemporalSql.CLOCK} INTO ${OracleTemporalSql.NOW} FROM DUAL;`,
             indent(body.join('\n')),
             'END;'
         ].join('\n');

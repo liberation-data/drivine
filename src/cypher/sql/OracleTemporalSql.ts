@@ -1,5 +1,5 @@
 import { Temporal } from '@/cypher/sql/Temporal';
-import { TemporalSql } from '@/cypher/sql/TemporalSql';
+import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 
 const FORMATS: Record<string, string> = {
     year: 'YYYY',
@@ -18,8 +18,25 @@ const FORMATS: Record<string, string> = {
  * the day of the month, so months are added and counted from the first of the month.
  */
 export class OracleTemporalSql extends TemporalSql {
+    /** The clock as the query that reads it starts, in UTC. */
+    static readonly CLOCK = 'CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS TIMESTAMP)';
+
+    /** The variable a block reads {@link CLOCK} into as it starts. */
+    static readonly NOW = 'cy_now';
+
+    constructor(
+        shared: Shared,
+        private readonly procedural: () => boolean
+    ) {
+        super(shared);
+    }
+
+    /**
+     * The clock as a query starts. A block reads it once, into its variable {@link NOW}, where each statement of the
+     * block would read it as that statement starts, and a statement's clock is one in Cypher.
+     */
     get now(): string {
-        return 'CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS TIMESTAMP)';
+        return this.procedural() ? OracleTemporalSql.NOW : OracleTemporalSql.CLOCK;
     }
 
     local(text: string, kind: Temporal): string {

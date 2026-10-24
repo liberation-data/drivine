@@ -395,6 +395,22 @@ cases:
       - note: A dot matches no line break, as Java's does, unless the pattern opens with (?s).
         cypher: "RETURN ['a\\nb' =~ 'a.b', 'a\\nb' =~ '(?s)a.b']"
         rows: [[false, true]]
+      - note: The whole text matches, a line break that ends it included, though Java's $ matches before one.
+        cypher: "RETURN ['ab\\n' =~ 'ab', 'ab\\n' =~ 'ab\\n', 'ab\\n' =~ 'ab$']"
+        rows: [[false, true, false]]
+      - note: (?m) lets ^ and $ in the pattern match at a line break, and the whole text must still match.
+        cypher: "RETURN ['x\\nab' =~ '(?m)ab', 'ab\\nx' =~ '(?m)ab', 'x\\nab' =~ 'x$\\n^ab', 'x\\nab' =~ '(?m).*ab']"
+        rows: [[false, false, false, false]]
+      - note: Oracle's ^ and $ match at a line break only where nothing in the pattern reads past it, so a pattern that does is left out there.
+        except: [oracle]
+        cypher: "RETURN 'x\\nab' =~ '(?m)x$\\n^ab'"
+        rows: [true]
+      - note: (?s) and (?m) together let a dot match a line break and ^ and $ match at one, in either order.
+        cypher: "RETURN ['a\\nb' =~ '(?sm)a.b', 'a\\nb' =~ '(?ms)a.b', 'a\\nb' =~ '(?si)A.B']"
+        rows: [[true, true, true]]
+      - except: [oracle]
+        cypher: "RETURN 'a\\nb' =~ '(?ims)A$.^B'"
+        rows: [true]
       - cypher: "MATCH (p:Person) WHERE p.name =~ $pattern RETURN p.name ORDER BY p.name"
         parameters: {pattern: "(?i)[ck].*"}
         rows: ["Carrie", "Keanu"]
@@ -456,6 +472,12 @@ cases:
         rows: [["Carrie", null], ["Hugo", null], ["Keanu", "Carrie"], ["Laurence", "Keanu"]]
       - cypher: "CALL { MATCH (m:Movie) RETURN m ORDER BY m.released DESC LIMIT 1 } RETURN m.title"
         rows: ["The Matrix Reloaded"]
+      - note: A CALL that finds no path returns null for its nodes, its relationships and the node at its end, not a list of null.
+        cypher: |
+          MATCH (k:Person {name: 'Keanu'})
+          CALL (k) { OPTIONAL MATCH p = (k)-[rs:NOPE*]->(x) RETURN nodes(p) AS ns, rs, relationships(p) AS r1, x }
+          RETURN [ns, rs, r1, x, ns IS NULL, rs IS NULL, size(rs), labels(x)]
+        rows: [[null, null, null, null, true, true, null, null]]
 
   - name: "UNION inside subqueries"
     description: "A UNION works inside CALL, COUNT and EXISTS, evaluated per row."
