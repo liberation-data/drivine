@@ -46,7 +46,7 @@ export function canonicalTemporal(text: string, kind: Temporal): string | undefi
     const written = from.zoned ? new RegExp(Temporal.OFFSET).exec(text)![0] : undefined;
     const local = written !== undefined ? text.substring(0, text.length - written.length) : text;
     const offset = written?.replace(/^[+-]00:?00$/, 'Z').replace(/^([+-][0-9]{2})([0-9]{2})$/, '$1:$2');
-    return textOf(parsed(text, local, from), kind, kind.zoned ? offset ?? 'Z' : '');
+    return textOf(parsed(local, from), kind, kind.zoned ? offset ?? 'Z' : '');
 }
 
 /** The text of `kind` the wall clock `clock` reads, with `zone`, as the store's SQL writes one. */
@@ -68,8 +68,11 @@ function textOf(clock: Clock, kind: Temporal, zone: string): string {
     return `${time}${zone}`;
 }
 
-/** The wall clock the text `local`, `text` without its offset, reads as `from`: a date at its midnight, a time on 1970-01-01. */
-function parsed(text: string, local: string, from: Temporal): Clock {
+/**
+ * The wall clock the text `local`, a text without its offset, reads as `from`: a date at its midnight, a time on
+ * 1970-01-01. What is wrong with it is found in the order `java.time` looks, and said as it says it, of `local`.
+ */
+function parsed(local: string, from: Temporal): Clock {
     const [datePart, timePart] =
         from === Temporal.DATE
             ? [local, undefined]
@@ -77,34 +80,50 @@ function parsed(text: string, local: string, from: Temporal): Clock {
             ? local.split('T')
             : ['1970-01-01', local];
     const [year, month, day] = datePart.split('-').map(Number);
-    checked(text, 'MonthOfYear', month, 1, 12);
-    checked(text, 'DayOfMonth', day, 1, 31);
+    checked(local, 'MonthOfYear', month, 1, 12);
+    checked(local, 'DayOfMonth', day, 1, 31, '1 - 28/31');
     if (day > daysIn(year, month)) {
-        refuse(text, `Invalid date '${MONTHS[month - 1]} ${day}'`);
+        refuse(
+            local,
+            day === 29
+                ? `: Invalid date 'February 29' as '${year}' is not a leap year`
+                : `: Invalid date '${MONTHS[month - 1]} ${day}'`
+        );
     }
     const clock: Clock = { year, month, day, hour: 0, minute: 0, second: 0, micros: 0 };
     if (timePart === undefined) {
         return clock;
     }
     const [hms, digits = ''] = timePart.split('.');
-    const [hour, minute, second = 0] = hms.split(':').map(Number);
-    checked(text, 'HourOfDay', hour, 0, 23);
-    checked(text, 'MinuteOfHour', minute, 0, 59);
-    checked(text, 'SecondOfMinute', second, 0, 59);
     if (digits.length > 9) {
-        refuse(text, 'more than nine digits of a fraction of a second');
+        // java.time reads nine digits of a fraction, and finds the rest left over.
+        refuse(local, `, unparsed text found at index ${local.indexOf('.') + 10}`);
     }
+    const [hour, minute, second = 0] = hms.split(':').map(Number);
+    checked(local, 'MinuteOfHour', minute, 0, 59);
+    checked(local, 'HourOfDay', hour, 0, 23);
+    checked(local, 'SecondOfMinute', second, 0, 59);
     return { ...clock, hour, minute, second, micros: Number(digits.padEnd(9, '0').substring(0, 6) || '0') };
 }
 
-function checked(text: string, field: string, value: number, min: number, max: number): void {
+/** Refuses `text` where the field's `value` is outside `min` to `max`, which `java.time` writes as `range`. */
+function checked(
+    text: string,
+    field: string,
+    value: number,
+    min: number,
+    max: number,
+    range: string = `${min} - ${max}`
+): void {
     if (value < min || value > max) {
-        refuse(text, `Invalid value for ${field} (valid values ${min} - ${max}): ${value}`);
+        refuse(text, `: Invalid value for ${field} (valid values ${range}): ${value}`);
     }
 }
 
+/** Refuses `text`, as `java.time` does, with `why` after it: a text past 64 characters is cut short there. */
 function refuse(text: string, why: string): never {
-    throw new RangeError(`Text '${text}' could not be parsed: ${why}`);
+    const shown = text.length > 64 ? `${text.substring(0, 64)}...` : text;
+    throw new RangeError(`Text '${shown}' could not be parsed${why}`);
 }
 
 function daysIn(year: number, month: number): number {

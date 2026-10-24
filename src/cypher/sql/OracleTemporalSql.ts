@@ -113,7 +113,8 @@ export class OracleTemporalSql extends TemporalSql {
     }
 
     truncate(unit: string, timestamp: string): string | undefined {
-        const format = FORMATS[unit];
+        // Its own units alone: `constructor` is no unit.
+        const format = Object.prototype.hasOwnProperty.call(FORMATS, unit) ? FORMATS[unit] : undefined;
         if (format) {
             return `CAST(TRUNC(CAST(${timestamp} AS DATE), '${format}') AS TIMESTAMP)`;
         }

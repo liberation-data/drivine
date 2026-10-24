@@ -84,7 +84,8 @@ export const Temporal = {
             datetime: DATE_TIME,
             duration: DURATION
         };
-        return kinds[name];
+        // Its own names alone: `constructor` is no function.
+        return Object.prototype.hasOwnProperty.call(kinds, name) ? kinds[name] : undefined;
     },
 
     /** The kind a parameter bound to `value` is, as Drivine writes such a value: a `Date` is a moment. */

@@ -1,6 +1,7 @@
 import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { canonicalTemporal } from '@/cypher/sql/TemporalText';
+import { literal } from '@/cypher/sql/CypherSyntax';
 
 /** A duration's parts, SQL numbers each: whole months, whole days, and seconds with their fraction. */
 interface Parts {
@@ -553,8 +554,4 @@ export class Temporals {
 /** A number as Neo4j writes one in a duration: no zeros after the point, nor the point where there is no fraction. */
 function durationNumber(value: string): string {
     return `RTRIM(to_char(${value}, 'FM9999999999990.999999999'), '.')`;
-}
-
-function literal(text: string): string {
-    return `'${text.replace(/'/g, "''")}'`;
 }

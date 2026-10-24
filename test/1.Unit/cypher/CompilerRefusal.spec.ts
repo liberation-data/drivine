@@ -37,6 +37,23 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('a function named as a property every JavaScript object has, as any function it has no SQL for', () => {
+        // Not in the spec: a name such as `constructor` is no function in drivine4j's compiler either.
+        compilers.forEach(([, compiler]) => {
+            expect(() => compiler().compile('RETURN constructor(1)')).toThrow(
+                'The function constructor() is Cypher, and is not compiled to SQL yet.'
+            );
+        });
+    });
+
+    it('a truncation to a unit named as a property every JavaScript object has, as any unit it has no SQL for', () => {
+        compilers.forEach(([, compiler]) => {
+            expect(() => compiler().compile("RETURN date.truncate('constructor', date('2024-03-15'))")).toThrow(
+                'date.truncate() truncates to year, quarter, month, week, day, hour, minute, second or millisecond, not constructor.'
+            );
+        });
+    });
+
     it('a statement that is not Cypher, with where it goes wrong', () => {
         expect(() => new PostgresCypherCompiler('g').compile('MATCH (n RETURN n')).toThrow(
             "The statement is not Cypher, at line 1, column 10: no viable alternative at input 'MATCH (n RETURN'"

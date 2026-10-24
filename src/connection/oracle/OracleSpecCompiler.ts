@@ -1,3 +1,4 @@
+import * as oracledb from 'oracledb';
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
@@ -55,12 +56,22 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
     }
 }
 
+/** Past this many bytes a text is bound as a CLOB: the longest a PL/SQL `VARCHAR2` holds. */
+const MAX_STRING = 32_767;
+
+/**
+ * A value as Oracle binds it: a list or a map as its JSON text, and a text a `VARCHAR2` can't hold, measured in bytes,
+ * as a CLOB, as drivine4j binds one (a Cypher statement's parameters are one JSON text).
+ */
 function bindable(value: any): any {
     if (value === undefined) {
         return null;
     }
     if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Buffer.isBuffer(value)) {
-        return JSON.stringify(value);
+        return bindable(JSON.stringify(value));
+    }
+    if (typeof value === 'string' && value.length * 3 > MAX_STRING && Buffer.byteLength(value, 'utf8') > MAX_STRING) {
+        return { type: oracledb.CLOB, val: value };
     }
     return value;
 }

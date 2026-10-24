@@ -1584,6 +1584,9 @@ const names = await pm.query<string>(
 ```
 
 - A statement must say it is Cypher: a statement of no language is SQL on these stores.
+- The graph's tables must be there. Oracle makes them on its first connection; on Postgres an object manager makes them,
+  so a persistence manager that runs Cypher on a graph no object manager has worked on runs
+  `new QuerySpecification(new PostgresGraph(graph).ensuring)` first.
 - A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties.
 - A statement that writes (`CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`, `FOREACH`) runs as one statement, applied whole
   or not at all: an anonymous PL/SQL block on Oracle, and a function of the session's own (`pg_temp`) on Postgres.

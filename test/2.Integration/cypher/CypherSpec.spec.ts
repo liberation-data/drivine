@@ -11,7 +11,7 @@ import {
     TransactionContextHolder
 } from '@liberation-data/drivine';
 import { DrivineTestContainers, Environment } from '@/testing';
-import { check, CypherSpec, loadSpec, runsOn, skipped, trimIndent, valuesFor } from '../../cypher/CypherSpec';
+import { check, loadSpec, runsOn, skipped, trimIndent, valuesFor } from '../../cypher/CypherSpec';
 
 jest.setTimeout(120_000);
 
@@ -19,11 +19,12 @@ jest.setTimeout(120_000);
 const GRAPH = 'cypher';
 
 /**
- * The Neo4j the spec runs on, as drivine4j runs it on a Neo4j of its own (`neo4j:latest` there): the spec's rows are
- * Neo4j 2026's, and Neo4j 5, the other suites', refuses two of its statements (a date added to a text, and an order by
- * an aggregate of a variable no item names). `CYPHER_SPEC_NEO4J_IMAGE` picks another.
+ * The Neo4j the spec runs on, `neo4j:latest` as in drivine4j, so a new Neo4j that gives other rows shows up at once.
+ * It is a container of its own: the spec's statements match labels other suites write (`Person`, `Movie`), and Neo4j
+ * 5, the other suites', refuses two of them (a date added to a text, and an order by an aggregate of a variable no
+ * item names). `CYPHER_SPEC_NEO4J_IMAGE` picks another.
  */
-const SPEC_NEO4J_IMAGE = process.env.CYPHER_SPEC_NEO4J_IMAGE ?? 'neo4j:2026.10.1-community';
+const SPEC_NEO4J_IMAGE = process.env.CYPHER_SPEC_NEO4J_IMAGE ?? 'neo4j:latest';
 
 /** The container of the spec's Neo4j, where it started one. */
 let neo4jContainer: DrivineTestContainers | undefined;
@@ -133,10 +134,14 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             )
         );
 
-    /** Removes the graph the spec wrote: the nodes of its label on a graph engine, the whole graph on a SQL store. */
-    const clear = async (spec: CypherSpec): Promise<void> => {
+    /**
+     * Empties the whole graph, as the spec's README asks, and not just the nodes of the file's label: its statements
+     * match plain labels (`MATCH (p:Person)`), so a node anything else left would be among their rows. On a SQL store
+     * a node's edges go with it.
+     */
+    const clear = async (): Promise<void> => {
         if (store.type === DatabaseType.NEO4J) {
-            await pm.execute(new QuerySpecification(`MATCH (n:${spec.label}) DETACH DELETE n`));
+            await pm.execute(new QuerySpecification('MATCH (n) DETACH DELETE n'));
         } else {
             await pm.execute(new QuerySpecification(`DELETE FROM ${GRAPH}_node`));
         }
@@ -145,7 +150,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     describe.each(['queries.yaml', 'writes.yaml', 'temporal.yaml'])('%s', (file) => {
         const spec = loadSpec(file);
         it.each(spec.cases.map((it) => [it.name, it] as const))('%s', async (__, cypherCase) => {
-            await clear(spec);
+            await clear();
             if (spec.graph) {
                 await query(spec.graph);
             }
@@ -239,6 +244,14 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ]);
             await query(`MATCH (n:CyWrite {id: 1}) REMOVE n.${stamp}`);
             expect(await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`)).toEqual([null]);
+        });
+
+        it('a text longer than a VARCHAR2 holds is bound whole, to a statement that reads and to one that writes', async () => {
+            // 40,000 bytes in UTF-8, past the 32,767 a PL/SQL VARCHAR2 holds: drivine4j binds such a text as a CLOB.
+            const text = 'é'.repeat(20_000);
+            await query('CREATE (:CyWrite {id: 1, text: $text})', { text });
+            expect(await query('MATCH (n:CyWrite {id: 1}) RETURN n.text')).toEqual([text]);
+            expect(await query('RETURN $text', { text })).toEqual([text]);
         });
 
         it('a write in a transaction rolled back leaves nothing, and runs again after', async () => {
