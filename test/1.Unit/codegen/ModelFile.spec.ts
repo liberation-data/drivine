@@ -929,12 +929,12 @@ describe('Reading constants and types', () => {
         });
         const warnings: string[] = [];
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
-        const loadsAsObject = (name: string, field: string): string =>
+        const loadsAsObject = (name: string, field: string, kind: string, empty: string): string =>
             `Drivine model file: src/A#${name}: @EmptyWhenAbsent ${name}.${field} is a list TypeScript records as ` +
-            "Object, so a load gives {} for it, not []. Name the kind: @EmptyWhenAbsent({ kind: 'array' }).";
+            `Object, so a load gives {} for it, not ${empty}. Name the kind: @EmptyWhenAbsent({ kind: '${kind}' }).`;
         expect(warnings).toEqual([
-            loadsAsObject('B', 'tags'),
-            loadsAsObject('C', 'seen'),
+            loadsAsObject('B', 'tags', 'array', '[]'),
+            loadsAsObject('C', 'seen', 'set', 'an empty Set'),
             "Drivine model file: src/A#D: @EmptyWhenAbsent D.tags names the kind 'set', but the field is declared a " +
                 "Array, which loads as 'array'.",
             "Drivine model file: src/A#E: Can't read the kind of @EmptyWhenAbsent E.tags. Name it with 'array', 'set' " +

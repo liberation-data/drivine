@@ -544,10 +544,13 @@ export class ModelReader {
             );
         }
         if (type === 'list' && (named ?? read ?? 'object') === 'object') {
+            // A Set loads as an empty Set where its kind is named, and an array or a tuple as [].
+            const set = ['Set', 'ReadonlySet'].includes(this.nonNull(prop.type).getSymbol()?.getName() ?? '');
+            const [kind, empty] = set ? ['set', 'an empty Set'] : ['array', '[]'];
             this.problems.push(
                 `${this.id(this.ts.findAncestor(prop.decorated, this.ts.isClassDeclaration)!)}: @EmptyWhenAbsent ` +
-                    `${this.field(prop)} is a list TypeScript records as Object, so a load gives {} for it, not []. ` +
-                    `Name the kind: @EmptyWhenAbsent({ kind: 'array' }).`
+                    `${this.field(prop)} is a list TypeScript records as Object, so a load gives {} for it, not ` +
+                    `${empty}. Name the kind: @EmptyWhenAbsent({ kind: '${kind}' }).`
             );
         }
     }
