@@ -40,7 +40,9 @@ export class ConstraintManager {
      * to refuse a constraint the data breaks. FalkorDB doesn't refuse one: it builds it in the background and marks the
      * build FAILED. The failed constraint is then dropped, and the result is a VIOLATION when the data shows a key held
      * more than once, with up to `sampleSize` of them (none at 0, though the data is still read to confirm it). A build
-     * that fails with no key held more than once throws.
+     * that fails with no key held more than once throws. A constraint FalkorDB already lists as UNDER CONSTRUCTION, from
+     * another process or an earlier run, is waited on as one made here is: ALREADY_MATCHING once built, and dropped and
+     * made again once its build fails, as is one already marked FAILED.
      *
      * @param replaceBlockingIndex drop a plain index in the way of the constraint and make the constraint, whose own
      * index takes its place, rather than returning BLOCKED_BY_INDEX. The data is read first: a key held more than once
@@ -53,7 +55,7 @@ export class ConstraintManager {
         sampleSize: number = VIOLATION_SAMPLE,
         replaceBlockingIndex: boolean = false
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        if (await this.exists(spec)) {
+        if (await this.built(spec)) {
             return { status: 'ALREADY_MATCHING', spec };
         }
         const sample = sampleSize > 0 ? await this.conflicts(spec, sampleSize) : [];
@@ -103,6 +105,25 @@ export class ConstraintManager {
         }
     }
 
+    /**
+     * Whether the constraint is there and built. One still being built, by another process or an earlier run, may yet
+     * fail: its build is waited on, as for one made here. FalkorDB keeps listing a constraint whose build failed, though
+     * it enforces nothing. It isn't the constraint: it is dropped, to be made again, which gives a VIOLATION when the
+     * data still holds a key more than once. One dropped meanwhile is made again too.
+     */
+    private async built(spec: UniquenessConstraintSpec): Promise<boolean> {
+        const found = await this.awaitBuild(spec, false);
+        if (found === 'FAILED') {
+            await this.dropFailedBuild(spec);
+            this.changed();
+            this.logger.warn(
+                `Dropped the uniqueness constraint on ${spec.label}(${spec.properties.join(', ')}), whose build ` +
+                    `${this.grammar.engine} had marked FAILED, to make it again`
+            );
+        }
+        return found === 'BUILT';
+    }
+
     private async exists(spec: UniquenessConstraintSpec): Promise<boolean> {
         return (await this.list()).some((it) => it.label === spec.label && same(it.properties, spec.properties));
     }
@@ -149,6 +170,21 @@ export class ConstraintManager {
         }
     }
 
+    /**
+     * Drops the constraint, whose build failed. Another process waiting on the same build sees it fail too, and may drop
+     * it first: FalkorDB then refuses the drop, as there is no such constraint, which is no error once the failed build
+     * is no longer listed.
+     */
+    private async dropFailedBuild(spec: UniquenessConstraintSpec): Promise<void> {
+        try {
+            await this.dropUnique(spec);
+        } catch (e) {
+            if (await this.failed(spec)) {
+                throw e;
+            }
+        }
+    }
+
     private async create(spec: UniquenessConstraintSpec): Promise<void> {
         for (const statement of this.grammar.createUnique(spec)) {
             await this.executor.run(statement);
@@ -173,19 +209,35 @@ export class ConstraintManager {
         spec: UniquenessConstraintSpec,
         sampleSize: number
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
+        if ((await this.awaitBuild(spec, true)) === 'FAILED') {
+            return this.buildFailed(spec, sampleSize);
+        }
+        this.changed();
+        return { status: 'CREATED', spec };
+    }
+
+    /**
+     * Reads the constraint until its build has ended: BUILT, or FAILED where the engine builds it in the background and
+     * the build failed. FalkorDB lists the constraint UNDER CONSTRUCTION as it builds it, and may yet mark it FAILED.
+     * While it isn't listed, reading goes on when `untilListed` (one just made, not yet listed), and otherwise ends with
+     * undefined (none there, or one dropped meanwhile).
+     */
+    private async awaitBuild(
+        spec: UniquenessConstraintSpec,
+        untilListed: boolean
+    ): Promise<'BUILT' | 'FAILED' | undefined> {
         for (let attempt = 0; attempt < 50; attempt++) {
             // One reading per attempt, so that a build marked FAILED between two readings isn't taken for built.
             const rows = new Map<string, Promise<any[]>>();
             if (await this.listedBy(this.grammar.listFailedUniques, spec, rows)) {
-                return this.buildFailed(spec, sampleSize);
+                return 'FAILED';
             }
-            // FalkorDB lists the constraint UNDER CONSTRUCTION as it builds it, and may yet mark it FAILED.
-            if (
-                (await this.listedBy(this.grammar.listUniques, spec, rows)) &&
-                !(await this.listedBy(this.grammar.listBuildingUniques, spec, rows))
-            ) {
-                this.changed();
-                return { status: 'CREATED', spec };
+            if (await this.listedBy(this.grammar.listUniques, spec, rows)) {
+                if (!(await this.listedBy(this.grammar.listBuildingUniques, spec, rows))) {
+                    return 'BUILT';
+                }
+            } else if (!untilListed) {
+                return undefined;
             }
             await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
         }
@@ -204,7 +256,7 @@ export class ConstraintManager {
         spec: UniquenessConstraintSpec,
         sampleSize: number
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        await this.dropUnique(spec);
+        await this.dropFailedBuild(spec);
         const failed =
             `${this.grammar.engine} could not build the uniqueness constraint on ` +
             `${spec.label}(${spec.properties.join(', ')})`;
