@@ -178,7 +178,8 @@ export abstract class SqlCypherCompiler {
                 (it) => this.nullIfJsonNull(this.propertyOf(Procedure.PARAMS, it)),
                 (it) => this.number(this.propertyOf(Procedure.PARAMS, it)),
                 true,
-                (it) => this.parameterText(it)
+                (it) => this.parameterText(it),
+                this.parameterPath && ((name, keys) => this.parameterPath!(Procedure.PARAMS, [name, ...keys]))
             )
         );
         const call = this.procedure(writer.procedure(query));
@@ -400,7 +401,8 @@ export abstract class SqlCypherCompiler {
             (it) => this.parameterJson(it),
             (it) => this.parameterCount(it),
             false,
-            (it) => this.parameterText(it)
+            (it) => this.parameterText(it),
+            this.parameterPath?.bind(this)
         );
     }
 
@@ -460,6 +462,13 @@ export abstract class SqlCypherCompiler {
 
     /** The parameter bound as `marker`, JSON text, as JSON. */
     abstract parameterJson(marker: string): string;
+
+    /**
+     * Where a store reads a value in a parameter that is a map, `$p.text`, straight from the JSON text bound as `marker`
+     * (in a procedure, from the parameters' object, with the parameter's name first among `keys`): the value at `keys`,
+     * as JSON. None where the store reads the parameter as JSON, then each key of it.
+     */
+    parameterPath?(marker: string, keys: string[]): string;
 
     /** The parameter bound as `marker`, a whole number, as one. */
     abstract parameterCount(marker: string): string;

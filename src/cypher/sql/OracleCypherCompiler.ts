@@ -28,12 +28,23 @@ function quoted(text: string): string {
     return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/** The path of the property `key`, as a SQL literal: a key with a dot in it is one key. */
-function path(key: string): string {
-    if (key.length === 0) {
-        throw new DrivineError('A property name is empty: an empty name is no property a statement can read.');
-    }
-    return literal(`$.${PLAIN_KEY.test(key) && !JSON_WORDS.includes(key) ? key : quoted(key)}`);
+/**
+ * The path of the property `key`, as a SQL literal: a key with a dot in it is one key. With `more`, the property each
+ * of them leads to in turn, each of a map in the one before: `'$.p.text'`.
+ */
+function path(key: string, ...more: string[]): string {
+    return literal(
+        `$${[key, ...more]
+            .map((it) => {
+                if (it.length === 0) {
+                    throw new DrivineError(
+                        'A property name is empty: an empty name is no property a statement can read.'
+                    );
+                }
+                return `.${PLAIN_KEY.test(it) && !JSON_WORDS.includes(it) ? it : quoted(it)}`;
+            })
+            .join('')}`
+    );
 }
 
 /** The kind of the JSON `json` as Oracle names it, a floating-point number by its own name. */
@@ -77,6 +88,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     parameterJson(marker: string): string {
         return `JSON(${marker})`;
+    }
+
+    /**
+     * Read with one path from the text the parameter is bound as, and not from the parameter read as JSON first: Oracle
+     * crashed the session (ORA-07445 `ksmem_malloc`, ORA-00600) where a statement read a value from a parameter past
+     * 32 KB, taken as JSON, for each of two rows.
+     */
+    parameterPath(marker: string, keys: string[]): string {
+        return `JSON_QUERY(${marker}, ${path(keys[0], ...keys.slice(1))} RETURNING JSON)`;
     }
 
     parameterCount(marker: string): string {

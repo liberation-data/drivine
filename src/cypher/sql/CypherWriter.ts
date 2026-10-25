@@ -16,6 +16,7 @@ import {
     ListLiteral,
     MapProjection,
     PatternComprehension,
+    Property,
     Quantifier,
     Reduce,
     sameExpression,
@@ -266,7 +267,12 @@ export class CypherWriter {
             this.givenParameters?.get(it.name) ??
             json(this.parameters.json(it.name), { temporal: Temporal.ofValue(this.parameters.value(it.name)) }),
         Variable: (it, scope) => scope.get(it.name) ?? this.undefinedVariable(it.name),
-        Property: (it, scope) => this.property(this.expression(it.subject, scope), it.key),
+        Property: (it, scope) => {
+            const inParameter = this.inParameter(it);
+            return inParameter !== undefined
+                ? json(inParameter)
+                : this.property(this.expression(it.subject, scope), it.key);
+        },
         HasLabels: (it, scope) => {
             const subject = this.expression(it.subject, scope);
             if (subject.kind !== 'Node') {
@@ -2611,7 +2617,10 @@ export class CypherWriter {
         // An index written, or bound to a parameter, is known: a text is the property of that name, a number an item.
         const known = this.known(index.index);
         if (typeof known === 'string') {
-            return this.property(this.expression(index.subject, scope), known);
+            const inParameter = this.inParameter(index);
+            return inParameter !== undefined
+                ? json(inParameter)
+                : this.property(this.expression(index.subject, scope), known);
         }
         // An item of a list of nodes or relationships is the node or the relationship, so it is compared by its id; of one
         // collect gathers in this query, its properties, for a store reads no aggregate from a subquery. A pattern
@@ -2978,6 +2987,33 @@ export class CypherWriter {
             inner.where.push(this.condition(this.expression(where, inner.scope)));
         }
         return bool(`EXISTS (${['SELECT 1', ...inner.from(), ...optional(inner.whereClause())].join(' ')})`);
+    }
+
+    /**
+     * A value in a parameter that is a map, `$p.text`, `$p.a.b` or `$p['text']`, read at once from the text the parameter
+     * is bound as, where the store reads it so (see {@link Parameters.jsonAt}); undefined otherwise. Oracle crashed the
+     * session where a statement took a parameter past 32 KB as JSON, then the value from it, for each of two rows.
+     */
+    private inParameter(value: Property | Index): string | undefined {
+        const keys: string[] = [];
+        let subject: Expression = value;
+        for (;;) {
+            const key =
+                subject.kind === 'Property'
+                    ? subject.key
+                    : subject.kind === 'Index'
+                    ? this.known(subject.index)
+                    : undefined;
+            if (typeof key !== 'string') {
+                break;
+            }
+            keys.unshift(key);
+            subject = (subject as Property | Index).subject;
+        }
+        if (subject.kind !== 'Parameter' || this.givenParameters?.has(subject.name)) {
+            return undefined;
+        }
+        return this.parameters.jsonAt(subject.name, keys);
     }
 
     private property(subject: Value, key: string): Value {
