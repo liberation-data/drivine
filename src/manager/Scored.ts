@@ -32,7 +32,14 @@ export interface NearestOptions<T = any> {
 }
 
 export interface MatchingOptions<T = any> {
-    /** How many to return, at most: applied after the filter. */
+    /**
+     * How many to return, at most: applied after the filter. On Neo4j, Memgraph and FalkorDB it also bounds the hits
+     * the index yields, since every hit is held to scale the scores: the best `topK`, or `topK` times
+     * FULL_TEXT_FILTERED_OVER_FETCH (10) where a `where`, a view's required relationships or paths, or a label beyond
+     * the first (the index is over the first) filter them. A filter that passes fewer than one in ten of the best hits
+     * can then return fewer than `topK` while the index holds more that pass it. Memgraph's index is asked for no more
+     * than 1,000,000 hits, however large `topK` is.
+     */
     topK: number;
     /** The least relevance a hit may have, on the [0, 1] scale where the best hit is 1. */
     threshold?: number;

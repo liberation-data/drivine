@@ -58,6 +58,7 @@ export interface MatchingSearch {
     table?: string;
     where?: string;
     threshold?: boolean;
+    /** How many are returned, at most. On a graph engine, also what the hits the index yields are bounded by. */
     limit: number;
     depth?: Record<string, number>;
 }
@@ -209,7 +210,9 @@ export interface GraphBackend {
 
     /**
      * Loads the nodes matching `$_text` by the full-text index over properties, as fragments or views, each with its
-     * relevance scaled so the best hit is 1, most relevant first. Filters apply after the search; `limit` trims.
+     * relevance scaled so the best hit is 1, most relevant first. Filters apply after the search; `limit` trims. A
+     * graph engine also cuts the hits the index yields to `limit`, or ten times `limit` where a filter follows (see
+     * fullTextIndexLimit), before it scales them.
      */
     matching(target: TargetModel, search: MatchingSearch): GraphStatement;
 

@@ -595,6 +595,15 @@ The index is the fragment's `@FullTextIndex`: on a property for one field, or on
 `@FullTextIndex({ properties: ['title', 'body'] })`, for several. Name one with `property` when the fragment declares
 more than one. The text is the engine's full-text language (Lucene on Neo4j): escape user input yourself.
 
+**`topK` bounds the index too.** The scores are scaled over the hits the index yields, and each hit is held to do it,
+so on Neo4j, Memgraph and FalkorDB the index is asked for its best `topK` hits: a common word that matches most of a
+corpus costs no more than those. `threshold` keeps the best hits, so it changes nothing here. A `where`, like a view's
+required relationships and paths, or a label beyond the first (the index is over the first), is applied after the
+index yields: where any of them filters, the index is asked for
+`topK × FULL_TEXT_FILTERED_OVER_FETCH` (10) hits and the filter keeps the best `topK` of those. A filter that passes
+fewer than one in ten of the best hits can then return fewer than `topK` while the index holds more that pass it.
+Memgraph's index is asked for no more than 1,000,000 hits, however large `topK` is.
+
 ### Query DSL
 
 A query is a function of the class's **references**, `q`, which mirror its fields. The compiler checks each one, so a
