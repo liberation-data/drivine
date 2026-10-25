@@ -532,7 +532,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         ]);
         const sql = [
             'DECLARE',
-            `    ${PARAMS} JSON := JSON($${PARAMETERS_OBJECT});`,
+            // Text, read as JSON where each parameter is read (propertyOf): Oracle crashed the session where a block read
+            // a value past 32 KB more than once from a JSON variable (liberation-data/drivine#308).
+            `    ${PARAMS} CLOB := $${PARAMETERS_OBJECT};`,
             `    ${ROWS} JSON;`,
             `    ${OUT} JSON;`,
             `    ${ROW} JSON;`,
