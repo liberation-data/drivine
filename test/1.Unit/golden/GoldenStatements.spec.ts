@@ -111,6 +111,25 @@ function oracleStatements(): Record<string, string> {
             table: 'drivine_t_Personnamebio_4d5e6f'
         }).text,
         'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text,
+        // As loadNearest writes them: by a vector of 3, only embeddings and an index of that size (ORA-51808 otherwise).
+        'Person.nearest.sized': backend.nearest(person, {
+            label: 'Person',
+            property: 'embedding',
+            similarity: 'COSINE',
+            k: 5,
+            dimensions: 3
+        }).text,
+        'Person.nearest.filtered.sized': backend.nearest(person, {
+            label: 'Person',
+            property: 'embedding',
+            similarity: 'EUCLIDEAN',
+            where: SQL_WHERE,
+            threshold: true,
+            k: 20,
+            limit: 5,
+            dimensions: 3
+        }).text,
+        'Person.searchIndexTable.sized': backend.searchIndexTable('VECTOR', 'Person', ['embedding'], 3).text,
         ...indexedReads(backend, registry)
     };
 }

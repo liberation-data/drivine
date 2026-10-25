@@ -173,13 +173,30 @@ END;`);
         return this.deleting(root, this.rootWhere(target, where), tested);
     }
 
-    /** The table a search index was made over, recorded as drivine4j records it or as this library did before. */
-    searchIndexTable(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement {
+    /**
+     * The table a search index was made over, recorded as drivine4j records it or as this library did before. Given
+     * `dimensions`, only a vector index made for embeddings of that size: Oracle refuses to measure a vector against an
+     * index of another size (ORA-51808), so a search by it measures every node instead.
+     */
+    searchIndexTable(
+        kind: 'VECTOR' | 'FULLTEXT',
+        label: string,
+        properties: string[],
+        dimensions?: number
+    ): GraphStatement {
         const [recorded, earlier] = recordedAs(kind);
+        const sized = kind === 'VECTOR' && dimensions !== undefined;
         return new GraphStatement(
             `SELECT object_name AS "table" FROM ${this.graph.catalog} WHERE kind IN ($kind, $earlier) ` +
-                `AND label = $label AND properties = $properties AND object_name IS NOT NULL`,
-            { kind: recorded, earlier, label, properties: catalogProperties(properties) }
+                `AND label = $label AND properties = $properties AND object_name IS NOT NULL` +
+                (sized ? ` AND JSON_VALUE(details, '$.dimensions' RETURNING NUMBER) = $dimensions` : ''),
+            {
+                kind: recorded,
+                earlier,
+                label,
+                properties: catalogProperties(properties),
+                ...(sized ? { dimensions } : {})
+            }
         );
     }
 

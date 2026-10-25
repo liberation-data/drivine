@@ -171,3 +171,133 @@ describe.each(allStores())('loadNearest on $type', (engine) => {
         expect((await gom.load(Proposition, 'north'))!.stamp).toEqual(before);
     });
 });
+
+/** A document whose embedding has 4 dimensions, as the index made for it has, but for W's 3. */
+@NodeFragment({ labels: ['SizedTest'] })
+class SizedDoc {
+    @NodeId() id: string;
+    title?: string;
+    @VectorIndex({ dimensions: 4 }) embedding?: number[];
+}
+
+/** A document of a partition no index is made for, so a search partitioned by it measures every node, on a SQL store. */
+@NodeFragment({ labels: ['SizedTest', 'SizedCorpus'] })
+class PartitionedDoc extends SizedDoc {}
+
+@NodeFragment({ labels: ['SizedTest', 'SizedAuthor'] })
+class SizedAuthor {
+    @NodeId() id: string;
+}
+
+@GraphView()
+class SizedDocView {
+    @Root() doc: SizedDoc;
+    @GraphRelationship({ type: 'WRITTEN_BY', target: () => SizedAuthor, required: true }) authors: SizedAuthor[];
+}
+
+/** The vector searched by: A's own embedding, of the index's 4 dimensions. */
+const SIZED_QUERY = [1, 0, 0, 0];
+
+/** W's own embedding, of 3 dimensions. */
+const MIS_SIZED_QUERY = [1, 0, 0];
+
+/** Wide enough that every store, approximate or not, sees every node. */
+const SIZED_WIDE = 10;
+
+/**
+ * Each store with the index made for the documents, and each SQL store also without it, where it measures every node.
+ * Memgraph refuses to write an embedding of another size than its index's, so it has no such node to leave out.
+ */
+const sizedStores = allStores().flatMap((engine) =>
+    engine.type === DatabaseType.MEMGRAPH
+        ? []
+        : [
+              { ...engine, indexed: true },
+              ...(engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES
+                  ? [{ ...engine, indexed: false }]
+                  : [])
+          ]
+);
+
+/**
+ * W, whose embedding has 3 dimensions where the others and the index have 4, is left out of a search by a vector of 4
+ * on every store rather than failing it: Oracle refuses to measure two sizes against each other (ORA-51808). W has an
+ * author, so that a view leaves it out for its size and not for a missing relationship. W and A are in a partition, so
+ * that a search partitioned by it has one node of each size to measure. Ported from drivine4j's
+ * NearestAmongCrossEngineTest.
+ */
+describe.each(sizedStores)('loadNearest with an embedding of another size on $type, indexed: $indexed', (engine) => {
+    let pm: PersistenceManager;
+    let gom: StatelessGraphObjectManager;
+    const spec = vectorIndex('SizedTest', 'embedding', 4);
+    const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
+
+    const ids = (hits: { value: SizedDoc }[]): string[] => hits.map((it) => it.value.id);
+
+    beforeAll(async () => {
+        pm = persistenceManagerFor(engine);
+        gom = new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
+        await gom.indexes.drop(spec);
+        await clearLabels(pm, engine, 'SizedTest');
+        if (engine.indexed) {
+            await gom.indexes.ensure(spec);
+        }
+        const doc = (id: string, title: string, embedding: number[], type = SizedDoc): SizedDoc =>
+            Object.assign(new type(), { id, title, embedding });
+        const author = Object.assign(new SizedAuthor(), { id: 'au1' });
+        const written = (it: SizedDoc): SizedDocView =>
+            Object.assign(new SizedDocView(), { doc: it, authors: [author] });
+        await gom.saveAll([
+            written(doc('A', 'Alpha', [1, 0, 0, 0], PartitionedDoc)),
+            written(doc('B', 'Beta', [0.8, 0.6, 0, 0])),
+            written(doc('C', 'Gamma', [0.6, 0, 0.8, 0])),
+            written(doc('W', 'Wrong size', MIS_SIZED_QUERY, PartitionedDoc))
+        ]);
+        await gom.save(doc('D', 'Delta', [0, 0, 0, 1]));
+        if (engine.type === DatabaseType.NEO4J) {
+            await pm.execute(new QuerySpecification('CALL db.awaitIndexes(30)'));
+        }
+    });
+
+    afterAll(async () => {
+        await clearLabels(pm, engine, 'SizedTest');
+        await gom.indexes.drop(spec);
+        await closeGraphEngines();
+    });
+
+    it('should leave out a node whose embedding is of another size, plain, filtered or as a view', async () => {
+        const options = { topK: SIZED_WIDE, searchK: SIZED_WIDE };
+        expect(ids(await gom.loadNearest(SizedDoc, SIZED_QUERY, options))).toEqual(['A', 'B', 'C', 'D']);
+        const filtered = await gom.loadNearest(SizedDoc, SIZED_QUERY, {
+            ...options,
+            where: (q) => q.title.neq('Alpha')
+        });
+        expect(ids(filtered)).toEqual(['B', 'C', 'D']);
+        // W has an author, as A, B and C do; D has none, so a view leaves it out.
+        const viewed = await gom.loadNearest(SizedDocView, SIZED_QUERY, options);
+        expect(viewed.map((it) => it.value.doc.id)).toEqual(['A', 'B', 'C']);
+    });
+
+    it("should find only the nodes of a vector's size when the index is of another, or refuse it", async () => {
+        const search = gom.loadNearest(SizedDoc, MIS_SIZED_QUERY, { topK: SIZED_WIDE, searchK: SIZED_WIDE });
+        if (!sql) {
+            // A graph engine searches only through its index, which refuses a vector of another size.
+            await expect(search).rejects.toThrow();
+            return;
+        }
+        // A SQL store with an index of another size measures every node instead, as one with none does.
+        expect(ids(await search)).toEqual(['W']);
+    });
+
+    it('should leave out a node whose embedding is of another size from a search partitioned with no index', async () => {
+        if (!sql) {
+            // A graph engine searches a partition only through an index made for it.
+            return;
+        }
+        const found = await gom.loadNearest(SizedDoc, SIZED_QUERY, {
+            topK: SIZED_WIDE,
+            partitionLabel: 'SizedCorpus'
+        });
+        expect(ids(found)).toEqual(['A']);
+    });
+});
