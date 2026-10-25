@@ -14,6 +14,7 @@ import headingFont from '@fontsource/ubuntu/files/ubuntu-latin-700-normal.woff2?
 import { Image } from 'astro:assets';
 import ocean from '../assets/hero-ocean.jpg';
 import studioCanvas from '../assets/studio-canvas.png';
+import videoPoster from '../assets/video-poster.jpg';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 
@@ -29,6 +30,8 @@ const ts = `${base}ts/`;
 const py = `${base}py/`;
 const jvm = `${base}jvm/`;
 const image = (name: string) => `${base}images/${name}`;
+// The explainer on YouTube. The section shows once this is set.
+const VIDEO_ID = '';
 
 import { REPOS, formatStars, repoUrl, stars } from '../lib/github';
 const tsStars = await stars('ts');
@@ -186,6 +189,18 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .intro { padding: 96px 32px 72px; }
             .intro .wrap { max-width: 880px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
             .intro p:last-child { margin: 0; font-size: 19px; line-height: 1.65; color: var(--muted); max-width: 720px; }
+
+            .watch { padding: 0 32px 96px; }
+            .watch .wrap { max-width: 1040px; display: flex; flex-direction: column; gap: 18px; }
+            .watch .player { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: var(--abyss); box-shadow: 0 24px 60px rgba(2, 28, 38, 0.25); }
+            .watch .player img, .watch .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
+            /* The whole poster plays; the pill in its corner says so, clear of the title. */
+            .watch .play { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start; padding: 24px; border: 0; cursor: pointer; background: transparent; }
+            .watch .play span { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px 0 16px; border-radius: 999px; background: var(--accent); color: var(--ink); font: 700 17px Ubuntu, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); transition: transform 0.15s ease; }
+            .watch .play:hover span, .watch .play:focus-visible span { transform: scale(1.05); }
+            .watch .play:focus-visible { outline: 3px solid #fff; outline-offset: -6px; }
+            @media (max-width: 600px) { .watch .play { padding: 10px; } .watch .play span { min-height: 36px; padding: 0 14px 0 10px; gap: 6px; font-size: 13px; } .watch .play svg { width: 16px; height: 16px; } }
+            .watch p { margin: 0; text-align: center; font-size: 16px; color: var(--muted); }
 
             .libraries { padding: 0 32px 96px; }
             .row { display: flex; flex-wrap: wrap; gap: 28px; }
@@ -350,6 +365,20 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     </p>
                 </div>
             </section>
+
+            {VIDEO_ID && (
+                <section class="watch">
+                    <div class="wrap">
+                        <div class="player" data-video={VIDEO_ID}>
+                            <Image src={videoPoster} widths={[640, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
+                            <button type="button" class="play" aria-label="Watch the video, 4 minutes 26 seconds: Drivine, graph RAG on any database">
+                                <span><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="#0b2530" /></svg>Watch · 4:26</span>
+                            </button>
+                        </div>
+                        <p>Drivine in four and a half minutes: graph RAG on any database. With captions.</p>
+                    </div>
+                </section>
+            )}
 
             <section class="libraries">
                 <div class="wrap">
@@ -598,6 +627,17 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     menu.querySelector('summary')?.focus();
                 }
             });
+            // The video's player loads only when asked for, from YouTube's no-cookie domain.
+            document.querySelector<HTMLElement>('.watch .player')?.addEventListener('click', (event) => {
+                const player = event.currentTarget as HTMLElement;
+                const frame = document.createElement('iframe');
+                frame.src = `https://www.youtube-nocookie.com/embed/${player.dataset.video}?autoplay=1&rel=0&cc_load_policy=1`;
+                frame.title = 'Drivine: graph RAG on any database';
+                frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+                frame.allowFullscreen = true;
+                player.replaceChildren(frame);
+                frame.focus();
+            }, { once: true });
             const buttons = document.querySelectorAll<HTMLButtonElement>('.tabs button');
             const samples = document.querySelectorAll<HTMLElement>('.panel pre[data-lang]');
             buttons.forEach((button) =>
