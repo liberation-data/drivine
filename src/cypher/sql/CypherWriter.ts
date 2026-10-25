@@ -1,3 +1,4 @@
+import { isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 import { Stamps } from '@/model/Stamps';
@@ -4000,14 +4001,20 @@ export class CypherWriter {
 
     /**
      * Refuses a precision for `round()` that is below 0 as a whole number toward zero, as Neo4j refuses it, where it is
-     * written, negated or not, or a parameter's value: -0.5 is 0 places, and -1.2 is refused.
+     * written, negated or not, or a parameter's value, a bigint or the Neo4j driver's Integer too: -0.5 is 0 places, and
+     * -1.2 is refused.
      * One read from data is not known here, and SQL has no way to fail on it, so it rounds to tens or hundreds where Neo4j
      * fails.
      */
     private refuseNegativePrecision(written: Expression): void {
         const negated = written.kind === 'Unary' && written.operator === 'NEGATE';
         const precision = this.given(negated ? (written as Unary).operand : written);
-        const value = precision instanceof CypherFloat ? precision.value : precision;
+        const value =
+            precision instanceof CypherFloat
+                ? precision.value
+                : typeof precision === 'bigint' || isInt(precision)
+                ? Number(precision.toString())
+                : precision;
         if (typeof value === 'number' && Math.trunc(negated ? -value : value) < 0) {
             throw new DrivineError('round() takes a precision of 0 or more, as in Neo4j.');
         }

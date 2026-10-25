@@ -1,3 +1,4 @@
+import { int } from 'neo4j-driver';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
@@ -36,7 +37,10 @@ describe('The Cypher compiler refuses', () => {
                     ['RETURN round(1234.5, -2)', {}],
                     ['RETURN round(1234.5, -1.2)', {}],
                     ['RETURN round(1234.5, -$p)', { p: 2 }],
-                    ['RETURN round(1234.5, $p)', { p: -2.5 }]
+                    ['RETURN round(1234.5, $p)', { p: -2.5 }],
+                    // A whole number a caller binds as a bigint or as the Neo4j driver's Integer.
+                    ['RETURN round(1234.5, $p)', { p: BigInt(-2) }],
+                    ['RETURN round(1234.5, $p)', { p: int(-2) }]
                 ] as const
             ).forEach(([cypher, parameters]) => {
                 expect(() => compiler().compile(cypher, parameters)).toThrow(
