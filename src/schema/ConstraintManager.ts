@@ -114,7 +114,7 @@ export class ConstraintManager {
     private async built(spec: UniquenessConstraintSpec): Promise<boolean> {
         const found = await this.awaitBuild(spec, false);
         if (found === 'FAILED') {
-            await this.dropUnique(spec);
+            await this.dropFailedBuild(spec);
             this.changed();
             this.logger.warn(
                 `Dropped the uniqueness constraint on ${spec.label}(${spec.properties.join(', ')}), whose build ` +
@@ -167,6 +167,21 @@ export class ConstraintManager {
     private async dropUnique(spec: UniquenessConstraintSpec): Promise<void> {
         for (const statement of this.grammar.dropUnique(spec)) {
             await this.executor.run(statement);
+        }
+    }
+
+    /**
+     * Drops the constraint, whose build failed. Another process waiting on the same build sees it fail too, and may drop
+     * it first: FalkorDB then refuses the drop, as there is no such constraint, which is no error once the failed build
+     * is no longer listed.
+     */
+    private async dropFailedBuild(spec: UniquenessConstraintSpec): Promise<void> {
+        try {
+            await this.dropUnique(spec);
+        } catch (e) {
+            if (await this.failed(spec)) {
+                throw e;
+            }
         }
     }
 
@@ -241,7 +256,7 @@ export class ConstraintManager {
         spec: UniquenessConstraintSpec,
         sampleSize: number
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        await this.dropUnique(spec);
+        await this.dropFailedBuild(spec);
         const failed =
             `${this.grammar.engine} could not build the uniqueness constraint on ` +
             `${spec.label}(${spec.properties.join(', ')})`;

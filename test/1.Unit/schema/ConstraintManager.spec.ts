@@ -343,6 +343,91 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
         expect([store.count('CONSTRAINT_DROP'), store.count('CONSTRAINT_CREATE')]).toEqual([0, 1]);
     });
 
+    it('should throw, leaving it, when a constraint already UNDER CONSTRUCTION is still being built at the limit', async () => {
+        jest.useFakeTimers();
+        try {
+            const store = buildingInStore(['UNDER CONSTRUCTION']);
+            const ensured = store.constraints.ensure(spec).catch((e) => e);
+            await jest.advanceTimersByTimeAsync(60_000);
+            const thrown = await ensured;
+            expect(thrown).toBeInstanceOf(DrivineError);
+            expect(thrown.message).toBe('The uniqueness constraint on Person(email) was not built.');
+            expect([store.count('CONSTRAINT_DROP'), store.count('CONSTRAINT_CREATE')]).toEqual([0, 0]);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    /** What FalkorDB says to a drop of a constraint that isn't there. */
+    const noSuchConstraint = new Error('Unable to drop constraint, no such constraint.');
+
+    /**
+     * A FalkorDB whose constraint is listed with each of `builds` in turn, the last from then on, until another
+     * process also waiting on it drops it first: the drop here is refused, and nothing is listed until the constraint
+     * is made, after which it is listed OPERATIONAL. With `madeHere`, nothing is listed until it is made here, and the
+     * listing of `builds` follows. The query for keys held more than once gives `conflicts`.
+     */
+    function droppedFirstElsewhere(builds: string[], madeHere: boolean = false, conflicts: unknown[] = []) {
+        const ran: unknown[] = [];
+        let phase: 'none' | 'building' | 'dropped' | 'made' = madeHere ? 'none' : 'building';
+        let listings = 0;
+        const answer = (statement: any): unknown[] => {
+            ran.push(statement);
+            if (statement?.native === 'CONSTRAINT_DROP') {
+                phase = 'dropped';
+                throw noSuchConstraint;
+            }
+            if (statement?.native === 'CONSTRAINT_CREATE') {
+                phase = phase === 'none' ? 'building' : 'made';
+                return [];
+            }
+            if (statement === FALKORDB_SCHEMA.listUniques.statement) {
+                const status =
+                    phase === 'building'
+                        ? builds[Math.min(listings++, builds.length - 1)]
+                        : phase === 'made'
+                        ? 'OPERATIONAL'
+                        : undefined;
+                return status ? [{ label: 'Person', properties: ['email'], status }] : [];
+            }
+            return typeof statement === 'string' && statement.includes('holders > 1') ? conflicts : [];
+        };
+        const executor = {
+            run: async (statement: unknown) => Promise.resolve().then(() => answer(statement))
+        } as unknown as SchemaExecutor;
+        const count = (native: string) => ran.filter((it: any) => it?.native === native).length;
+        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), count };
+    }
+
+    it('should make again a failed build another process dropped first', async () => {
+        const store = droppedFirstElsewhere(['UNDER CONSTRUCTION', 'FAILED']);
+        expect(await store.constraints.ensure(spec)).toEqual({ status: 'CREATED', spec });
+        expect(store.count('CONSTRAINT_CREATE')).toBe(1);
+    });
+
+    it('should give a VIOLATION for a failed build made here that another process dropped first', async () => {
+        const store = droppedFirstElsewhere(['UNDER CONSTRUCTION', 'FAILED'], true, [repeated]);
+        expect(await store.constraints.ensure(spec, 0)).toEqual({ status: 'VIOLATION', spec, sample: [] });
+    });
+
+    it('should throw a refused drop of a failed build while it is still listed', async () => {
+        const executor = {
+            run: async (statement: any) =>
+                Promise.resolve().then(() => {
+                    if (statement?.native === 'CONSTRAINT_DROP') {
+                        throw noSuchConstraint;
+                    }
+                    if (statement?.native === 'CONSTRAINT_CREATE') {
+                        throw new Error('made');
+                    }
+                    return statement === FALKORDB_SCHEMA.listUniques.statement
+                        ? [{ label: 'Person', properties: ['email'], status: 'FAILED' }]
+                        : [];
+                })
+        } as unknown as SchemaExecutor;
+        await expect(new ConstraintManager(executor, FALKORDB_SCHEMA).ensure(spec)).rejects.toBe(noSuchConstraint);
+    });
+
     it('should drop a constraint whose build failed, which list leaves out', async () => {
         const ran: unknown[] = [];
         const executor = {
