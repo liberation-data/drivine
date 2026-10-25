@@ -85,7 +85,7 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
             Object.assign(new Article(), { id: 'a1', title: 'Moon Girl', summary: 'a genius inventor' }),
             Object.assign(new Article(), { id: 'a2', title: 'Devil', summary: 'a dinosaur' }),
             chunk('c4', 'zebra grass grass grass grass grass', 's3'),
-            Object.assign(new Draft(), { id: 'd1', body: 'zebra' })
+            Object.assign(new Draft(), { id: 'd1', body: 'zebra and zebra' })
         ]);
         await gom.save(
             Object.assign(new ChunkInSection(), {
@@ -122,7 +122,7 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
     });
 
     it('should scale by the best hit with every root label, not by one of the index label alone', async () => {
-        // The draft ranks above c4, but is no Chunk.
+        // The draft ranks above c4 on every store, matching twice in fewer words, but is no Chunk.
         const hits = await gom.loadMatching(Chunk, 'zebra', { topK: 5 });
         expect(hits.map((it) => it.value.id)).toEqual(['c4']);
         expect(hits[0].score).toBeCloseTo(1, 5);

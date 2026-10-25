@@ -17,6 +17,10 @@ import {
     NEO4J_GRAMMAR,
     NodeFragment,
     NodeId,
+    OracleBackend,
+    OracleGraph,
+    PostgresBackend,
+    PostgresGraph,
     Root,
     TargetModel
 } from '@liberation-data/drivine';
@@ -171,6 +175,25 @@ describe('A full-text search’s index bound', () => {
                 expect(text.indexOf(check)).toBeLessThan(text.indexOf('collect('));
             }
             expect(engine.matching(fragment, search()).text).not.toContain('WHERE node:');
+        }
+    );
+
+    it.each([
+        ['Postgres', new PostgresBackend(new PostgresGraph()), undefined, 'c.labels @> \'["Reviewed"]\''],
+        ['Oracle', new OracleBackend(new OracleGraph()), undefined, ',"Reviewed",'],
+        ['Oracle Text', new OracleBackend(new OracleGraph()), 'drivine_t_Article', ',"Reviewed",']
+    ])(
+        'should check a root’s every label before scaling the hits on %s (liberation-data/drivine#307)',
+        (_store, backend, table, second) => {
+            for (const target of [
+                { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) },
+                { kind: 'GRAPH_VIEW', model: registry.view(ReviewedArticleWithAuthors) }
+            ] as TargetModel[]) {
+                const text = backend.matching(target, search({ text: 'graph', table })).text;
+                // The hits the scale's MAX() OVER () is taken over, before they are joined to the nodes returned.
+                const scaled = text.slice(text.indexOf('OVER ()'), text.indexOf(') s JOIN'));
+                expect(scaled).toContain(second);
+            }
         }
     );
 

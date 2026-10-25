@@ -56,6 +56,9 @@ export class OracleSearch {
             bindings[name] = value;
             return `$${name}`;
         };
+        // Narrowed by the root's every label before the scale, so the best of it is a hit the search can return.
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const labels = [search.label, ...root.labels.filter((it) => it !== search.label)];
         if (search.table) {
             // Through Oracle Text: each property's score added, then scaled by the best. The index holds what has been
             // committed, so a search does not see what its own transaction wrote.
@@ -64,9 +67,15 @@ export class OracleSearch {
                 (it, i) => `JSON_TEXTCONTAINS(t.doc, '$${jsonKey(it)}', ${text}, ${i + 1})`
             );
             const scores = search.properties.map((_, i) => `SCORE(${i + 1})`).join(' + ');
+            const matched =
+                labels.length > 1
+                    ? `(${contains.join(' OR ')}) AND t.nid IN (SELECT c.nid FROM ${
+                          this.graph.nodes
+                      } c WHERE ${hasLabels('c', labels)})`
+                    : contains.join(' OR ');
             const candidates =
                 `SELECT nid, hit_count / MAX(hit_count) OVER () AS score FROM (SELECT t.nid, ${scores} AS hit_count ` +
-                `FROM ${search.table} t WHERE ${contains.join(' OR ')}) WHERE hit_count > 0`;
+                `FROM ${search.table} t WHERE ${matched}) WHERE hit_count > 0`;
             return this.scored(target, candidates, search, bindings);
         }
         // Every node of the label: how often the query's terms occur as whole words in its lower-cased text, each term
@@ -82,7 +91,7 @@ export class OracleSearch {
         ];
         const candidates = `SELECT nid, hit_count / MAX(hit_count) OVER () AS score FROM (
     SELECT x.nid, ${occurrences} AS hit_count
-    FROM (SELECT c.nid, ${text} AS text FROM ${this.graph.nodes} c WHERE ${hasLabels('c', [search.label])}) x
+    FROM (SELECT c.nid, ${text} AS text FROM ${this.graph.nodes} c WHERE ${hasLabels('c', labels)}) x
     ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
 ) WHERE hit_count > 0`;
         return this.scored(target, candidates, search, bindings);
