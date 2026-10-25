@@ -76,11 +76,14 @@ export class PostgresSearch {
             ...query.required.map((it) => `${count(it)} > 0`),
             ...query.excluded.map((it) => `${count(it)} = 0`)
         ];
+        // Narrowed by the root's every label before the scale, so the best of it is a hit the search can return.
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const labels = [search.label, ...root.labels.filter((it) => it !== search.label)];
         const candidates =
             `SELECT h.nid, CAST(h.hit_count AS double precision) / MAX(h.hit_count) OVER () AS score FROM (` +
             `SELECT x.nid, ${occurrences} AS hit_count FROM (SELECT c.nid, ${text} AS text FROM ${
                 this.graph.nodes
-            } c WHERE ${[hasLabels('c', [search.label]), ...narrowed].join(' AND ')}) x` +
+            } c WHERE ${[hasLabels('c', labels), ...narrowed].join(' AND ')}) x` +
             `${conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''}) h WHERE h.hit_count > 0`;
         return this.scored(target, candidates, search, bindings);
     }

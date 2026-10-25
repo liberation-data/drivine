@@ -17,6 +17,10 @@ import {
     NEO4J_GRAMMAR,
     NodeFragment,
     NodeId,
+    OracleBackend,
+    OracleGraph,
+    PostgresBackend,
+    PostgresGraph,
     Root,
     TargetModel
 } from '@liberation-data/drivine';
@@ -37,6 +41,13 @@ class ReviewedArticle {
 @NodeFragment({ labels: ['Author'] })
 class Author {
     @NodeId() id: string;
+}
+
+/** A view rooted on a fragment of two labels. */
+@GraphView()
+class ReviewedArticleWithAuthors {
+    @Root() article: ReviewedArticle;
+    @GraphRelationship({ type: 'WROTE', direction: Direction.INCOMING, target: () => Author }) authors: Author[];
 }
 
 /** A view with no required relationship: nothing drops a hit after the index. */
@@ -148,6 +159,43 @@ describe('A full-text search’s index bound', () => {
         const reviewed: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) };
         expect(cutTo(neo4j.matching(reviewed, search()).text)).toEqual(80);
     });
+
+    it.each(engines.map((it) => [it.grammar.engine, it]))(
+        'should check a root’s every label before cutting and scaling the hits on %s (liberation-data/drivine#307)',
+        (_engine, backend) => {
+            const engine = backend as CypherBackend;
+            const check =
+                'YIELD node, score\nWITH node, score WHERE node:Article:Reviewed\nWITH node, score\nORDER BY score DESC\nLIMIT 80\n';
+            for (const target of [
+                { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) },
+                { kind: 'GRAPH_VIEW', model: registry.view(ReviewedArticleWithAuthors) }
+            ] as TargetModel[]) {
+                const text = engine.matching(target, search()).text;
+                expect(text).toContain(check);
+                expect(text.indexOf(check)).toBeLessThan(text.indexOf('collect('));
+            }
+            expect(engine.matching(fragment, search()).text).not.toContain('WHERE node:');
+        }
+    );
+
+    it.each([
+        ['Postgres', new PostgresBackend(new PostgresGraph()), undefined, 'c.labels @> \'["Reviewed"]\''],
+        ['Oracle', new OracleBackend(new OracleGraph()), undefined, ',"Reviewed",'],
+        ['Oracle Text', new OracleBackend(new OracleGraph()), 'drivine_t_Article', ',"Reviewed",']
+    ])(
+        'should check a root’s every label before scaling the hits on %s (liberation-data/drivine#307)',
+        (_store, backend, table, second) => {
+            for (const target of [
+                { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) },
+                { kind: 'GRAPH_VIEW', model: registry.view(ReviewedArticleWithAuthors) }
+            ] as TargetModel[]) {
+                const text = backend.matching(target, search({ text: 'graph', table })).text;
+                // The hits the scale's MAX() OVER () is taken over, before they are joined to the nodes returned.
+                const scaled = text.slice(text.indexOf('OVER ()'), text.indexOf(') s JOIN'));
+                expect(scaled).toContain(second);
+            }
+        }
+    );
 
     it('should clamp the over-fetch, and ask for no more than the ceiling however large the limit', () => {
         expect(fullTextIndexLimit(Number.MAX_SAFE_INTEGER, true)).toEqual(FULL_TEXT_INDEX_LIMIT_CEILING);

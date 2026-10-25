@@ -218,11 +218,18 @@ export class CypherBackend implements GraphBackend {
      *
      * The cut's sort stays even where the call yields its hits best first: `collect` keeps the order it is given and
      * `UNWIND` the order of the list, so the rows come out best first, and a fragment's limit takes no sort of its own.
+     *
+     * The index is on the root's first label, so it yields nodes with that label alone, which are not the root's. A
+     * root with more labels has its hits checked for all of them before they are cut or scaled, so the best of the
+     * scale is a hit the search can return, as on a store that narrows by labels first. The check is a `WITH` of its
+     * own: FalkorDB and Memgraph take no `WHERE` before an `ORDER BY` in one.
      */
     matching(target: TargetModel, search: MatchingSearch): GraphStatement {
         const indexLimit = fullTextIndexLimit(search.limit, this.filtersAfterSearch(target, search.where));
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const head = [
             this.grammar.fullTextSearch(search.label, search.properties, indexLimit),
+            ...(root.labels.length > 1 ? [`WITH node, score WHERE node${labelExpression(root.labels)}`] : []),
             'WITH node, score',
             'ORDER BY score DESC',
             `LIMIT ${indexLimit}`,
