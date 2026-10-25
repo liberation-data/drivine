@@ -207,6 +207,33 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(Number((await query('RETURN toString(1.0E-200)'))[0])).toEqual(1e-200);
         });
 
+        it('round() reads a precision from data, or a whole float, as a whole number toward zero, and a null as null', async () => {
+            // Not in the spec yet: its round() case takes the precision as written or given.
+            await query('CREATE (:Round {p: 1.7, q: -0.5, w: 2.0, r: -2})');
+            expect(
+                await query(
+                    "MATCH (n:Round) RETURN [round(2.555, n.p), round(2.55, n.p, 'UP'), round(2.5, n.q), round(2.5, n.q, 'HALF_UP'), round(2.555, n.w), round(2.555, 2.0, 'HALF_UP')]"
+                )
+            ).toEqual([[2.6, 2.6, 3.0, 3.0, 2.56, 2.56]]);
+            expect(
+                await query(
+                    "RETURN [round(2.5, 0, 'HALF_UP'), round(-2.5, 0, 'HALF_EVEN'), round(2.5, 0, 'DOWN'), round(2.1, 0, 'CEILING'), round(2.9, 0, 'FLOOR'), round(-2.1, 0, 'UP')]"
+                )
+            ).toEqual([[3.0, -2.0, 2.0, 3.0, 2.0, -3.0]]);
+            expect(
+                await query("RETURN [round(null, 2), round(2.5, null), round(null, 2, 'UP'), round(2.5, null, 'UP')]")
+            ).toEqual([[null, null, null, null]]);
+            // A negative precision from data fails on Neo4j, at run time; SQL has no way to fail there, so it rounds to
+            // tens or hundreds.
+            expect(await query("MATCH (n:Round) RETURN round(1234.5, n.r, 'HALF_UP')")).toEqual([1200.0]);
+            if (store.type !== DatabaseType.ORACLE) {
+                // Oracle overflows on a precision past its NUMBER range, as in drivine4j (liberation-data/drivine4j#266).
+                expect(
+                    await query("RETURN [round(2.5, 400), round(2.5, 400, 'HALF_UP'), round(2.5, 400, 'CEILING')]")
+                ).toEqual([[2.5, 2.5, 2.5]]);
+            }
+        });
+
         /** Writes the graph of the spec's `queries.yaml`, which the tests that read it start from. */
         const seed = async (): Promise<void> => {
             await query(trimIndent(loadSpec('queries.yaml').graph!));
