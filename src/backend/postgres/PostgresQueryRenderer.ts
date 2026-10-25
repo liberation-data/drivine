@@ -1,6 +1,7 @@
 import { jsonValue, numberOf, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
 import { Compared, SqlQueryRenderer } from '@/backend/sql/SqlQueryRenderer';
+import { storedValue } from '@/backend/SaveStatementBuilder';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { Query, QueryFn, WhereFn } from '@/dsl/Refs';
@@ -52,7 +53,7 @@ export class PostgresQueryRenderer extends SqlQueryRenderer {
                 return any ? `${present} AND NOT COALESCE(${any}, FALSE)` : present;
             }
             case 'HAS_ITEM':
-                return this.holds(row, name, jsonPacked ? JSON.stringify(test.value) : super.storable(test.value));
+                return this.holds(row, name, jsonPacked ? storedValue(test.value, true) : super.storable(test.value));
             case 'IS_NULL':
                 return `NOT ${present}`;
             case 'IS_NOT_NULL':
@@ -115,7 +116,7 @@ export class PostgresQueryRenderer extends SqlQueryRenderer {
 
     /** A value as the property holds it: packed into JSON text where the property is, and as `storable` writes it. */
     private scalar(value: unknown, jsonPacked: boolean): unknown {
-        return this.storable(jsonPacked ? JSON.stringify(value) : value);
+        return this.storable(jsonPacked ? storedValue(value, true) : value);
     }
 
     /**

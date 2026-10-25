@@ -347,7 +347,7 @@ export class SaveStatementBuilder {
      */
     private packedAsLoaded(property: string, value: any): any {
         const held = this.options.loadedProperties?.[property];
-        return held != null ? asCompared(held) : JSON.stringify(value instanceof Set ? [...value] : value);
+        return held != null ? asCompared(held) : storedValue(value, true);
     }
 
     private removals(
@@ -750,13 +750,20 @@ export function propsOf(
             continue;
         }
         if (value != null || clearNulls) {
-            // A set is stored as a list: no store holds a set, and JSON text would hold one as {}.
-            const stored = value instanceof Set ? [...value] : value;
-            props[model.graphProperties.get(field) ?? field] =
-                stored != null && model.jsonPacked?.has(field) ? JSON.stringify(stored) : stored ?? null;
+            props[model.graphProperties.get(field) ?? field] = storedValue(value, !!model.jsonPacked?.has(field));
         }
     }
     return props;
+}
+
+/**
+ * A field's value as a write stores it, and so as a where compares a @JsonPacked field with it: a set as the list of its
+ * items, since no store holds a set and JSON text would hold one as {}; packed into JSON text when the field is
+ * @JsonPacked; and null for none.
+ */
+export function storedValue(value: any, packed: boolean): any {
+    const stored = value instanceof Set ? [...value] : value;
+    return stored != null && packed ? JSON.stringify(stored) : stored ?? null;
 }
 
 function pattern(rel: RelationshipModel, from: string, relAlias: string, to: string): string {

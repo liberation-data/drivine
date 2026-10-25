@@ -9,6 +9,8 @@ import {
     NodeFragment,
     NodeId,
     NodeStamp,
+    nodeRef,
+    NullPolicy,
     PersistenceManager,
     PostgresGraph,
     QuerySpecification,
@@ -91,9 +93,7 @@ describe.each(allStores())('Set fields on $type', (engine) => {
     });
 
     it('should store a Set as a list, load it back as a Set, and save the loaded Set back as a list', async () => {
-        await gom.save(
-            coded('c1', { codes: new Set(['x', 'y']), packed: new Set(['p']), badges: new Set(['gold']) })
-        );
+        await gom.save(coded('c1', { codes: new Set(['x', 'y']), packed: new Set(['p']), badges: new Set(['gold']) }));
         const props = await stored('c1');
         expect([...props.code_set].sort()).toEqual(['x', 'y']);
         expect(JSON.parse(props.packed)).toEqual(['p']);
@@ -152,6 +152,81 @@ describe.each(allStores())('Set fields on $type', (engine) => {
             it.badges.add('new');
         });
         expect((await gom.load(Coded, 'd2'))!.badges).toEqual(new Set(['new']));
+    });
+
+    it('should patch a Set as the list of its items, packed or not, and load it back as a Set', async () => {
+        await gom.save(coded('p1', { codes: new Set(['old']) }));
+        await gom.patch(Coded, 'p1', {
+            set: { codes: new Set(['x', 'y']), packed: new Set(['p', 'q']), badges: new Set(['gold']) }
+        });
+        const props = await stored('p1');
+        expect([...props.code_set].sort()).toEqual(['x', 'y']);
+        expect(JSON.parse(props.packed)).toEqual(['p', 'q']);
+        expect(props.badges).toEqual(['gold']);
+        const loaded = (await gom.load(Coded, 'p1'))!;
+        expect(loaded.codes).toEqual(new Set(['x', 'y']));
+        expect(loaded.packed).toEqual(new Set(['p', 'q']));
+        expect(loaded.badges).toEqual(new Set(['gold']));
+
+        // A loaded Set handed back, with an item added, and an empty one.
+        await gom.patch(Coded, 'p1', { set: { packed: new Set([...loaded.packed!, 'r']), badges: new Set() } });
+        expect(JSON.parse((await stored('p1')).packed)).toEqual(['p', 'q', 'r']);
+        expect((await stored('p1')).badges).toEqual([]);
+        const again = (await gom.load(Coded, 'p1'))!;
+        expect(again.packed).toEqual(new Set(['p', 'q', 'r']));
+        expect(again.badges).toEqual(new Set());
+    });
+
+    it('should patchAll Sets as the lists of their items, packed or not, and load them back as Sets', async () => {
+        await gom.saveAll([coded('a1'), coded('a2')]);
+        const patched = [
+            coded('a1', { codes: new Set(['x']), packed: new Set(['p']), badges: new Set(['gold']) }),
+            coded('a2', { codes: new Set(['y', 'z']), packed: new Set(['q', 'r']), badges: new Set() })
+        ];
+        await gom.patchAll(patched, { only: ['codes', 'packed', 'badges'], nullPolicy: NullPolicy.CLEAR });
+        const first = await stored('a1');
+        expect(first.code_set).toEqual(['x']);
+        expect(JSON.parse(first.packed)).toEqual(['p']);
+        expect(first.badges).toEqual(['gold']);
+        const second = await stored('a2');
+        expect([...second.code_set].sort()).toEqual(['y', 'z']);
+        expect(JSON.parse(second.packed)).toEqual(['q', 'r']);
+        expect(second.badges).toEqual([]);
+        const loaded = (await gom.load(Coded, 'a2'))!;
+        expect(loaded.codes).toEqual(new Set(['y', 'z']));
+        expect(loaded.packed).toEqual(new Set(['q', 'r']));
+        expect(loaded.badges).toEqual(new Set());
+    });
+
+    it('should relate with a Set property as the list of its items, and load it in a relationship fragment', async () => {
+        await gom.saveAll([coded('root'), coded('target')]);
+        expect(
+            await gom.edges.relate(nodeRef(Coded, 'root'), nodeRef(Coded, 'target'), 'PLAIN_SET_CODING', {
+                reasons: new Set(['because', 'why'])
+            })
+        ).toBe(true);
+        const loaded = (await gom.load(CodedHolder, 'root'))!;
+        expect(loaded.codings[0].reasons).toEqual(new Set(['because', 'why']));
+
+        // The same Set again finds the relationship as it is, so neither end is marked.
+        const before = (await gom.load(Coded, 'root'))!.stamp;
+        await gom.edges.relate(nodeRef(Coded, 'root'), nodeRef(Coded, 'target'), 'PLAIN_SET_CODING', {
+            reasons: new Set(['because', 'why'])
+        });
+        expect((await gom.load(Coded, 'root'))!.stamp).toEqual(before);
+        expect((await gom.load(CodedHolder, 'root'))!.codings).toHaveLength(1);
+    });
+
+    it('should find a packed Set by a Set, packed as a save packs it', async () => {
+        await gom.saveAll([coded('w1', { packed: new Set(['p', 'q']) }), coded('w2', { packed: new Set(['r']) })]);
+        // A Set field's reference offers only hasItem; a packed one is compared as its whole text.
+        const packed = (q: any): any => q.packed;
+        const ids = (found: Coded[]): string[] => found.map((it) => it.id).sort();
+        expect(ids(await gom.loadAll(Coded, (q) => ({ where: packed(q).eq(new Set(['p', 'q'])) })))).toEqual(['w1']);
+        expect(ids(await gom.loadAll(Coded, (q) => ({ where: packed(q).neq(new Set(['p', 'q'])) })))).toEqual(['w2']);
+        expect(
+            ids(await gom.loadAll(Coded, (q) => ({ where: packed(q).in([new Set(['r']), new Set(['s'])]) })))
+        ).toEqual(['w2']);
     });
 
     it('should load a Set in a view that holds a view, and in a relationship fragment', async () => {
