@@ -12,10 +12,11 @@ import { TextQuery } from '@/backend/sql/TextQuery';
  * the trim.
  *
  * Each goes through the index made for it (a table beside the nodes, see OracleSchemaGrammar) where there is one, and
- * otherwise reads every node of the label. A vector search scores on Neo4j's scale ((1 + cos) / 2 for cosine,
- * 1 / (1 + d²) for euclidean): approximate through the index, exact without. A full-text query is the core of Lucene's
- * syntax (see TextQuery): Oracle Text scores through the index; without one, how often each term occurs as whole
- * words. Either is scaled by the best hit.
+ * otherwise reads every node of the label. A vector search goes through an index made for embeddings of the vector's
+ * size only, and without one measures only the embeddings of that size: Oracle refuses to measure two sizes against
+ * each other. It scores on Neo4j's scale ((1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean): approximate through
+ * the index, exact without. A full-text query is the core of Lucene's syntax (see TextQuery): Oracle Text scores
+ * through the index; without one, how often each term occurs as whole words. Either is scaled by the best hit.
  */
 export class OracleSearch {
     constructor(private readonly graph: OracleGraph) {}
@@ -33,15 +34,18 @@ export class OracleSearch {
                 } v ` + `ORDER BY distance FETCH APPROX FIRST ${search.k} ROWS ONLY) k`;
             return this.scored(target, candidates, search);
         }
+        // Every node of the label that holds an embedding of the vector's size (ORA-51808 for any other), so a node of
+        // another size is left out, as the other stores leave it out.
         const value = `TO_VECTOR(JSON_SERIALIZE(JSON_QUERY(c.props, '$${jsonKey(search.property)}')))`;
         const distance = `VECTOR_DISTANCE(${value}, TO_VECTOR($_vector), ${metric})`;
+        const held = [
+            hasLabels('c', [search.label]),
+            `JSON_EXISTS(c.props, '$${jsonKey(search.property)}')`,
+            ...(search.dimensions !== undefined ? [`VECTOR_DIMENSION_COUNT(${value}) = ${search.dimensions}`] : [])
+        ];
         const candidates =
-            `SELECT c.nid, ${score(distance)} AS score FROM ${this.graph.nodes} c WHERE ${hasLabels('c', [
-                search.label
-            ])} ` +
-            `AND JSON_EXISTS(c.props, '$${jsonKey(search.property)}') ORDER BY ${distance} FETCH FIRST ${
-                search.k
-            } ROWS ONLY`;
+            `SELECT c.nid, ${score(distance)} AS score FROM ${this.graph.nodes} c WHERE ${held.join(' AND ')} ` +
+            `ORDER BY ${distance} FETCH FIRST ${search.k} ROWS ONLY`;
         return this.scored(target, candidates, search);
     }
 

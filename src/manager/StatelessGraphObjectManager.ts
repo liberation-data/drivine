@@ -352,7 +352,7 @@ export class StatelessGraphObjectManager {
         const label = options.partitionLabel ?? root.labels[0];
         const statement = this.backend.nearest(target, {
             label,
-            table: await this.searchTable('VECTOR', label, [property]),
+            table: await this.searchTable('VECTOR', label, [property], vector.length),
             property,
             similarity,
             where: filter.where,
@@ -718,17 +718,21 @@ export class StatelessGraphObjectManager {
         );
     }
 
-    /** The table a store keeps a search index in, where it keeps one and the index was made. */
+    /**
+     * The table a store keeps a search index in, where it keeps one and the index was made: for a vector search by a
+     * vector of `dimensions`, made for embeddings of that size.
+     */
     private async searchTable(
         kind: 'VECTOR' | 'FULLTEXT',
         label: string,
-        properties: string[]
+        properties: string[],
+        dimensions?: number
     ): Promise<string | undefined> {
         if (!this.backend.searchIndexTable) {
             return undefined;
         }
         const rows = await this.persistenceManager.query<string>(
-            this.backend.searchIndexTable(kind, label, properties).spec()
+            this.backend.searchIndexTable(kind, label, properties, dimensions).spec()
         );
         return rows[0];
     }

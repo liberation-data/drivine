@@ -218,10 +218,16 @@ export interface GraphBackend {
 
     /**
      * Where a store keeps a search index as a table of its own (Oracle): the statement giving that table's name for the
-     * index over the label's properties, one row, or none when the index was not made. Undefined where the store
-     * searches its own index by name.
+     * index over the label's properties, one row, or none when the index was not made. Given `dimensions`, a vector
+     * index made for embeddings of another size is taken as not made, where the store can't search it by a vector of
+     * that size. Undefined where the store searches its own index by name.
      */
-    searchIndexTable?(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement;
+    searchIndexTable?(
+        kind: 'VECTOR' | 'FULLTEXT',
+        label: string,
+        properties: string[],
+        dimensions?: number
+    ): GraphStatement;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
     save(

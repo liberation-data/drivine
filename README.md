@@ -1558,8 +1558,9 @@ Notes:
   expression numbers it by, `\1` to `\8`; `\9` is refused, as the group that anchors the expression would make it the
   tenth, which POSIX does not have.
 - A vector index is a table of embeddings beside the nodes, kept in step by a trigger, with an Oracle vector index over
-  it by neighbour partitions; `loadNearest` is approximate through it. With no index made, it measures every node of the
-  label and is exact.
+  it by neighbour partitions. The table holds the embeddings of the index's size; a node written with another size is
+  left out, not refused. `loadNearest` is approximate through it. With no index made, or one of another size than the
+  vector's, it measures every node of the label whose embedding is of the vector's size, and is exact.
 - A full-text index is a table of the indexed text beside the nodes, with an Oracle Text index over it. `loadMatching`
   reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`. The index holds what has been committed, so a search
   doesn't see its own transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or
