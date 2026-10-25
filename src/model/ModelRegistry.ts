@@ -41,6 +41,11 @@ export class ModelRegistry {
     private readonly relationshipFragments = new Map<Function, RelationshipFragmentModel>();
     private readonly views = new Map<Function, GraphViewModel>();
     private readonly registeredSubtypes = new Map<Function, Set<ClassType>>();
+    /**
+     * What has been cached since the outermost view being built was asked for: each model's cache and class. A view
+     * that fails takes all of them with it, as one built on its account may refer to it.
+     */
+    private building: [Map<Function, unknown>, Function][] | undefined;
 
     /**
      * Registers `subtype` as a kind of `parent` that it does not extend, as an implementation of an interface is: a
@@ -101,24 +106,38 @@ export class ModelRegistry {
         if (!model) {
             model = this.buildRelationshipFragment(type);
             this.relationshipFragments.set(type, model);
+            // It may lead to a view still being built, so it goes if that view fails.
+            this.building?.push([this.relationshipFragments, type]);
         }
         return model;
     }
 
     view(type: ClassType): GraphViewModel {
-        let model = this.views.get(type);
-        if (!model) {
+        const cached = this.views.get(type);
+        if (cached) {
+            return cached;
+        }
+        const outermost = !this.building;
+        const building = (this.building ??= []);
+        try {
             // Cached before its relationships are resolved, so a view that refers to itself finds itself.
-            model = this.buildView(type);
+            const model = this.buildView(type);
             this.views.set(type, model);
-            try {
-                this.checkRelationships(model);
-            } catch (e) {
-                this.views.delete(type);
-                throw e;
+            building.push([this.views, type]);
+            this.checkRelationships(model);
+            return model;
+        } catch (e) {
+            // Everything cached while this was built may refer to it: a view that leads back to it, as two views that
+            // refer to each other do. Each is built again, and refused, when it is next asked for.
+            if (outermost) {
+                building.forEach(([cache, built]) => cache.delete(built));
+            }
+            throw e;
+        } finally {
+            if (outermost) {
+                this.building = undefined;
             }
         }
-        return model;
     }
 
     private buildFragment(type: ClassType): FragmentModel {
