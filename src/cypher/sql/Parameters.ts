@@ -21,13 +21,17 @@ export class Parameters {
      * @param asCount the bound whole number at a marker, or with `inObject` the parameter of a name, as the store's
      * number
      * @param text a value as the JSON text it is bound as
+     * @param asPath the value at a path of keys in a parameter that is a map, read straight from the text it is bound
+     * as: given the marker (or with `inObject` the parameter's name) and the keys; none where the store reads the
+     * parameter as JSON, then each key of it
      */
     constructor(
         private readonly given: Record<string, any>,
         private readonly asJson: (marker: string) => string,
         private readonly asCount: (marker: string) => string,
         private readonly inObject: boolean = false,
-        private readonly text: (value: any) => string = jsonText
+        private readonly text: (value: any) => string = jsonText,
+        private readonly asPath?: (marker: string, keys: string[]) => string
     ) {}
 
     /** What the SQL binds. */
@@ -41,12 +45,29 @@ export class Parameters {
         if (this.inObject) {
             return this.asJson(name);
         }
-        const key = `_cy_${name}`;
-        // Written once: an iterator gives its items only once, and a parameter is read where the statement names it.
-        if (!(key in this.bound)) {
-            this.bound[key] = value === null || value === undefined ? null : this.text(value);
+        return this.asJson(this.bind(name, value));
+    }
+
+    /**
+     * The value at `keys` in the parameter `name`, as JSON, where the store reads it from the text the parameter is bound
+     * as (see `asPath`) and the parameter is a map that holds a map at each key but the last; undefined otherwise.
+     */
+    jsonAt(name: string, keys: string[]): string | undefined {
+        if (this.asPath === undefined) {
+            return undefined;
         }
-        return this.asJson(`$${key}`);
+        const value = this.value(name);
+        let map = value;
+        for (const key of keys.slice(0, -1)) {
+            map = isMap(map) ? map[key] : undefined;
+        }
+        if (!isMap(map)) {
+            return undefined;
+        }
+        if (this.inObject) {
+            return this.asPath(name, keys);
+        }
+        return this.asPath(this.bind(name, value), keys);
     }
 
     /** The parameter `name`, as a whole number. */
@@ -68,4 +89,23 @@ export class Parameters {
         }
         return this.given[name];
     }
+
+    /** The marker the parameter `name`, of value `value`, is bound at as JSON text. */
+    private bind(name: string, value: any): string {
+        const key = `_cy_${name}`;
+        // Written once: an iterator gives its items only once, and a parameter is read where the statement names it.
+        if (!(key in this.bound)) {
+            this.bound[key] = value === null || value === undefined ? null : this.text(value);
+        }
+        return `$${key}`;
+    }
+}
+
+/** Whether `value` is a map, as the JSON text it is bound as writes one: no list, date, number, bytes or iterable. */
+function isMap(value: any): value is Record<string, any> {
+    if (value === null || typeof value !== 'object' || typeof value[Symbol.iterator] === 'function') {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
 }

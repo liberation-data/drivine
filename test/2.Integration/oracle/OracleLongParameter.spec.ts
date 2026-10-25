@@ -13,7 +13,9 @@ const GRAPH = 'drivine_long_parameter';
 /**
  * Oracle crashed the session (ORA-07445 `ksmem_malloc`, then ORA-00600 `kghfrempty:ds`; NJS-500 here) where a compiled
  * write read a parameter past 32 KB once for each of two or more rows from a `JSON` variable holding all its parameters
- * (liberation-data/drivine#308). The parameters are now held as text, read as JSON where each is read.
+ * (liberation-data/drivine#308). The parameters are now held as text, read as JSON where each is read. It crashed too
+ * where a statement read a value past 32 KB from a map parameter, `$p.text`, for each of two rows, taking the parameter
+ * as JSON first and then the value from it (liberation-data/drivine#321): the value is now read with one path.
  */
 describeOnOracle('a parameter past 32 KB set on two nodes on Oracle', () => {
     let connection: Connection;
@@ -57,6 +59,30 @@ describeOnOracle('a parameter past 32 KB set on two nodes on Oracle', () => {
                 [`f${i}`]: 2.5 + i
             });
             Object.assign(written, { [`a${i}`]: text, [`b${i}`]: text, [`f${i}`]: 2.5 + i });
+            expect(await cypher('MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id')).toEqual(
+                [1, 2].map((id) => ({ id, ...written }))
+            );
+        }
+    });
+
+    it("leaves the session open where a parameter's property past 32 KB is read and set on two nodes", async () => {
+        // As above, each statement is new, and the session is asked again after it.
+        await cypher('MATCH (n:CyWrite) DETACH DELETE n');
+        await cypher('CREATE (:CyWrite {id: 1}), (:CyWrite {id: 2})');
+        const text = 'x'.repeat(40_000);
+        const p = { p: { text } };
+        const written: Record<string, any> = {};
+        for (let i = 0; i < 3; i++) {
+            expect(await cypher(`MATCH (n:CyWrite) WHERE n.id > -${i} RETURN $p.text ORDER BY n.id`, p)).toEqual([
+                text,
+                text
+            ]);
+            expect(await cypher(`MATCH (n:CyWrite) WHERE n.id > -${i} RETURN $p['text'] ORDER BY n.id`, p)).toEqual([
+                text,
+                text
+            ]);
+            await cypher(`MATCH (n:CyWrite) SET n.t${i} = $p.text`, p);
+            written[`t${i}`] = text;
             expect(await cypher('MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id')).toEqual(
                 [1, 2].map((id) => ({ id, ...written }))
             );
