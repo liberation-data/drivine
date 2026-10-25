@@ -1295,6 +1295,30 @@ describe('Subtypes', () => {
         expect(warnings[0]).toContain('src/A#Twice');
         expect(byId(read(dir).fragments, 'src/A#Animal').subtypes).toEqual(['src/A#Dog']);
     });
+
+    it('lists no subtype now left out that the previous file had, kept removed: a current entry refers to current ones', () => {
+        const file = 'src/A.ts';
+        const dir = project({
+            [file]: [
+                "import { NodeFragment, NodeId } from '@liberation-data/drivine';",
+                "@NodeFragment({ labels: ['Animal'] })",
+                'export class Animal { @NodeId() id: string; }',
+                "@NodeFragment({ labels: ['Dog'] })",
+                'export class Dog extends Animal {}'
+            ].join('\n')
+        });
+        const tsconfig = path.join(dir, 'tsconfig.json');
+        generateModelFile({ project: tsconfig, warn: quiet });
+        expect(byId(read(dir).fragments, 'src/A#Animal').subtypes).toEqual(['src/A#Dog']);
+
+        const source = fs.readFileSync(path.join(dir, file), 'utf8');
+        fs.writeFileSync(path.join(dir, file), source.replace('Animal {}', 'Animal { @NodeId() other: string; }'));
+        generateModelFile({ project: tsconfig, warn: quiet });
+        const animal = byId(read(dir).fragments, 'src/A#Animal');
+        expect(byId(read(dir).fragments, 'src/A#Dog').removed).toBe(true);
+        expect(animal.subtypes).toBeUndefined();
+        expect(Object.keys(animal)).toEqual(['id', 'name', 'labels', 'nodeId', 'subtypesComplete', 'properties']);
+    });
 });
 
 describe('drivine model', () => {
