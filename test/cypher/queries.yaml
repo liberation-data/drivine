@@ -347,10 +347,15 @@ cases:
         rows: [[[1], 1]]
       - cypher: "UNWIND [null, 'b', 'a'] AS x RETURN [min(x), max(x)]"
         rows: [["a", "b"]]
-      - note: "Of lists, item by item: Postgres's jsonb puts the shorter list first (drivine4j#220)."
+      - note: "Of lists, item by item, as ORDER BY sorts them, where a store's JSON may put the shorter list first (drivine4j#220)."
         cypher: "UNWIND [[1, 2], [3]] AS xs RETURN [min(xs), max(xs)]"
-        except: [postgres]
         rows: [[[1, 2], [3]]]
+      - note: "Item by item, not as text: [10] comes after [2]."
+        cypher: "UNWIND [[2], [1, 5], [1, 5], [10]] AS xs RETURN [min(DISTINCT xs), max(DISTINCT xs)]"
+        rows: [[[1, 5], [10]]]
+      - note: "In a group, too."
+        cypher: "UNWIND [[1, 2], [3], [0, 9, 9], [2, 1]] AS xs WITH xs[0] < 2 AS k, min(xs) AS lo, max(xs) AS hi RETURN k, lo, hi ORDER BY k"
+        rows: [[false, [2, 1], [3]], [true, [0, 9, 9], [1, 2]]]
 
   - name: "Nulls in ORDER BY"
     description: "ORDER BY puts null last ascending and first descending."

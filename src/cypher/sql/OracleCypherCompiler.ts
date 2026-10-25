@@ -66,6 +66,12 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /** `collect(CASE WHEN … THEN [r] ELSE [m.title] END)` fails with ORA-00979, or closes the session: see `casesFirst`. */
     readonly aggregatesCaseSubqueries: boolean = false;
 
+    /**
+     * Oracle's JSON orders lists item by item already, and a grouped `KEEP (DENSE_RANK FIRST ORDER BY …)` by the list key
+     * drops the connection (ORA-03113), as drivine4j found.
+     */
+    readonly extremesByListKey: boolean = false;
+
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
 

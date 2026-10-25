@@ -109,6 +109,12 @@ export abstract class SqlCypherCompiler {
     readonly aggregatesCaseSubqueries: boolean = true;
 
     /**
+     * Whether `min` and `max` of a list the statement makes order it by {@link listSortKey}, item by item, as an
+     * `ORDER BY` sorts it: where the store's own JSON order puts the shorter list first.
+     */
+    readonly extremesByListKey: boolean = true;
+
+    /**
      * Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would
      * take from its group, nor in a term a projection beside a variable-length walk sorts by that is none of its items
      * (see `CypherWriter.sorts`).
