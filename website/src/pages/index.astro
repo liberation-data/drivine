@@ -225,6 +225,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .panel pre[hidden] { display: none; }
             .a { color: #7fd3c8; } .k { color: #f4a27c; } .s { color: #c8de8c; } .t { color: #9cc4f2; } .c { color: #8ba3aa; }
 
+            .cypher .wrap { flex-direction: column; gap: 40px; }
+            .cypher .text { flex: none; max-width: 820px; }
+            .cypher .panel { flex: none; width: 100%; }
+            .cypher ul { width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 18px 36px; }
             .cypher a { color: #7fd3c8; }
             .cypher a:hover { color: #fff; }
             .cypher .panel header { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #1c3d48; background: #0a2630; }
@@ -461,12 +465,6 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             written. On Postgres, Oracle and SQLite, Drivine compiles it to SQL over two tables, one of nodes
                             and one of relationships, and gives back the same rows.
                         </p>
-                        <ul>
-                            <li><span>Reads and writes. A statement that writes is applied whole or not at all.</span></li>
-                            <li><span>Variable-length relationships and quantified path patterns compile too.</span></li>
-                            <li><span>Cypher the compiler doesn’t take yet is refused by name, before the store is sent anything.</span></li>
-                            <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries, says what each statement gives on each store.</span></li>
-                        </ul>
                     </div>
                     <div class="panel">
                         <header aria-label="Stores">
@@ -476,6 +474,12 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
 <pre set:html={cypherSample} />
                         <footer>Outlined in orange: compiled to SQL. SQLite is drivine4j’s for now.</footer>
                     </div>
+                    <ul>
+                        <li><span>Reads and writes. A statement that writes is applied whole or not at all.</span></li>
+                        <li><span>Variable-length relationships and quantified path patterns compile too.</span></li>
+                        <li><span>Cypher the compiler doesn’t take yet is refused by name, before the store is sent anything.</span></li>
+                        <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries, says what each statement gives on each store.</span></li>
+                    </ul>
                 </div>
             </section>
 
@@ -514,10 +518,11 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <p class="eyebrow">DRIVINE STUDIO</p>
                         <h2>See what a view loads.</h2>
                         <p>
-                            drivine4j writes your model to <code>.drivine/model.json</code> as it builds, and the other two
-                            libraries will too. Drivine Studio reads it: drag a view to the canvas and it loads
-                            as <code>loadAll</code> does, shows the Cypher, and draws what came back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or
-                            as a desktop app.
+                            Each library writes your model to <code>.drivine/model.json</code>: drivine4j as it builds, Python
+                            from its stubs step, TypeScript with <code>npx drivine model</code>. Drivine Studio reads it: drag a
+                            view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws what came
+                            back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or as a
+                            desktop app.
                         </p>
                     </header>
                     <figure>
@@ -593,7 +598,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 }
             });
             const buttons = document.querySelectorAll<HTMLButtonElement>('.tabs button');
-            const samples = document.querySelectorAll<HTMLElement>('.panel pre');
+            const samples = document.querySelectorAll<HTMLElement>('.panel pre[data-lang]');
             buttons.forEach((button) =>
                 button.addEventListener('click', () => {
                     buttons.forEach((it) => it.setAttribute('aria-pressed', String(it === button)));
