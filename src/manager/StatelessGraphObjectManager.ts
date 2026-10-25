@@ -12,7 +12,7 @@ import { SaveOptions } from '@/manager/SaveOptions';
 import { MatchingOptions, NearestOptions, Scored } from '@/manager/Scored';
 import { PatchOptions, PatchResult } from '@/manager/PatchResult';
 import { splitVectors } from '@/backend/VectorWrites';
-import { idOf, propsOf } from '@/backend/SaveStatementBuilder';
+import { idOf, propsOf, storedValue } from '@/backend/SaveStatementBuilder';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 import { whenNotContended } from '@/manager/Contention';
@@ -532,9 +532,10 @@ export class StatelessGraphObjectManager {
         const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
         this.assertPatchable(root, named);
         for (const field of named) {
-            const value = options.set?.[field] ?? null;
-            set[root.graphProperties.get(field) ?? field] =
-                value != null && root.jsonPacked.has(field) ? JSON.stringify(value) : value;
+            set[root.graphProperties.get(field) ?? field] = storedValue(
+                options.set?.[field],
+                root.jsonPacked.has(field)
+            );
         }
         const statement = this.backend.patchOne(root, filter.where);
         const split = splitVectors(root, set);

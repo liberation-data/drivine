@@ -2,6 +2,7 @@ import { Direction } from '@/annotation/Metadata';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { GraphBackend } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
+import { storedValue } from '@/backend/SaveStatementBuilder';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { NodeRef, RelateMode } from '@/manager/NodeRef';
 import { GraphObjectMapper } from '@/mapper/GraphObjectMapper';
@@ -40,7 +41,7 @@ export class EdgeOperations {
     /**
      * Joins `from` to `to` with a relationship of the type. Under MERGE (the default) one is made only when there is
      * none, and the properties are set whether it was made or found; a call that finds it as it is marks neither end.
-     * Under CREATE each call makes another. A null property is left out.
+     * Under CREATE each call makes another. A null property is left out, and a set is written as the list of its items.
      * @returns whether both nodes were found and joined
      */
     async relate(
@@ -50,9 +51,10 @@ export class EdgeOperations {
         properties: Record<string, any> = {},
         mode: RelateMode = RelateMode.MERGE
     ): Promise<boolean> {
-        const related = await this.run<number>(
-            this.backend.relate(this.node(from), this.node(to), type, properties, mode)
+        const stored = Object.fromEntries(
+            Object.entries(properties).map(([key, value]) => [key, storedValue(value, false)])
         );
+        const related = await this.run<number>(this.backend.relate(this.node(from), this.node(to), type, stored, mode));
         return related > 0;
     }
 
