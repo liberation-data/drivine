@@ -30,6 +30,13 @@ class Zebra {
     @FullTextIndex() body?: string;
 }
 
+/** Searched by the same index, over MatchBound, so a hit without the second label is dropped after it. */
+@NodeFragment({ labels: ['MatchBound', 'MatchReviewed'] })
+class ReviewedZebra {
+    @NodeId() id: string;
+    @FullTextIndex() body?: string;
+}
+
 const LABEL = 'MatchBound';
 const spec = fullTextIndex(LABEL, 'body');
 
@@ -102,6 +109,12 @@ describe.each(graphEngines())('loadMatching’s index bound on $type', (engine) 
         kept.forEach((it, i) => expect(it.score).toBeCloseTo(bestKept[i].score, 9));
     });
 
+    it('should reach past the best hit for a fragment whose second label it lacks', async () => {
+        await seededWith.pm.execute(new QuerySpecification(`MATCH (z:${LABEL} {id: 'z2'}) SET z:MatchReviewed`));
+        const reviewed = await gom.loadMatching(ReviewedZebra, 'zebra', { topK: 1 });
+        expect(reviewed.map((it) => it.value.id)).toEqual(['z2']);
+    });
+
     it('should return every hit for a topK as large as a JS number holds exactly', async () => {
         expect(await gom.loadMatching(Zebra, 'zebra', { topK: Number.MAX_SAFE_INTEGER })).toHaveLength(12);
         const allKept = await gom.loadMatching(Zebra, 'zebra', {
@@ -113,7 +126,9 @@ describe.each(graphEngines())('loadMatching’s index bound on $type', (engine) 
 
     it('should refuse a topK of 0, or one too large for a JS number to hold exactly', async () => {
         await expect(gom.loadMatching(Zebra, 'zebra', { topK: 0 })).rejects.toThrow(/topK must be a whole number/);
-        await expect(gom.loadMatching(Zebra, 'zebra', { topK: 1e300 })).rejects.toThrow(/topK must be a whole number/);
+        await expect(gom.loadMatching(Zebra, 'zebra', { topK: 1e300 })).rejects.toThrow(
+            'topK must be a whole number from 1 to Number.MAX_SAFE_INTEGER.'
+        );
     });
 });
 

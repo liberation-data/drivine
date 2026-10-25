@@ -384,8 +384,8 @@ export class StatelessGraphObjectManager {
      * (Lucene on Neo4j), passed as it is: escape user input yourself.
      *
      * On Neo4j, Memgraph and FalkorDB, `topK` also bounds the hits the index yields, since each is held to scale the
-     * scores: `topK` of them, or ten times `topK` where a `where` or a view's required relationships filter them (see
-     * MatchingOptions.topK).
+     * scores: `topK` of them, or ten times `topK` where a `where`, a view's required relationships or paths, or a label
+     * beyond the first filter them (see MatchingOptions.topK).
      */
     async loadMatching<T>(type: ClassRef<T>, text: string, options: MatchingOptions<T>): Promise<Scored<T>[]> {
         const target = this.modelOf(type);
@@ -406,7 +406,7 @@ export class StatelessGraphObjectManager {
         }
         // A whole number too large for a JS number to hold exactly is written as one it can, or in exponent form.
         if (!Number.isSafeInteger(options.topK) || options.topK < 1) {
-            throw new DrivineError('topK must be a whole number of at least 1.');
+            throw new DrivineError('topK must be a whole number from 1 to Number.MAX_SAFE_INTEGER.');
         }
         const statement = this.backend.matching(target, {
             label: root.labels[0],

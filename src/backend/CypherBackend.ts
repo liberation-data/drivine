@@ -358,12 +358,15 @@ export class CypherBackend implements GraphBackend {
     }
 
     /**
-     * Whether something drops a hit after the search: a caller's `where`, or a view's requirements. A threshold keeps
-     * the best hits, as the index's limit does, so it is not counted.
+     * Whether something drops a hit after the search: a caller's `where`, a view's requirements, or a root label beyond
+     * the first, which the index is over. A threshold keeps the best hits, as the index's limit does, so it is not
+     * counted.
      */
     private filtersAfterSearch(target: TargetModel, where?: string): boolean {
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         return (
             !!where ||
+            root.labels.length > 1 ||
             (target.kind === 'GRAPH_VIEW' &&
                 new ViewProjector(this.grammar).requirements(target.model, NODE_ALIAS).length > 0)
         );

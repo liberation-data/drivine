@@ -6,8 +6,10 @@ import {
     FULL_TEXT_INDEX_LIMIT_CEILING,
     fullTextIndexLimit,
     FullTextIndex,
+    GraphPath,
     GraphRelationship,
     GraphView,
+    hop,
     MEMGRAPH_GRAMMAR,
     MEMGRAPH_TEXT_SEARCH_LIMIT_CAP,
     MatchingSearch,
@@ -21,6 +23,13 @@ import {
 
 @NodeFragment({ labels: ['Article'] })
 class Article {
+    @NodeId() id: string;
+    @FullTextIndex() body?: string;
+}
+
+/** A fragment of two labels: the index is over the first, so a hit without the second is dropped after it. */
+@NodeFragment({ labels: ['Article', 'Reviewed'] })
+class ReviewedArticle {
     @NodeId() id: string;
     @FullTextIndex() body?: string;
 }
@@ -43,6 +52,14 @@ class AuthoredArticle {
     @Root() article: Article;
     @GraphRelationship({ type: 'WROTE', direction: Direction.INCOMING, target: () => Author, required: true })
     author: Author;
+}
+
+/** A view whose required path drops the hits that no editor reviewed. */
+@GraphView()
+class EditedArticle {
+    @Root() article: Article;
+    @GraphPath([hop('WROTE', Direction.INCOMING), hop('REVIEWED_BY')], { target: () => Author, required: true })
+    editors: Author[];
 }
 
 /**
@@ -120,6 +137,16 @@ describe('A full-text search’s index bound', () => {
     it('should over-fetch for a view’s required relationship alone', () => {
         expect(cutTo(neo4j.matching(authored, search()).text)).toEqual(80);
         expect(cutTo(neo4j.matching(unauthored, search({ where: 'n.title = $t' })).text)).toEqual(80);
+    });
+
+    it('should over-fetch for a view’s required path alone', () => {
+        const edited: TargetModel = { kind: 'GRAPH_VIEW', model: registry.view(EditedArticle) };
+        expect(cutTo(neo4j.matching(edited, search()).text)).toEqual(80);
+    });
+
+    it('should over-fetch for a fragment whose labels beyond the first drop the hits without them', () => {
+        const reviewed: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) };
+        expect(cutTo(neo4j.matching(reviewed, search()).text)).toEqual(80);
     });
 
     it('should clamp the over-fetch, and ask for no more than the ceiling however large the limit', () => {
