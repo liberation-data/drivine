@@ -87,8 +87,9 @@ const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
     'queries.yaml': {
         // The greatest whole number and the least, written as literals.
         'Integer bounds': [[1], BEYOND_2_53],
-        // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, and toString($f * 2).
-        'A float parameter with no fraction': [[1, 3, 7], WHOLE_FLOAT_PARAMETER]
+        // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, toString($seven) of
+        // seven = 1.0e+7, and toString($f * 2).
+        'A float parameter with no fraction': [[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]
     },
     'writes.yaml': { 'Typical app round trip': [[19, 20, 21], BEYOND_2_53] }
 };

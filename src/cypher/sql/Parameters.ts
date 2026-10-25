@@ -20,17 +20,19 @@ export class Parameters {
      * @param asJson the bound JSON text at a marker, or with `inObject` the parameter of a name, as the store's JSON
      * @param asCount the bound whole number at a marker, or with `inObject` the parameter of a name, as the store's
      * number
+     * @param text a value as the JSON text it is bound as
      */
     constructor(
         private readonly given: Record<string, any>,
         private readonly asJson: (marker: string) => string,
         private readonly asCount: (marker: string) => string,
-        private readonly inObject: boolean = false
+        private readonly inObject: boolean = false,
+        private readonly text: (value: any) => string = jsonText
     ) {}
 
     /** What the SQL binds. */
     get values(): Record<string, any> {
-        return this.inObject ? { [PARAMETERS_OBJECT]: jsonText(this.given) } : this.bound;
+        return this.inObject ? { [PARAMETERS_OBJECT]: this.text(this.given) } : this.bound;
     }
 
     /** The parameter `name`, as JSON. */
@@ -42,7 +44,7 @@ export class Parameters {
         const key = `_cy_${name}`;
         // Written once: an iterator gives its items only once, and a parameter is read where the statement names it.
         if (!(key in this.bound)) {
-            this.bound[key] = value === null || value === undefined ? null : jsonText(value);
+            this.bound[key] = value === null || value === undefined ? null : this.text(value);
         }
         return this.asJson(`$${key}`);
     }

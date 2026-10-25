@@ -483,6 +483,21 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id"
         rows: [{id: 1, text: {$repeat: "x", times: 40000}}, {id: 2, more: {$repeat: "z", times: 40000}}]
 
+  - name: "A parameter past 32 KB set on two nodes"
+    description: "A write that matches two nodes sets on each a parameter whose JSON is past 32 KB, alone and beside a float that is a whole number. On Oracle, a JSON variable that long read once for each row crashed the session."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 1}), (:CyWrite {id: 2})"
+      - cypher: "MATCH (n:CyWrite) SET n.text = $text"
+        parameters: {text: {$repeat: "x", times: 40000}}
+        rows: []
+      - cypher: "MATCH (n:CyWrite) SET n.more = $more, n.f = $f"
+        parameters: {more: {$repeat: "é", times: 20000}, f: 2.0}
+        rows: []
+      - cypher: "MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id"
+        rows:
+          - {id: 1, text: {$repeat: "x", times: 40000}, more: {$repeat: "é", times: 20000}, f: 2.0}
+          - {id: 2, text: {$repeat: "x", times: 40000}, more: {$repeat: "é", times: 20000}, f: 2.0}
+
   - name: "A float with no fraction"
     description: "A float that is a whole number, such as 2.0, is written and read back as a float, from a parameter nested or past 32 KB too, and toString() of it keeps its fraction."
     steps:
@@ -498,9 +513,7 @@ cases:
       - cypher: "CREATE (n:CyWrite {id: 2, list: $p.list, big: $p.big}) RETURN n.list"
         parameters: {p: {list: [1.0, 2.5], big: 1.0e+20}}
         rows: [[1.0, 2.5]]
-      - note: "Postgres's jsonb reads a float past a long's range back as a whole number."
-        cypher: "MATCH (n:CyWrite {id: 2}) RETURN [n.list, n.big]"
-        except: [postgres]
+      - cypher: "MATCH (n:CyWrite {id: 2}) RETURN [n.list, n.big]"
         rows: [[[1.0, 2.5], 1.0e+20]]
       - cypher: "CREATE (n:CyWrite {id: 3, f: $doc.n}) RETURN n.f"
         parameters: {doc: {text: {$repeat: "y", times: 40000}, n: 2.0}}
@@ -556,3 +569,51 @@ cases:
       - only: [sql]
         cypher: "CREATE (:CyWrite)-[:R]-(:CyWrite)"
         error: "A relationship that CREATE makes has a direction."
+
+  - name: "Parameter named by a keyword in a write"
+    description: "A parameter named by a keyword is read in a pattern's map, a SET and a SET +=, as any other."
+    steps:
+      - cypher: "CREATE (n:CyWrite {name: $create}) SET n.born = $set, n += $merge"
+        parameters: {create: "Ada", set: 1815, merge: {first: true}}
+      - cypher: "MATCH (n:CyWrite) RETURN properties(n)"
+        rows: [{name: "Ada", born: 1815, first: true}]
+
+  - name: "Labels and types something has now"
+    description: "db.labels() and db.relationshipTypes() give only what a node or a relationship has now, as Neo4j lists them, and nothing for an empty graph."
+    steps:
+      - cypher: "CALL db.labels()"
+        rows: []
+      - cypher: "CREATE (:CyWrite:Gone)-[:GOING]->(:CyWrite:Kept)"
+      - cypher: "CALL db.labels() YIELD label RETURN label ORDER BY label"
+        rows: ["CyWrite", "Gone", "Kept"]
+      - cypher: "CALL db.relationshipTypes()"
+        rows: ["GOING"]
+      - cypher: "MATCH (g:Gone) DETACH DELETE g"
+      - cypher: "CALL db.labels() YIELD label RETURN label ORDER BY label"
+        rows: ["CyWrite", "Kept"]
+      - cypher: "CALL db.relationshipTypes()"
+        rows: []
+
+  - name: "Labels of the statement's own writes, and of odd names"
+    description: "db.labels() reads the labels a write before it in the statement gave, and gives a label as it is named."
+    steps:
+      - cypher: "CREATE (:CyWrite:`odd label`:`a\"b`) WITH 1 AS one CALL db.labels() YIELD label RETURN label"
+        unordered: true
+        rows: ["CyWrite", "a\"b", "odd label"]
+
+  - name: "Labels feeding a write"
+    description: "What db.labels() yields is written by a clause after it, and its WHERE reads the variables around it in a statement that writes."
+    steps:
+      - cypher: "CREATE (:CyWrite:Kept)"
+      - cypher: "CALL db.labels() YIELD label CREATE (:CyWrite {copy: label})"
+      - cypher: "MATCH (n:CyWrite) WHERE n.copy IS NOT NULL RETURN n.copy ORDER BY n.copy"
+        rows: ["CyWrite", "Kept"]
+      - cypher: "CREATE (:CyWrite:Fresh) WITH 'Fresh' AS wanted CALL db.labels() YIELD label WHERE label = wanted RETURN label"
+        rows: ["Fresh"]
+
+  - name: "A random value bound by a WITH in a write"
+    description: "randomUUID() bound by a WITH is one value however often a write after reads it."
+    steps:
+      - cypher: "CREATE (n:CyWrite) WITH n, randomUUID() AS u SET n.u = u, n.v = u"
+      - cypher: "MATCH (n:CyWrite) RETURN n.u = n.v"
+        rows: [true]

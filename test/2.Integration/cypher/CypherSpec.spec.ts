@@ -197,8 +197,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
 
         it('toString of a float that is a whole number keeps its fraction, as in Cypher', async () => {
             // Not in the spec, whose case binds the float as a parameter, which a JavaScript number cannot keep a float.
-            // Oracle writes a double of 2 as 2 (liberation-data/drivine#243). A quotient is left out: on Postgres it keeps
-            // numeric's scale (liberation-data/drivine#245).
+            // Oracle writes a double of 2 as 2 (liberation-data/drivine#243).
             const [row] = await query(
                 'RETURN [toString(2.0), toString(2.5), toString(1.5 * 2), toString(7), toString(-3.0)]'
             );
@@ -214,7 +213,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         };
 
         it('collect(DISTINCT) beside grouping keys, other aggregates, an order, a page and a variable outside its aggregates', async () => {
-            // Not in the spec: distinctFirst's grouping WITH, and the projection over it.
+            // Not in the spec: aggregatesFirst's grouping WITH, and the projection over it.
             await seed();
             expect(
                 await query(
@@ -241,7 +240,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('collect(DISTINCT) in a DISTINCT projection ordered by a key property or an aggregate no item is', async () => {
-            // Not in the spec: the projection over distinctFirst's grouping WITH orders by what that WITH holds.
+            // Not in the spec: the projection over aggregatesFirst's grouping WITH orders by what that WITH holds.
             await seed();
             expect(
                 await query(
@@ -311,7 +310,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('collect(DISTINCT) under a comprehension, a quantifier or a reduce that names a grouping key in its body', async () => {
-            // Not in the spec: distinctFirst's grouping WITH keeps each variable such a body names, outside the aggregate.
+            // Not in the spec: aggregatesFirst's grouping WITH keeps each variable such a body names, outside the aggregate.
             await seed();
             expect(
                 await query(
@@ -327,7 +326,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('collect(DISTINCT) beside a pattern or a subquery that names a grouping key', async () => {
-            // Not in the spec: distinctFirst's grouping WITH keeps each variable a pattern or a subquery names, outside the
+            // Not in the spec: aggregatesFirst's grouping WITH keeps each variable a pattern or a subquery names, outside the
             // aggregate.
             await seed();
             expect(
@@ -345,7 +344,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('collect(DISTINCT) of dates keeps each once, as dates', async () => {
-            // Not in the spec: what distinctFirst keeps of a collection is still of the kind collect gathered.
+            // Not in the spec: what aggregatesFirst keeps of a collection is still of the kind collect gathered.
             const dates = "UNWIND [date('2020-01-01'), date('2020-01-01'), date('2021-05-01')] AS d";
             expect(await query(`${dates} WITH collect(DISTINCT d) AS ds RETURN [x IN ds | x.year]`)).toEqual([
                 [2020, 2021]
@@ -355,7 +354,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
 
         it('a float that is a whole number, collected once each, stays a float', async () => {
             // The spec's case reads the floats back, which a JavaScript number does not tell from whole numbers, so toString
-            // tells them apart: what distinctFirst keeps of a collection is the items collect gathered, not their text.
+            // tells them apart: what aggregatesFirst keeps of a collection is the items collect gathered, not their text.
             expect(
                 await query('UNWIND [1.0, 2.5, 1.0] AS x WITH collect(DISTINCT x) AS xs RETURN [x IN xs | toString(x)]')
             ).toEqual([['1.0', '2.5']]);
@@ -566,6 +565,141 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             // On Postgres, the function the write was compiled to went with the transaction, and is made again.
             await query("CREATE (:CyWrite {name: 'Ada'})");
             expect(await query('MATCH (n:CyWrite) RETURN count(n)')).toEqual([1]);
+        });
+
+        it("a list of a few thousand relationships is equal by identity to a map's or a list's", async () => {
+            // Not in the spec: their identity is larger than Oracle's = compares (ORA-40180), so Oracle compares it by
+            // JSON_EQUAL.
+            expect(
+                await query('CREATE (h:Hub) WITH h UNWIND range(1, 2500) AS i CREATE (h)-[:R]->(:Leaf) RETURN count(*)')
+            ).toEqual([2500]);
+            expect(
+                await query(
+                    'MATCH (:Hub)-[r:R]->() WITH collect(r) AS rs RETURN [[rs][0] = rs, {x: rs}.x = rs, rs IN [rs], size(rs)]'
+                )
+            ).toEqual([[true, true, true, 2500]]);
+        }, 300_000);
+
+        it('collect(DISTINCT) keeps a few thousand lists or maps holding a relationship once each in seconds, not a minute', async () => {
+            // Not in the spec: each was compared with every one before it, which took 20 to 40 seconds on Oracle.
+            expect(
+                await query('CREATE (h:Hub) WITH h UNWIND range(1, 5000) AS i CREATE (h)-[:R]->(:Leaf) RETURN count(*)')
+            ).toEqual([5000]);
+            const started = Date.now();
+            expect(
+                await query(
+                    'MATCH p = (:Hub)-[r:R]->() RETURN [size(collect(DISTINCT relationships(p))), size(collect(DISTINCT {x: r}))]'
+                )
+            ).toEqual([[5000, 5000]]);
+            expect(Date.now() - started).toBeLessThan(15_000);
+        }, 300_000);
+
+        it('a whole float past 2^53 written in the statement or given equals the same float worked out', async () => {
+            // Not in the spec: Postgres writes such a float out in full, by its shortest decimal, not the double's exact value.
+            expect(
+                await query("RETURN [toFloat('1e24') = 1e24, toFloat('1e300') = 1e300, toFloat('1e24') = $x]", { x: 1e24 })
+            ).toEqual([[true, true, true]]);
+        });
+
+        it('a number or a text the statement gives, added to a text, is written as toString writes it', async () => {
+            // Not in the spec: a side the statement gives is written out at compile time, and the other side as it is.
+            expect(
+                await query(
+                    "RETURN ['a' + 1e7, 1e7 + 'a', 'a' + 2.0, 'a' + $f, $i + 'b', 'a' + $s, $s + 1.5e-7, 'x' + 10, $m.n + 'y', $j + 'b']",
+                    { f: 1.0e-4, i: 3, s: 's', m: { n: 0.5 }, j: neo4j.int(4) }
+                )
+            ).toEqual([['a1.0E7', '1.0E7a', 'a2.0', 'a1.0E-4', '3b', 'as', 's1.5E-7', 'x10', '0.5y', '4b']]);
+        });
+
+        it('a quotient of floats is written without the zeros its scale leaves', async () => {
+            // The spec's float arithmetic steps skip Postgres, which works a float out in exact decimal
+            // (liberation-data/drivine4j#188): these it gives as a double does.
+            expect(
+                await query('RETURN [4.0 / 2, 7 / 2.0, 10.0 / 4, toString(4.0 / 2), toString(10.0 / 4), toString(7 / 2.0)]')
+            ).toEqual([[2.0, 3.5, 2.5, '2.0', '2.5', '3.5']]);
+        });
+
+        it("toString of a double past Oracle's NUMBER range writes its shortest digits", async () => {
+            // Not in the spec: Oracle writes such a double from its own text, not from TO_CHAR's 15 digits.
+            expect(
+                await query(
+                    'RETURN [toString(1.7976931348623157e308), toString(1.5e300), toString(1.0e-310), toString($a)]',
+                    { a: -2.5e-320 }
+                )
+            ).toEqual([['1.7976931348623157E308', '1.5E300', '1.0E-310', '-2.5E-320']]);
+            expect(await query('RETURN toString(5e-324)')).toEqual(['4.9E-324']);
+        });
+
+        it('a UNION in CALL whose queries return a list with an identity beside one without compiles, as it did before identities', async () => {
+            // Not in the spec: the queries are compiled again without identities, so their columns match.
+            await seed();
+            expect(
+                await query(
+                    "CALL { MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->() RETURN collect([r]) AS l UNION RETURN [] AS l } RETURN size(l) ORDER BY size(l)"
+                )
+            ).toEqual([0, 3]);
+            expect(
+                await query(
+                    "CALL { MATCH (:Person {name: 'Keanu'})-[r:KNOWS]->() RETURN {x: r} AS m UNION RETURN {x: 1} AS m } RETURN count(*)"
+                )
+            ).toEqual([2]);
+        });
+
+        it('a CASE that gives a list of relationships or of texts is read, and gathered on every store but Oracle, which refuses it', async () => {
+            // Not in the spec: on Oracle the CASE's results are worked out first; gathered, it closes the session, so it is
+            // refused (liberation-data/drivine4j#224).
+            await seed();
+            expect(
+                await query(
+                    "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(m) WITH r, m ORDER BY m.title RETURN CASE WHEN m.released > 2000 THEN [r] ELSE [m.title] END"
+                )
+            ).toEqual([['Johnny Mnemonic'], ['The Matrix'], [{ role: 'Neo' }]]);
+            // A CASE that reads an aggregate is worked out in the query that aggregates, where a subquery would group it again.
+            expect(
+                await query(
+                    'MATCH (a:Person)-[r:ACTED_IN]->(m) RETURN a.name, size(CASE WHEN count(*) > 1 THEN collect(r) ELSE [] END) ORDER BY a.name'
+                )
+            ).toEqual([
+                ['Carrie', 2],
+                ['Keanu', 3],
+                ['Laurence', 0]
+            ]);
+            // Counted, by count() or the size() of its collect, it is read on Oracle too, as it was before.
+            expect(
+                await query(
+                    'MATCH (a:Person)-[r:ACTED_IN]->(m) RETURN a.name, size(collect(CASE WHEN m.released > 2000 THEN [r] ELSE [] END)), ' +
+                        'count(CASE WHEN m.released > 2000 THEN [r] ELSE [] END) ORDER BY a.name'
+                )
+            ).toEqual([
+                ['Carrie', 2, 2],
+                ['Keanu', 3, 3],
+                ['Laurence', 1, 1]
+            ]);
+            const gathered =
+                'MATCH (a:Person)-[r:ACTED_IN]->(m) WITH a, r, m ORDER BY m.title ' +
+                'RETURN a.name, [x IN collect(CASE WHEN m.released > 2000 THEN [r] ELSE [m.title] END) | x[0]] ORDER BY a.name';
+            // With no ELSE, its null is the value of another kind.
+            const unmatched =
+                'MATCH (a:Person)-[r:ACTED_IN]->(m) WITH a, r, m ORDER BY m.title ' +
+                'RETURN a.name, [x IN collect(CASE WHEN m.released > 2000 THEN [r] END) | x[0].role] ORDER BY a.name';
+            if (store.type === DatabaseType.ORACLE) {
+                for (const statement of [gathered, unmatched]) {
+                    await expect(query(statement)).rejects.toThrow(
+                        'On Oracle, an aggregate of a CASE that gives a list of nodes or relationships beside a value of another kind'
+                    );
+                }
+                return;
+            }
+            expect(await query(unmatched)).toEqual([
+                ['Carrie', ['Trinity']],
+                ['Keanu', ['Neo']],
+                ['Laurence', []]
+            ]);
+            expect(await query(gathered)).toEqual([
+                ['Carrie', ['The Matrix', { role: 'Trinity' }]],
+                ['Keanu', ['Johnny Mnemonic', 'The Matrix', { role: 'Neo' }]],
+                ['Laurence', ['The Matrix']]
+            ]);
         });
     }
 );

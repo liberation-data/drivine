@@ -4,7 +4,9 @@ import { Temporal } from '@/cypher/sql/Temporal';
  * A JSON value: `jsonb`, or with `ordered` `json`, whose object keys keep the order they were written in. Where the
  * statement makes it of a `temporal` kind (a constructor, a parameter of a date, temporal arithmetic), it is that kind's
  * ISO text; where it makes it a list whose every item is of one, `items` is that kind, so an item taken from it, unwound
- * or indexed, is of it.
+ * or indexed, is of it. Where it is a map or a list the statement builds that holds a node or a relationship, `identity`
+ * is the same value, as JSON that compares, with each node or relationship in it as its id: it is compared by that, as a
+ * graph engine compares what it holds by identity, not by its properties.
  */
 export interface JsonValue {
     readonly kind: 'Json';
@@ -12,7 +14,14 @@ export interface JsonValue {
     readonly ordered?: boolean;
     readonly temporal?: Temporal;
     readonly items?: Temporal;
+    readonly identity?: string;
+    /** Whether the statement makes it a list, and with `itemLists` a list of lists: a store may sort a list as Cypher does only then. */
+    readonly list?: boolean;
+    readonly itemLists?: boolean;
 }
+
+/** What a {@link JsonValue} is besides its SQL. */
+export type JsonOf = Omit<JsonValue, 'kind' | 'sql'>;
 
 /** A truth value: SQL's boolean, with its null for Cypher's. */
 export interface BoolValue {
@@ -68,7 +77,7 @@ export interface PathValue {
 export type Value = JsonValue | BoolValue | NodeValue | RelationshipValue | EntitiesValue | PathValue;
 
 /** A JSON value of the SQL `sql`: see {@link JsonValue}. */
-export function json(sql: string, of: { ordered?: boolean; temporal?: Temporal; items?: Temporal } = {}): JsonValue {
+export function json(sql: string, of: JsonOf = {}): JsonValue {
     return { kind: 'Json', sql, ...of };
 }
 

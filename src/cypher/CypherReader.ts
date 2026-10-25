@@ -8,6 +8,7 @@ import {
     OC_CaseExpressionContext,
     OC_ComparisonExpressionContext,
     OC_ExpressionContext,
+    OC_InQueryCallContext,
     OC_IntegerLiteralContext,
     OC_ListOperatorExpressionContext,
     OC_ListPredicateExpressionContext,
@@ -24,6 +25,7 @@ import {
     OC_PatternContext,
     OC_PatternElementChainContext,
     OC_PatternElementContext,
+    OC_ProcedureNameContext,
     OC_ProjectionBodyContext,
     OC_PropertiesContext,
     OC_PropertyExpressionContext,
@@ -40,6 +42,7 @@ import {
     OC_SchemaNameContext,
     OC_SetContext,
     OC_SingleQueryContext,
+    OC_StandaloneCallContext,
     OC_StringListNullPredicateExpressionContext,
     OC_StringPredicateExpressionContext,
     OC_SubqueryReadingsContext,
@@ -47,7 +50,8 @@ import {
     OC_UnaryAddOrSubtractExpressionContext,
     OC_UpdatingClauseContext,
     OC_VariableContext,
-    OC_WithContext
+    OC_WithContext,
+    OC_YieldItemsContext
 } from '@/cypher/grammar/CypherParser';
 import {
     BinaryOperator,
@@ -59,6 +63,7 @@ import {
 } from '@/cypher/ast/Expression';
 import { Direction, NodePattern, Pattern, Range, RelationshipPattern } from '@/cypher/ast/Pattern';
 import { Clause, Projection, Query, RemoveItem, SetItem } from '@/cypher/ast/Query';
+import { CypherProcedure, CypherProcedures } from '@/cypher/CypherProcedure';
 
 const COMPARISONS: Record<string, BinaryOperator> = {
     '=': 'EQUALS',
@@ -91,8 +96,9 @@ class Refusing extends BaseErrorListener {
 /**
  * Reads a Cypher statement into a {@link Query}: parsed with openCypher's grammar, then walked into the syntax tree the
  * compiler works from, which says what the statement means and no more of how it was written. A statement that is not
- * Cypher is refused with where it went wrong. A statement that is Cypher the compiler does not take (a procedure call)
- * is refused by name.
+ * Cypher is refused with where it went wrong. A statement that is Cypher the compiler does not take (a call of a
+ * procedure it does not know) is refused by name. A call of one it knows, `CALL db.labels()`, is read as the query that
+ * gives its rows: see {@link CypherProcedures}.
  */
 export const CypherReader = {
     /** The statement `cypher`, read. */
@@ -109,7 +115,75 @@ export const CypherReader = {
 };
 
 function query(context: OC_QueryContext): Query {
-    return regular(context.oC_RegularQuery() ?? refuse('A procedure call (CALL)'));
+    const regularQuery = context.oC_RegularQuery();
+    return regularQuery ? regular(regularQuery) : standalone(context.oC_StandaloneCall()!);
+}
+
+/**
+ * `CALL db.labels()` as the whole statement: the procedure's rows, each field under the name it is yielded as, or its
+ * own where it yields them all, by `YIELD *` or no `YIELD`.
+ */
+function standalone(call: OC_StandaloneCallContext): Query {
+    const invocation = call.oC_ExplicitProcedureInvocation();
+    const procedure = procedureNamed(
+        invocation?.oC_ProcedureName() ?? call.oC_ImplicitProcedureInvocation()!.oC_ProcedureName()
+    );
+    const items = call.oC_YieldItems();
+    // As Neo4j refuses it: a WHERE filters rows a clause after it reads.
+    if (items?.oC_Where()) {
+        throw new DrivineError(
+            `A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL ${procedure.qualifiedName}() YIELD ${procedure.field} WHERE … RETURN ${procedure.field}.`
+        );
+    }
+    const yielded: [string, string][] = items ? yields(items) : [[procedure.field, procedure.field]];
+    return CypherProcedures.query(procedure, invocation?.oC_Expression().map(expression) ?? [], yielded, undefined);
+}
+
+/**
+ * `CALL db.labels() YIELD label` within a query: for each row, the procedure's rows, joined to it as a `CALL { … }`'s
+ * are, each field yielded bound for the clauses after.
+ */
+function inQuery(call: OC_InQueryCallContext): Clause {
+    const invocation = call.oC_ExplicitProcedureInvocation();
+    const procedure = procedureNamed(invocation.oC_ProcedureName());
+    // As Neo4j refuses it: within a query, what a procedure gives is named.
+    const items = call.oC_YieldItems();
+    if (!items) {
+        throw new DrivineError(
+            `A CALL of a procedure within a query names what it yields, as in Cypher: CALL ${procedure.qualifiedName}() YIELD ${procedure.field}.`
+        );
+    }
+    const condition = items.oC_Where();
+    return {
+        kind: 'Call',
+        optional: false,
+        query: CypherProcedures.query(
+            procedure,
+            invocation.oC_Expression().map(expression),
+            yields(items),
+            condition ? expression(condition.oC_Expression()) : undefined
+        )
+    };
+}
+
+/** The procedure a call names, or the call refused where the compiler does not take it. */
+function procedureNamed(context: OC_ProcedureNameContext): CypherProcedure {
+    const qualified =
+        context
+            .oC_Namespace()
+            .oC_SymbolicName()
+            .map((it) => `${symbolic(it)}.`)
+            .join('') + symbolic(context.oC_SymbolicName());
+    return CypherProcedures.named(qualified) ?? refuse('A procedure call (CALL)');
+}
+
+/** Each field a `YIELD` names, and the variable it is bound to: its own name, or the one after `AS`. */
+function yields(items: OC_YieldItemsContext): [string, string][] {
+    return items.oC_YieldItem().map((item): [string, string] => {
+        const variable = name(item.oC_Variable());
+        const field = item.oC_ProcedureResultField();
+        return [field ? symbolic(field.oC_SymbolicName()) : variable, variable];
+    });
 }
 
 function regular(context: OC_RegularQueryContext): Query {
@@ -260,7 +334,7 @@ function reading(context: OC_ReadingClauseContext): Clause {
     if (unwind) {
         return { kind: 'Unwind', list: expression(unwind.oC_Expression()), variable: name(unwind.oC_Variable()) };
     }
-    return refuse('A procedure call (CALL)');
+    return inQuery(context.oC_InQueryCall()!);
 }
 
 /** Reading clauses that return nothing, the body of an `EXISTS { … }` or a `COUNT { … }`. */
@@ -836,9 +910,13 @@ function mapLiteral(context: OC_MapLiteralContext): MapLiteral {
     };
 }
 
+/** `$name`, `$1`, or a keyword, `$limit`, which names a parameter as any other word does. */
 function parameter(context: OC_ParameterContext): Parameter {
-    const symbolicName = context.oC_SymbolicName();
-    return { kind: 'Parameter', name: symbolicName ? symbolic(symbolicName) : context.DecimalInteger()!.getText() };
+    const schema = context.oC_SchemaName();
+    return {
+        kind: 'Parameter',
+        name: schema ? schemaName(schema) : context.DecimalInteger()?.getText() ?? context.getChild(1)!.getText()
+    };
 }
 
 // ----- Names and literals -----

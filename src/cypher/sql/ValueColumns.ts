@@ -3,10 +3,14 @@ import { Value } from '@/cypher/sql/Value';
 /** Stands for the name of the query a `WITH` is read from, before it is named. */
 export const PENDING = '__with__';
 
-/** The select-list entries that carry `value` out of a query, under `name`. */
+/**
+ * The select-list entries that carry `value` out of a query, under `name`: a JSON value's identity, where it has one, as
+ * a column of its own, `<name>_identity`.
+ */
 export function columns(value: Value, name: string): string[] {
     switch (value.kind) {
         case 'Json':
+            return [`${value.sql} AS ${name}`, ...(value.identity ? [`${value.identity} AS ${name}_identity`] : [])];
         case 'Bool':
             return [`${value.sql} AS ${name}`];
         case 'Entities':
@@ -42,6 +46,7 @@ export function columnsOf(value: Value, alias: string, name?: string): Value {
     const at = `${alias}.${name}`;
     switch (value.kind) {
         case 'Json':
+            return { ...value, sql: at, identity: value.identity && `${at}_identity` };
         case 'Bool':
             return { ...value, sql: at };
         case 'Entities':
@@ -73,6 +78,7 @@ function withAlias(value: Value, alias: string): Value {
     const named = (sql: string): string => sql.split(PENDING).join(alias);
     switch (value.kind) {
         case 'Json':
+            return { ...value, sql: named(value.sql), identity: value.identity && named(value.identity) };
         case 'Bool':
             return { ...value, sql: named(value.sql) };
         case 'Entities':
@@ -99,10 +105,11 @@ function withAlias(value: Value, alias: string): Value {
     }
 }
 
-/** What a projection that aggregates is grouped by, to keep `value`: a node by its columns. */
+/** What a projection that aggregates is grouped by, to keep `value`: a node by its columns, a JSON value by its identity too. */
 export function groupKeys(value: Value): string[] {
     switch (value.kind) {
         case 'Json':
+            return [value.sql, ...(value.identity ? [value.identity] : [])];
         case 'Bool':
             return [value.sql];
         case 'Entities':

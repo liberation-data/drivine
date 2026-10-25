@@ -1,18 +1,71 @@
+import { Integer, isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
-import { indent, unsupported, writes } from '@/cypher/sql/CypherSyntax';
+import { indent, literal, RoundingMode, unsupported, writes } from '@/cypher/sql/CypherSyntax';
+import { jsonText } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
 import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
+import { CypherFloat } from '@/cypher/ast/Expression';
 
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
 const SHARED_ABOVE = 200;
+
+/**
+ * The format a float from 10^-3 up to 10^7 is written in by `TO_CHAR` or `to_char`, as Java writes a double: no
+ * exponent, a digit before the point and one after it at least, and as many more as its shortest decimal has.
+ */
+export const PLAIN_FLOAT = 'FM9999990.0999999999999999999999';
+
+/** Whether `value`, given by the statement, is a number JSON holds as one: NaN and the infinities it holds as none. */
+function isGivenNumber(value: unknown): value is number | bigint | CypherFloat | Integer {
+    if (value instanceof CypherFloat) {
+        return Number.isFinite(value.value);
+    }
+    return typeof value === 'bigint' || isInt(value) || (typeof value === 'number' && Number.isFinite(value));
+}
+
+/**
+ * A number the statement gives, as Java writes it: a float as a double, `1.0E7`, `2.5`. A JavaScript number with no
+ * fraction is a whole number, as a parameter binds it.
+ */
+function givenText(value: number | bigint | CypherFloat | Integer): string {
+    if (value instanceof CypherFloat) {
+        return javaDouble(value.value);
+    }
+    return typeof value === 'number' && !Number.isInteger(value) ? javaDouble(value) : value.toString();
+}
+
+/**
+ * The double `value` as Java's `Double.toString` writes it: with no exponent from 10^-3 up to 10^7, a point and a digit
+ * after it at least, and else as `1.0E7`, `1.2E-4`, from the shortest decimal that reads back as it.
+ */
+export function javaDouble(value: number): string {
+    if (Number.isNaN(value)) {
+        return 'NaN';
+    }
+    if (!Number.isFinite(value)) {
+        return value > 0 ? 'Infinity' : '-Infinity';
+    }
+    if (value === 0) {
+        return Object.is(value, -0) ? '-0.0' : '0.0';
+    }
+    const magnitude = Math.abs(value);
+    if (magnitude >= 1e-3 && magnitude < 1e7) {
+        const text = String(value);
+        return text.includes('.') ? text : `${text}.0`;
+    }
+    // Two digits at least, as Java writes them: the least double, 5e-324, is 4.9E-324.
+    const [shortest] = value.toExponential().split('e');
+    const [mantissa, exponent] = (shortest.includes('.') ? value.toExponential() : value.toExponential(1)).split('e');
+    return `${mantissa}E${Number(exponent)}`;
+}
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables, `<graph>_node` and `<graph>_edge`, so a statement written
@@ -49,6 +102,9 @@ export abstract class SqlCypherCompiler {
 
     /** Whether the statement is a procedure, which declares no function of its own a query of it may call. */
     procedural = false;
+
+    /** Whether the store aggregates a `CASE` whose result holds a subquery: see `CypherWriter.casesFirst`. */
+    readonly aggregatesCaseSubqueries: boolean = true;
 
     /**
      * Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would
@@ -119,7 +175,8 @@ export abstract class SqlCypherCompiler {
                 parameters,
                 (it) => this.nullIfJsonNull(this.propertyOf(Procedure.PARAMS, it)),
                 (it) => this.number(this.propertyOf(Procedure.PARAMS, it)),
-                true
+                true,
+                (it) => this.parameterText(it)
             )
         );
         const call = this.procedure(writer.procedure(query));
@@ -170,6 +227,42 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The query `query` that makes a value anew for each row, `randomUUID()`, kept apart from the query that reads it,
+     * where a store would merge the two and make the value again for each read: a `WITH`'s, and a projection's sorted by
+     * it.
+     */
+    once(query: string): string {
+        return this.called(query);
+    }
+
+    /**
+     * `round(value, precision, mode)`: the SQL number `number` rounded to `precision` decimal places by `mode`, as a SQL
+     * number. Worked out in decimal, as Neo4j works it out with Java's `BigDecimal`, so 2.345 is halfway between 2.34 and
+     * 2.35: a store whose numbers are decimal (`numeric`, `NUMBER`) takes this.
+     */
+    roundTo(number: string, precision: string, mode: RoundingMode): string {
+        return this.shared([number, precision], ([n, p]) => {
+            const scale = `POWER(CAST(10 AS NUMERIC), ${p})`;
+            const scaled = `(ABS(${n}) * ${scale})`;
+            // Rounded as a magnitude, then given the number's sign: UP, DOWN and the HALF_ modes round toward or away from 0.
+            const magnitudes: Partial<Record<RoundingMode, string>> = {
+                UP: `CEIL(${scaled})`,
+                DOWN: `FLOOR(${scaled})`,
+                HALF_UP: `FLOOR(${scaled} + 0.5)`,
+                HALF_DOWN: `CEIL(${scaled} - 0.5)`,
+                HALF_EVEN: `CASE WHEN ${scaled} - FLOOR(${scaled}) = 0.5 THEN FLOOR(${scaled}) + MOD(FLOOR(${scaled}), 2) ELSE FLOOR(${scaled} + 0.5) END`
+            };
+            if (mode === 'CEILING') {
+                return `(CEIL(${n} * ${scale}) / ${scale})`;
+            }
+            if (mode === 'FLOOR') {
+                return `(FLOOR(${n} * ${scale}) / ${scale})`;
+            }
+            return `(SIGN(${n}) * ${magnitudes[mode]} / ${scale})`;
+        });
+    }
+
+    /**
      * Where the JSON `json`'s kind comes among the others, as Cypher orders values of several kinds: a map, a list, a
      * text, a truth value, then a number. JSON orders them otherwise on each store.
      */
@@ -194,6 +287,48 @@ export abstract class SqlCypherCompiler {
      */
     indexedEquality(_property: string, _value: string): string | undefined {
         return undefined;
+    }
+
+    /**
+     * Whether the identities `x` and `y`, neither of them null, are equal: see `CypherWriter.identityOf`. A list of a few
+     * thousand relationships' tokens is larger than Oracle's `=` compares, so Oracle compares them otherwise.
+     */
+    identityEquals(x: string, y: string): string {
+        return `${x} = ${y}`;
+    }
+
+    /**
+     * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): JSON's
+     * null as SQL's, as any value, where the store orders lists as Cypher does.
+     */
+    listSortKey(jsonSql: string): string {
+        return this.nullIfJsonNull(jsonSql);
+    }
+
+    /** Where the kind of the JSON `json`, an item of a list, comes among the others as Cypher orders them: as {@link kindOrder}, null last. */
+    itemRank(jsonSql: string): string {
+        return `COALESCE(${this.kindOrder(jsonSql)}, 6)`;
+    }
+
+    /**
+     * The text the JSON `json`, a side of a `+` that may put a number and a text together, is written as there: by
+     * `written`, as `toString` writes it, a float as Java writes a double. Where the statement gives it a number, `given`,
+     * it is that number's text, worked out here; and where it gives the other side, `other`, a number, or this side a text,
+     * it is its own text, `plain`, for a side is put together with a number only where it is a text. So only a side the
+     * statement gives neither way is written as `toString` writes it, which is long: `c.name + 1` compiles as it did
+     * before floats were so written. NaN and the infinities count as given neither way.
+     */
+    summedText(
+        jsonSql: string,
+        given: unknown,
+        other: unknown,
+        plain: (json: string) => string,
+        written: (json: string) => string
+    ): string {
+        if (isGivenNumber(given)) {
+            return literal(givenText(given));
+        }
+        return typeof given === 'string' || isGivenNumber(other) ? plain(jsonSql) : written(jsonSql);
     }
 
     /** `a op b` of the JSON numbers `a` and `b`, as JSON: `operator` is `+`, `-`, `*` or `/`. */
@@ -251,12 +386,19 @@ export abstract class SqlCypherCompiler {
         return { joins, reached, distinct };
     }
 
+    /** A parameter's value `value` as the JSON text it is bound as. */
+    parameterText(value: any): string {
+        return jsonText(value);
+    }
+
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(
             parameters,
             (it) => this.parameterJson(it),
-            (it) => this.parameterCount(it)
+            (it) => this.parameterCount(it),
+            false,
+            (it) => this.parameterText(it)
         );
     }
 
@@ -392,11 +534,32 @@ export abstract class SqlCypherCompiler {
      */
     abstract distinctItems(list: string): string;
 
-    /** `min` or `max` of the JSON values `value` of a group: of values of several kinds, as {@link kindOrder} orders them. */
-    abstract extreme(value: string, min: boolean): string;
+    /**
+     * The items of the JSON list `list` whose item in `identities`, a list as long, is first among those equal to it, as
+     * {@link distinctItems} finds them: what `collect(DISTINCT …)` keeps of what holds a node or a relationship, by its
+     * identity. Worked out in one pass, where comparing each identity with those before it took seconds over a few
+     * thousand.
+     */
+    abstract firstOfEach(list: string, identities: string): string;
 
-    /** `a + b` of the JSON values `a` and `b`: numbers added, lists joined, texts put together. */
-    abstract add(a: string, b: string): string;
+    /**
+     * `min` or `max` of the JSON values `value` of a group: of values of several kinds, as {@link kindOrder} orders them;
+     * of one kind, as JSON orders them, or by `key` where there is one, what orders them.
+     */
+    abstract extreme(value: string, min: boolean, key?: string): string;
+
+    /**
+     * The JSON list of ids `ids` with each id the map `{[key]: id}`, a node's or a relationship's identity (see
+     * `CypherWriter.identityOf`), and null where the list is: by its text, so it reads no aggregate in a subquery, as
+     * Oracle reads none.
+     */
+    abstract idTokens(ids: string, key: string): string;
+
+    /**
+     * `a + b` of the JSON values `a` and `b`: numbers added, lists joined, texts put together. `given` is what the
+     * statement gives each as, where it does: see {@link summedText}.
+     */
+    abstract add(a: string, b: string, given?: [unknown, unknown]): string;
 
     /** The remainder of the SQL numbers `a` and `b`. */
     abstract modulo(a: string, b: string): string;
@@ -470,6 +633,14 @@ export abstract class SqlCypherCompiler {
 
     /** `randomUUID()`: a new UUID, as SQL text in its usual form. */
     abstract uuid(): string;
+
+    /**
+     * One of openCypher's functions of numbers, `name`, one of `MATH_FUNCTIONS` or `atan2`, of `numbers`, the store's SQL
+     * numbers, as a SQL float: null where one is null. Neo4j works these out as Java's doubles, and gives NaN or an
+     * infinity for some (`log(0)`, `sqrt(-1)`, `exp(1000)`, `cot(0)`), which JSON holds neither of: there, the store
+     * fails.
+     */
+    abstract math(name: string, numbers: string[]): string;
 
     /** `right`: the last `count` characters of the SQL text `text`, or all of it where it has fewer. */
     abstract rightText(text: string, count: string): string;
