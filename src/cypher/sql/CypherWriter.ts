@@ -149,6 +149,9 @@ const TEMPORAL_NOW = TEMPORAL_KINDS.flatMap((kind) =>
     ['statement', 'transaction', 'realtime'].map((it) => `${kind}.${it}`)
 );
 
+/** What `round()` is refused with, as Neo4j refuses it, a precision below 0. */
+const NEGATIVE_PRECISION = 'round() takes a precision of 0 or more, as in Neo4j.';
+
 /** The functions of a temporal kind that truncate a value to a unit. */
 const TEMPORAL_TRUNCATE = TEMPORAL_KINDS.map((it) => `${it}.truncate`);
 
@@ -3896,21 +3899,26 @@ export class CypherWriter {
             if (mode === undefined) {
                 return json(this.sql.literalJson(null));
             }
-            this.refuseNegativePrecision(call.fn.arguments[1]);
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        this.sql.roundTo(this.numberOf(call.arguments[0]), this.truncatedWhole(call.arguments[1]), mode)
+                        this.sql.roundTo(
+                            this.numberOf(call.arguments[0]),
+                            this.precisionOf(call.arguments[1], call.fn.arguments[1]),
+                            mode
+                        )
                     )
                 )
             );
         }
         if (call.arguments.length === 2) {
-            this.refuseNegativePrecision(call.fn.arguments[1]);
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        `ROUND(${this.numberOf(call.arguments[0])}, ${this.truncatedWhole(call.arguments[1])})`
+                        `ROUND(${this.numberOf(call.arguments[0])}, ${this.precisionOf(
+                            call.arguments[1],
+                            call.fn.arguments[1]
+                        )})`
                     )
                 )
             );
@@ -4041,24 +4049,32 @@ export class CypherWriter {
     }
 
     /**
-     * Refuses a precision for `round()` that is below 0 as a whole number toward zero, as Neo4j refuses it, where it is
-     * written, negated or not, or a parameter's value, a bigint or the Neo4j driver's Integer too: -0.5 is 0 places, and
-     * -1.2 is refused.
-     * One read from data is not known here, and SQL has no way to fail on it, so it rounds to tens or hundreds where Neo4j
-     * fails.
+     * `round()`'s precision `value`, written in the statement as `written`, as a whole number toward zero: -0.5 is 0
+     * places. One below 0 is refused, as Neo4j refuses it: when compiling, where it is written, negated or not, or a
+     * parameter's value, a bigint or the Neo4j driver's Integer too; and else when the row is read, by the store's
+     * `failure`.
      */
-    private refuseNegativePrecision(written: Expression): void {
+    private precisionOf(value: Value, written: Expression): string {
         const negated = written.kind === 'Unary' && written.operator === 'NEGATE';
         const precision = this.given(negated ? (written as Unary).operand : written);
-        const value =
+        const given =
             precision instanceof CypherFloat
                 ? precision.value
                 : typeof precision === 'bigint' || isInt(precision)
                 ? Number(precision.toString())
                 : precision;
-        if (typeof value === 'number' && Math.trunc(negated ? -value : value) < 0) {
-            throw new DrivineError('round() takes a precision of 0 or more, as in Neo4j.');
+        if (typeof given === 'number') {
+            if (Math.trunc(negated ? -given : given) < 0) {
+                throw new DrivineError(NEGATIVE_PRECISION);
+            }
+            return this.truncatedWhole(value);
         }
+        return this.sql.shared(
+            [`TRUNC(${this.numberOf(value)})`],
+            ([places]) =>
+                `CASE WHEN ${places} < 0 THEN ${this.sql.failure(NEGATIVE_PRECISION, places)} ` +
+                `ELSE CAST(${places} AS INTEGER) END`
+        );
     }
 
     /** A value as a SQL number, where it is one. */
