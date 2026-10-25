@@ -1,3 +1,4 @@
+import { int } from 'neo4j-driver';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
@@ -25,6 +26,31 @@ describe('The Cypher compiler refuses', () => {
                     });
                 }
             }
+        });
+    });
+
+    it('round() of two arguments, a precision below 0 when cut toward zero, written, negated or given', () => {
+        // Not in the spec's refusals yet, which name the message for three arguments alone.
+        compilers.forEach(([, compiler]) => {
+            (
+                [
+                    ['RETURN round(1234.5, -2)', {}],
+                    ['RETURN round(1234.5, -1.2)', {}],
+                    ['RETURN round(1234.5, -$p)', { p: 2 }],
+                    ['RETURN round(1234.5, $p)', { p: -2.5 }],
+                    // A whole number a caller binds as a bigint or as the Neo4j driver's Integer.
+                    ['RETURN round(1234.5, $p)', { p: BigInt(-2) }],
+                    ['RETURN round(1234.5, $p)', { p: int(-2) }]
+                ] as const
+            ).forEach(([cypher, parameters]) => {
+                expect(() => compiler().compile(cypher, parameters)).toThrow(
+                    'round() takes a precision of 0 or more, as in Neo4j.'
+                );
+            });
+            // -0.5 and -0.9 cut toward zero are 0 places.
+            expect(() =>
+                compiler().compile("RETURN [round(1234.5, -0.5), round(1234.5, $p, 'HALF_UP')]", { p: -0.9 })
+            ).not.toThrow();
         });
     });
 
