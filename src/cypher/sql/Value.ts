@@ -18,6 +18,12 @@ export interface JsonValue {
     /** Whether the statement makes it a list, and with `itemLists` a list of lists: a store may sort a list as Cypher does only then. */
     readonly list?: boolean;
     readonly itemLists?: boolean;
+    /**
+     * Whether the statement makes it a text or null (a text written, `toString`, a string function, a `+` of texts), and
+     * with `texts` a list whose every item is: a `+` writes such a side as its own text, not as `toString` writes a float.
+     */
+    readonly text?: boolean;
+    readonly texts?: boolean;
 }
 
 /** What a {@link JsonValue} is besides its SQL. */

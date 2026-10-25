@@ -1,5 +1,6 @@
+import { Integer, isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
-import { Expression } from '@/cypher/ast/Expression';
+import { CypherFloat, Expression } from '@/cypher/ast/Expression';
 import { Pattern } from '@/cypher/ast/Pattern';
 import { Clause } from '@/cypher/ast/Query';
 
@@ -64,6 +65,20 @@ export const MATH_FUNCTIONS = [
     'radians',
     'haversin'
 ];
+
+/** The functions of one value a store writes (`function`) whose result is a text, or null: see `JsonValue.text`. */
+export const TEXT_FUNCTIONS = ['tostring', 'toupper', 'tolower', 'trim'];
+
+/** A side of a `+` the statement makes a text, or null, though it does not give it: see `JsonValue.text`. */
+export const MADE_TEXT = Symbol('MadeText');
+
+/** Whether `value`, given by the statement, is a number JSON holds as one: NaN and the infinities it holds as none. */
+export function isGivenNumber(value: unknown): value is number | bigint | CypherFloat | Integer {
+    if (value instanceof CypherFloat) {
+        return Number.isFinite(value.value);
+    }
+    return typeof value === 'bigint' || isInt(value) || (typeof value === 'number' && Number.isFinite(value));
+}
 
 /**
  * The doubles Java's `Math.toDegrees` and `Math.toRadians` multiply by, as Neo4j's `degrees` and `radians` do: a store

@@ -104,6 +104,84 @@ describe('A compiled Cypher statement', () => {
         }
     );
 
+    it.each(compilers)(
+        'of a sum writes a side the statement makes a text as its own text, and only a side that may be a float as toString writes it, on %s',
+        (name, compilerFor) => {
+            // Written as toString writes a float, a side that is always a text made `count('x' + toString(i))` 2.5 times
+            // as slow on Oracle (#326).
+            const written = name === 'oracle' ? 'TO_CHAR(' : 'to_char(';
+            const writes = (cypher: string): number => compilerFor().compile(cypher).sql.split(written).length - 1;
+            // toString writes its float once, and the sum writes the text it gives as it is.
+            const once = writes('MATCH (c:Claim) RETURN toString(c.i)');
+            expect(once).toBeGreaterThan(0);
+            expect(writes("MATCH (c:Claim) RETURN 'x' + toString(c.i)")).toEqual(once);
+            expect(
+                writes(
+                    "MATCH (c:Claim) RETURN 'a' + toUpper(c.s), trim(c.s) + substring(c.s, 1) + left(c.s, 2) + replace(c.s, 'a', 'b')"
+                )
+            ).toEqual(0);
+            expect(
+                writes("MATCH (c:Claim)-[r]->() RETURN split(c.s, ',')[0] + reverse(toLower(c.s)) + type(r)")
+            ).toEqual(0);
+            // Carried through a WITH, a collect and an UNWIND, still a text.
+            expect(
+                writes(
+                    'MATCH (c:Claim) WITH toLower(c.s) AS t, collect(toUpper(c.s)) AS ts UNWIND ts AS u RETURN t + u + ts[0] + head(ts)'
+                )
+            ).toEqual(0);
+            // A property may hold a float: it is written as toString writes it, beside a text or not.
+            expect(writes("MATCH (c:Claim) RETURN c.s + 'b'")).toEqual(once);
+            expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + c.f')).toEqual(once);
+            expect(writes("MATCH (c:Claim) RETURN 'x' + toString(c.i) + c.f")).toEqual(2 * once);
+            // A CASE, a coalesce and a list written are a text, or hold texts, where each of theirs is; a text unwound is one.
+            expect(
+                writes(
+                    "MATCH (c:Claim) RETURN CASE WHEN c.b THEN toUpper(c.s) ELSE 'n' END + coalesce(toLower(c.s), 'z') + ['a', toUpper(c.s)][1]"
+                )
+            ).toEqual(0);
+            expect(writes('MATCH (c:Claim) RETURN ltrim(c.s) + rtrim(c.s) + right(c.s, 2)')).toEqual(0);
+            expect(writes("MATCH (c:Claim) UNWIND toUpper(c.s) AS u RETURN u + 'x'")).toEqual(0);
+            // A list of texts kept distinct, sliced, its tail, its last, and an item an expression names, still holds texts.
+            expect(
+                writes(
+                    'MATCH (c:Claim) WITH collect(DISTINCT toUpper(c.s)) AS ts RETURN last(ts) + ts[1..][0] + tail(ts)[0] + ts[size(ts) - 1]'
+                )
+            ).toEqual(0);
+            expect(
+                writes(
+                    "MATCH (c:Claim) WITH collect(toUpper(c.s)) AS ts RETURN reverse(ts)[0] + coalesce(ts, split('a,b', ','))[0]"
+                )
+            ).toEqual(0);
+            // Joined to texts, too: the join writes its sides as any `+` does, and its item, added to a text, is written as
+            // it is.
+            const joined =
+                "MATCH (c:Claim) WITH collect(toUpper(c.s)) AS ts, collect(c.f) AS fs RETURN (ts + ['a'])[0], ('b' + ts)[0], (ts + fs)[0]";
+            expect(writes(joined.split('[0],').join("[0] + 'x',"))).toEqual(writes(joined));
+            expect(writes(`${joined} + 'x'`)).toEqual(writes(joined) + once);
+            // Each query of a CALL's UNION makes it a text, and a write carries it on.
+            expect(
+                writes(
+                    "MATCH (c:Claim) CALL { WITH c RETURN toUpper(c.s) AS v UNION WITH c RETURN 'n' AS v } RETURN v + 'x'"
+                )
+            ).toEqual(0);
+            expect(writes("MATCH (c:Claim) WITH c, toUpper(c.s) AS t SET c.t = t RETURN t + 'x'")).toEqual(0);
+            // Where any one of them may be a float, it is written as toString writes it.
+            expect(writes("MATCH (c:Claim) RETURN CASE WHEN c.b THEN 'a' ELSE c.f END + 'x'")).toEqual(once);
+            expect(writes("MATCH (c:Claim) RETURN coalesce(toUpper(c.s), c.f) + 'x'")).toEqual(once);
+            expect(writes("MATCH (c:Claim) RETURN ['a', c.f][1] + 'x'")).toEqual(once);
+            expect(
+                writes(
+                    "MATCH (c:Claim) CALL { WITH c RETURN toUpper(c.s) AS v UNION WITH c RETURN c.f AS v } RETURN v + 'x'"
+                )
+            ).toEqual(once);
+            // The least and the greatest of texts are a text; of a property, which may hold a float, not.
+            expect(
+                writes("MATCH (c:Claim) WITH min(toUpper(c.s)) AS lo, max(toLower(c.s)) AS hi RETURN lo + hi + 'x'")
+            ).toEqual(0);
+            expect(writes("MATCH (c:Claim) WITH max(c.f) AS hi RETURN hi + 'x'")).toEqual(once);
+        }
+    );
+
     it('of a sort by a property on Postgres is by its JSON alone, and only a list the statement makes is keyed as a list', () => {
         // Keyed as a list, a term costs thousands a row in the planner's estimate, which brings in its JIT for the whole
         // statement past a few dozen rows (liberation-data/drivine4j#223).

@@ -48,13 +48,16 @@ import {
     indent,
     isAggregate,
     isAnew,
+    isGivenNumber,
     iterated,
     literal,
+    MADE_TEXT,
     MATH_FUNCTIONS,
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
     replaced,
+    TEXT_FUNCTIONS,
     unsupported,
     variablesIn,
     variablesOfPattern,
@@ -205,6 +208,14 @@ interface Invocation {
     one(): Value;
 }
 
+/** A side of a `+`, as `CypherWriter.summand` reads it. */
+interface Summand {
+    given: unknown;
+    text: boolean;
+    texts: boolean;
+    passed: unknown;
+}
+
 /** The one value of `values`, where each is the same; undefined where they differ or there are none. */
 function single<T>(values: T[]): T | undefined {
     return new Set(values).size === 1 ? values[0] : undefined;
@@ -265,7 +276,7 @@ export class CypherWriter {
 
     /** How each kind of expression is compiled. */
     private readonly expressions: { [K in Expression['kind']]: (expression: any, scope: Scope) => Value } = {
-        Literal: (it) => json(this.sql.literalJson(it.value)),
+        Literal: (it) => json(this.sql.literalJson(it.value), { text: typeof it.value === 'string' }),
         Parameter: (it) =>
             this.givenParameters?.get(it.name) ??
             json(this.parameters.json(it.name), { temporal: Temporal.ofValue(this.parameters.value(it.name)) }),
@@ -341,7 +352,7 @@ export class CypherWriter {
             if (subject.kind !== 'Relationship') {
                 throw new DrivineError('type() takes a relationship.');
             }
-            return json(this.sql.scalar(subject.type));
+            return json(this.sql.scalar(subject.type), { text: true });
         },
         id: (call) => this.idFunction(call),
         elementid: (call) => this.idFunction(call),
@@ -353,7 +364,11 @@ export class CypherWriter {
                 `COALESCE(${call.arguments
                     .map((it) => this.sql.nullIfJsonNull(this.sql.comparable(this.asJson(it))))
                     .join(', ')})`,
-                { temporal: this.kindOf(call.fn.arguments.map((it, i) => [it, call.arguments[i]])) }
+                {
+                    temporal: this.kindOf(call.fn.arguments.map((it, i) => [it, call.arguments[i]])),
+                    text: call.arguments.every((it) => this.isText(it)),
+                    texts: call.arguments.every((it) => this.holdsTexts(it))
+                }
             ),
         count: (call) => json(this.sql.scalar(`count(${call.distinct}${this.countable(call.one())})`)),
         collect: (call) => this.collectFunction(call),
@@ -375,7 +390,7 @@ export class CypherWriter {
                 throw new DrivineError('split() takes a text and a separator.');
             }
             const [text, separator] = call.arguments.map((it) => this.textOf(it));
-            return json(this.sql.split(text, separator), { list: true });
+            return json(this.sql.split(text, separator), { list: true, texts: true });
         },
         reverse: (call) =>
             json(
@@ -393,7 +408,9 @@ export class CypherWriter {
                 {
                     items: this.itemsOf(call.one()),
                     list: this.isList(call.one()),
-                    itemLists: this.holdsLists(call.one())
+                    itemLists: this.holdsLists(call.one()),
+                    text: this.isText(call.one()),
+                    texts: this.holdsTexts(call.one())
                 }
             ),
         tail: (call) =>
@@ -411,7 +428,8 @@ export class CypherWriter {
                 {
                     items: this.itemsOf(call.one()),
                     list: this.isList(call.one()),
-                    itemLists: this.holdsLists(call.one())
+                    itemLists: this.holdsLists(call.one()),
+                    texts: this.holdsTexts(call.one())
                 }
             ),
         // A text is read as Cypher reads it, its case and the spaces around it aside; a number is true but for 0.
@@ -466,8 +484,8 @@ export class CypherWriter {
         e: (call) => this.constant(call, Math.E),
         pi: (call) => this.constant(call, Math.PI),
         sign: (call) => json(this.sql.scalar(`SIGN(${this.numberOf(call.one())})`)),
-        ltrim: (call) => json(this.sql.scalar(`LTRIM(${this.textOf(call.one())})`)),
-        rtrim: (call) => json(this.sql.scalar(`RTRIM(${this.textOf(call.one())})`)),
+        ltrim: (call) => json(this.sql.scalar(`LTRIM(${this.textOf(call.one())})`), { text: true }),
+        rtrim: (call) => json(this.sql.scalar(`RTRIM(${this.textOf(call.one())})`), { text: true }),
         randomuuid: (call) => {
             if (call.arguments.length > 0) {
                 throw new DrivineError('randomUUID() takes no argument.');
@@ -481,7 +499,7 @@ export class CypherWriter {
             }
             const [text, start] = this.textAndCount(call.arguments);
             const length = call.arguments[2] ? `, ${this.whole(call.arguments[2])}` : '';
-            return json(this.sql.scalar(`SUBSTR(${text}, ${start} + 1${length})`));
+            return json(this.sql.scalar(`SUBSTR(${text}, ${start} + 1${length})`), { text: true });
         },
         left: (call) => this.leftOrRight(call),
         right: (call) => this.leftOrRight(call),
@@ -490,7 +508,7 @@ export class CypherWriter {
                 throw new DrivineError('replace() takes a text, what to replace, and what with.');
             }
             const [text, search, replacement] = call.arguments.map((it) => this.textOf(it));
-            return json(this.sql.scalar(`REPLACE(${text}, ${search}, ${replacement})`));
+            return json(this.sql.scalar(`REPLACE(${text}, ${search}, ${replacement})`), { text: true });
         },
         timestamp: (call) => {
             if (call.arguments.length > 0) {
@@ -768,7 +786,9 @@ export class CypherWriter {
                     {
                         ...value,
                         temporal: single(all.map((it) => it?.temporal)),
-                        items: single(all.map((it) => it?.items))
+                        items: single(all.map((it) => it?.items)),
+                        text: all.every((it) => it?.text === true),
+                        texts: all.every((it) => it?.texts === true)
                     }
                 ];
             })
@@ -801,9 +821,14 @@ export class CypherWriter {
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
         select.source(this.sql.elements(items, name));
+        // An item of a list of texts, or of a text, is a text.
         select.bind(
             unwind.variable,
-            json(`${name}.item`, { temporal: this.itemsOf(list), list: this.holdsLists(list) })
+            json(`${name}.item`, {
+                temporal: this.itemsOf(list),
+                list: this.holdsLists(list),
+                text: this.holdsTexts(list) || this.isText(list)
+            })
         );
         select.order.push([`${name}.item_no`, false]);
     }
@@ -1450,7 +1475,9 @@ export class CypherWriter {
                         temporal: was?.temporal,
                         items: was?.items,
                         list: was?.list,
-                        itemLists: was?.itemLists
+                        itemLists: was?.itemLists,
+                        text: was?.text,
+                        texts: was?.texts
                     })
                 );
             } else if (kind === 'PATH') {
@@ -2608,7 +2635,8 @@ export class CypherWriter {
             items: this.kindOf(list.items.map((it, i) => [it, items[i]])),
             identity: this.identityHolding(items, (ids) => this.sql.jsonArray(ids)),
             list: true,
-            itemLists: entities.length > 0 && entities.every((it) => this.isList(it))
+            itemLists: entities.length > 0 && entities.every((it) => this.isList(it)),
+            texts: items.every((it) => this.isText(it))
         });
     }
 
@@ -2638,7 +2666,8 @@ export class CypherWriter {
             return json(item, {
                 temporal: this.itemsOf(value),
                 identity: this.identityTaken(value, item, true, (it) => this.sql.element(it, at)),
-                list: this.holdsLists(value)
+                list: this.holdsLists(value),
+                text: this.holdsTexts(value)
             });
         }
         const take = (list: string): string =>
@@ -2652,7 +2681,8 @@ export class CypherWriter {
         return json(taken, {
             temporal: this.itemsOf(value),
             identity: this.identityTaken(value, taken, true, take),
-            list: this.holdsLists(value)
+            list: this.holdsLists(value),
+            text: this.holdsTexts(value)
         });
     }
 
@@ -2711,7 +2741,8 @@ export class CypherWriter {
             items: this.itemsOf(listed),
             identity: this.identityTaken(listed, taken, false, sliced),
             list: true,
-            itemLists: this.holdsLists(listed)
+            itemLists: this.holdsLists(listed),
+            texts: this.holdsTexts(listed)
         });
     }
 
@@ -3067,6 +3098,16 @@ export class CypherWriter {
     /** Whether the statement makes `value` a list whose every item is a list: see {@link JsonValue.itemLists}. */
     private holdsLists(value: Value): boolean {
         return value.kind === 'Json' && value.itemLists === true;
+    }
+
+    /** Whether the statement makes `value` a text, or null: see {@link JsonValue.text}. */
+    private isText(value: Value): boolean {
+        return value.kind === 'Json' && value.text === true;
+    }
+
+    /** Whether the statement makes `value` a list whose every item is a text, or null: see {@link JsonValue.texts}. */
+    private holdsTexts(value: Value): boolean {
+        return value.kind === 'Json' && value.texts === true;
     }
 
     /** The temporal kind the statement makes each item of the list `list`: see {@link JsonValue.items}. */
@@ -3448,15 +3489,18 @@ export class CypherWriter {
                         gathered
                     };
                 }
-                // Two lists of items of one kind are, together, a list of that kind.
+                // Two lists of items of one kind are, together, a list of that kind. A side the statement makes a text, not
+                // given, is written as its own text; a text put together with a text, or a number given, is a text.
                 const items = this.itemsOf(left);
-                const given: [unknown, unknown] = [this.given(binary.left), this.given(binary.right)];
+                const [l, r] = [this.summand(binary.left, left), this.summand(binary.right, right)];
+                const given: [unknown, unknown] = [l.passed, r.passed];
                 return json(
                     sql.shared([a, b], ([x, y]) => sql.add(x, y, given)),
                     {
                         items: items !== undefined && items === this.itemsOf(right) ? items : undefined,
                         list: this.isList(left) || this.isList(right),
-                        itemLists: this.holdsLists(left) && (this.holdsLists(right) || !this.isList(right))
+                        itemLists: this.holdsLists(left) && (this.holdsLists(right) || !this.isList(right)),
+                        ...this.summedTexts(l, r)
                     }
                 );
             },
@@ -3648,6 +3692,25 @@ export class CypherWriter {
     }
 
     /**
+     * A side of a `+`, `expression`, whose value is `value`: what the statement gives it as, where it does; whether it
+     * makes it a text, given or not, or a list of texts; and what `add` is given for it, {@link MADE_TEXT} where it
+     * makes it a text without giving it.
+     */
+    private summand(expression: Expression, value: Value): Summand {
+        const given = this.given(expression);
+        const text = this.isText(value) || typeof given === 'string';
+        return { given, text, texts: this.holdsTexts(value), passed: given ?? (text ? MADE_TEXT : undefined) };
+    }
+
+    /** Whether a `+` of `l` and `r` is a text (a text and a text, or a number given), or a list of texts. */
+    private summedTexts(l: Summand, r: Summand): { text: boolean; texts: boolean } {
+        return {
+            text: (l.text && (r.text || isGivenNumber(r.given))) || (r.text && isGivenNumber(l.given)),
+            texts: (l.texts && (r.texts || r.text)) || (l.text && r.texts)
+        };
+    }
+
+    /**
      * The value `expression` is where the statement gives it: written, or bound to a parameter or a parameter's key;
      * undefined where it is not given, or is null.
      */
@@ -3738,7 +3801,9 @@ export class CypherWriter {
             temporal: this.kindOf(results),
             identity,
             list: results.every(([, it]) => this.isList(it)),
-            itemLists: results.every(([, it]) => this.holdsLists(it))
+            itemLists: results.every(([, it]) => this.holdsLists(it)),
+            text: results.every(([, it]) => this.isText(it)),
+            texts: results.every(([, it]) => this.holdsTexts(it))
         });
     }
 
@@ -3787,10 +3852,11 @@ export class CypherWriter {
                 identity: this.identityTaken(one, result, true, (list) =>
                     this.sql.shared([list], ([x]) => this.sql.function(name, x)!)
                 ),
-                list: this.holdsLists(one)
+                list: this.holdsLists(one),
+                text: this.holdsTexts(one)
             });
         }
-        return json(result);
+        return json(result, { text: TEXT_FUNCTIONS.includes(name) });
     }
 
     private idFunction(call: Invocation): Value {
@@ -3836,6 +3902,7 @@ export class CypherWriter {
             items: gathered.kind === 'Json' ? gathered.temporal : undefined,
             list: true,
             itemLists: this.isList(gathered),
+            texts: this.isText(gathered),
             identity:
                 identity !== undefined
                     ? this.sql.comparable(json(this.sql.collect(identity, this.rowOrder), { ordered: true }))
@@ -3863,14 +3930,16 @@ export class CypherWriter {
                 items: list.items,
                 identity: this.sql.comparable(json(this.sql.distinctItems(list.identity), { ordered: true })),
                 list: true,
-                itemLists: list.itemLists
+                itemLists: list.itemLists,
+                texts: list.texts
             });
         }
         return json(this.sql.distinctItems(this.sql.comparable(list)), {
             ordered: true,
             items: list.items,
             list: true,
-            itemLists: list.itemLists
+            itemLists: list.itemLists,
+            texts: list.texts
         });
     }
 
@@ -3886,7 +3955,7 @@ export class CypherWriter {
             : this.sql.extremesByListKey && this.isList(call.one())
             ? this.sql.listSortKey(this.sql.comparable(value))
             : undefined;
-        return json(this.sql.extreme(this.sql.comparable(value), min, key), { temporal });
+        return json(this.sql.extreme(this.sql.comparable(value), min, key), { temporal, text: this.isText(value) });
     }
 
     /**
@@ -3971,7 +4040,8 @@ export class CypherWriter {
         }
         const [text, count] = this.textAndCount(call.arguments);
         return json(
-            this.sql.scalar(call.name === 'left' ? `SUBSTR(${text}, 1, ${count})` : this.sql.rightText(text, count))
+            this.sql.scalar(call.name === 'left' ? `SUBSTR(${text}, 1, ${count})` : this.sql.rightText(text, count)),
+            { text: true }
         );
     }
 
