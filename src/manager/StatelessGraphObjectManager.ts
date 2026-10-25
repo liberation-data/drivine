@@ -382,6 +382,10 @@ export class StatelessGraphObjectManager {
      * The nodes matching `text` by the fragment's @FullTextIndex (a view's root's), as fragments or views, each with its
      * relevance, scaled so the best hit is 1, most relevant first. The text is the engine's full-text query language
      * (Lucene on Neo4j), passed as it is: escape user input yourself.
+     *
+     * On Neo4j, Memgraph and FalkorDB, `topK` also bounds the hits the index yields, since each is held to scale the
+     * scores: `topK` of them, or ten times `topK` where a `where` or a view's required relationships filter them (see
+     * MatchingOptions.topK).
      */
     async loadMatching<T>(type: ClassRef<T>, text: string, options: MatchingOptions<T>): Promise<Scored<T>[]> {
         const target = this.modelOf(type);
@@ -400,7 +404,8 @@ export class StatelessGraphObjectManager {
                     : `${root.type.name} declares no @FullTextIndex to search.`
             );
         }
-        if (!Number.isInteger(options.topK) || options.topK < 1) {
+        // A whole number too large for a JS number to hold exactly is written as one it can, or in exponent form.
+        if (!Number.isSafeInteger(options.topK) || options.topK < 1) {
             throw new DrivineError('topK must be a whole number of at least 1.');
         }
         const statement = this.backend.matching(target, {

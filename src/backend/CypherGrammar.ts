@@ -8,6 +8,12 @@ function fullTextIndexName(label: string, properties: string[]): string {
     return itemName({ kind: 'FULLTEXT', label, properties });
 }
 
+/**
+ * The most hits a full-text search asks Memgraph's `text_search` for. Memgraph 3.14 takes 100,000,000 and aborts at
+ * 500,000,000; a million is far more than a search can scale in memory, and far below where the server fails.
+ */
+export const MEMGRAPH_TEXT_SEARCH_LIMIT_CAP = 1_000_000;
+
 /** The vector index Drivine makes over a label's property (see vectorIndex), by the name it gives it. */
 function vectorIndexName(label: string, property: string): string {
     return itemName({ kind: 'VECTOR', label, properties: [property], dimensions: 1, similarity: 'COSINE' });
@@ -62,8 +68,12 @@ export interface CypherGrammar {
      */
     vectorSearch(label: string, property: string, similarity: 'COSINE' | 'EUCLIDEAN'): { call: string; score: string };
 
-    /** The call that asks the full-text index over a label's properties for nodes matching `$_text`, yielding `node, score`. */
-    fullTextSearch(label: string, properties: string[]): string;
+    /**
+     * The call that asks the full-text index over a label's properties for nodes matching `$_text`, yielding `node,
+     * score`. Where the engine's call takes a limit, it is asked for no more than `limit` hits, so the index stops
+     * rather than yield hits the search would drop (see CypherBackend.matching).
+     */
+    fullTextSearch(label: string, properties: string[], limit: number): string;
 
     /**
      * A predicate that holds when `pattern` (e.g. `(n)-[:R]->(:T)`) matches at least once.
@@ -121,10 +131,10 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
     keysetNullGuard: true,
     readsWithoutSnapshot: true,
     vectorValue: plainVector,
-    fullTextSearch: (label, properties) =>
+    fullTextSearch: (label, properties, limit) =>
         `CALL db.index.fulltext.queryNodes(${quoteString(
             fullTextIndexName(label, properties)
-        )}, $_text) YIELD node, score`,
+        )}, $_text, {limit: ${limit}}) YIELD node, score`,
     // Neo4j's score is already (1 + cos) / 2, or 1 / (1 + d²).
     vectorSearch: (label, property) => ({
         call: `CALL db.index.vector.queryNodes(${quoteString(
@@ -143,8 +153,13 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     engine: 'Memgraph',
     keysetNullGuard: false,
     vectorValue: plainVector,
-    fullTextSearch: (label, properties) =>
-        `CALL text_search.search_all(${quoteString(fullTextIndexName(label, properties))}, $_text) YIELD node, score`,
+    // Without a limit, text_search yields its best 1,000 hits and no more. A limit far above the cap aborts the server,
+    // however few hits there are: Memgraph allocates it up front (memgraph/memgraph#5200).
+    fullTextSearch: (label, properties, limit) =>
+        `CALL text_search.search_all(${quoteString(fullTextIndexName(label, properties))}, $_text, {limit: ${Math.min(
+            limit,
+            MEMGRAPH_TEXT_SEARCH_LIMIT_CAP
+        )}}) YIELD node, score`,
     // Memgraph's similarity is the cosine itself, or already 1 / (1 + d²). Its vector search returns nodes deleted since
     // its last garbage collection, and any read of one fails ('Trying to access labels on a deleted node') until it
     // collects: FREE MEMORY forces it (memgraph/memgraph#4975).
@@ -174,7 +189,7 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
     keysetNullGuard: false,
     // FalkorDB indexes only its own vector type: a list stored as a list is never found by a vector search.
     vectorValue: (expression: string) => `vecf32(${expression})`,
-    // One full-text index to a label, found by the label.
+    // One full-text index to a label, found by the label. Its call takes no limit: the search cuts the hits after it.
     fullTextSearch: (label) => `CALL db.idx.fulltext.queryNodes(${quoteString(label)}, $_text) YIELD node, score`,
     // FalkorDB's score is a distance: 1 - cos, or d.
     vectorSearch: (label, property, similarity) => ({

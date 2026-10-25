@@ -31,6 +31,25 @@ const STORE_LABEL = 'DrivineStore';
 /** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
 const SCHEMA_MARKER = '_DrivineSchema';
 
+/** How many times its limit a full-text search asks its index for, when something drops hits after the index. */
+export const FULL_TEXT_FILTERED_OVER_FETCH = 10;
+
+/**
+ * The most hits a full-text search asks its index for, however large its limit: the largest a Java int holds, as
+ * drivine4j's limit is one.
+ */
+export const FULL_TEXT_INDEX_LIMIT_CEILING = 2_147_483_647;
+
+/**
+ * How many hits the full-text index may yield to a search that returns `limit` rows. Where nothing drops a hit after
+ * the index, the best `limit` hits are the answer. Where a filter does, the index is asked for
+ * FULL_TEXT_FILTERED_OVER_FETCH times as many and the filter chooses among them, so a filter that passes fewer than one
+ * in ten of the best hits can return fewer than `limit` rows while the index holds more that pass it.
+ */
+export function fullTextIndexLimit(limit: number, filtered: boolean): number {
+    return Math.min(filtered ? limit * FULL_TEXT_FILTERED_OVER_FETCH : limit, FULL_TEXT_INDEX_LIMIT_CEILING);
+}
+
 /** What a statement over a fragment calls its node. Filters are written against it. */
 export const NODE_ALIAS = 'n';
 
@@ -189,15 +208,29 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
+    /**
+     * Scaled by the best hit, so the scale is [0, 1] on every engine; a best score of 0 (FalkorDB) gives each 1.
+     *
+     * Every hit is collected to find the best, and each row after carries the collection, so the number of hits, not
+     * the limit, is what a search costs, and a common word matches most of a corpus. So the hits are cut to the best
+     * `fullTextIndexLimit` before they are collected, on every engine, and an engine whose call takes a limit is given
+     * it too. The cut keeps the best score, so the scale is the same as with every hit.
+     *
+     * The cut's sort stays even where the call yields its hits best first: `collect` keeps the order it is given and
+     * `UNWIND` the order of the list, so the rows come out best first, and a fragment's limit takes no sort of its own.
+     */
     matching(target: TargetModel, search: MatchingSearch): GraphStatement {
-        // Scaled by the best hit, so the scale is [0, 1] on every engine; a best score of 0 (FalkorDB) gives each 1.
+        const indexLimit = fullTextIndexLimit(search.limit, this.filtersAfterSearch(target, search.where));
         const head = [
-            this.grammar.fullTextSearch(search.label, search.properties),
+            this.grammar.fullTextSearch(search.label, search.properties, indexLimit),
+            'WITH node, score',
+            'ORDER BY score DESC',
+            `LIMIT ${indexLimit}`,
             'WITH collect({node: node, score: score}) AS _hits, max(score) AS _best',
             'UNWIND _hits AS _hit',
             `WITH _hit.node AS ${NODE_ALIAS}, CASE WHEN _best > 0 THEN _hit.score / _best ELSE 1.0 END AS _score`
         ];
-        return this.scored(target, head, search);
+        return this.scored(target, head, search, true);
     }
 
     save(
@@ -324,11 +357,30 @@ export class CypherBackend implements GraphBackend {
         return false;
     }
 
-    /** The tail of a scored search: filter after the search, project, order by score, trim. */
+    /**
+     * Whether something drops a hit after the search: a caller's `where`, or a view's requirements. A threshold keeps
+     * the best hits, as the index's limit does, so it is not counted.
+     */
+    private filtersAfterSearch(target: TargetModel, where?: string): boolean {
+        return (
+            !!where ||
+            (target.kind === 'GRAPH_VIEW' &&
+                new ViewProjector(this.grammar).requirements(target.model, NODE_ALIAS).length > 0)
+        );
+    }
+
+    /**
+     * The tail of a scored search: filter after the search, project, order by score, trim.
+     *
+     * With `limitFirst`, a fragment is trimmed before it is projected, so its properties are read only for the rows
+     * returned. That limit takes no sort of its own, so the head must yield its rows best first: a sort there would
+     * hold each row, and each row of a full-text search carries the hits the head collected.
+     */
     private scored(
         target: TargetModel,
         head: string[],
-        search: { where?: string; threshold?: boolean; limit?: number; depth?: Record<string, number> }
+        search: { where?: string; threshold?: boolean; limit?: number; depth?: Record<string, number> },
+        limitFirst: boolean = false
     ): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const filters = [
@@ -343,15 +395,18 @@ export class CypherBackend implements GraphBackend {
             target.kind === 'GRAPH_VIEW'
                 ? new ViewProjector(this.grammar, search.depth).project(target.model, NODE_ALIAS)
                 : { calls: [], expression: fragment(NODE_ALIAS) };
+        const trimmed = search.limit !== undefined ? [`LIMIT ${search.limit}`] : [];
+        const early = limitFirst && target.kind === 'NODE_FRAGMENT';
         return new GraphStatement(
             [
                 ...head,
                 // A MATCH of the bound node holds the filter: Memgraph takes no existence check in a WITH's WHERE.
                 `MATCH (${NODE_ALIAS}) WHERE ${filters.join(' AND ')}`,
+                ...(early && trimmed.length ? [`WITH ${NODE_ALIAS}, _score`, ...trimmed] : []),
                 ...projection.calls,
                 `RETURN {value: ${projection.expression}, score: _score} AS result`,
                 'ORDER BY result.score DESC',
-                ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
+                ...(early ? [] : trimmed)
             ].join('\n')
         );
     }
