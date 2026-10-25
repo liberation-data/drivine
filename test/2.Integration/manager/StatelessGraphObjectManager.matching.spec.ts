@@ -31,6 +31,13 @@ class Chunk {
     sectionId?: string;
 }
 
+/** In the Chunk index, as its label is the index's, but no Chunk: a search for Chunks must neither return nor scale by it. */
+@NodeFragment({ labels: ['MatchTest'] })
+class Draft {
+    @NodeId() id: string;
+    body?: string;
+}
+
 @NodeFragment({ labels: ['MatchArticle'] })
 @FullTextIndex({ properties: ['title', 'summary'] })
 class Article {
@@ -76,7 +83,9 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
             chunk('c2', 'graph databases and graph queries', 's2'),
             chunk('c3', 'relational tables'),
             Object.assign(new Article(), { id: 'a1', title: 'Moon Girl', summary: 'a genius inventor' }),
-            Object.assign(new Article(), { id: 'a2', title: 'Devil', summary: 'a dinosaur' })
+            Object.assign(new Article(), { id: 'a2', title: 'Devil', summary: 'a dinosaur' }),
+            chunk('c4', 'zebra grass grass grass grass grass', 's3'),
+            Object.assign(new Draft(), { id: 'd1', body: 'zebra' })
         ]);
         await gom.save(
             Object.assign(new ChunkInSection(), {
@@ -104,6 +113,17 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
         expect(hits.every((it) => it.score > 0 && it.score <= 1)).toBe(true);
         expect(hits[0].value).toBeInstanceOf(Chunk);
         expect(hits.map((it) => it.score)).toEqual([...hits.map((it) => it.score)].sort((a, b) => b - a));
+    });
+
+    it('should scale by the best hit with every root label, not by one of the index label alone', async () => {
+        // The draft ranks above c4, but is no Chunk.
+        const hits = await gom.loadMatching(Chunk, 'zebra', { topK: 5 });
+        expect(hits.map((it) => it.value.id)).toEqual(['c4']);
+        expect(hits[0].score).toBeCloseTo(1, 5);
+        expect((await gom.loadMatching(Chunk, 'zebra', { topK: 1 })).map((it) => it.value.id)).toEqual(['c4']);
+        expect((await gom.loadMatching(Chunk, 'zebra', { topK: 5, threshold: 0.99 })).map((it) => it.value.id)).toEqual([
+            'c4'
+        ]);
     });
 
     it('should search a class-level index over several properties', async () => {
