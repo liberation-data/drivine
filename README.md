@@ -1657,7 +1657,10 @@ A sample size of 0, as in `ensure(spec, 0)`, skips reading the data first, and a
 the engine's refusal. FalkorDB doesn't refuse one: it builds it in the background and marks the build failed. Drivine then
 drops the failed constraint, which enforces nothing, and reads the data: a key held more than once is a `VIOLATION`, as in
 drivine4j, with an empty sample at sample size 0. A build that fails with no key held more than once throws. Once the
-data is clean, `ensure` makes the constraint. `drop(spec)` also removes a constraint FalkorDB failed to build.
+data is clean, `ensure` makes the constraint. A constraint FalkorDB already lists as failed, or still under
+construction (another process's build, or an earlier run's), is not taken as `ALREADY_MATCHING`: one under construction
+is waited on, and matches once built, and a failed one is dropped and made again. `drop(spec)` also removes a constraint
+FalkorDB failed to build.
 
 A `VIOLATION`'s `sample` is a breaking change from 3.2. Each entry used to be the repeated value itself: one property's
 value as it is, or several properties' values as a list. Each entry is now a `ViolatingKey`, and the value is in its

@@ -265,6 +265,84 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
         expect(store.dropped()).toBe(true);
     });
 
+    /**
+     * A FalkorDB holding a constraint another process is building. Until it is dropped, each listing gives the next of
+     * `builds`, the last from then on; undefined lists nothing, as when that process has dropped its failed build. Once
+     * dropped, nothing is listed until the constraint is made, and then each listing gives the next of `rebuilds`. The
+     * query for keys held more than once gives `conflicts`.
+     */
+    function buildingInStore(
+        builds: (string | undefined)[],
+        rebuilds: string[] = ['OPERATIONAL'],
+        conflicts: unknown[] = []
+    ) {
+        const ran: unknown[] = [];
+        let phase: 'building' | 'dropped' | 'made' = 'building';
+        let listings = 0;
+        const listed = (status: string | undefined) =>
+            status ? [{ label: 'Person', properties: ['email'], status }] : [];
+        const answer = (statement: any): unknown[] => {
+            ran.push(statement);
+            if (statement?.native === 'CONSTRAINT_DROP') {
+                phase = 'dropped';
+                return [];
+            }
+            if (statement?.native === 'CONSTRAINT_CREATE') {
+                phase = 'made';
+                listings = 0;
+                return [];
+            }
+            if (statement === FALKORDB_SCHEMA.listUniques.statement) {
+                if (phase === 'building') {
+                    return listed(builds[Math.min(listings++, builds.length - 1)]);
+                }
+                return phase === 'made' ? listed(rebuilds[Math.min(listings++, rebuilds.length - 1)]) : [];
+            }
+            return typeof statement === 'string' && statement.includes('holders > 1') ? conflicts : [];
+        };
+        const executor = {
+            run: async (statement: unknown) => Promise.resolve().then(() => answer(statement))
+        } as unknown as SchemaExecutor;
+        const count = (native: string) => ran.filter((it: any) => it?.native === native).length;
+        const listingsRun = () => ran.filter((it) => it === FALKORDB_SCHEMA.listUniques.statement).length;
+        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), ran, count, listings: listingsRun };
+    }
+
+    it('should wait on a constraint already UNDER CONSTRUCTION, and match it once built', async () => {
+        const store = buildingInStore(['UNDER CONSTRUCTION', 'UNDER CONSTRUCTION', 'OPERATIONAL']);
+        expect(await store.constraints.ensure(spec)).toEqual({ status: 'ALREADY_MATCHING', spec });
+        expect(store.listings()).toBe(3);
+        expect([store.count('CONSTRAINT_DROP'), store.count('CONSTRAINT_CREATE')]).toEqual([0, 0]);
+    });
+
+    it('should drop a constraint already UNDER CONSTRUCTION whose build fails, and give a VIOLATION from the data', async () => {
+        const store = buildingInStore(['UNDER CONSTRUCTION', 'FAILED'], ['FAILED'], [repeated]);
+        expect(await store.constraints.ensure(spec)).toEqual({ status: 'VIOLATION', spec, sample: [repeated] });
+        // Dropped, and not made again over data that holds a key more than once.
+        expect([store.count('CONSTRAINT_DROP'), store.count('CONSTRAINT_CREATE')]).toEqual([1, 0]);
+    });
+
+    it('should drop a constraint already UNDER CONSTRUCTION whose build fails, and make it again once the data is clean', async () => {
+        const store = buildingInStore(['UNDER CONSTRUCTION', 'FAILED']);
+        expect(await store.constraints.ensure(spec)).toEqual({ status: 'CREATED', spec });
+        const dropped = store.ran.findIndex((it: any) => it?.native === 'CONSTRAINT_DROP');
+        expect(dropped).toBeGreaterThanOrEqual(0);
+        expect(store.ran.slice(dropped).some((it: any) => it?.native === 'CONSTRAINT_CREATE')).toBe(true);
+    });
+
+    it('should drop a constraint already marked FAILED, and give a VIOLATION at sample size 0 when its rebuild fails', async () => {
+        const store = buildingInStore(['FAILED'], ['FAILED'], [repeated]);
+        expect(await store.constraints.ensure(spec, 0)).toEqual({ status: 'VIOLATION', spec, sample: [] });
+        // The one already there, then the one made again, which failed too.
+        expect(store.count('CONSTRAINT_DROP')).toBe(2);
+    });
+
+    it('should make a constraint dropped while it was UNDER CONSTRUCTION', async () => {
+        const store = buildingInStore(['UNDER CONSTRUCTION', undefined]);
+        expect(await store.constraints.ensure(spec)).toEqual({ status: 'CREATED', spec });
+        expect([store.count('CONSTRAINT_DROP'), store.count('CONSTRAINT_CREATE')]).toEqual([0, 1]);
+    });
+
     it('should drop a constraint whose build failed, which list leaves out', async () => {
         const ran: unknown[] = [];
         const executor = {
