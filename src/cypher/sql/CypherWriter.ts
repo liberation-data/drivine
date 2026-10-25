@@ -148,10 +148,10 @@ const TEMPORAL_NOW = TEMPORAL_KINDS.flatMap((kind) =>
     ['statement', 'transaction', 'realtime'].map((it) => `${kind}.${it}`)
 );
 
-/** The functions of a temporal kind that truncate a value to a unit. */
 /** What `round()` is refused with, as Neo4j refuses it, a precision below 0. */
 const NEGATIVE_PRECISION = 'round() takes a precision of 0 or more, as in Neo4j.';
 
+/** The functions of a temporal kind that truncate a value to a unit. */
 const TEMPORAL_TRUNCATE = TEMPORAL_KINDS.map((it) => `${it}.truncate`);
 
 /** The fields a map makes a moment or a time of day of. */

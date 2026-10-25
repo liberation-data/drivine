@@ -208,7 +208,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('round() reads a precision from data, or a whole float, as a whole number toward zero, and a null as null', async () => {
-            // Not in the spec yet: its round() case takes the precision as written or given.
+            // Beyond the spec's round() cases: a float, -0.5 and a whole float read from data, and every rounding mode.
             await query('CREATE (:Round {p: 1.7, q: -0.5, w: 2.0, r: -2})');
             expect(
                 await query(
@@ -236,6 +236,35 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     await query("RETURN [round(2.5, 400), round(2.5, 400, 'HALF_UP'), round(2.5, 400, 'CEILING')]")
                 ).toEqual([[2.5, 2.5, 2.5]]);
             }
+        });
+
+        it("a negative precision from data fails only on a row that reads it, in a WHERE and an aggregate too, with the compiler's message", async () => {
+            // The spec reads a precision from data since v0.6.4; here, in a WHERE and an aggregate, and on rows filtered out.
+            await query('CREATE (:Round {r: -2, k: 1}), (:Round {r: 1, k: 2})');
+            for (const statement of [
+                'MATCH (n:Round) RETURN round(1234.5, n.r)',
+                'MATCH (n:Round) WHERE round(1234.5, n.r) > 0 RETURN n.k',
+                'MATCH (n:Round) RETURN sum(round(1234.5, n.r))',
+                "MATCH (n:Round) RETURN collect(round(1234.5, n.r, 'HALF_UP'))",
+                // A constant the compiler does not read as given is worked out by the store, as one from data.
+                'RETURN round(1234.5, 1 - 3)',
+                "RETURN round(1234.5, toInteger('-2'))"
+            ]) {
+                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more, as in Neo4j.');
+            }
+            expect(await query('MATCH (n:Round) WHERE n.r >= 0 RETURN round(1234.5, n.r)')).toEqual([1234.5]);
+            expect(await query('MATCH (n:Nothing) RETURN round(1234.5, 1 - 3)')).toEqual([]);
+            expect(await query('UNWIND [] AS x RETURN round(1234.5, 1 - 3)')).toEqual([]);
+            expect(await query("MATCH (n:Round) WHERE n.k > 5 RETURN round(1234.5, toInteger('-2'))")).toEqual([]);
+            expect(await query('MATCH (n:Round) WHERE n.k = 2 RETURN sum(round(1234.5, n.r))')).toEqual([1234.5]);
+            expect(
+                await query(
+                    'MATCH (n:Round) RETURN CASE WHEN n.r < 0 THEN 0.0 ELSE round(1234.5, n.r) END ORDER BY n.k'
+                )
+            ).toEqual([0.0, 1234.5]);
+            expect(await query("RETURN [round(1234.5, 3 - 1), round(1234.5, toInteger('2'))]")).toEqual([
+                [1234.5, 1234.5]
+            ]);
         });
 
         /** Writes the graph of the spec's `queries.yaml`, which the tests that read it start from. */
