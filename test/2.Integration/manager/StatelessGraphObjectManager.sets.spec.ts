@@ -123,6 +123,37 @@ describe.each(allStores())('Set fields on $type', (engine) => {
         expect(loaded.badges).toEqual(new Set());
     });
 
+    it('should save a Set loaded from a list holding an item twice from the loaded copy', async () => {
+        if (engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES) {
+            return;
+        }
+        await gom.save(coded('d1', { codes: new Set(['a']) }));
+        // Another writer stored the list with an item twice, leaving the stamp as it was.
+        await pm.execute(new QuerySpecification(`MATCH (n:PlainSet {id: 'd1'}) SET n.code_set = ['a', 'a', 'b']`));
+        const loaded = (await gom.load(Coded, 'd1'))!;
+        expect(loaded.codes).toEqual(new Set(['a', 'b']));
+
+        await gom.save(coded('d1', { ...loaded, badges: new Set(['new']) }), { from: loaded });
+        expect((await gom.load(Coded, 'd1'))!.badges).toEqual(new Set(['new']));
+    });
+
+    it('should update a Set loaded from a list out of order and holding an item twice, changed in place', async () => {
+        await gom.save(coded('d2', { codes: new Set(['a']) }));
+        if (engine.type !== DatabaseType.ORACLE && engine.type !== DatabaseType.POSTGRES) {
+            // Another writer stored the list out of order with an item twice, leaving the stamp as it was.
+            await pm.execute(new QuerySpecification(`MATCH (n:PlainSet {id: 'd2'}) SET n.code_set = ['b', 'a', 'b']`));
+        }
+        await gom.update(Coded, 'd2', (it) => {
+            it.codes.add('c');
+        });
+        expect((await gom.load(Coded, 'd2'))!.codes.has('c')).toBe(true);
+        // The Set unchanged, and another field changed.
+        await gom.update(Coded, 'd2', (it) => {
+            it.badges.add('new');
+        });
+        expect((await gom.load(Coded, 'd2'))!.badges).toEqual(new Set(['new']));
+    });
+
     it('should load a Set in a view that holds a view, and in a relationship fragment', async () => {
         const holder = Object.assign(new CodedHolder(), {
             root: coded('root', { codes: new Set(['r']) }),

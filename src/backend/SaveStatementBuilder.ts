@@ -296,7 +296,10 @@ export class SaveStatementBuilder {
             }
             const param = bind(
                 `_loaded${i}`,
-                model.jsonPacked.has(field) ? this.packedAsLoaded(property, value) : asCompared(value)
+                model.jsonPacked.has(field)
+                    ? this.packedAsLoaded(property, value)
+                    : // A set as the list it was loaded from, which may hold an item twice.
+                      asCompared((value instanceof Set && this.options.loadedProperties?.[property]) || value)
             );
             const expression = model.vectorFields.has(field) ? this.grammar.vectorValue(param) : param;
             const same = `NOT coalesce(${stored} <> ${expression}, false)`;

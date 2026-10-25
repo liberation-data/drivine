@@ -33,15 +33,16 @@ export function knownProperties(type: Function, mapping: FieldMapping, fragment:
 }
 
 /**
- * The text each @JsonPacked property held when a load made the fragment, by stored name: for a save given the fragment
- * as `from`, which compares a packed field as the node held it, not as its value packed again. Kept for stamped
- * fragments with a packed field only, and only as long as the fragment is.
+ * The text each @JsonPacked property held when a load made the fragment, and the list each property a load gave a Set
+ * held, by stored name: for a save given the fragment as `from`, which compares a packed field as the node held it, not
+ * as its value packed again, and a set as the list it was loaded from, which may hold an item twice. Kept for stamped
+ * fragments with a packed or Set field only, and only as long as the fragment is.
  */
 const packedAsHeld = new WeakMap<object, Record<string, any>>();
 
 /**
- * Internal: the text a load read for each @JsonPacked property of the fragment, by stored name; undefined for a fragment
- * no load made.
+ * Internal: the text a load read for each @JsonPacked property of the fragment, and the list for each property it gave a
+ * Set, by stored name; undefined for a fragment no load made.
  */
 export function packedTextOf(fragment: object): Record<string, any> | undefined {
     return packedAsHeld.get(fragment);
@@ -86,8 +87,11 @@ export class GraphObjectMapper {
         const instance: any = this.properties(model.type, model, row.props, model);
         if (model.stampField) {
             instance[model.stampField] = row.props?.[Stamps.PROPERTY] ?? undefined;
-            if (model.jsonPacked.size) {
-                const stored = [...model.jsonPacked].map((it) => model.graphProperties.get(it) ?? it);
+            const sets = Object.keys(instance).filter((it) => instance[it] instanceof Set);
+            if (model.jsonPacked.size || sets.length) {
+                const stored = [...new Set([...model.jsonPacked, ...sets])].map(
+                    (it) => model.graphProperties.get(it) ?? it
+                );
                 packedAsHeld.set(instance, Object.fromEntries(stored.map((it) => [it, row.props?.[it]])));
             }
         }

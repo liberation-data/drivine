@@ -149,3 +149,40 @@ describe('A Set field without @EmptyWhenAbsent', () => {
         expect(saved.initializedUnion).toEqual(['u']);
     });
 });
+
+/** A class whose constructor needs its argument: the model can't see its initializers. */
+@NodeFragment({ labels: ['Needy'] })
+class Needy {
+    @NodeId() id: string;
+    @GraphProperty('codes') codes: Set<string>;
+    initialized = new Set<string>();
+    constructor(given: { id: string }) {
+        this.id = given.id;
+    }
+}
+
+@NodeFragment({ labels: ['OddlyStored'] })
+class OddlyStored {
+    @NodeId() id: string;
+    initialized = new Set<string>();
+}
+
+describe('A Set field the model reads from the class', () => {
+    const registry = new ModelRegistry();
+    const mapper = new GraphObjectMapper();
+
+    it('should be known by its decorator alone where the constructor needs its arguments', () => {
+        expect([...registry.fragment(Needy).sets]).toEqual(['codes']);
+    });
+
+    it('should leave a value stored as neither a list nor {} as it is', () => {
+        const load = (initialized: any): any =>
+            mapper.fragment<OddlyStored>(registry.fragment(OddlyStored), {
+                props: { id: 'o1', initialized },
+                labels: ['OddlyStored']
+            }).initialized;
+        expect(load('one')).toBe('one');
+        expect(load(7)).toBe(7);
+        expect(load({ a: 1 })).toEqual({ a: 1 });
+    });
+});
