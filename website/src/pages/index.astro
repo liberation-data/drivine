@@ -183,6 +183,11 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .button.primary:hover { color: var(--ink); filter: brightness(1.06); }
             .button.ghost { border: 2px solid #fff; color: #fff; }
             .button.ghost:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+            .video-tip { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 30px; padding: 6px 18px 6px 6px; border-radius: 999px; background: rgba(2, 28, 38, 0.62); border: 1px solid rgba(255, 255, 255, 0.3); color: #fff; font-size: 16px; font-weight: 500; text-decoration: none; box-shadow: 0 8px 24px rgba(0, 20, 28, 0.3); }
+            .video-tip:hover, .video-tip:focus-visible { color: #fff; border-color: #fff; background: rgba(2, 28, 38, 0.82); }
+            .video-tip .new { padding: 4px 10px; border-radius: 999px; background: var(--accent); color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+            .video-tip .short { display: none; }
+            @media (max-width: 600px) { .video-tip { font-size: 15px; gap: 8px; } .video-tip .long { display: none; } .video-tip .short { display: inline; } }
             .installs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 22px; font-size: 14px; }
             .installs code { background: rgba(2, 28, 38, 0.62); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 9px 14px; color: #e6f2f4; }
 
@@ -190,7 +195,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .intro .wrap { max-width: 880px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
             .intro p:last-child { margin: 0; font-size: 19px; line-height: 1.65; color: var(--muted); max-width: 720px; }
 
-            .watch { padding: 0 32px 96px; }
+            .watch { padding: 0 32px 96px; scroll-margin-top: 24px; }
             .watch .wrap { max-width: 1040px; display: flex; flex-direction: column; gap: 18px; }
             .watch .player { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: var(--abyss); box-shadow: 0 24px 60px rgba(2, 28, 38, 0.25); }
             .watch .player img, .watch .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
@@ -340,7 +345,14 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 <div class="rule" style="width: min(900px, 94%)" aria-hidden="true"></div>
                 <p class="subtitle">Graph database client for TypeScript, Python &amp; the JVM</p>
                 <p class="tagline">Community project by Liberation Data.</p>
-                <div class="actions" style="margin-top: 44px">
+                {VIDEO_ID && (
+                    <a href="#watch" class="video-tip">
+                        <span class="new">New</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" /></svg>
+                        <span>Watch<span class="long">: graph RAG on any database</span><span class="short"> the video</span> · 4:26</span>
+                    </a>
+                )}
+                <div class="actions" style={`margin-top: ${VIDEO_ID ? 28 : 44}px`}>
                     <a href={ts} class="button primary">TypeScript docs <span aria-hidden="true">→</span></a>
                     <a href={py} class="button ghost">Python docs <span aria-hidden="true">→</span></a>
                     <a href={jvm} class="button ghost">Kotlin &amp; Java docs <span aria-hidden="true">→</span></a>
@@ -367,7 +379,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             </section>
 
             {VIDEO_ID && (
-                <section class="watch">
+                <section class="watch" id="watch">
                     <div class="wrap">
                         <div class="player" data-video={VIDEO_ID}>
                             <Image src={videoPoster} widths={[640, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
@@ -636,8 +648,17 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
                 frame.allowFullscreen = true;
                 player.replaceChildren(frame);
-                frame.focus();
+                frame.focus({ preventScroll: true });
             }, { once: true });
+            // The hero's tip takes the visitor down to the video and starts it.
+            document.querySelector<HTMLAnchorElement>('.video-tip')?.addEventListener('click', (event) => {
+                const play = document.querySelector<HTMLButtonElement>('.watch .play');
+                if (!play) return;
+                event.preventDefault();
+                const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+                document.getElementById('watch')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth' });
+                play.click();
+            });
             const buttons = document.querySelectorAll<HTMLButtonElement>('.tabs button');
             const samples = document.querySelectorAll<HTMLElement>('.panel pre[data-lang]');
             buttons.forEach((button) =>
