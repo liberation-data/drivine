@@ -320,7 +320,9 @@ END;`);
 
     /**
      * The marker found by a query and matched by its id: matched by its scope, the MERGE would update the column it
-     * matches on, which Oracle refuses (ORA-38104). Where a race left several, the newest is written.
+     * matches on, which Oracle refuses (ORA-38104). Where a race left several, the newest is written. Both objects
+     * are built RETURNING JSON: by default JSON_OBJECT returns VARCHAR2(4000), which an inventory of about 300 items
+     * overflows (ORA-40478).
      */
     recordSchemaMarker(): GraphStatement {
         return new GraphStatement(
@@ -330,10 +332,10 @@ END;`);
                 'm'
             )} FETCH FIRST 1 ROWS ONLY) AS nid FROM dual) found ON (n.nid = found.nid) ` +
                 `WHEN MATCHED THEN UPDATE SET n.props = JSON_MERGEPATCH(n.props, JSON_OBJECT('version' VALUE $version, ` +
-                `'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ${NOW_MILLIS})) ` +
+                `'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ${NOW_MILLIS} RETURNING JSON)) ` +
                 `WHEN NOT MATCHED THEN INSERT (labels, props) VALUES (JSON('["${SCHEMA_MARKER}"]'), JSON_OBJECT('scope' ` +
                 `VALUE $scope, 'version' VALUE $version, 'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ` +
-                `${NOW_MILLIS} ABSENT ON NULL))`
+                `${NOW_MILLIS} ABSENT ON NULL RETURNING JSON))`
         );
     }
 
