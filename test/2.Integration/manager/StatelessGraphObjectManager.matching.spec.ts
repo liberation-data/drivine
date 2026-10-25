@@ -93,6 +93,12 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
                 section: Object.assign(new Section(), { id: 's1' })
             })
         );
+        await gom.save(
+            Object.assign(new ChunkInSection(), {
+                chunk: chunk('c4', 'zebra grass grass grass grass grass', 's3'),
+                section: Object.assign(new Section(), { id: 's3' })
+            })
+        );
         if (engine.type === DatabaseType.NEO4J) {
             await pm.execute(new QuerySpecification('CALL db.awaitIndexes(30)'));
         }
@@ -121,9 +127,12 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
         expect(hits.map((it) => it.value.id)).toEqual(['c4']);
         expect(hits[0].score).toBeCloseTo(1, 5);
         expect((await gom.loadMatching(Chunk, 'zebra', { topK: 1 })).map((it) => it.value.id)).toEqual(['c4']);
-        expect((await gom.loadMatching(Chunk, 'zebra', { topK: 5, threshold: 0.99 })).map((it) => it.value.id)).toEqual([
-            'c4'
-        ]);
+        expect((await gom.loadMatching(Chunk, 'zebra', { topK: 5, threshold: 0.99 })).map((it) => it.value.id)).toEqual(
+            ['c4']
+        );
+        const viewed = await gom.loadMatching(ChunkInSection, 'zebra', { topK: 5 });
+        expect(viewed.map((it) => it.value.chunk.id)).toEqual(['c4']);
+        expect(viewed[0].score).toBeCloseTo(1, 5);
     });
 
     it('should search a class-level index over several properties', async () => {

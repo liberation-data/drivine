@@ -39,6 +39,13 @@ class Author {
     @NodeId() id: string;
 }
 
+/** A view rooted on a fragment of two labels. */
+@GraphView()
+class ReviewedArticleWithAuthors {
+    @Root() article: ReviewedArticle;
+    @GraphRelationship({ type: 'WROTE', direction: Direction.INCOMING, target: () => Author }) authors: Author[];
+}
+
 /** A view with no required relationship: nothing drops a hit after the index. */
 @GraphView()
 class ArticleWithAuthors {
@@ -148,6 +155,24 @@ describe('A full-text search’s index bound', () => {
         const reviewed: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) };
         expect(cutTo(neo4j.matching(reviewed, search()).text)).toEqual(80);
     });
+
+    it.each(engines.map((it) => [it.grammar.engine, it]))(
+        'should check a root’s every label before cutting and scaling the hits on %s (liberation-data/drivine#307)',
+        (_engine, backend) => {
+            const engine = backend as CypherBackend;
+            const check =
+                'YIELD node, score\nWITH node, score WHERE node:Article:Reviewed\nWITH node, score\nORDER BY score DESC\nLIMIT 80\n';
+            for (const target of [
+                { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) },
+                { kind: 'GRAPH_VIEW', model: registry.view(ReviewedArticleWithAuthors) }
+            ] as TargetModel[]) {
+                const text = engine.matching(target, search()).text;
+                expect(text).toContain(check);
+                expect(text.indexOf(check)).toBeLessThan(text.indexOf('collect('));
+            }
+            expect(engine.matching(fragment, search()).text).not.toContain('WHERE node:');
+        }
+    );
 
     it('should clamp the over-fetch, and ask for no more than the ceiling however large the limit', () => {
         expect(fullTextIndexLimit(Number.MAX_SAFE_INTEGER, true)).toEqual(FULL_TEXT_INDEX_LIMIT_CEILING);
