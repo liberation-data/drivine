@@ -1884,9 +1884,9 @@ straight from your repository, and `--check` in CI says when it is stale. A clas
 written only when it changes. `"drivine": { "model": false }` in `package.json` turns it off.
 
 TypeScript can't say all the format can: a `number` is written as a `float`, an id held as a `string` as a `string`,
-and a field's nullness as `"unknown"` without `strictNullChecks`. An `@EmptyWhenAbsent` list TypeScript does not
-record as an Array, such as `string[] | null` or a `Set`, loads as `{}` when absent, not `[]`: it is named, and written
-as the list it is declared.
+and a field's nullness as `"unknown"` without `strictNullChecks`. An `@EmptyWhenAbsent` list TypeScript records as Object,
+such as `string[] | null` or `Set<string> | null`, loads as `{}` when absent unless its kind is named: it is named, and
+written as the list it is declared. A kind that contradicts the type TypeScript records is refused, as a load refuses it.
 
 The sample app's file is [`sample/.drivine/model.json`](sample/.drivine/model.json).
 
