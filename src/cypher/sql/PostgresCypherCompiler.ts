@@ -496,6 +496,11 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         return `RAISE EXCEPTION USING MESSAGE = ${literal(message)};`;
     }
 
+    /** A text that is no whole number, cast to one: Postgres fails with the text in its message. */
+    failure(message: string, value: string): string {
+        return `CAST(${literal(`${message} `)} || CAST(${value} AS text) AS integer)`;
+    }
+
     idOf(json: string, key?: string): string {
         return key !== undefined ? `CAST(${json} ->> ${literal(key)} AS bigint)` : `CAST(${json} #>> '{}' AS bigint)`;
     }

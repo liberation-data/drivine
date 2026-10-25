@@ -629,6 +629,11 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `RAISE_APPLICATION_ERROR(-20000, ${literal(message)});`;
     }
 
+    /** A text that is no number, read as one: Oracle fails with ORA-01722, the text in its detail. */
+    failure(message: string, value: string): string {
+        return `TO_NUMBER(${literal(`${message} `)} || TO_CHAR(${value}))`;
+    }
+
     idOf(json: string, key?: string): string {
         return `JSON_VALUE(${json}, ${key !== undefined ? path(key) : "'$'"} RETURNING NUMBER)`;
     }

@@ -479,6 +479,17 @@ cases:
         cypher: "RETURN round(1234.5, $p)"
         parameters: {p: -2}
         error: true
+      - note: "A precision read from data below 0 fails the statement when the row is read, as Neo4j fails it, in both forms."
+        only: [neo4j, sql]
+        cypher: "UNWIND [-2] AS p RETURN round(1234.5, p)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [-2] AS p RETURN round(1234.5, p, 'HALF_UP')"
+        error: true
+      - note: "-0.5 read from data is 0 places, and null is null."
+        only: [neo4j, sql]
+        cypher: "UNWIND [-0.5, null] AS p RETURN round(1234.5, p)"
+        rows: [1235.0, null]
 
   - name: "EXISTS and COUNT subqueries"
     description: "EXISTS { } and COUNT { } take a pattern, clauses or a whole query, evaluated per row."

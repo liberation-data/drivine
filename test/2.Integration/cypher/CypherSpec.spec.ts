@@ -223,9 +223,13 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(
                 await query("RETURN [round(null, 2), round(2.5, null), round(null, 2, 'UP'), round(2.5, null, 'UP')]")
             ).toEqual([[null, null, null, null]]);
-            // A negative precision from data fails on Neo4j, at run time; SQL has no way to fail there, so it rounds to
-            // tens or hundreds.
-            expect(await query("MATCH (n:Round) RETURN round(1234.5, n.r, 'HALF_UP')")).toEqual([1200.0]);
+            // A negative precision from data fails when the row is read, as on Neo4j, in both forms.
+            await expect(query("MATCH (n:Round) RETURN round(1234.5, n.r, 'HALF_UP')")).rejects.toThrow(
+                'round() takes a precision of 0 or more'
+            );
+            await expect(query('MATCH (n:Round) RETURN round(1234.5, n.r)')).rejects.toThrow(
+                'round() takes a precision of 0 or more'
+            );
             if (store.type !== DatabaseType.ORACLE) {
                 // Oracle overflows on a precision past its NUMBER range, as in drivine4j (liberation-data/drivine4j#266).
                 expect(

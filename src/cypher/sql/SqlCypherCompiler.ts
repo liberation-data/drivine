@@ -674,6 +674,13 @@ export abstract class SqlCypherCompiler {
     /** The statement that fails the procedure with `message`. */
     abstract raise(message: string): string;
 
+    /**
+     * A whole number that fails the statement when it is worked out, with `message` and the SQL value `value` it names:
+     * what a compiled statement does where Neo4j fails on a value it reads. It reads `value`, so no store works it out
+     * before a row that needs it, as one may a failing expression of constants alone.
+     */
+    abstract failure(message: string, value: string): string;
+
     /** The id at `key` of the JSON map `json`, or with no key the id `json` is, as the store's id. */
     abstract idOf(jsonSql: string, key?: string): string;
 
