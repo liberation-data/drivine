@@ -81,8 +81,6 @@ cases:
   - name: "Read not compiled yet"
     description: "Read syntax the compiler doesn't handle yet is refused, naming what it is."
     steps:
-      - cypher: "RETURN [1, 2][0..1]"
-        error: "A slice of a list (list[from..to]) is Cypher, and is not compiled to SQL yet."
       - cypher: "MATCH (n) RETURN n LIMIT 1 + 1"
         error: "SKIP or LIMIT of an expression is Cypher, and is not compiled to SQL yet."
       - cypher: "RETURN nope(1)"
@@ -219,3 +217,62 @@ cases:
         error: "A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet."
       - cypher: "MATCH (a)-[r]->(b) CREATE (a)-[r:R]->(b)"
         error: "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet."
+
+  - name: "Round by a mode it does not take"
+    description: "round() by a mode Java does not name, by UNNECESSARY, or by a mode an expression gives is refused."
+    steps:
+      - cypher: "RETURN round(2.5, 0, 'up')"
+        error: "round() rounds by CEILING, FLOOR, UP, DOWN, HALF_EVEN, HALF_UP, HALF_DOWN or UNNECESSARY, not up."
+      - note: UNNECESSARY fails where rounding changes the number, which a query has no way to say.
+        cypher: "RETURN round(1.0, 2, 'UNNECESSARY')"
+        error: "round() by UNNECESSARY is Cypher, and is not compiled to SQL yet."
+      - cypher: "WITH 'UP' AS m RETURN round(2.5, 0, m)"
+        error: "A rounding mode an expression gives is Cypher, and is not compiled to SQL yet."
+      - note: Neo4j takes no negative precision, written or a parameter's value.
+        cypher: "RETURN round(1250, -2, 'HALF_EVEN')"
+        error: "round() takes a precision of 0 or more, as in Neo4j."
+      - cypher: "RETURN round(1250, $p, 'HALF_EVEN')"
+        parameters: {p: -1}
+        error: "round() takes a precision of 0 or more, as in Neo4j."
+
+  - name: "Function of numbers given the wrong arguments"
+    description: "A function of numbers given more or fewer arguments than it takes is refused."
+    steps:
+      - cypher: "RETURN exp(1, 2)"
+        error: "exp() takes one argument."
+      - cypher: "RETURN atan2(1)"
+        error: "atan2() takes two numbers."
+      - cypher: "RETURN pi(1)"
+        error: "pi() takes no argument."
+
+  - name: "Procedure"
+    description: "A procedure other than db.labels() and db.relationshipTypes() is refused, as is one of them called as Neo4j refuses it."
+    steps:
+      - cypher: "CALL db.indexes()"
+        error: "A procedure call (CALL) is Cypher, and is not compiled to SQL yet."
+      - cypher: "MATCH (n) CALL apoc.nodes.get(n) YIELD node RETURN node"
+        error: "A procedure call (CALL) is Cypher, and is not compiled to SQL yet."
+      - note: A procedure's name is matched in its case, as Neo4j matches it.
+        cypher: "CALL DB.LABELS()"
+        error: "A procedure call (CALL) is Cypher, and is not compiled to SQL yet."
+      - cypher: "CALL db.labels() RETURN 1"
+        error: "A CALL of a procedure within a query names what it yields, as in Cypher: CALL db.labels() YIELD label."
+      - cypher: "CALL db.labels() YIELD nope RETURN nope"
+        error: "db.labels() yields label, not nope."
+      - cypher: "CALL db.relationshipTypes('x')"
+        error: "db.relationshipTypes() takes no argument."
+      - note: What it yields is a new variable, as what a CALL { … } returns is.
+        cypher: "WITH 'Movie' AS label CALL db.labels() YIELD label RETURN label"
+        error: "The variable label is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."
+      - note: In a statement that writes, too.
+        cypher: "CREATE (n:Made) WITH 'Made' AS label CALL db.labels() YIELD label RETURN label"
+        error: "The variable label is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."
+      - cypher: "WITH 1 AS x CALL { RETURN 2 AS x } RETURN x"
+        error: "The variable x is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."
+      - note: Within a CALL { … } that imports it, too.
+        cypher: "WITH 'Movie' AS label CALL { WITH label CALL db.labels() YIELD label RETURN label AS l } RETURN l"
+        error: "The variable label is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."
+      - cypher: "WITH 1 AS x CALL { WITH x CALL { CREATE (:Made) RETURN 2 AS x } RETURN x AS y } RETURN y"
+        error: "The variable x is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."
+      - cypher: "CALL db.labels() YIELD label WHERE label STARTS WITH 'A'"
+        error: "A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL db.labels() YIELD label WHERE … RETURN label."

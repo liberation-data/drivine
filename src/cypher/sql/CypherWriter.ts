@@ -18,6 +18,7 @@ import {
     Quantifier,
     Reduce,
     sameExpression,
+    Slice,
     Unary
 } from '@/cypher/ast/Expression';
 import { NodePattern, Pattern, RelationshipPattern } from '@/cypher/ast/Pattern';
@@ -44,7 +45,12 @@ import {
     holdsSubquery,
     indent,
     isAggregate,
+    isAnew,
+    iterated,
     literal,
+    MATH_FUNCTIONS,
+    ROUNDING_MODES,
+    RoundingMode,
     parametersIn,
     replaced,
     unsupported,
@@ -126,6 +132,8 @@ interface Sorted {
     after: Map<string, string>;
     /** What sorts each term carried out of the query as a column, of that column. */
     sorted: Map<string, (column: string) => string>;
+    /** Whether a term sorts by an item made anew for each row, `randomUUID()`, of its column: see `SqlCypherCompiler.once`. */
+    anew: boolean;
 }
 
 /** The names of a shortest path's ends where its pattern gives none, which no statement can write unquoted. */
@@ -243,6 +251,13 @@ export class CypherWriter {
      */
     private rowOrder?: string;
 
+    /**
+     * Whether a value's identity is carried out of a query as a column of its own (see {@link JsonValue.identity}): not
+     * where the queries of a `UNION` in `CALL { … }` would give different columns, which compare by their properties
+     * instead.
+     */
+    private identities = true;
+
     /** How each kind of expression is compiled. */
     private readonly expressions: { [K in Expression['kind']]: (expression: any, scope: Scope) => Value } = {
         Literal: (it) => json(this.sql.literalJson(it.value)),
@@ -259,21 +274,24 @@ export class CypherWriter {
             return bool(`(${this.sql.hasLabels(subject.labels, it.labels)})`);
         },
         ListLiteral: (it, scope) => this.listLiteral(it, scope),
-        MapLiteral: (it, scope) =>
-            json(
-                this.sql.jsonObject(
-                    it.entries.map(([key, value]: [string, Expression]) => [
-                        key,
-                        this.asJson(this.expression(value, scope)).sql
-                    ])
-                ),
-                { ordered: true }
-            ),
+        MapLiteral: (it, scope) => {
+            const entries = (it.entries as [string, Expression][]).map(([key, value]): [string, Value] => [
+                key,
+                this.expression(value, scope)
+            ]);
+            return json(this.sql.jsonObject(entries.map(([key, value]) => [key, this.asJson(value).sql])), {
+                ordered: true,
+                identity: this.identityHolding(
+                    entries.map(([, value]) => value),
+                    (ids) => this.sql.jsonObject(entries.map(([key], i) => [key, ids[i]]))
+                )
+            });
+        },
         MapProjection: (it, scope) => this.mapProjection(it, scope),
         Binary: (it, scope) => this.binary(it, scope),
         Unary: (it, scope) => this.unary(it, scope),
         Index: (it, scope) => this.index(it, scope),
-        Slice: () => unsupported('A slice of a list (list[from..to])'),
+        Slice: (it, scope) => this.slice(it, scope),
         Function: (it, scope) => this.function(it, scope),
         CountStar: () => json(this.sql.scalar('count(*)')),
         Case: (it, scope) => this.caseOf(it, scope),
@@ -332,22 +350,22 @@ export class CypherWriter {
         [DISTINCT_ITEMS]: (call) => this.distinctItemsFunction(call),
         sum: (call) => json(this.sql.scalar(`COALESCE(sum(${call.distinct}${this.numberOf(call.one())}), 0)`)),
         avg: (call) => json(this.sql.scalar(this.sql.float(`avg(${call.distinct}${this.numberOf(call.one())})`))),
-        min: (call) => json(this.sql.extreme(this.sql.comparable(this.asJson(call.one())), true)),
-        max: (call) => json(this.sql.extreme(this.sql.comparable(this.asJson(call.one())), false)),
+        min: (call) => this.extreme(call, true),
+        max: (call) => this.extreme(call, false),
         range: (call) => {
             if (call.arguments.length < 2 || call.arguments.length > 3) {
                 throw new DrivineError('range() takes a start, an end and a step.');
             }
             const [from, to] = call.arguments.map((it) => this.numberOf(it));
             const step = call.arguments[2];
-            return json(this.sql.range(from, to, step ? this.numberOf(step) : '1'));
+            return json(this.sql.range(from, to, step ? this.numberOf(step) : '1'), { list: true });
         },
         split: (call) => {
             if (call.arguments.length !== 2) {
                 throw new DrivineError('split() takes a text and a separator.');
             }
             const [text, separator] = call.arguments.map((it) => this.textOf(it));
-            return json(this.sql.split(text, separator));
+            return json(this.sql.split(text, separator), { list: true });
         },
         reverse: (call) =>
             json(
@@ -362,7 +380,11 @@ export class CypherWriter {
                         )} ` + `WHEN 'array' THEN (SELECT ${reversed} FROM ${this.sql.elements(x, e)}) END`
                     );
                 }),
-                { items: this.itemsOf(call.one()) }
+                {
+                    items: this.itemsOf(call.one()),
+                    list: this.isList(call.one()),
+                    itemLists: this.holdsLists(call.one())
+                }
             ),
         tail: (call) =>
             json(
@@ -376,7 +398,11 @@ export class CypherWriter {
                         e
                     )} WHERE ${e}.item_no > 1) END`;
                 }),
-                { items: this.itemsOf(call.one()) }
+                {
+                    items: this.itemsOf(call.one()),
+                    list: this.isList(call.one()),
+                    itemLists: this.holdsLists(call.one())
+                }
             ),
         // A text is read as Cypher reads it, its case and the spaces around it aside; a number is true but for 0.
         toboolean: (call) =>
@@ -404,17 +430,31 @@ export class CypherWriter {
                 })
             ),
         // A float, as Cypher gives these; round as Java rounds, half up.
-        round: (call) =>
-            json(
-                call.arguments.length === 2
-                    ? this.sql.scalar(
-                          this.sql.float(`ROUND(${this.numberOf(call.arguments[0])}, ${this.whole(call.arguments[1])})`)
-                      )
-                    : this.sql.scalar(this.sql.float(`FLOOR(${this.numberOf(call.one())} + 0.5)`))
-            ),
+        round: (call) => this.round(call),
         floor: (call) => this.numeric(call),
         ceil: (call) => this.numeric(call),
-        sqrt: (call) => this.numeric(call),
+        ...Object.fromEntries(
+            MATH_FUNCTIONS.map((name): [string, (call: Invocation) => Value] => [
+                name,
+                (call) => json(this.sql.scalar(this.sql.math(name, [this.numberOf(call.one())])))
+            ])
+        ),
+        atan2: (call) => {
+            if (call.arguments.length !== 2) {
+                throw new DrivineError('atan2() takes two numbers.');
+            }
+            return json(
+                this.sql.scalar(
+                    this.sql.math(
+                        'atan2',
+                        call.arguments.map((it) => this.numberOf(it))
+                    )
+                )
+            );
+        },
+        // Java's constants, which Neo4j gives, written as the floats they are.
+        e: (call) => this.constant(call, Math.E),
+        pi: (call) => this.constant(call, Math.PI),
         sign: (call) => json(this.sql.scalar(`SIGN(${this.numberOf(call.one())})`)),
         ltrim: (call) => json(this.sql.scalar(`LTRIM(${this.textOf(call.one())})`)),
         rtrim: (call) => json(this.sql.scalar(`RTRIM(${this.textOf(call.one())})`)),
@@ -517,13 +557,19 @@ export class CypherWriter {
         }
     }
 
-    /** A `WITH`: a query of its own, which the rest of the statement reads from, as it reads `outer`. */
-    private with(select: Select, clause: With, outer: Scope = new Map()): Select {
+    /**
+     * A `WITH`: a query of its own, which the rest of the statement reads from, as it reads `outer`. With `apart`, kept
+     * apart from the query that reads it, which must not have it merged in: see {@link casesFirst}.
+     */
+    private with(select: Select, clause: With, outer: Scope = new Map(), apart: boolean = false): Select {
         const projected = this.project(select, clause.projection, false);
         const name = this.alias('w');
         const next = new Select(outer);
         next.walks = select.walks;
-        next.source(`(\n${indent(projected.sql)}\n) ${name}`);
+        // A value made anew for each row is one value however often the clauses after read it: see SqlCypherCompiler.once.
+        const anew = clause.projection.items.some((item) => contains(item.expression, isAnew));
+        const sql = anew ? this.sql.once(projected.sql) : projected.sql;
+        next.source(`(\n${indent(apart ? this.sql.called(sql) : sql)}\n) ${name}`);
         projected.scope.forEach((value, variable) => next.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => next.order.push([`${name}.${column}`, descending]));
         if (clause.where) {
@@ -623,11 +669,27 @@ export class CypherWriter {
                 ? this.calledPart(select, clauses, undefined, false)
                 : this.calledUnion(select, call.query);
         this.rowOrder = order;
+        this.redeclared([...projected.scope.keys()], [...select.bound.keys()]);
         const name = this.alias('c');
         const text = `(\n${indent(this.sql.called(projected.sql))}\n) ${name}`;
         select.join(call.optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`);
         projected.scope.forEach((value, variable) => select.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => select.order.push([`${name}.${column}`, descending]));
+    }
+
+    /**
+     * Fails where a `CALL` returns or yields a variable of `returned` that is bound around it, in `bound`, as Neo4j
+     * fails: those of the query part it is in, and not those around a `CALL { … }` that it is in and that does not import
+     * them. In a statement that writes, each variable the row holds, which a `CALL { … }` there sees whether it imports it
+     * or not.
+     */
+    private redeclared(returned: string[], bound: string[]): void {
+        const again = returned.find((it) => bound.includes(it));
+        if (again !== undefined) {
+            throw new DrivineError(
+                `The variable ${again} is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS.`
+            );
+        }
     }
 
     /**
@@ -661,9 +723,23 @@ export class CypherWriter {
             throw new DrivineError('Each query of a UNION returns the same names, as in Cypher.');
         }
         const distinct = !query.unions[0].all;
-        const projected = parts.map((it) => this.calledPart(select, it, names, distinct));
+        let projected = parts.map((it) => this.calledPart(select, it, names, distinct));
         if (new Set(projected.map((p) => JSON.stringify([...p.scope.values()].map((it) => it.kind)))).size > 1) {
             unsupported('A UNION in CALL { … } whose queries return values of different kinds');
+        }
+        // A map or a list that holds a node carries a column more, of its identity. Where one query's value has it and
+        // another's has none, as `collect([r])` beside `[]`, the queries are compiled again without identities, so their
+        // columns match, and what they return compares by its properties, as it did before identities.
+        const held = (p: Projected): string =>
+            JSON.stringify([...p.scope.values()].map((it) => it.kind === 'Json' && it.identity !== undefined));
+        if (new Set(projected.map(held)).size > 1) {
+            const was = this.identities;
+            this.identities = false;
+            try {
+                projected = parts.map((it) => this.calledPart(select, it, names, distinct));
+            } finally {
+                this.identities = was;
+            }
         }
         const sql = projected
             .map((it) => `SELECT * FROM (\n${indent(it.sql)}\n) ${this.alias('q')}`)
@@ -715,7 +791,10 @@ export class CypherWriter {
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
         select.source(this.sql.elements(items, name));
-        select.bind(unwind.variable, json(`${name}.item`, { temporal: this.itemsOf(list) }));
+        select.bind(
+            unwind.variable,
+            json(`${name}.item`, { temporal: this.itemsOf(list), list: this.holdsLists(list) })
+        );
         select.order.push([`${name}.item_no`, false]);
     }
 
@@ -1357,7 +1436,12 @@ export class CypherWriter {
                 const was = this.carried.get(variable);
                 select.bind(
                     variable,
-                    json(this.sql.propertyOf(row, key), { temporal: was?.temporal, items: was?.items })
+                    json(this.sql.propertyOf(row, key), {
+                        temporal: was?.temporal,
+                        items: was?.items,
+                        list: was?.list,
+                        itemLists: was?.itemLists
+                    })
                 );
             } else if (kind === 'PATH') {
                 const held = this.sql.propertyOf(row, key);
@@ -1470,6 +1554,12 @@ export class CypherWriter {
         }
         if (this.nesting === NESTING) {
             unsupported(`A FOREACH or CALL { … } that writes nested more than ${NESTING} deep`);
+        }
+        if (returned) {
+            this.redeclared(
+                returned.projection.items.map((it) => it.name),
+                [...this.kinds.keys()]
+            );
         }
         const kept = `${SAVED}${++this.nesting}`;
         const gathered = `${GATHERED}${this.nesting}`;
@@ -1906,15 +1996,11 @@ export class CypherWriter {
         if (items.length === 0) {
             throw new DrivineError('A projection has at least one item.');
         }
-        // Before distinctFirst, which names each variable it groups by as an item of its own.
+        // Before aggregatesFirst, which names each variable it groups by as an item of its own.
         this.requireExplicitGrouping(items);
-        const grouped = this.distinctFirst(select, projection, items);
-        if (grouped) {
-            return this.project(grouped[0], grouped[1], final);
-        }
-        const held = this.heldFirst(select, projection, items);
-        if (held) {
-            return this.project(held[0], held[1], final);
+        const first = this.workedOutFirst(select, projection, items);
+        if (first) {
+            return this.project(first[0], first[1], final);
         }
         if (final && items.length > 1) {
             this.logger.warn(
@@ -1928,7 +2014,7 @@ export class CypherWriter {
         this.rowOrder = this.orderOf(select);
         const compiled = items.map((item): [string, Value] => [
             item.name,
-            this.aggregating(item.expression, () => this.expression(item.expression, select.scope))
+            this.carriedOut(this.aggregating(item.expression, () => this.expression(item.expression, select.scope)))
         ]);
         const aggregating = items.some((it) => contains(it.expression, isAggregate));
         // Where rows are compared (DISTINCT, GROUP BY), JSON is compared as what compares.
@@ -1941,7 +2027,7 @@ export class CypherWriter {
         ]);
         const selectList = itemColumns.flatMap(([column, value]) => columns(value, column));
         const name = this.alias('p');
-        const { sorts, after, sorted }: Sorted = this.sorts(
+        const { sorts, after, sorted, anew }: Sorted = this.sorts(
             select,
             projection,
             items,
@@ -1965,7 +2051,7 @@ export class CypherWriter {
         const ordered = sorts.map(([column, descending]) => `${sortedBy(column)}${descending ? ' DESC' : ''}`);
         const outer = [
             `SELECT ${outerColumns}`,
-            `FROM (\n${indent(inner)}\n) ${name}`,
+            `FROM (\n${indent(anew ? this.sql.once(inner) : inner)}\n) ${name}`,
             ...(sorts.length > 0 ? [`ORDER BY ${ordered.join(', ')}`] : []),
             ...this.page(projection)
         ].join('\n');
@@ -1974,6 +2060,30 @@ export class CypherWriter {
             items.map((item, i) => [item.name, columnsOf(itemColumns[i][1], PENDING, itemColumns[i][0])])
         );
         return { sql: outer, scope, order: sorts };
+    }
+
+    /**
+     * The rows `select` reads with what the projection reads of them worked out first, in a `WITH` of its own, and the
+     * projection over that: see {@link casesFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
+     * is.
+     */
+    private workedOutFirst(
+        select: Select,
+        projection: Projection,
+        items: ProjectionItem[]
+    ): [Select, Projection] | undefined {
+        return (
+            this.casesFirst(select, projection, items) ??
+            this.aggregatesFirst(select, projection, items) ??
+            this.heldFirst(select, projection, items)
+        );
+    }
+
+    /** `value` as a projection carries it out: without its identity where none is carried (see {@link identities}). */
+    private carriedOut(value: Value): Value {
+        return value.kind === 'Json' && !this.identities && value.identity !== undefined
+            ? { ...value, identity: undefined }
+            : value;
     }
 
     /**
@@ -2031,6 +2141,10 @@ export class CypherWriter {
         // what sorts it (JSON's null as SQL's) worked out of that column. Oracle (23.26), sorting by a value that reads
         // the row more than once beside a variable-length walk, closes the session.
         const sorted = new Map<string, (column: string) => string>();
+        // An item made anew for each row, randomUUID(), is sorted by of its column, as it is given, not made again: see
+        // SqlCypherCompiler.once.
+        const madeAnew = new Set(items.filter((it) => contains(it.expression, isAnew)).map((it) => it.name));
+        let anew = false;
         const carried = (column: string, value: () => Value, aggregates: Expression): void => {
             const [carriedValue, sorts] = this.aggregating(aggregates, () => this.sortTerm(value()));
             selectList.push(`${carriedValue} AS ${column}`);
@@ -2040,7 +2154,13 @@ export class CypherWriter {
             const column = `s${i + 1}`;
             // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.
             const item = items.findIndex((it) => sameExpression(it.expression, sort.expression));
-            if (item >= 0) {
+            if (
+                contains(sort.expression, (it) => it.kind === 'Variable' && madeAnew.has(it.name)) &&
+                [...variablesIn(sort.expression)].every((it) => byName.has(it))
+            ) {
+                after.set(column, this.sortable(this.expression(sort.expression, byName)));
+                anew = true;
+            } else if (item >= 0) {
                 carried(column, () => compiled[item][1], sort.expression);
             } else if (
                 compared &&
@@ -2052,7 +2172,7 @@ export class CypherWriter {
                 after.set(column, this.sortable(this.expression(sort.expression, byName)));
             } else {
                 // One that aggregates reads the rows it aggregates, as an item does; so does one that reads an aggregate
-                // distinctFirst worked out first, which no item is. Beside a variable-length walk it binds no value in a
+                // aggregatesFirst worked out first, which no item is. Beside a variable-length walk it binds no value in a
                 // subquery: carried out of a WITH's query, one so bound closes Oracle's (23.26) session (ORA-03113), as
                 // `WITH b ORDER BY toString(coalesce(b.name, b.title))` did, its argument long enough to be bound. Elsewhere
                 // it does, so operations nested in it compile to a statement that grows with them, not exponentially.
@@ -2068,7 +2188,7 @@ export class CypherWriter {
             return [column, sort.descending];
         });
         if (sorts.length > 0 || compared) {
-            return { sorts, after, sorted };
+            return { sorts, after, sorted, anew };
         }
         return {
             sorts: select.order.map(([term, descending], i): [string, boolean] => {
@@ -2077,7 +2197,8 @@ export class CypherWriter {
                 return [column, descending];
             }),
             after,
-            sorted
+            sorted,
+            anew
         };
     }
 
@@ -2098,6 +2219,95 @@ export class CypherWriter {
             }
         });
         return [...new Set(keys)];
+    }
+
+    /**
+     * On a store that aggregates no `CASE` holding a subquery (`aggregatesCaseSubqueries`), the rows `select` reads with
+     * each aggregate's argument that is such a `CASE` worked out first, in a `WITH *` of its own, and the projection with
+     * the aggregate of that argument read from there: Oracle (23.26) fails `collect(CASE WHEN … THEN [r] ELSE [m.title] END)`
+     * with ORA-00979, or closes the session (ORA-03113). Undefined where there is none.
+     */
+    private casesFirst(
+        select: Select,
+        projection: Projection,
+        items: ProjectionItem[]
+    ): [Select, Projection] | undefined {
+        if (this.sql.aggregatesCaseSubqueries) {
+            return undefined;
+        }
+        const argumentsOf = new Map<string, Expression>();
+        // Those of a collect whose list is read, not only counted by size(): see below.
+        const gathered = new Map<string, Expression>();
+        [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)].forEach((term) => {
+            const sized: Expression[] = [];
+            contains(term, (e) => {
+                if (e.kind === 'Function' && e.name.toLowerCase() === 'size') {
+                    sized.push(...e.arguments);
+                }
+                if (isAggregate(e) && e.kind === 'Function') {
+                    e.arguments
+                        .filter(
+                            (argument) =>
+                                contains(argument, (it) => it.kind === 'Case') &&
+                                /select/i.test(
+                                    this.unshared(() => this.asJson(this.expression(argument, select.scope)).sql)
+                                )
+                        )
+                        .forEach((argument) => {
+                            argumentsOf.set(expressionKey(argument), argument);
+                            if (e.name.toLowerCase() === 'collect' && !sized.some((it) => it === e)) {
+                                gathered.set(expressionKey(argument), argument);
+                            }
+                        });
+                }
+                return false;
+            });
+        });
+        if (argumentsOf.size === 0) {
+            return undefined;
+        }
+        // Gathered by collect, a list of nodes or relationships beside a value of another kind, or the null of a CASE with
+        // no ELSE, closes Oracle's (23.26) session (ORA-03113) wherever the CASE is worked out: refused, as Oracle gave an
+        // error of its own for it (ORA-00979) before. Counted, by count() or the size() of the collect, it is read.
+        gathered.forEach((argument) =>
+            contains(argument, (e) => {
+                if (e.kind === 'Case') {
+                    const kinds = [
+                        ...[...e.alternatives.map(([, result]) => result), ...optional(e.otherwise)].map(
+                            (it) => this.unshared(() => this.expression(it, select.scope)).kind === 'Entities'
+                        ),
+                        ...(e.otherwise === undefined ? [false] : [])
+                    ];
+                    if (kinds.some((it) => it) && !kinds.every((it) => it)) {
+                        unsupported(
+                            'On Oracle, an aggregate of a CASE that gives a list of nodes or relationships beside a value of another kind'
+                        );
+                    }
+                }
+                return false;
+            })
+        );
+        // Named as no variable is, unless quoted so.
+        const names = new Map([...argumentsOf.keys()].map((key) => [key, `#case${++this.counter}`]));
+        const withProjection: Projection = {
+            distinct: false,
+            star: true,
+            items: [...argumentsOf].map(([key, argument]) => ({ expression: argument, name: names.get(key)! })),
+            orderBy: []
+        };
+        const cased = (expression: Expression): Expression =>
+            replaced(expression, (it) => {
+                const name = names.get(expressionKey(it));
+                return name !== undefined ? { kind: 'Variable', name } : undefined;
+            });
+        const kept: Projection = {
+            ...projection,
+            star: false,
+            items: items.map((it) => ({ ...it, expression: cased(it.expression) })),
+            orderBy: projection.orderBy.map((it) => ({ ...it, expression: cased(it.expression) }))
+        };
+        // Kept apart, or Oracle merges it back into the query that aggregates.
+        return [this.with(select, { kind: 'With', projection: withProjection }, new Map(), true), kept];
     }
 
     /**
@@ -2146,24 +2356,29 @@ export class CypherWriter {
     }
 
     /**
-     * Where a projection holds `collect(DISTINCT …)`, the rows `select` reads grouped first, in a `WITH` of their own:
+     * Where a projection holds `collect(DISTINCT …)`, or reads an aggregate item by item (a comprehension, a quantifier or
+     * a reduce over `collect(…)`, `IN collect(…)`, a slice of it…), the rows `select` reads grouped first, in a `WITH` of
+     * their own:
      * each item that does not aggregate a key of its own; each variable an aggregating item names beside its aggregates,
      * in a body, a pattern or a subquery it holds too, and each key an aggregating order term names; and each aggregate,
      * the items' and the order terms', `collect(DISTINCT …)` collected without its `DISTINCT`. Then the projection, over
      * those, keeps each item of such a collection once, where it is first, as a graph engine does: by its id for a node
      * or a relationship, not its properties. An order term, or a part of one, that is an item is read by the item's name.
      * A store dedupes no aggregate in the query that makes it, and Oracle's `LISTAGG`, which does, gives at most 4,000
-     * bytes. Undefined where the projection collects nothing distinct.
+     * bytes; and Oracle reads no aggregate of the query it is in from a subquery, which reading a list item by item is.
+     * Undefined where the projection does neither.
      */
-    private distinctFirst(
+    private aggregatesFirst(
         select: Select,
         projection: Projection,
         items: ProjectionItem[]
     ): [Select, Projection] | undefined {
         const collectsDistinct = (expression: Expression): boolean =>
             expression.kind === 'Function' && expression.distinct && expression.name.toLowerCase() === 'collect';
+        const iteratesAggregate = (expression: Expression): boolean =>
+            iterated(expression).some((it) => contains(it, isAggregate));
         const terms = [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)];
-        if (!terms.some((it) => contains(it, collectsDistinct))) {
+        if (!terms.some((it) => contains(it, collectsDistinct) || contains(it, iteratesAggregate))) {
             return undefined;
         }
         // Named as no variable is, unless quoted so.
@@ -2380,7 +2595,10 @@ export class CypherWriter {
         }
         return json(this.sql.jsonArray(items.map((it) => this.asJson(it).sql)), {
             ordered: true,
-            items: this.kindOf(list.items.map((it, i) => [it, items[i]]))
+            items: this.kindOf(list.items.map((it, i) => [it, items[i]])),
+            identity: this.identityHolding(items, (ids) => this.sql.jsonArray(ids)),
+            list: true,
+            itemLists: entities.length > 0 && entities.every((it) => this.isList(it))
         });
     }
 
@@ -2401,18 +2619,87 @@ export class CypherWriter {
         if (value.kind === 'Entities' && !contains(index.subject, isAggregate)) {
             return this.entityAt(value, at);
         }
+        // An item of a list that holds a node or a relationship holds it by identity too: see JsonValue.identity.
         if (typeof known === 'number' || typeof known === 'bigint' || known instanceof CypherFloat) {
-            return json(this.sql.element(subject(), at), { temporal: this.itemsOf(listed()) });
+            const item = this.sql.element(subject(), at);
+            return json(item, {
+                temporal: this.itemsOf(value),
+                identity: this.identityTaken(value, item, true, (it) => this.sql.element(it, at)),
+                list: this.holdsLists(value)
+            });
         }
-        return json(
-            this.sql.shared([subject(), at], ([map, key]) => {
+        const take = (list: string): string =>
+            this.sql.shared([list, at], ([map, key]) => {
                 // A store that reads no key an expression gives reads a list's item alone.
                 const keyed = this.sql.keyed(map, key);
                 const byKey = keyed !== undefined ? ` WHEN 'string' THEN ${keyed}` : '';
                 return `CASE ${this.sql.typeOf(key)} WHEN 'number' THEN ${this.sql.element(map, key)}${byKey} END`;
-            }),
-            { temporal: this.itemsOf(listed()) }
-        );
+            });
+        const taken = take(subject());
+        return json(taken, {
+            temporal: this.itemsOf(value),
+            identity: this.identityTaken(value, taken, true, take),
+            list: this.holdsLists(value)
+        });
+    }
+
+    /**
+     * `list[from..to]`: the items from the one at `from` up to the one before `to`, each counted from the end where it is
+     * negative, a bound left out the list's end; null where the list or a bound given is. A slice of nodes or
+     * relationships is a list of them.
+     */
+    private slice(slice: Slice, scope: Scope): Value {
+        const listed = this.expression(slice.subject, scope);
+        const bounds = [slice.from, slice.to]
+            .filter((it): it is Expression => it !== undefined)
+            .map((it) => this.sql.comparable(this.asJson(this.expression(it, scope))));
+        const list = listed.kind === 'Entities' ? listed.ids : this.sql.comparable(this.asJson(listed));
+        const sliced = (of: string): string =>
+            this.sql.shared([of, ...bounds], (values) => {
+                const x = values[0];
+                let i = 1;
+                const from = slice.from !== undefined ? values[i++] : undefined;
+                const to = slice.to !== undefined ? values[i] : undefined;
+                const e = this.alias('e');
+                const v = this.alias('v');
+                // A bound counted from the end where it is negative, as an index is: past either end, the end it is past.
+                const bound = (b: string): string =>
+                    `CASE WHEN ${this.sql.number(b)} < 0 THEN ${v}.cnt + ${this.sql.number(b)} ELSE ${this.sql.number(
+                        b
+                    )} END`;
+                const within = [
+                    ...(from !== undefined ? [`${v}.item_no > ${bound(from)}`] : []),
+                    ...(to !== undefined ? [`${v}.item_no <= ${bound(to)}`] : [])
+                ];
+                const items = `SELECT ${e}.item AS item, ${e}.item_no AS item_no, COUNT(*) OVER () AS cnt FROM ${this.sql.elements(
+                    x,
+                    e
+                )}`;
+                const listedItems = this.sql.comparable(
+                    json(this.sql.aggregateList(`${v}.item`, `${v}.item_no`), { ordered: true })
+                );
+                const query =
+                    `SELECT ${listedItems} FROM (${items}) ${v}` +
+                    (within.length > 0 ? ` WHERE ${within.join(' AND ')}` : '');
+                const present = [
+                    `${this.sql.typeOf(x)} = 'array'`,
+                    ...[from, to]
+                        .filter((it): it is string => it !== undefined)
+                        .map((it) => `NOT ${this.sql.isJsonNull(it)}`)
+                ].join(' AND ');
+                return `CASE WHEN ${present} THEN (${query}) END`;
+            });
+        // A slice of a list that holds a node or a relationship holds it by identity too: see JsonValue.identity.
+        if (listed.kind === 'Entities') {
+            return { kind: 'Entities', ids: sliced(list), relationships: listed.relationships };
+        }
+        const taken = sliced(list);
+        return json(taken, {
+            items: this.itemsOf(listed),
+            identity: this.identityTaken(listed, taken, false, sliced),
+            list: true,
+            itemLists: this.holdsLists(listed)
+        });
     }
 
     /** The value of an index, where the statement writes it or binds it to a parameter: `-1` is a negated number. */
@@ -2517,7 +2804,12 @@ export class CypherWriter {
                 relationships: projected.kind === 'Relationship'
             };
         }
-        return json(list, { ordered: true, items: projected?.kind === 'Json' ? projected.temporal : undefined });
+        return json(list, {
+            ordered: true,
+            items: projected?.kind === 'Json' ? projected.temporal : undefined,
+            list: true,
+            itemLists: projected !== undefined && this.isList(projected)
+        });
     }
 
     /** A list comprehension over a list of values. */
@@ -2545,7 +2837,9 @@ export class CypherWriter {
             ),
             {
                 ordered: true,
-                items: projected ? (projected.kind === 'Json' ? projected.temporal : undefined) : this.itemsOf(listed)
+                items: projected ? (projected.kind === 'Json' ? projected.temporal : undefined) : this.itemsOf(listed),
+                list: true,
+                itemLists: projected ? this.isList(projected) : this.holdsLists(listed)
             }
         );
     }
@@ -2640,7 +2934,9 @@ export class CypherWriter {
         }
         return json(gathered(this.asJson(projected).sql), {
             ordered: true,
-            items: projected.kind === 'Json' ? projected.temporal : undefined
+            items: projected.kind === 'Json' ? projected.temporal : undefined,
+            list: true,
+            itemLists: this.isList(projected)
         });
     }
 
@@ -2693,8 +2989,16 @@ export class CypherWriter {
                 );
             case 'Relationship':
                 return json(this.sql.propertyOf(subject.props, key));
-            case 'Json':
-                return this.temporalField(subject, key) ?? json(this.sql.propertyOf(this.sql.comparable(subject), key));
+            case 'Json': {
+                const field = this.temporalField(subject, key);
+                if (field) {
+                    return field;
+                }
+                const taken = this.sql.propertyOf(this.sql.comparable(subject), key);
+                return json(taken, {
+                    identity: this.identityTaken(subject, taken, true, (it) => this.sql.propertyOf(it, key))
+                });
+            }
             case 'Bool':
                 throw new DrivineError('A truth value has no properties.');
             default:
@@ -2713,6 +3017,16 @@ export class CypherWriter {
                 .filter(([written]) => !isNullLiteral(written))
                 .map(([, value]) => (value.kind === 'Json' ? value.temporal : undefined))
         );
+    }
+
+    /** Whether the statement makes `value` a list: see {@link JsonValue.list}. */
+    private isList(value: Value): boolean {
+        return value.kind === 'Entities' || (value.kind === 'Json' && value.list === true);
+    }
+
+    /** Whether the statement makes `value` a list whose every item is a list: see {@link JsonValue.itemLists}. */
+    private holdsLists(value: Value): boolean {
+        return value.kind === 'Json' && value.itemLists === true;
     }
 
     /** The temporal kind the statement makes each item of the list `list`: see {@link JsonValue.items}. */
@@ -2956,27 +3270,32 @@ export class CypherWriter {
         if (!subject) {
             throw new DrivineError(`${projection.variable} is not defined.`);
         }
-        const entries = projection.elements.flatMap((element): [string, string][] => {
+        const values = projection.elements.flatMap((element): [string, Value][] => {
             switch (element.kind) {
                 case 'Selected':
-                    return [[element.key, this.asJson(this.property(subject, element.key)).sql]];
+                    return [[element.key, this.property(subject, element.key)]];
                 case 'Entry':
-                    return [[element.key, this.asJson(this.expression(element.value, scope)).sql]];
+                    return [[element.key, this.expression(element.value, scope)]];
                 case 'Variable': {
                     const value = scope.get(element.name);
                     if (!value) {
                         throw new DrivineError(`${element.name} is not defined.`);
                     }
-                    return [[element.name, this.asJson(value).sql]];
+                    return [[element.name, value]];
                 }
                 default:
                     return [];
             }
         });
+        const entries = values.map(([key, value]): [string, string] => [key, this.asJson(value).sql]);
         // A projection of null is null, as in Cypher, and not a map of nulls.
         const present = (map: string): string => `CASE WHEN NOT (${this.isNull(subject)}) THEN ${map} END`;
         if (!projection.elements.some((it) => it.kind === 'All')) {
-            return json(present(this.sql.jsonObject(entries)), { ordered: true });
+            const identity = this.identityHolding(
+                values.map(([, value]) => value),
+                (ids) => present(this.sql.jsonObject(values.map(([key], i) => [key, ids[i]])))
+            );
+            return json(present(this.sql.jsonObject(entries)), { ordered: true, identity });
         }
         // Every property, then the entries over them.
         return json(present(this.sql.withEntries(this.sql.comparable(this.asJson(subject)), entries)));
@@ -2992,8 +3311,11 @@ export class CypherWriter {
             // Each side whole: a condition may be several, and `a = b <> c` is no SQL.
             return bool(binary.operator === 'OR' ? `(${left} OR ${right})` : `((${left}) <> (${right}))`);
         }
-        const left = this.expression(binary.left, scope);
-        const right = this.expression(binary.right, scope);
+        const [left, right] = this.compared(
+            this.expression(binary.left, scope),
+            this.expression(binary.right, scope),
+            binary
+        );
         const temporal = this.temporalBinary(binary.operator, left, right);
         if (temporal) {
             return temporal;
@@ -3001,6 +3323,48 @@ export class CypherWriter {
         const a = this.sql.comparable(this.asJson(left));
         const b = this.sql.comparable(this.asJson(right));
         return this.operation(binary, left, right, a, b);
+    }
+
+    /**
+     * `left` and `right`, the sides of `binary`, as compared: where one holds a node or a relationship by identity and the
+     * other may hold one without it (an item taken from a list, a collect, a variable), both by their properties, as
+     * before identities: only a value the statement writes out or is given, all the way down (a literal, a parameter, a
+     * map, a list or a map projection of such, a `CASE` that gives one), holds none where it carries no identity, so
+     * `[{x: r}][0] = {x: r}` is true, and `{x: r} = {x: {}}` false.
+     */
+    private compared(left: Value, right: Value, binary: Binary): [Value, Value] {
+        // Written all the way down: `{a: ms[0]}` and `n {.*, x: r}` hold what may be a node without its identity.
+        const written = (expression: Expression): boolean => {
+            switch (expression.kind) {
+                case 'Literal':
+                case 'Parameter':
+                    return true;
+                case 'MapLiteral':
+                    return expression.entries.every(([, value]) => written(value));
+                case 'ListLiteral':
+                    return expression.items.every(written);
+                case 'MapProjection':
+                    return expression.elements.every(
+                        (it) => it.kind === 'Selected' || (it.kind === 'Entry' && written(it.value))
+                    );
+                case 'Case':
+                    return [
+                        ...expression.alternatives.map(([, result]) => result),
+                        ...optional(expression.otherwise)
+                    ].every(written);
+                default:
+                    return false;
+            }
+        };
+        const held = (value: Value): boolean => value.kind === 'Json' && value.identity !== undefined;
+        const plain = (value: Value): Value => (value.kind === 'Json' ? { ...value, identity: undefined } : value);
+        if (held(left) && right.kind === 'Json' && !held(right) && !written(binary.right)) {
+            return [plain(left), right];
+        }
+        if (held(right) && left.kind === 'Json' && !held(left) && !written(binary.left)) {
+            return [left, plain(right)];
+        }
+        return [left, right];
     }
 
     /** An operator of two values, not a logical one, neither of them temporal: its operands `a` and `b` as JSON. */
@@ -3046,10 +3410,13 @@ export class CypherWriter {
                 }
                 // Two lists of items of one kind are, together, a list of that kind.
                 const items = this.itemsOf(left);
+                const given: [unknown, unknown] = [this.given(binary.left), this.given(binary.right)];
                 return json(
-                    sql.shared([a, b], ([x, y]) => sql.add(x, y)),
+                    sql.shared([a, b], ([x, y]) => sql.add(x, y, given)),
                     {
-                        items: items !== undefined && items === this.itemsOf(right) ? items : undefined
+                        items: items !== undefined && items === this.itemsOf(right) ? items : undefined,
+                        list: this.isList(left) || this.isList(right),
+                        itemLists: this.holdsLists(left) && (this.holdsLists(right) || !this.isList(right))
                     }
                 );
             },
@@ -3082,6 +3449,18 @@ export class CypherWriter {
                         return bool(`EXISTS (SELECT 1 FROM ${sql.elements(right.ids, i)} WHERE ${i}.item = ${id})`);
                     }
                 }
+                // A map or a list that holds a node or a relationship is in a list where an item holds the same, by identity.
+                if (
+                    (left.kind === 'Json' && left.identity !== undefined) ||
+                    (right.kind === 'Json' && right.identity !== undefined)
+                ) {
+                    return bool(
+                        `EXISTS (SELECT 1 FROM ${sql.elements(this.identified(right), i)} WHERE ${sql.identityEquals(
+                            `${i}.item`,
+                            this.identified(left)
+                        )})`
+                    );
+                }
                 return bool(`EXISTS (SELECT 1 FROM ${sql.elements(b, i)} WHERE ${i}.item = ${a})`);
             },
             STARTS_WITH: () => bool(sql.shared([sql.text(a), sql.text(b)], ([x, y]) => sql.startsWith(x, y))),
@@ -3103,11 +3482,9 @@ export class CypherWriter {
         if (temporal?.kind === 'Bool') {
             return temporal.sql;
         }
-        if (left.kind === 'Node' && right.kind === 'Node') {
-            return `${left.nid} = ${right.nid}`;
-        }
-        if (left.kind === 'Relationship' && right.kind === 'Relationship') {
-            return `${left.eid} = ${right.eid}`;
+        const identical = this.identityEquality(left, right);
+        if (identical !== undefined) {
+            return identical;
         }
         const [a, b] = this.equated(left, right);
         const given = written ? this.given(written) : undefined;
@@ -3126,6 +3503,100 @@ export class CypherWriter {
                           )} THEN ${x} = ${y} END`
                   );
         return indexed !== undefined ? `(${indexed} AND ${equal})` : equal;
+    }
+
+    /**
+     * Whether `left` and `right` are equal by identity: two nodes, or two relationships, by their rows; and where either is
+     * a map or a list that holds a node or a relationship, where what it holds is. Undefined where neither is so.
+     */
+    private identityEquality(left: Value, right: Value): string | undefined {
+        if (left.kind === 'Node' && right.kind === 'Node') {
+            return `${left.nid} = ${right.nid}`;
+        }
+        if (left.kind === 'Relationship' && right.kind === 'Relationship') {
+            return `${left.eid} = ${right.eid}`;
+        }
+        if (
+            (left.kind !== 'Json' || left.identity === undefined) &&
+            (right.kind !== 'Json' || right.identity === undefined)
+        ) {
+            return undefined;
+        }
+        return this.sql.shared(
+            [this.identified(left), this.identified(right)],
+            ([x, y]) =>
+                `CASE WHEN NOT ${this.sql.isJsonNull(x)} AND NOT ${this.sql.isJsonNull(
+                    y
+                )} THEN ${this.sql.identityEquals(x, y)} END`
+        );
+    }
+
+    /**
+     * `value` as JSON that compares by identity: a node or a relationship as its id, under a key no property of the graph
+     * has (`" node"`, `" relationship"`), a list of them as the list of their ids so written, and a map or a list that
+     * holds one as its {@link JsonValue.identity}. Undefined where the value holds none.
+     */
+    private identityOf(value: Value): string | undefined {
+        const token = (key: string, id: string): string =>
+            `CASE WHEN ${id} IS NOT NULL THEN ${this.sql.comparable(
+                json(this.sql.jsonObject([[key, this.sql.scalar(id)]]), { ordered: true })
+            )} END`;
+        switch (value.kind) {
+            case 'Node':
+                return token(' node', value.nid);
+            case 'Relationship':
+                return token(' relationship', value.eid);
+            // Each id as the node or relationship it is, so a list of them is the same as one that holds them among other values.
+            case 'Entities':
+                return this.sql.idTokens(value.ids, value.relationships ? ' relationship' : ' node');
+            case 'Json':
+                return value.identity;
+            default:
+                return undefined;
+        }
+    }
+
+    /**
+     * What `take` takes of `list`'s identity, where it holds a node or a relationship by one: an item, a key's value, a
+     * slice; `taken` is what it takes of the value. Taken from a node or a relationship, a property holds neither, so its
+     * identity is `taken` itself. `item` says whether it takes one value, not a slice.
+     */
+    private identityTaken(
+        list: Value,
+        taken: string,
+        item: boolean,
+        take: (identity: string) => string
+    ): string | undefined {
+        if (list.kind !== 'Json' || list.identity === undefined) {
+            return undefined;
+        }
+        if (!item) {
+            return take(list.identity);
+        }
+        return this.sql.shared([list.identity, taken], ([i, t]) => {
+            // A map's key, not a list's items' keys, as Oracle's lax path reads them.
+            const holds = `COALESCE(${this.sql.propertyOf(i, ' node')}, ${this.sql.propertyOf(i, ' relationship')})`;
+            return `CASE WHEN ${this.sql.typeOf(i)} = 'object' AND ${holds} IS NOT NULL THEN ${t} ELSE ${take(i)} END`;
+        });
+    }
+
+    /** `value` as JSON that compares by identity where it holds a node or a relationship, and as itself where it does not: see {@link identityOf}. */
+    private identified(value: Value): string {
+        return this.identityOf(value) ?? this.sql.comparable(this.asJson(value));
+    }
+
+    /**
+     * The identity of a map or a list of `values`, built by `build` of each value's: see {@link JsonValue.identity}.
+     * Undefined where none of them holds a node or a relationship.
+     */
+    private identityHolding(values: Value[], build: (identities: string[]) => string): string | undefined {
+        const identities = values.map((it) => this.identityOf(it));
+        if (identities.every((it) => it === undefined)) {
+            return undefined;
+        }
+        return this.sql.comparable(
+            json(build(values.map((it, i) => identities[i] ?? this.asJson(it).sql)), { ordered: true })
+        );
     }
 
     /** What {@link equality} compares of two values: two lists of nodes, or of relationships, their ids, item by item. */
@@ -3198,18 +3669,37 @@ export class CypherWriter {
         const results = [...expression.alternatives.map(([, result]) => result), ...optional(expression.otherwise)].map(
             (it): [Expression, Value] => [it, this.expression(it, scope)]
         );
-        const alternatives = expression.alternatives
-            .map(([key], i) => {
-                const condition = subject
-                    ? this.equality(subject, this.expression(key, scope))
-                    : this.condition(this.expression(key, scope));
-                return `WHEN ${condition} THEN ${this.sql.comparable(this.asJson(results[i][1]))}`;
-            })
-            .join(' ');
-        const otherwise = expression.otherwise
-            ? ` ELSE ${this.sql.comparable(this.asJson(results[results.length - 1][1]))}`
-            : '';
-        return json(`CASE ${alternatives}${otherwise} END`, { temporal: this.kindOf(results) });
+        const conditions = expression.alternatives.map(([key]) =>
+            subject ? this.equality(subject, this.expression(key, scope)) : this.condition(this.expression(key, scope))
+        );
+        const written = (value: (result: Value, i: number) => string): string => {
+            const alternatives = conditions
+                .map((condition, i) => `WHEN ${condition} THEN ${value(results[i][1], i)}`)
+                .join(' ');
+            const last = results.length - 1;
+            const otherwise = expression.otherwise ? ` ELSE ${value(results[last][1], last)}` : '';
+            return `CASE ${alternatives}${otherwise} END`;
+        };
+        // Where a result holds a node or a relationship, the CASE holds it by identity too.
+        const identity = results.some(([, it]) => this.identityOf(it) !== undefined)
+            ? written((it) => this.identified(it))
+            : undefined;
+        // On Oracle a list of nodes or relationships, read from their rows in a subquery, beside a result that reads the
+        // row, as `CASE WHEN … THEN [r] ELSE [m.title] END`, closes the session (ORA-03113): its results are worked out in
+        // a subquery first. Not a CASE that reads an aggregate, which the subquery would aggregate again, over its one row.
+        const values = (): string[] => results.map(([, it]) => this.sql.comparable(this.asJson(it)));
+        const sql =
+            this.sql.aggregatesCaseSubqueries ||
+            !results.some(([, it]) => it.kind === 'Entities') ||
+            contains(expression, isAggregate)
+                ? written((it) => this.sql.comparable(this.asJson(it)))
+                : this.sql.bound(values(), (bound) => written((_, i) => bound[i]));
+        return json(sql, {
+            temporal: this.kindOf(results),
+            identity,
+            list: results.every(([, it]) => this.isList(it)),
+            itemLists: results.every(([, it]) => this.holdsLists(it))
+        });
     }
 
     private function(fn: FunctionCall, scope: Scope): Value {
@@ -3247,8 +3737,20 @@ export class CypherWriter {
         if (this.sql.function(name, 'NULL') === undefined) {
             unsupported(`The function ${fn.name}()`);
         }
-        const argument = this.sql.comparable(this.asJson(call.one()));
-        return json(this.sql.shared([argument], ([x]) => this.sql.function(name, x)!));
+        const one = call.one();
+        const argument = this.sql.comparable(this.asJson(one));
+        const result = this.sql.shared([argument], ([x]) => this.sql.function(name, x)!);
+        // An item taken from a list is of the kind its items are.
+        if (name === 'head' || name === 'last') {
+            return json(result, {
+                temporal: this.itemsOf(one),
+                identity: this.identityTaken(one, result, true, (list) =>
+                    this.sql.shared([list], ([x]) => this.sql.function(name, x)!)
+                ),
+                list: this.holdsLists(one)
+            });
+        }
+        return json(result);
     }
 
     private idFunction(call: Invocation): Value {
@@ -3271,10 +3773,10 @@ export class CypherWriter {
         return subject;
     }
 
-    /** `collect`. collect(DISTINCT …) is collected in a `WITH` of its own, then kept once each: see {@link distinctFirst}. */
+    /** `collect`. collect(DISTINCT …) is collected in a `WITH` of its own, then kept once each: see {@link aggregatesFirst}. */
     private collectFunction(call: Invocation): Value {
         if (call.fn.distinct) {
-            throw new Error('collect(DISTINCT …) is gathered by distinctFirst');
+            throw new Error('collect(DISTINCT …) is gathered by aggregatesFirst');
         }
         const gathered = call.one();
         // Nodes or relationships are gathered as their ids, so a list of them is still of them.
@@ -3287,9 +3789,17 @@ export class CypherWriter {
                 gathered: this.collected(gathered)
             };
         }
+        // What holds a node or a relationship, a map or a list of them, is gathered beside its identity too.
+        const identity = this.identityOf(gathered);
         return json(this.collected(gathered), {
             ordered: true,
-            items: gathered.kind === 'Json' ? gathered.temporal : undefined
+            items: gathered.kind === 'Json' ? gathered.temporal : undefined,
+            list: true,
+            itemLists: this.isList(gathered),
+            identity:
+                identity !== undefined
+                    ? this.sql.comparable(json(this.sql.collect(identity, this.rowOrder), { ordered: true }))
+                    : undefined
         });
     }
 
@@ -3303,10 +3813,103 @@ export class CypherWriter {
                 relationships: list.relationships
             };
         }
-        return json(this.sql.distinctItems(this.sql.comparable(this.asJson(list))), {
+        if (list.kind !== 'Json') {
+            return json(this.sql.distinctItems(this.sql.comparable(this.asJson(list))), { ordered: true });
+        }
+        // What holds a node or a relationship once each by its identity, not its properties.
+        if (list.identity !== undefined) {
+            return json(this.sql.firstOfEach(this.sql.comparable(list), list.identity), {
+                ordered: true,
+                items: list.items,
+                identity: this.sql.comparable(json(this.sql.distinctItems(list.identity), { ordered: true })),
+                list: true,
+                itemLists: list.itemLists
+            });
+        }
+        return json(this.sql.distinctItems(this.sql.comparable(list)), {
             ordered: true,
-            items: list.kind === 'Json' ? list.items : undefined
+            items: list.items,
+            list: true,
+            itemLists: list.itemLists
         });
+    }
+
+    /** `min` or `max`: zoned values as the moments they are, whatever their offsets; of a temporal kind, still of it. */
+    private extreme(call: Invocation, min: boolean): Value {
+        const value = this.asJson(call.one());
+        const temporal = value.temporal;
+        const key = temporal?.zoned
+            ? this.temporals.moment(this.sql.text(this.sql.comparable(value)), temporal)
+            : undefined;
+        return json(this.sql.extreme(this.sql.comparable(value), min, key), { temporal });
+    }
+
+    /** `round(value)`, `round(value, precision)` or `round(value, precision, mode)`. */
+    private round(call: Invocation): Value {
+        if (call.arguments.length === 3) {
+            const mode = this.roundingMode(call.fn.arguments[2]);
+            if (mode === undefined) {
+                return json(this.sql.literalJson(null));
+            }
+            // As Neo4j refuses it, where the precision is written, negated or not, or a parameter's value.
+            const written = call.fn.arguments[1];
+            const negated = written.kind === 'Unary' && written.operator === 'NEGATE';
+            const precision = this.given(negated ? (written as Unary).operand : written);
+            const value = precision instanceof CypherFloat ? precision.value : precision;
+            if (typeof value === 'number' && (negated ? -value : value) < 0) {
+                throw new DrivineError('round() takes a precision of 0 or more, as in Neo4j.');
+            }
+            return json(
+                this.sql.scalar(
+                    this.sql.float(
+                        this.sql.roundTo(this.numberOf(call.arguments[0]), this.whole(call.arguments[1]), mode)
+                    )
+                )
+            );
+        }
+        if (call.arguments.length === 2) {
+            return json(
+                this.sql.scalar(
+                    this.sql.float(`ROUND(${this.numberOf(call.arguments[0])}, ${this.whole(call.arguments[1])})`)
+                )
+            );
+        }
+        return json(this.sql.scalar(this.sql.float(`FLOOR(${this.numberOf(call.one())} + 0.5)`)));
+    }
+
+    /**
+     * The mode `mode` a `round()` names, as Java's `BigDecimal` names it, as Neo4j takes it: undefined where it is null,
+     * as the rounding then is. Written, or a parameter's value: the SQL is worked out for the one mode.
+     */
+    private roundingMode(mode: Expression): RoundingMode | undefined {
+        if (mode.kind !== 'Literal' && mode.kind !== 'Parameter') {
+            unsupported('A rounding mode an expression gives');
+        }
+        const name = this.given(mode);
+        if (name === null || name === undefined) {
+            return undefined;
+        }
+        const known = ROUNDING_MODES.find((it) => it === name);
+        if (known === undefined) {
+            throw new DrivineError(
+                `round() rounds by CEILING, FLOOR, UP, DOWN, HALF_EVEN, HALF_UP, HALF_DOWN or UNNECESSARY, not ${String(
+                    name
+                )}.`
+            );
+        }
+        // It fails where rounding would change the number, which SQL has no way to say in a query.
+        if (known === 'UNNECESSARY') {
+            unsupported('round() by UNNECESSARY');
+        }
+        return known;
+    }
+
+    /** `e()` or `pi()`: Java's constant `value`, which takes no argument. */
+    private constant(call: Invocation, value: number): Value {
+        if (call.arguments.length > 0) {
+            throw new DrivineError(`${call.fn.name}() takes no argument.`);
+        }
+        return json(this.sql.literalJson(new CypherFloat(value)));
     }
 
     private numeric(call: Invocation): Value {
@@ -3423,7 +4026,8 @@ export class CypherWriter {
             case 'Entities':
                 return value.ids;
             default:
-                return this.sql.nullIfJsonNull(this.sql.comparable(this.asJson(value)));
+                // What holds a node or a relationship by its identity, so `count(DISTINCT {x: r})` counts each relationship.
+                return this.sql.nullIfJsonNull(this.identified(value));
         }
     }
 
@@ -3455,7 +4059,7 @@ export class CypherWriter {
             case 'Relationship':
                 return json(`CASE WHEN ${value.eid} IS NOT NULL THEN ${value.props} END`);
             case 'Entities':
-                return json(this.entitiesJson(value), { ordered: true });
+                return json(this.entitiesJson(value), { ordered: true, list: true });
             default:
                 // Each graph engine's driver gives a path as a value of its own, so a path is given by its parts.
                 throw new DrivineError(
@@ -3493,6 +4097,10 @@ export class CypherWriter {
         if (value.kind === 'Json' && value.temporal?.zoned) {
             const temporal = value.temporal;
             return [this.sql.comparable(value), (it) => this.temporals.moment(this.sql.text(it), temporal)];
+        }
+        // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
+        if (this.isList(value)) {
+            return [this.sql.comparable(this.asJson(value)), (it) => this.sql.listSortKey(it)];
         }
         return [this.sql.comparable(this.asJson(value)), (it) => this.sql.nullIfJsonNull(it)];
     }

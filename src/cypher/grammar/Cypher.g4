@@ -646,8 +646,9 @@ oC_MapLiteral
 oC_PropertyKeyName
                :  oC_SchemaName ;
 
+// drivine4j: a parameter may be named by any word, a keyword among them, `$limit` or `$match`, as in Neo4j's Cypher.
 oC_Parameter
-         :  '$' ( oC_SymbolicName | DecimalInteger ) ;
+         :  '$' ( oC_SchemaName | CALL | YIELD | DecimalInteger ) ;
 
 oC_SchemaName
           :  oC_SymbolicName

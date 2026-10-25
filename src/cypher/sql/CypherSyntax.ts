@@ -7,7 +7,7 @@ import { Clause } from '@/cypher/ast/Query';
 const AGGREGATES = ['count', 'collect', 'sum', 'avg', 'min', 'max'];
 
 /**
- * The function that keeps each item of a list once, where it is first: see `CypherWriter.distinctFirst`. Named as no
+ * The function that keeps each item of a list once, where it is first: see `CypherWriter.aggregatesFirst`. Named as no
  * function is, unless quoted so.
  */
 export const DISTINCT_ITEMS = '#distinct items';
@@ -47,11 +47,76 @@ export function writes(clause: Clause): boolean {
     }
 }
 
+/** openCypher's functions of one number that a store's `math` works out, as Neo4j names them, lowered. */
+export const MATH_FUNCTIONS = [
+    'exp',
+    'log',
+    'log10',
+    'sqrt',
+    'sin',
+    'cos',
+    'tan',
+    'cot',
+    'asin',
+    'acos',
+    'atan',
+    'degrees',
+    'radians',
+    'haversin'
+];
+
+/**
+ * The doubles Java's `Math.toDegrees` and `Math.toRadians` multiply by, as Neo4j's `degrees` and `radians` do: a store
+ * that works out 180 / π otherwise, or divides, can differ in the last digit, as at `degrees(0.1)`.
+ */
+export const RADIANS_TO_DEGREES = '57.29577951308232';
+export const DEGREES_TO_RADIANS = '0.017453292519943295';
+
+/** Java's rounding modes, as `round(value, precision, mode)` names them, as Neo4j takes them. */
+export type RoundingMode = 'UP' | 'DOWN' | 'CEILING' | 'FLOOR' | 'HALF_UP' | 'HALF_DOWN' | 'HALF_EVEN' | 'UNNECESSARY';
+
+export const ROUNDING_MODES: RoundingMode[] = [
+    'UP',
+    'DOWN',
+    'CEILING',
+    'FLOOR',
+    'HALF_UP',
+    'HALF_DOWN',
+    'HALF_EVEN',
+    'UNNECESSARY'
+];
+
+/** Whether `expression` is a call of `randomUUID()`, the one function compiled here that gives a value anew each time it is called. */
+export function isAnew(expression: Expression): boolean {
+    return expression.kind === 'Function' && expression.name.toLowerCase() === 'randomuuid';
+}
+
 export function isAggregate(expression: Expression): boolean {
     return (
         expression.kind === 'CountStar' ||
         (expression.kind === 'Function' && AGGREGATES.includes(expression.name.toLowerCase()))
     );
+}
+
+/**
+ * The lists `expression` reads item by item, in a subquery of its own: a comprehension's, a quantifier's or a reduce's,
+ * what `IN` searches, what a slice, `reverse` or `tail` takes items of.
+ */
+export function iterated(expression: Expression): Expression[] {
+    switch (expression.kind) {
+        case 'ListComprehension':
+        case 'Quantifier':
+        case 'Reduce':
+            return [expression.list];
+        case 'Slice':
+            return [expression.subject];
+        case 'Binary':
+            return expression.operator === 'IN' ? [expression.right] : [];
+        case 'Function':
+            return ['reverse', 'tail'].includes(expression.name.toLowerCase()) ? expression.arguments.slice(0, 1) : [];
+        default:
+            return [];
+    }
 }
 
 /** Whether `expression` holds an expression `test` holds of, outside a nested query of its own. */

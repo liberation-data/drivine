@@ -2,12 +2,12 @@ import { DrivineError } from '@/DrivineError';
 import { holdsLabel } from '@/backend/oracle/OracleGraph';
 import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
-import { indent, literal } from '@/cypher/sql/CypherSyntax';
+import { DEGREES_TO_RADIANS, indent, literal, RADIANS_TO_DEGREES } from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
-import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import { PLAIN_FLOAT, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
 
@@ -62,6 +62,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /** Oracle's recursive queries read nothing of the row they are in. */
     readonly walksReadRow: boolean = false;
+
+    /** `collect(CASE WHEN … THEN [r] ELSE [m.title] END)` fails with ORA-00979, or closes the session: see `casesFirst`. */
+    readonly aggregatesCaseSubqueries: boolean = false;
 
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
@@ -228,13 +231,25 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         );
     }
 
-    /** Of the values of the kind that comes first, or last, as `kindOrder` orders them. */
-    extreme(value: string, min: boolean): string {
+    firstOfEach(list: string, identities: string): string {
         return (
-            `${min ? 'MIN' : 'MAX'}(${this.nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY ${this.kindOrder(
-                value
-            )} ` + `${min ? 'ASC' : 'DESC'} NULLS LAST)`
+            `(SELECT ${this.aggregateList('v.item', 'v.item_no')} FROM ${this.elements(
+                list,
+                'v'
+            )} JOIN (SELECT d.item_no FROM (SELECT e.item_no, ` +
+            `ROW_NUMBER() OVER (PARTITION BY e.item ORDER BY e.item_no) AS n FROM ${this.elements(
+                identities,
+                'e'
+            )}) d WHERE d.n = 1) f ON f.item_no = v.item_no)`
         );
+    }
+
+    /** Of the values of the kind that comes first, or last, as `kindOrder` orders them; by `key` first where there is one. */
+    extreme(value: string, min: boolean, key?: string): string {
+        const direction = min ? 'ASC' : 'DESC';
+        return `${min ? 'MIN' : 'MAX'}(${this.nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY ${this.kindOrder(
+            value
+        )} ${direction} NULLS LAST${key !== undefined ? `, ${key} ${direction} NULLS LAST` : ''})`;
     }
 
     /** In `BINARY_DOUBLE` where either is one, so a float stays a float, as in Cypher: `NUMBER` keeps no such kind. */
@@ -246,7 +261,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         );
     }
 
-    add(a: string, b: string): string {
+    add(a: string, b: string, given: [unknown, unknown] = [undefined, undefined]): string {
         return (
             `CASE WHEN ${this.typeOf(a)} = 'number' AND ${this.typeOf(b)} = 'number' THEN ${this.arithmetic(
                 a,
@@ -260,8 +275,23 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `WHEN ${kind(b)} = 'array' THEN JSON_TRANSFORM(${b}, INSERT '$[0]' = ${a}) ` +
             `WHEN ${this.typeOf(a)} IN ('string', 'number') AND ${this.typeOf(
                 b
-            )} IN ('string', 'number') THEN JSON_SCALAR(JSON_VALUE(${a}, '$') || JSON_VALUE(${b}, '$')) END`
+            )} IN ('string', 'number') THEN JSON_SCALAR(${this.summed(a, given[0], given[1])} || ${this.summed(
+                b,
+                given[1],
+                given[0]
+            )}) END`
         );
+    }
+
+    /** `JSON_EQUAL`, which compares values larger than `=` does, with ORA-40180 past about 32 KB. */
+    identityEquals(x: string, y: string): string {
+        return `JSON_EQUAL(${x}, ${y})`;
+    }
+
+    idTokens(ids: string, key: string): string {
+        return `JSON(REGEXP_REPLACE(JSON_SERIALIZE(${ids} RETURNING CLOB), '(-?[0-9]+)', ${literal(
+            `{"${key}": \\1}`
+        )}))`;
     }
 
     modulo(a: string, b: string): string {
@@ -288,18 +318,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             tolower: () => `JSON_SCALAR(LOWER(${this.text(json)}))`,
             toupper: () => `JSON_SCALAR(UPPER(${this.text(json)}))`,
             trim: () => `JSON_SCALAR(TRIM(${this.text(json)}))`,
-            // A float that is a whole number is written with its fraction, 2.0, as in Cypher: Oracle writes a double of 2 as
-            // 2. Whole as the double it is: a double too small for a NUMBER, 1e-200, is the NUMBER 0.
-            tostring: () =>
-                this.shared([json], ([x]) => {
-                    const n = `JSON_VALUE(${x}, '$' RETURNING NUMBER)`;
-                    return (
-                        `CASE WHEN ${kind(
-                            x
-                        )} = 'double' AND ABS(${n}) < 1e15 AND JSON_VALUE(${x}, '$' RETURNING BINARY_DOUBLE) = TRUNC(${n}) ` +
-                        `THEN JSON_SCALAR(TO_CHAR(TRUNC(${n})) || '.0') ELSE JSON_SCALAR(JSON_VALUE(${x}, '$')) END`
-                    );
-                }),
+            tostring: () => `JSON_SCALAR(${this.asText(json)})`,
             tointeger: () => `JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR)))`,
             tofloat: () => `JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR))`,
             head: () => `JSON_QUERY(${json}, '$[0]' RETURNING JSON)`,
@@ -515,6 +534,35 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return "LOWER(REGEXP_REPLACE(RAWTOHEX(SYS_GUID()), '(.{8})(.{4})(.{4})(.{4})(.{12})', '\\1-\\2-\\3-\\4-\\5'))";
     }
 
+    /**
+     * Worked out as a `NUMBER`, then made the nearest double: Oracle fails where Neo4j gives NaN or an infinity, `LN(0)`,
+     * `SQRT(-1)`, `ASIN(2)` and `1 / TAN(0)` among them, and where a `NUMBER` overflows, past 1e126, as `EXP(300)` does.
+     * One too small for a `NUMBER`, below 1e-130, is 0, as `EXP(-1000)` is in Java, and `EXP(-300)` is not. A
+     * `BINARY_DOUBLE` would give NaN or an infinity, which JSON holds neither of.
+     */
+    math(name: string, numbers: string[]): string {
+        const x = numbers[0];
+        const functions: Record<string, () => string> = {
+            log: () => `LN(${x})`,
+            log10: () => `LOG(10, ${x})`,
+            cot: () => `(1 / TAN(${x}))`,
+            // In doubles from the one nearest the cosine, as Java works it out: near 0, that loses digits a NUMBER keeps.
+            haversin: () => `((1 - TO_BINARY_DOUBLE(COS(${x}))) / 2)`,
+            // In doubles, by the ratio Java multiplies by: see RADIANS_TO_DEGREES.
+            degrees: () => `(TO_BINARY_DOUBLE(${x}) * ${RADIANS_TO_DEGREES})`,
+            radians: () => `(TO_BINARY_DOUBLE(${x}) * ${DEGREES_TO_RADIANS})`,
+            // Oracle overflows at ATAN2(0, 0), which Java gives as 0.0: a NUMBER has no negative zero to give π for.
+            atan2: () =>
+                this.shared(
+                    [x, numbers[1]],
+                    ([y, z]) => `CASE WHEN ${y} = 0 AND ${z} = 0 THEN 0 ELSE ATAN2(${y}, ${z}) END`
+                )
+        };
+        return this.float(
+            Object.prototype.hasOwnProperty.call(functions, name) ? functions[name]() : `${name.toUpperCase()}(${x})`
+        );
+    }
+
     /** SUBSTR from the end gives null where it is asked for more than there is. */
     rightText(text: string, count: string): string {
         return this.shared(
@@ -593,6 +641,49 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     withoutLabel(labels: string, label: string): string {
         return `JSON_TRANSFORM(${labels}, REMOVE ${literal(`$[*]?(@ == ${quoted(label)})`)})`;
+    }
+
+    /** The side `json` of a `+` that the statement gives as `given`, and the other side as `other`, as text: see `summedText`. */
+    private summed(json: string, given: unknown, other: unknown): string {
+        return this.summedText(
+            json,
+            given,
+            other,
+            (it) => `JSON_VALUE(${it}, '$')`,
+            (it) => this.asText(it)
+        );
+    }
+
+    /**
+     * The JSON `json`, a text, a number or a truth value, as `toString` gives it: a float (a double, or a number with a
+     * fraction) as Java writes a double, from the shortest decimal Oracle writes it as, with no exponent from 10^-3 up to
+     * 10^7, and else as `1.0E7`, `1.2E-4`; NaN and the infinities by Java's names. A double past a `NUMBER`'s range,
+     * `1e300`, is written from Oracle's own text of it, its shortest digits, `1E+300`.
+     */
+    private asText(json: string): string {
+        return this.shared([json], ([x]) => {
+            const written = `JSON_VALUE(${x}, '$')`;
+            const float = `${kind(x)} = 'double' OR (${kind(x)} = 'number' AND NOT ${this.integral(x)})`;
+            const n = `TO_NUMBER(${written} DEFAULT NULL ON CONVERSION ERROR)`;
+            const double = `JSON_VALUE(${x}, '$' RETURNING BINARY_DOUBLE)`;
+            // Past a NUMBER's range, which reads 1e-200 as 0, the double's own text, with a point where it has none:
+            // `1E-310`. TO_CHAR of the double writes 15 digits, so 1e-310 as 9.99999999999997E-311.
+            const scientific = this.scientific(
+                `NVL(TO_CHAR(NULLIF(${n}, 0), 'FM9.9999999999999999EEEE'), REGEXP_REPLACE(${written}, '^(-?[0-9]+)E', '\\1.0E'))`
+            );
+            return (
+                `CASE WHEN ${kind(
+                    x
+                )} = 'double' AND ${written} IN ('Nan', 'Inf', '-Inf') THEN DECODE(${written}, 'Nan', 'NaN', 'Inf', 'Infinity', '-Infinity') ` +
+                `WHEN ${float} THEN CASE WHEN ${double} = 0 THEN '0.0' WHEN ABS(${n}) >= 0.001 AND ABS(${n}) < 10000000 THEN TO_CHAR(${n}, '${PLAIN_FLOAT}') ELSE ${scientific} END ` +
+                `ELSE ${written} END`
+            );
+        });
+    }
+
+    /** `TO_CHAR`'s scientific notation, `1.E+07`, `-1.2E-04`, as Java's: `1.0E7`, `-1.2E-4`. */
+    private scientific(text: string): string {
+        return `REGEXP_REPLACE(REPLACE(${text}, '.E', '.0E'), 'E\\+?(-?)0*([0-9])', 'E\\1\\2')`;
     }
 
     /**

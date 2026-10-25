@@ -1,6 +1,6 @@
 import { CypherReader } from '@/cypher/CypherReader';
 import { CypherFloat, Expression } from '@/cypher/ast/Expression';
-import { Merge, Return, SetClause, Remove, Delete, Match, With } from '@/cypher/ast/Query';
+import { Call, Merge, Return, SetClause, Remove, Delete, Match, Unwind, With } from '@/cypher/ast/Query';
 
 /** The one item a statement's last clause, a `RETURN`, returns. */
 function returned(cypher: string): Expression {
@@ -156,8 +156,8 @@ describe('CypherReader', () => {
             key: 'odd`key'
         });
         expect(returned('RETURN $1')).toEqual({ kind: 'Parameter', name: '1' });
-        // Strict openCypher: a parameter is not named with a reserved word.
-        expect(() => CypherReader.read('RETURN $skip')).toThrow(/^The statement is not Cypher/);
+        // As in Neo4j, and not strict openCypher: a parameter may be named with a reserved word.
+        expect(returned('RETURN $skip')).toEqual({ kind: 'Parameter', name: 'skip' });
         expect(returned('RETURN 0xff')).toEqual(literal(255));
         expect(returned('RETURN 0o17')).toEqual(literal(15));
         expect(returned('RETURN 1.5e3')).toEqual(literal(new CypherFloat(1500)));
@@ -316,11 +316,62 @@ describe('CypherReader', () => {
         }
     );
 
+    it.each(['limit', 'skip', 'order', 'match', 'count', 'end', 'call', 'yield', 'Return', 'null', 'foreach'])(
+        'reads a parameter named by any word, %s among them, in a page, a condition, a map, an unwind and a set',
+        (word) => {
+            const parameter: Expression = { kind: 'Parameter', name: word };
+            expect(returned(`RETURN $${word}`)).toEqual(parameter);
+            const [match, unwind, ret] = CypherReader.read(
+                `MATCH (n {k: $${word}}) WHERE n.x = $${word} UNWIND $${word} AS i RETURN i SKIP $${word} LIMIT $${word}`
+            ).clauses as [Match, Unwind, Return];
+            expect(match.patterns[0].nodes[0].properties).toEqual({ kind: 'MapLiteral', entries: [['k', parameter]] });
+            expect(match.where).toMatchObject({ right: parameter });
+            expect(unwind.list).toEqual(parameter);
+            expect([ret.projection.skip, ret.projection.limit]).toEqual([parameter, parameter]);
+            const set = CypherReader.read(`MATCH (n) SET n.x = $${word}, n += $${word}`).clauses[1] as SetClause;
+            expect(set.items).toEqual([
+                { kind: 'Property', variable: 'n', key: 'x', value: parameter },
+                { kind: 'Add', variable: 'n', value: parameter }
+            ]);
+        }
+    );
+
+    it('reads a call of db.labels() or db.relationshipTypes() as the query that gives its rows', () => {
+        const labels = CypherReader.read('CALL db.labels()');
+        expect((labels.clauses[1] as Unwind).list).toEqual({
+            kind: 'Function',
+            name: 'labels',
+            distinct: false,
+            arguments: [{ kind: 'Variable', name: '#procedure' }]
+        });
+        const projection = (labels.clauses[labels.clauses.length - 1] as Return).projection;
+        expect(projection.distinct).toBe(true);
+        expect(projection.items.map((it) => it.name)).toEqual(['label']);
+        // Within a query, a CALL { … } of its own, its WHERE a WITH's in it, and what it yields named as the YIELD names it.
+        const call = CypherReader.read(
+            'MATCH (m) CALL db.relationshipTypes() YIELD relationshipType AS t WHERE t <> m.x RETURN t'
+        ).clauses[1] as Call;
+        const [, withClause, ret] = call.query.clauses as [Match, With, Return];
+        expect(withClause.projection.items.map((it) => [it.expression, it.name])).toEqual([
+            [
+                {
+                    kind: 'Function',
+                    name: 'type',
+                    distinct: false,
+                    arguments: [{ kind: 'Variable', name: '#procedure' }]
+                },
+                't'
+            ]
+        ]);
+        expect(withClause.where).toMatchObject({ left: { kind: 'Variable', name: 't' } });
+        expect(ret.projection.items.map((it) => it.name)).toEqual(['t']);
+    });
+
     it('refuses Cypher the compiler does not take by name, and what is not Cypher with where', () => {
-        expect(() => CypherReader.read('CALL db.labels()')).toThrow(
+        expect(() => CypherReader.read('CALL db.indexes()')).toThrow(
             'A procedure call (CALL) is Cypher, and is not compiled to SQL yet.'
         );
-        expect(() => CypherReader.read('MATCH (n) CALL db.labels() YIELD label RETURN label')).toThrow(
+        expect(() => CypherReader.read('MATCH (n) CALL db.indexes() YIELD index RETURN index')).toThrow(
             'A procedure call (CALL) is Cypher, and is not compiled to SQL yet.'
         );
         expect(() => CypherReader.read('MATCH (n RETURN n')).toThrow(

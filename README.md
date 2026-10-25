@@ -1653,8 +1653,20 @@ const names = await pm.query<string>(
   each repetition matched. On Oracle, whose recursive queries read nothing of the row they are in, its `WHERE` and
   properties read no variable from outside it, and hold a subquery only where no variable of its `MATCH` or before it
   is named, and that walks no variable-length relationship or quantified path pattern of its own; on Postgres they may.
-- Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A slice of a list
-  (list[from..to]) is Cypher, and is not compiled to SQL yet.`
+- A map or a list that holds a node or a relationship (`{x: r}`, `[r, 1]`) compares by what it holds, not by its
+  properties, through a `WITH` or a `CALL { … }` too, as on a graph engine. Unwound by `UNWIND`, as a comprehension's
+  or a reduce's variable, or carried past a write in the statement, it compares by its properties.
+- `CALL db.labels()` and `CALL db.relationshipTypes()` compile, alone or within a query with `YIELD`, and give each
+  label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter
+  may be named by a keyword (`$limit`), as in Neo4j.
+- Functions of numbers (`exp`, `log`, `sin`, `atan2`, `round` by a mode …) give the floats Neo4j gives, but where Neo4j
+  gives NaN or an infinity (`log(0)`, `sqrt(-1)`, `exp(1000)`) the statement fails: JSON holds neither. A float is
+  written as Java writes a double, by `toString` and added to a text: `1.0E7`, `1.2E-4`.
+- On Postgres, float arithmetic is worked out in exact decimal (`numeric`), not as a double, so a result can differ
+  from a graph engine's in its last digits: `0.1 * 3` is `0.3`, where Neo4j gives `0.30000000000000004`. A float's text
+  carries no trailing zeros: `toString(4.0 / 2)` is `"2.0"`.
+- Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A path variable in
+  CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own.
 - A parameter is bound as JSON, so a number that is whole is a whole number, though it was written `2.0`:
   `toString($f)` of it gives `'2'`, where Neo4j, which the driver sends a number to as a float, gives `'2.0'`.

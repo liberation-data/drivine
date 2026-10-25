@@ -340,6 +340,22 @@ cases:
       - cypher: "UNWIND [1, 2] AS i WITH CASE i WHEN 1 THEN datetime('2024-03-15T10:00:00+02:00') ELSE datetime('2024-03-15T09:00:00Z') END AS t RETURN t.hour ORDER BY t"
         rows: [10, 9]
 
+  - name: "Zoned kind through head, last, a slice, min and max"
+    description: "A zoned value taken from a list by head(), last() or a slice, and one min() or max() gives, sorts and compares as the moment it is, whatever its offset."
+    steps:
+      - cypher: "WITH [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS ts UNWIND [[0], [1]] AS i RETURN i[0] ORDER BY head([ts[i[0]]])"
+        rows: [0, 1]
+      - cypher: "WITH [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS ts UNWIND [0, 1] AS i RETURN i ORDER BY last(ts[..i + 1]) DESC"
+        rows: [1, 0]
+      - cypher: "WITH [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS ts UNWIND [0, 1] AS i RETURN i ORDER BY head(ts[i..])"
+        rows: [0, 1]
+      - cypher: "UNWIND [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS t RETURN [max(t).hour, min(t).hour]"
+        rows: [[9, 10]]
+      - cypher: "UNWIND [[1, datetime('2024-03-15T10:00:00+02:00')], [1, datetime('2024-03-15T09:00:00Z')], [2, datetime('2024-03-15T07:30:00Z')]] AS r WITH r[0] AS k, r[1] AS t WITH k, max(t) AS m RETURN k ORDER BY m"
+        rows: [2, 1]
+      - cypher: "WITH [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS ts RETURN [head(ts) < last(ts), head(ts).hour]"
+        rows: [[true, 10]]
+
   - name: "Zoned kind through quantifiers, reduce and writes"
     description: "A zoned value keeps its kind in a quantifier, reduce, a pattern comprehension and a statement that writes."
     steps:
