@@ -3844,33 +3844,32 @@ export class CypherWriter {
         return json(this.sql.extreme(this.sql.comparable(value), min, key), { temporal });
     }
 
-    /** `round(value)`, `round(value, precision)` or `round(value, precision, mode)`. */
+    /**
+     * `round(value)`, `round(value, precision)` or `round(value, precision, mode)`. The precision is read as a whole number
+     * toward zero, as Neo4j reads it: 1.7 places is 1.
+     */
     private round(call: Invocation): Value {
         if (call.arguments.length === 3) {
             const mode = this.roundingMode(call.fn.arguments[2]);
             if (mode === undefined) {
                 return json(this.sql.literalJson(null));
             }
-            // As Neo4j refuses it, where the precision is written, negated or not, or a parameter's value.
-            const written = call.fn.arguments[1];
-            const negated = written.kind === 'Unary' && written.operator === 'NEGATE';
-            const precision = this.given(negated ? (written as Unary).operand : written);
-            const value = precision instanceof CypherFloat ? precision.value : precision;
-            if (typeof value === 'number' && (negated ? -value : value) < 0) {
-                throw new DrivineError('round() takes a precision of 0 or more, as in Neo4j.');
-            }
+            this.refuseNegativePrecision(call.fn.arguments[1]);
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        this.sql.roundTo(this.numberOf(call.arguments[0]), this.whole(call.arguments[1]), mode)
+                        this.sql.roundTo(this.numberOf(call.arguments[0]), this.truncatedWhole(call.arguments[1]), mode)
                     )
                 )
             );
         }
         if (call.arguments.length === 2) {
+            this.refuseNegativePrecision(call.fn.arguments[1]);
             return json(
                 this.sql.scalar(
-                    this.sql.float(`ROUND(${this.numberOf(call.arguments[0])}, ${this.whole(call.arguments[1])})`)
+                    this.sql.float(
+                        `ROUND(${this.numberOf(call.arguments[0])}, ${this.truncatedWhole(call.arguments[1])})`
+                    )
                 )
             );
         }
@@ -3992,6 +3991,24 @@ export class CypherWriter {
     /** A value as a SQL whole number. */
     private whole(value: Value): string {
         return `CAST(${this.numberOf(value)} AS INTEGER)`;
+    }
+
+    /** A value as a SQL whole number with its fraction cut off, toward zero, as Neo4j reads `round()`'s precision. */
+    private truncatedWhole(value: Value): string {
+        return `CAST(TRUNC(${this.numberOf(value)}) AS INTEGER)`;
+    }
+
+    /**
+     * Refuses a precision for `round()` that is below 0 as a whole number toward zero, as Neo4j refuses it, where it is
+     * written, negated or not, or a parameter's value: -0.5 is 0 places, and -1.2 is refused.
+     */
+    private refuseNegativePrecision(written: Expression): void {
+        const negated = written.kind === 'Unary' && written.operator === 'NEGATE';
+        const precision = this.given(negated ? (written as Unary).operand : written);
+        const value = precision instanceof CypherFloat ? precision.value : precision;
+        if (typeof value === 'number' && Math.trunc(negated ? -value : value) < 0) {
+            throw new DrivineError('round() takes a precision of 0 or more, as in Neo4j.');
+        }
     }
 
     /** A value as a SQL number, where it is one. */

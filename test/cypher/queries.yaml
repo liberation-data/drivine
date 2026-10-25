@@ -453,6 +453,28 @@ cases:
         cypher: "RETURN [split('abc', ''), split('', ',')]"
         rows: [[["a", "b", "c"], [""]]]
 
+  - name: "Round to a fractional or negative precision"
+    description: "round() reads its precision as a whole number toward zero, as Neo4j does, and refuses one below 0."
+    steps:
+      - note: "1.7 is read as 1, not rounded to 2: 2.555 to 2 places would be 2.56. -0.5 is read as 0. Memgraph and FalkorDB take no precision."
+        only: [neo4j, sql]
+        cypher: "RETURN [round(2.555, 1.7), round(2.55, 1.7, 'UP'), round(2.5, -0.5)]"
+        rows: [[2.6, 2.6, 3.0]]
+      - only: [neo4j, sql]
+        cypher: "RETURN round(2.555, $p)"
+        parameters: {p: 1.7}
+        rows: [2.6]
+      - only: [neo4j, sql]
+        cypher: "RETURN round(1234.5, -2)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(1234.5, -2, 'HALF_UP')"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(1234.5, $p)"
+        parameters: {p: -2}
+        error: true
+
   - name: "EXISTS and COUNT subqueries"
     description: "EXISTS { } and COUNT { } take a pattern, clauses or a whole query, evaluated per row."
     steps:
