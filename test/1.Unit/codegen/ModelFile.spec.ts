@@ -905,31 +905,51 @@ describe('Reading constants and types', () => {
         ]);
     });
 
-    it('names an @EmptyWhenAbsent list TypeScript does not record as an Array, as a load gives {} for it, and writes its class', () => {
+    it('names an @EmptyWhenAbsent list that loads as {}, and refuses a kind its type contradicts, as ModelRegistry does', () => {
         const dir = project({
             'src/A.ts': [
                 "import { EmptyWhenAbsent, NodeFragment } from '@liberation-data/drivine';",
                 "@NodeFragment({ labels: ['A'] })",
-                'export class A { @EmptyWhenAbsent() tags?: string[]; @EmptyWhenAbsent() scores: Map<string, number>; }',
+                'export class A {',
+                '    @EmptyWhenAbsent() tags?: string[];',
+                '    @EmptyWhenAbsent() scores: Map<string, number>;',
+                '    @EmptyWhenAbsent() seen: Set<string>;',
+                "    @EmptyWhenAbsent({ kind: 'array' }) named: string[] | null;",
+                "    @EmptyWhenAbsent({ kind: 'set' }) namedSet: Set<string> | null;",
+                '}',
                 "@NodeFragment({ labels: ['B'] })",
                 'export class B { @EmptyWhenAbsent() tags: string[] | null; }',
                 "@NodeFragment({ labels: ['C'] })",
-                'export class C { @EmptyWhenAbsent() tags: Set<string>; }'
+                'export class C { @EmptyWhenAbsent() seen: Set<string> | undefined; }',
+                "@NodeFragment({ labels: ['D'] })",
+                "export class D { @EmptyWhenAbsent({ kind: 'set' }) tags: string[]; }",
+                "@NodeFragment({ labels: ['E'] })",
+                "export class E { @EmptyWhenAbsent({ kind: 'list' as any }) tags: string[]; }"
             ].join('\n')
         });
         const warnings: string[] = [];
         generateModelFile({ project: path.join(dir, 'tsconfig.json'), warn: (it) => warnings.push(it) });
-        const named = (name: string): string =>
-            `Drivine model file: src/A#${name}: @EmptyWhenAbsent ${name}.tags is a list TypeScript does not record ` +
-            'as an Array, so a load gives {} for it, not []. Declare it as an array, optional with ? rather than | null.';
-        expect(warnings).toEqual([named('B'), named('C')]);
+        const loadsAsObject = (name: string, field: string): string =>
+            `Drivine model file: src/A#${name}: @EmptyWhenAbsent ${name}.${field} is a list TypeScript records as ` +
+            "Object, so a load gives {} for it, not []. Name the kind: @EmptyWhenAbsent({ kind: 'array' }).";
+        expect(warnings).toEqual([
+            loadsAsObject('B', 'tags'),
+            loadsAsObject('C', 'seen'),
+            "Drivine model file: src/A#D: @EmptyWhenAbsent D.tags names the kind 'set', but the field is declared a " +
+                "Array, which loads as 'array'.",
+            "Drivine model file: src/A#E: Can't read the kind of @EmptyWhenAbsent E.tags. Name it with 'array', 'set' " +
+                "or 'object'."
+        ]);
+        // What loads is written: A, whose lists, set and map each load empty as declared, and B and C, named.
+        expect(read(dir).fragments.map((it: any) => it.name)).toEqual(['A', 'B', 'C']);
         const a = read(dir).fragments[0];
         expect(a.properties.map((it: any) => [it.name, it.type, it.whenAbsent])).toEqual([
+            ['named', 'list', 'empty'],
+            ['namedSet', 'list', 'empty'],
             ['scores', 'map', 'empty'],
+            ['seen', 'list', 'empty'],
             ['tags', 'list', 'empty']
         ]);
-        // The classes load, so they are written.
-        expect(read(dir).fragments.map((it: any) => it.name)).toEqual(['A', 'B', 'C']);
     });
 
     it('takes the class of a field that may be null without strict null checks, as TypeScript records it', () => {

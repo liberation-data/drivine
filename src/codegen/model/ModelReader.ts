@@ -499,20 +499,8 @@ export class ModelReader {
         const vector = this.on(prop, 'VectorIndex');
         const vectorOptions = this.options(vector, `@VectorIndex ${this.field(prop)}`);
         const renamed = this.on(prop, 'GraphProperty');
-        // As ModelRegistry reads it: an empty list only where the field's metadata records an Array, and else {}.
-        // The class loads, so it is written, and the field is named, for a load gives it what its type does not say.
-        if (
-            this.on(prop, 'EmptyWhenAbsent') &&
-            typed.type === 'list' &&
-            this.designType(prop.decorated.type) !== 'Array'
-        ) {
-            this.problems.push(
-                `${this.id(
-                    this.ts.findAncestor(prop.decorated, this.ts.isClassDeclaration)!
-                )}: @EmptyWhenAbsent ${this.field(prop)} is a list TypeScript does not ` +
-                    `record as an Array, so a load gives {} for it, not []. Declare it as an array, optional with ? ` +
-                    `rather than | null.`
-            );
+        if (this.on(prop, 'EmptyWhenAbsent')) {
+            this.emptyKind(prop, typed.type);
         }
         return {
             name: prop.name,
@@ -530,6 +518,64 @@ export class ModelReader {
             vector: vector ? this.vector(prop, vectorOptions) : undefined,
             source: this.checker.typeToString(this.nonNull(prop.type, true))
         };
+    }
+
+    /**
+     * What an `@EmptyWhenAbsent` field loads as when the node holds nothing for it, as ModelRegistry reads it: the kind
+     * the decorator names, else the kind of the type TypeScript records, which is Object, and so `{}`, for a union such
+     * as `string[] | null`. A kind that contradicts the recorded type is refused, as the registry refuses it; a list
+     * that loads as `{}` is named, and its class still written, as it loads.
+     */
+    private emptyKind(prop: Property, type: string): void {
+        const options = this.options(this.on(prop, 'EmptyWhenAbsent'), `@EmptyWhenAbsent ${this.field(prop)}`);
+        const named = this.given(
+            options,
+            'kind',
+            (value): value is EmptyKind => EMPTY_KINDS.includes(value as EmptyKind),
+            `the kind of @EmptyWhenAbsent ${this.field(prop)}`,
+            `'array', 'set' or 'object'`
+        );
+        const recorded = this.recordedCollection(prop.decorated.type);
+        const read = recorded && RECORDED_KINDS[recorded];
+        if (named && read && named !== read) {
+            throw new Error(
+                `@EmptyWhenAbsent ${this.field(prop)} names the kind '${named}', but the field is declared a ` +
+                    `${recorded}, which loads as '${read}'.`
+            );
+        }
+        if (type === 'list' && (named ?? read ?? 'object') === 'object') {
+            this.problems.push(
+                `${this.id(this.ts.findAncestor(prop.decorated, this.ts.isClassDeclaration)!)}: @EmptyWhenAbsent ` +
+                    `${this.field(prop)} is a list TypeScript records as Object, so a load gives {} for it, not []. ` +
+                    `Name the kind: @EmptyWhenAbsent({ kind: 'array' }).`
+            );
+        }
+    }
+
+    /** The collection TypeScript records a field's type as, by the name of its constructor, where it records one. */
+    private recordedCollection(node: TS.TypeNode | undefined): keyof typeof RECORDED_KINDS | undefined {
+        if (this.designType(node) === 'Array') {
+            return 'Array';
+        }
+        const type = this.recordedNode(node);
+        if (!type || !this.ts.isTypeReferenceNode(type) || !this.program.getCompilerOptions().emitDecoratorMetadata) {
+            return undefined;
+        }
+        const name = type.typeName.getText();
+        return name === 'Set' || name === 'Map' ? name : undefined;
+    }
+
+    /** The type node TypeScript records a field by: without parentheses, and without null where it is not strict. */
+    private recordedNode(node: TS.TypeNode | undefined): TS.TypeNode | undefined {
+        let type = node;
+        while (type && this.ts.isParenthesizedTypeNode(type)) {
+            type = type.type;
+        }
+        if (type && this.ts.isUnionTypeNode(type) && !this.strictNulls) {
+            const rest = type.types.filter((it) => !this.isNullish(it));
+            return rest.length === 1 ? rest[0] : undefined;
+        }
+        return type;
     }
 
     private vector(prop: Property, options: Record<string, unknown>): Entry {
@@ -1147,6 +1193,13 @@ export class ModelReader {
 
 /** The kinds of class a model file has an entry for. */
 const KINDS = ['NodeFragment', 'RelationshipFragment', 'GraphView'];
+
+/** What an `@EmptyWhenAbsent` field may load as, as Drivine's EmptyCollectionKind names it. */
+const EMPTY_KINDS = ['array', 'set', 'object'] as const;
+type EmptyKind = (typeof EMPTY_KINDS)[number];
+
+/** What a field TypeScript records as each of these loads as, empty. */
+const RECORDED_KINDS = { Array: 'array', Set: 'set', Map: 'object' } as const;
 
 /** A relationship's directions, the default first. */
 const DIRECTIONS = ['OUTGOING', 'INCOMING', 'UNDIRECTED'] as const;
