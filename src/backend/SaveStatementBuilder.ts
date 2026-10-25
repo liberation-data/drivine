@@ -347,7 +347,7 @@ export class SaveStatementBuilder {
      */
     private packedAsLoaded(property: string, value: any): any {
         const held = this.options.loadedProperties?.[property];
-        return held != null ? asCompared(held) : JSON.stringify(value instanceof Set ? [...value] : value);
+        return held != null ? asCompared(held) : storedValue(value, true);
     }
 
     private removals(
@@ -757,8 +757,9 @@ export function propsOf(
 }
 
 /**
- * A field's value as a write stores it: a set as the list of its items, since no store holds a set and JSON text would
- * hold one as {}; packed into JSON text when the field is @JsonPacked; and null for none.
+ * A field's value as a write stores it, and so as a where compares a @JsonPacked field with it: a set as the list of its
+ * items, since no store holds a set and JSON text would hold one as {}; packed into JSON text when the field is
+ * @JsonPacked; and null for none.
  */
 export function storedValue(value: any, packed: boolean): any {
     const stored = value instanceof Set ? [...value] : value;

@@ -1,6 +1,7 @@
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelsOf, pattern, target } from '@/backend/ViewProjector';
+import { storedValue } from '@/backend/SaveStatementBuilder';
 import { DrivineError } from '@/DrivineError';
 import { Scope, scopeOf, Step, step } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
@@ -321,7 +322,7 @@ export class QueryRenderer {
         if (test.kind !== 'COMPARE') {
             throw new DrivineError(`${path.join('.')} is a property, not a node.`);
         }
-        const packed = (value: unknown): unknown => (jsonPacked ? JSON.stringify(value) : value);
+        const packed = (value: unknown): unknown => (jsonPacked ? storedValue(value, true) : value);
         switch (test.operator) {
             case 'IN':
             case 'NOT_IN': {

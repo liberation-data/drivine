@@ -207,6 +207,26 @@ describe.each(allStores())('Set fields on $type', (engine) => {
         ).toBe(true);
         const loaded = (await gom.load(CodedHolder, 'root'))!;
         expect(loaded.codings[0].reasons).toEqual(new Set(['because', 'why']));
+
+        // The same Set again finds the relationship as it is, so neither end is marked.
+        const before = (await gom.load(Coded, 'root'))!.stamp;
+        await gom.edges.relate(nodeRef(Coded, 'root'), nodeRef(Coded, 'target'), 'PLAIN_SET_CODING', {
+            reasons: new Set(['because', 'why'])
+        });
+        expect((await gom.load(Coded, 'root'))!.stamp).toEqual(before);
+        expect((await gom.load(CodedHolder, 'root'))!.codings).toHaveLength(1);
+    });
+
+    it('should find a packed Set by a Set, packed as a save packs it', async () => {
+        await gom.saveAll([coded('w1', { packed: new Set(['p', 'q']) }), coded('w2', { packed: new Set(['r']) })]);
+        // A Set field's reference offers only hasItem; a packed one is compared as its whole text.
+        const packed = (q: any): any => q.packed;
+        const ids = (found: Coded[]): string[] => found.map((it) => it.id).sort();
+        expect(ids(await gom.loadAll(Coded, (q) => ({ where: packed(q).eq(new Set(['p', 'q'])) })))).toEqual(['w1']);
+        expect(ids(await gom.loadAll(Coded, (q) => ({ where: packed(q).neq(new Set(['p', 'q'])) })))).toEqual(['w2']);
+        expect(
+            ids(await gom.loadAll(Coded, (q) => ({ where: packed(q).in([new Set(['r']), new Set(['s'])]) })))
+        ).toEqual(['w2']);
     });
 
     it('should load a Set in a view that holds a view, and in a relationship fragment', async () => {

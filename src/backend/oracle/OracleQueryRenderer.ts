@@ -1,6 +1,7 @@
 import { holding, jsonKey, labelledValue } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { Compared, SqlQueryRenderer } from '@/backend/sql/SqlQueryRenderer';
+import { storedValue } from '@/backend/SaveStatementBuilder';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { Query, QueryFn, Test, WhereFn } from '@/dsl/Refs';
@@ -141,7 +142,7 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
             throw new DrivineError(`${path.join('.')} is a property, not a node.`);
         }
         const k = jsonKey(name);
-        const packed = (value: unknown): unknown => this.storable(jsonPacked ? JSON.stringify(value) : value);
+        const packed = (value: unknown): unknown => this.storable(jsonPacked ? storedValue(value, true) : value);
         const filter = (expression: string, values: unknown[]): string => {
             const passing = values.map((value, i) => `${this.bind(packed(value))} AS "v${i}"`).join(', ');
             return `JSON_EXISTS(${column}, '$?(${expression})'${passing ? ` PASSING ${passing}` : ''})`;

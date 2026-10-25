@@ -380,8 +380,9 @@ tags: Set<string>;                               // neither: TypeScript records 
 Loading a set without `@EmptyWhenAbsent` as a `Set` is a change from 3.2, which loaded it as the array the store held.
 
 `save`, `patch`, `patchAll` and `edges.relate` all write a set as the list of its items, and a `@JsonPacked` one as the
-JSON text of that list. In 3.2, `patch` wrote a packed set as `{}`, and on Postgres and Oracle so did `patch` and
-`relate` any set, losing its items.
+JSON text of that list, which is also what a `where` compares a packed set field with. In 3.2, `patch` wrote a packed
+set as `{}`, and on Postgres and Oracle so did `patch` and `relate` any set, losing its items; a `where` comparing a
+packed field with a set compared it with `{}`, and matched nothing.
 
 #### 2. RelationshipFragment: a Relationship's Properties
 
