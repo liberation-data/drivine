@@ -171,4 +171,28 @@ describeOnOracle('schema on Oracle', () => {
             })
         );
     });
+
+    it('should record an inventory past 4000 characters, and record it again, and read it back whole', async () => {
+        // JSON_OBJECT with no RETURNING is VARCHAR2(4000), which 300 items overflow (ORA-40478).
+        const backend = backendFor(DatabaseType.ORACLE);
+        const scope = `ora-test-${Date.now()}`;
+        const read = async () =>
+            backend.markerItems(await pm.maybeGetOne<string>(backend.schemaMarker('items').spec({ scope })));
+        const items = Array.from({ length: 300 }, (_, i) => `uniqueness:Label${i + 1}:property${i + 1}`);
+        // The first record inserts the marker and the second updates it, so both branches of the MERGE are run.
+        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v1', items: items.join('\n') }));
+        expect(await read()).toEqual(items);
+        const more = [...items, 'one-more'];
+        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v2', items: more.join('\n') }));
+        expect(await read()).toEqual(more);
+        // Past 32767 bytes the items are bound as a CLOB, not a VARCHAR2.
+        const many = Array.from({ length: 1200 }, (_, i) => `uniqueness:Label${i + 1}:property${i + 1}`);
+        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v3', items: many.join('\n') }));
+        expect(await read()).toEqual(many);
+        await pm.execute(
+            new QuerySpecification(`DELETE FROM drivine_node n WHERE JSON_VALUE(n.props, '$.scope') = $scope`).bind({
+                scope
+            })
+        );
+    });
 });

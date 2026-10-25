@@ -539,7 +539,13 @@ hits.forEach((it) => console.log(it.score, it.value.proposition.text));
 
 The searched embedding is the fragment's `@VectorIndex` field: inferred when there is one, and named with `property`
 when there are several. The score is a similarity, higher meaning more similar, on every engine, so `threshold` means
-the same thing everywhere.
+the same thing everywhere: `(1 + cos) / 2` for a cosine index, from 1 for the same direction down to 0 for the opposite
+one, and `1 / (1 + d²)` for a Euclidean index.
+
+**Memgraph's cosine scores changed after 3.2.0 for vectors more than 90 degrees from the query.** Drivine read Memgraph's
+`similarity`, which for a cosine index is the absolute value of `1 - distance` (memgraph/memgraph#5199), so a cosine of
+-0.6 scored 0.8, as 0.6 does, and opposite vectors scored 1. It now reads the distance, so they score 0.2 and 0, as on
+every other store. Scores for a positive cosine, and every Euclidean score, are unchanged.
 
 | Option | Meaning |
 |---|---|

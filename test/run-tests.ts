@@ -16,6 +16,7 @@ import { CONTAINERS_STARTED, loadTestEnvironment, seedTestData } from './TestEnv
 const SERIAL = [
     'test/2.Integration/schema',
     'test/2.Integration/manager/StatelessGraphObjectManager.nearest',
+    'test/2.Integration/manager/StatelessGraphObjectManager.vectorScore',
     'test/2.Integration/manager/StatelessGraphObjectManager.matching'
 ];
 const SAMPLE = 'sample';
