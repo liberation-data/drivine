@@ -145,14 +145,16 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     vectorValue: plainVector,
     fullTextSearch: (label, properties) =>
         `CALL text_search.search_all(${quoteString(fullTextIndexName(label, properties))}, $_text) YIELD node, score`,
-    // Memgraph's similarity is the cosine itself, or already 1 / (1 + d²). Its vector search returns nodes deleted since
-    // its last garbage collection, and any read of one fails ('Trying to access labels on a deleted node') until it
-    // collects: FREE MEMORY forces it (memgraph/memgraph#4975).
+    // Memgraph's distance is 1 - cos for a cos index, so (1 + cos) / 2 is 1 - distance / 2; for l2sq it is d², so
+    // 1 / (1 + d²) is 1 / (1 + distance). Not its similarity: for cos that is the absolute value of 1 - distance, so a
+    // cosine of -0.6 would score as 0.6 does, and opposite vectors as equal ones (memgraph/memgraph#5199).
+    // Its vector search returns nodes deleted since its last garbage collection, and any read of one fails ('Trying to
+    // access labels on a deleted node') until it collects: FREE MEMORY forces it (memgraph/memgraph#4975).
     vectorSearch: (label, property, similarity) => ({
         call: `CALL vector_search.search(${quoteString(
             vectorIndexName(label, property)
-        )}, $_k, $_vector) YIELD node AS n, similarity AS _raw`,
-        score: similarity === 'COSINE' ? '(1 + _raw) / 2.0' : '_raw'
+        )}, $_k, $_vector) YIELD node AS n, distance AS _raw`,
+        score: similarity === 'COSINE' ? '1 - _raw / 2.0' : '1.0 / (1 + _raw)'
     }),
     existenceCheck: existsSubquery,
     someMatch: someMatchSubquery,
