@@ -360,9 +360,24 @@ A kind the declared type contradicts, and a field that holds no collection, such
 model is built.
 
 Storing a set as a list is a change from 3.2, which wrote a set as it was given: Oracle and Postgres held it as `{}`,
-and Memgraph as an empty map, without its items. An `@EmptyWhenAbsent` set loads such a `{}` as an empty set, and its
-next save stores it as a list. The refusal of `@EmptyWhenAbsent` on a field that holds no collection is new too: such
-a field used to load `{}`.
+and Memgraph as an empty map, without its items. A set field Drivine knows of (see below) loads such a `{}` as an empty
+set, and its next save stores it as a list. The refusal of `@EmptyWhenAbsent` on a field that holds no collection is
+new too: such a field used to load `{}`.
+
+**Sets.** A field that holds a `Set` loads the list the store holds as a `Set`, with or without `@EmptyWhenAbsent`, in
+a fragment, a view or a relationship fragment. Drivine knows a field holds a set where TypeScript records its type as
+`Set`, which it does for a decorated field, whatever the decorator, or where the class initializes the field with a
+`Set`. A field neither decorated nor initialized leaves no type at run time, and TypeScript records a union, such as
+`Set<string> | null`, as `Object`: such a field loads the list as an array. Without `@EmptyWhenAbsent`, a set the node
+holds nothing for stays absent, or keeps its initializer, and a stored null loads as null.
+
+```typescript
+@GraphProperty('code_set') codes: Set<string>;   // decorated: loads as a Set
+badges = new Set<string>();                      // initialized: loads as a Set
+tags: Set<string>;                               // neither: TypeScript records nothing, so it loads as an array
+```
+
+Loading a set without `@EmptyWhenAbsent` as a `Set` is a change from 3.2, which loaded it as the array the store held.
 
 #### 2. RelationshipFragment: a Relationship's Properties
 

@@ -213,23 +213,48 @@ export class GraphObjectMapper {
         }
         const instance = plainToInstance(type as any, fields) as any;
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
-        mapping.emptyWhenAbsent.forEach((kind, field) => {
-            if (instance[field] == null) {
-                instance[field] = emptyCollection(kind);
-            } else if (kind === 'set' && Array.isArray(instance[field])) {
-                // A store holds a set as a list.
-                instance[field] = new Set(instance[field]);
-            } else if (
-                kind === 'set' &&
-                instance[field].constructor === Object &&
-                Object.keys(instance[field]).length === 0
-            ) {
-                // A set saved before sets were stored as lists: JSON text, and Memgraph, held it as {}, without items.
-                instance[field] = new Set();
-            }
-        });
+        loadCollections(type, mapping, instance, Object.keys(fields));
         return instance;
     }
+}
+
+/**
+ * Gives each `@EmptyWhenAbsent` field the node holds nothing for, or null, an empty collection of its kind, and each
+ * field declared a Set the list the store holds as a Set. A Set field without `@EmptyWhenAbsent` the node holds nothing
+ * for, or null, is left as it is: it keeps its initializer, or stays absent.
+ */
+function loadCollections(type: Function, mapping: FieldMapping, instance: any, loaded: string[]): void {
+    mapping.emptyWhenAbsent.forEach((kind, field) => {
+        if (instance[field] == null) {
+            instance[field] = emptyCollection(kind);
+        } else if (kind === 'set') {
+            instance[field] = asSet(instance[field]);
+        }
+    });
+    for (const field of loaded) {
+        if (instance[field] != null && !mapping.emptyWhenAbsent.has(field) && declaredSet(type, mapping, field)) {
+            instance[field] = asSet(instance[field]);
+        }
+    }
+}
+
+/**
+ * Whether the field is declared a Set: as the model records it, or as TypeScript records it for a field only another
+ * library's decorator marks, which the model doesn't know of.
+ */
+function declaredSet(type: Function, mapping: FieldMapping, field: string): boolean {
+    return mapping.sets.has(field) || Reflect.getMetadata('design:type', type.prototype, field) === Set;
+}
+
+/**
+ * A set as a store holds it, as a Set: the list it is stored as, or `{}`, which JSON text and Memgraph held for a set
+ * saved before sets were stored as lists, without its items. Any other value is left as it is.
+ */
+function asSet(value: any): any {
+    if (Array.isArray(value)) {
+        return new Set(value);
+    }
+    return value?.constructor === Object && Object.keys(value).length === 0 ? new Set() : value;
 }
 
 /** A packed JSON value, unpacked; a value that isn't JSON text is left as it is. */
