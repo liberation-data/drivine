@@ -58,9 +58,10 @@ export interface SaveOptions<T> {
      */
     loaded?: any;
     /**
-     * Internal: the root's properties as `update`'s load read them, or the packed ones the load of `from` read, by
-     * stored name. A @JsonPacked field is compared as the text the node held, not as its value written again: text
-     * another writer wrote with other spacing would differ. Without it, as a save packs the value.
+     * Internal: the root's properties as `update`'s load read them, or the packed ones and those loaded as a Set the
+     * load of `from` read, by stored name. A @JsonPacked field is compared as the text the node held, not as its value
+     * written again: text another writer wrote with other spacing would differ. A Set is compared as the list the node
+     * held, which may hold an item twice. Without it, as a save writes the value.
      */
     loadedProperties?: Record<string, any>;
 }

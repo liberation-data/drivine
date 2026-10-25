@@ -14,6 +14,11 @@ export interface FieldMapping {
     defaults: Set<string>;
     /** Fields loaded as an empty collection when absent: field → the empty value's kind. */
     emptyWhenAbsent: Map<string, EmptyCollectionKind>;
+    /**
+     * Fields known to hold a Set when the model is built: those TypeScript records as Set, and those the class
+     * initializes with one. A store holds a set as a list, and a load gives such a field a Set.
+     */
+    sets: Set<string>;
 }
 
 /** What a load gives an `@EmptyWhenAbsent` field of the kind where the node holds no value for it, or holds null. */

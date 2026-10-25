@@ -9,6 +9,7 @@ import {
     PropertyMetadata,
     propertyMetadata
 } from '@/annotation/Metadata';
+import { plainToInstance } from 'class-transformer';
 import { DrivineError } from '@/DrivineError';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
 import { classSchemaDeclarations } from '@/annotation/Schema';
@@ -535,8 +536,27 @@ export class ModelRegistry {
                     field,
                     this.emptyCollectionKind(type, field, properties.get(field)!)
                 ])
-            )
+            ),
+            sets: this.sets(type, properties)
         };
+    }
+
+    /**
+     * The fields that hold a Set: those TypeScript records as Set, and those the class initializes with one. TypeScript
+     * records the type of a decorated field only, and a union such as `Set<string> | null` as Object, so a field
+     * neither decorated nor initialized, or declared with a union, can't be told from a list.
+     */
+    private sets(type: Function, properties: Map<string, PropertyMetadata>): Set<string> {
+        let initialized: Record<string, any> = {};
+        try {
+            initialized = plainToInstance(type as any, {}) as Record<string, any>;
+        } catch {
+            // A constructor that needs its arguments: its decorated fields are all there is to go by.
+        }
+        return new Set([
+            ...[...properties].filter(([, it]) => it.designType === Set).map(([field]) => field),
+            ...Object.keys(initialized).filter((field) => initialized[field] instanceof Set)
+        ]);
     }
 
     /**
