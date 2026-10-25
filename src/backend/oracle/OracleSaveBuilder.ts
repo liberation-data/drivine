@@ -335,7 +335,8 @@ END;`;
 
 /**
  * The declarations every writing block holds: its state, and the procedures its body calls. The offered stamp is bound
- * as `$x_stamp`.
+ * as `$x_stamp`. A node's or relationship's properties are taken as a CLOB, as drivine4j holds them: a PL/SQL
+ * `VARCHAR2` holds 32,767 bytes, and a long text is bound as a CLOB.
  */
 export function prelude(graph: OracleGraph, declarations: string[]): string {
     const nodes = graph.nodes;
@@ -402,7 +403,7 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
 
     -- Merges the patch into the node's properties, adds and removes labels, and records an open label field's labels.
     -- Whether any of it changed the node.
-    FUNCTION apply_node(p NUMBER, p_props VARCHAR2, p_add VARCHAR2, p_remove VARCHAR2, p_record VARCHAR2, p_replace BOOLEAN)
+    FUNCTION apply_node(p NUMBER, p_props CLOB, p_add VARCHAR2, p_remove VARCHAR2, p_record VARCHAR2, p_replace BOOLEAN)
         RETURN BOOLEAN IS
         old_props JSON;
         new_props JSON;
@@ -427,14 +428,14 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
             IF NOT has(kept, additions.get_string(i)) THEN kept.append(additions.get_string(i)); relabelled := TRUE; END IF;
         END LOOP;
         IF p_record IS NOT NULL THEN
-            props := JSON_OBJECT_T.parse(JSON_SERIALIZE(new_props));
+            props := JSON_OBJECT_T.parse(JSON_SERIALIZE(new_props RETURNING CLOB));
             IF p_replace OR NOT props.has(p_record) THEN recorded := JSON_ARRAY_T();
             ELSE recorded := props.get_array(p_record); END IF;
             FOR i IN 0 .. additions.get_size - 1 LOOP
                 IF NOT has(recorded, additions.get_string(i)) THEN recorded.append(additions.get_string(i)); END IF;
             END LOOP;
             props.put(p_record, recorded);
-            new_props := JSON(props.to_string());
+            new_props := JSON(props.to_clob());
         END IF;
         SELECT CASE WHEN JSON_EQUAL(old_props, new_props) THEN 1 ELSE 0 END INTO same FROM dual;
         -- An object type's methods are PL/SQL's: called in SQL, they are refused (ORA-40573).
@@ -443,7 +444,7 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
         RETURN same = 0 OR relabelled;
     END;
 
-    FUNCTION write_node(p_match VARCHAR2, p_id VARCHAR2, p_labels VARCHAR2, p_props VARCHAR2, p_add VARCHAR2,
+    FUNCTION write_node(p_match VARCHAR2, p_id VARCHAR2, p_labels VARCHAR2, p_props CLOB, p_add VARCHAR2,
         p_remove VARCHAR2, p_record VARCHAR2, p_replace BOOLEAN) RETURN NUMBER IS
         v NUMBER := find_node(p_match, p_id);
         made BOOLEAN := v IS NULL;
@@ -455,7 +456,7 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
 
     -- Joins two nodes by a relationship of the type, unless one is there (in either direction, for BOTH), and merges
     -- its properties. Both ends are marked when one is made or its properties change.
-    PROCEDURE link(p_from NUMBER, p_to NUMBER, p_type VARCHAR2, p_dir VARCHAR2, p_props VARCHAR2) IS
+    PROCEDURE link(p_from NUMBER, p_to NUMBER, p_type VARCHAR2, p_dir VARCHAR2, p_props CLOB) IS
         e NUMBER;
         old_props JSON;
         new_props JSON;
