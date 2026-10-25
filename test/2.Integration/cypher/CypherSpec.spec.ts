@@ -602,13 +602,14 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('a number or a text the statement gives, added to a text, is written as toString writes it', async () => {
-            // Not in the spec: a side the statement gives is written out at compile time, and the other side as it is.
+            // Not in the spec: a side the statement gives is written out at compile time, and the other side as it is. A
+            // JavaScript number past a whole number's range is a float, as the Neo4j driver sends it.
             expect(
                 await query(
-                    "RETURN ['a' + 1e7, 1e7 + 'a', 'a' + 2.0, 'a' + $f, $i + 'b', 'a' + $s, $s + 1.5e-7, 'x' + 10, $m.n + 'y', $j + 'b']",
-                    { f: 1.0e-4, i: 3, s: 's', m: { n: 0.5 }, j: neo4j.int(4) }
+                    "RETURN ['a' + 1e7, 1e7 + 'a', 'a' + 2.0, 'a' + $f, $i + 'b', 'a' + $s, $s + 1.5e-7, 'x' + 10, $m.n + 'y', $j + 'b', 'a' + $big]",
+                    { f: 1.0e-4, i: 3, s: 's', m: { n: 0.5 }, j: neo4j.int(4), big: 1e21 }
                 )
-            ).toEqual([['a1.0E7', '1.0E7a', 'a2.0', 'a1.0E-4', '3b', 'as', 's1.5E-7', 'x10', '0.5y', '4b']]);
+            ).toEqual([['a1.0E7', '1.0E7a', 'a2.0', 'a1.0E-4', '3b', 'as', 's1.5E-7', 'x10', '0.5y', '4b', 'a1.0E21']]);
         });
 
         it('a quotient of floats is written without the zeros its scale leaves', async () => {

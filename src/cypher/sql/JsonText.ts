@@ -52,7 +52,7 @@ function twoDigits(value: number): string {
 }
 
 /** 2^63, past the greatest whole number Cypher has. */
-const LONG_RANGE = 2 ** 63;
+export const LONG_RANGE = 2 ** 63;
 
 function isWhole(value: number): boolean {
     return Number.isFinite(value) && Number.isInteger(value);

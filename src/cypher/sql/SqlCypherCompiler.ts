@@ -6,7 +6,7 @@ import { Query, Return } from '@/cypher/ast/Query';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
 import { indent, literal, RoundingMode, unsupported, writes } from '@/cypher/sql/CypherSyntax';
-import { jsonText } from '@/cypher/sql/JsonText';
+import { jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
@@ -33,13 +33,15 @@ function isGivenNumber(value: unknown): value is number | bigint | CypherFloat |
 
 /**
  * A number the statement gives, as Java writes it: a float as a double, `1.0E7`, `2.5`. A JavaScript number with no
- * fraction is a whole number, as a parameter binds it.
+ * fraction is a whole number, as a parameter binds it, but past a whole number's range, where it is a float, `1.0E21`.
  */
 function givenText(value: number | bigint | CypherFloat | Integer): string {
     if (value instanceof CypherFloat) {
         return javaDouble(value.value);
     }
-    return typeof value === 'number' && !Number.isInteger(value) ? javaDouble(value) : value.toString();
+    return typeof value === 'number' && (!Number.isInteger(value) || Math.abs(value) >= LONG_RANGE)
+        ? javaDouble(value)
+        : value.toString();
 }
 
 /**

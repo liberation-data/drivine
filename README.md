@@ -1654,7 +1654,8 @@ const names = await pm.query<string>(
   properties read no variable from outside it, and hold a subquery only where no variable of its `MATCH` or before it
   is named, and that walks no variable-length relationship or quantified path pattern of its own; on Postgres they may.
 - A map or a list that holds a node or a relationship (`{x: r}`, `[r, 1]`) compares by what it holds, not by its
-  properties, through a `WITH` too, as on a graph engine.
+  properties, through a `WITH` or a `CALL { … }` too, as on a graph engine. Unwound by `UNWIND`, as a comprehension's
+  or a reduce's variable, or carried past a write in the statement, it compares by its properties.
 - `CALL db.labels()` and `CALL db.relationshipTypes()` compile, alone or within a query with `YIELD`, and give each
   label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter
   may be named by a keyword (`$limit`), as in Neo4j.
