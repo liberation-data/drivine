@@ -36,4 +36,13 @@ describe('compiledSpecification', () => {
         expect(compiled.setup[0]).toMatch(/^CREATE OR REPLACE FUNCTION pg_temp\./);
         expect(compiled.spec.parameters).toEqual({ _cy_params: '{"x":1}' });
     });
+
+    it('holds the parameters of a statement that writes on Oracle as text, read as JSON where each is read', () => {
+        // Oracle crashed the session where a block read a value past 32 KB more than once from a JSON variable (#308).
+        const spec = new QuerySpecification(cypherStatement('MATCH (n) SET n.a = $a')).bind({ a: 'x' });
+        const sql = compiledSpecification(spec.finalizedCopy('SQL'), new OracleCypherCompiler('g')).spec.statement.text;
+        expect(sql).toContain('cy_params CLOB := $_cy_params;');
+        expect(sql).not.toContain('cy_params JSON');
+        expect(sql).toContain("JSON_QUERY(cy_params, '$.a' RETURNING JSON)");
+    });
 });
