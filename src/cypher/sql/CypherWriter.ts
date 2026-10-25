@@ -3835,12 +3835,17 @@ export class CypherWriter {
         });
     }
 
-    /** `min` or `max`: zoned values as the moments they are, whatever their offsets; of a temporal kind, still of it. */
+    /**
+     * `min` or `max`: zoned values as the moments they are, whatever their offsets; of a temporal kind, still of it. A list
+     * the statement makes item by item, as an `ORDER BY` sorts it: a store's JSON may put the shorter list first.
+     */
     private extreme(call: Invocation, min: boolean): Value {
         const value = this.asJson(call.one());
         const temporal = value.temporal;
         const key = temporal?.zoned
             ? this.temporals.moment(this.sql.text(this.sql.comparable(value)), temporal)
+            : this.sql.extremesByListKey && this.isList(call.one())
+            ? this.sql.listSortKey(this.sql.comparable(value))
             : undefined;
         return json(this.sql.extreme(this.sql.comparable(value), min, key), { temporal });
     }
