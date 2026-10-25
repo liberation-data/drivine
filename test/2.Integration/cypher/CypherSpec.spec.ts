@@ -729,5 +729,28 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 ['Laurence', ['The Matrix']]
             ]);
         });
+
+        it('min() and max() of lists the statement makes compare them item by item, whatever their lengths', async () => {
+            // Not in the spec yet: a nested list (liberation-data/drivine#287). The spec holds DISTINCT and the grouping WITH.
+            expect(await query('UNWIND [[[1, 2]], [[3]], [[1], [2]]] AS xs RETURN [min(xs), max(xs)]')).toEqual([
+                [[[1], [2]], [[3]]]
+            ]);
+            // The least and the greatest moment still, whatever their offsets.
+            expect(
+                await query(
+                    "UNWIND [datetime('2020-01-01T00:00+01:00'), datetime('2020-01-01T00:30+02:00')] AS x RETURN [toString(min(x)), toString(max(x))]"
+                )
+            ).toEqual([['2020-01-01T00:30:00+02:00', '2020-01-01T00:00:00+01:00']]);
+            // Oracle puts a null item first and a number before a text (liberation-data/drivine4j#205).
+            if (store.type === DatabaseType.ORACLE) {
+                return;
+            }
+            expect(await query("UNWIND [[1, 'a'], ['a', 1], [true]] AS xs RETURN [min(xs), max(xs)]")).toEqual([
+                [['a', 1], [1, 'a']]
+            ]);
+            expect(await query('UNWIND [[1, null], [1], [null], null] AS xs RETURN [min(xs), max(xs)]')).toEqual([
+                [[1], [null]]
+            ]);
+        });
     }
 );
