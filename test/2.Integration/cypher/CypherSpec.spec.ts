@@ -218,7 +218,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     { x: [] }
                 )
             ).toEqual([3, 1]);
-            // A quantifier keeps an item where its condition is true, so one with no name is in all of no list of names.
+            // Of a node with no name, a quantifier whose condition no item decides is null, so the WHERE drops it (#333).
             expect(await query("MATCH (n:CyTest) WHERE all(x IN [1] WHERE n.name IN ['Keanu']) RETURN count(*)")).toEqual([
                 1
             ]);

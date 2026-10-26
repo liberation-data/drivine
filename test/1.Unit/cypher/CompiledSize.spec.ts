@@ -394,4 +394,32 @@ describe('A compiled Cypher statement', () => {
             expect(sign).toBeLessThan(ceil * 1.1);
         }
     );
+
+    it.each(compilers)(
+        'of quantifiers nested in one another grows with each, not exponentially, three-valued or in a WHERE, on %s',
+        (_, compilerFor) => {
+            // Three-valued, a quantifier reads each item's condition once and counts the true, false and null ones
+            // (liberation-data/drivine#333), so a nested one is written out once at each level, as drivine4j's #283 does.
+            const nested = (quantifier: string, depth: number): string => {
+                let condition = 'x0 > 1';
+                for (let i = depth; i >= 1; i--) {
+                    const list = i === 1 ? 'p.born' : `x${i - 2}`;
+                    condition = `${quantifier}(x${i - 1} IN [${list}, null] WHERE ${condition})`;
+                }
+                return condition;
+            };
+            for (const quantifier of ['any', 'all', 'none', 'single']) {
+                for (const query of [
+                    (it: string) => `MATCH (p:Person) RETURN ${it}`,
+                    (it: string) => `MATCH (p:Person) WHERE ${it} RETURN p`
+                ]) {
+                    const [one, two, four] = [1, 2, 4].map(
+                        (depth) => compilerFor().compile(query(nested(quantifier, depth))).sql.length
+                    );
+                    expect(one).toBeLessThan(2_000);
+                    expect(four).toBeLessThan(2 * two);
+                }
+            }
+        }
+    );
 });
