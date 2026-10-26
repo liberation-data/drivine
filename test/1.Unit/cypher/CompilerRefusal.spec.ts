@@ -55,7 +55,7 @@ describe('The Cypher compiler refuses', () => {
     });
 
     it('a start or length of substring(), left() or right() written as a float, or given out of range beside a text', () => {
-        // Not in the spec yet (#319): what drivine4j's #263 refuses, and a whole number a caller binds as a bigint, the
+        // Beyond the spec's refusals (#319): what drivine4j's #263 refuses, and a whole number a caller binds as a bigint, the
         // Neo4j driver's Integer, or past what a float holds, and a float no number is, cut as Java casts a double.
         const float = (fn: string, what: string): string =>
             `${fn}() takes an integer for its ${what}, not a float, as in Neo4j.`;
@@ -67,7 +67,6 @@ describe('The Cypher compiler refuses', () => {
                     ['RETURN left($t, 2.0)', { t: 'hello' }, float('left', 'length')],
                     ['RETURN right(null, -0.5)', {}, float('right', 'length')],
                     ['MATCH (n:Count) RETURN substring(n.t, 1.0)', {}, float('substring', 'start')],
-                    ["RETURN substring('hello', 1, 2.6)", {}, float('substring', 'length')],
                     ["RETURN left('hello', $n)", { n: BigInt(-1) }, outOfRange('left', 'length')],
                     ["RETURN left('hello', $n)", { n: int(2147483648) }, outOfRange('left', 'length')],
                     ["RETURN left('hello', $n)", { n: BigInt('1' + '0'.repeat(400)) }, outOfRange('left', 'length')],

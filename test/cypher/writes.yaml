@@ -513,6 +513,18 @@ cases:
           - {id: 1, t: {$repeat: "é", times: 20000}, f: 2.0}
           - {id: 2, t: {$repeat: "é", times: 20000}, f: 2.0}
 
+  - name: "A property past 32 KB read on two nodes"
+    description: "A property whose JSON is past 32 KB is read from each of two nodes, returned, ordered by another property, and passed on through a WITH. On Oracle, a text that long taken from the properties as JSON, for each of two rows, crashed the session."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 1}), (:CyWrite {id: 2})"
+      - cypher: "MATCH (n:CyWrite) SET n.text = $text"
+        parameters: {text: {$repeat: "x", times: 40000}}
+        rows: []
+      - cypher: "MATCH (n:CyWrite) RETURN n.text ORDER BY n.id"
+        rows: [{$repeat: "x", times: 40000}, {$repeat: "x", times: 40000}]
+      - cypher: "MATCH (n:CyWrite) WITH n.id AS id, n.text AS text RETURN [id, text] ORDER BY id"
+        rows: [[1, {$repeat: "x", times: 40000}], [2, {$repeat: "x", times: 40000}]]
+
   - name: "A float with no fraction"
     description: "A float that is a whole number, such as 2.0, is written and read back as a float, from a parameter nested or past 32 KB too, and toString() of it keeps its fraction."
     steps:

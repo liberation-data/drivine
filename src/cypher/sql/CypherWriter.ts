@@ -3264,32 +3264,65 @@ export class CypherWriter {
     }
 
     private quantifier(quantifier: Quantifier, scope: Scope): Value {
+        // Read by a WHERE for its truth alone, a quantifier that is null may be false, as neither keeps a row.
+        const filter = this.filtered;
         const listed = this.expression(quantifier.list, scope);
         const name = this.alias('q');
-        const quantified = (from: string, item: Value): string => {
+        const quantified = (from: string, item: Value, listNull: string): string => {
             const inner: Scope = new Map([...scope, [quantifier.variable, item]]);
-            // Each item is kept where the condition is true, as a WHERE keeps a row, so an IN in it is false where it is null.
-            const condition = quantifier.where ? this.keeps(quantifier.where, inner) : 'TRUE';
-            const tests = {
-                ANY: `EXISTS (SELECT 1 ${from} WHERE ${condition})`,
-                ALL: `NOT EXISTS (SELECT 1 ${from} WHERE NOT (${condition}))`,
-                NONE: `NOT EXISTS (SELECT 1 ${from} WHERE ${condition})`,
-                SINGLE: `(SELECT count(*) ${from} WHERE ${condition}) = 1`
-            };
-            return tests[quantifier.of];
+            const exists = (condition: string): string => `EXISTS (SELECT 1 ${from} WHERE ${condition})`;
+            const kind = quantifier.of;
+            const where = quantifier.where;
+            let value: string;
+            if (filter && kind !== 'SINGLE') {
+                // any() is true where an item's condition is true, and all() where each one's is: each is kept where its condition
+                // is true, as a WHERE keeps a row, so an IN in it is false where it is null. none() is true where each one's is false.
+                const condition = !where
+                    ? 'TRUE'
+                    : kind === 'NONE'
+                    ? this.condition(this.expression(where, inner))
+                    : this.keeps(where, inner);
+                value =
+                    kind === 'ANY'
+                        ? exists(condition)
+                        : kind === 'ALL'
+                        ? `NOT ${exists(`CASE WHEN ${condition} THEN 0 ELSE 1 END = 1`)}`
+                        : `NOT ${exists(`CASE WHEN NOT (${condition}) THEN 0 ELSE 1 END = 1`)}`;
+            } else {
+                // Cypher's quantifiers are three-valued: an item whose condition is null decides nothing, and leaves null one no
+                // item decides. Each item's is read once, in one pass, and counted: 1 is true, 0 false, and null null.
+                const condition = where ? this.condition(this.expression(where, inner)) : 'TRUE';
+                const counts = this.alias('q');
+                const [t, f, u] = [`${counts}.v`, `NOT ${counts}.v`, `${counts}.v IS NULL`].map(
+                    (it) => `count(CASE WHEN ${it} THEN 1 END)`
+                );
+                const counted = {
+                    ANY: `WHEN ${t} > 0 THEN 1 WHEN ${u} > 0 THEN NULL ELSE 0`,
+                    ALL: `WHEN ${f} > 0 THEN 0 WHEN ${u} > 0 THEN NULL ELSE 1`,
+                    NONE: `WHEN ${t} > 0 THEN 0 WHEN ${u} > 0 THEN NULL ELSE 1`,
+                    // Two items whose condition is true make single() false, whatever the others' are.
+                    SINGLE: `WHEN ${t} > 1 THEN 0 WHEN ${u} > 0 THEN NULL WHEN ${t} = 1 THEN 1 ELSE 0`
+                }[kind];
+                value = `(SELECT CASE ${counted} END FROM (SELECT ${condition} AS v ${from}) ${counts}) = 1`;
+            }
+            // Of a null list, null, as in Cypher, and its items are not read, where it may be one.
+            return this.present(quantifier.list) ? value : `CASE WHEN NOT (${listNull}) THEN ${value} END`;
         };
         // Over a list of nodes or relationships, each item is the node or the relationship, read from its table.
         if (listed.kind === 'Entities') {
             return bool(
                 this.sql.shared([listed.ids], ([ids]) =>
-                    quantified(...this.entityItems(ids, listed.relationships, name))
+                    quantified(...this.entityItems(ids, listed.relationships, name), `${ids} IS NULL`)
                 )
             );
         }
         return bool(
-            quantified(
-                `FROM ${this.sql.elements(this.sql.comparable(this.asJson(listed)), name)}`,
-                json(`${name}.item`, { temporal: this.itemsOf(listed) })
+            this.sql.shared([this.sql.comparable(this.asJson(listed))], ([items]) =>
+                quantified(
+                    `FROM ${this.sql.elements(items, name)}`,
+                    json(`${name}.item`, { temporal: this.itemsOf(listed) }),
+                    this.sql.isJsonNull(items)
+                )
             )
         );
     }
