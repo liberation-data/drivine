@@ -301,7 +301,8 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
 
     /**
      * A list as `jsonb` that Postgres orders as Cypher orders lists, item by item: each item, from the first, a list of
-     * three, of where its kind comes (`itemRank`), the item, and what follows it so written, the end an empty list.
+     * three, of where its kind comes (`itemRank`), the item (a text by its code points, as {@link codePoints} writes
+     * it), and what follows it so written, the end an empty list.
      * `jsonb` orders the shorter of two lists first, and every list here but the last is of three. An item that is a list
      * is followed by its own items, at any depth, then by its end, which comes before any item. Any other value sorts as
      * itself, as before. Only a value the statement makes a list sorts so: the planner costs the walk at thousands a row,
