@@ -4684,7 +4684,8 @@ export class CypherWriter {
                                           p
                                       )} END`
                               )
-                            : places < 1
+                            : // Not "places < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places.
+                            !(places >= 1)
                             ? this.sql.roundWhole(number)
                             : this.sql.roundPlaces(number, precision)
                     )
