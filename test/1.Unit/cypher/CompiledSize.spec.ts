@@ -215,6 +215,47 @@ describe('A compiled Cypher statement', () => {
     );
 
     it.each(compilers)(
+        'of a value that holds no null, carried past a write, has no test for one, on %s',
+        (name, compilerFor) => {
+            // A row carried between a procedure's statements holds each value as its JSON, which holds no null where the
+            // value held none. drivine4j's row carry forgets this, and tests for one.
+            const test = name === 'oracle' ? '[[,:]null[],}]' : 'jsonb_path_exists(';
+            const compiled = compilerFor().compile(
+                'MATCH (c:Claim) WITH c, c.list AS l SET c.b = 1 WITH c, l WHERE l = c.other RETURN c.id'
+            );
+            expect([compiled.sql, ...compiled.setup].some((it) => it.includes(test))).toBe(false);
+        }
+    );
+
+    it.each(compilers)(
+        'of a parameter that holds a number JSON has no text for, NaN, compares it as the null it is bound as, on %s',
+        (_, compilerFor) => {
+            const compiled = (p: unknown[]): string =>
+                compilerFor().compile('MATCH (c:Claim) WHERE c.list = $p RETURN c.list = $p', { p }).sql;
+            expect(compiled([1, NaN])).toEqual(compiled([1, null]));
+            expect(compiled([Infinity])).toEqual(compiled([null]));
+        }
+    );
+
+    it.each(compilers)(
+        'of a parameter that is an iterator, which gives its items once, binds them where it is compared, on %s',
+        (_, compilerFor) => {
+            function* items(): Generator<number> {
+                yield 1;
+                yield 2;
+            }
+            for (const cypher of [
+                'MATCH (c:Claim) WHERE c.a IN $l RETURN c.id',
+                'MATCH (c:Claim) RETURN c.list = $l',
+                'MATCH (c:Claim) SET c.b = 1 WITH c WHERE c.a IN $l RETURN c.id'
+            ]) {
+                const bound = JSON.stringify(compilerFor().compile(cypher, { l: items() }).parameters);
+                expect(bound).toContain('[1,2]');
+            }
+        }
+    );
+
+    it.each(compilers)(
         'of a WHERE that searches a list that holds no null is the search alone, on %s',
         (_, compilerFor) => {
             // drivine4j#225: null and false keep no row alike, so a WHERE needs no test of the value being null.

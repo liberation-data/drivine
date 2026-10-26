@@ -1663,8 +1663,9 @@ const names = await pm.query<string>(
 - Lists and maps that hold a null compare item by item, as in Cypher: `[null] = [null]` is null, `[1, null] = [2, null]`
   false, and `IN` compares a value with each item as `=` does, so `2 IN [1, null]` is null. On Oracle this is a
   function the query declares, which a statement that writes, or the step of a `reduce`, calls none of: there two such
-  values that are equal as JSON compare as null and any other two as false, so `[null] = [1]` is false, where Cypher's
-  comparison is null.
+  values that are equal as JSON compare as null and any other two as false, so `a = b` is false where `a` is `[null]`
+  and `b` is `[1]`, where Cypher's comparison is null. Lists and maps written out in the statement, `[null] = [1]`, are
+  compared item by item there too.
 - `CALL db.labels()` and `CALL db.relationshipTypes()` compile, alone or within a query with `YIELD`, and give each
   label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter
   may be named by a keyword (`$limit`), as in Neo4j.

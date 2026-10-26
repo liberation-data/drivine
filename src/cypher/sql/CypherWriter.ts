@@ -326,11 +326,11 @@ function optional<T>(value: T | undefined): T[] {
 
 /**
  * `value`, a parameter's, as the JSON text it is bound as reads (see `jsonText`): a list, or any other iterable but
- * bytes, as an array; a map as an object of its entries, those undefined left out; null and undefined as null. Any
- * other value (a number, a text, a date, bytes) is itself.
+ * bytes, as an array; a map as an object of its entries, those undefined left out; null and undefined as null, and so
+ * a number JSON has no text for (`NaN`, `Infinity`). Any other value (a number, a text, a date, bytes) is itself.
  */
 function jsonTree(value: any): unknown {
-    if (value === null || value === undefined) {
+    if (boundAsNull(value)) {
         return null;
     }
     if (Array.isArray(value)) {
@@ -354,6 +354,11 @@ function jsonTree(value: any): unknown {
             .filter(([, item]) => item !== undefined)
             .map(([key, item]) => [key, jsonTree(item)])
     );
+}
+
+/** Whether `value` is bound as JSON's null (see `jsonText`): null, undefined, or a number JSON has no text for. */
+function boundAsNull(value: any): boolean {
+    return value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value));
 }
 
 /** Whether `tree`, a value {@link jsonTree} gives, is a map. */

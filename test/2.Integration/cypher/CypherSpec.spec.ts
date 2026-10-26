@@ -174,7 +174,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         };
 
         it('compare item by item, null where no pair differs', async () => {
-            // Beside the spec's cases since v0.6.6 (#225):Cypher compares a list or a map item by item, so a null it holds makes the comparison null.
+            // Cypher compares a list or a map item by item, so a null it holds makes the comparison null.
             expect(await query('RETURN [[null] = [null], {x: null} = {x: null}, [null, 1] = [null, 1]]')).toEqual([
                 [null, null, null]
             ]);
@@ -209,7 +209,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         });
 
         it('IN compares a value with each item as equality does', async () => {
-            // Beside the spec's cases since v0.6.6 (#225):true where an item is equal, else null where a comparison is null, else false.
+            // True where an item is equal, else null where a comparison is null, else false.
             await seed();
             // A node with no name is in no list of names, nor out of one: NOT keeps it no more than the IN does.
             expect(
@@ -245,7 +245,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         });
 
         it('compare item by item where neither side is written out', async () => {
-            // Beside the spec's cases since v0.6.6 (#225):parameters, values carried by a WITH and collected lists are compared as they are at run time.
+            // Parameters, values carried by a WITH and collected lists are compared as they are at run time.
             expect(
                 await query('RETURN [$a = $b, $a = $c, $a IN [$b], $a IN $l, $m = $n, $p = $p]', {
                     a: [1, null],
@@ -284,8 +284,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ).toEqual([[null, false, false, null, true, false]]);
         });
 
-        it("a text that holds a null's text, and a value too long for a short text, compare as values that hold no null", async () => {
-            // Beside the spec's cases since v0.6.6 (#225):Oracle reads whether a value holds a null from its JSON's text.
+        it("find a null a value holds, not one its text spells, at any length and in a reduce's step", async () => {
+            // Oracle reads whether a value holds a null from its JSON's text.
             expect(
                 await query(
                     String.raw`UNWIND ['a,null]', 'x:null}', 'null', 'a\",null]', 'é😀\",null]', 'a\\'] AS s WITH s, [s] AS v, [[s]] AS l, {k: s} AS m, [{k: s}] AS ms RETURN [v IN l, v = [s], m IN ms]`
@@ -307,6 +307,12 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     `WITH ${long} + [null] AS v, ${long} + [null] AS w, [${long} + [null]] AS l, ['z'] + ${long} + [null] AS u RETURN [v = w, v IN l, v <> w, v = u]`
                 )
             ).toEqual([[null, null, null, false]]);
+            // A text past 32 KB beside a null is compared whole.
+            expect(
+                await query("WITH [null, $t] AS a, [null, $t] AS b, [null, $t + 'y'] AS c RETURN [a = b, a = c]", {
+                    t: 'x'.repeat(40000)
+                })
+            ).toEqual([[null, false]]);
             // In the step of a reduce, as in a statement that writes, on Oracle.
             expect(
                 await query(
@@ -321,7 +327,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         });
 
         it('a null node or relationship in a list or a map makes its comparison null', async () => {
-            // Beside the spec's cases since v0.6.6 (#225):a node or a relationship OPTIONAL MATCH finds none of is null in what holds it.
+            // A node or a relationship OPTIONAL MATCH finds none of is null in what holds it.
             await seed();
             expect(
                 await query(
@@ -337,8 +343,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ).toEqual([[null, null, null, null, null, null, false]]);
         });
 
-        it('a statement that writes compares a list that holds a null as null where it is equal as JSON', async () => {
-            // Beside the spec's cases since v0.6.6 (#225):on Oracle a procedure calls no function of its own, so values that differ as JSON are false there.
+        it('compare in a statement that writes, on Oracle as null where equal as JSON and else false', async () => {
+            // On Oracle a procedure calls no function of its own, so values that differ as JSON are false there.
             await clear();
             expect(
                 await query(
@@ -352,14 +358,16 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     `UNWIND ['a,null]'] AS s WITH s, [s] AS v, [[s]] AS l, ${long} AS w, [${long}] AS ws CREATE (n:CyNullEquality) SET n.eq = v = [s], n.in = v IN l, n.longEq = w = ${long}, n.longIn = w IN ws RETURN [n.eq, n.in, n.longEq, n.longIn]`
                 )
             ).toEqual([[true, true, true, true]]);
-            if (store.type === DatabaseType.ORACLE) {
-                return;
-            }
+            // Lists written out are compared item by item, on Oracle too.
+            expect(
+                await query("CREATE (n:CyNullEquality) SET n.eq = coalesce([null] = [1], 'null') RETURN n.eq")
+            ).toEqual(['null']);
+            // Values that differ as JSON are false on Oracle, as the README says, where Cypher's comparison is null.
             expect(
                 await query(
                     "CREATE (n:CyNullEquality) WITH n, [null] AS a, [1] AS b SET n.eq = coalesce(a = b, 'null') RETURN n.eq"
                 )
-            ).toEqual(['null']);
+            ).toEqual([store.type === DatabaseType.ORACLE ? false : 'null']);
         });
     });
 });
