@@ -436,6 +436,14 @@ export abstract class SqlCypherCompiler {
         return jsonText(value);
     }
 
+    /**
+     * The property `key` of the node or relationship whose properties are `props`, where it is an item of a `RETURN` or
+     * a `WITH`, returned or passed on: as {@link propertyOf} reads it, but on a store that must read such an item apart.
+     */
+    itemProperty(props: string, key: string): string {
+        return this.propertyOf(props, key);
+    }
+
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(
