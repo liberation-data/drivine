@@ -261,6 +261,18 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     "RETURN [round(123.456, 14, 'UP'), round(123.456, 15, 'UP'), round(123.456, 16, 'UP'), round(-123.456, 14, 'FLOOR'), round(1234.5678901234567, 13), round(1234.5678901234567, 12, 'HALF_EVEN')]"
                 )
             ).toEqual([[123.456, 123.456, 123.456, -123.456, 1234.5678901234567, 1234.567890123457]]);
+            // Near 10^17, whose digits all come before the point, and negatives past their digits.
+            expect(
+                await query(
+                    "RETURN [round(123456789012345678, 2), round(99999999999999999.0, 1, 'UP'), round(12345678901234567.0, 1), round(-9.87654321E16, 3, 'FLOOR'), round(-1234.5678, 400), round(-1234.5678, 2)]"
+                )
+            ).toEqual([[1.2345678901234568e17, 1.0e17, 1.2345678901234568e16, -9.87654321e16, -1234.5678, -1234.57]]);
+            // Over an aggregate, where no value is bound in a subquery, and so the number is written out where it is read.
+            expect(
+                await query(
+                    "UNWIND [1.0, 2.0, 2.5] AS x RETURN [round(avg(x), 2), round(avg(x), 400), round(avg(x), 400, 'HALF_UP'), round(round(avg(x), 400), 1, 'DOWN')]"
+                )
+            ).toEqual([[1.83, 1.8333333333333333, 1.8333333333333333, 1.8]]);
             // Zero too, whose places Oracle gives back without rounding.
             await expect(query("MATCH (n:Round) RETURN round(n.z, n.r, 'HALF_UP')")).rejects.toThrow(
                 'round() takes a precision of 0 or more'
