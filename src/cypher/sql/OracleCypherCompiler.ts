@@ -696,12 +696,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * once rounded. Oracle works out only the branch of a CASE a row takes, so the overflowing one is never reached.
      * Short of its digits, a tiny number may still take more than {@link MOST_PLACES} places, as 1.0E-120 to 130 does:
      * it is rounded moved that many places fewer to the right, then moved back, which is exact in decimal.
+     *
+     * Each test is a WHEN of its own, as Oracle tries them in order and stops at the first that holds, where it does not
+     * promise the order of an OR's sides: zero, whose digits `LOG` cannot count (ORA-01428), is given back before they are
+     * counted. The precision is read first, so a null one gives null for zero too, and a negative one from data fails
+     * there, where it is written out, not bound, as under an aggregate.
      */
     private pastItsDigits(number: string, precision: string, round: (n: string, p: string) => string): string {
         return this.shared([number, precision], ([n, p]) => {
             const shift = `POWER(10, GREATEST(${p} - ${MOST_PLACES}, 0))`;
             const rounded = round(`(${n} * ${shift})`, `(${p} - GREATEST(${p} - ${MOST_PLACES}, 0))`);
-            return `CASE WHEN ${n} = 0 OR ${p} >= ${DOUBLE_DIGITS} - FLOOR(LOG(10, ABS(${n}))) THEN ${n} ELSE ${rounded} / ${shift} END`;
+            return `CASE WHEN ${p} IS NULL THEN NULL WHEN ${n} = 0 THEN ${n} WHEN ${p} >= ${DOUBLE_DIGITS} - FLOOR(LOG(10, ABS(${n}))) THEN ${n} ELSE ${rounded} / ${shift} END`;
         });
     }
 

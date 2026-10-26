@@ -291,6 +291,67 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             }
         });
 
+        it('round() of zero, whose digits Oracle cannot count by its logarithm, gives zero, or null to a null precision, and fails on a negative one', async () => {
+            // Oracle counts a number's digits by LOG, which fails on zero (ORA-01428): zero is given back first,
+            // wherever it is read, among rows that are not zero too.
+            await query('UNWIND [0.0, 1.25, 0.0, -2.5] AS x CREATE (:Round {x: x})');
+            expect(await query('MATCH (n:Round) WHERE round(n.x, 400) = 0 RETURN count(*)')).toEqual([2]);
+            expect(
+                await query("MATCH (n:Round) WHERE round(n.x, 2) = 0 AND round(n.x, 1, 'UP') = 0 RETURN count(*)")
+            ).toEqual([2]);
+            expect(
+                await query('MATCH (n:Round) RETURN round(n.x, 1) AS r, count(*) AS c ORDER BY r')
+            ).toEqual([[-2.5, 1], [0.0, 2], [1.3, 1]]);
+            expect(await query("MATCH (n:Round) RETURN n.x ORDER BY round(n.x, 1, 'UP') DESC")).toEqual([
+                1.25, 0.0, 0.0, -2.5
+            ]);
+            expect(
+                await query(
+                    "UNWIND [0.0, 0.0] AS x RETURN [round(sum(x), 2), round(avg(x), 400), round(min(x), 2, 'HALF_UP'), round(sum(x), 1, 'CEILING')]"
+                )
+            ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
+            expect(
+                await query(
+                    "MATCH (n:Round) WITH n.x AS x WHERE round(x, 2) = 0 RETURN [round(sum(x), 2), round(avg(x), 400), round(sum(x), 1, 'CEILING')]"
+                )
+            ).toEqual([[0.0, 0.0, 0.0]]);
+            expect(
+                await query(
+                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x RETURN [sum(round(x, 400)), sum(round(x, 0)), sum(round(x, 0, 'UP')), count(*)]"
+                )
+            ).toEqual([[1500.0, 2000.0, 2000.0, 3000]]);
+            expect(
+                await query(
+                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x WHERE round(x, 2) = 0 OR round(x, 400, 'UP') > 0 RETURN count(*)"
+                )
+            ).toEqual([3000]);
+            expect(await query('RETURN [x IN [0.0, 1.55, 0.0] | round(x, 1)]')).toEqual([[0.0, 1.6, 0.0]]);
+            expect(
+                await query("RETURN [round($z, 2), round($z, 400, 'FLOOR'), round(0, 2), round(0.0, 2, 'UP')]", {
+                    z: 0.0
+                })
+            ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
+            // The precision is read before zero is given back: a null one gives null, and a negative one from data
+            // fails, under an aggregate too, where it is written out where it is read.
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.x = 0 RETURN [round(0.0, null), round(0, null, 'HALF_UP'), round(n.x, n.none), round(n.x, n.none, 'UP')]"
+                )
+            ).toEqual([
+                [null, null, null, null],
+                [null, null, null, null]
+            ]);
+            await query('CREATE (:Round {x: 0.0, r: -2})');
+            for (const statement of [
+                'UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r)',
+                "UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r, 'UP')",
+                'MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(sum(x), r)',
+                "MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(min(x), r, 'HALF_UP')"
+            ]) {
+                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more');
+            }
+        });
+
         it("a negative precision from data fails only on a row that reads it, in a WHERE and an aggregate too, with the compiler's message", async () => {
             // The spec reads a precision from data since v0.6.4; here, in a WHERE and an aggregate, and on rows filtered out.
             await query('CREATE (:Round {r: -2, k: 1}), (:Round {r: 1, k: 2})');
