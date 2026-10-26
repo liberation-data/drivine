@@ -510,6 +510,38 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ).toEqual([[4, true]]);
         });
 
+        it('are three-valued in a statement that writes, over a list of mixed values, and past a thousand items', async () => {
+            // On Oracle a statement that writes runs as a procedure, which reads its parameters apart from a query's.
+            const xs = [...Array.from({ length: 3000 }, (_, i) => i), null];
+            expect(
+                await query(
+                    'CREATE (n:QZ {a: any(x IN $xs WHERE x = 2999), b: all(x IN $xs WHERE x >= 0), ' +
+                        'c: single(x IN [1, 2] WHERE x = 1), d: none(x IN $xs WHERE x = -1)}) RETURN [n.a, n.b, n.c, n.d]',
+                    { xs }
+                )
+            ).toEqual([[true, null, true, null]]);
+            expect(
+                await query(
+                    'MATCH (n:QZ) SET n.e = any(x IN [n.c, null] WHERE x), n.f = all(x IN [n.c, null] WHERE x) RETURN [n.e, n.f]'
+                )
+            ).toEqual([[true, null]]);
+            expect(await query('MATCH (n:QZ) WHERE none(x IN [1, null] WHERE x = 2) SET n.g = 1 RETURN count(*)')).toEqual([
+                0
+            ]);
+            expect(
+                await query(
+                    "RETURN [any(x IN $m WHERE x = 'a'), all(x IN $m WHERE x IS NOT NULL), none(x IN $m WHERE x = true), " +
+                        'single(x IN $m WHERE x = 2.5), single(x IN $m WHERE x = [1]), any(x IN $m WHERE x = {a: 1})]',
+                    { m: [1, 'a', true, null, 2.5, [1], { a: 1 }] }
+                )
+            ).toEqual([[true, false, false, null, null, true]]);
+            expect(
+                await query('RETURN [single(x IN range(0, 5000) + [null] WHERE x = 4999), single(x IN $xs WHERE x = 5)]', {
+                    xs: xs.slice(0, -1)
+                })
+            ).toEqual([[null, true]]);
+        });
+
         it('are null over a list of nodes or relationships that is null, and keep no row in a WHERE', async () => {
             // A path OPTIONAL MATCH finds none of, a CASE or a coalesce() that gives no list, and a node that is null in one.
             expect(
