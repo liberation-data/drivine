@@ -16,6 +16,11 @@ import {
 } from '@liberation-data/drivine';
 import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Neo4j plans each statement the first time it sees it, a few hundred milliseconds for one of the object manager's, and
+// the tests here send statements of their own shapes. On fresh containers, beside the suites running in parallel, a
+// test can pass Jest's 5 seconds planning them (#349).
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['OrderedPathTest', 'Actor'] })
 class Actor {
     @NodeId() id: string;

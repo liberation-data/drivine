@@ -17,6 +17,10 @@ import {
 } from '@liberation-data/drivine';
 import { rawProperty, SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
+// Oracle parses each save's PL/SQL block and its statements the first time it sees them, and a suite's first test saves
+// first. On fresh containers, beside the suites running in parallel, that test can pass Jest's 5 seconds (#349).
+jest.setTimeout(30_000);
+
 @NodeFragment({ labels: ['SqlWrite', 'Session'] })
 class Session {
     @NodeId() id: string;

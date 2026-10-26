@@ -22,6 +22,11 @@ import {
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 import { rawProps, SqlStore } from '../support/SqlStores';
 
+// Neo4j plans each statement the first time it sees it, a few hundred milliseconds for one of the object manager's, and
+// the tests here send statements of their own shapes. On fresh containers, beside the suites running in parallel, a
+// test can pass Jest's 5 seconds planning them (#349).
+jest.setTimeout(30_000);
+
 /**
  * Set fields without `@EmptyWhenAbsent`: one TypeScript records as a Set, as it does for a decorated field, one packed
  * as JSON, and one the class initializes with a Set.
