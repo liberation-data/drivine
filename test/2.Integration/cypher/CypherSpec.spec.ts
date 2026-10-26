@@ -164,8 +164,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
 
     /**
      * Lists and maps that hold a null, compared as Cypher compares them, on every store: drivine4j's own tests of
-     * liberation-data/drivine4j#225, ported for liberation-data/drivine#290. They sit beside the spec's cases of it
-     * since v0.6.6.
+     * liberation-data/drivine4j#225, ported for liberation-data/drivine#290, less the steps the spec holds since v0.6.6.
      */
     describe('lists and maps that hold a null', () => {
         const seed = async (): Promise<void> => {
@@ -175,15 +174,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
 
         it('compare item by item, null where no pair differs', async () => {
             // Cypher compares a list or a map item by item, so a null it holds makes the comparison null.
-            expect(await query('RETURN [[null] = [null], {x: null} = {x: null}, [null, 1] = [null, 1]]')).toEqual([
-                [null, null, null]
-            ]);
-            expect(await query('RETURN [[1, null] = [2, null], [1, 2] = [1], [null] = [null, null], [] = []]')).toEqual([
-                [false, false, false, true]
-            ]);
-            expect(await query('RETURN [[null] <> [null], [1, null] <> [2, null], [null, 1] <> [null, 1]]')).toEqual([
-                [null, true, null]
-            ]);
             expect(
                 await query(
                     'RETURN [{x: null} = {y: null}, {x: 1, y: null} = {x: 2, y: null}, {x: null} = {x: 1}, {x: null} = {}, {a: 1} = {a: 1, b: null}]'
@@ -199,7 +189,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     "RETURN [[1] = ['1'], [null] = [1], [[1]] = [1], [null, 'a'] = [1, 'b'], [1] = [1.0], [null] = [[1]], [null] = [{x: 1}], [null, 1] = [1, null]]"
                 )
             ).toEqual([[false, null, false, false, true, null, null, null]]);
-            expect(await query("RETURN CASE [null] WHEN [null] THEN 'y' ELSE 'n' END")).toEqual(['n']);
             // Lists that hold no null compare as before.
             expect(
                 await query(
@@ -228,15 +217,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                         '[null] IN [[1]], [1, null] IN [[2, null]], [1] IN [[1], null], {x: null} IN [{x: null}], [1] IN [[2], null], [1] IN [[null]], null IN [1]]'
                 )
             ).toEqual([[null, null, null, true, null, false, false, null, false, true, null, null, null, null]]);
-            expect(
-                await query('RETURN [$x IN $l, 2 IN $l, $a IN $ls, $a IN [[2, null]], 1 IN $n]', {
-                    x: null,
-                    l: [1, 2],
-                    a: [1, null],
-                    ls: [[1, null], [3]],
-                    n: null
-                })
-            ).toEqual([[null, true, null, false, null]]);
             // Read by a WHERE, a null is in no list that holds one: JSON's null is equal to such an item as JSON.
             const nulls = { x: null, l: [null, 2], m: { x: null } };
             expect(await query('UNWIND [1] AS i WITH i WHERE $x IN $l RETURN i', nulls)).toEqual([]);
@@ -257,24 +237,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     p: [1, 2]
                 })
             ).toEqual([[null, false, null, null, null, true]]);
-            expect(
-                await query(
-                    'WITH [1, null] AS a, [1, null] AS b, [2, null] AS c, [null, 1] AS d RETURN [a = b, a = c, a <> c, a = d, a IN [b, c], a IN [c]]'
-                )
-            ).toEqual([[null, false, true, null, null, false]]);
-            expect(
-                await query(
-                    'WITH [[null], 1] AS a, [[null], 2] AS b, {k: [null]} AS m, {k: [1]} AS n, {k: [1], j: 2} AS o RETURN [a = b, m = n, m = m, m = o, n = n]'
-                )
-            ).toEqual([[false, null, null, false, true]]);
-            expect(
-                await query(
-                    'UNWIND [[1, null], [2, null]] AS l WITH collect(l) AS ls RETURN [ls = [[1, null], [2, null]], ls[0] = ls[1], ls[0] IN ls]'
-                )
-            ).toEqual([[null, false, null]]);
-            expect(
-                await query('UNWIND [[1, null], [2, null], [3]] AS l WITH l WHERE l = [1, null] OR l = [3] RETURN l')
-            ).toEqual([[3]]);
             // A parameter's list compared item by item as the statement is compiled, at any depth.
             expect(
                 await query(
@@ -339,23 +301,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             );
         });
 
-        it('a null node or relationship in a list or a map makes its comparison null', async () => {
-            // A node or a relationship OPTIONAL MATCH finds none of is null in what holds it.
-            await seed();
-            expect(
-                await query(
-                    'OPTIONAL MATCH (x:Nope)-[r]->() RETURN [[r] = [r], {x: r} = {x: r}, [r] <> [r], r IN [r], [r] IN [[r]], x IN [x], [x] = [x], {x: x} = {x: x}, [r, 1] = [r, 2]]'
-                )
-            ).toEqual([[null, null, null, null, null, null, null, null, false]]);
-            expect(
-                await query(
-                    "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->() OPTIONAL MATCH (:Person {name: 'Hugo'})-[r2:KNOWS]->() " +
-                        'WITH r1, r2, [r1, r2] AS a, {x: r2} AS m ' +
-                        'RETURN [[r1, r2] = [r1, r2], {a: r1, b: r2} = {a: r1, b: r2}, a = a, m = m, a = [r1, r1], r1 IN [r2], a = [r1]]'
-                )
-            ).toEqual([[null, null, null, null, null, null, false]]);
-        });
-
         it('compare in a statement that writes, on Oracle as null where equal as JSON and else false', async () => {
             // On Oracle a procedure calls no function of its own, so values that differ as JSON are false there.
             await clear();
@@ -381,219 +326,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     "CREATE (n:CyNullEquality) WITH n, [null] AS a, [1] AS b SET n.eq = coalesce(a = b, 'null') RETURN n.eq"
                 )
             ).toEqual([store.type === DatabaseType.ORACLE ? false : 'null']);
-        });
-    });
-
-    /**
-     * Texts compared and sorted by their code points, as Cypher has them, on every store: drivine4j's own tests of
-     * liberation-data/drivine4j#273, ported for liberation-data/drivine#339. Not in the spec Drivine runs yet: its
-     * cases are in v0.6.10, past the quantifiers of v0.6.7 (#333), which Drivine has not ported.
-     */
-    describe('texts in code point order', () => {
-        it('compare and sort by their code points, not by a locale collation', async () => {
-            // Postgres compared and sorted texts by the database's collation.
-            await clear();
-            await query(loadSpec('queries.yaml').graph!);
-            expect(
-                await query(
-                    "UNWIND ['John Wick', 'Johnny Mnemonic', 'b', 'B', 'a', 'A', 'é', 'e', 'z', 'Z', '~', '_', '-', ' ', 'a b', 'ab', 'a-c'] AS t RETURN t ORDER BY t"
-                )
-            ).toEqual([
-                ' ',
-                '-',
-                'A',
-                'B',
-                'John Wick',
-                'Johnny Mnemonic',
-                'Z',
-                '_',
-                'a',
-                'a b',
-                'a-c',
-                'ab',
-                'b',
-                'e',
-                'z',
-                '~',
-                'é'
-            ]);
-            expect(
-                await query(
-                    "UNWIND ['John Wick', 'Johnny Mnemonic', 'b', 'B', 'a', 'é'] AS t WITH t ORDER BY t DESC RETURN collect(t)"
-                )
-            ).toEqual([['é', 'b', 'a', 'Johnny Mnemonic', 'John Wick', 'B']]);
-            expect(await query("UNWIND ['b', 'B', 'b', 'a', 'B'] AS t RETURN DISTINCT t ORDER BY t")).toEqual([
-                'B',
-                'a',
-                'b'
-            ]);
-            expect(
-                await query(
-                    "RETURN ['a' < 'B', 'John Wick' < 'Johnny Mnemonic', 'é' > 'f', 'Z' < '_', 'a' >= 'B', 'ab' <= 'a b']"
-                )
-            ).toEqual([[false, true, true, true, true, false]]);
-            expect(await query("UNWIND ['b', 'B', 'a', 'é'] AS t RETURN min(t), max(t)")).toEqual([['B', 'é']]);
-            expect(
-                await query('UNWIND $ts AS t RETURN t ORDER BY t', {
-                    ts: ['b', 'B', 'John Wick', 'Johnny Mnemonic', 'a']
-                })
-            ).toEqual(['B', 'John Wick', 'Johnny Mnemonic', 'a', 'b']);
-            // A property compared with a text, and sorted: 'The Matrix' is before 'The matrix', which a locale puts first.
-            expect(
-                await query('MATCH (m:Movie) WHERE m.title < $t RETURN m.title ORDER BY m.title', { t: 'The matrix' })
-            ).toEqual(['Johnny Mnemonic', 'The Matrix', 'The Matrix Reloaded']);
-            expect(await query("MATCH (m:Movie) WHERE m.title >= 'the' RETURN m.title")).toEqual([]);
-            expect(
-                await query("MATCH (m:Movie) WITH m.title AS t ORDER BY toLower(t) + 'A' DESC RETURN collect(t)")
-            ).toEqual([['The Matrix', 'The Matrix Reloaded', 'Johnny Mnemonic']]);
-            expect(
-                await query(
-                    'MATCH (m:Movie) WITH CASE WHEN m.released < 1996 THEN toLower(m.title) ELSE m.title END AS t RETURN min(t), max(t)'
-                )
-            ).toEqual([['The Matrix', 'johnny mnemonic']]);
-            expect(await query('MATCH (p:Person), (q:Person) WHERE toLower(p.name) < q.name RETURN count(*)')).toEqual([
-                0
-            ]);
-            // A sort by a list, and min and max of lists, compare the texts in them so too.
-            expect(
-                await query(
-                    "UNWIND [['a', 'b'], ['a', 'B'], ['B'], ['b'], ['John Wick'], ['Johnny Mnemonic'], ['a', 'é'], ['a', '~']] AS l RETURN l ORDER BY l"
-                )
-            ).toEqual([
-                ['B'],
-                ['John Wick'],
-                ['Johnny Mnemonic'],
-                ['a', 'B'],
-                ['a', 'b'],
-                ['a', '~'],
-                ['a', 'é'],
-                ['b']
-            ]);
-            expect(await query("UNWIND [['a', 'b'], ['a', 'B'], ['B'], ['b']] AS l RETURN min(l), max(l)")).toEqual([
-                [['B'], ['b']]
-            ]);
-            // Long texts too: Postgres keys the first 500 characters of a text in a list by their code points.
-            const [a499, a600] = ['a'.repeat(499), 'a'.repeat(600)];
-            expect(
-                await query('UNWIND $ls AS g WITH [g[0], g[1]] AS l RETURN l[1] ORDER BY l', {
-                    ls: [
-                        [a499 + 'b', '3'],
-                        [a499 + 'B', '2'],
-                        [a499, '1'],
-                        [a600 + 'b', '5'],
-                        [a600, '4']
-                    ]
-                })
-            ).toEqual(['1', '2', '4', '5', '3']);
-            expect(
-                await query(
-                    "MATCH (m:Movie) WITH m ORDER BY m.released WITH collect(toLower(m.title)) + ['The Matrix'] AS ts " +
-                        "UNWIND [ts, ['the matrix'], ['The matrix']] AS l RETURN l ORDER BY l DESC"
-                )
-            ).toEqual([
-                ['the matrix'],
-                ['johnny mnemonic', 'the matrix', 'the matrix reloaded', 'The Matrix'],
-                ['The matrix']
-            ]);
-        });
-
-        it('a character above U+FFFF sorts after every one below it, as its code point says', async () => {
-            // JavaScript's UTF-16 puts such a character before U+E000 to U+FFFF, as Neo4j compares a text given.
-            const [smile, tilde, privateUse] = ['😀', '～', ''];
-            expect(
-                await query(`UNWIND ['${smile}', '${tilde}', '${privateUse}', 'a', '퟿'] AS t RETURN t ORDER BY t`)
-            ).toEqual(['a', '퟿', privateUse, tilde, smile]);
-            expect(
-                await query(`RETURN ['${smile}' < '${tilde}', '${smile}' > '${privateUse}', '${smile}' > '퟿']`)
-            ).toEqual([[false, true, true]]);
-            expect(await query(`UNWIND [['${smile}'], ['${tilde}']] AS l RETURN l ORDER BY l`)).toEqual([
-                [tilde],
-                [smile]
-            ]);
-            // Neo4j compares a text given by its UTF-16 code units, where it compares one written or stored by its code
-            // points (neo4j/neo4j#13997).
-            if (store.type !== DatabaseType.NEO4J) {
-                expect(
-                    await query('UNWIND $ts AS t RETURN min(t), max(t)', { ts: [smile, tilde, privateUse] })
-                ).toEqual([[privateUse, smile]]);
-            }
-        });
-
-        it('a text in a list sorts by its code points up to and across its 500th character', async () => {
-            // Postgres keys a text in a list by the bits of its first 500 characters, then by the rest. 500 characters
-            // of four bytes are 16,000 bits, near the 16,383 places Postgres holds; the 500th may be of 1 to 4 bytes.
-            const smile = '😀';
-            const [s499, s500] = [smile.repeat(499), smile.repeat(500)];
-            const texts = [s499, s499 + 'a', s499 + '～', s500, s500 + 'a', s500 + 'b'];
-            const written = [...texts]
-                .reverse()
-                .map((it) => `['${it}']`)
-                .join(', ');
-            expect(await query(`UNWIND [${written}] AS l RETURN l ORDER BY l`)).toEqual(texts.map((it) => [it]));
-            expect(await query(`UNWIND [${written}] AS l RETURN l ORDER BY l DESC`)).toEqual(
-                [...texts].reverse().map((it) => [it])
-            );
-            const [a499, a500] = ['a'.repeat(499), 'a'.repeat(500)];
-            expect(
-                await query(
-                    `UNWIND [['${a500}B'], ['${a500}'], ['${a499}é'], ['${a499}b'], ['${a499}B']] AS l RETURN l ORDER BY l`
-                )
-            ).toEqual([[a499 + 'B'], [a500], [a500 + 'B'], [a499 + 'b'], [a499 + 'é']]);
-        });
-
-        it('a text sorts beside a null and a number as before, and by its code points among the texts', async () => {
-            // Postgres sorts by a row of the value, each text blanked, and of the text by its code points.
-            expect(await query("UNWIND ['b', null, 'B'] AS t RETURN t ORDER BY t")).toEqual(['B', 'b', null]);
-            expect(await query("UNWIND ['b', null, 'B', 'b'] AS t RETURN DISTINCT t ORDER BY t DESC")).toEqual([
-                null,
-                'b',
-                'B'
-            ]);
-            // Oracle sorts a number before a text, by its own order of kinds.
-            if (store.type !== DatabaseType.ORACLE) {
-                expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t")).toEqual([
-                    'B',
-                    'b',
-                    1,
-                    2,
-                    null
-                ]);
-                expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t DESC")).toEqual([
-                    null,
-                    2,
-                    1,
-                    'b',
-                    'B'
-                ]);
-            }
-            // A text compared with a value of another kind is null, and min and max of several kinds take the least
-            // text by its code points.
-            expect(
-                await query(
-                    "RETURN ['a' < 1, 'B' > null, 1 >= 'a', coalesce(null, 'a') < 'B', CASE WHEN true THEN 'a' END < 'B']"
-                )
-            ).toEqual([[null, null, null, false, false]]);
-            expect(await query("UNWIND ['b', 1, 'B', true] AS t WITH t WHERE t < 'a' RETURN t")).toEqual(['B']);
-            expect(await query("UNWIND ['b', 1, 'B', true] AS t WITH t WHERE t > 0 RETURN t")).toEqual([1]);
-            expect(await query("UNWIND ['b', 'B', 'a', 'B'] AS t RETURN min(DISTINCT t), max(DISTINCT t)")).toEqual([
-                ['B', 'b']
-            ]);
-            expect(await query("UNWIND ['b', 1, 'B', 2, true] AS t RETURN min(t), max(t)")).toEqual([['B', 2]]);
-        });
-
-        it('a text sorts by its code points where its sort key is long enough to be worked out in a subquery', async () => {
-            // Postgres binds a long term once in a subquery, which gives its sort key as a row.
-            const key = "coalesce(toLower(toUpper(trim(t))), toUpper(t), 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz') + t";
-            expect(await query(`UNWIND ['b', 'B', 'a'] AS t RETURN DISTINCT t ORDER BY ${key}`)).toEqual([
-                'a',
-                'B',
-                'b'
-            ]);
-            expect(await query(`UNWIND ['b', 'B', 'a'] AS t RETURN DISTINCT t ORDER BY ${key} DESC`)).toEqual([
-                'b',
-                'B',
-                'a'
-            ]);
         });
     });
 });
@@ -690,12 +422,6 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     "MATCH (n:Round) RETURN [round(0.0, 400), round(0, 400, 'HALF_UP'), round(n.z, 2), round(n.z, 400), round(n.z, 2, 'UP'), round(1.0E-120, 130), round(1.0E-120, 130, 'HALF_UP'), round(-1.0E-120, 136, 'CEILING')]"
                 )
             ).toEqual([[0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-120, 1.0e-120, -1.0e-120]]);
-            // Either side of the last place a double holds, and short of it, where a mode still rounds.
-            expect(
-                await query(
-                    "RETURN [round(123.456, 14, 'UP'), round(123.456, 15, 'UP'), round(123.456, 16, 'UP'), round(-123.456, 14, 'FLOOR'), round(1234.5678901234567, 13), round(1234.5678901234567, 12, 'HALF_EVEN')]"
-                )
-            ).toEqual([[123.456, 123.456, 123.456, -123.456, 1234.5678901234567, 1234.567890123457]]);
             // Near 10^17, whose digits all come before the point, and negatives past their digits.
             expect(
                 await query(
@@ -733,15 +459,8 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         });
 
         it('round() to 0 places rounds as round(x) does, half toward +infinity, and to more half away from zero', async () => {
-            // The spec's steps for liberation-data/drivine#328, from drivine-cypher-spec v0.6.8.
-            expect(
-                await query(
-                    'RETURN [round(-2.5, 0), round(-1.5, 0), round(-0.5, 0), round(2.5, 0), round(-2.6, 0), round(-2.55, 1), round(-2.5, 0.7)]'
-                )
-            ).toEqual([[-2.0, -1.0, 0.0, 3.0, -3.0, -2.6, -2.0]]);
-            expect(await query('UNWIND [0, -0.5, 1, null] AS p RETURN round(-2.5, p)')).toEqual([-2.0, -2.0, -2.5, null]);
-            // Either side of 0, the first odd double past 2^52 and numbers near NUMBER's greatest, to 0 places written, picked
-            // when compiling, and from an expression, by the CASE.
+            // Beyond the spec's steps for liberation-data/drivine#328: either side of 0, the first odd double past 2^52 and
+            // numbers near NUMBER's greatest, to 0 places written, picked when compiling, and from an expression, by the CASE.
             for (const places of ['0', "toInteger('0')"]) {
                 expect(
                     await query(
@@ -1000,18 +719,13 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             `${fn}() takes a ${what} from 0 to 2147483647, as in Neo4j.`;
 
         it('substring(), left() and right() refuse a written float, even a whole one, and a given start or length out of range, as Neo4j does', async () => {
-            // Not in the spec yet (#263): a start or a length. Neo4j refuses a float it knows to be one whatever the text;
-            // a bound one it cuts toward zero. It refuses one out of range only where the text is not null.
+            // Beyond the spec's steps for drivine4j's #263: a start or a length. Neo4j refuses a float it knows to be one
+            // whatever the text; a bound one it cuts toward zero. It refuses one out of range only where the text is not null.
             for (const [statement, parameters, message] of [
-                ["RETURN left('hello', 2.7)", {}, float('left', 'length')],
                 ["RETURN left('hello', 2.0)", {}, float('left', 'length')],
                 ["RETURN right('hello', -0.5)", {}, float('right', 'length')],
                 ["RETURN substring('hello', 1.0)", {}, float('substring', 'start')],
-                ["RETURN substring('hello', 1, 2.6)", {}, float('substring', 'length')],
-                ['RETURN left(null, 2.7)', {}, float('left', 'length')],
-                ["RETURN left('hello', -1)", {}, outOfRange('left', 'length')],
                 ["RETURN right('hello', -1)", {}, outOfRange('right', 'length')],
-                ["RETURN substring('hello', -1, 2)", {}, outOfRange('substring', 'start')],
                 ["RETURN substring('hello', 1, -1)", {}, outOfRange('substring', 'length')],
                 ["RETURN left('hello', 9223372036854775807)", {}, outOfRange('left', 'length')],
                 ['RETURN substring($t, $s)', { t: 'hello', s: -1 }, outOfRange('substring', 'start')],
