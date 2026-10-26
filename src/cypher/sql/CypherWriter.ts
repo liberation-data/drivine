@@ -64,6 +64,7 @@ import {
     variablesOutsideAggregates,
     writes
 } from '@/cypher/sql/CypherSyntax';
+import { jsonText } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Select } from '@/cypher/sql/Select';
 import { Procedure, Walk, Walked } from '@/cypher/sql/Procedure';
@@ -389,6 +390,21 @@ function holdsNoNull(tree: unknown): boolean {
 /** Whether `tree`, a value {@link jsonTree} gives, holds no map, at any depth. */
 function arrays(tree: unknown): boolean {
     return !isJsonMap(tree) && (!Array.isArray(tree) || tree.every(arrays));
+}
+
+/**
+ * The most bytes of JSON's text, in UTF-8, an item of a parameter's list is written in the statement in, as
+ * `givenItemwise` writes it: Oracle takes no text literal past 4,000 bytes (ORA-01704), a text's JSON is written in a
+ * literal of its own, and each quote in it is doubled there.
+ */
+const LITERAL_BYTES = 1000;
+
+/**
+ * Whether each text, number and truth value `tree`, a list {@link jsonTree} gives that holds no map, holds is short
+ * enough to write in the statement: see {@link LITERAL_BYTES}.
+ */
+function short(tree: unknown): boolean {
+    return Array.isArray(tree) ? tree.every(short) : Buffer.byteLength(jsonText(tree), 'utf8') <= LITERAL_BYTES;
 }
 
 /**
@@ -4077,7 +4093,8 @@ export class CypherWriter {
      * An equality of `left` and `right`, written as `leftWritten` and `rightWritten`, where one is a parameter bound to a
      * list that holds a null, lists within it among its items and no map: the other compared with it item by item, each
      * item as the statement is compiled with it, as {@link itemwise} compares a list written out, so no store walks the
-     * two. Undefined where neither is such a parameter.
+     * two. Undefined where neither is such a parameter, or where an item is too long to write in the statement (see
+     * {@link short}): such a list is walked as any other.
      */
     private givenItemwise(
         leftWritten: Expression,
@@ -4090,7 +4107,7 @@ export class CypherWriter {
                 return undefined;
             }
             const tree = this.parameterTree(expression.name);
-            return Array.isArray(tree) && !holdsNoNull(tree) && arrays(tree) ? tree : undefined;
+            return Array.isArray(tree) && !holdsNoNull(tree) && arrays(tree) && short(tree) ? tree : undefined;
         };
         const other = (value: Value): JsonValue | undefined =>
             value.kind === 'Json' && value.identity === undefined && value.temporal === undefined ? value : undefined;

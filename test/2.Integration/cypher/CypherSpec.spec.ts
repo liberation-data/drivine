@@ -326,6 +326,19 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ).toEqual([[true, true]]);
         });
 
+        it("texts past 32 KB in a parameter's lists that hold a null compare as texts", async () => {
+            // A parameter's list with such a text is walked, not written in the statement item by item, past the literal
+            // Oracle takes (ORA-01704) (#351).
+            const text = 'x'.repeat(40_000);
+            const given = { a: [text, null], b: [text, null], c: [text + 'y', null] };
+            expect(await query('RETURN [$a = $b, $a = $c, $a IN [$b], $a IN [$c]]', given)).toEqual([
+                [null, false, null, false]
+            ]);
+            expect(await query('WITH $a AS a, $b AS b, $c AS c RETURN [a = b, a = c, {k: a} = {k: b}]', given)).toEqual(
+                [[null, false, null]]
+            );
+        });
+
         it('a null node or relationship in a list or a map makes its comparison null', async () => {
             // A node or a relationship OPTIONAL MATCH finds none of is null in what holds it.
             await seed();
