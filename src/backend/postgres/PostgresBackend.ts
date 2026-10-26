@@ -48,7 +48,8 @@ export const ROW_ALIAS = 'n';
  * `where` is an SQL predicate over the node's row, `n` (its `labels`, `props` and `stamp`), in which a property of the
  * node may be written as Cypher writes it, `n.name` (see `written`).
  *
- * The store is made by the object manager, before its first statement: see `ensuring`.
+ * The store is made on the connection provider's first connection, and by the object manager before its first
+ * statement, for a backend of another graph than the provider's: see `ensuring`.
  */
 export class PostgresBackend implements GraphBackend {
     constructor(readonly graph: PostgresGraph = new PostgresGraph()) {}

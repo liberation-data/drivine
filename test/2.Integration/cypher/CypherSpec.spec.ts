@@ -5,7 +5,6 @@ import {
     DatabaseType,
     PersistenceManager,
     PersistenceManagerFactory,
-    PostgresGraph,
     QuerySpecification,
     Stamps,
     TransactionContextHolder
@@ -68,15 +67,11 @@ async function managerFor(store: Store): Promise<PersistenceManager> {
         await startNeo4j();
         DatabaseRegistry.buildOrResolveFromEnv(store.connection);
     }
-    const pm = new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance()).get(
+    // The connection makes the graph's tables on Postgres and Oracle alike, on its first statement.
+    return new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance()).get(
         store.connection,
         'NON_TRANSACTIONAL'
     );
-    // Oracle's connection makes the graph's tables; on Postgres, an object manager does, so here the spec does.
-    if (store.type === DatabaseType.POSTGRES) {
-        await pm.execute(new QuerySpecification(new PostgresGraph(GRAPH).ensuring));
-    }
-    return pm;
 }
 
 /**

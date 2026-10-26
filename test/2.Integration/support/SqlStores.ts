@@ -70,7 +70,10 @@ export class SqlSeed {
         private readonly key: string = 'id'
     ) {}
 
-    /** Makes the store where it is not there: Oracle's connection makes it; on Postgres, an object manager does. */
+    /**
+     * Makes the store where it is not there. The connection makes it on its first statement, on Oracle and Postgres
+     * alike; this makes Postgres's again where a suite dropped it after.
+     */
     async prepare(): Promise<void> {
         if (this.store.type === DatabaseType.POSTGRES) {
             await this.pm.execute(new QuerySpecification(new PostgresGraph().ensuring));

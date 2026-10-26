@@ -334,15 +334,11 @@ import {
     cypherStatement,
     DatabaseRegistry,
     PersistenceManagerFactory,
-    PostgresGraph,
     QuerySpecification
 } from '@liberation-data/drivine';
 
 DatabaseRegistry.buildOrResolveFromEnv();
 const pm = new PersistenceManagerFactory().get();
-
-// Postgres only, and only until an object manager has worked on the graph: make its tables. Oracle makes them itself.
-await pm.execute(new QuerySpecification(new PostgresGraph(process.env.DATABASE_DEFAULT_GRAPH_PATH).ensuring));
 
 await pm.execute(
     new QuerySpecification(
@@ -363,6 +359,8 @@ const friends = await pm.query<{ name: string; since: number }>(
 );
 // [{ name: 'Carrie-Anne', since: 1999 }]
 ```
+
+The graph's tables are made on the first connection to a new store, so there is nothing to set up first.
 
 A statement that writes runs as one statement, applied whole or not at all. Each row is one value, so
 [return one map](#return-one-map) or a scalar, as on a graph engine.
@@ -1692,9 +1690,11 @@ DATABASE_DEFAULT_GRAPH_PATH=drivine   # names the graph's tables; this is the de
 ```
 
 The graph's name names tables, so it is letters, digits and underscores, begins with a letter, and is at most 49
-characters; Postgres folds it to lower case. The tables are made when an object manager first runs a statement.
-Postgres is a graph store like the others, so a schema catalog that names no database applies to it too, and makes its
-tables at startup: to keep a database you use only for plain SQL as it is, narrow the catalog with `.forDatabase(...)`.
+characters; Postgres folds it to lower case. The tables are made on the first connection, when they are not there, as on
+Oracle, whichever manager is first: a database you connect to through Drivine gets the graph's tables, even if you send
+it only plain SQL. A user who may only read connects to a graph that is already there and up to date. Postgres is a
+graph store like the others, so a schema catalog that names no database applies to it too, and makes its indexes at
+startup: to keep a database you use only for plain SQL free of them, narrow the catalog with `.forDatabase(...)`.
 
 **How a graph is stored.** drivine4j's store, byte for byte, so the JVM, Node and Python read and write one graph:
 `<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
@@ -1743,9 +1743,8 @@ const names = await pm.query<string>(
 ```
 
 - A statement must say it is Cypher: a statement of no language is SQL on these stores.
-- The graph's tables must be there. Oracle makes them on its first connection; on Postgres an object manager makes them,
-  so a persistence manager that runs Cypher on a graph no object manager has worked on runs
-  `new QuerySpecification(new PostgresGraph(graph).ensuring)` first.
+- The graph's tables are made on the first connection to the store, on Oracle and Postgres alike, so Cypher runs on a
+  new store with no object manager.
 - A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties,
   and so is each node or relationship of a list of them (`collect(n)`, `nodes(p)`); compared, indexed, searched with
   `IN` or iterated, its items are the nodes themselves, so two with equal properties differ.
