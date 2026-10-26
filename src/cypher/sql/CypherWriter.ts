@@ -2303,7 +2303,7 @@ export class CypherWriter {
         this.rowOrder = this.orderOf(select);
         const compiled = items.map((item): [string, Value] => [
             item.name,
-            this.carriedOut(this.aggregating(item.expression, () => this.expression(item.expression, select.scope)))
+            this.carriedOut(this.aggregating(item.expression, () => this.item(item.expression, select)))
         ]);
         const aggregating = items.some((it) => contains(it.expression, isAggregate));
         // Where rows are compared (DISTINCT, GROUP BY), JSON is compared as what compares.
@@ -3328,6 +3328,26 @@ export class CypherWriter {
             return undefined;
         }
         return this.parameters.jsonAt(subject.name, keys);
+    }
+
+    /**
+     * The item `expression` of a `RETURN` or a `WITH` over `select`: a property of a node or a relationship, the item
+     * itself, read as {@link SqlCypherCompiler.itemProperty} reads it, but beside a variable-length walk; anything else
+     * as elsewhere. A node or a relationship is compiled once here: compiling the item over it again lost the rows of
+     * statements that match a relationship.
+     */
+    private item(expression: Expression, select: Select): Value {
+        if (expression.kind === 'Property' && !select.walks) {
+            // A property of a node or a relationship holds no null in a list, as expression() marks it (see flat).
+            const subject = this.expression(expression.subject, select.scope);
+            if (subject.kind === 'Node' && expression.key !== Stamps.PROPERTY) {
+                return json(this.sql.itemProperty(subject.props, expression.key), { flat: true });
+            }
+            if (subject.kind === 'Relationship') {
+                return json(this.sql.itemProperty(subject.props, expression.key), { flat: true });
+            }
+        }
+        return this.expression(expression, select.scope);
     }
 
     private property(subject: Value, key: string): Value {

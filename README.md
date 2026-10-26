@@ -1771,6 +1771,16 @@ const names = await pm.query<string>(
 - Functions of numbers (`exp`, `log`, `sin`, `atan2`, `round` by a mode …) give the floats Neo4j gives, but where Neo4j
   gives NaN or an infinity (`log(0)`, `sqrt(-1)`, `exp(1000)`) the statement fails: JSON holds neither. A float is
   written as Java writes a double, by `toString` and added to a text: `1.0E7`, `1.2E-4`.
+- On Oracle, a property that a `RETURN` or a `WITH` returns or passes on (`RETURN n.name`) is read through its text,
+  which costs about 2.4 to 3.8 times a plain read: 100,000 rows of `RETURN n.name` take about 490 ms, against 150 ms.
+  This works around an Oracle bug, seen on 23.26.3: a string past about 32 KB taken from JSON as JSON, returned or fed
+  on into more SQL, crashes the session (ORA-03113, with ORA-00600 [17114] or ORA-07445 in the alert log) over two or
+  more rows. Only an item that is the property itself is read so: one inside an item (`RETURN [n.name]`,
+  `collect(n.name)`) is read as JSON, as before, and isn't worked around. It goes once an Oracle release no longer
+  crashes on the repro in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
+  Such a text still can't be sorted by, grouped by or made `DISTINCT`: Oracle sorts and groups JSON only up to about
+  32 KB, and refuses the statement (ORA-40180), leaving the session open.
 - On Postgres, float arithmetic is worked out in exact decimal (`numeric`), not as a double, so a result can differ
   from a graph engine's in its last digits: `0.1 * 3` is `0.3`, where Neo4j gives `0.30000000000000004`. A float's text
   carries no trailing zeros: `toString(4.0 / 2)` is `"2.0"`.
