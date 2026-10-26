@@ -2,7 +2,7 @@ import { DrivineError } from '@/DrivineError';
 import { holdsLabel } from '@/backend/oracle/OracleGraph';
 import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
-import { DEGREES_TO_RADIANS, indent, literal, RADIANS_TO_DEGREES } from '@/cypher/sql/CypherSyntax';
+import { DEGREES_TO_RADIANS, indent, literal, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
@@ -22,6 +22,12 @@ const NULLS_EQUAL = 'cy_nulls_equal';
 
 /** A key a JSON path writes bare: what SQL would take for an identifier. */
 const PLAIN_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** How many significant digits a double holds at most, as Neo4j rounds one. */
+const DOUBLE_DIGITS = 17;
+
+/** The most places `pastItsDigits` rounds to, whose scale `10^p` is well inside the `NUMBER` range. */
+const MOST_PLACES = 100;
 
 /** The words a JSON path reads as values, not keys. */
 const JSON_WORDS = ['true', 'false', 'null'];
@@ -691,6 +697,14 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         );
     }
 
+    roundPlaces(number: string, precision: string): string {
+        return this.pastItsDigits(number, precision, (n, p) => super.roundPlaces(n, p));
+    }
+
+    roundTo(number: string, precision: string, mode: RoundingMode): string {
+        return this.pastItsDigits(number, precision, (n, p) => super.roundTo(n, p, mode));
+    }
+
     /** SUBSTR from the end gives null where it is asked for more than there is. */
     rightText(text: string, count: string): string {
         return this.shared(
@@ -774,6 +788,29 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     withoutLabel(labels: string, label: string): string {
         return `JSON_TRANSFORM(${labels}, REMOVE ${literal(`$[*]?(@ == ${quoted(label)})`)})`;
+    }
+
+    /**
+     * `round` of `number` to `precision` places, or `number` itself where those places are past its digits: Oracle's
+     * `NUMBER` stops near 10^126, so `ROUND(n, 400)`, and the scale `10^p` a mode rounds by, overflow (ORA-01426) where
+     * Neo4j gives the number back. Neo4j rounds a double, of {@link DOUBLE_DIGITS} significant digits at most, so
+     * rounding it to places past its last digit changes nothing; a number Oracle holds to more digits is a double again
+     * once rounded. Oracle works out only the branch of a CASE a row takes, so the overflowing one is never reached.
+     * Short of its digits, a tiny number may still take more than {@link MOST_PLACES} places, as 1.0E-120 to 130 does:
+     * it is rounded moved that many places fewer to the right, then moved back, which is exact in decimal.
+     *
+     * The places are past its digits where the number is at least `10^(17 - p)`, compared in decimal: `LOG` would count
+     * them, but fails on zero and on numbers as small as 1.0E-129 (ORA-01428). `POWER` gives 0 for a scale past `NUMBER`'s
+     * least, so zero is given back to places that many, and rounded short of them: 0 either way. The precision is read
+     * first, in a WHEN of its own, as Oracle tries them in order and stops at the first that holds: a null one gives null
+     * for zero too, and a negative one from data fails there, where it is written out, not bound, as under an aggregate.
+     */
+    private pastItsDigits(number: string, precision: string, round: (n: string, p: string) => string): string {
+        return this.shared([number, precision], ([n, p]) => {
+            const shift = `POWER(10, GREATEST(${p} - ${MOST_PLACES}, 0))`;
+            const rounded = round(`(${n} * ${shift})`, `(${p} - GREATEST(${p} - ${MOST_PLACES}, 0))`);
+            return `CASE WHEN ${p} IS NULL THEN NULL WHEN ABS(${n}) >= POWER(10, ${DOUBLE_DIGITS} - ${p}) THEN ${n} ELSE ${rounded} / ${shift} END`;
+        });
     }
 
     /** The side `json` of a `+` that the statement gives as `given`, and the other side as `other`, as text: see `summedText`. */

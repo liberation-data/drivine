@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { Stamps } from '@/model/Stamps';
-import { indent, literal, RADIANS_TO_DEGREES } from '@/cypher/sql/CypherSyntax';
+import { indent, literal, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { PostgresTemporalSql } from '@/cypher/sql/PostgresTemporalSql';
@@ -35,6 +35,9 @@ const NUMERIC_TEXT = '^\\s*[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?\\
  * -745.13321910194120…, and this is the least double Java's `exp` gives more than 0.0 for.
  */
 const EXP_UNDERFLOW = '-745.1332191019411';
+
+/** The most places `round()` rounds to: past them, a double, the least of which is near 4.9E-324, has no digit. */
+const MOST_PLACES = 400;
 
 /** A property read as `propertyOf` reads it, `(alias.props -> 'key')`: its row's column, and its key's literal. */
 const READ_PROPERTY = /^\(([\w.]+) -> ('(?:[^']|'')*')\)$/;
@@ -455,6 +458,19 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * Places past {@link MOST_PLACES} change no double, the least of which is near 4.9E-324, and Postgres's `numeric`
+     * overflows on a precision as large as a billion: so a precision is held to them, as Neo4j gives the number back. A
+     * CASE, not `LEAST`, which passes over a null where a null precision rounds to null.
+     */
+    roundPlaces(number: string, precision: string): string {
+        return super.roundPlaces(number, this.heldPlaces(precision));
+    }
+
+    roundTo(number: string, precision: string, mode: RoundingMode): string {
+        return super.roundTo(number, this.heldPlaces(precision), mode);
+    }
+
+    /**
      * Worked out as a `double precision`, as Neo4j works it out as a Java double, and written back as the text of that
      * double: a cast to `numeric` would keep 15 of its digits. Postgres fails where Neo4j gives NaN or an infinity,
      * `ln(0)`, `sqrt(-1)`, `asin(2)`, `exp(1000)` and `1 / tan(0)` among them, but for an exponent too small for a
@@ -557,6 +573,11 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
 
     withoutLabel(labels: string, label: string): string {
         return `(${labels} - ${literal(label)})`;
+    }
+
+    /** `precision`, held to {@link MOST_PLACES}: see {@link roundPlaces}. */
+    private heldPlaces(precision: string): string {
+        return this.shared([precision], ([p]) => `CASE WHEN ${p} > ${MOST_PLACES} THEN ${MOST_PLACES} ELSE ${p} END`);
     }
 
     /** The side `json` of a `+` that the statement gives as `given`, and the other side as `other`, as text: see `summedText`. */
