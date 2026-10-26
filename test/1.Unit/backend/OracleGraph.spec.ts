@@ -10,6 +10,18 @@ const HELD = `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || '
 const DRIVINE4J = JSON.parse(fs.readFileSync(path.join(__dirname, '../golden/drivine4j-oracle-schema.json'), 'utf8'));
 
 describe('OracleGraph', () => {
+    it('should wait on the locks of another session making the store, and set the wait back after, failed or not', () => {
+        const ensuring = new OracleGraph('tenant_a').ensuring;
+        const waits = `EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';`;
+        const resets = "EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';";
+        const first = ensuring.indexOf('CREATE TABLE IF NOT EXISTS tenant_a_node');
+        const graph = ensuring.indexOf('CREATE OR REPLACE PROPERTY GRAPH tenant_a');
+        expect(ensuring.indexOf(waits)).toBeGreaterThan(ensuring.indexOf('IF v_made = 0 THEN'));
+        expect(ensuring.indexOf(waits)).toBeLessThan(first);
+        expect(ensuring.indexOf(resets)).toBeGreaterThan(graph);
+        expect(ensuring).toContain(`WHEN OTHERS THEN\n        ${resets}\n        RAISE;`);
+    });
+
     it("should name its tables after the graph, drivine's unless named", () => {
         expect(new OracleGraph().name).toEqual(DEFAULT_GRAPH);
         const graph = new OracleGraph('tenant_a');

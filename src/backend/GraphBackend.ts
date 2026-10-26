@@ -82,9 +82,11 @@ export interface CascadeDepthCheck {
  */
 export interface GraphBackend {
     /**
-     * Where the store is tables an object manager makes (Postgres): the statement that makes them when they are not
-     * there and does nothing when they are, which a manager runs once, before its first statement, outside any
-     * transaction. Undefined where there is nothing to make, or the connection makes it (Oracle).
+     * Where the store is tables (Postgres): the statement that makes them when they are not there and does nothing
+     * when they are, which a manager runs once, before its first statement, outside any transaction. The connection
+     * provider runs it too, on its first connection, for the graph it names (see FirstConnection), so a persistence
+     * manager alone finds the tables; the manager's run covers a backend of another graph than the provider's.
+     * Undefined where there is nothing to make, or only the connection makes it (Oracle).
      */
     readonly ensuring?: string;
 
