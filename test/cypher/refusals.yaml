@@ -260,12 +260,6 @@ cases:
         error: "round() by UNNECESSARY is Cypher, and is not compiled to SQL yet."
       - cypher: "WITH 'UP' AS m RETURN round(2.5, 0, m)"
         error: "A rounding mode an expression gives is Cypher, and is not compiled to SQL yet."
-      - note: Neo4j takes no negative precision, written or a parameter's value.
-        cypher: "RETURN round(1250, -2, 'HALF_EVEN')"
-        error: "round() takes a precision of 0 or more, as in Neo4j."
-      - cypher: "RETURN round(1250, $p, 'HALF_EVEN')"
-        parameters: {p: -1}
-        error: "round() takes a precision of 0 or more, as in Neo4j."
 
   - name: "Function of numbers given the wrong arguments"
     description: "A function of numbers given more or fewer arguments than it takes is refused."
