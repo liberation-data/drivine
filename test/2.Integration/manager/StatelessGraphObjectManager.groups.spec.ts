@@ -23,7 +23,7 @@ import { SqlSeed, SqlStore, sqlStores } from '../support/SqlStores';
 
 // Neo4j plans each statement the first time it sees it, a few hundred milliseconds for one of the object manager's, and
 // the tests here send statements of their own shapes. On fresh containers, beside the suites running in parallel, a
-// test can pass Jest's 5 seconds planning them (#349).
+// test can pass Jest's 5 seconds planning them, and so can beforeAll seeding the store (#349).
 jest.setTimeout(30_000);
 
 @NodeFragment({ labels: ['GroupTest', 'Feedback'] })
