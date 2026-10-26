@@ -244,6 +244,14 @@ export abstract class SqlCypherCompiler {
         return this.called(query);
     }
 
+    /**
+     * `round(value)`, and `round(value, 0)`: the SQL number `number` to a whole number, half toward +infinity, as Java's
+     * `Math.round` rounds. Worked out in decimal, as `numeric` and `NUMBER` hold a number, exactly.
+     */
+    roundWhole(number: string): string {
+        return `FLOOR(${number} + 0.5)`;
+    }
+
     /** `round(value, precision)`: the SQL number `number` to `precision` places, half away from zero, as SQL's `ROUND` rounds. */
     roundPlaces(number: string, precision: string): string {
         return `ROUND(${number}, ${precision})`;

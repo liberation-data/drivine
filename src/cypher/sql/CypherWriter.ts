@@ -4665,18 +4665,34 @@ export class CypherWriter {
             );
         }
         if (call.arguments.length === 2) {
+            // To 0 places Neo4j rounds as round(x) does, half toward +infinity, as Java's Math.round; to more, half away
+            // from zero. Places known when compiling pick the rounding then: under an aggregate, where nothing is bound,
+            // a CASE of both would write the number out in each, at each round() nested in another. Places from data
+            // are told apart as the statement runs.
+            const number = this.numberOf(call.arguments[0]);
+            const precision = this.precisionOf(call.arguments[1], call.fn.arguments[1]);
+            const places = this.givenPlaces(call.fn.arguments[1]);
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        this.sql.roundPlaces(
-                            this.numberOf(call.arguments[0]),
-                            this.precisionOf(call.arguments[1], call.fn.arguments[1])
-                        )
+                        places === undefined
+                            ? this.sql.shared(
+                                  [number, precision],
+                                  ([n, p]) =>
+                                      `CASE WHEN ${p} = 0 THEN ${this.sql.roundWhole(n)} ELSE ${this.sql.roundPlaces(
+                                          n,
+                                          p
+                                      )} END`
+                              )
+                            : // Not "places < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places.
+                            !(places >= 1)
+                            ? this.sql.roundWhole(number)
+                            : this.sql.roundPlaces(number, precision)
                     )
                 )
             );
         }
-        return json(this.sql.scalar(this.sql.float(`FLOOR(${this.numberOf(call.one())} + 0.5)`)));
+        return json(this.sql.scalar(this.sql.float(this.sql.roundWhole(this.numberOf(call.one())))));
     }
 
     /**
@@ -4838,12 +4854,11 @@ export class CypherWriter {
     }
 
     /**
-     * `round()`'s precision `value`, written in the statement as `written`, as a whole number toward zero: -0.5 is 0
-     * places. One below 0 is refused, as Neo4j refuses it: when compiling, where it is written, negated or not, or a
-     * parameter's value, a bigint or the Neo4j driver's Integer too; and else when the row is read, by the store's
-     * `failure`.
+     * `round()`'s precision, written in the statement as `written`, as a whole number toward zero where it is known when
+     * compiling: written, negated or not, or a parameter's value, a bigint or the Neo4j driver's Integer too. Undefined
+     * where it comes from data.
      */
-    private precisionOf(value: Value, written: Expression): string {
+    private givenPlaces(written: Expression): number | undefined {
         const negated = written.kind === 'Unary' && written.operator === 'NEGATE';
         const precision = this.given(negated ? (written as Unary).operand : written);
         const given =
@@ -4852,8 +4867,19 @@ export class CypherWriter {
                 : typeof precision === 'bigint' || isInt(precision)
                 ? Number(precision.toString())
                 : precision;
-        if (typeof given === 'number') {
-            if (Math.trunc(negated ? -given : given) < 0) {
+        return typeof given === 'number' ? Math.trunc(negated ? -given : given) : undefined;
+    }
+
+    /**
+     * `round()`'s precision `value`, written in the statement as `written`, as a whole number toward zero: -0.5 is 0
+     * places. One below 0 is refused, as Neo4j refuses it: when compiling, where it is written, negated or not, or a
+     * parameter's value, a bigint or the Neo4j driver's Integer too; and else when the row is read, by the store's
+     * `failure`.
+     */
+    private precisionOf(value: Value, written: Expression): string {
+        const places = this.givenPlaces(written);
+        if (places !== undefined) {
+            if (places < 0) {
                 throw new DrivineError(NEGATIVE_PRECISION);
             }
             return this.truncatedWhole(value);
