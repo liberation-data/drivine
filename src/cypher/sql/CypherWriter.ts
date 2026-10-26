@@ -702,7 +702,7 @@ export class CypherWriter {
         // Java's constants, which Neo4j gives, written as the floats they are.
         e: (call) => this.constant(call, Math.E),
         pi: (call) => this.constant(call, Math.PI),
-        sign: (call) => json(this.sql.scalar(`SIGN(${this.numberOf(call.one())})`)),
+        sign: (call) => json(this.sql.scalar(this.sql.signOf(this.numberOf(call.one())))),
         ltrim: (call) => json(this.sql.scalar(`LTRIM(${this.textOf(call.one())})`), { text: true }),
         rtrim: (call) => json(this.sql.scalar(`RTRIM(${this.textOf(call.one())})`), { text: true }),
         randomuuid: (call) => {

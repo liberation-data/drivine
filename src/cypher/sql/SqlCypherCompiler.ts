@@ -257,6 +257,11 @@ export abstract class SqlCypherCompiler {
         return `ROUND(${number}, ${precision})`;
     }
 
+    /** The sign of the SQL number `number`: 1, -1 or 0, as SQL's `SIGN` gives it, and null where it is null. */
+    signOf(number: string): string {
+        return `SIGN(${number})`;
+    }
+
     /**
      * `round(value, precision, mode)`: the SQL number `number` rounded to `precision` decimal places by `mode`, as a SQL
      * number. Worked out in decimal, as Neo4j works it out with Java's `BigDecimal`, so 2.345 is halfway between 2.34 and
@@ -280,7 +285,7 @@ export abstract class SqlCypherCompiler {
             if (mode === 'FLOOR') {
                 return `(FLOOR(${n} * ${scale}) / ${scale})`;
             }
-            return `(SIGN(${n}) * ${magnitudes[mode]} / ${scale})`;
+            return `(${this.signOf(n)} * ${magnitudes[mode]} / ${scale})`;
         });
     }
 

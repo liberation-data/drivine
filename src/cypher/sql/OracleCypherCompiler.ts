@@ -697,6 +697,16 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         );
     }
 
+    /**
+     * Oracle's `SIGN` gives 0 for a positive number under 1.0E-128, from 1.0E-130 up, which NUMBER holds and compares as
+     * greater than 0, and is right from 1.0E-128 up, for a negative number, 0, and null. So the number is held to between
+     * -1 and 1, where a thousand times it cannot overflow, and that is signed, past 1.0E-128 where it is not 0: `number`
+     * is read once, so a sign of a sign does not write it out twice at each level (liberation-data/drivine#342).
+     */
+    signOf(number: string): string {
+        return `SIGN(GREATEST(LEAST(${number}, 1), -1) * 1000)`;
+    }
+
     roundPlaces(number: string, precision: string): string {
         return this.pastItsDigits(number, precision, (n, p) => super.roundPlaces(n, p));
     }
