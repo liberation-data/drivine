@@ -78,6 +78,38 @@ cases:
       - cypher: "RETURN replace('abc', 'a')"
         error: "replace() takes a text, what to replace, and what with."
 
+  - name: "Start or length of a text function"
+    description: "substring(), left() and right() refuse a written float, even a whole one, and a given start or length out of range beside a given text."
+    steps:
+      - cypher: "RETURN left('hello', 2.7)"
+        error: "left() takes an integer for its length, not a float, as in Neo4j."
+      - cypher: "RETURN right('hello', 2.0)"
+        error: "right() takes an integer for its length, not a float, as in Neo4j."
+      - cypher: "RETURN substring('hello', -0.5)"
+        error: "substring() takes an integer for its start, not a float, as in Neo4j."
+      - cypher: "RETURN substring('hello', 1, 2.6)"
+        error: "substring() takes an integer for its length, not a float, as in Neo4j."
+      - note: "Refused whatever the text, as Neo4j refuses it."
+        cypher: "RETURN left(null, 2.7)"
+        error: "left() takes an integer for its length, not a float, as in Neo4j."
+      - cypher: "RETURN left('hello', -1)"
+        error: "left() takes a length from 0 to 2147483647, as in Neo4j."
+      - cypher: "RETURN substring('hello', -1, 2)"
+        error: "substring() takes a start from 0 to 2147483647, as in Neo4j."
+      - cypher: "RETURN substring('hello', 1, 9223372036854775807)"
+        error: "substring() takes a length from 0 to 2147483647, as in Neo4j."
+      - note: "Bound, a float is cut toward zero first: -1.5 is -1."
+        cypher: "RETURN right($t, $n)"
+        parameters: {t: "hello", n: -1.5}
+        error: "right() takes a length from 0 to 2147483647, as in Neo4j."
+      - note: "A negated parameter is negated first, and then cut: -2.7 is -2."
+        cypher: "RETURN left($t, -$n)"
+        parameters: {t: "hello", n: 2.7}
+        error: "left() takes a length from 0 to 2147483647, as in Neo4j."
+      - cypher: "RETURN left($t, $n)"
+        parameters: {t: "hello", n: 2147483648}
+        error: "left() takes a length from 0 to 2147483647, as in Neo4j."
+
   - name: "Read not compiled yet"
     description: "Read syntax the compiler doesn't handle yet is refused, naming what it is."
     steps:
