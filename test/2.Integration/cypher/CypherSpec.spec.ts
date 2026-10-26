@@ -933,6 +933,48 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             }
         });
 
+        it("round() by a mode and sign() take the least positive numbers as positive, where Oracle's SIGN gives 0", async () => {
+            // Oracle's SIGN gives 0 for a positive number from 1.0E-130 to under 1.0E-128 (liberation-data/drivine#342);
+            // UP, DOWN and the HALF_ modes round by the sign.
+            expect(
+                await query(
+                    "RETURN [round(1.0E-129, 2, 'UP'), round(1.0E-129, 0, 'UP'), round(-1.0E-129, 2, 'UP'), round(1.0E-129, 2, 'DOWN'), round(-1.0E-129, 2, 'DOWN'), round(1.0E-130, 2, 'UP'), round(1.0E-129, 2, 'CEILING'), round(1.0E-129, 129, 'UP')]"
+                )
+            ).toEqual([[0.01, 1.0, -0.01, 0.0, 0.0, 0.01, 0.01, 1.0e-129]]);
+            expect(
+                await query(
+                    "RETURN [round(5.0E-130, 129, 'HALF_UP'), round(5.0E-130, 129, 'HALF_DOWN'), round(5.0E-130, 129, 'HALF_EVEN'), round(1.5E-129, 129, 'HALF_EVEN'), round(-5.0E-130, 129, 'HALF_UP'), round(9.0E-129, 128, 'HALF_UP')]"
+                )
+            ).toEqual([[1.0e-129, 0.0, 0.0, 2.0e-129, -1.0e-129, 1.0e-128]]);
+            expect(
+                await query(
+                    'RETURN [sign(1.0E-129), sign(-1.0E-129), sign(0.0), sign(null), sign(1.0E-130), sign(9.99E-129), sign($x)]',
+                    { x: 1.0e-129 }
+                )
+            ).toEqual([[1, -1, 0, null, 1, 1, 1]]);
+            // Read from a row, beside 0, -0.0 and null, whose sign the rounding does not ask, and under an aggregate.
+            expect(
+                await query(
+                    "UNWIND [1.0E-129, -1.0E-129, 0.0, -0.0, null] AS x RETURN [sign(x), round(x, 2, 'UP'), round(x, 129, 'HALF_EVEN'), round(x, 0, 'DOWN')]"
+                )
+            ).toEqual([
+                [1, 0.01, 1.0e-129, 0.0],
+                [-1, -0.01, -1.0e-129, 0.0],
+                [0, 0.0, 0.0, 0.0],
+                [0, 0.0, 0.0, 0.0],
+                [null, null, null, null]
+            ]);
+            expect(
+                await query(
+                    "UNWIND [1.0E-129, 5.0E-130] AS x RETURN [sign(sum(x)), sum(sign(x)), sign(min(x)), round(max(x), 2, 'UP'), sign(sign(sign(min(x))))]"
+                )
+            ).toEqual([[1, 2, 1, 0.01, 1]]);
+            // Numbers near NUMBER's greatest, which a sign told by a multiple of them would overflow.
+            expect(
+                await query('RETURN [sign(9.0E125), sign(-9.0E125), sign(7), sign(-0.5), sign(0.5)]')
+            ).toEqual([[1, -1, 1, -1, 1]]);
+        });
+
         /** The empty text, which Oracle reads as null. */
         const empty = store.type === DatabaseType.ORACLE ? null : '';
 

@@ -369,4 +369,15 @@ describe('A compiled Cypher statement', () => {
         expect(list).not.toContain('FROM jsonb_array_elements(');
         expect(list).toContain('unnest(ARRAY(SELECT jsonb_array_elements(');
     });
+
+    it.each(compilers)(
+        'of a sign() nested under an aggregate is about the size of a ceil(), reading its number once, on %s',
+        (_, compilerFor) => {
+            // Under an aggregate nothing is bound, so a sign that read its number twice wrote it out twice at each level:
+            // on Oracle, where a sign is not SIGN alone (liberation-data/drivine#342), four deep was 14 times a ceil().
+            const nested = (fn: string) => 'UNWIND [1.5] AS x RETURN ' + `${fn}(`.repeat(4) + 'sum(x)' + ')'.repeat(4);
+            const [sign, ceil] = ['sign', 'ceil'].map((it) => compilerFor().compile(nested(it)).sql.length);
+            expect(sign).toBeLessThan(ceil * 1.1);
+        }
+    );
 });
