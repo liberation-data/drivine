@@ -133,6 +133,11 @@ describe('A compiled Cypher statement', () => {
             expect(writes("MATCH (c:Claim) RETURN c.s + 'b'")).toEqual(once);
             expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + c.f')).toEqual(once);
             expect(writes("MATCH (c:Claim) RETURN 'x' + toString(c.i) + c.f")).toEqual(2 * once);
+            // A text put together with a number given, on either side, is a text; with a property, which may hold a list,
+            // not.
+            expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + 1 + c.f')).toEqual(once);
+            expect(writes('MATCH (c:Claim) RETURN 1 + toUpper(c.s) + c.f')).toEqual(once);
+            expect(writes("MATCH (c:Claim) RETURN toUpper(c.s) + c.f + 'x'")).toEqual(2 * once);
             // A CASE, a coalesce and a list written are a text, or hold texts, where each of theirs is; a text unwound is one.
             expect(
                 writes(
@@ -158,6 +163,8 @@ describe('A compiled Cypher statement', () => {
                 "MATCH (c:Claim) WITH collect(toUpper(c.s)) AS ts, collect(c.f) AS fs RETURN (ts + ['a'])[0], ('b' + ts)[0], (ts + fs)[0]";
             expect(writes(joined.split('[0],').join("[0] + 'x',"))).toEqual(writes(joined));
             expect(writes(`${joined} + 'x'`)).toEqual(writes(joined) + once);
+            const added = "MATCH (c:Claim) WITH collect(toUpper(c.s)) AS ts RETURN (ts + toLower('a'))[0]";
+            expect(writes(`${added} + 'x'`)).toEqual(writes(added));
             // Each query of a CALL's UNION makes it a text, and a write carries it on.
             expect(
                 writes(
