@@ -384,8 +384,9 @@ documents them; the ones you're likeliest to meet:
 - A node in a row is its properties.
 - A temporal value is its ISO 8601 text.
 - Postgres works float arithmetic out in exact decimal, so a result can differ in its last digits.
-- Text sorts by the database's collation on Postgres ([Postgres](#postgres)), and Oracle reads an empty string as
-  null ([Oracle](#oracle)).
+- Text sorts by its code points, as Cypher does, but on Postgres a list or a map read from a property sorts the texts
+  in it by the database's collation ([Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)), and Oracle
+  reads an empty string as null ([Oracle](#oracle)).
 
 You may not need Cypher at all: the [object manager](#object-manager) loads and saves your classes on every store
 without it.
@@ -1715,7 +1716,8 @@ Notes:
 - A number is compared as a number only where one is stored: `'7'` is not `7`, as on the graph engines.
 - Text is ordered by the database's collation, so a page of mixed-case text may not be in the order Neo4j gives
   (`a, b, B` rather than `B, a, b`). The range indexes are made in that collation, so an order and a seek are read
-  through them.
+  through them. Compiled Cypher orders text by its code points instead
+  ([Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)).
 - A save checks the stamp, as on the graph engines. A save turned away by a serialization failure (`40001`) or a
   deadlock (`40P01`) is run again.
 - Index the id of each class you save: a range index or a uniqueness constraint is a partial index over the label's
@@ -1772,6 +1774,11 @@ const names = await pm.query<string>(
 - On Postgres, float arithmetic is worked out in exact decimal (`numeric`), not as a double, so a result can differ
   from a graph engine's in its last digits: `0.1 * 3` is `0.3`, where Neo4j gives `0.30000000000000004`. A float's text
   carries no trailing zeros: `toString(4.0 / 2)` is `"2.0"`.
+- On Postgres, text is compared and sorted by its code points, as Cypher does (`B, a, b`), not by the database's
+  collation: in the `C` collation, whose byte order is code point order in a UTF-8 database, as `initdb` and Postgres's
+  images make one. In a list the statement makes, such as `ORDER BY [n.last, n.first]`, a text is ordered by its code
+  points over its first 500 characters, and past them by the database's collation. A list read from a property, and a
+  map, still order the texts in them by the database's collation (`ORDER BY n.tags`).
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A path variable in
   CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own.

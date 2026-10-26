@@ -350,14 +350,18 @@ describe('A compiled Cypher statement', () => {
         }
     );
 
-    it('of a sort by a property on Postgres is by its JSON alone, and only a list the statement makes is keyed as a list', () => {
+    it('of a sort by a property on Postgres is by its JSON and its text, and only a list the statement makes is keyed as a list', () => {
         // Keyed as a list, a term costs thousands a row in the planner's estimate, which brings in its JIT for the whole
-        // statement past a few dozen rows (liberation-data/drivine4j#223).
+        // statement past a few dozen rows (liberation-data/drivine4j#223). A text sorts by its code points (#339), in the
+        // same row, with no subquery.
         const order = (cypher: string): string => {
             const sql = new PostgresCypherCompiler('g').compile(cypher).sql;
             return sql.substring(sql.indexOf('ORDER BY ') + 'ORDER BY '.length);
         };
-        expect(order('MATCH (c:Claim) RETURN c.name ORDER BY c.name')).toEqual("NULLIF(p2.s1, 'null'::jsonb)");
+        expect(order('MATCH (c:Claim) RETURN c.name ORDER BY c.name')).toEqual(
+            "ROW(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN '\"\"'::jsonb ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
+                "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")"
+        );
         const list = order('MATCH (c:Claim) WITH c.name AS n, collect(c.id) AS ids RETURN n ORDER BY ids');
         expect(list).toContain('WITH RECURSIVE');
         // Its items as arrays unnested, which the planner takes for 10 items, not a set-returning function's 100: a

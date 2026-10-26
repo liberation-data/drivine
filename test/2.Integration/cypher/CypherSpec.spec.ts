@@ -370,6 +370,219 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ).toEqual([store.type === DatabaseType.ORACLE ? false : 'null']);
         });
     });
+
+    /**
+     * Texts compared and sorted by their code points, as Cypher has them, on every store: drivine4j's own tests of
+     * liberation-data/drivine4j#273, ported for liberation-data/drivine#339. Not in the spec Drivine runs yet: its
+     * cases are in v0.6.10, past the quantifiers of v0.6.7 (#333), which Drivine has not ported.
+     */
+    describe('texts in code point order', () => {
+        it('compare and sort by their code points, not by a locale collation', async () => {
+            // Postgres compared and sorted texts by the database's collation.
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            expect(
+                await query(
+                    "UNWIND ['John Wick', 'Johnny Mnemonic', 'b', 'B', 'a', 'A', 'é', 'e', 'z', 'Z', '~', '_', '-', ' ', 'a b', 'ab', 'a-c'] AS t RETURN t ORDER BY t"
+                )
+            ).toEqual([
+                ' ',
+                '-',
+                'A',
+                'B',
+                'John Wick',
+                'Johnny Mnemonic',
+                'Z',
+                '_',
+                'a',
+                'a b',
+                'a-c',
+                'ab',
+                'b',
+                'e',
+                'z',
+                '~',
+                'é'
+            ]);
+            expect(
+                await query(
+                    "UNWIND ['John Wick', 'Johnny Mnemonic', 'b', 'B', 'a', 'é'] AS t WITH t ORDER BY t DESC RETURN collect(t)"
+                )
+            ).toEqual([['é', 'b', 'a', 'Johnny Mnemonic', 'John Wick', 'B']]);
+            expect(await query("UNWIND ['b', 'B', 'b', 'a', 'B'] AS t RETURN DISTINCT t ORDER BY t")).toEqual([
+                'B',
+                'a',
+                'b'
+            ]);
+            expect(
+                await query(
+                    "RETURN ['a' < 'B', 'John Wick' < 'Johnny Mnemonic', 'é' > 'f', 'Z' < '_', 'a' >= 'B', 'ab' <= 'a b']"
+                )
+            ).toEqual([[false, true, true, true, true, false]]);
+            expect(await query("UNWIND ['b', 'B', 'a', 'é'] AS t RETURN min(t), max(t)")).toEqual([['B', 'é']]);
+            expect(
+                await query('UNWIND $ts AS t RETURN t ORDER BY t', {
+                    ts: ['b', 'B', 'John Wick', 'Johnny Mnemonic', 'a']
+                })
+            ).toEqual(['B', 'John Wick', 'Johnny Mnemonic', 'a', 'b']);
+            // A property compared with a text, and sorted: 'The Matrix' is before 'The matrix', which a locale puts first.
+            expect(
+                await query('MATCH (m:Movie) WHERE m.title < $t RETURN m.title ORDER BY m.title', { t: 'The matrix' })
+            ).toEqual(['Johnny Mnemonic', 'The Matrix', 'The Matrix Reloaded']);
+            expect(await query("MATCH (m:Movie) WHERE m.title >= 'the' RETURN m.title")).toEqual([]);
+            expect(
+                await query("MATCH (m:Movie) WITH m.title AS t ORDER BY toLower(t) + 'A' DESC RETURN collect(t)")
+            ).toEqual([['The Matrix', 'The Matrix Reloaded', 'Johnny Mnemonic']]);
+            expect(
+                await query(
+                    'MATCH (m:Movie) WITH CASE WHEN m.released < 1996 THEN toLower(m.title) ELSE m.title END AS t RETURN min(t), max(t)'
+                )
+            ).toEqual([['The Matrix', 'johnny mnemonic']]);
+            expect(await query('MATCH (p:Person), (q:Person) WHERE toLower(p.name) < q.name RETURN count(*)')).toEqual([
+                0
+            ]);
+            // A sort by a list, and min and max of lists, compare the texts in them so too.
+            expect(
+                await query(
+                    "UNWIND [['a', 'b'], ['a', 'B'], ['B'], ['b'], ['John Wick'], ['Johnny Mnemonic'], ['a', 'é'], ['a', '~']] AS l RETURN l ORDER BY l"
+                )
+            ).toEqual([
+                ['B'],
+                ['John Wick'],
+                ['Johnny Mnemonic'],
+                ['a', 'B'],
+                ['a', 'b'],
+                ['a', '~'],
+                ['a', 'é'],
+                ['b']
+            ]);
+            expect(await query("UNWIND [['a', 'b'], ['a', 'B'], ['B'], ['b']] AS l RETURN min(l), max(l)")).toEqual([
+                [['B'], ['b']]
+            ]);
+            // Long texts too: Postgres keys the first 500 characters of a text in a list by their code points.
+            const [a499, a600] = ['a'.repeat(499), 'a'.repeat(600)];
+            expect(
+                await query('UNWIND $ls AS g WITH [g[0], g[1]] AS l RETURN l[1] ORDER BY l', {
+                    ls: [
+                        [a499 + 'b', '3'],
+                        [a499 + 'B', '2'],
+                        [a499, '1'],
+                        [a600 + 'b', '5'],
+                        [a600, '4']
+                    ]
+                })
+            ).toEqual(['1', '2', '4', '5', '3']);
+            expect(
+                await query(
+                    "MATCH (m:Movie) WITH m ORDER BY m.released WITH collect(toLower(m.title)) + ['The Matrix'] AS ts " +
+                        "UNWIND [ts, ['the matrix'], ['The matrix']] AS l RETURN l ORDER BY l DESC"
+                )
+            ).toEqual([
+                ['the matrix'],
+                ['johnny mnemonic', 'the matrix', 'the matrix reloaded', 'The Matrix'],
+                ['The matrix']
+            ]);
+        });
+
+        it('a character above U+FFFF sorts after every one below it, as its code point says', async () => {
+            // JavaScript's UTF-16 puts such a character before U+E000 to U+FFFF, as Neo4j compares a text given.
+            const [smile, tilde, privateUse] = ['😀', '～', ''];
+            expect(
+                await query(`UNWIND ['${smile}', '${tilde}', '${privateUse}', 'a', '퟿'] AS t RETURN t ORDER BY t`)
+            ).toEqual(['a', '퟿', privateUse, tilde, smile]);
+            expect(
+                await query(`RETURN ['${smile}' < '${tilde}', '${smile}' > '${privateUse}', '${smile}' > '퟿']`)
+            ).toEqual([[false, true, true]]);
+            expect(await query(`UNWIND [['${smile}'], ['${tilde}']] AS l RETURN l ORDER BY l`)).toEqual([
+                [tilde],
+                [smile]
+            ]);
+            // Neo4j compares a text given by its UTF-16 code units, where it compares one written or stored by its code
+            // points (neo4j/neo4j#13997).
+            if (store.type !== DatabaseType.NEO4J) {
+                expect(
+                    await query('UNWIND $ts AS t RETURN min(t), max(t)', { ts: [smile, tilde, privateUse] })
+                ).toEqual([[privateUse, smile]]);
+            }
+        });
+
+        it('a text in a list sorts by its code points up to and across its 500th character', async () => {
+            // Postgres keys a text in a list by the bits of its first 500 characters, then by the rest. 500 characters
+            // of four bytes are 16,000 bits, near the 16,383 places Postgres holds; the 500th may be of 1 to 4 bytes.
+            const smile = '😀';
+            const [s499, s500] = [smile.repeat(499), smile.repeat(500)];
+            const texts = [s499, s499 + 'a', s499 + '～', s500, s500 + 'a', s500 + 'b'];
+            const written = [...texts]
+                .reverse()
+                .map((it) => `['${it}']`)
+                .join(', ');
+            expect(await query(`UNWIND [${written}] AS l RETURN l ORDER BY l`)).toEqual(texts.map((it) => [it]));
+            expect(await query(`UNWIND [${written}] AS l RETURN l ORDER BY l DESC`)).toEqual(
+                [...texts].reverse().map((it) => [it])
+            );
+            const [a499, a500] = ['a'.repeat(499), 'a'.repeat(500)];
+            expect(
+                await query(
+                    `UNWIND [['${a500}B'], ['${a500}'], ['${a499}é'], ['${a499}b'], ['${a499}B']] AS l RETURN l ORDER BY l`
+                )
+            ).toEqual([[a499 + 'B'], [a500], [a500 + 'B'], [a499 + 'b'], [a499 + 'é']]);
+        });
+
+        it('a text sorts beside a null and a number as before, and by its code points among the texts', async () => {
+            // Postgres sorts by a row of the value, each text blanked, and of the text by its code points.
+            expect(await query("UNWIND ['b', null, 'B'] AS t RETURN t ORDER BY t")).toEqual(['B', 'b', null]);
+            expect(await query("UNWIND ['b', null, 'B', 'b'] AS t RETURN DISTINCT t ORDER BY t DESC")).toEqual([
+                null,
+                'b',
+                'B'
+            ]);
+            // Oracle sorts a number before a text, by its own order of kinds.
+            if (store.type !== DatabaseType.ORACLE) {
+                expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t")).toEqual([
+                    'B',
+                    'b',
+                    1,
+                    2,
+                    null
+                ]);
+                expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t DESC")).toEqual([
+                    null,
+                    2,
+                    1,
+                    'b',
+                    'B'
+                ]);
+            }
+            // A text compared with a value of another kind is null, and min and max of several kinds take the least
+            // text by its code points.
+            expect(
+                await query(
+                    "RETURN ['a' < 1, 'B' > null, 1 >= 'a', coalesce(null, 'a') < 'B', CASE WHEN true THEN 'a' END < 'B']"
+                )
+            ).toEqual([[null, null, null, false, false]]);
+            expect(await query("UNWIND ['b', 1, 'B', true] AS t WITH t WHERE t < 'a' RETURN t")).toEqual(['B']);
+            expect(await query("UNWIND ['b', 1, 'B', true] AS t WITH t WHERE t > 0 RETURN t")).toEqual([1]);
+            expect(await query("UNWIND ['b', 'B', 'a', 'B'] AS t RETURN min(DISTINCT t), max(DISTINCT t)")).toEqual([
+                ['B', 'b']
+            ]);
+            expect(await query("UNWIND ['b', 1, 'B', 2, true] AS t RETURN min(t), max(t)")).toEqual([['B', 2]]);
+        });
+
+        it('a text sorts by its code points where its sort key is long enough to be worked out in a subquery', async () => {
+            // Postgres binds a long term once in a subquery, which gives its sort key as a row.
+            const key = "coalesce(toLower(toUpper(trim(t))), toUpper(t), 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz') + t";
+            expect(await query(`UNWIND ['b', 'B', 'a'] AS t RETURN DISTINCT t ORDER BY ${key}`)).toEqual([
+                'a',
+                'B',
+                'b'
+            ]);
+            expect(await query(`UNWIND ['b', 'B', 'a'] AS t RETURN DISTINCT t ORDER BY ${key} DESC`)).toEqual([
+                'b',
+                'B',
+                'a'
+            ]);
+        });
+    });
 });
 
 /**

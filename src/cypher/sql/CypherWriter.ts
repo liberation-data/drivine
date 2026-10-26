@@ -3750,7 +3750,7 @@ export class CypherWriter {
                     ([x, y]) =>
                         `CASE WHEN ${sql.typeOf(x)} = ${sql.typeOf(y)} AND ${sql.typeOf(
                             x
-                        )} IN ('number', 'string', 'boolean') THEN ${x} ${comparison} ${y} END`
+                        )} IN ('number', 'string', 'boolean') THEN ${sql.ordered(x, comparison, y)} END`
                 )
             );
         }
@@ -4993,11 +4993,11 @@ export class CypherWriter {
             const temporal = value.temporal;
             return [this.sql.comparable(value), (it) => this.temporals.moment(this.sql.text(it), temporal)];
         }
-        // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
+        // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts it.
         if (this.isList(value)) {
             return [this.sql.comparable(this.asJson(value)), (it) => this.sql.listSortKey(it)];
         }
-        return [this.sql.comparable(this.asJson(value)), (it) => this.sql.nullIfJsonNull(it)];
+        return [this.sql.comparable(this.asJson(value)), (it) => this.sql.sortKey(it)];
     }
 }
 
