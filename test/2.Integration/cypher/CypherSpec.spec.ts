@@ -668,6 +668,45 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ]);
         });
 
+        it('a null rounds to null by a negative precision from data, in an aggregate too, as in Neo4j', async () => {
+            // liberation-data/drivine#336: Neo4j fails a negative precision only where there is a value to round.
+            await query('CREATE (:Round {r: -2, k: 1, x: 1234.5, i: 1234}), (:Round {r: -2, k: 2})');
+            expect(
+                await query("MATCH (n:Round) WHERE n.k = 1 RETURN [round(n.none, n.r), round(n.none, n.r, 'HALF_UP')]")
+            ).toEqual([[null, null]]);
+            expect(await query('MATCH (n:Round) RETURN round(round(n.none, n.r), n.r)')).toEqual([null, null]);
+            // Under an aggregate, where nothing is bound.
+            expect(
+                await query(
+                    "MATCH (n:Round) WITH n.none AS x, n.r AS r WITH r, [round(min(x), r), round(max(x), r, 'HALF_UP')] AS v RETURN v"
+                )
+            ).toEqual([[null, null]]);
+            expect(await query('MATCH (n:Round) RETURN collect(round(n.none, n.r))')).toEqual([[]]);
+            // A null written in the statement, or a parameter's.
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.k = 1 RETURN [round(null, n.r), round(null, n.r, 'UP'), round($v, n.r)]",
+                    { v: null }
+                )
+            ).toEqual([[null, null, null]]);
+            // A value there is still refused, -0.0 and a parameter's too.
+            await expect(query('MATCH (n:Round) WHERE n.k = 1 RETURN round($v, n.r)', { v: 1.5 })).rejects.toThrow(
+                'round() takes a precision of 0 or more, as in Neo4j.'
+            );
+            for (const statement of [
+                'MATCH (n:Round) WHERE n.k = 1 RETURN round(-0.0, n.r)',
+                'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r)',
+                // An integer, which Oracle's JSON holds as a number of another kind than a float's.
+                'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.i, n.r)',
+                "MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r, 'HALF_UP')",
+                'MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(min(x), r)',
+                "MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(max(x), r, 'HALF_UP')",
+                'MATCH (n:Round) RETURN collect(round(n.x, n.r))'
+            ]) {
+                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more, as in Neo4j.');
+            }
+        });
+
         /** The empty text, which Oracle reads as null. */
         const empty = store.type === DatabaseType.ORACLE ? null : '';
 

@@ -4652,42 +4652,19 @@ export class CypherWriter {
             if (mode === undefined) {
                 return json(this.sql.literalJson(null));
             }
-            return json(
-                this.sql.scalar(
-                    this.sql.float(
-                        this.sql.roundTo(
-                            this.numberOf(call.arguments[0]),
-                            this.precisionOf(call.arguments[1], call.fn.arguments[1]),
-                            mode
-                        )
-                    )
-                )
-            );
+            return json(this.sql.scalar(this.sql.float(this.rounded(call, (n, p) => this.sql.roundTo(n, p, mode)))));
         }
         if (call.arguments.length === 2) {
             // To 0 places Neo4j rounds as round(x) does, half toward +infinity, as Java's Math.round; to more, half away
-            // from zero. Places known when compiling pick the rounding then: under an aggregate, where nothing is bound,
-            // a CASE of both would write the number out in each, at each round() nested in another. Places from data
-            // are told apart as the statement runs.
-            const number = this.numberOf(call.arguments[0]);
-            const precision = this.precisionOf(call.arguments[1], call.fn.arguments[1]);
-            const places = this.givenPlaces(call.fn.arguments[1]);
+            // from zero.
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        places === undefined
-                            ? this.sql.shared(
-                                  [number, precision],
-                                  ([n, p]) =>
-                                      `CASE WHEN ${p} = 0 THEN ${this.sql.roundWhole(n)} ELSE ${this.sql.roundPlaces(
-                                          n,
-                                          p
-                                      )} END`
-                              )
-                            : // Not "places < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places.
-                            !(places >= 1)
-                            ? this.sql.roundWhole(number)
-                            : this.sql.roundPlaces(number, precision)
+                        this.rounded(
+                            call,
+                            (n, p) => this.sql.roundPlaces(n, p),
+                            (n) => this.sql.roundWhole(n)
+                        )
                     )
                 )
             );
@@ -4871,25 +4848,44 @@ export class CypherWriter {
     }
 
     /**
-     * `round()`'s precision `value`, written in the statement as `written`, as a whole number toward zero: -0.5 is 0
-     * places. One below 0 is refused, as Neo4j refuses it: when compiling, where it is written, negated or not, or a
-     * parameter's value, a bigint or the Neo4j driver's Integer too; and else when the row is read, by the store's
-     * `failure`.
+     * `round(value, precision)` of the invocation `call`, by `places` over the value as a SQL number and the precision as
+     * a whole number toward zero: -0.5 is 0 places. Given `whole`, to 0 places it rounds by that instead. A precision
+     * below 0 is refused, as Neo4j refuses it: when compiling, where it is written, negated or not, or a parameter's
+     * value, a bigint or the Neo4j driver's Integer too; and else when the row is read, by the store's `failure`, but
+     * for a null value, which Neo4j rounds to null whatever the precision.
+     *
+     * Places known when compiling pick the rounding then: under an aggregate, where nothing is bound, a CASE of both
+     * would write the number out in each, at each round() nested in another. Places from data are told apart as the
+     * statement runs, in one CASE over the value and the places, where a negative one is refused before either
+     * rounding, so the precision each rounding writes out, more than once on a store, is the places alone.
      */
-    private precisionOf(value: Value, written: Expression): string {
-        const places = this.givenPlaces(written);
-        if (places !== undefined) {
-            if (places < 0) {
+    private rounded(
+        call: Invocation,
+        places: (number: string, precision: string) => string,
+        whole?: (number: string) => string
+    ): string {
+        const given = this.givenPlaces(call.fn.arguments[1]);
+        if (given !== undefined) {
+            if (given < 0) {
                 throw new DrivineError(NEGATIVE_PRECISION);
             }
-            return this.truncatedWhole(value);
+            const number = this.numberOf(call.arguments[0]);
+            // Not "given < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places.
+            return whole !== undefined && !(given >= 1)
+                ? whole(number)
+                : places(number, this.truncatedWhole(call.arguments[1]));
         }
-        return this.sql.shared(
-            [`TRUNC(${this.numberOf(value)})`],
-            ([places]) =>
-                `CASE WHEN ${places} < 0 THEN ${this.sql.failure(NEGATIVE_PRECISION, places)} ` +
-                `ELSE CAST(${places} AS INTEGER) END`
-        );
+        const value = this.sql.comparable(this.asJson(call.arguments[0]));
+        return this.sql.shared([value, `TRUNC(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
+            // Asked of its kind, whose test writes the value out fewer times than the number does: a null value, as
+            // anything else that is no number, rounds by its negative places to null.
+            const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
+            return (
+                `CASE ${toWhole}WHEN ${t} < 0 AND ${this.sql.typeOf(x)} = 'number' ` +
+                `THEN ${this.sql.failure(NEGATIVE_PRECISION, t)} ` +
+                `ELSE ${places(this.sql.number(x), `CAST(${t} AS INTEGER)`)} END`
+            );
+        });
     }
 
     /** A value as a SQL number, where it is one. */
