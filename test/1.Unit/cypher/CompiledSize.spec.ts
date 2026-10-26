@@ -1,3 +1,4 @@
+import { int } from 'neo4j-driver';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
@@ -56,16 +57,16 @@ describe('A compiled Cypher statement', () => {
             // Under an aggregate nothing is bound: a CASE of both roundings, nested four deep, made 85 KB on Postgres and
             // 8.8 MB on Oracle of what round(x) makes in 4 KB and 26 KB (liberation-data/drivine#328).
             const nested = (precision: string) =>
-                'UNWIND [1.5] AS x RETURN ' +
-                'round('.repeat(4) +
-                'sum(x)' +
-                `${precision})`.repeat(4);
+                'UNWIND [1.5] AS x RETURN ' + 'round('.repeat(4) + 'sum(x)' + `${precision})`.repeat(4);
             const size = (precision: string, parameters: Record<string, any> = {}) =>
                 compilerFor().compile(nested(precision), parameters).sql.length;
             const whole = size('');
             expect(size(', 0')).toEqual(whole);
             expect(size(', -0.5')).toEqual(whole);
             expect(size(', $p', { p: 0 })).toEqual(whole);
+            // A bigint or the Neo4j driver's Integer is read as the number it is.
+            expect(size(', $p', { p: BigInt(0) })).toEqual(whole);
+            expect(size(', $p', { p: int(0) })).toEqual(whole);
         }
     );
 
