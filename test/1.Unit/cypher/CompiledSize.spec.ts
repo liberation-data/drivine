@@ -70,6 +70,25 @@ describe('A compiled Cypher statement', () => {
         }
     );
 
+    it.each(compilers)(
+        'of round() to places from data, nested under an aggregate, reads the value once more for its kind, not in the places, on %s',
+        (name, compilerFor) => {
+            // A null value rounds to null by negative places, so the value is read where they are refused
+            // (liberation-data/drivine#336). Read in the places, it was written out again at each place they are, and
+            // three rounds deep made 26 MB on Oracle and 550 KB on Postgres.
+            for (const mode of ['', ", 'HALF_UP'"]) {
+                const nested =
+                    'UNWIND [1.5] AS x WITH x, 1 AS p RETURN p, ' +
+                    'round('.repeat(3) +
+                    'sum(x)' +
+                    `, p${mode})`.repeat(3);
+                expect(compilerFor().compile(nested).sql.length).toBeLessThan(
+                    name === 'oracle' ? 2_000_000 : 100_000
+                );
+            }
+        }
+    );
+
     it.each(compilers)('of a sum of twice the terms is about twice as long on %s', (_, compilerFor) => {
         const compiler = compilerFor();
         const sum = (terms: number) =>
