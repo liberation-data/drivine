@@ -750,8 +750,10 @@ export abstract class SqlCypherCompiler {
 
     /**
      * A whole number that fails the statement when it is worked out, with `message` and the SQL value `value` it names:
-     * what a compiled statement does where Neo4j fails on a value it reads. It reads `value`, so no store works it out
-     * before a row that needs it, as one may a failing expression of constants alone.
+     * what a compiled statement does where Neo4j fails on a value it reads. No store works it out before a row that
+     * needs it, even where `value` is a constant, as a store may work out a failing expression of constants alone. But
+     * in a WHERE, one that reads nothing of a row is tested before any row on Postgres, which tests such a condition
+     * once, first: as it does any expression that fails, such as `1 / 0`.
      */
     abstract failure(message: string, value: string): string;
 
