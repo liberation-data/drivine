@@ -324,12 +324,22 @@ export abstract class SqlCypherCompiler {
         return `${x} = ${y}`;
     }
 
+    /** Whether the JSON values `x` and `y`, of one kind, a number, a text or a truth value, stand as `operator` says (`<`, `>=`…). */
+    ordered(x: string, operator: string, y: string): string {
+        return `${x} ${operator} ${y}`;
+    }
+
+    /** What an order sorts the JSON value `json` by: JSON's null as SQL's, which comes last, as a graph engine orders null. */
+    sortKey(jsonSql: string): string {
+        return this.nullIfJsonNull(jsonSql);
+    }
+
     /**
-     * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): JSON's
-     * null as SQL's, as any value, where the store orders lists as Cypher does.
+     * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): as
+     * {@link sortKey} where the store orders lists as Cypher does.
      */
     listSortKey(jsonSql: string): string {
-        return this.nullIfJsonNull(jsonSql);
+        return this.sortKey(jsonSql);
     }
 
     /** Where the kind of the JSON `json`, an item of a list, comes among the others as Cypher orders them: as {@link kindOrder}, null last. */
