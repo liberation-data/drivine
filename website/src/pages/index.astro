@@ -188,7 +188,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .video-tip .new { padding: 4px 10px; border-radius: 999px; background: var(--accent); color: var(--ink); font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
             .video-tip .short { display: none; }
             @media (max-width: 600px) { .video-tip { font-size: 15px; gap: 8px; } .video-tip .long { display: none; } .video-tip .short { display: inline; } }
-            .installs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 22px; font-size: 14px; }
+            .installs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; font-size: 14px; }
             .installs .copy { position: relative; display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; background: rgba(2, 28, 38, 0.62); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; color: #e6f2f4; font: inherit; cursor: pointer; }
             .installs .copy code { color: inherit; background: none; padding: 0; white-space: nowrap; user-select: text; }
             @media (max-width: 420px) { .installs { font-size: 12px; } .installs .copy { gap: 8px; padding: 0 10px; } }
@@ -364,12 +364,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <span>Watch<span class="long">: graph RAG on any database</span><span class="short"> the video</span> · 4:26</span>
                     </a>
                 )}
-                <div class="actions" style={`margin-top: ${VIDEO_ID ? 28 : 44}px`}>
-                    <a href={ts} class="button primary">TypeScript docs <span aria-hidden="true">→</span></a>
-                    <a href={py} class="button ghost">Python docs <span aria-hidden="true">→</span></a>
-                    <a href={jvm} class="button ghost">Kotlin &amp; Java docs <span aria-hidden="true">→</span></a>
-                </div>
-                <div class="installs">
+                <div class="installs" style={`margin-top: ${VIDEO_ID ? 28 : 44}px`}>
                     {['npm install @liberation-data/drivine', 'pip install drivine', 'org.drivine:drivine4j'].map((line) => (
                         <button type="button" class="copy" data-copy={line} aria-label={`Copy ${line}`}>
                             <code>{line}</code>
@@ -523,6 +518,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             FalkorDB and Neptune run it as written. On Postgres, Oracle and SQLite, Drivine compiles it to SQL
                             over two tables, one of nodes and one of relationships, and gives back the same rows.
                         </p>
+                        <p><a href={`${ts}cypher-on-a-relational-database/`}>How to run Cypher on a relational database →</a></p>
                     </div>
                     <div class="panel">
                         <header aria-label="Stores">

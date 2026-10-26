@@ -12,6 +12,9 @@ graph:
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
    query DSL whose references come from the classes themselves.
 
+A Cypher statement runs on every store, the SQL ones too: on Postgres and Oracle, Drivine compiles it to SQL. See
+[Cypher on a relational database](#cypher-on-a-relational-database).
+
 > **On Python or the JVM?** [drivine-python](https://github.com/liberation-data/drivine-python) (`pip install drivine`)
 > is Drivine's Python twin, async first with a sync API. [drivine4j](https://github.com/liberation-data/drivine4j)
 > (`org.drivine:drivine4j`) is its Java and Kotlin twin, the graph client for [Embabel](https://hub.embabel.com), with
@@ -30,6 +33,7 @@ Its design goals:
 - [Quick Start](#quick-start)
   - [With Nest](#2-with-nest)
   - [Without Nest](#3-without-nest)
+- [Cypher on a relational database](#cypher-on-a-relational-database)
 - [Object Manager](#object-manager)
   - [Key Concepts](#key-concepts)
   - [Loading Data](#loading-data)
@@ -294,6 +298,97 @@ RETURN { name: a.name, age: a.age, title: b.title } AS result
 RETURN properties(p)
 RETURN count(p) AS total
 ```
+
+## Cypher on a relational database
+
+Write a Cypher statement once, and run it on whichever store you connect to. Neo4j, Memgraph, FalkorDB and Neptune run
+it as written. On **Postgres** and **Oracle**, the SQL stores Drivine for TypeScript supports, Drivine compiles it to
+SQL over the graph's two tables, one of nodes and one of relationships, and gives back the rows a graph engine gives.
+SQLite is [drivine4j](https://github.com/liberation-data/drivine4j)'s for now.
+
+### Connect
+
+Postgres is the quickest to try: `docker run -d -p 5432:5432 -e POSTGRES_USER=app -e POSTGRES_PASSWORD=secret postgres`,
+then:
+
+```bash
+DATABASE_TYPE=POSTGRES
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=app
+DATABASE_USER=app
+DATABASE_PASSWORD=secret
+```
+
+For Oracle 23ai or later, set `DATABASE_TYPE=ORACLE`, `DATABASE_PORT=1521` and `DATABASE_NAME` to the service, such as
+`FREEPDB1`. On either, `DATABASE_DEFAULT_GRAPH_PATH` names the graph's tables, `drivine` unless given. The
+[Postgres](#postgres) and [Oracle](#oracle) sections have the rest.
+
+### Write and read
+
+Give a persistence manager the statement through `cypherStatement`. A statement that doesn't say it is Cypher is SQL
+on these stores, as it always has been.
+
+```typescript
+import {
+    cypherStatement,
+    DatabaseRegistry,
+    PersistenceManagerFactory,
+    PostgresGraph,
+    QuerySpecification
+} from '@liberation-data/drivine';
+
+DatabaseRegistry.buildOrResolveFromEnv();
+const pm = new PersistenceManagerFactory().get();
+
+// Postgres only, and only until an object manager has worked on the graph: make its tables. Oracle makes them itself.
+await pm.execute(new QuerySpecification(new PostgresGraph(process.env.DATABASE_DEFAULT_GRAPH_PATH).ensuring));
+
+await pm.execute(
+    new QuerySpecification(
+        cypherStatement(`
+            MERGE (a:Person {name: $from})
+            MERGE (b:Person {name: $to})
+            MERGE (a)-[:KNOWS {since: $since}]->(b)`)
+    ).bind({ from: 'Keanu', to: 'Carrie-Anne', since: 1999 })
+);
+
+const friends = await pm.query<{ name: string; since: number }>(
+    new QuerySpecification<{ name: string; since: number }>(
+        cypherStatement(`
+            MATCH (p:Person {name: $name})-[k:KNOWS]->(f:Person)
+            RETURN {name: f.name, since: k.since} AS friend
+            ORDER BY f.name`)
+    ).bind({ name: 'Keanu' })
+);
+// [{ name: 'Carrie-Anne', since: 1999 }]
+```
+
+A statement that writes runs as one statement, applied whole or not at all. Each row is one value, so
+[return one map](#return-one-map) or a scalar, as on a graph engine.
+
+### What compiles
+
+What each statement gives on each store, compiled to SQL or not, is the shared
+[Cypher spec](https://github.com/liberation-data/drivine-cypher-spec). This repository runs version
+[v0.6.4](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.6.4) of it on Neo4j, Postgres and Oracle, and
+drivine-python and drivine4j run the same spec. Reads and writes compile, with variable-length relationships and
+quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
+anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
+
+### Differences you'll meet
+
+The results match a graph engine's, with a few differences. [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)
+documents them; the ones you're likeliest to meet:
+
+- A node in a row is its properties.
+- A temporal value is its ISO 8601 text.
+- Postgres works float arithmetic out in exact decimal, so a result can differ in its last digits.
+- Text sorts by the database's collation on Postgres ([Postgres](#postgres)), and Oracle reads an empty string as
+  null ([Oracle](#oracle)).
+
+You may not need Cypher at all: the [object manager](#object-manager) loads and saves your classes on every store
+without it.
 
 ## Object Manager
 
@@ -1539,7 +1634,8 @@ Notes:
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher. A statement that writes and returns
   rows is a PL/SQL block that hands them back with `DBMS_SQL.RETURN_RESULT`.
 - A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
-  engine gives: see [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres).
+  engine gives: see [Cypher on a relational database](#cypher-on-a-relational-database) to start, and
+  [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`.
   A property of the root may be written as Cypher writes it, `n.name = $name` (or ``n.`a name` ``), and is read as that
   property, as text; a property compared with `true` or `false` is compared with the text a JSON boolean is read as. To
@@ -1610,7 +1706,8 @@ Notes:
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher, and a statement is bound only the
   ones it names.
 - A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
-  engine gives: see [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres).
+  engine gives: see [Cypher on a relational database](#cypher-on-a-relational-database) to start, and
+  [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`,
   e.g. `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name` (or
   ``n.`a name` ``), and is read as that property, as text; a property compared with `true` or `false` is compared with
@@ -1635,7 +1732,7 @@ A Cypher statement given to a `PersistenceManager` on Oracle or Postgres is comp
 a statement written for a graph engine runs there and gives the same rows. The compiler is drivine4j's, ported: what a
 statement gives on each store, compiled or not, is the shared
 [Cypher spec](https://github.com/liberation-data/drivine-cypher-spec), which Drivine's tests run on Neo4j, Postgres
-and Oracle.
+and Oracle. To get started, see [Cypher on a relational database](#cypher-on-a-relational-database).
 
 ```typescript
 const names = await pm.query<string>(

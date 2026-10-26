@@ -209,7 +209,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
 
         it('round() reads a precision from data, or a whole float, as a whole number toward zero, and a null as null', async () => {
             // Beyond the spec's round() cases: a float, -0.5 and a whole float read from data, and every rounding mode.
-            await query('CREATE (:Round {p: 1.7, q: -0.5, w: 2.0, r: -2})');
+            await query('CREATE (:Round {p: 1.7, q: -0.5, w: 2.0, r: -2, z: 0.0, b: 400})');
             expect(
                 await query(
                     "MATCH (n:Round) RETURN [round(2.555, n.p), round(2.55, n.p, 'UP'), round(2.5, n.q), round(2.5, n.q, 'HALF_UP'), round(2.555, n.w), round(2.555, 2.0, 'HALF_UP')]"
@@ -230,11 +230,131 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             await expect(query('MATCH (n:Round) RETURN round(1234.5, n.r)')).rejects.toThrow(
                 'round() takes a precision of 0 or more'
             );
+            // Places past a number's digits give it back, where Oracle's NUMBER would overflow (#324); short of them, it
+            // rounds.
+            expect(
+                await query("RETURN [round(2.5, 400), round(2.5, 400, 'HALF_UP'), round(2.5, 400, 'CEILING')]")
+            ).toEqual([[2.5, 2.5, 2.5]]);
+            // Read from data, and so far past the digits that writing them all out would not finish, where Postgres's
+            // numeric would overflow.
+            expect(await query("MATCH (n:Round) RETURN [round(2.5, n.b), round(2.5, n.b, 'FLOOR')]")).toEqual([
+                [2.5, 2.5]
+            ]);
+            expect(await query("RETURN [round(2.5, 1000000000), round(2.5, 1000000000, 'HALF_UP')]")).toEqual([
+                [2.5, 2.5]
+            ]);
+            expect(
+                await query(
+                    "RETURN [round(1.0E-100, 120), round(123.456, 200, 'HALF_UP'), round(1.0E100, 30), round(1.0 / 3, 20), round(1.0E-100, 99), round(-2.5, 300, 'FLOOR')]"
+                )
+            ).toEqual([[1.0e-100, 123.456, 1.0e100, 0.3333333333333333, 0.0, -2.5]]);
+            // Zero, which has no digits to count, and a precision short of a tiny number's digits
+            // but past NUMBER's range.
+            expect(
+                await query(
+                    "MATCH (n:Round) RETURN [round(0.0, 400), round(0, 400, 'HALF_UP'), round(n.z, 2), round(n.z, 400), round(n.z, 2, 'UP'), round(1.0E-120, 130), round(1.0E-120, 130, 'HALF_UP'), round(-1.0E-120, 136, 'CEILING')]"
+                )
+            ).toEqual([[0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-120, 1.0e-120, -1.0e-120]]);
+            // Either side of the last place a double holds, and short of it, where a mode still rounds.
+            expect(
+                await query(
+                    "RETURN [round(123.456, 14, 'UP'), round(123.456, 15, 'UP'), round(123.456, 16, 'UP'), round(-123.456, 14, 'FLOOR'), round(1234.5678901234567, 13), round(1234.5678901234567, 12, 'HALF_EVEN')]"
+                )
+            ).toEqual([[123.456, 123.456, 123.456, -123.456, 1234.5678901234567, 1234.567890123457]]);
+            // Near 10^17, whose digits all come before the point, and negatives past their digits.
+            expect(
+                await query(
+                    "RETURN [round(123456789012345678, 2), round(99999999999999999.0, 1, 'UP'), round(12345678901234567.0, 1), round(-9.87654321E16, 3, 'FLOOR'), round(-1234.5678, 400), round(-1234.5678, 2)]"
+                )
+            ).toEqual([[1.2345678901234568e17, 1.0e17, 1.2345678901234568e16, -9.87654321e16, -1234.5678, -1234.57]]);
+            // A null number past its digits, and numbers near NUMBER's least, whose digits Oracle's LOG cannot count.
+            expect(
+                await query(
+                    "MATCH (n:Round) RETURN [round(null, 400), round(n.none, 400, 'UP'), round(n.none, n.b), round(1.0E-129, 2), round(-1.0E-129, 2, 'FLOOR'), round(1.0E-130, 140), round(-1.0E-125, 141, 'HALF_EVEN'), round(1.2345678901234567E-130, 145), round(5.5E-128, 128, 'HALF_EVEN')]"
+                )
+            ).toEqual([[null, null, null, 0.0, -0.01, 1.0e-130, -1.0e-125, 1.234567890123457e-130, 6.0e-128]]);
+            // Over an aggregate, where no value is bound in a subquery, and so the number is written out where it is read.
+            expect(
+                await query(
+                    "UNWIND [1.0, 2.0, 2.5] AS x RETURN [round(avg(x), 2), round(avg(x), 400), round(avg(x), 400, 'HALF_UP'), round(round(avg(x), 400), 1, 'DOWN')]"
+                )
+            ).toEqual([[1.83, 1.8333333333333333, 1.8333333333333333, 1.8]]);
+            // Zero too, whose places Oracle gives back without rounding.
+            await expect(query("MATCH (n:Round) RETURN round(n.z, n.r, 'HALF_UP')")).rejects.toThrow(
+                'round() takes a precision of 0 or more'
+            );
+            await expect(query('MATCH (n:Round) RETURN round(n.z, n.r)')).rejects.toThrow(
+                'round() takes a precision of 0 or more'
+            );
             if (store.type !== DatabaseType.ORACLE) {
-                // Oracle overflows on a precision past its NUMBER range, as in drivine4j (liberation-data/drivine4j#266).
+                // The least doubles, whose last digits are short of the 400 places Postgres holds a precision to.
+                // Oracle's NUMBER holds none of them.
                 expect(
-                    await query("RETURN [round(2.5, 400), round(2.5, 400, 'HALF_UP'), round(2.5, 400, 'CEILING')]")
-                ).toEqual([[2.5, 2.5, 2.5]]);
+                    await query(
+                        "RETURN [round(2.2250738585072014E-308, 323), round(2.2250738585072014E-308, 400), round(4.9E-324, 324, 'UP'), round(4.9E-324, 323, 'UP')]"
+                    )
+                ).toEqual([[2.225073858507201e-308, 2.2250738585072014e-308, 4.9e-324, 9.9e-324]]);
+            }
+        });
+
+        it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
+            // Zero, on which LOG fails (ORA-01428) were Oracle to count its digits by it, gives zero wherever it is read,
+            // among rows that are not zero too.
+            await query('UNWIND [0.0, 1.25, 0.0, -2.5] AS x CREATE (:Round {x: x})');
+            expect(await query('MATCH (n:Round) WHERE round(n.x, 400) = 0 RETURN count(*)')).toEqual([2]);
+            expect(
+                await query("MATCH (n:Round) WHERE round(n.x, 2) = 0 AND round(n.x, 1, 'UP') = 0 RETURN count(*)")
+            ).toEqual([2]);
+            expect(
+                await query('MATCH (n:Round) RETURN round(n.x, 1) AS r, count(*) AS c ORDER BY r')
+            ).toEqual([[-2.5, 1], [0.0, 2], [1.3, 1]]);
+            expect(await query("MATCH (n:Round) RETURN n.x ORDER BY round(n.x, 1, 'UP') DESC")).toEqual([
+                1.25, 0.0, 0.0, -2.5
+            ]);
+            expect(
+                await query(
+                    "UNWIND [0.0, 0.0] AS x RETURN [round(sum(x), 2), round(avg(x), 400), round(min(x), 2, 'HALF_UP'), round(sum(x), 1, 'CEILING')]"
+                )
+            ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
+            expect(
+                await query(
+                    "MATCH (n:Round) WITH n.x AS x WHERE round(x, 2) = 0 RETURN [round(sum(x), 2), round(avg(x), 400), round(sum(x), 1, 'CEILING')]"
+                )
+            ).toEqual([[0.0, 0.0, 0.0]]);
+            expect(
+                await query(
+                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x RETURN [sum(round(x, 400)), sum(round(x, 0)), sum(round(x, 0, 'UP')), count(*)]"
+                )
+            ).toEqual([[1500.0, 2000.0, 2000.0, 3000]]);
+            expect(
+                await query(
+                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x WHERE round(x, 2) = 0 OR round(x, 400, 'UP') > 0 RETURN count(*)"
+                )
+            ).toEqual([3000]);
+            expect(await query('RETURN [x IN [0.0, 1.55, 0.0] | round(x, 1)]')).toEqual([[0.0, 1.6, 0.0]]);
+            expect(
+                await query("RETURN [round($z, 2), round($z, 400, 'FLOOR'), round(0, 2), round(0.0, 2, 'UP')]", {
+                    z: 0.0
+                })
+            ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
+            // The precision is read before zero is given back: a null one gives null, and a negative one from data
+            // fails, under an aggregate too, where it is written out where it is read.
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.x = 0 RETURN [round(0.0, null), round(0, null, 'HALF_UP'), round(n.x, n.none), round(n.x, n.none, 'UP')]"
+                )
+            ).toEqual([
+                [null, null, null, null],
+                [null, null, null, null]
+            ]);
+            await query('CREATE (:Round {x: 0.0, r: -2})');
+            for (const statement of [
+                'UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r)',
+                "UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r, 'UP')",
+                'MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(sum(x), r)',
+                "MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(min(x), r, 'HALF_UP')"
+            ]) {
+                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more');
             }
         });
 
@@ -328,10 +448,11 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             // The greatest start or length is taken: a start past the text gives the empty text, written, bound or from a list.
             expect(
                 await query(
-                    "RETURN [substring('hello', 2147483647), left('hello', 2147483647), right('hello', 2147483647), substring('hello', 1, 2147483647), substring('hello', $m)]",
+                    "RETURN [substring('hello', 2147483647), left('hello', 2147483647), right('hello', 2147483647), substring('hello', 1, 2147483647), substring('hello', $m), " +
+                        "substring('hello', 2147483647, 2147483647), substring('hello', $m, $m)]",
                     { m: 2147483647 }
                 )
-            ).toEqual([[empty, 'hello', 'hello', 'ello', empty]]);
+            ).toEqual([[empty, 'hello', 'hello', 'ello', empty, empty, empty]]);
             expect(await query("UNWIND $xs AS s RETURN substring('hello', s)", { xs: [2147483647] })).toEqual([empty]);
         });
 
@@ -351,6 +472,9 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 // -1.5 is cut to -1, and 2147483648.5 to past the greatest.
                 ['MATCH (n:Count) RETURN left(n.t, n.r)', outOfRange('left', 'length')],
                 ['MATCH (n:Count) RETURN left(n.t, n.hp)', outOfRange('left', 'length')],
+                // In an ORDER BY, and counted by an aggregate: three rows, less 5, is -2.
+                ['MATCH (n:Count) RETURN n.k ORDER BY left(n.t, n.m)', outOfRange('left', 'length')],
+                ['MATCH (n:Count) RETURN left(max(n.t), count(*) - 5)', outOfRange('left', 'length')],
                 // Written, below 0, beside a text from data: it fails on the row whose text is not null.
                 ['MATCH (n:Count) RETURN left(n.t, -1)', outOfRange('left', 'length')],
                 // A constant the compiler does not read as given is worked out by the store, as one from data.
@@ -358,6 +482,12 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 ["RETURN substring('hello', toInteger('-2'))", outOfRange('substring', 'start')]
             ]) {
                 await expect(query(statement)).rejects.toThrow(message);
+            }
+            // Bound past what a long holds, beside a text from data: cut to the greatest long, as Java casts a double.
+            for (const n of [1.0e300, BigInt('1' + '0'.repeat(400)), -1.0e300]) {
+                await expect(query('MATCH (n:Count) RETURN left(n.t, $n)', { n })).rejects.toThrow(
+                    outOfRange('left', 'length')
+                );
             }
             expect(
                 await query(
@@ -367,6 +497,9 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(
                 await query('MATCH (n:Count) WHERE n.k = 1 RETURN [substring(n.t, n.h), substring(n.t, 0, n.h)]')
             ).toEqual([[empty, 'hello']]);
+            expect(
+                await query('MATCH (n:Count) RETURN [left(max(n.t), count(*)), substring(max(n.t), count(*) - 2, count(*))]')
+            ).toEqual([['hel', 'ell']]);
             // Grouped by, as a key beside an aggregate.
             expect(await query('MATCH (n:Count) WHERE n.k = 2 RETURN substring(n.t, n.m), count(*)')).toEqual([
                 ['ello', 1]

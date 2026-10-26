@@ -158,6 +158,10 @@ const NEGATIVE_PRECISION = 'round() takes a precision of 0 or more, as in Neo4j.
 /** The greatest start or length `substring()`, `left()` and `right()` take, as Neo4j takes them: Java's greatest `int`. */
 const MAX_COUNT = 2147483647;
 
+/** The greatest and least long, Java's, as `cutTowardZero` holds a number to. */
+const LONG_MAX = BigInt('9223372036854775807');
+const LONG_MIN = BigInt('-9223372036854775808');
+
 /** The functions of a temporal kind that truncate a value to a unit. */
 const TEMPORAL_TRUNCATE = TEMPORAL_KINDS.map((it) => `${it}.truncate`);
 
@@ -3995,10 +3999,10 @@ export class CypherWriter {
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        `ROUND(${this.numberOf(call.arguments[0])}, ${this.precisionOf(
-                            call.arguments[1],
-                            call.fn.arguments[1]
-                        )})`
+                        this.sql.roundPlaces(
+                            this.numberOf(call.arguments[0]),
+                            this.precisionOf(call.arguments[1], call.fn.arguments[1])
+                        )
                     )
                 )
             );
@@ -4323,27 +4327,27 @@ function heldKind(value: Value): Kind {
 
 /**
  * A given number cut toward zero, as Java casts a double to a long and Neo4j so reads a start or length: NaN is 0, and
- * an infinity the greatest or least long. A whole number, a bigint or the Neo4j driver's Integer, is kept as it is,
- * however large. Undefined where `value` is no number.
+ * a number past a long, an infinity too, the greatest or least long, so no store is given a literal past its number. A
+ * whole number, a bigint or the Neo4j driver's Integer, is kept as it is within a long. Undefined where `value` is no
+ * number.
  */
 function cutTowardZero(value: unknown): bigint | undefined {
     const number = value instanceof CypherFloat ? value.value : value;
+    let cut: bigint;
     if (typeof number === 'bigint') {
-        return number;
-    }
-    if (isInt(number)) {
-        return BigInt(number.toString());
-    }
-    if (typeof number !== 'number') {
+        cut = number;
+    } else if (isInt(number)) {
+        cut = BigInt(number.toString());
+    } else if (typeof number !== 'number') {
         return undefined;
-    }
-    if (Number.isNaN(number)) {
+    } else if (Number.isNaN(number)) {
         return BigInt(0);
+    } else if (!Number.isFinite(number)) {
+        return number > 0 ? LONG_MAX : LONG_MIN;
+    } else {
+        cut = BigInt(Math.trunc(number));
     }
-    if (!Number.isFinite(number)) {
-        return BigInt(number > 0 ? '9223372036854775807' : '-9223372036854775808');
-    }
-    return BigInt(Math.trunc(number));
+    return cut > LONG_MAX ? LONG_MAX : cut < LONG_MIN ? LONG_MIN : cut;
 }
 
 /** Whether the statement gives the value of `expression`, as `CypherWriter.given` reads it, null or not. */

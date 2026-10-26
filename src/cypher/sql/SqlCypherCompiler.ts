@@ -244,6 +244,11 @@ export abstract class SqlCypherCompiler {
         return this.called(query);
     }
 
+    /** `round(value, precision)`: the SQL number `number` to `precision` places, half away from zero, as SQL's `ROUND` rounds. */
+    roundPlaces(number: string, precision: string): string {
+        return `ROUND(${number}, ${precision})`;
+    }
+
     /**
      * `round(value, precision, mode)`: the SQL number `number` rounded to `precision` decimal places by `mode`, as a SQL
      * number. Worked out in decimal, as Neo4j works it out with Java's `BigDecimal`, so 2.345 is halfway between 2.34 and
