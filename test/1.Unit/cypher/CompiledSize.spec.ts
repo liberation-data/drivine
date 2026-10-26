@@ -82,9 +82,7 @@ describe('A compiled Cypher statement', () => {
                     'round('.repeat(3) +
                     'sum(x)' +
                     `, p${mode})`.repeat(3);
-                expect(compilerFor().compile(nested).sql.length).toBeLessThan(
-                    name === 'oracle' ? 2_000_000 : 100_000
-                );
+                expect(compilerFor().compile(nested).sql.length).toBeLessThan(name === 'oracle' ? 2_000_000 : 100_000);
             }
         }
     );

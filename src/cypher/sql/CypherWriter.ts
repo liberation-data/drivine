@@ -4652,9 +4652,7 @@ export class CypherWriter {
             if (mode === undefined) {
                 return json(this.sql.literalJson(null));
             }
-            return json(
-                this.sql.scalar(this.sql.float(this.rounded(call, (n, p) => this.sql.roundTo(n, p, mode))))
-            );
+            return json(this.sql.scalar(this.sql.float(this.rounded(call, (n, p) => this.sql.roundTo(n, p, mode)))));
         }
         if (call.arguments.length === 2) {
             // To 0 places Neo4j rounds as round(x) does, half toward +infinity, as Java's Math.round; to more, half away

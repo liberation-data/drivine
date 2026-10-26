@@ -682,8 +682,19 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 )
             ).toEqual([[null, null]]);
             expect(await query('MATCH (n:Round) RETURN collect(round(n.none, n.r))')).toEqual([[]]);
-            // A value there is still refused.
+            // A null written in the statement, or a parameter's.
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.k = 1 RETURN [round(null, n.r), round(null, n.r, 'UP'), round($v, n.r)]",
+                    { v: null }
+                )
+            ).toEqual([[null, null, null]]);
+            // A value there is still refused, -0.0 and a parameter's too.
+            await expect(query('MATCH (n:Round) WHERE n.k = 1 RETURN round($v, n.r)', { v: 1.5 })).rejects.toThrow(
+                'round() takes a precision of 0 or more, as in Neo4j.'
+            );
             for (const statement of [
+                'MATCH (n:Round) WHERE n.k = 1 RETURN round(-0.0, n.r)',
                 'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r)',
                 // An integer, which Oracle's JSON holds as a number of another kind than a float's.
                 'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.i, n.r)',
