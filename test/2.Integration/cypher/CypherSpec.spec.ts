@@ -506,6 +506,78 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             }
         });
 
+        it('round() to 0 places rounds as round(x) does, half toward +infinity, and to more half away from zero', async () => {
+            // The spec's steps for liberation-data/drivine#328, from drivine-cypher-spec v0.6.8.
+            expect(
+                await query(
+                    'RETURN [round(-2.5, 0), round(-1.5, 0), round(-0.5, 0), round(2.5, 0), round(-2.6, 0), round(-2.55, 1), round(-2.5, 0.7)]'
+                )
+            ).toEqual([[-2.0, -1.0, 0.0, 3.0, -3.0, -2.6, -2.0]]);
+            expect(await query('UNWIND [0, -0.5, 1, null] AS p RETURN round(-2.5, p)')).toEqual([-2.0, -2.0, -2.5, null]);
+            // Either side of 0, the first odd double past 2^52 and numbers near NUMBER's greatest, to 0 places written, picked
+            // when compiling, and from an expression, by the CASE.
+            for (const places of ['0', "toInteger('0')"]) {
+                expect(
+                    await query(
+                        `RETURN [round(-0.0, ${places}), round(-0.4, ${places}), round(-0.49999999999999994, ${places}), round(-4503599627370497.0, ${places}), round(9.0E125, ${places}), round(-9.0E125, ${places})]`
+                    )
+                ).toEqual([[0.0, 0.0, 0.0, -4.503599627370497e15, 9.0e125, -9.0e125]]);
+            }
+            // An integer as a float, a huge or tiny number, a precision from data, and the doubles that a binary sum with
+            // a half rounds up, the last below a half and the first odd past 2^52; round(x) likewise.
+            await query('CREATE (:Round {q: 0, z: 0.0})');
+            expect(
+                await query(
+                    'MATCH (n:Round) RETURN [round(3, 0), round(-3, 0), round(1.0E20, 0), round(-1.0E100, 0), round(1.0E-120, 0), round(-1.0E-120, 0), round(-2.5, n.q), round(-2.5, n.z), ' +
+                        'round(0.49999999999999994, 0), round(4503599627370497.0, 0), round(0.49999999999999994), round(4503599627370497.0), round(-0.5), round(-2.5)]'
+                )
+            ).toEqual([
+                [3.0, -3.0, 1.0e20, -1.0e100, 0.0, 0.0, -2.0, -2.0, 0.0, 4.503599627370497e15, 0.0, 4.503599627370497e15, 0.0, -2.0]
+            ]);
+            // Over an aggregate, where nothing is shared, with the precision written or read from a row; a negative one
+            // still fails there, on zero too, as the WHEN for 0 places reads it first.
+            expect(
+                await query(
+                    'UNWIND [-1.0, -1.5] AS x WITH x, 0 AS p RETURN p, [round(sum(x), 0), round(sum(x), p), round(sum(x), 1), round(avg(x) * 2, p)]'
+                )
+            ).toEqual([[0, [-2.0, -2.0, -2.5, -2.0]]]);
+            await expect(query('UNWIND [0.0] AS x WITH x, -1 AS p RETURN p, round(sum(x), p)')).rejects.toThrow(
+                'round() takes a precision of 0 or more'
+            );
+            // In a WHERE, a grouping key and an ORDER BY, and nested.
+            expect(
+                await query('UNWIND [-2.5, -0.5, 0.5, 2.5] AS x WITH x WHERE round(x, 0) >= 0 RETURN collect(x)')
+            ).toEqual([[-0.5, 0.5, 2.5]]);
+            expect(
+                await query('UNWIND [-2.5, -0.5, 0.5, 2.5, 2.6] AS x RETURN round(x, 0) AS r, count(*) AS c ORDER BY r')
+            ).toEqual([
+                [-2.0, 1],
+                [0.0, 1],
+                [1.0, 1],
+                [3.0, 2]
+            ]);
+            expect(await query('UNWIND [-2.5, 2.4, -0.5] AS x RETURN x ORDER BY round(x, 0), x')).toEqual([-2.5, -0.5, 2.4]);
+            expect(await query('MATCH (n:Round) RETURN round(round(-2.5, n.q) - 0.5, n.z)')).toEqual([-2.0]);
+            // Places a parameter or a parameter's key gives, picked when compiling: a fraction, -0.5, negated, or NaN is 0
+            // places, as Neo4j casts NaN to 0, and 1.0 is 1; a mode rounds by it alone. drivine-python's steps.
+            expect(
+                await query(
+                    'RETURN [round(-2.5, $p), round(-2.5, $q), round(-2.5, -$r), round(-2.5, $z), round(-2.5, $n), ' +
+                        "round(-2.5, $o), round(-2.55, $o), round(-2.5, 0.9999), round(-2.5, 1.0), round(-2.5, $p, 'HALF_UP'), " +
+                        "round(-2.5, 0, 'HALF_UP'), round(-2.5, $m.z), round(-2.5, -0.5), round(-2.5, -0.9999)]",
+                    { p: 0.7, q: -0.5, r: 0.5, z: 0, n: NaN, o: 1.0, m: { z: 0 } }
+                )
+            ).toEqual([[-2.0, -2.0, -2.0, -2.0, -2.0, -2.5, -2.6, -2.0, -2.5, -3.0, -3.0, -2.0, -2.0, -2.0]]);
+            // Below 0 places, given or written, negated or not, is refused, as Neo4j refuses it.
+            for (const [statement, parameters] of [
+                ['RETURN round(-2.5, $n)', { n: -1 }],
+                ['RETURN round(-2.5, -$n)', { n: 1 }],
+                ['RETURN round(-2.5, -1)', {}]
+            ] as [string, Record<string, any>][]) {
+                await expect(query(statement, parameters)).rejects.toThrow('round() takes a precision of 0 or more');
+            }
+        });
+
         it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
             // Zero, on which LOG fails (ORA-01428) were Oracle to count its digits by it, gives zero wherever it is read,
             // among rows that are not zero too.
@@ -594,6 +666,155 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(await query("RETURN [round(1234.5, 3 - 1), round(1234.5, toInteger('2'))]")).toEqual([
                 [1234.5, 1234.5]
             ]);
+        });
+
+        /** The empty text, which Oracle reads as null. */
+        const empty = store.type === DatabaseType.ORACLE ? null : '';
+
+        /** What the compiler refuses a written float start or length `what` of `fn` with. */
+        const float = (fn: string, what: string): string =>
+            `${fn}() takes an integer for its ${what}, not a float, as in Neo4j.`;
+
+        /** What the compiler refuses a start or length `what` of `fn` out of range with. */
+        const outOfRange = (fn: string, what: string): string =>
+            `${fn}() takes a ${what} from 0 to 2147483647, as in Neo4j.`;
+
+        it('substring(), left() and right() refuse a written float, even a whole one, and a given start or length out of range, as Neo4j does', async () => {
+            // Not in the spec yet (#263): a start or a length. Neo4j refuses a float it knows to be one whatever the text;
+            // a bound one it cuts toward zero. It refuses one out of range only where the text is not null.
+            for (const [statement, parameters, message] of [
+                ["RETURN left('hello', 2.7)", {}, float('left', 'length')],
+                ["RETURN left('hello', 2.0)", {}, float('left', 'length')],
+                ["RETURN right('hello', -0.5)", {}, float('right', 'length')],
+                ["RETURN substring('hello', 1.0)", {}, float('substring', 'start')],
+                ["RETURN substring('hello', 1, 2.6)", {}, float('substring', 'length')],
+                ['RETURN left(null, 2.7)', {}, float('left', 'length')],
+                ["RETURN left('hello', -1)", {}, outOfRange('left', 'length')],
+                ["RETURN right('hello', -1)", {}, outOfRange('right', 'length')],
+                ["RETURN substring('hello', -1, 2)", {}, outOfRange('substring', 'start')],
+                ["RETURN substring('hello', 1, -1)", {}, outOfRange('substring', 'length')],
+                ["RETURN left('hello', 9223372036854775807)", {}, outOfRange('left', 'length')],
+                ['RETURN substring($t, $s)', { t: 'hello', s: -1 }, outOfRange('substring', 'start')],
+                // Bound, -1.5 is cut to -1, and 1.0E20 is past the greatest, as is an infinity.
+                ["RETURN left('hello', $n)", { n: -1.5 }, outOfRange('left', 'length')],
+                ["RETURN left('hello', $n)", { n: 1.0e20 }, outOfRange('left', 'length')],
+                ["RETURN left('hello', $n)", { n: Infinity }, outOfRange('left', 'length')],
+                ["RETURN left('hello', $n)", { n: -Infinity }, outOfRange('left', 'length')],
+                // Negated, a bound number is negated before it is cut: -2.7 is -2.
+                ["RETURN left('hello', -$n)", { n: 2.7 }, outOfRange('left', 'length')]
+            ] as const) {
+                await expect(query(statement, parameters)).rejects.toThrow(message);
+            }
+            expect(
+                await query(
+                    "RETURN [left('hello', 2), right('hello', 2), substring('hello', 1), substring('hello', 1, 2), left('hello', null), substring('hello', null), " +
+                        "substring('hello', 1, null), left(null, -1), right(null, -1), substring(null, 1, -1), left('hello', 10), left('hello', 0), substring('hello', 10)]"
+                )
+            ).toEqual([['he', 'lo', 'ello', 'el', null, null, null, null, null, null, 'hello', empty, empty]]);
+            expect(
+                await query(
+                    "RETURN [left($t, $m), left('hello', $i), left('hello', $f), substring('hello', $s, $l), left('hello', $q), right($t, $f), left('hello', $p.f), left($p.none, $m), left('hello', -$m), left('hello', -$q)]",
+                    { t: null, m: -1, i: 2, f: 2.7, s: 1.7, l: 2.6, q: -0.5, p: { f: 2.7 } }
+                )
+            ).toEqual([[null, 'he', 'he', 'el', empty, null, 'he', null, 'h', empty]]);
+            expect(await query("UNWIND $xs AS c RETURN left('hello', c)", { xs: [2.7, null] })).toEqual(['he', null]);
+            // A bound NaN is 0, as Java casts a double to a long; a bigint and the Neo4j driver's Integer are the numbers they are.
+            expect(
+                await query("RETURN [left('hello', $n), substring('hello', $n), left('hello', $b), substring('hello', $i)]", {
+                    n: NaN,
+                    b: BigInt(2),
+                    i: neo4j.int(1)
+                })
+            ).toEqual([[empty, 'hello', 'he', 'ello']]);
+            // The greatest start or length is taken: a start past the text gives the empty text, written, bound or from a list.
+            expect(
+                await query(
+                    "RETURN [substring('hello', 2147483647), left('hello', 2147483647), right('hello', 2147483647), substring('hello', 1, 2147483647), substring('hello', $m), " +
+                        "substring('hello', 2147483647, 2147483647), substring('hello', $m, $m)]",
+                    { m: 2147483647 }
+                )
+            ).toEqual([[empty, 'hello', 'hello', 'ello', empty, empty, empty]]);
+            expect(await query("UNWIND $xs AS s RETURN substring('hello', s)", { xs: [2147483647] })).toEqual([empty]);
+        });
+
+        it('a start or length from data is cut toward zero, and one out of range fails only on a row that reads it, with the compiler\'s message', async () => {
+            // Not in the spec yet (#263): a start or a length read from data, in a WHERE and an aggregate too, and on rows
+            // filtered out.
+            await query(
+                "CREATE (:Count {k: 1, f: 2.7, w: 2.0, q: -0.5, r: -1.5, m: -1, h: 2147483647.9, hp: 2147483648.5, t: 'hello'}), " +
+                    "(:Count {k: 2, m: 1, t: 'hello'}), (:Count {k: 3, m: -1, r: -1.5, hp: 2147483648.5})"
+            );
+            for (const [statement, message] of [
+                ['MATCH (n:Count) RETURN left(n.t, n.m)', outOfRange('left', 'length')],
+                ["MATCH (n:Count) WHERE left(n.t, n.m) = 'h' RETURN n.k", outOfRange('left', 'length')],
+                ['MATCH (n:Count) RETURN collect(right(n.t, n.m))', outOfRange('right', 'length')],
+                ['MATCH (n:Count) RETURN substring(n.t, n.m)', outOfRange('substring', 'start')],
+                ['MATCH (n:Count) RETURN substring(n.t, 0, n.r)', outOfRange('substring', 'length')],
+                // -1.5 is cut to -1, and 2147483648.5 to past the greatest.
+                ['MATCH (n:Count) RETURN left(n.t, n.r)', outOfRange('left', 'length')],
+                ['MATCH (n:Count) RETURN left(n.t, n.hp)', outOfRange('left', 'length')],
+                // In an ORDER BY, and counted by an aggregate: three rows, less 5, is -2.
+                ['MATCH (n:Count) RETURN n.k ORDER BY left(n.t, n.m)', outOfRange('left', 'length')],
+                ['MATCH (n:Count) RETURN left(max(n.t), count(*) - 5)', outOfRange('left', 'length')],
+                // Written, below 0, beside a text from data: it fails on the row whose text is not null.
+                ['MATCH (n:Count) RETURN left(n.t, -1)', outOfRange('left', 'length')],
+                // A constant the compiler does not read as given is worked out by the store, as one from data.
+                ["RETURN left('hello', 1 - 3)", outOfRange('left', 'length')],
+                ["RETURN substring('hello', toInteger('-2'))", outOfRange('substring', 'start')]
+            ]) {
+                await expect(query(statement)).rejects.toThrow(message);
+            }
+            // Bound past what a long holds, beside a text from data: cut to the greatest long, as Java casts a double.
+            for (const n of [1.0e300, BigInt('1' + '0'.repeat(400)), -1.0e300]) {
+                await expect(query('MATCH (n:Count) RETURN left(n.t, $n)', { n })).rejects.toThrow(
+                    outOfRange('left', 'length')
+                );
+            }
+            expect(
+                await query(
+                    'MATCH (n:Count) WHERE n.k = 1 RETURN [left(n.t, n.f), right(n.t, n.w), substring(n.t, n.f), substring(n.t, n.q, n.f), left(n.t, n.h), left(n.t, n.f * 1), left(n.none, n.f), left(n.t, n.q)]'
+                )
+            ).toEqual([['he', 'lo', 'llo', 'he', 'hello', 'he', null, empty]]);
+            expect(
+                await query('MATCH (n:Count) WHERE n.k = 1 RETURN [substring(n.t, n.h), substring(n.t, 0, n.h)]')
+            ).toEqual([[empty, 'hello']]);
+            expect(
+                await query('MATCH (n:Count) RETURN [left(max(n.t), count(*)), substring(max(n.t), count(*) - 2, count(*))]')
+            ).toEqual([['hel', 'ell']]);
+            // Grouped by, as a key beside an aggregate.
+            expect(await query('MATCH (n:Count) WHERE n.k = 2 RETURN substring(n.t, n.m), count(*)')).toEqual([
+                ['ello', 1]
+            ]);
+            // Out of range beside a null text is null, as in Neo4j, and so is a null start or length.
+            expect(
+                await query(
+                    'MATCH (n:Count) WHERE n.k = 3 RETURN [left(n.t, n.m), substring(n.t, n.m), left(n.t, -1), right(n.t, n.r)]'
+                )
+            ).toEqual([[null, null, null, null]]);
+            // A constant out of range, which the compiler does not read as given, and one past SQL's integer: null beside a
+            // null text, and not refused for the row filtered out.
+            expect(
+                await query(
+                    'MATCH (n:Count) WHERE n.k = 3 RETURN [left(n.t, 1 - 3), substring(n.t, 0, 1 - 3), left(n.t, n.hp), left(n.t, 2147483647 + 1)]'
+                )
+            ).toEqual([[null, null, null, null]]);
+            // Out of range beside a text of constants alone, on no row: the failure reads the text, so no store works it
+            // out before a row, given or not.
+            expect(
+                await query(
+                    "MATCH (n:Count) WHERE n.k = 99 RETURN [left(toUpper('hello'), -1), left('hello', 1 - 3), substring(toUpper('hello'), 0, 1 - 3)]"
+                )
+            ).toEqual([]);
+            expect(
+                await query(
+                    'MATCH (n:Count) WHERE n.k = 2 RETURN [left(n.t, n.none), substring(n.t, n.none), substring(n.t, 1, n.none)]'
+                )
+            ).toEqual([[null, null, null]]);
+            expect(
+                await query(
+                    "MATCH (n:Count) RETURN CASE WHEN n.m < 0 THEN 'none' ELSE left(n.t, n.m) END ORDER BY n.k"
+                )
+            ).toEqual(['none', 'h', 'none']);
         });
 
         it('a sum of a text the statement makes and a text or a float gives the text Cypher writes', async () => {

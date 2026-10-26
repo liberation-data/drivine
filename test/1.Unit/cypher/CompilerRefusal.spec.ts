@@ -54,6 +54,43 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('a start or length of substring(), left() or right() written as a float, or given out of range beside a text', () => {
+        // Not in the spec yet (#319): what drivine4j's #263 refuses, and a whole number a caller binds as a bigint, the
+        // Neo4j driver's Integer, or past what a float holds, and a float no number is, cut as Java casts a double.
+        const float = (fn: string, what: string): string =>
+            `${fn}() takes an integer for its ${what}, not a float, as in Neo4j.`;
+        const outOfRange = (fn: string, what: string): string =>
+            `${fn}() takes a ${what} from 0 to 2147483647, as in Neo4j.`;
+        compilers.forEach(([, compiler]) => {
+            (
+                [
+                    ['RETURN left($t, 2.0)', { t: 'hello' }, float('left', 'length')],
+                    ['RETURN right(null, -0.5)', {}, float('right', 'length')],
+                    ['MATCH (n:Count) RETURN substring(n.t, 1.0)', {}, float('substring', 'start')],
+                    ["RETURN substring('hello', 1, 2.6)", {}, float('substring', 'length')],
+                    ["RETURN left('hello', $n)", { n: BigInt(-1) }, outOfRange('left', 'length')],
+                    ["RETURN left('hello', $n)", { n: int(2147483648) }, outOfRange('left', 'length')],
+                    ["RETURN left('hello', $n)", { n: BigInt('1' + '0'.repeat(400)) }, outOfRange('left', 'length')],
+                    ["RETURN right('hello', $n)", { n: Infinity }, outOfRange('right', 'length')],
+                    ["RETURN substring('hello', $n)", { n: -Infinity }, outOfRange('substring', 'start')],
+                    ['RETURN substring($p.t, 0, -$n)', { p: { t: 'hello' }, n: 1 }, outOfRange('substring', 'length')]
+                ] as const
+            ).forEach(([cypher, parameters, message]) => {
+                expect(() => compiler().compile(cypher, parameters)).toThrow(message);
+            });
+            // NaN is 0; out of range beside a null text, given, is null; and a count from data is read on a row.
+            expect(() =>
+                compiler().compile(
+                    "RETURN [left('hello', $n), substring('hello', $n), left(null, -1), left($p.none, $m), left($t, $m)]",
+                    { n: NaN, p: {}, m: BigInt(-1), t: null }
+                )
+            ).not.toThrow();
+            expect(() =>
+                compiler().compile('MATCH (n:Count) RETURN [left(n.t, -1), left(n.t, n.m), substring(n.t, 1 - 3)]')
+            ).not.toThrow();
+        });
+    });
+
     it('collect(DISTINCT) beside a variable no other item is, outside its aggregates, as collect() is', () => {
         // Not in the spec: distinctFirst groups by each such variable, so it is refused before.
         compilers.forEach(([, compiler]) => {
