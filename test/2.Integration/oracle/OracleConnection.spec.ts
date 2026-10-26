@@ -174,6 +174,72 @@ describeOnOracle('Oracle connection', () => {
         }
     });
 
+    it("should make the store once another session's lock goes, and leave the session's DDL not waiting after, made or failed", async () => {
+        const graph = new OracleGraph('drivine_ddl_wait_test');
+        const provider = DatabaseRegistry.getInstance().connectionProvider('ORACLE')!;
+        const run = async (statement: string): Promise<void> => {
+            await pm.execute(new QuerySpecification(statement));
+        };
+        const drop = async (): Promise<void> => {
+            await run(`DROP PROPERTY GRAPH IF EXISTS ${graph.name}`);
+            for (const table of [graph.edges, graph.nodes, graph.catalog]) {
+                await run(`DROP TABLE IF EXISTS ${table} PURGE`);
+            }
+        };
+        const holder = await provider.connect();
+        const maker = await provider.connect();
+        /** How long DDL `maker` runs on the edges, while `holder` writes them, takes to be turned away (ORA-00054). */
+        const turnedAwayAfter = async (): Promise<number> => {
+            await holder.startTransaction();
+            await holder.query(new QuerySpecification(`LOCK TABLE ${graph.edges} IN ROW EXCLUSIVE MODE`));
+            const started = Date.now();
+            try {
+                await expect(
+                    maker.query(new QuerySpecification(`CREATE INDEX ${graph.name}_extra ON ${graph.edges} (type)`))
+                ).rejects.toThrow(/ORA-00054/);
+                return Date.now() - started;
+            } finally {
+                await holder.rollbackTransaction();
+            }
+        };
+        try {
+            await drop();
+            await run(graph.ensuring);
+            await run(`DROP PROPERTY GRAPH ${graph.name}`);
+            await run(`DROP INDEX ${graph.name}_edge_src`);
+
+            await holder.startTransaction();
+            await holder.query(new QuerySpecification(`LOCK TABLE ${graph.edges} IN ROW EXCLUSIVE MODE`));
+            const making = maker.query(new QuerySpecification(graph.ensuring));
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await holder.rollbackTransaction();
+            await making;
+            expect(
+                await pm.query<number>(
+                    new QuerySpecification(
+                        `SELECT COUNT(*) AS "n" FROM user_property_graphs WHERE graph_name = '${graph.name.toUpperCase()}'`
+                    )
+                )
+            ).toEqual([1]);
+            expect(await turnedAwayAfter()).toBeLessThan(10_000);
+
+            // A node table without the key the edges reference: the block fails after the wait is set.
+            await drop();
+            await run(`CREATE TABLE ${graph.nodes} (x NUMBER)`);
+            await expect(maker.query(new QuerySpecification(graph.ensuring))).rejects.toThrow(/ORA-00904/);
+            await run(`CREATE TABLE ${graph.edges} (type VARCHAR2(10))`);
+            expect(await turnedAwayAfter()).toBeLessThan(10_000);
+            // And the measure tells the wait: a session that waits three seconds is turned away after them.
+            await maker.query(new QuerySpecification('ALTER SESSION SET DDL_LOCK_TIMEOUT = 3'));
+            expect(await turnedAwayAfter()).toBeGreaterThanOrEqual(2500);
+            await maker.query(new QuerySpecification('ALTER SESSION SET DDL_LOCK_TIMEOUT = 0'));
+        } finally {
+            await holder.release();
+            await maker.release();
+            await drop();
+        }
+    }, 120_000);
+
     it('should read a cursor in batches', async () => {
         const connection = await DatabaseRegistry.getInstance().connectionProvider('ORACLE')!.connect();
         try {

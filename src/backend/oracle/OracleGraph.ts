@@ -8,6 +8,9 @@ export { DEFAULT_GRAPH, sqlText };
  * through.
  */
 export class OracleGraph extends SqlGraph {
+    /** How long a statement of `ensuring` waits on a lock another session making the store holds. */
+    static readonly DDL_WAIT_SECONDS = 60;
+
     constructor(name: string = DEFAULT_GRAPH) {
         super(name, 'Oracle', 128);
     }
@@ -52,6 +55,12 @@ export class OracleGraph extends SqlGraph {
     /**
      * The block that makes the store when it is not there and does nothing when it is: the property graph is made
      * last, so its presence says the rest is. One another process made meanwhile (ORA-00955) is taken as made.
+     *
+     * Two sessions that each find the store missing, as two pools or processes first connecting at once do, make it
+     * together: a statement of one waits on the lock the other's holds, rather than being turned away at once
+     * (ORA-00054), for up to {@link OracleGraph.DDL_WAIT_SECONDS}, and then finds what the other made. The wait is the
+     * session's DDL_LOCK_TIMEOUT, set back to Oracle's default, no wait, when the block ends, failed or not, so the
+     * session's later statements are as they were.
      */
     get ensuring(): string {
         const statements = this.ddl
@@ -64,8 +73,14 @@ export class OracleGraph extends SqlGraph {
 BEGIN
     SELECT COUNT(*) INTO v_made FROM user_property_graphs WHERE graph_name = '${this.name.toUpperCase()}';
     IF v_made = 0 THEN
+    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';
 ${statements}
+    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';
     END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';
+        RAISE;
 END;`;
     }
 }
