@@ -50,6 +50,25 @@ describe('A compiled Cypher statement', () => {
         }
     );
 
+    it.each(compilers)(
+        'of round() to places known when compiling, nested under an aggregate, rounds one way, not both, on %s',
+        (_, compilerFor) => {
+            // Under an aggregate nothing is bound: a CASE of both roundings, nested four deep, made 85 KB on Postgres and
+            // 8.8 MB on Oracle of what round(x) makes in 4 KB and 26 KB (liberation-data/drivine#328).
+            const nested = (precision: string) =>
+                'UNWIND [1.5] AS x RETURN ' +
+                'round('.repeat(4) +
+                'sum(x)' +
+                `${precision})`.repeat(4);
+            const size = (precision: string, parameters: Record<string, any> = {}) =>
+                compilerFor().compile(nested(precision), parameters).sql.length;
+            const whole = size('');
+            expect(size(', 0')).toEqual(whole);
+            expect(size(', -0.5')).toEqual(whole);
+            expect(size(', $p', { p: 0 })).toEqual(whole);
+        }
+    );
+
     it.each(compilers)('of a sum of twice the terms is about twice as long on %s', (_, compilerFor) => {
         const compiler = compilerFor();
         const sum = (terms: number) =>

@@ -514,15 +514,50 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 )
             ).toEqual([[-2.0, -1.0, 0.0, 3.0, -3.0, -2.6, -2.0]]);
             expect(await query('UNWIND [0, -0.5, 1, null] AS p RETURN round(-2.5, p)')).toEqual([-2.0, -2.0, -2.5, null]);
+            // Either side of 0, the first odd double past 2^52 and numbers near NUMBER's greatest, to 0 places written, picked
+            // when compiling, and from an expression, by the CASE.
+            for (const places of ['0', "toInteger('0')"]) {
+                expect(
+                    await query(
+                        `RETURN [round(-0.0, ${places}), round(-0.4, ${places}), round(-0.49999999999999994, ${places}), round(-4503599627370497.0, ${places}), round(9.0E125, ${places}), round(-9.0E125, ${places})]`
+                    )
+                ).toEqual([[0.0, 0.0, 0.0, -4.503599627370497e15, 9.0e125, -9.0e125]]);
+            }
             // An integer as a float, a huge or tiny number, a precision from data, and the doubles that a binary sum with
             // a half rounds up, the last below a half and the first odd past 2^52; round(x) likewise.
-            await query('CREATE (:Round {q: 0})');
+            await query('CREATE (:Round {q: 0, z: 0.0})');
             expect(
                 await query(
-                    'MATCH (n:Round) RETURN [round(3, 0), round(-3, 0), round(1.0E20, 0), round(-1.0E100, 0), round(1.0E-120, 0), round(-1.0E-120, 0), round(-2.5, n.q), ' +
-                        'round(0.49999999999999994, 0), round(4503599627370497.0, 0), round(0.49999999999999994), round(4503599627370497.0)]'
+                    'MATCH (n:Round) RETURN [round(3, 0), round(-3, 0), round(1.0E20, 0), round(-1.0E100, 0), round(1.0E-120, 0), round(-1.0E-120, 0), round(-2.5, n.q), round(-2.5, n.z), ' +
+                        'round(0.49999999999999994, 0), round(4503599627370497.0, 0), round(0.49999999999999994), round(4503599627370497.0), round(-0.5), round(-2.5)]'
                 )
-            ).toEqual([[3.0, -3.0, 1.0e20, -1.0e100, 0.0, 0.0, -2.0, 0.0, 4.503599627370497e15, 0.0, 4.503599627370497e15]]);
+            ).toEqual([
+                [3.0, -3.0, 1.0e20, -1.0e100, 0.0, 0.0, -2.0, -2.0, 0.0, 4.503599627370497e15, 0.0, 4.503599627370497e15, 0.0, -2.0]
+            ]);
+            // Over an aggregate, where nothing is shared, with the precision written or read from a row; a negative one
+            // still fails there, on zero too, as the WHEN for 0 places reads it first.
+            expect(
+                await query(
+                    'UNWIND [-1.0, -1.5] AS x WITH x, 0 AS p RETURN p, [round(sum(x), 0), round(sum(x), p), round(sum(x), 1), round(avg(x) * 2, p)]'
+                )
+            ).toEqual([[0, [-2.0, -2.0, -2.5, -2.0]]]);
+            await expect(query('UNWIND [0.0] AS x WITH x, -1 AS p RETURN p, round(sum(x), p)')).rejects.toThrow(
+                'round() takes a precision of 0 or more'
+            );
+            // In a WHERE, a grouping key and an ORDER BY, and nested.
+            expect(
+                await query('UNWIND [-2.5, -0.5, 0.5, 2.5] AS x WITH x WHERE round(x, 0) >= 0 RETURN collect(x)')
+            ).toEqual([[-0.5, 0.5, 2.5]]);
+            expect(
+                await query('UNWIND [-2.5, -0.5, 0.5, 2.5, 2.6] AS x RETURN round(x, 0) AS r, count(*) AS c ORDER BY r')
+            ).toEqual([
+                [-2.0, 1],
+                [0.0, 1],
+                [1.0, 1],
+                [3.0, 2]
+            ]);
+            expect(await query('UNWIND [-2.5, 2.4, -0.5] AS x RETURN x ORDER BY round(x, 0), x')).toEqual([-2.5, -0.5, 2.4]);
+            expect(await query('MATCH (n:Round) RETURN round(round(-2.5, n.q) - 0.5, n.z)')).toEqual([-2.0]);
         });
 
         it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
