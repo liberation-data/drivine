@@ -161,6 +161,215 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
         });
     });
+
+    /**
+     * Lists and maps that hold a null, compared as Cypher compares them, on every store: drivine4j's own tests of
+     * liberation-data/drivine4j#225, ported for liberation-data/drivine#290. They sit beside the spec's cases of it
+     * since v0.6.6.
+     */
+    describe('lists and maps that hold a null', () => {
+        const seed = async (): Promise<void> => {
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+        };
+
+        it('compare item by item, null where no pair differs', async () => {
+            // Cypher compares a list or a map item by item, so a null it holds makes the comparison null.
+            expect(await query('RETURN [[null] = [null], {x: null} = {x: null}, [null, 1] = [null, 1]]')).toEqual([
+                [null, null, null]
+            ]);
+            expect(await query('RETURN [[1, null] = [2, null], [1, 2] = [1], [null] = [null, null], [] = []]')).toEqual([
+                [false, false, false, true]
+            ]);
+            expect(await query('RETURN [[null] <> [null], [1, null] <> [2, null], [null, 1] <> [null, 1]]')).toEqual([
+                [null, true, null]
+            ]);
+            expect(
+                await query(
+                    'RETURN [{x: null} = {y: null}, {x: 1, y: null} = {x: 2, y: null}, {x: null} = {x: 1}, {x: null} = {}, {a: 1} = {a: 1, b: null}]'
+                )
+            ).toEqual([[false, false, null, false, false]]);
+            expect(
+                await query(
+                    'RETURN [[[null]] = [[null]], [[1, null]] = [[2, null]], [{x: null}] = [{x: null}], {a: [null]} = {a: [null]}, [1, [null]] = [2, [null]], [[null], 1] = [[null], 2]]'
+                )
+            ).toEqual([[null, false, null, null, false, false]]);
+            expect(
+                await query(
+                    "RETURN [[1] = ['1'], [null] = [1], [[1]] = [1], [null, 'a'] = [1, 'b'], [1] = [1.0], [null] = [[1]], [null] = [{x: 1}], [null, 1] = [1, null]]"
+                )
+            ).toEqual([[false, null, false, false, true, null, null, null]]);
+            expect(await query("RETURN CASE [null] WHEN [null] THEN 'y' ELSE 'n' END")).toEqual(['n']);
+            // Lists that hold no null compare as before.
+            expect(
+                await query(
+                    "RETURN [[1, 2] = [1, 2], [1, 2] <> [1, 3], {x: 1} = {x: 1}, 'a' IN ['a', 'b'], 'c' IN ['a', 'b']]"
+                )
+            ).toEqual([[true, true, true, true, false]]);
+        });
+
+        it('IN compares a value with each item as equality does', async () => {
+            // True where an item is equal, else null where a comparison is null, else false.
+            await seed();
+            // A node with no name is in no list of names, nor out of one: NOT keeps it no more than the IN does.
+            expect(
+                await query(
+                    "MATCH (n:CyTest) WHERE NOT (n.name IN ['Keanu']) RETURN count(*) UNION ALL MATCH (n:CyTest) WHERE n.name IN ['Keanu'] AND n.born > 0 OR n.name IN $x RETURN count(*)",
+                    { x: [] }
+                )
+            ).toEqual([3, 1]);
+            // A quantifier keeps an item where its condition is true, so one with no name is in all of no list of names.
+            expect(await query("MATCH (n:CyTest) WHERE all(x IN [1] WHERE n.name IN ['Keanu']) RETURN count(*)")).toEqual([
+                1
+            ]);
+            expect(
+                await query(
+                    'RETURN [null IN [null], [null] IN [[null]], 1 IN [null], 1 IN [1, null], 2 IN [1, null], null IN [], [null] IN [[1, 2]], ' +
+                        '[null] IN [[1]], [1, null] IN [[2, null]], [1] IN [[1], null], {x: null} IN [{x: null}], [1] IN [[2], null], [1] IN [[null]], null IN [1]]'
+                )
+            ).toEqual([[null, null, null, true, null, false, false, null, false, true, null, null, null, null]]);
+            expect(
+                await query('RETURN [$x IN $l, 2 IN $l, $a IN $ls, $a IN [[2, null]], 1 IN $n]', {
+                    x: null,
+                    l: [1, 2],
+                    a: [1, null],
+                    ls: [[1, null], [3]],
+                    n: null
+                })
+            ).toEqual([[null, true, null, false, null]]);
+            // Read by a WHERE, a null is in no list that holds one: JSON's null is equal to such an item as JSON.
+            const nulls = { x: null, l: [null, 2], m: { x: null } };
+            expect(await query('UNWIND [1] AS i WITH i WHERE $x IN $l RETURN i', nulls)).toEqual([]);
+            expect(await query('UNWIND [1] AS i WITH i WHERE null IN $l OR $m.x IN $l RETURN i', nulls)).toEqual([]);
+            expect(await query('RETURN [x IN [1] WHERE null IN $l OR $m.x IN $l]', nulls)).toEqual([[]]);
+        });
+
+        it('compare item by item where neither side is written out', async () => {
+            // Parameters, values carried by a WITH and collected lists are compared as they are at run time.
+            expect(
+                await query('RETURN [$a = $b, $a = $c, $a IN [$b], $a IN $l, $m = $n, $p = $p]', {
+                    a: [1, null],
+                    b: [1, null],
+                    c: [2, null],
+                    l: [[1, null], [3]],
+                    m: { x: null },
+                    n: { x: 1 },
+                    p: [1, 2]
+                })
+            ).toEqual([[null, false, null, null, null, true]]);
+            expect(
+                await query(
+                    'WITH [1, null] AS a, [1, null] AS b, [2, null] AS c, [null, 1] AS d RETURN [a = b, a = c, a <> c, a = d, a IN [b, c], a IN [c]]'
+                )
+            ).toEqual([[null, false, true, null, null, false]]);
+            expect(
+                await query(
+                    'WITH [[null], 1] AS a, [[null], 2] AS b, {k: [null]} AS m, {k: [1]} AS n, {k: [1], j: 2} AS o RETURN [a = b, m = n, m = m, m = o, n = n]'
+                )
+            ).toEqual([[false, null, null, false, true]]);
+            expect(
+                await query(
+                    'UNWIND [[1, null], [2, null]] AS l WITH collect(l) AS ls RETURN [ls = [[1, null], [2, null]], ls[0] = ls[1], ls[0] IN ls]'
+                )
+            ).toEqual([[null, false, null]]);
+            expect(
+                await query('UNWIND [[1, null], [2, null], [3]] AS l WITH l WHERE l = [1, null] OR l = [3] RETURN l')
+            ).toEqual([[3]]);
+            // A parameter's list compared item by item as the statement is compiled, at any depth.
+            expect(
+                await query(
+                    'UNWIND [[1, [2, 3]], [1, [2]], 5] AS l WITH collect(l) AS ls RETURN [ls[0] = $p, ls[1] = $p, ls[2] = $p, $p = ls[0], ls[0] <> $q, $q = ls[1]]',
+                    { p: [null, [2, 3]], q: [1, [null, 4]] }
+                )
+            ).toEqual([[null, false, false, null, true, false]]);
+        });
+
+        it("find a null a value holds, not one its text spells, at any length and in a reduce's step", async () => {
+            // Oracle reads whether a value holds a null from its JSON's text.
+            expect(
+                await query(
+                    String.raw`UNWIND ['a,null]', 'x:null}', 'null', 'a\",null]', 'é😀\",null]', 'a\\'] AS s WITH s, [s] AS v, [[s]] AS l, {k: s} AS m, [{k: s}] AS ms RETURN [v IN l, v = [s], m IN ms]`
+                )
+            ).toEqual(Array.from({ length: 6 }, () => [true, true, true]));
+            // A text that ends in a backslash ends where its quote does.
+            expect(
+                await query(
+                    String.raw`UNWIND ['a\\'] AS s WITH s, [s, ',null]'] AS v RETURN [v = [s, ',null]'], v IN [[s, ',null]']]]`
+                )
+            ).toEqual([[true, true]]);
+            const long = "[x IN range(1, 600) | 'abcdefghij']";
+            expect(
+                await query(`WITH ${long} AS v, ${long} AS w, [${long}] AS l RETURN [v = w, v IN l, v <> w]`)
+            ).toEqual([[true, true, false]]);
+            // A long value that holds a null is read whole, so the null is found.
+            expect(
+                await query(
+                    `WITH ${long} + [null] AS v, ${long} + [null] AS w, [${long} + [null]] AS l, ['z'] + ${long} + [null] AS u RETURN [v = w, v IN l, v <> w, v = u]`
+                )
+            ).toEqual([[null, null, null, false]]);
+            // A text past 32 KB beside a null is compared whole.
+            expect(
+                await query("WITH [null, $t] AS a, [null, $t] AS b, [null, $t + 'y'] AS c RETURN [a = b, a = c]", {
+                    t: 'x'.repeat(40000)
+                })
+            ).toEqual([[null, false]]);
+            // In the step of a reduce, as in a statement that writes, on Oracle.
+            expect(
+                await query(
+                    "WITH [1, null] AS a, [2, null] AS c RETURN reduce(acc = [], x IN [a, c] | acc + [coalesce(x = a, 'null')])"
+                )
+            ).toEqual([['null', false]]);
+            expect(
+                await query(
+                    "UNWIND ['a,null]'] AS s WITH s, [s] AS v, [[s]] AS l RETURN reduce(acc = [], x IN [v] | acc + [x = [s], x IN l])"
+                )
+            ).toEqual([[true, true]]);
+        });
+
+        it('a null node or relationship in a list or a map makes its comparison null', async () => {
+            // A node or a relationship OPTIONAL MATCH finds none of is null in what holds it.
+            await seed();
+            expect(
+                await query(
+                    'OPTIONAL MATCH (x:Nope)-[r]->() RETURN [[r] = [r], {x: r} = {x: r}, [r] <> [r], r IN [r], [r] IN [[r]], x IN [x], [x] = [x], {x: x} = {x: x}, [r, 1] = [r, 2]]'
+                )
+            ).toEqual([[null, null, null, null, null, null, null, null, false]]);
+            expect(
+                await query(
+                    "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->() OPTIONAL MATCH (:Person {name: 'Hugo'})-[r2:KNOWS]->() " +
+                        'WITH r1, r2, [r1, r2] AS a, {x: r2} AS m ' +
+                        'RETURN [[r1, r2] = [r1, r2], {a: r1, b: r2} = {a: r1, b: r2}, a = a, m = m, a = [r1, r1], r1 IN [r2], a = [r1]]'
+                )
+            ).toEqual([[null, null, null, null, null, null, false]]);
+        });
+
+        it('compare in a statement that writes, on Oracle as null where equal as JSON and else false', async () => {
+            // On Oracle a procedure calls no function of its own, so values that differ as JSON are false there.
+            await clear();
+            expect(
+                await query(
+                    "CREATE (n:CyNullEquality) WITH n, [1, null] AS a, [1, null] AS b, [2, null] AS c SET n.same = coalesce(a = b, 'null'), n.other = a = c, n.unequal = a <> c RETURN [n.same, n.other, n.unequal]"
+                )
+            ).toEqual([['null', false, true]]);
+            // Values that hold no null compare as before, a text that holds a null's text and a long value among them.
+            const long = "[x IN range(1, 600) | 'abcdefghij']";
+            expect(
+                await query(
+                    `UNWIND ['a,null]'] AS s WITH s, [s] AS v, [[s]] AS l, ${long} AS w, [${long}] AS ws CREATE (n:CyNullEquality) SET n.eq = v = [s], n.in = v IN l, n.longEq = w = ${long}, n.longIn = w IN ws RETURN [n.eq, n.in, n.longEq, n.longIn]`
+                )
+            ).toEqual([[true, true, true, true]]);
+            // Lists written out are compared item by item, on Oracle too.
+            expect(
+                await query("CREATE (n:CyNullEquality) SET n.eq = coalesce([null] = [1], 'null') RETURN n.eq")
+            ).toEqual(['null']);
+            // Values that differ as JSON are false on Oracle, as the README says, where Cypher's comparison is null.
+            expect(
+                await query(
+                    "CREATE (n:CyNullEquality) WITH n, [null] AS a, [1] AS b SET n.eq = coalesce(a = b, 'null') RETURN n.eq"
+                )
+            ).toEqual([store.type === DatabaseType.ORACLE ? false : 'null']);
+        });
+    });
 });
 
 /**

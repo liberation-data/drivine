@@ -1456,3 +1456,73 @@ cases:
         cypher: "WITH 1 AS label CALL { CALL db.labels() YIELD label RETURN count(label) AS n } RETURN label, n"
         rows: [[1, 4]]
 
+  - name: "Lists and maps that hold a null"
+    description: "A list or a map is compared item by item: false where a pair is false, else null where a pair is null, else true."
+    steps:
+      - cypher: "RETURN [[null] = [null], {x: null} = {x: null}, [null, 1] = [null, 1]]"
+        rows: [[null, null, null]]
+      - note: "A pair that differs makes it false, whatever else is null; so do different lengths and different keys."
+        cypher: "RETURN [[1, null] = [2, null], [1, 2] = [1], [null] = [null, null], [] = []]"
+        rows: [[false, false, false, true]]
+      - cypher: "RETURN [[null] <> [null], [1, null] <> [2, null], [null, 1] <> [null, 1]]"
+        rows: [[null, true, null]]
+      - cypher: "RETURN [{x: null} = {y: null}, {x: 1, y: null} = {x: 2, y: null}, {x: null} = {x: 1}, {x: null} = {}, {a: 1} = {a: 1, b: null}]"
+        rows: [[false, false, null, false, false]]
+      - note: "Lists and maps within them are compared the same way."
+        cypher: "RETURN [[[null]] = [[null]], [[1, null]] = [[2, null]], [{x: null}] = [{x: null}], {a: [null]} = {a: [null]}, [1, [null]] = [2, [null]], [[null], 1] = [[null], 2]]"
+        rows: [[null, false, null, null, false, false]]
+      - note: "A null is compared with a value of any kind as null; values of two other kinds are not equal."
+        cypher: "RETURN [[1] = ['1'], [null] = [1], [[1]] = [1], [null, 'a'] = [1, 'b'], [1] = [1.0], [null] = [[1]], [null] = [{x: 1}], [null, 1] = [1, null]]"
+        rows: [[false, null, false, false, true, null, null, null]]
+      - cypher: "RETURN CASE [null] WHEN [null] THEN 'y' ELSE 'n' END"
+        rows: ["n"]
+      - note: "Lists that hold no null compare as they did."
+        cypher: "RETURN [[1, 2] = [1, 2], [1, 2] <> [1, 3], {x: 1} = {x: 1}, 'a' IN ['a', 'b'], 'c' IN ['a', 'b']]"
+        rows: [[true, true, true, true, false]]
+
+  - name: "IN compares as equality does"
+    description: "x IN list is true where an item is equal to x, else null where a comparison is null, else false."
+    steps:
+      - note: "The first item is in parentheses: FalkorDB reads a list that starts `[null IN` as a list comprehension."
+        cypher: |
+          RETURN [(null IN [null]), [null] IN [[null]], 1 IN [null], 1 IN [1, null], 2 IN [1, null], null IN [], [null] IN [[1, 2]],
+                  [null] IN [[1]], [1, null] IN [[2, null]], [1] IN [[1], null], {x: null} IN [{x: null}], [1] IN [[2], null], [1] IN [[null]], null IN [1]]
+        rows: [[null, null, null, true, null, false, false, null, false, true, null, null, null, null]]
+      - cypher: "RETURN [$x IN $l, 2 IN $l, $a IN $ls, $a IN [[2, null]], 1 IN $n]"
+        parameters: {x: null, l: [1, 2], a: [1, null], ls: [[1, null], [3]], n: null}
+        rows: [[null, true, null, false, null]]
+      - note: "A null IN keeps no row, nor an item in a list comprehension's WHERE."
+        cypher: "UNWIND [1] AS i WITH i WHERE $x IN $l OR $m.x IN $l RETURN i"
+        parameters: {x: null, l: [null, 2], m: {x: null}}
+        rows: []
+      - cypher: "RETURN [j IN [1, 2] WHERE $x IN $l OR $m.x IN $l]"
+        parameters: {x: null, l: [null, 2], m: {x: null}}
+        rows: [[]]
+
+  - name: "Values that hold a null, compared at run time"
+    description: "Parameters, values a WITH carries and collected lists are compared item by item as written lists are."
+    steps:
+      - cypher: "RETURN [$a = $b, $a = $c, $a IN [$b], $m = $n, $p = $p]"
+        parameters: {a: [1, null], b: [1, null], c: [2, null], m: {x: null}, n: {x: 1}, p: [1, 2]}
+        rows: [[null, false, null, null, true]]
+      - cypher: "WITH [1, null] AS a, [1, null] AS b, [2, null] AS c, [null, 1] AS d RETURN [a = b, a = c, a <> c, a = d, a IN [b, c], a IN [c]]"
+        rows: [[null, false, true, null, null, false]]
+      - cypher: "WITH [[null], 1] AS a, [[null], 2] AS b, {k: [null]} AS m, {k: [1]} AS n, {k: [1], j: 2} AS o RETURN [a = b, m = n, m = m, m = o, n = n]"
+        rows: [[false, null, null, false, true]]
+      - cypher: "UNWIND [[1, null], [2, null]] AS l WITH collect(l) AS ls RETURN [ls = [[1, null], [2, null]], ls[0] = ls[1], ls[0] IN ls]"
+        rows: [[null, false, null]]
+      - note: "A null comparison keeps no row, nor does a false one."
+        cypher: "UNWIND [[1, null], [2, null], [3]] AS l WITH l WHERE l = [1, null] OR l = [3] RETURN l"
+        rows: [[3]]
+
+  - name: "A null node or relationship in a list or a map"
+    description: "A node or a relationship OPTIONAL MATCH finds none of is null in the list or the map that holds it, so the comparison is null."
+    steps:
+      - cypher: "OPTIONAL MATCH (x:Nope)-[r]->() RETURN [[r] = [r], {x: r} = {x: r}, [r] <> [r], r IN [r], [r] IN [[r]], x IN [x], [x] = [x], {x: x} = {x: x}, [r, 1] = [r, 2]]"
+        rows: [[null, null, null, null, null, null, null, null, false]]
+      - note: "Hugo knows no one."
+        cypher: |
+          MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->() OPTIONAL MATCH (:Person {name: 'Hugo'})-[r2:KNOWS]->()
+          WITH r1, r2, [r1, r2] AS a, {x: r2} AS m
+          RETURN [[r1, r2] = [r1, r2], {a: r1, b: r2} = {a: r1, b: r2}, a = a, m = m, a = [r1, r1], r1 IN [r2], a = [r1]]
+        rows: [[null, null, null, null, null, null, false]]

@@ -17,6 +17,12 @@ export class Parameters {
     private readonly bound: Record<string, any> = {};
 
     /**
+     * Each parameter given as an iterator, by name, as the list of its items: an iterator gives them only once, and the
+     * statement reads a parameter's value to compile it (whether it holds a null) as well as to bind it.
+     */
+    private readonly items: Map<string, unknown[]> = new Map();
+
+    /**
      * @param asJson the bound JSON text at a marker, or with `inObject` the parameter of a name, as the store's JSON
      * @param asCount the bound whole number at a marker, or with `inObject` the parameter of a name, as the store's
      * number
@@ -36,7 +42,9 @@ export class Parameters {
 
     /** What the SQL binds. */
     get values(): Record<string, any> {
-        return this.inObject ? { [PARAMETERS_OBJECT]: this.text(this.given) } : this.bound;
+        return this.inObject
+            ? { [PARAMETERS_OBJECT]: this.text({ ...this.given, ...Object.fromEntries(this.items) }) }
+            : this.bound;
     }
 
     /** The parameter `name`, as JSON. */
@@ -82,12 +90,19 @@ export class Parameters {
         return this.asCount(`$${key}`);
     }
 
-    /** The value bound to the parameter `name`, as the caller gave it. */
+    /** The value bound to the parameter `name`, as the caller gave it: an iterator as the list of its items. */
     value(name: string): any {
         if (!Object.prototype.hasOwnProperty.call(this.given, name)) {
             throw new DrivineError(`The statement has a parameter $${name}, and no value is bound to it.`);
         }
-        return this.given[name];
+        const value = this.given[name];
+        if (!isIterator(value)) {
+            return value;
+        }
+        if (!this.items.has(name)) {
+            this.items.set(name, Array.from(value));
+        }
+        return this.items.get(name);
     }
 
     /** The marker the parameter `name`, of value `value`, is bound at as JSON text. */
@@ -99,6 +114,16 @@ export class Parameters {
         }
         return `$${key}`;
     }
+}
+
+/** Whether `value` is an iterator, which is its own iterable, so gives its items once: a generator's, as one. */
+function isIterator(value: any): value is Iterable<unknown> {
+    return (
+        value !== null &&
+        typeof value === 'object' &&
+        typeof value[Symbol.iterator] === 'function' &&
+        value[Symbol.iterator]() === value
+    );
 }
 
 /** Whether `value` is a map, as the JSON text it is bound as writes one: no list, date, number, bytes or iterable. */

@@ -17,6 +17,9 @@ const { PARAMS, ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, CALLER
 /** The cursor a procedure returns its rows by. */
 const CURSOR = 'cy_cursor';
 
+/** The function a query declares that compares two values that may hold a null: see `OracleCypherCompiler.nullsEqual`. */
+const NULLS_EQUAL = 'cy_nulls_equal';
+
 /** A key a JSON path writes bare: what SQL would take for an identifier. */
 const PLAIN_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -91,6 +94,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
+
+    /** Whether the query declares {@link NULLS_EQUAL}: see {@link nullsEqual}. */
+    private nullsCompared = false;
 
     literalJson(value: any): string {
         return value instanceof CypherFloat
@@ -324,6 +330,102 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `JSON(REGEXP_REPLACE(JSON_SERIALIZE(${ids} RETURNING CLOB), '(-?[0-9]+)', ${literal(
             `{"${key}": \\1}`
         )}))`;
+    }
+
+    itemAt(json: string, index: number): string {
+        return `JSON_QUERY(${json}, '$[${index}]' RETURNING JSON)`;
+    }
+
+    listSize(json: string): string {
+        return `JSON_VALUE(${json}, '$.size()' RETURNING NUMBER)`;
+    }
+
+    /**
+     * A null as JSON's text writes one in a list or a map, its texts and keys taken out first, so a text that holds a
+     * null's text (`"a,null]"`) does not say so: Oracle's JSON path walks no descendants. Read as a `VARCHAR2`, faster
+     * than as a `CLOB`, which a value whose text is past 4,000 bytes is read as instead. It is exact, as a procedure's
+     * {@link nullsEqual} needs.
+     */
+    holdsNull(json: string): string {
+        const nulls = (text: string): string =>
+            `REGEXP_LIKE(REGEXP_REPLACE(${text}, '"([^"\\\\]|\\\\.)*"', '""'), '[[,:]null[],}]')`;
+        const short = `JSON_SERIALIZE(${json} RETURNING VARCHAR2(4000) NULL ON ERROR)`;
+        return `(${short} IS NOT NULL AND ${nulls(short)} OR ${short} IS NULL AND ${nulls(
+            `JSON_SERIALIZE(${json} RETURNING CLOB)`
+        )})`;
+    }
+
+    /**
+     * By a function the query declares (see {@link reduce}), which walks the two together: Oracle's recursive queries take
+     * no `JSON`. A procedure's queries call no function it declares, nor do a `reduce`'s step's: there, two values equal
+     * as JSON are null, as each holds a null, and any other two false, as before null was compared item by item:
+     * `[null] = [1]` is false there, where Cypher's is null.
+     */
+    nullsEqual(x: string, y: string, equals: (x: string, y: string) => string): string {
+        if (this.procedural || this.folding) {
+            return `CASE WHEN ${equals(x, y)} THEN NULL ELSE FALSE END`;
+        }
+        if (!this.nullsCompared) {
+            this.nullsCompared = true;
+            this.declare(
+                [
+                    `FUNCTION ${NULLS_EQUAL}(cy_x JSON, cy_y JSON) RETURN NUMBER IS`,
+                    '    FUNCTION eq(a JSON_ELEMENT_T, b JSON_ELEMENT_T) RETURN NUMBER IS',
+                    '        r NUMBER := 1;',
+                    '        e NUMBER;',
+                    '        la JSON_ARRAY_T;',
+                    '        lb JSON_ARRAY_T;',
+                    '        oa JSON_OBJECT_T;',
+                    '        ob JSON_OBJECT_T;',
+                    '        ks JSON_KEY_LIST;',
+                    '        too_long EXCEPTION;',
+                    '        PRAGMA EXCEPTION_INIT(too_long, -40478);',
+                    '    BEGIN',
+                    '        IF a.is_Null OR b.is_Null THEN RETURN NULL; END IF;',
+                    '        IF a.is_Array AND b.is_Array THEN',
+                    '            la := TREAT(a AS JSON_ARRAY_T);',
+                    '            lb := TREAT(b AS JSON_ARRAY_T);',
+                    '            IF la.get_Size <> lb.get_Size THEN RETURN 0; END IF;',
+                    '            FOR i IN 0 .. la.get_Size - 1 LOOP',
+                    '                e := eq(la.get(i), lb.get(i));',
+                    '                IF e = 0 THEN RETURN 0; END IF;',
+                    '                IF e IS NULL THEN r := NULL; END IF;',
+                    '            END LOOP;',
+                    '            RETURN r;',
+                    '        END IF;',
+                    '        IF a.is_Object AND b.is_Object THEN',
+                    '            oa := TREAT(a AS JSON_OBJECT_T);',
+                    '            ob := TREAT(b AS JSON_OBJECT_T);',
+                    '            IF oa.get_Size <> ob.get_Size THEN RETURN 0; END IF;',
+                    '            ks := oa.get_Keys;',
+                    '            FOR i IN 1 .. ks.COUNT LOOP',
+                    '                IF NOT ob.has(ks(i)) THEN RETURN 0; END IF;',
+                    '                e := eq(oa.get(ks(i)), ob.get(ks(i)));',
+                    '                IF e = 0 THEN RETURN 0; END IF;',
+                    '                IF e IS NULL THEN r := NULL; END IF;',
+                    '            END LOOP;',
+                    '            RETURN r;',
+                    '        END IF;',
+                    '        IF a.is_Number AND b.is_Number THEN RETURN CASE WHEN a.to_Number = b.to_Number THEN 1 ELSE 0 END; END IF;',
+                    // As VARCHAR2s, three times as fast as CLOBs; as CLOBs where one is past 32 KB, which to_String
+                    // raises on (ORA-40478).
+                    '        IF a.is_String AND b.is_String THEN',
+                    '            BEGIN',
+                    '                RETURN CASE WHEN a.to_String = b.to_String THEN 1 ELSE 0 END;',
+                    '            EXCEPTION WHEN too_long THEN',
+                    '                RETURN CASE WHEN DBMS_LOB.COMPARE(a.to_Clob, b.to_Clob) = 0 THEN 1 ELSE 0 END;',
+                    '            END;',
+                    '        END IF;',
+                    '        IF a.is_Boolean AND b.is_Boolean THEN RETURN CASE WHEN a.to_Boolean = b.to_Boolean THEN 1 ELSE 0 END; END IF;',
+                    '        RETURN 0;',
+                    '    END;',
+                    'BEGIN',
+                    '    RETURN eq(JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB)), JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_y RETURNING CLOB)));',
+                    'END;'
+                ].join('\n')
+            );
+        }
+        return `(${NULLS_EQUAL}(${x}, ${y}) = 1)`;
     }
 
     modulo(a: string, b: string): string {
