@@ -559,15 +559,28 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             expect(await query('UNWIND [-2.5, 2.4, -0.5] AS x RETURN x ORDER BY round(x, 0), x')).toEqual([-2.5, -0.5, 2.4]);
             expect(await query('MATCH (n:Round) RETURN round(round(-2.5, n.q) - 0.5, n.z)')).toEqual([-2.0]);
             // Places a parameter or a parameter's key gives, picked when compiling: a fraction, -0.5, negated, or NaN is 0
-            // places, as Neo4j casts NaN to 0, and 1.0 is 1; a mode rounds by it alone. drivine-python's steps.
+            // places, as Neo4j casts NaN to 0, and 1.0 is 1; a mode rounds by it alone, to 0 places for NaN, given,
+            // negated or a key (liberation-data/drivine#354). drivine-python's steps.
             expect(
                 await query(
                     'RETURN [round(-2.5, $p), round(-2.5, $q), round(-2.5, -$r), round(-2.5, $z), round(-2.5, $n), ' +
                         "round(-2.5, $o), round(-2.55, $o), round(-2.5, 0.9999), round(-2.5, 1.0), round(-2.5, $p, 'HALF_UP'), " +
-                        "round(-2.5, 0, 'HALF_UP'), round(-2.5, $m.z), round(-2.5, -0.5), round(-2.5, -0.9999)]",
-                    { p: 0.7, q: -0.5, r: 0.5, z: 0, n: NaN, o: 1.0, m: { z: 0 } }
+                        "round(-2.5, 0, 'HALF_UP'), round(-2.5, $m.z), round(-2.5, -0.5), round(-2.5, -0.9999), " +
+                        "round(-2.5, $n, 'HALF_UP'), round(-2.55, $n, 'UP'), round(-2.5, $n, 'HALF_DOWN'), " +
+                        "round(-2.5, -$n, 'HALF_UP'), round(-2.55, $m.n, 'UP')]",
+                    { p: 0.7, q: -0.5, r: 0.5, z: 0, n: NaN, o: 1.0, m: { z: 0, n: NaN } }
                 )
-            ).toEqual([[-2.0, -2.0, -2.0, -2.0, -2.0, -2.5, -2.6, -2.0, -2.5, -3.0, -3.0, -2.0, -2.0, -2.0]]);
+            ).toEqual([
+                [-2.0, -2.0, -2.0, -2.0, -2.0, -2.5, -2.6, -2.0, -2.5, -3.0, -3.0, -2.0, -2.0, -2.0, -3.0, -3.0, -2.0, -3.0, -3.0]
+            ]);
+            // NaN's 0 places by each other mode, over an aggregate, and of a null value, as Neo4j gives them.
+            expect(
+                await query(
+                    "UNWIND [1.25, -2.5] AS x RETURN [round(sum(x), $n, 'UP'), round(-2.5, $n, 'CEILING'), " +
+                        "round(-2.5, $n, 'FLOOR'), round(-3.5, $n, 'HALF_EVEN'), round(-2.5, $n, 'DOWN'), round(null, $n, 'UP')]",
+                    { n: NaN }
+                )
+            ).toEqual([[-2.0, -2.0, -3.0, -4.0, -2.0, null]]);
             // Below 0 places, given or written, negated or not, is refused, as Neo4j refuses it.
             for (const [statement, parameters] of [
                 ['RETURN round(-2.5, $n)', { n: -1 }],
