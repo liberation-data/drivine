@@ -3984,10 +3984,10 @@ export class CypherWriter {
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        `ROUND(${this.numberOf(call.arguments[0])}, ${this.precisionOf(
-                            call.arguments[1],
-                            call.fn.arguments[1]
-                        )})`
+                        this.sql.roundPlaces(
+                            this.numberOf(call.arguments[0]),
+                            this.precisionOf(call.arguments[1], call.fn.arguments[1])
+                        )
                     )
                 )
             );
