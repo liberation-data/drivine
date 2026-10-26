@@ -248,7 +248,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     "RETURN [round(1.0E-100, 120), round(123.456, 200, 'HALF_UP'), round(1.0E100, 30), round(1.0 / 3, 20), round(1.0E-100, 99), round(-2.5, 300, 'FLOOR')]"
                 )
             ).toEqual([[1.0e-100, 123.456, 1.0e100, 0.3333333333333333, 0.0, -2.5]]);
-            // Zero, whose digits Oracle cannot count by its logarithm, and a precision short of a tiny number's digits
+            // Zero, which has no digits to count, and a precision short of a tiny number's digits
             // but past NUMBER's range.
             expect(
                 await query(
@@ -267,6 +267,12 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     "RETURN [round(123456789012345678, 2), round(99999999999999999.0, 1, 'UP'), round(12345678901234567.0, 1), round(-9.87654321E16, 3, 'FLOOR'), round(-1234.5678, 400), round(-1234.5678, 2)]"
                 )
             ).toEqual([[1.2345678901234568e17, 1.0e17, 1.2345678901234568e16, -9.87654321e16, -1234.5678, -1234.57]]);
+            // A null number past its digits, and numbers near NUMBER's least, whose digits Oracle's LOG cannot count.
+            expect(
+                await query(
+                    "MATCH (n:Round) RETURN [round(null, 400), round(n.none, 400, 'UP'), round(n.none, n.b), round(1.0E-129, 2), round(-1.0E-129, 2, 'FLOOR'), round(1.0E-130, 140), round(-1.0E-125, 141, 'HALF_EVEN'), round(1.2345678901234567E-130, 145), round(5.5E-128, 128, 'HALF_EVEN')]"
+                )
+            ).toEqual([[null, null, null, 0.0, -0.01, 1.0e-130, -1.0e-125, 1.234567890123457e-130, 6.0e-128]]);
             // Over an aggregate, where no value is bound in a subquery, and so the number is written out where it is read.
             expect(
                 await query(
@@ -291,9 +297,9 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             }
         });
 
-        it('round() of zero, whose digits Oracle cannot count by its logarithm, gives zero, or null to a null precision, and fails on a negative one', async () => {
-            // Oracle counts a number's digits by LOG, which fails on zero (ORA-01428): zero is given back first,
-            // wherever it is read, among rows that are not zero too.
+        it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
+            // Zero, on which LOG fails (ORA-01428) were Oracle to count its digits by it, gives zero wherever it is read,
+            // among rows that are not zero too.
             await query('UNWIND [0.0, 1.25, 0.0, -2.5] AS x CREATE (:Round {x: x})');
             expect(await query('MATCH (n:Round) WHERE round(n.x, 400) = 0 RETURN count(*)')).toEqual([2]);
             expect(

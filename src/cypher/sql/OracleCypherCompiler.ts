@@ -697,16 +697,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * Short of its digits, a tiny number may still take more than {@link MOST_PLACES} places, as 1.0E-120 to 130 does:
      * it is rounded moved that many places fewer to the right, then moved back, which is exact in decimal.
      *
-     * Each test is a WHEN of its own, as Oracle tries them in order and stops at the first that holds, where it does not
-     * promise the order of an OR's sides: zero, whose digits `LOG` cannot count (ORA-01428), is given back before they are
-     * counted. The precision is read first, so a null one gives null for zero too, and a negative one from data fails
-     * there, where it is written out, not bound, as under an aggregate.
+     * The places are past its digits where the number is at least `10^(17 - p)`, compared in decimal: `LOG` would count
+     * them, but fails on zero and on numbers as small as 1.0E-129 (ORA-01428). `POWER` gives 0 for a scale past `NUMBER`'s
+     * least, so zero is given back to places that many, and rounded short of them: 0 either way. The precision is read
+     * first, in a WHEN of its own, as Oracle tries them in order and stops at the first that holds: a null one gives null
+     * for zero too, and a negative one from data fails there, where it is written out, not bound, as under an aggregate.
      */
     private pastItsDigits(number: string, precision: string, round: (n: string, p: string) => string): string {
         return this.shared([number, precision], ([n, p]) => {
             const shift = `POWER(10, GREATEST(${p} - ${MOST_PLACES}, 0))`;
             const rounded = round(`(${n} * ${shift})`, `(${p} - GREATEST(${p} - ${MOST_PLACES}, 0))`);
-            return `CASE WHEN ${p} IS NULL THEN NULL WHEN ${n} = 0 THEN ${n} WHEN ${p} >= ${DOUBLE_DIGITS} - FLOOR(LOG(10, ABS(${n}))) THEN ${n} ELSE ${rounded} / ${shift} END`;
+            return `CASE WHEN ${p} IS NULL THEN NULL WHEN ABS(${n}) >= POWER(10, ${DOUBLE_DIGITS} - ${p}) THEN ${n} ELSE ${rounded} / ${shift} END`;
         });
     }
 
