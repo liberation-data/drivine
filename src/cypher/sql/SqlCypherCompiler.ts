@@ -306,6 +306,11 @@ export abstract class SqlCypherCompiler {
         return `${x} = ${y}`;
     }
 
+    /** Whether the JSON values `x` and `y`, neither of them null, are equal as JSON. */
+    jsonEquals(x: string, y: string): string {
+        return `${x} = ${y}`;
+    }
+
     /**
      * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): JSON's
      * null as SQL's, as any value, where the store orders lists as Cypher does.
@@ -541,6 +546,26 @@ export abstract class SqlCypherCompiler {
 
     /** The items of the JSON list `json` as rows named `alias`, with columns `item` and `item_no`, counted from 1. */
     abstract elements(jsonSql: string, alias: string): string;
+
+    /** The item at `index`, counted from 0, of the JSON list `jsonSql`: null where it has none. */
+    abstract itemAt(jsonSql: string, index: number): string;
+
+    /** How many items the JSON list `jsonSql` holds, as a SQL number. */
+    abstract listSize(jsonSql: string): string;
+
+    /**
+     * Whether the JSON value `jsonSql`, not null, holds a null in a list or a map, at any depth: exactly, as an `IN` takes
+     * a value that holds one to be equal to no item.
+     */
+    abstract holdsNull(jsonSql: string): string;
+
+    /**
+     * Whether the JSON values `x` and `y`, neither of them null, are equal, as Cypher compares values that may hold a
+     * null: item by item and key by key, at any depth, false where a pair differs (a list's length, a map's keys, a
+     * value's kind among them), else null where a pair holds a null, else true. Called where {@link holdsNull} says one
+     * of them holds one; `equals` compares two that hold none, as {@link jsonEquals} or {@link identityEquals} does.
+     */
+    abstract nullsEqual(x: string, y: string, equals: (x: string, y: string) => string): string;
 
     /** The values `value` of a group, or of a query's rows ordered by `order`, as a JSON list: empty where there are none. */
     abstract aggregateList(value: string, order?: string): string;

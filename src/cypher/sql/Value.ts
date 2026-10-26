@@ -24,6 +24,13 @@ export interface JsonValue {
      */
     readonly text?: boolean;
     readonly texts?: boolean;
+    /**
+     * Whether it is known to hold no null in a list or a map, at any depth: a value of one kind, a property read from the
+     * store, which holds none, or a list or map the statement writes or is given without one. It may itself be null. Two
+     * such values compare as JSON; any other may hold a null, which makes Cypher's comparison of the two null where it is
+     * not false.
+     */
+    readonly flat?: boolean;
 }
 
 /** What a {@link JsonValue} is besides its SQL. */
@@ -59,13 +66,14 @@ export interface RelationshipValue {
  * their properties, and read as the nodes or relationships themselves where it is unwound, so a write reaches them,
  * and where it is compared, indexed, searched with `IN` or iterated, so they compare by their ids. Where `collect` gathers
  * it, `gathered` is the JSON list of their properties, gathered beside the ids, for a store reads no aggregate of the
- * query it is in from a subquery.
+ * query it is in from a subquery. With `flat`, it is known to hold no null: see {@link JsonValue.flat}.
  */
 export interface EntitiesValue {
     readonly kind: 'Entities';
     readonly ids: string;
     readonly relationships: boolean;
     readonly gathered?: string;
+    readonly flat?: boolean;
 }
 
 /** A path: the ids of its nodes, and of its relationships, in the order the pattern names them. */

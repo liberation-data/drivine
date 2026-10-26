@@ -189,6 +189,89 @@ describe('A compiled Cypher statement', () => {
         }
     );
 
+    it.each(compilers)(
+        'of an equality of values that hold no null in a list or a map has no test for one, on %s',
+        (name, compilerFor) => {
+            // drivine4j#225: a null a list or a map holds is tested for, and the two walked, only where one may hold one.
+            const test = name === 'oracle' ? '[[,:]null[],}]' : 'jsonb_path_exists(';
+            const tests = (cypher: string, parameters: Record<string, any> = {}): boolean =>
+                compilerFor().compile(cypher, parameters).sql.includes(test);
+            expect(tests('MATCH (c:Claim) WHERE c.list = $p RETURN c.id', { p: [1, 2] })).toBe(false);
+            expect(
+                tests(
+                    'MATCH (c:Claim) WITH c, c.list AS l RETURN [1, 2] = [1, 2], c.a = c.b, l = c.b, c.list IN $ls, {x: 1} <> {x: 2}, size(l) = 2',
+                    { ls: [[1]] }
+                )
+            ).toBe(false);
+            // Lists and maps written out are compared item by item.
+            expect(
+                tests('MATCH (c:Claim) WITH c.a AS a, c.b AS b RETURN [a, b] = [b, a], {x: a} = {x: b}, a IN [b, null]')
+            ).toBe(false);
+            // A parameter's list that holds a null is compared item by item as the statement is compiled; a map is walked.
+            expect(tests('MATCH (c:Claim) WHERE c.list = $p RETURN c.id', { p: [1, null, [null, 2]] })).toBe(false);
+            expect(tests('MATCH (c:Claim) WHERE c.map = $p RETURN c.id', { p: { x: null } })).toBe(true);
+            expect(tests('MATCH (c:Claim) WITH c, [c.a] AS l RETURN l = [c.b]')).toBe(true);
+        }
+    );
+
+    it.each(compilers)(
+        'of a WHERE that searches a list that holds no null is the search alone, on %s',
+        (_, compilerFor) => {
+            // drivine4j#225: null and false keep no row alike, so a WHERE needs no test of the value being null.
+            const compiled = (cypher: string, parameters: Record<string, any> = {}): string =>
+                compilerFor().compile(cypher, parameters).sql;
+            const tested = (sql: string): boolean => sql.includes('ELSE FALSE') || sql.includes('THEN FALSE');
+            expect(
+                tested(
+                    compiled('MATCH (c:Claim) WHERE c.a IN $l AND (c.b IN [1, 2] OR c.c > 1) RETURN c.id', {
+                        l: [1, 2]
+                    })
+                )
+            ).toBe(false);
+            // Nor of the list being null or holding a null, beside a value that holds none.
+            expect(
+                tested(compiled("MATCH (c:Claim) WHERE 'a' IN c.tags AND c.a IN $l RETURN c.id", { l: [1, null] }))
+            ).toBe(false);
+            // Nor in a quantified path pattern's WHERE, which keeps a step where it is true.
+            expect(tested(compiled('MATCH (a:Claim) ((x)-[:R]->(y) WHERE y.a IN [1, 2]){1,3} (b) RETURN b.id'))).toBe(
+                false
+            );
+            expect(compiled('MATCH (c:Claim) RETURN c.a IN $l', { l: [1, 2] })).toContain('THEN FALSE');
+        }
+    );
+
+    it.each(compilers)('of an IN of an IN grows with each, not exponentially, on %s', (_, compilerFor) => {
+        const nested = (times: number, list: string): string =>
+            'MATCH (c:Claim) RETURN ' + '('.repeat(times) + 'c.a' + ` IN ${list})`.repeat(times);
+        for (const list of ['[true]', 'c.list']) {
+            const [two, four] = [2, 4].map((it) => compilerFor().compile(nested(it, list)).sql.length);
+            expect(four).toBeLessThan(3 * two);
+        }
+    });
+
+    it('of values that may hold a null walks them on Postgres over arrays unnested, which the planner costs low', () => {
+        // As the sort key's walk is: a set-returning function's 100 rows, multiplied through the walk, bring in its JIT.
+        const sql = new PostgresCypherCompiler('g').compile(
+            'MATCH (c:Claim) WITH [c.a] AS l, [c.b] AS m RETURN l = m'
+        ).sql;
+        expect(sql).toContain('WITH RECURSIVE');
+        expect(sql).not.toContain('FROM jsonb_array_elements(');
+        expect(sql).not.toContain('jsonb_each(');
+    });
+
+    it.each(compilers)(
+        'of lists and maps written out that may hold a null compares them item by item, not built and compared whole, on %s',
+        (name, compilerFor) => {
+            const built = name === 'oracle' ? ['JSON_ARRAY(', 'JSON_OBJECT('] : ['json_build_'];
+            for (const equality of ['[a, b] = [b, a]', '{x: a} = {x: b}']) {
+                const sql = compilerFor().compile(
+                    `MATCH (c:Claim) WITH c.a AS a, c.b AS b RETURN ${equality} AS e`
+                ).sql;
+                expect(built.filter((it) => sql.includes(it))).toEqual([]);
+            }
+        }
+    );
+
     it('of a sort by a property on Postgres is by its JSON alone, and only a list the statement makes is keyed as a list', () => {
         // Keyed as a list, a term costs thousands a row in the planner's estimate, which brings in its JIT for the whole
         // statement past a few dozen rows (liberation-data/drivine4j#223).
