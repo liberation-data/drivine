@@ -248,6 +248,20 @@ describe('A compiled Cypher statement', () => {
             expect(tests('MATCH (c:Claim) WHERE c.list = $p RETURN c.id', { p: [1, null, [null, 2]] })).toBe(false);
             expect(tests('MATCH (c:Claim) WHERE c.map = $p RETURN c.id', { p: { x: null } })).toBe(true);
             expect(tests('MATCH (c:Claim) WITH c, [c.a] AS l RETURN l = [c.b]')).toBe(true);
+            // As is a parameter's list with an item too long to write in the statement (#351).
+            expect(tests('MATCH (c:Claim) WHERE c.list = $p RETURN c.id', { p: ['x'.repeat(2000), null] })).toBe(true);
+            // Up to LITERAL_BYTES of JSON's text, its quotes and each character's UTF-8 bytes counted, an item is written.
+            for (const [text, walked] of [
+                ['x'.repeat(998), false],
+                ['x'.repeat(999), true],
+                ['é'.repeat(499), false],
+                ['é'.repeat(500), true]
+            ] as const) {
+                expect([
+                    text.length,
+                    tests('MATCH (c:Claim) WHERE c.list = $p RETURN c.id', { p: [[text], null] })
+                ]).toEqual([text.length, walked]);
+            }
         }
     );
 
