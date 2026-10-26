@@ -4870,10 +4870,11 @@ export class CypherWriter {
                 throw new DrivineError(NEGATIVE_PRECISION);
             }
             const number = this.numberOf(call.arguments[0]);
-            // Not "given < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places.
+            // Not "given < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places. NaN is no SQL number, as it is
+            // bound as JSON text, so its places are written as that 0.
             return whole !== undefined && !(given >= 1)
                 ? whole(number)
-                : places(number, this.truncatedWhole(call.arguments[1]));
+                : places(number, Number.isNaN(given) ? '0' : this.truncatedWhole(call.arguments[1]));
         }
         const value = this.sql.comparable(this.asJson(call.arguments[0]));
         return this.sql.shared([value, `TRUNC(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
