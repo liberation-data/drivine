@@ -670,7 +670,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
 
         it('a null rounds to null by a negative precision from data, in an aggregate too, as in Neo4j', async () => {
             // liberation-data/drivine#336: Neo4j fails a negative precision only where there is a value to round.
-            await query('CREATE (:Round {r: -2, k: 1, x: 1234.5}), (:Round {r: -2, k: 2})');
+            await query('CREATE (:Round {r: -2, k: 1, x: 1234.5, i: 1234}), (:Round {r: -2, k: 2})');
             expect(
                 await query("MATCH (n:Round) WHERE n.k = 1 RETURN [round(n.none, n.r), round(n.none, n.r, 'HALF_UP')]")
             ).toEqual([[null, null]]);
@@ -685,6 +685,8 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             // A value there is still refused.
             for (const statement of [
                 'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r)',
+                // An integer, which Oracle's JSON holds as a number of another kind than a float's.
+                'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.i, n.r)',
                 "MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r, 'HALF_UP')",
                 'MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(min(x), r)',
                 "MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(max(x), r, 'HALF_UP')",
