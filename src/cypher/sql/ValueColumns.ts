@@ -50,7 +50,7 @@ export function columnsOf(value: Value, alias: string, name?: string): Value {
         case 'Bool':
             return { ...value, sql: at };
         case 'Entities':
-            return { kind: 'Entities', ids: at, relationships: value.relationships };
+            return { kind: 'Entities', ids: at, relationships: value.relationships, flat: value.flat };
         case 'Node':
             return {
                 kind: 'Node',

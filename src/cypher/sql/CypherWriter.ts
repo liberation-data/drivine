@@ -119,6 +119,19 @@ interface Hop {
 }
 
 /**
+ * What `x IN list` compares, as `CypherWriter.membership` reads it: the `list` and the value `x`, as SQL; how an item of
+ * the list `matches` the value, and how `equals` compares two values that hold no null; and where the value is a node or
+ * a relationship in a list of them, its `id`, which is `x`.
+ */
+interface Member {
+    list: string;
+    x: string;
+    id?: string;
+    equals: (a: string, b: string) => string;
+    matches: (item: string, value: string) => string;
+}
+
+/**
  * What a `WITH` or a `RETURN` makes of the rows it reads: the `sql` of its query, what each item's name is bound to
  * among its columns, and the order of its rows, each term a column of the query and whether it descends.
  */
@@ -164,6 +177,91 @@ const LONG_MIN = BigInt('-9223372036854775808');
 
 /** The functions of a temporal kind that truncate a value to a unit. */
 const TEMPORAL_TRUNCATE = TEMPORAL_KINDS.map((it) => `${it}.truncate`);
+
+/** The kinds of expression whose value, null aside, is a number, a text, a truth value or a temporal value: no list or map. */
+const SCALAR_KINDS: ReadonlySet<Expression['kind']> = new Set<Expression['kind']>([
+    'Literal',
+    'Unary',
+    'HasLabels',
+    'CountStar',
+    'PatternPredicate',
+    'Exists',
+    'Subquery',
+    'Quantifier'
+]);
+
+/** The functions whose value, null aside, is a number, a text, a truth value or a temporal value: no list or map. */
+const SCALAR_FUNCTIONS: ReadonlySet<string> = new Set([
+    'size',
+    'length',
+    'count',
+    'sum',
+    'avg',
+    'tostring',
+    'tointeger',
+    'tofloat',
+    'toboolean',
+    'tolower',
+    'toupper',
+    'trim',
+    'ltrim',
+    'rtrim',
+    'substring',
+    'left',
+    'right',
+    'replace',
+    'id',
+    'elementid',
+    'type',
+    'round',
+    'floor',
+    'ceil',
+    'sign',
+    'atan2',
+    'e',
+    'pi',
+    'randomuuid',
+    'timestamp',
+    'isempty',
+    'date',
+    'localtime',
+    'time',
+    'localdatetime',
+    'datetime',
+    'duration',
+    'duration.between',
+    'duration.inmonths',
+    'duration.indays',
+    'duration.inseconds',
+    ...MATH_FUNCTIONS,
+    ...TEMPORAL_NOW,
+    ...TEMPORAL_TRUNCATE
+]);
+
+/** The functions whose value holds no null in a list or a map: see {@link JsonValue.flat}. */
+const FLAT_FUNCTIONS: ReadonlySet<string> = new Set([
+    ...SCALAR_FUNCTIONS,
+    'labels',
+    'keys',
+    'nodes',
+    'relationships',
+    'range',
+    'split'
+]);
+
+/** The functions whose value holds a null in a list or a map only where an argument does: see {@link JsonValue.flat}. */
+const CARRYING_FUNCTIONS: ReadonlySet<string> = new Set([
+    'collect',
+    'min',
+    'max',
+    'coalesce',
+    'head',
+    'last',
+    'tail',
+    'reverse',
+    'properties',
+    DISTINCT_ITEMS
+]);
 
 /** The fields a map makes a moment or a time of day of. */
 const INSTANT_MAP_FIELDS = [
@@ -234,6 +332,66 @@ function optional<T>(value: T | undefined): T[] {
 }
 
 /**
+ * `value`, a parameter's, as the JSON text it is bound as reads (see `jsonText`): a list, or any other iterable but
+ * bytes, as an array; a map as an object of its entries, those undefined left out; null and undefined as null, and so
+ * a number JSON has no text for (`NaN`, `Infinity`). Any other value (a number, a text, a date, bytes) is itself.
+ */
+function jsonTree(value: any): unknown {
+    if (boundAsNull(value)) {
+        return null;
+    }
+    if (Array.isArray(value)) {
+        return value.map(jsonTree);
+    }
+    if (
+        typeof value !== 'object' ||
+        value instanceof Date ||
+        value instanceof CypherFloat ||
+        value instanceof Uint8Array ||
+        value instanceof Int8Array ||
+        isInt(value)
+    ) {
+        return value;
+    }
+    if (typeof value[Symbol.iterator] === 'function') {
+        return Array.from(value as Iterable<unknown>).map(jsonTree);
+    }
+    return Object.fromEntries(
+        Object.entries(value)
+            .filter(([, item]) => item !== undefined)
+            .map(([key, item]) => [key, jsonTree(item)])
+    );
+}
+
+/** Whether `value` is bound as JSON's null (see `jsonText`): null, undefined, or a number JSON has no text for. */
+function boundAsNull(value: any): boolean {
+    return value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value));
+}
+
+/** Whether `tree`, a value {@link jsonTree} gives, is a map. */
+function isJsonMap(tree: unknown): tree is Record<string, unknown> {
+    return tree !== null && typeof tree === 'object' && Object.getPrototypeOf(tree) === Object.prototype;
+}
+
+/** Whether `tree`, a value {@link jsonTree} gives, is a list or a map. */
+function isContainer(tree: unknown): boolean {
+    return Array.isArray(tree) || isJsonMap(tree);
+}
+
+/** Whether `tree`, a value {@link jsonTree} gives, holds no null in a list or a map, at any depth. */
+function holdsNoNull(tree: unknown): boolean {
+    if (Array.isArray(tree)) {
+        return tree.every((it) => it !== null && holdsNoNull(it));
+    }
+    return !isJsonMap(tree) || Object.values(tree).every((it) => it !== null && holdsNoNull(it));
+}
+
+/** Whether `tree`, a value {@link jsonTree} gives, holds no map, at any depth. */
+function arrays(tree: unknown): boolean {
+    return !isJsonMap(tree) && (!Array.isArray(tree) || tree.every(arrays));
+}
+
+/**
  * One statement's compilation, for a {@link SqlCypherCompiler}: its parameters, and the names it gives its rows and
  * columns. What is the same on each store is here; the store's own SQL is the compiler's.
  */
@@ -243,6 +401,15 @@ export class CypherWriter {
 
     /** Whether a quantified path pattern's conditions are being compiled: what they hold is in its walk's step. */
     private stepping = false;
+
+    /** Whether the expression being compiled is read by a `WHERE` for its truth alone: see {@link keeps}. */
+    private filtering = false;
+
+    /** Whether the expression `expression` has begun is read by a `WHERE` for its truth alone, as {@link filtering} said as it began. */
+    private filtered = false;
+
+    /** Each parameter's value as the JSON it is bound as, by name, as {@link parameterTree} reads it. */
+    private readonly parameterTrees: Map<string, unknown> = new Map();
 
     /** The procedure's statements, in order. */
     private readonly body: string[] = [];
@@ -339,6 +506,51 @@ export class CypherWriter {
                       )
                   ),
         Quantifier: (it, scope) => this.quantifier(it, scope)
+    };
+
+    /**
+     * Whether the value of each kind of expression, but those of {@link SCALAR_KINDS}, is known to hold no null in a list
+     * or a map: see {@link flat}. A kind not here may hold one.
+     */
+    private readonly flatness: Partial<Record<Expression['kind'], (expression: any, scope: Scope) => boolean>> = {
+        Parameter: (it) => holdsNoNull(this.parameterTree(it.name)),
+        Variable: (it, scope) => {
+            const value = scope.get(it.name);
+            return value !== undefined && this.isFlat(value);
+        },
+        // A property of a node or a relationship holds no null, as a graph engine stores none in a list; a parameter's
+        // map's, as it is bound.
+        Property: (it, scope) => {
+            if (it.subject.kind !== 'Parameter') {
+                return this.flat(it.subject, scope);
+            }
+            const map = this.parameterTree(it.subject.name);
+            return !isJsonMap(map) || holdsNoNull(map[it.key] ?? null);
+        },
+        ListLiteral: (it, scope) =>
+            (it.items as Expression[]).every((item) => this.present(item) && this.flat(item, scope)),
+        MapLiteral: (it, scope) =>
+            (it.entries as [string, Expression][]).every(([, value]) => this.present(value) && this.flat(value, scope)),
+        // A list and an item that may be null are a list that holds it.
+        Binary: (it: Binary, scope) =>
+            it.operator !== 'ADD' ||
+            (this.flat(it.left, scope) &&
+                this.flat(it.right, scope) &&
+                (this.present(it.left) || this.presentScalar(it.right, scope)) &&
+                (this.present(it.right) || this.presentScalar(it.left, scope))),
+        Index: (it, scope) => this.flat(it.subject, scope),
+        Slice: (it, scope) => this.flat(it.subject, scope),
+        Function: (it: FunctionCall, scope) => {
+            const name = it.name.toLowerCase();
+            return (
+                FLAT_FUNCTIONS.has(name) ||
+                (CARRYING_FUNCTIONS.has(name) && it.arguments.every((argument) => this.flat(argument, scope)))
+            );
+        },
+        Case: (it: Case, scope) =>
+            [...it.alternatives.map(([, result]) => result), ...optional(it.otherwise)].every((result) =>
+                this.flat(result, scope)
+            )
     };
 
     /** How each function is compiled, by its name in lower case, where it is none the store compiles alone. */
@@ -616,7 +828,7 @@ export class CypherWriter {
         projected.scope.forEach((value, variable) => next.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => next.order.push([`${name}.${column}`, descending]));
         if (clause.where) {
-            next.where.push(this.condition(this.expression(clause.where, next.scope)));
+            next.where.push(this.keeps(clause.where, next.scope));
         }
         return next;
     }
@@ -629,7 +841,7 @@ export class CypherWriter {
         if (!match.optional) {
             this.patterns(select, match.patterns, shortestWhere);
             if (where) {
-                select.where.push(this.condition(this.expression(where, select.scope)));
+                select.where.push(this.keeps(where, select.scope));
             }
             return;
         }
@@ -637,7 +849,7 @@ export class CypherWriter {
         const inner = new Select(select.scope);
         this.patterns(inner, match.patterns, shortestWhere);
         if (where) {
-            inner.where.push(this.condition(this.expression(where, inner.scope)));
+            inner.where.push(this.keeps(where, inner.scope));
         }
         const outer = select.scope;
         const found = [...inner.bound].filter(([variable]) => !outer.has(variable));
@@ -836,13 +1048,14 @@ export class CypherWriter {
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
         select.source(this.sql.elements(items, name));
-        // An item of a list of texts, or of a text, is a text.
+        // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none.
         select.bind(
             unwind.variable,
             json(`${name}.item`, {
                 temporal: this.itemsOf(list),
                 list: this.holdsLists(list),
-                text: this.holdsTexts(list) || this.isText(list)
+                text: this.holdsTexts(list) || this.isText(list),
+                flat: this.isFlat(list)
             })
         );
         select.order.push([`${name}.item_no`, false]);
@@ -1019,7 +1232,7 @@ export class CypherWriter {
             hops
         );
         if (where) {
-            inner.where.push(this.condition(this.expression(where, inner.scope)));
+            inner.where.push(this.keeps(where, inner.scope));
         }
         const outer = select.scope;
         const found = [...inner.bound]
@@ -1191,7 +1404,7 @@ export class CypherWriter {
                     ...optional(this.types(`${links[i]}.type`, r.types)),
                     ...(r.properties ? [this.propertiesMatch(`${links[i]}.props`, r.properties, within)] : [])
                 ]),
-                ...(group.where ? [this.condition(this.expression(group.where, within))] : [])
+                ...(group.where ? [this.keeps(group.where, within)] : [])
             ];
         } finally {
             this.stepping = outer;
@@ -1324,9 +1537,16 @@ export class CypherWriter {
     private propertiesMatch(props: string, properties: Expression, scope: Scope): string {
         if (properties.kind === 'MapLiteral') {
             return properties.entries
-                .map(([key, value]) =>
-                    this.equality(json(this.sql.propertyOf(props, key)), this.expression(value, scope), value)
-                )
+                .map(([key, value]) => {
+                    // A property holds no null, as a graph engine stores none in a list.
+                    const compiled = this.expression(value, scope);
+                    return this.equality(
+                        json(this.sql.propertyOf(props, key), { flat: true }),
+                        compiled,
+                        value,
+                        this.scalarValued(value, scope) || this.isFlat(compiled)
+                    );
+                })
                 .join(' AND ');
         }
         return this.sql.containsAll(props, this.sql.comparable(this.asJson(this.expression(properties, scope))));
@@ -1492,7 +1712,8 @@ export class CypherWriter {
                         list: was?.list,
                         itemLists: was?.itemLists,
                         text: was?.text,
-                        texts: was?.texts
+                        texts: was?.texts,
+                        flat: was?.flat
                     })
                 );
             } else if (kind === 'PATH') {
@@ -2612,8 +2833,39 @@ export class CypherWriter {
 
     // ----- Expressions -----
 
+    /**
+     * `where`, a condition that keeps the rows it is true of, as SQL: within it, a comparison whose truth is all a `WHERE`
+     * reads (one of its conditions joined by `AND` or `OR`) may be false where Cypher's is null, as neither keeps a row.
+     */
+    private keeps(where: Expression, scope: Scope): string {
+        this.filtering = true;
+        try {
+            return this.condition(this.expression(where, scope));
+        } finally {
+            this.filtering = false;
+        }
+    }
+
+    /**
+     * The value `expression` gives in `scope`, marked {@link JsonValue.flat} where it is known to hold no null in a list
+     * or a map.
+     */
     private expression(expression: Expression, scope: Scope): Value {
-        return this.expressions[expression.kind](expression, scope);
+        const outer = this.filtering;
+        // Only a condition joined by AND or OR is read for its truth alone: NOT, a CASE or a function reads null apart from false.
+        this.filtering =
+            outer && expression.kind === 'Binary' && (expression.operator === 'AND' || expression.operator === 'OR');
+        this.filtered = outer;
+        let value: Value;
+        try {
+            value = this.expressions[expression.kind](expression, scope);
+        } finally {
+            this.filtering = outer;
+        }
+        if ((value.kind === 'Json' || value.kind === 'Entities') && !value.flat && this.flat(expression, scope)) {
+            return { ...value, flat: true };
+        }
+        return value;
     }
 
     private undefinedVariable(name: string): never {
@@ -2840,9 +3092,7 @@ export class CypherWriter {
             const inner: Scope = new Map([...scope, [comprehension.variable, item]]);
             const projected = comprehension.projection ? this.expression(comprehension.projection, inner) : item;
             kind = projected;
-            const filter = comprehension.where
-                ? ` WHERE ${this.condition(this.expression(comprehension.where, inner))}`
-                : '';
+            const filter = comprehension.where ? ` WHERE ${this.keeps(comprehension.where, inner)}` : '';
             const value =
                 projected.kind === 'Node'
                     ? this.sql.scalar(projected.nid)
@@ -2881,9 +3131,7 @@ export class CypherWriter {
         ]);
         const projected = comprehension.projection ? this.expression(comprehension.projection, inner) : undefined;
         const projection = projected ? this.asJson(projected).sql : `${name}.item`;
-        const filter = comprehension.where
-            ? ` WHERE ${this.condition(this.expression(comprehension.where, inner))}`
-            : '';
+        const filter = comprehension.where ? ` WHERE ${this.keeps(comprehension.where, inner)}` : '';
         // Of null, null, as in Cypher, and not an empty list.
         return json(
             this.sql.shared(
@@ -2974,7 +3222,7 @@ export class CypherWriter {
         const inner = new Select(scope);
         this.patterns(inner, [comprehension.pattern]);
         if (comprehension.where) {
-            inner.where.push(this.condition(this.expression(comprehension.where, inner.scope)));
+            inner.where.push(this.keeps(comprehension.where, inner.scope));
         }
         const projected = this.expression(comprehension.projection, inner.scope);
         const gathered = (value: string): string =>
@@ -3004,7 +3252,8 @@ export class CypherWriter {
         const name = this.alias('q');
         const quantified = (from: string, item: Value): string => {
             const inner: Scope = new Map([...scope, [quantifier.variable, item]]);
-            const condition = quantifier.where ? this.condition(this.expression(quantifier.where, inner)) : 'TRUE';
+            // Each item is kept where the condition is true, as a WHERE keeps a row, so an IN in it is false where it is null.
+            const condition = quantifier.where ? this.keeps(quantifier.where, inner) : 'TRUE';
             const tests = {
                 ANY: `EXISTS (SELECT 1 ${from} WHERE ${condition})`,
                 ALL: `NOT EXISTS (SELECT 1 ${from} WHERE NOT (${condition}))`,
@@ -3033,7 +3282,7 @@ export class CypherWriter {
         const inner = new Select(scope);
         this.patterns(inner, patterns);
         if (where) {
-            inner.where.push(this.condition(this.expression(where, inner.scope)));
+            inner.where.push(this.keeps(where, inner.scope));
         }
         return bool(`EXISTS (${['SELECT 1', ...inner.from(), ...optional(inner.whereClause())].join(' ')})`);
     }
@@ -3398,6 +3647,7 @@ export class CypherWriter {
     }
 
     private binary(binary: Binary, scope: Scope): Value {
+        const filter = this.filtered;
         if (binary.operator === 'AND' || binary.operator === 'OR' || binary.operator === 'XOR') {
             const left = this.condition(this.expression(binary.left, scope));
             const right = this.condition(this.expression(binary.right, scope));
@@ -3407,6 +3657,10 @@ export class CypherWriter {
             // Each side whole: a condition may be several, and `a = b <> c` is no SQL.
             return bool(binary.operator === 'OR' ? `(${left} OR ${right})` : `((${left}) <> (${right}))`);
         }
+        const itemwise = this.itemwise(binary, scope);
+        if (itemwise !== undefined) {
+            return bool(binary.operator === 'NOT_EQUALS' ? `(NOT ${itemwise})` : itemwise);
+        }
         const [left, right] = this.compared(
             this.expression(binary.left, scope),
             this.expression(binary.right, scope),
@@ -3415,6 +3669,10 @@ export class CypherWriter {
         const temporal = this.temporalBinary(binary.operator, left, right);
         if (temporal) {
             return temporal;
+        }
+        const compared = this.comparison(binary, left, right, scope, filter);
+        if (compared !== undefined) {
+            return bool(compared);
         }
         const a = this.sql.comparable(this.asJson(left));
         const b = this.sql.comparable(this.asJson(right));
@@ -3426,53 +3684,64 @@ export class CypherWriter {
      * other may hold one without it (an item taken from a list, a collect, a variable), both by their properties, as
      * before identities: only a value the statement writes out or is given, all the way down (a literal, a parameter, a
      * map, a list or a map projection of such, a `CASE` that gives one), holds none where it carries no identity, so
-     * `[{x: r}][0] = {x: r}` is true, and `{x: r} = {x: {}}` false.
+     * `[{x: r}][0] = {x: r}` is true, and `{x: r} = {x: {}}` false. A node or a relationship compared with such a value
+     * is compared by its identity, so `r = {}` is false.
      */
     private compared(left: Value, right: Value, binary: Binary): [Value, Value] {
-        // Written all the way down: `{a: ms[0]}` and `n {.*, x: r}` hold what may be a node without its identity.
-        const written = (expression: Expression): boolean => {
-            switch (expression.kind) {
-                case 'Literal':
-                case 'Parameter':
-                    return true;
-                case 'MapLiteral':
-                    return expression.entries.every(([, value]) => written(value));
-                case 'ListLiteral':
-                    return expression.items.every(written);
-                case 'MapProjection':
-                    return expression.elements.every(
-                        (it) => it.kind === 'Selected' || (it.kind === 'Entry' && written(it.value))
-                    );
-                case 'Case':
-                    return [
-                        ...expression.alternatives.map(([, result]) => result),
-                        ...optional(expression.otherwise)
-                    ].every(written);
-                default:
-                    return false;
-            }
-        };
         const held = (value: Value): boolean => value.kind === 'Json' && value.identity !== undefined;
         const plain = (value: Value): Value => (value.kind === 'Json' ? { ...value, identity: undefined } : value);
-        if (held(left) && right.kind === 'Json' && !held(right) && !written(binary.right)) {
-            return [plain(left), right];
-        }
-        if (held(right) && left.kind === 'Json' && !held(left) && !written(binary.left)) {
-            return [left, plain(right)];
-        }
-        return [left, right];
+        const entity = (value: Value): boolean => value.kind === 'Node' || value.kind === 'Relationship';
+        const identity = (value: Value): Value =>
+            json(this.asJson(value).sql, { identity: this.identityOf(value), flat: true });
+        // Each side as compared with the other, `other`, written as `written`.
+        const as = (value: Value, other: Value, written: Expression): Value => {
+            if (other.kind !== 'Json' || held(other)) {
+                return value;
+            }
+            if (entity(value) && this.writtenOut(written)) {
+                return identity(value);
+            }
+            return held(value) && !this.writtenOut(written) ? plain(value) : value;
+        };
+        const leftAs = as(left, right, binary.right);
+        return leftAs !== left ? [leftAs, right] : [left, as(right, left, binary.left)];
     }
 
-    /** An operator of two values, not a logical one, neither of them temporal: its operands `a` and `b` as JSON. */
+    /**
+     * Whether `expression` is written all the way down (a literal, a parameter, a map, a list or a map projection of such,
+     * a `CASE` that gives one), so holds no node or relationship without its identity: `{a: ms[0]}` and `n {.*, x: r}`
+     * hold what may be one.
+     */
+    private writtenOut(expression: Expression): boolean {
+        switch (expression.kind) {
+            case 'Literal':
+            case 'Parameter':
+                return true;
+            case 'MapLiteral':
+                return expression.entries.every(([, value]) => this.writtenOut(value));
+            case 'ListLiteral':
+                return expression.items.every((it) => this.writtenOut(it));
+            case 'MapProjection':
+                return expression.elements.every(
+                    (it) => it.kind === 'Selected' || (it.kind === 'Entry' && this.writtenOut(it.value))
+                );
+            case 'Case':
+                return [
+                    ...expression.alternatives.map(([, result]) => result),
+                    ...optional(expression.otherwise)
+                ].every((it) => this.writtenOut(it));
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * An operator of two values, neither a logical one nor an equality nor an `IN`, and neither of them temporal: its
+     * operands `a` and `b` as JSON.
+     */
     private operation(binary: Binary, left: Value, right: Value, a: string, b: string): Value {
         const sql = this.sql;
         const comparison = COMPARISONS[binary.operator];
-        if (binary.operator === 'EQUALS') {
-            return bool(this.equality(left, right, binary.right));
-        }
-        if (binary.operator === 'NOT_EQUALS') {
-            return bool(`NOT (${this.equality(left, right, binary.right)})`);
-        }
         if (comparison) {
             // Values of two kinds are not ordered, as in Cypher: the comparison is null.
             return bool(
@@ -3534,34 +3803,6 @@ export class CypherWriter {
                 ),
             MODULO: () => json(sql.scalar(sql.modulo(sql.number(a), sql.number(b)))),
             POWER: () => json(sql.scalar(sql.float(`power(${sql.number(a)}, ${sql.number(b)})`))),
-            IN: () => {
-                const i = this.alias('i');
-                // A node or a relationship is in a list of them where its id is.
-                if (right.kind === 'Entities') {
-                    const id =
-                        left.kind === 'Node' && !right.relationships
-                            ? sql.scalar(left.nid)
-                            : left.kind === 'Relationship' && right.relationships
-                            ? sql.scalar(left.eid)
-                            : undefined;
-                    if (id !== undefined) {
-                        return bool(`EXISTS (SELECT 1 FROM ${sql.elements(right.ids, i)} WHERE ${i}.item = ${id})`);
-                    }
-                }
-                // A map or a list that holds a node or a relationship is in a list where an item holds the same, by identity.
-                if (
-                    (left.kind === 'Json' && left.identity !== undefined) ||
-                    (right.kind === 'Json' && right.identity !== undefined)
-                ) {
-                    return bool(
-                        `EXISTS (SELECT 1 FROM ${sql.elements(this.identified(right), i)} WHERE ${sql.identityEquals(
-                            `${i}.item`,
-                            this.identified(left)
-                        )})`
-                    );
-                }
-                return bool(`EXISTS (SELECT 1 FROM ${sql.elements(b, i)} WHERE ${i}.item = ${a})`);
-            },
             STARTS_WITH: () => bool(sql.shared([sql.text(a), sql.text(b)], ([x, y]) => sql.startsWith(x, y))),
             MATCHES: () => bool(sql.matches(sql.text(a), sql.text(b))),
             ENDS_WITH: () => bool(sql.shared([sql.text(a), sql.text(b)], ([x, y]) => sql.endsWith(x, y))),
@@ -3574,41 +3815,56 @@ export class CypherWriter {
      * Whether two values are equal: as JSON, so `'7'` is not `7` and `1` is `1.0`. A node is equal to a node by its
      * row. Where a property is compared with `written`, a text or a truth value the statement is given, a test an index
      * answers stands beside it, where the store has one: such a value's text is equal where its JSON is, and a number's
-     * is not (`1` and `1.0`).
+     * is not (`1` and `1.0`). `left` is `stored` where it is a property read from the store, which is SQL's null where it
+     * is not there, and so needs no test of its own beside such a value. Where neither is `plain`, either may hold a
+     * null: see {@link plain}.
      */
-    private equality(left: Value, right: Value, written?: Expression): string {
+    private equality(
+        left: Value,
+        right: Value,
+        written?: Expression,
+        plain: boolean = true,
+        stored: boolean = true
+    ): string {
         const temporal = this.temporalBinary('EQUALS', left, right);
         if (temporal?.kind === 'Bool') {
             return temporal.sql;
         }
-        const identical = this.identityEquality(left, right);
+        const identical = this.identityEquality(left, right, plain);
         if (identical !== undefined) {
             return identical;
         }
         const [a, b] = this.equated(left, right);
+        // Either may hold a null, which makes the comparison null where no item or entry differs.
+        if (!plain) {
+            return this.nullableEquals(a, b, (x, y) => this.sql.jsonEquals(x, y));
+        }
         const given = written ? this.given(written) : undefined;
         const indexed =
             typeof given === 'string' || typeof given === 'boolean' ? this.sql.indexedEquality(a, b) : undefined;
         // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement is given
-        // that is not null needs no test of its own, and a property that is not there is SQL's null.
+        // that is not null needs no test of its own where the other is a property, which is SQL's null where it is not there.
         const equal =
             given !== null && given !== undefined
-                ? `${a} = ${b}`
+                ? stored
+                    ? this.sql.jsonEquals(a, b)
+                    : `CASE WHEN NOT ${this.sql.isJsonNull(a)} THEN ${this.sql.jsonEquals(a, b)} END`
                 : this.sql.shared(
                       [a, b],
                       ([x, y]) =>
                           `CASE WHEN NOT ${this.sql.isJsonNull(x)} AND NOT ${this.sql.isJsonNull(
                               y
-                          )} THEN ${x} = ${y} END`
+                          )} THEN ${this.sql.jsonEquals(x, y)} END`
                   );
         return indexed !== undefined ? `(${indexed} AND ${equal})` : equal;
     }
 
     /**
      * Whether `left` and `right` are equal by identity: two nodes, or two relationships, by their rows; and where either is
-     * a map or a list that holds a node or a relationship, where what it holds is. Undefined where neither is so.
+     * a map or a list that holds a node or a relationship, where what it holds is, as {@link nullableEquals} compares
+     * them where neither is `plain`. Undefined where neither is so.
      */
-    private identityEquality(left: Value, right: Value): string | undefined {
+    private identityEquality(left: Value, right: Value, plain: boolean): string | undefined {
         if (left.kind === 'Node' && right.kind === 'Node') {
             return `${left.nid} = ${right.nid}`;
         }
@@ -3621,6 +3877,11 @@ export class CypherWriter {
         ) {
             return undefined;
         }
+        if (!plain) {
+            return this.nullableEquals(this.identified(left), this.identified(right), (x, y) =>
+                this.sql.identityEquals(x, y)
+            );
+        }
         return this.sql.shared(
             [this.identified(left), this.identified(right)],
             ([x, y]) =>
@@ -3628,6 +3889,405 @@ export class CypherWriter {
                     y
                 )} THEN ${this.sql.identityEquals(x, y)} END`
         );
+    }
+
+    /**
+     * Whether the JSON values `x` and `y` are equal, as Cypher compares values that may hold a null: null where either is
+     * null, and as the store's `nullsEqual` compares them where one holds one; else as `equals` compares them.
+     */
+    private nullableEquals(x: string, y: string, equals: (x: string, y: string) => string): string {
+        return this.sql.shared([x, y], ([a, b]) => {
+            const held = `${this.sql.holdsNull(a)} OR ${this.sql.holdsNull(b)}`;
+            const equal = `CASE WHEN ${held} THEN ${this.sql.nullsEqual(a, b, equals)} ELSE ${equals(a, b)} END`;
+            return `CASE WHEN NOT ${this.sql.isJsonNull(a)} AND NOT ${this.sql.isJsonNull(b)} THEN ${equal} END`;
+        });
+    }
+
+    /**
+     * Whether the sides `leftWritten` and `rightWritten` of a comparison, compiled as `left` and `right`, compare as JSON:
+     * where one is no list or map, or neither holds a null in one (see {@link JsonValue.flat}). Else a null they hold
+     * makes the comparison null where no item or entry differs, as in Cypher.
+     */
+    private plain(leftWritten: Expression, rightWritten: Expression, left: Value, right: Value, scope: Scope): boolean {
+        return (
+            this.scalarValued(leftWritten, scope) ||
+            this.scalarValued(rightWritten, scope) ||
+            (this.isFlat(left) && this.isFlat(right))
+        );
+    }
+
+    /** Whether `expression` is a property of a node or a relationship in `scope`, read from the store: SQL's null where it is not there. */
+    private stored(expression: Expression, scope: Scope): boolean {
+        if (expression.kind !== 'Property' || expression.subject.kind !== 'Variable') {
+            return false;
+        }
+        const subject = scope.get(expression.subject.name);
+        return subject?.kind === 'Node' || subject?.kind === 'Relationship';
+    }
+
+    /** Whether `value` is known to hold no null in a list or a map: see {@link JsonValue.flat}. A node or a relationship is compared by its id. */
+    private isFlat(value: Value): boolean {
+        switch (value.kind) {
+            case 'Json':
+            case 'Entities':
+                return value.flat === true;
+            case 'Path':
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    /** Whether `expression` is never null: a value the statement writes, a list or a map among them, or a parameter bound to one. */
+    private present(expression: Expression): boolean {
+        switch (expression.kind) {
+            case 'Literal':
+                return expression.value !== null && expression.value !== undefined;
+            case 'Parameter':
+                return this.parameterTree(expression.name) !== null;
+            case 'ListLiteral':
+            case 'MapLiteral':
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Whether `expression` is a number, a text or a truth value the statement writes, or a parameter bound to one: never null, and no list or map. */
+    private presentScalar(expression: Expression, scope: Scope): boolean {
+        return this.present(expression) && this.scalarValued(expression, scope);
+    }
+
+    /** Whether the value `expression` gives in `scope` is known to be no list or map: it may be null. */
+    private scalarValued(expression: Expression, scope: Scope): boolean {
+        if (SCALAR_KINDS.has(expression.kind)) {
+            return true;
+        }
+        switch (expression.kind) {
+            case 'Parameter':
+                return !isContainer(this.parameterTree(expression.name));
+            case 'Variable':
+                return scope.get(expression.name)?.kind === 'Bool';
+            // A sum is a list where either side is; every other operator gives a number, a text, a temporal value or a truth value.
+            case 'Binary':
+                return (
+                    expression.operator !== 'ADD' ||
+                    (this.scalarValued(expression.left, scope) && this.scalarValued(expression.right, scope))
+                );
+            case 'Function':
+                return SCALAR_FUNCTIONS.has(expression.name.toLowerCase());
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Whether the value `expression` gives in `scope` is known to hold no null in a list or a map, at any depth: see
+     * {@link JsonValue.flat}. Read from what is written, and what `scope` holds, so it compiles nothing.
+     */
+    private flat(expression: Expression, scope: Scope): boolean {
+        return SCALAR_KINDS.has(expression.kind) || (this.flatness[expression.kind]?.(expression, scope) ?? false);
+    }
+
+    /** The parameter `name`'s value as the JSON it is bound as (see {@link jsonTree}); null where it is null. */
+    private parameterTree(name: string): unknown {
+        if (!this.parameterTrees.has(name)) {
+            this.parameterTrees.set(name, jsonTree(this.parameters.value(name)));
+        }
+        return this.parameterTrees.get(name);
+    }
+
+    /**
+     * `binary`, an equality or an `IN`, compared item by item where its sides are lists or maps the statement writes out,
+     * `[a, b] = [c, d]`, `{x: a} = {x: b}`, `x IN [a, b]`, and one of them may hold a null: each pair compared, and the
+     * comparisons taken together as SQL's `AND` (`OR` for an `IN`) takes them, which is as Cypher takes them: false where
+     * one is false, else null where one is null. Lists of different lengths, and maps of different keys, are not equal.
+     * Undefined where the sides are not so written, or hold no null, and so compare whole, as JSON, or `binary` is
+     * another operator.
+     */
+    private itemwise(binary: Binary, scope: Scope): string | undefined {
+        if (!['EQUALS', 'NOT_EQUALS', 'IN'].includes(binary.operator)) {
+            return undefined;
+        }
+        const left = binary.left;
+        const right = binary.right;
+        if (this.flat(left, scope) && this.flat(right, scope)) {
+            return undefined;
+        }
+        const joined = (pairs: [Expression, Expression][]): string =>
+            `(${pairs
+                .map(([a, b]) =>
+                    this.condition(this.binary({ kind: 'Binary', operator: 'EQUALS', left: a, right: b }, scope))
+                )
+                .join(' AND ')})`;
+        if (binary.operator === 'IN') {
+            return this.itemwiseIn(left, right, scope);
+        }
+        if (left.kind === 'ListLiteral' && right.kind === 'ListLiteral') {
+            return left.items.length !== right.items.length
+                ? 'FALSE'
+                : joined(left.items.map((it, i): [Expression, Expression] => [it, right.items[i]]));
+        }
+        if (left.kind === 'MapLiteral' && right.kind === 'MapLiteral') {
+            const l = new Map(left.entries);
+            const r = new Map(right.entries);
+            if (l.size !== r.size || [...l.keys()].some((key) => !r.has(key))) {
+                return 'FALSE';
+            }
+            return joined([...l].map(([key, value]): [Expression, Expression] => [value, r.get(key)!]));
+        }
+        return undefined;
+    }
+
+    /** `left IN right`, item by item, where `right` is a list written out with items: see {@link itemwise}. */
+    private itemwiseIn(left: Expression, right: Expression, scope: Scope): string | undefined {
+        if (right.kind !== 'ListLiteral' || right.items.length === 0) {
+            return undefined;
+        }
+        // The item compiled once, and compared with each of the list's.
+        const item = this.expression(left, scope);
+        return `(${right.items
+            .map((listed) => {
+                const equals: Binary = { kind: 'Binary', operator: 'EQUALS', left, right: listed };
+                const [l, r] = this.compared(item, this.expression(listed, scope), equals);
+                return this.equality(l, r, listed, this.plain(left, listed, l, r, scope), this.stored(left, scope));
+            })
+            .join(' OR ')})`;
+    }
+
+    /**
+     * `binary`, an equality or an `IN` of `left` and `right`, compiled already, as SQL: undefined where it is another
+     * operator. An `IN` read by a `WHERE` for its truth alone is `filter`: see {@link membership}.
+     */
+    private comparison(binary: Binary, left: Value, right: Value, scope: Scope, filter: boolean): string | undefined {
+        if (binary.operator === 'IN') {
+            return this.membership(binary, left, right, scope, filter);
+        }
+        if (binary.operator !== 'EQUALS' && binary.operator !== 'NOT_EQUALS') {
+            return undefined;
+        }
+        const plain = this.plain(binary.left, binary.right, left, right, scope);
+        const equal =
+            (plain ? undefined : this.givenItemwise(binary.left, left, binary.right, right)) ??
+            this.equality(left, right, binary.right, plain, this.stored(binary.left, scope));
+        return binary.operator === 'EQUALS' ? equal : `NOT (${equal})`;
+    }
+
+    /**
+     * An equality of `left` and `right`, written as `leftWritten` and `rightWritten`, where one is a parameter bound to a
+     * list that holds a null, lists within it among its items and no map: the other compared with it item by item, each
+     * item as the statement is compiled with it, as {@link itemwise} compares a list written out, so no store walks the
+     * two. Undefined where neither is such a parameter.
+     */
+    private givenItemwise(
+        leftWritten: Expression,
+        left: Value,
+        rightWritten: Expression,
+        right: Value
+    ): string | undefined {
+        const given = (expression: Expression): unknown[] | undefined => {
+            if (expression.kind !== 'Parameter') {
+                return undefined;
+            }
+            const tree = this.parameterTree(expression.name);
+            return Array.isArray(tree) && !holdsNoNull(tree) && arrays(tree) ? tree : undefined;
+        };
+        const other = (value: Value): JsonValue | undefined =>
+            value.kind === 'Json' && value.identity === undefined && value.temporal === undefined ? value : undefined;
+        const [rightList, leftOther] = [given(rightWritten), other(left)];
+        if (rightList !== undefined && leftOther !== undefined) {
+            return this.itemsEqual(this.sql.comparable(leftOther), rightList);
+        }
+        const [leftList, rightOther] = [given(leftWritten), other(right)];
+        if (leftList !== undefined && rightOther !== undefined) {
+            return this.itemsEqual(this.sql.comparable(rightOther), leftList);
+        }
+        return undefined;
+    }
+
+    /**
+     * Whether the JSON value `jsonSql` is equal to `given`, a list that may hold a null and lists, as Cypher compares them:
+     * the same length, and each item equal, false where one is not, else null where one is null. A text, a number or a
+     * truth value is compared as JSON.
+     */
+    private itemsEqual(jsonSql: string, given: unknown): string {
+        return this.sql.shared([jsonSql], ([x]) => {
+            if (!Array.isArray(given)) {
+                return `CASE WHEN NOT ${this.sql.isJsonNull(x)} THEN ${this.sql.jsonEquals(
+                    x,
+                    this.sql.literalJson(given)
+                )} END`;
+            }
+            const checks = given
+                .map((item, i): [unknown, number] => [item, i])
+                .filter(([item]) => item !== null)
+                .map(([item, i]) => this.itemsEqual(this.sql.itemAt(x, i), item));
+            const nulls = given.some((it) => it === null);
+            // A null item makes the whole null where every other item is equal.
+            const items = !nulls
+                ? checks.length === 0
+                    ? 'TRUE'
+                    : `(${checks.join(' AND ')})`
+                : checks.length === 0
+                ? 'NULL'
+                : `CASE WHEN NOT (${checks.join(' AND ')}) THEN FALSE END`;
+            // Its size read only of a list, in the order a CASE reads its conditions.
+            return (
+                `CASE WHEN ${this.sql.isJsonNull(x)} THEN NULL WHEN ${this.sql.typeOf(x)} <> 'array' THEN FALSE ` +
+                `WHEN ${this.sql.listSize(x)} <> ${given.length} THEN FALSE ELSE ${items} END`
+            );
+        });
+    }
+
+    /**
+     * `x IN list`, of `left` and `right`, the sides of `binary`, as Cypher has it: null where the list is null; else true
+     * where an item is equal to the value, else null where a comparison with one is null (the value is null, an item is,
+     * or holds a null where the value holds another), else false. A value that holds no null, in a list that holds none,
+     * is in it where an item is equal to it; read by a `WHERE` for its truth alone (`filter`), it is not in it where it
+     * is null, as before.
+     */
+    private membership(binary: Binary, left: Value, right: Value, scope: Scope, filter: boolean): string {
+        const member = this.member(left, right);
+        const within = this.isFlat(right);
+        // A node, a relationship or a value of one kind holds no null; nor does an item of a list that holds none.
+        const whole = member.id !== undefined || this.scalarValued(binary.left, scope) || this.isFlat(left);
+        const leftPresent = this.present(binary.left);
+        const rightPresent = this.present(binary.right);
+        // Null and false keep no row alike, and a value that holds no null is null beside such a list only where it is
+        // null: beside any list, read by a WHERE for its truth alone, it is equal as JSON only to an item Cypher finds equal.
+        if (whole && (filter || (leftPresent && rightPresent && within))) {
+            return this.filteredMembership(binary.left, member, within, scope);
+        }
+        // A value that may be null, in a list that is not and holds none: in where an item is equal, null where the value
+        // is null, else not, written so the store still answers the first as it did, as a semi-join.
+        if (rightPresent && within && whole && this.filled(binary.right)) {
+            return this.found(
+                member,
+                (found, v) => `(${found} OR CASE WHEN NOT ${this.sql.isJsonNull(v)} THEN FALSE END)`
+            );
+        }
+        return this.undecidedMembership(member, {
+            nullList: !rightPresent,
+            nullValue: !leftPresent,
+            filled: this.filled(binary.right),
+            whole,
+            within
+        });
+    }
+
+    /**
+     * What {@link membership} compares of `left IN right`: the list, the value, and how an item of the list `matches` the
+     * value, as `equals` compares two values that hold no null. A node or a relationship in a list of them is its `id`.
+     */
+    private member(left: Value, right: Value): Member {
+        const sql = this.sql;
+        // A node or a relationship is in a list of them where its id is.
+        const id = this.memberId(left, right);
+        const identities =
+            (left.kind === 'Json' && left.identity !== undefined) ||
+            (right.kind === 'Json' && right.identity !== undefined);
+        const equals = identities
+            ? (a: string, b: string): string => sql.identityEquals(a, b)
+            : (a: string, b: string): string => sql.jsonEquals(a, b);
+        const matches = (item: string, value: string): string =>
+            id !== undefined ? `${item} = ${value}` : equals(item, value);
+        if (id !== undefined) {
+            return { list: (right as EntitiesValue).ids, x: id, id, equals, matches };
+        }
+        // A map or a list that holds a node or a relationship is in a list where an item holds the same, by identity.
+        if (identities) {
+            return { list: this.identified(right), x: this.identified(left), equals, matches };
+        }
+        return { list: sql.comparable(this.asJson(right)), x: sql.comparable(this.asJson(left)), equals, matches };
+    }
+
+    /**
+     * Whether `member`'s value, written as `value`, which holds no null, is in its list, which holds none where it is
+     * `within`, as a semi-join: read for its truth alone, or where neither may be null, it is equal as JSON only to an
+     * item Cypher finds equal. But JSON's null is equal as JSON to an item that is, so a value that may be JSON's null,
+     * in a list that may hold a null, is in it only where it is not null. A node or a relationship, a value the statement
+     * writes or is given, and a property read from the store, which is SQL's null where it is not there, are never
+     * JSON's null.
+     */
+    private filteredMembership(value: Expression, member: Member, within: boolean, scope: Scope): string {
+        if (within || member.id !== undefined || this.present(value) || this.stored(value, scope)) {
+            return this.found(member);
+        }
+        return this.found(member, (found, v) => `(${found} AND NOT ${this.sql.isJsonNull(v)})`);
+    }
+
+    /**
+     * Whether an item of `member`'s list matches its value, as a semi-join the store answers: `EXISTS`, or with `around`
+     * that test and the value, each read once.
+     */
+    private found(member: Member, around?: (found: string, value: string) => string): string {
+        const i = this.alias('i');
+        const exists = (list: string, value: string): string =>
+            `EXISTS (SELECT 1 FROM ${this.sql.elements(list, i)} WHERE ${member.matches(`${i}.item`, value)})`;
+        if (around === undefined) {
+            return exists(member.list, member.x);
+        }
+        return this.sql.shared([member.list, member.x], ([l, v]) => around(exists(l, v), v));
+    }
+
+    /** The id of `left`, a node or a relationship, where `right` is a list of such: undefined where they are not so. */
+    private memberId(left: Value, right: Value): string | undefined {
+        if (right.kind !== 'Entities') {
+            return undefined;
+        }
+        if (left.kind === 'Node' && !right.relationships) {
+            return this.sql.scalar(left.nid);
+        }
+        return left.kind === 'Relationship' && right.relationships ? this.sql.scalar(left.eid) : undefined;
+    }
+
+    /** Whether `list` is a list written out with items, or a parameter bound to a list or a map with them. */
+    private filled(list: Expression): boolean {
+        if (list.kind === 'ListLiteral') {
+            return list.items.length > 0;
+        }
+        const given = list.kind === 'Parameter' ? this.parameterTree(list.name) : undefined;
+        return (Array.isArray(given) && given.length > 0) || (isJsonMap(given) && Object.keys(given).length > 0);
+    }
+
+    /**
+     * `x IN list` of `member`, where the value or an item may hold a null, as a `CASE`: null where the list is null and
+     * may be (`nullList`); null where the value is null and may be (`nullValue`), in a list that is not empty, which a
+     * list written out with items, or a parameter bound to one, is (`filled`); true where an item is equal to the value,
+     * which holds no null where it is `whole`; null where a comparison with an item is null, which none is where the value
+     * is `whole` and the list holds no null (`within`); else false.
+     */
+    private undecidedMembership(
+        member: Member,
+        of: { nullList: boolean; nullValue: boolean; filled: boolean; whole: boolean; within: boolean }
+    ): string {
+        const sql = this.sql;
+        const matches = member.matches;
+        const equals = member.equals;
+        return sql.shared([member.list, member.x], ([l, v]) => {
+            const i = this.alias('i');
+            const cases: string[] = of.nullList ? [`WHEN ${sql.isJsonNull(l)} THEN NULL`] : [];
+            // Null is compared with each item, and is in no empty list.
+            if (of.nullValue) {
+                const j = this.alias('i');
+                const empty = `CASE WHEN EXISTS (SELECT 1 FROM ${sql.elements(l, j)}) THEN NULL ELSE FALSE END`;
+                cases.push(`WHEN ${sql.isJsonNull(v)} THEN ${of.filled ? 'NULL' : empty}`);
+            }
+            // A value that holds a null is equal to no item.
+            const held = of.whole ? '' : `NOT (${sql.holdsNull(v)}) AND `;
+            cases.push(
+                `WHEN ${held}EXISTS (SELECT 1 FROM ${sql.elements(l, i)} WHERE ${matches(`${i}.item`, v)}) THEN TRUE`
+            );
+            if (!of.within || !of.whole) {
+                const k = this.alias('i');
+                const undecided =
+                    member.id !== undefined
+                        ? sql.isJsonNull(`${k}.item`)
+                        : `(${this.nullableEquals(`${k}.item`, v, equals)}) IS NULL`;
+                cases.push(`WHEN EXISTS (SELECT 1 FROM ${sql.elements(l, k)} WHERE ${undecided}) THEN NULL`);
+            }
+            return `CASE ${cases.join(' ')} ELSE FALSE END`;
+        });
     }
 
     /**
@@ -3787,9 +4447,18 @@ export class CypherWriter {
         const results = [...expression.alternatives.map(([, result]) => result), ...optional(expression.otherwise)].map(
             (it): [Expression, Value] => [it, this.expression(it, scope)]
         );
-        const conditions = expression.alternatives.map(([key]) =>
-            subject ? this.equality(subject, this.expression(key, scope)) : this.condition(this.expression(key, scope))
-        );
+        const conditions = expression.alternatives.map(([key]) => {
+            if (!subject) {
+                return this.condition(this.expression(key, scope));
+            }
+            const value = this.expression(key, scope);
+            return this.equality(
+                subject,
+                value,
+                undefined,
+                this.plain(expression.subject!, key, subject, value, scope)
+            );
+        });
         const written = (value: (result: Value, i: number) => string): string => {
             const alternatives = conditions
                 .map((condition, i) => `WHEN ${condition} THEN ${value(results[i][1], i)}`)
