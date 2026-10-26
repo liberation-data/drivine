@@ -573,6 +573,14 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ).toEqual([
                 [-2.0, -2.0, -2.0, -2.0, -2.0, -2.5, -2.6, -2.0, -2.5, -3.0, -3.0, -2.0, -2.0, -2.0, -3.0, -3.0, -2.0, -3.0, -3.0]
             ]);
+            // NaN's 0 places by each other mode, over an aggregate, and of a null value, as Neo4j gives them.
+            expect(
+                await query(
+                    "UNWIND [1.25, -2.5] AS x RETURN [round(sum(x), $n, 'UP'), round(-2.5, $n, 'CEILING'), " +
+                        "round(-2.5, $n, 'FLOOR'), round(-3.5, $n, 'HALF_EVEN'), round(-2.5, $n, 'DOWN'), round(null, $n, 'UP')]",
+                    { n: NaN }
+                )
+            ).toEqual([[-2.0, -2.0, -3.0, -4.0, -2.0, null]]);
             // Below 0 places, given or written, negated or not, is refused, as Neo4j refuses it.
             for (const [statement, parameters] of [
                 ['RETURN round(-2.5, $n)', { n: -1 }],
