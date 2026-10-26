@@ -4665,18 +4665,24 @@ export class CypherWriter {
             );
         }
         if (call.arguments.length === 2) {
+            // To 0 places Neo4j rounds as round(x) does, half toward +infinity, as Java's Math.round; to more, half away
+            // from zero. The precision may come from data, so the places are told apart as the statement runs.
             return json(
                 this.sql.scalar(
                     this.sql.float(
-                        this.sql.roundPlaces(
-                            this.numberOf(call.arguments[0]),
-                            this.precisionOf(call.arguments[1], call.fn.arguments[1])
+                        this.sql.shared(
+                            [
+                                this.numberOf(call.arguments[0]),
+                                this.precisionOf(call.arguments[1], call.fn.arguments[1])
+                            ],
+                            ([n, p]) =>
+                                `CASE WHEN ${p} = 0 THEN ${this.sql.roundWhole(n)} ELSE ${this.sql.roundPlaces(n, p)} END`
                         )
                     )
                 )
             );
         }
-        return json(this.sql.scalar(this.sql.float(`FLOOR(${this.numberOf(call.one())} + 0.5)`)));
+        return json(this.sql.scalar(this.sql.float(this.sql.roundWhole(this.numberOf(call.one())))));
     }
 
     /**

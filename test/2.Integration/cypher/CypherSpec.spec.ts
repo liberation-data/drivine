@@ -506,6 +506,25 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             }
         });
 
+        it('round() to 0 places rounds as round(x) does, half toward +infinity, and to more half away from zero', async () => {
+            // The spec's steps for liberation-data/drivine#328, from drivine-cypher-spec v0.6.8.
+            expect(
+                await query(
+                    'RETURN [round(-2.5, 0), round(-1.5, 0), round(-0.5, 0), round(2.5, 0), round(-2.6, 0), round(-2.55, 1), round(-2.5, 0.7)]'
+                )
+            ).toEqual([[-2.0, -1.0, 0.0, 3.0, -3.0, -2.6, -2.0]]);
+            expect(await query('UNWIND [0, -0.5, 1, null] AS p RETURN round(-2.5, p)')).toEqual([-2.0, -2.0, -2.5, null]);
+            // An integer as a float, a huge or tiny number, a precision from data, and the doubles that a binary sum with
+            // a half rounds up, the last below a half and the first odd past 2^52; round(x) likewise.
+            await query('CREATE (:Round {q: 0})');
+            expect(
+                await query(
+                    'MATCH (n:Round) RETURN [round(3, 0), round(-3, 0), round(1.0E20, 0), round(-1.0E100, 0), round(1.0E-120, 0), round(-1.0E-120, 0), round(-2.5, n.q), ' +
+                        'round(0.49999999999999994, 0), round(4503599627370497.0, 0), round(0.49999999999999994), round(4503599627370497.0)]'
+                )
+            ).toEqual([[3.0, -3.0, 1.0e20, -1.0e100, 0.0, 0.0, -2.0, 0.0, 4.503599627370497e15, 0.0, 4.503599627370497e15]]);
+        });
+
         it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
             // Zero, on which LOG fails (ORA-01428) were Oracle to count its digits by it, gives zero wherever it is read,
             // among rows that are not zero too.
