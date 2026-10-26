@@ -189,7 +189,15 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .video-tip .short { display: none; }
             @media (max-width: 600px) { .video-tip { font-size: 15px; gap: 8px; } .video-tip .long { display: none; } .video-tip .short { display: inline; } }
             .installs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 22px; font-size: 14px; }
-            .installs code { background: rgba(2, 28, 38, 0.62); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; padding: 9px 14px; color: #e6f2f4; }
+            .installs .copy { position: relative; display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; background: rgba(2, 28, 38, 0.62); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 8px; color: #e6f2f4; font: inherit; cursor: pointer; }
+            .installs .copy code { color: inherit; background: none; padding: 0; white-space: nowrap; user-select: text; }
+            @media (max-width: 420px) { .installs { font-size: 12px; } .installs .copy { gap: 8px; padding: 0 10px; } }
+            .installs .copy svg { opacity: 0.7; }
+            .installs .copy:hover, .installs .copy:focus-visible { border-color: #fff; background: rgba(2, 28, 38, 0.82); }
+            .installs .copy:hover svg, .installs .copy:focus-visible svg { opacity: 1; }
+            .installs .copy:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+            .installs .copy.done::after { content: 'Copied'; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 7px; background: var(--accent); color: var(--ink); font-weight: 700; }
+            .copied-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
             .intro { padding: 96px 32px 72px; }
             .intro .wrap { max-width: 880px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
@@ -280,6 +288,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .studio .wrap { display: flex; flex-direction: column; gap: 36px; }
             .studio header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
             .studio header > p:not(.eyebrow) { margin: 0; font-size: 18px; line-height: 1.65; color: var(--muted); }
+            .studio .writers { margin: -6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 18px; line-height: 1.6; color: var(--muted); }
+            .studio .writers li { display: flex; gap: 12px; }
+            .studio .writers li::before { content: '—'; color: var(--accent); font-weight: 700; }
+            .studio .writers strong { color: var(--ink); font-weight: 500; }
             .studio figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
             .studio img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 18px 40px rgba(2, 28, 38, 0.14); }
             .studio figcaption { font-size: 15px; line-height: 1.5; color: var(--muted); }
@@ -358,9 +370,13 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <a href={jvm} class="button ghost">Kotlin &amp; Java docs <span aria-hidden="true">→</span></a>
                 </div>
                 <div class="installs">
-                    <code>npm install @liberation-data/drivine</code>
-                    <code>pip install drivine</code>
-                    <code>org.drivine:drivine4j</code>
+                    {['npm install @liberation-data/drivine', 'pip install drivine', 'org.drivine:drivine4j'].map((line) => (
+                        <button type="button" class="copy" data-copy={line} aria-label={`Copy ${line}`}>
+                            <code>{line}</code>
+                            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9z" fill="currentColor" /></svg>
+                        </button>
+                    ))}
+                    <span class="copied-status" role="status"></span>
                 </div>
             </div>
         </header>
@@ -559,10 +575,14 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <header>
                         <p class="eyebrow">DRIVINE STUDIO</p>
                         <h2>See what a view loads.</h2>
+                        <p>Each library writes your model to <code>.drivine/model.json</code>:</p>
+                        <ul class="writers">
+                            <li><span><strong>drivine4j</strong> as it builds</span></li>
+                            <li><span><strong>Python</strong> from its stubs step</span></li>
+                            <li><span><strong>TypeScript</strong> with <code>npx drivine model</code></span></li>
+                        </ul>
                         <p>
-                            Each library writes your model to <code>.drivine/model.json</code>: drivine4j as it builds, Python
-                            from its stubs step, TypeScript with <code>npx drivine model</code>. Drivine Studio reads it: drag a
-                            view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws what came
+                            Drivine Studio reads it: drag a view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws what came
                             back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or as a
                             desktop app.
                         </p>
@@ -650,6 +670,49 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 player.replaceChildren(frame);
                 frame.focus({ preventScroll: true });
             }, { once: true });
+            // Each install line copies itself, and says so for a moment.
+            const copied = document.querySelector<HTMLElement>('.copied-status');
+            const copy = async (line: string, button: HTMLButtonElement) => {
+                try {
+                    await navigator.clipboard.writeText(line);
+                    return true;
+                } catch {
+                    // Outside a secure context, or with the permission denied, the older command still copies.
+                    const area = document.createElement('textarea');
+                    area.value = line;
+                    area.readOnly = true;
+                    area.style.cssText = 'position: fixed; top: 0; opacity: 0;';
+                    document.body.append(area);
+                    area.select();
+                    try {
+                        return document.execCommand('copy');
+                    } catch {
+                        return false;
+                    } finally {
+                        area.remove();
+                        button.focus({ preventScroll: true });
+                    }
+                }
+            };
+            document.querySelectorAll<HTMLButtonElement>('.installs .copy').forEach((button) => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                button.addEventListener('click', async () => {
+                    const line = button.dataset.copy!;
+                    clearTimeout(timer);
+                    if (await copy(line, button)) {
+                        button.classList.add('done');
+                        if (copied) copied.textContent = `Copied ${line}`;
+                    } else {
+                        // Nothing would copy it, so the line is left selected for the visitor to copy.
+                        getSelection()?.selectAllChildren(button.querySelector('code')!);
+                        if (copied) copied.textContent = `Couldn't copy. ${line} is selected.`;
+                    }
+                    timer = setTimeout(() => {
+                        button.classList.remove('done');
+                        if (copied) copied.textContent = '';
+                    }, 1400);
+                });
+            });
             // The hero's tip takes the visitor down to the video and starts it.
             document.querySelector<HTMLAnchorElement>('.video-tip')?.addEventListener('click', (event) => {
                 const play = document.querySelector<HTMLButtonElement>('.watch .play');
