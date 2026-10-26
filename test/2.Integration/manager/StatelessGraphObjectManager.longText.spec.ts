@@ -17,6 +17,11 @@ import {
 } from '@liberation-data/drivine';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
+// Neo4j plans each statement the first time it sees it, a few hundred milliseconds for one of the object manager's, and
+// the tests here send statements of their own shapes. On fresh containers, beside the suites running in parallel, a
+// test can pass Jest's 5 seconds planning them (#349).
+jest.setTimeout(30_000);
+
 // Oracle writes a save in one PL/SQL block, whose VARCHAR2 parameters hold 32,767 bytes at most, and a JSON_SERIALIZE
 // that doesn't say otherwise 4,000: these texts are past each, in characters and in bytes.
 const ASCII = 'x'.repeat(40_000);
