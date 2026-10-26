@@ -1565,6 +1565,10 @@ Notes:
   reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`. The index holds what has been committed, so a search
   doesn't see its own transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or
   with no index made, a search counts the words in the text of every node of the label.
+- Each session Drivine opens makes no adaptive plan (`OPTIMIZER_ADAPTIVE_PLANS = FALSE`). On tables without
+  statistics, Oracle's adaptive join plan gave no rows for a read of a graph just written, where the same plan, fixed,
+  gave them all ([#331](https://github.com/liberation-data/drivine/issues/331)). A statement of yours that relies on
+  an adaptive plan can ask for one with the hint `/*+ OPT_PARAM('optimizer_adaptive_plans' 'true') */`.
 
 ### Amazon Neptune
 
