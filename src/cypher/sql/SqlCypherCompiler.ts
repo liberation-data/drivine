@@ -1,11 +1,19 @@
-import { Integer, isInt } from 'neo4j-driver';
+import { Integer } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
-import { indent, literal, RoundingMode, unsupported, writes } from '@/cypher/sql/CypherSyntax';
+import {
+    indent,
+    isGivenNumber,
+    literal,
+    MADE_TEXT,
+    RoundingMode,
+    unsupported,
+    writes
+} from '@/cypher/sql/CypherSyntax';
 import { jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
@@ -22,14 +30,6 @@ const SHARED_ABOVE = 200;
  * exponent, a digit before the point and one after it at least, and as many more as its shortest decimal has.
  */
 export const PLAIN_FLOAT = 'FM9999990.0999999999999999999999';
-
-/** Whether `value`, given by the statement, is a number JSON holds as one: NaN and the infinities it holds as none. */
-function isGivenNumber(value: unknown): value is number | bigint | CypherFloat | Integer {
-    if (value instanceof CypherFloat) {
-        return Number.isFinite(value.value);
-    }
-    return typeof value === 'bigint' || isInt(value) || (typeof value === 'number' && Number.isFinite(value));
-}
 
 /**
  * A number the statement gives, as Java writes it: a float as a double, `1.0E7`, `2.5`. A JavaScript number with no
@@ -323,9 +323,10 @@ export abstract class SqlCypherCompiler {
      * The text the JSON `json`, a side of a `+` that may put a number and a text together, is written as there: by
      * `written`, as `toString` writes it, a float as Java writes a double. Where the statement gives it a number, `given`,
      * it is that number's text, worked out here; and where it gives the other side, `other`, a number, or this side a text,
-     * it is its own text, `plain`, for a side is put together with a number only where it is a text. So only a side the
-     * statement gives neither way is written as `toString` writes it, which is long: `c.name + 1` compiles as it did
-     * before floats were so written. NaN and the infinities count as given neither way.
+     * it is its own text, `plain`, for a side is put together with a number only where it is a text. So is a side the
+     * statement makes a text ({@link MADE_TEXT}), as `'x' + toString(i)`. So only a side the statement gives or makes
+     * neither way, which may be a float, is written as `toString` writes it, which is long: `c.name + 1` compiles as it
+     * did before floats were so written. NaN and the infinities count as given neither way.
      */
     summedText(
         jsonSql: string,
@@ -337,7 +338,9 @@ export abstract class SqlCypherCompiler {
         if (isGivenNumber(given)) {
             return literal(givenText(given));
         }
-        return typeof given === 'string' || isGivenNumber(other) ? plain(jsonSql) : written(jsonSql);
+        return typeof given === 'string' || given === MADE_TEXT || isGivenNumber(other)
+            ? plain(jsonSql)
+            : written(jsonSql);
     }
 
     /** `a op b` of the JSON numbers `a` and `b`, as JSON: `operator` is `+`, `-`, `*` or `/`. */
@@ -574,7 +577,8 @@ export abstract class SqlCypherCompiler {
 
     /**
      * `a + b` of the JSON values `a` and `b`: numbers added, lists joined, texts put together. `given` is what the
-     * statement gives each as, where it does: see {@link summedText}.
+     * statement gives each as, where it does, or {@link MADE_TEXT} where it makes it a text without giving it: see
+     * {@link summedText}.
      */
     abstract add(a: string, b: string, given?: [unknown, unknown]): string;
 
