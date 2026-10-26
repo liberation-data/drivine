@@ -80,8 +80,26 @@ export class OracleConnectionProvider implements ConnectionProvider {
             connectString: this.connectionProperties.connectString,
             poolMin: 0,
             poolMax: this.connectionProperties.poolMax ?? 10,
-            connectTimeout: this.connectionProperties.connectTimeout
+            connectTimeout: this.connectionProperties.connectTimeout,
+            sessionCallback: withoutAdaptivePlans
         });
         return this.pool;
     }
+}
+
+/**
+ * Sets up each session the pool opens: Oracle makes no adaptive plan in it. An adaptive plan picks its joins as it
+ * runs, and once the graph's tables had grown and shrunk without statistics, one gave no rows for a join that filters
+ * a node by a label and a property, where the same plan, fixed, gave them (liberation-data/drivine#331). A walk's step
+ * already asks for no adaptive plan (liberation-data/drivine4j#182); this covers every statement.
+ */
+function withoutAdaptivePlans(
+    connection: oracledb.Connection,
+    _requestedTag: string,
+    done: (error?: Error) => void
+): void {
+    connection.execute('ALTER SESSION SET OPTIMIZER_ADAPTIVE_PLANS = FALSE').then(
+        () => done(),
+        (e) => done(e)
+    );
 }
