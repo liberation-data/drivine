@@ -170,6 +170,12 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
         const [five] = await query('RETURN toString($f)', { f: float(5) });
         expect(await query('UNWIND $items AS t WITH t.f AS f RETURN toString(f)', items)).toEqual([five, '-0.5']);
         expect(await query('MATCH (n:CyUnwoundMade) RETURN toString(n.f) ORDER BY n.id')).toEqual([five, '-0.5']);
+        // Oracle reads that parameter as the number 5, so the checks above can't fail there: a float the statement makes
+        // itself stays one on every store, and so must its value of an unwound item.
+        expect(await query('UNWIND [{f: 5.0}, {f: -0.5}] AS t WITH t.f AS f RETURN toString(f)')).toEqual([
+            '5.0',
+            '-0.5'
+        ]);
         // A map with a key as extended JSON's comes back the map it is, and not the number extended JSON writes.
         const keyed = { items: [{ d: { $numberLong: '5' } }, { d: { $numberDouble: '2.0' } }] };
         const maps = keyed.items.map((it) => it.d);
