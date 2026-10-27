@@ -1809,6 +1809,12 @@ const names = await pm.query<string>(
   gives null for one, and `CONTAINS` fails (ORA-22828) where the text it looks for is past 32 KB. A property such a
   function reads is read from the properties by its own path, which costs about a quarter more on short texts, and a
   `+` that may put texts together costs about a tenth more, as drivine4j measured.
+- On Oracle, an `OPTIONAL CALL` or an `OPTIONAL MATCH` is joined `ON 1 = 1`, where Postgres joins `ON TRUE`. This works
+  around an Oracle bug, seen on 23.26.3: in a scalar subquery, as a `COUNT { … }` is compiled, a join `ON TRUE` is
+  refused (ORA-00907) or crashes the session (ORA-03113, with ORA-07445 in the alert log)
+  ([#377](https://github.com/liberation-data/drivine/issues/377)). It goes once an Oracle release no longer fails the
+  repro in drivine4j's
+  [docs/oracle-on-true-in-scalar-subquery-crash.md](https://github.com/liberation-data/drivine4j/blob/main/docs/oracle-on-true-in-scalar-subquery-crash.md).
 - On Postgres, float arithmetic, `sum()` and `avg()` are worked out in exact decimal (`numeric`), not as doubles, so
   they are more accurate: `0.1 + 0.2` is `0.3`, where Neo4j gives `0.30000000000000004`. A result differs from a
   graph engine's only around its 16th significant digit, and still comes back as a float. It shows only where a result

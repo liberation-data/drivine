@@ -817,6 +817,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * An optional join is on `1 = 1`, not `ON TRUE`: in a scalar subquery, as a `COUNT { … }` is, Oracle refuses a join
+     * on `TRUE` followed by a `WHERE … AND …` (ORA-00907), and crashes the session on one without (ORA-07445 in
+     * `qcsjccqb`, ORA-03113 to the client) (#377). See drivine4j's docs/oracle-on-true-in-scalar-subquery-crash.md.
+     */
+    lateral(query: string, name: string, optional: boolean): string {
+        return optional
+            ? `LEFT JOIN LATERAL (\n${indent(query)}\n) ${name} ON 1 = 1`
+            : super.lateral(query, name, false);
+    }
+
+    /**
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
      * matches, as `=~` asks: it starts at `\A` and ends at `\z`, the text's start and end, which `(?m)` leaves as they are,
      * and Oracle's `$` also matches before a line break that ends the text. Under `(?m)`, Oracle's own `^` and `$` match
