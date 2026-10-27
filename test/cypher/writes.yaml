@@ -645,12 +645,32 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN n.u = n.v"
         rows: [true]
 
-  - name: "A list that holds a null in a statement that writes"
-    description: "A statement that writes compares a list that holds a null item by item too."
+  - name: "Values that hold a null in a statement that writes"
+    description: "A statement that writes compares a list or a map that holds a null, or a null node, item by item too."
     steps:
       - cypher: "CREATE (n:CyWrite) WITH n, [1, null] AS a, [1, null] AS b, [2, null] AS c SET n.same = coalesce(a = b, 'null'), n.other = a = c, n.unequal = a <> c RETURN [n.same, n.other, n.unequal]"
         rows: [["null", false, true]]
-      - note: "Oracle compiles a statement that writes to a procedure, whose queries call no function of their own: two lists that differ as JSON are false there, where Cypher's comparison may be null."
-        except: [oracle]
+      - note: "Two lists that differ as JSON are compared item by item too: a pair that holds a null is null."
         cypher: "CREATE (n:CyWrite) WITH n, [null] AS a, [1] AS b SET n.eq = coalesce(a = b, 'null') RETURN n.eq"
         rows: ["null"]
+      - note: "Maps, lists within lists, IN and <> compare the same way in a statement that writes."
+        cypher: "CREATE (n:CyWrite) WITH n, [null, 1] AS a, [2, 1] AS b, {x: null} AS m, {x: 1} AS o, [[null], 1] AS c, [[1], 2] AS d RETURN [a = b, m = o, c = d, a <> [1, 2], a IN [b, [3]], a IN [[3]], {k: [null]} = {k: [2]}, m <> {y: 1}]"
+        rows: [[null, null, false, true, null, false, null, true]]
+      - note: "A node OPTIONAL MATCH finds none of is null in the list that holds it."
+        cypher: "OPTIONAL MATCH (x:Nope) CREATE (n:CyWrite) WITH n, [x] AS a, [n] AS b RETURN [a = b, a = a]"
+        rows: [[null, null]]
+
+  - name: "A property stored as several kinds sorts in Cypher's order of kinds"
+    description: "A property read from the store may be of any kind: ORDER BY sorts a list, then a text, a truth value, a number, and a missing property last."
+    steps:
+      - cypher: "CREATE (:CyWrite {v: 2}), (:CyWrite {v: 'b'}), (:CyWrite {v: true}), (:CyWrite {v: [1]}), (:CyWrite {v: 1.5}), (:CyWrite {v: 'B'}), (:CyWrite {v: false}), (:CyWrite)"
+      - note: "Postgres sorts a number before a truth value, and a list last (drivine4j#307)."
+        cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v"
+        except: [postgres]
+        rows: [[1], "B", "b", false, true, 1.5, 2, null]
+      - cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v DESC"
+        except: [postgres]
+        rows: [null, 2, 1.5, true, false, "b", "B", [1]]
+      - cypher: "MATCH (k:CyWrite) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v"
+        except: [postgres]
+        rows: ["b", false]

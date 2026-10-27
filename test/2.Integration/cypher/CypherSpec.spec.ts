@@ -315,29 +315,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             expect(
                 await query("CREATE (n:CyNullEquality) SET n.eq = coalesce([null] = [1], 'null') RETURN n.eq")
             ).toEqual(['null']);
-            expect(
-                await query(
-                    "CREATE (n:CyNullEquality) WITH n, [null] AS a, [1] AS b SET n.eq = coalesce(a = b, 'null') RETURN n.eq"
-                )
-            ).toEqual(['null']);
-        });
-
-        it('that differ as JSON compare item by item in a statement that writes, maps, nested lists, IN and a null node among them', async () => {
-            // Not in the spec yet (#270): drivine4j's CypherWriteContract of liberation-data/drivine4j#323. On Oracle a
-            // procedure declares no function of its own, so the store's walks them.
-            await clear();
-            expect(
-                await query(
-                    'CREATE (n:CyWrite) WITH n, [null, 1] AS a, [2, 1] AS b, {x: null} AS m, {x: 1} AS o, [[null], 1] AS c, [[1], 2] AS d ' +
-                        'RETURN [a = b, m = o, c = d, a <> [1, 2], a IN [b, [3]], a IN [[3]], {k: [null]} = {k: [2]}, m <> {y: 1}]'
-                )
-            ).toEqual([[null, null, false, true, null, false, null, true]]);
-            // A node OPTIONAL MATCH finds none of is null in the list that holds it, beside one the statement made.
-            expect(
-                await query(
-                    'OPTIONAL MATCH (x:Nope) CREATE (n:CyWrite) WITH n, [x] AS a, [n] AS b RETURN [a = b, a = a]'
-                )
-            ).toEqual([[null, null]]);
         });
 
         it('are null where written alike only when one holds one, and walked where written otherwise', async () => {
@@ -357,23 +334,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     "WITH [1, null] AS c RETURN [c = [1, null], c = [1.0, null], c = [2, null], {a: 1, b: null} = {b: null, a: 1}, ['é', null] = ['\\u00e9', null]]"
                 )
             ).toEqual([[null, null, false, null, null]]);
-        });
-
-        it('that differ as JSON compare item by item in the step of a reduce', async () => {
-            // Not in the spec yet (#270): on Oracle a reduce's step calls no function of the query's, so the store's walks
-            // them.
-            expect(
-                await query(
-                    'WITH [2, null] AS c RETURN reduce(acc = [], x IN [[1, null], [2, null], [null, 1]] | acc + [x = c])'
-                )
-            ).toEqual([[false, null, null]]);
-            expect(
-                await query('RETURN reduce(acc = [], m IN [{x: null}, {x: 1, y: 2}, {x: 2}] | acc + [m = {x: 1}])')
-            ).toEqual([[null, false, false]]);
-            expect(
-                await query('WITH [[null], 1] AS a RETURN reduce(acc = [], x IN [[[1], 1], [[1], 2]] | acc + [x = a])')
-            ).toEqual([[null, false]]);
-            expect(await query('RETURN reduce(acc = true, x IN [[null]] | acc AND x = [1])')).toEqual([null]);
         });
     });
 
@@ -843,64 +803,20 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
 
     /**
      * Values of several kinds sorted as Cypher orders their kinds, a map, a list, a text, a truth value, a number, then
-     * null: drivine4j's tests of liberation-data/drivine4j#299, ported for #355. Not in the spec yet (#299). Postgres takes
+     * null: drivine4j's tests of liberation-data/drivine4j#299, ported for #355, beside the spec's cases since v0.6.16 (#299). Postgres takes
      * `jsonb`'s order for every kind but a text: a number before a truth value, a map and a list last
      * (liberation-data/drivine4j#307).
      */
     describe('values of several kinds in Cypher order', () => {
         const sorts = store.type !== DatabaseType.POSTGRES;
 
-        (sorts ? it : it.skip)('a text sorts before a number, and after one descending', async () => {
-            // Not in the spec yet (#299): the steps of "Texts beside nulls and other kinds" that skip Oracle in v0.6.13.
-            expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t")).toEqual([
-                'B',
-                'b',
-                1,
-                2,
-                null
-            ]);
-            expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t DESC")).toEqual([
-                null,
-                2,
-                1,
-                'b',
-                'B'
-            ]);
-        });
-
         (sorts ? it : it.skip)(
             'values of several kinds sort as Cypher orders their kinds, a map, a list, a text, a truth value, a number, then null',
             async () => {
-                // Not in the spec yet (#299): Oracle sorts first by where a value's kind comes, then by the value.
+                // Beside the spec's case since v0.6.16 (#299): Oracle sorts first by where a value's kind comes, then by
+                // the value.
                 const values = "[1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1]";
                 const ascending = [{ a: 1 }, [1, 2], [2], 'A', 'b', false, true, -1, 1, 2.5, null];
-                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t`)).toEqual(ascending);
-                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t DESC`)).toEqual([...ascending].reverse());
-                // Carried out of a WITH that pages them, kept distinct, and beside another term.
-                expect(await query(`UNWIND ${values} AS t WITH t ORDER BY t SKIP 3 LIMIT 4 RETURN t`)).toEqual([
-                    'A',
-                    'b',
-                    false,
-                    true
-                ]);
-                expect(await query("UNWIND [2, 'b', true, 2, 'b'] AS t RETURN DISTINCT t ORDER BY t")).toEqual([
-                    'b',
-                    true,
-                    2
-                ]);
-                expect(
-                    await query("UNWIND [[2, 0], [1, 3], [2, false], [1, 'a']] AS p RETURN p ORDER BY p[0], p[1]")
-                ).toEqual([
-                    [1, 'a'],
-                    [1, 3],
-                    [2, false],
-                    [2, 0]
-                ]);
-                // A truth value before a number.
-                expect(await query('UNWIND [1, true, 0, false] AS t RETURN t ORDER BY t')).toEqual([false, true, 0, 1]);
-                expect(await query("UNWIND [true, 1, 'b', [1], {a: 1}] AS t RETURN min(t), max(t)")).toEqual([
-                    [{ a: 1 }, 1]
-                ]);
                 // Carried out of a CALL { … }, grouped by, kept distinct by another name, and sorted by when it is not returned.
                 expect(await query(`CALL { UNWIND ${values} AS t RETURN t ORDER BY t LIMIT 4 } RETURN t`)).toEqual([
                     { a: 1 },
@@ -987,15 +903,13 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         );
 
         (sorts ? it : it.skip)('a property stored as several kinds sorts as Cypher orders their kinds', async () => {
-            // Not in the spec yet (#299): a property read from the store may be of any kind, so its kind is ranked first.
+            // Beside the spec's case since v0.6.16 (#299): a property read from the store may be of any kind, so its kind
+            // is ranked first.
             await clear();
             await query(
                 "CREATE (:Kind {v: 2}), (:Kind {v: 'b'}), (:Kind {v: true}), (:Kind {v: [1]}), (:Kind {v: 1.5}), (:Kind {v: 'B'}), (:Kind {v: false}), (:Kind)"
             );
             const ascending = [[1], 'B', 'b', false, true, 1.5, 2, null];
-            expect(await query('MATCH (k:Kind) RETURN k.v ORDER BY k.v')).toEqual(ascending);
-            expect(await query('MATCH (k:Kind) RETURN k.v ORDER BY k.v DESC')).toEqual([...ascending].reverse());
-            expect(await query('MATCH (k:Kind) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v')).toEqual(['b', false]);
             expect(await query('CALL { MATCH (k:Kind) RETURN k.v AS v ORDER BY v DESC LIMIT 2 } RETURN v')).toEqual([
                 null,
                 2
