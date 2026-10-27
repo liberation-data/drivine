@@ -30,6 +30,7 @@ on:
                 type: string
                 required: false
                 default: ''
+        # The calling job must grant contents: write and pull-requests: write, which the job below asks for.
         secrets:
             RELEASE_PR_TOKEN:
                 required: false
@@ -37,8 +38,10 @@ on:
 permissions:
     contents: read
 
+# Named for this repository: a run called from another repository is in that repository's concurrency groups, where
+# the train controller may call all three libraries' prepare-release at once.
 concurrency:
-    group: prepare-release
+    group: prepare-release-liberation-data/drivine
     cancel-in-progress: false
 
 jobs:
