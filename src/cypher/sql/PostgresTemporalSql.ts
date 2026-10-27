@@ -51,6 +51,10 @@ export class PostgresTemporalSql extends TemporalSql {
         return `CAST(NULLIF(${text}, '') AS numeric)`;
     }
 
+    sortable(timestamp: string): string {
+        return `to_char(${timestamp}, 'YYYY-MM-DD"T"HH24:MI:SS.US')`;
+    }
+
     micros(timestamp: string): string {
         return `to_char(${timestamp}, 'US')`;
     }
