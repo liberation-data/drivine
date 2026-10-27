@@ -31,8 +31,11 @@ on:
 permissions:
     contents: read
 
+# Real releases, pushes, queue one after another per ref. A dry run (a manual run, as the train controller's preflight
+# starts on master, or a pull request) gets a group of its own: GitHub keeps one pending run per group, so a dry run
+# queued in the release group would cancel a release waiting there.
 concurrency:
-    group: release-${{ github.ref }}
+    group: ${{ github.event_name == 'push' && format('release-{0}', github.ref) || format('release-dry-run-{0}', github.run_id) }}
     cancel-in-progress: false
 
 jobs:

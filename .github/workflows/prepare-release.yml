@@ -56,9 +56,6 @@ jobs:
             DEFAULT_BRANCH: master
             BUMP: ${{ inputs.bump }}
             EXACT: ${{ inputs.version }}
-            # A PR opened with GITHUB_TOKEN starts no workflows, so CI doesn't run on it by itself. A RELEASE_PR_TOKEN
-            # secret, when set, opens it instead, and CI runs.
-            GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
             HAS_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN != '' }}
         steps:
             - name: Has a token for this repository
@@ -134,6 +131,9 @@ jobs:
                   echo "version=$version" >> "$GITHUB_OUTPUT"
             - name: Open the release PR
               env:
+                  # A PR opened with GITHUB_TOKEN starts no workflows, so CI doesn't run on it by itself. A
+                  # RELEASE_PR_TOKEN secret, when set, opens it instead, and CI runs.
+                  GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
                   CURRENT: ${{ steps.version.outputs.current }}
                   LAST: ${{ steps.version.outputs.last }}
                   VERSION: ${{ steps.version.outputs.version }}
@@ -162,3 +162,8 @@ jobs:
                   url=$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" --title "Release v$VERSION" --body-file "$body")
                   echo "Opened $url"
                   echo "Release v$VERSION: $url" >> "$GITHUB_STEP_SUMMARY"
+                  if [[ "$HAS_PR_TOKEN" != true ]]; then
+                      note="Opened with GITHUB_TOKEN, so CI doesn't run on it by itself. Push an empty commit to $branch, or close and reopen the PR, to start it."
+                      echo "::notice::$note"
+                      echo "$note" >> "$GITHUB_STEP_SUMMARY"
+                  fi
