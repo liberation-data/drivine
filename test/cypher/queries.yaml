@@ -509,12 +509,10 @@ cases:
         rows: ["B", "b", null]
       - cypher: "UNWIND ['b', null, 'B', 'b'] AS t RETURN DISTINCT t ORDER BY t DESC"
         rows: [null, "b", "B"]
-      - note: "A text before a number, as Cypher orders kinds. Oracle and SQLite sort a number first."
+      - note: "A text before a number, as Cypher orders kinds."
         cypher: "UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t"
-        except: [oracle, sqlite]
         rows: ["B", "b", 1, 2, null]
       - cypher: "UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t DESC"
-        except: [oracle, sqlite]
         rows: [null, 2, 1, "b", "B"]
       - note: "A text compared with a value of another kind, or with null, is null; one that coalesce() or CASE gives compares by its code points."
         cypher: "RETURN ['a' < 1, 'B' > null, 1 >= 'a', coalesce(null, 'a') < 'B', CASE WHEN true THEN 'a' END < 'B']"
@@ -526,6 +524,34 @@ cases:
       - note: "min() takes the least text by its code points, and max() the greatest number, as Cypher orders kinds."
         cypher: "UNWIND ['b', 1, 'B', 2, true] AS t RETURN min(t), max(t)"
         rows: [["B", 2]]
+
+  - name: "Values of several kinds in Cypher's order of kinds"
+    description: "ORDER BY sorts a map, then a list, a text, a truth value, a number, and null last ascending (first descending), and values of one kind among themselves; min() and max() take that order too."
+    steps:
+      - note: "Postgres sorts a number before a truth value, and a map and a list last (drivine4j#307)."
+        cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t RETURN t ORDER BY t"
+        except: [postgres]
+        rows: [{a: 1}, [1, 2], [2], "A", "b", false, true, -1, 1, 2.5, null]
+      - cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t RETURN t ORDER BY t DESC"
+        except: [postgres]
+        rows: [null, 2.5, 1, -1, true, false, "b", "A", [2], [1, 2], {a: 1}]
+      - note: "Carried out of a WITH that pages them."
+        cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t WITH t ORDER BY t SKIP 3 LIMIT 4 RETURN t"
+        except: [postgres]
+        rows: ["A", "b", false, true]
+      - cypher: "UNWIND [2, 'b', true, 2, 'b'] AS t RETURN DISTINCT t ORDER BY t"
+        except: [postgres]
+        rows: ["b", true, 2]
+      - note: "An item of a list, whose kind the statement leaves open, beside another term."
+        cypher: "UNWIND [[2, 0], [1, 3], [2, false], [1, 'a']] AS p RETURN p ORDER BY p[0], p[1]"
+        except: [postgres]
+        rows: [[1, "a"], [1, 3], [2, false], [2, 0]]
+      - note: "A truth value before a number, though SQLite reads one as 1 or 0."
+        cypher: "UNWIND [1, true, 0, false] AS t RETURN t ORDER BY t"
+        except: [postgres]
+        rows: [false, true, 0, 1]
+      - cypher: "UNWIND [true, 1, 'b', [1], {a: 1}] AS t RETURN min(t), max(t)"
+        rows: [[{a: 1}, 1]]
 
   - name: "Texts beyond the Basic Multilingual Plane in code point order"
     description: "A character above U+FFFF sorts after every one below it, as its code point says, though UTF-16, by which Java and JavaScript compare texts, puts it before U+E000 to U+FFFF."
@@ -1970,6 +1996,21 @@ cases:
       - note: "A null comparison keeps no row, nor does a false one."
         cypher: "UNWIND [[1, null], [2, null], [3]] AS l WITH l WHERE l = [1, null] OR l = [3] RETURN l"
         rows: [[3]]
+
+  - name: "Values that hold a null, compared in the step of a reduce"
+    description: "The step of a reduce() compares lists and maps that hold a null item by item, as a query does."
+    steps:
+      - cypher: "WITH [2, null] AS c RETURN reduce(acc = [], x IN [[1, null], [2, null], [null, 1]] | acc + [x = c])"
+        rows: [[false, null, null]]
+      - cypher: "RETURN reduce(acc = [], m IN [{x: null}, {x: 1, y: 2}, {x: 2}] | acc + [m = {x: 1}])"
+        rows: [[null, false, false]]
+      - cypher: "WITH [[null], 1] AS a RETURN reduce(acc = [], x IN [[[1], 1], [[1], 2]] | acc + [x = a])"
+        rows: [[null, false]]
+      - note: "<> and IN compare the same way in the step."
+        cypher: "RETURN reduce(acc = [], x IN [[null, 1], [null, 2]] | acc + [x <> [2, 1], x IN [[2, 1], [3]]])"
+        rows: [[null, null, true, false]]
+      - cypher: "RETURN reduce(acc = true, x IN [[null]] | acc AND x = [1])"
+        rows: [null]
 
   - name: "A null node or relationship in a list or a map"
     description: "A node or a relationship OPTIONAL MATCH finds none of is null in the list or the map that holds it, so the comparison is null."
