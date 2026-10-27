@@ -381,7 +381,9 @@ documents them; the ones you're likeliest to meet:
 
 - A node in a row is its properties.
 - A temporal value is its ISO 8601 text.
-- Postgres works float arithmetic out in exact decimal, so a result can differ in its last digits.
+- Postgres works float arithmetic, `sum()` and `avg()` out in exact decimal, so it is more accurate: `0.1 + 0.2`
+  is `0.3` there, where doubles give `0.30000000000000004`. A result differs from Neo4j's only around its 16th
+  significant digit, and still comes back as a float.
 - Text sorts by its code points, as Cypher does, but on Postgres a list or a map read from a property sorts the texts
   in it by the database's collation ([Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)), and Oracle
   reads an empty string as null ([Oracle](#oracle)).
@@ -988,8 +990,11 @@ What every engine agrees on:
 - An aggregate's filter never takes a node out of its group: a group none of whose nodes meet it still has 0.
 - Ties are broken by the keys, ascending, so a top 5 is the same five on every engine.
 
-Where Oracle differs: `min` and `max` of a text skip a value stored as `""`, which Oracle reads as no value. A `sum` or
-an `avg` of decimals is decimal arithmetic, so 0.1 + 0.2 is 0.3 there.
+Where Oracle differs: `min` and `max` of a text skip a value stored as `""`, which Oracle reads as no value.
+
+On Oracle and Postgres, a `sum` or an `avg` of decimals is worked out in exact decimal, so it is more accurate:
+0.1 + 0.2 is 0.3 there, where doubles give 0.30000000000000004. It differs from a graph engine's only around its 16th
+significant digit, and is still a number.
 
 ### Saving Data
 
@@ -1780,8 +1785,10 @@ const names = await pm.query<string>(
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
   Such a text still can't be sorted by, grouped by or made `DISTINCT`: Oracle sorts and groups JSON only up to about
   32 KB, and refuses the statement (ORA-40180), leaving the session open.
-- On Postgres, float arithmetic is worked out in exact decimal (`numeric`), not as a double, so a result can differ
-  from a graph engine's in its last digits: `0.1 * 3` is `0.3`, where Neo4j gives `0.30000000000000004`. A float's text
+- On Postgres, float arithmetic, `sum()` and `avg()` are worked out in exact decimal (`numeric`), not as doubles, so
+  they are more accurate: `0.1 + 0.2` is `0.3`, where Neo4j gives `0.30000000000000004`. A result differs from a
+  graph engine's only around its 16th significant digit, and still comes back as a float. It shows only where a result
+  is compared for exact equality with one worked out in doubles, which is fragile with floats anyway. A float's text
   carries no trailing zeros: `toString(4.0 / 2)` is `"2.0"`.
 - On Postgres, text is compared and sorted by its code points, as Cypher does (`B, a, b`), not by the database's
   collation: in the `C` collation, whose byte order is code point order in a UTF-8 database, as `initdb` and Postgres's
