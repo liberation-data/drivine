@@ -1697,17 +1697,18 @@ export class CypherWriter {
      * The row in `ROW` alone, as a statement of a write reads it, with the variables `needed` bound: a row may hold
      * many, and each node or relationship bound is a join.
      */
-    private row(needed?: Set<string>): Select {
+    private row(needed?: Set<string>, written: boolean = false): Select {
         const select = new Select(new Map());
-        this.bindRow(select, ROW, needed);
+        this.bindRow(select, ROW, needed, written);
         return select;
     }
 
     /**
      * Binds into `select` each variable the row `row` holds, of `needed` where given: a node or a relationship is read
-     * from its table, as it is now.
+     * from its table, as it is now. With `written`, `row` is `ROW`, and a value and each property of it are read as
+     * {@link SqlCypherCompiler.rowValue} reads them, for a statement that works out what a write writes.
      */
-    private bindRow(select: Select, row: string, needed?: Set<string>): void {
+    private bindRow(select: Select, row: string, needed?: Set<string>, written: boolean = false): void {
         this.kinds.forEach((kind, variable) => {
             if (needed && !needed.has(variable)) {
                 return;
@@ -1725,14 +1726,15 @@ export class CypherWriter {
                 const was = this.carried.get(variable);
                 select.bind(
                     variable,
-                    json(this.sql.propertyOf(row, key), {
+                    json(written ? this.sql.rowValue([key]) : this.sql.propertyOf(row, key), {
                         temporal: was?.temporal,
                         items: was?.items,
                         list: was?.list,
                         itemLists: was?.itemLists,
                         text: was?.text,
                         texts: was?.texts,
-                        flat: was?.flat
+                        flat: was?.flat,
+                        rowKeys: written ? [key] : undefined
                     })
                 );
             } else if (kind === 'PATH') {
@@ -1761,7 +1763,8 @@ export class CypherWriter {
     private evaluate(variable: string, expressions: (Expression | undefined)[], value: (scope: Scope) => string): void {
         const read = expressions.filter((it): it is Expression => it !== undefined);
         const select = this.row(
-            read.some(holdsSubquery) ? undefined : new Set(read.flatMap((it) => [...variablesIn(it)]))
+            read.some(holdsSubquery) ? undefined : new Set(read.flatMap((it) => [...variablesIn(it)])),
+            true
         );
         this.emit([`SELECT ${value(select.scope)} INTO ${variable}`, ...this.from(select)].join('\n') + ';');
     }
@@ -3400,6 +3403,10 @@ export class CypherWriter {
                 const field = this.temporalField(subject, key);
                 if (field) {
                     return field;
+                }
+                if (subject.rowKeys) {
+                    const keys = [...subject.rowKeys, key];
+                    return json(this.sql.rowValue(keys), { rowKeys: keys });
                 }
                 const taken = this.sql.propertyOf(this.sql.comparable(subject), key);
                 return json(taken, {

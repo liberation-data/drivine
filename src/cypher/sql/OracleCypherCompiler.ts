@@ -42,8 +42,16 @@ function quoted(text: string): string {
  * of them leads to in turn, each of a map in the one before: `'$.p.text'`.
  */
 function path(key: string, ...more: string[]): string {
+    return pathTo([key, ...more]);
+}
+
+/**
+ * The path of the property the keys `keys` lead to, each of a map in the one before, as a SQL literal: `'$.p.text'`,
+ * or with `suffix` after it, `'$.p.text.type()'`.
+ */
+function pathTo(keys: string[], suffix: string = ''): string {
     return literal(
-        `$${[key, ...more]
+        `$${keys
             .map((it) => {
                 if (it.length === 0) {
                     throw new DrivineError(
@@ -52,7 +60,7 @@ function path(key: string, ...more: string[]): string {
                 }
                 return `.${PLAIN_KEY.test(it) && !JSON_WORDS.includes(it) ? it : quoted(it)}`;
             })
-            .join('')}`
+            .join('')}${suffix}`
     );
 }
 
@@ -222,6 +230,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * item that is the property itself is read so: a property inside an item (`[n.a]`, `collect(n.a)`) is read as
      * {@link propertyOf} reads it, and isn't worked around. Read so, a text past 32 KB still can't be sorted by, grouped
      * by or made `DISTINCT`: Oracle refuses it (ORA-40180), as it does any JSON that large, and the session stays open.
+     * A write's block is worked around too, where it takes a text from the row it is writing: see {@link rowValue}.
      *
      * To remove it, delete this override, so the item is read as {@link propertyOf} reads it, `JSON_QUERY … RETURNING
      * JSON`, once an Oracle release no longer crashes on the repro, and `OracleLongProperty.spec.ts` and the Cypher
@@ -232,6 +241,40 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(${props}, KEEP ${path(
             key
         )}) RETURNING CLOB EXTENDED), ${path(key)} RETURNING CLOB) EXTENDED)`;
+    }
+
+    /**
+     * A value that a write takes from the row it is writing, to work out what it writes (`SET n.a = t.a`, `CREATE (:X
+     * {a: t.a})`, `MERGE … SET n.a = t.a`, where `t` is an item of an unwound parameter): a text read with one path from
+     * the row written out as text, anything else with that path from the row as JSON, as before.
+     *
+     * **A workaround for the Oracle bug of {@link itemProperty} (liberation-data/drivine#356), to be removed with it.**
+     * The block crashed the session where it took a text past 32 KB from the row, a `JSON` variable, with
+     * `JSON_QUERY(JSON_QUERY(cy_row, '$.v1' RETURNING JSON), '$.a' RETURNING JSON)`, for each of two or more rows. Read
+     * as {@link itemProperty} reads a property, through `JSON_TRANSFORM(cy_row, KEEP …)`, it crashed too; written out
+     * whole, `JSON_SERIALIZE(cy_row …)`, it didn't. A text is read from text that isn't extended JSON, which has no float
+     * to keep; anything else is read as JSON, as before, so a map of the row with a key as extended JSON's are
+     * (`{"$numberLong": "5"}`) stays a map. A list or a map that holds a long text is so read as JSON, which didn't
+     * crash: `SET n += t` sets such a map whole. The `CASE` on the value's type, which in a read made Oracle drop a label
+     * test (see {@link itemProperty}), doesn't here: it reads the row variable, one value for the whole statement, after
+     * the rows were matched, and a labelled pattern in a subquery of that statement keeps its test
+     * (`CypherUnwoundWrites.spec.ts`'s "should write an unwound item's text, short or past 32 KB, only to the nodes a
+     * labelled pattern matches"). See drivine4j's
+     * [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md),
+     * "In a PL/SQL block, from a `JSON` variable".
+     *
+     * To remove it, delete this override, so the value is read as {@link propertyOf} reads each key, once an Oracle
+     * release no longer crashes on the repro, and `OracleLongProperty.spec.ts`'s "leaves the session open where a text
+     * past 32 KB is set from an unwound parameter on two nodes" test still passes without it. The SQL pins in
+     * `OracleItemProperty.spec.ts` go with it.
+     */
+    rowValue(keys: string[]): string {
+        const at = pathTo(keys);
+        return (
+            `CASE WHEN JSON_VALUE(${ROW}, ${pathTo(keys, '.type()')}) = 'string' ` +
+            `THEN JSON(JSON_QUERY(JSON_SERIALIZE(${ROW} RETURNING CLOB), ${at} RETURNING CLOB)) ` +
+            `ELSE JSON_QUERY(${ROW}, ${at} RETURNING JSON) END`
+        );
     }
 
     /** Counted from the end where negative: a JSON path counts from the start. */

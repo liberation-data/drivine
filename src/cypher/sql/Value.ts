@@ -31,6 +31,12 @@ export interface JsonValue {
      * not false.
      */
     readonly flat?: boolean;
+    /**
+     * Where a write reads it from the row it is making, to work out what it writes, the keys it is at in that row: a
+     * property of it is read from the row at those keys and the property's, as {@link SqlCypherCompiler.rowValue} reads
+     * it.
+     */
+    readonly rowKeys?: string[];
 }
 
 /** What a {@link JsonValue} is besides its SQL. */
