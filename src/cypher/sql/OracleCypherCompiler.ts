@@ -360,7 +360,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * item that is the property itself is read so: a property inside an item (`[n.a]`, `collect(n.a)`) is read as
      * {@link propertyOf} reads it, and isn't worked around. Read so, a text past 32 KB still can't be sorted by, grouped
      * by or made `DISTINCT`: Oracle refuses it (ORA-40180), as it does any JSON that large, and the session stays open.
-     * A write's block is worked around too, where it takes a text from the row it is writing: see {@link rowValue}.
+     * A write's block is worked around too, where it takes a text from the row it is writing: see {@link rowValue}; and
+     * so is an unwound item's value an item gives: see {@link itemValue}.
      *
      * To remove it, delete this override, so the item is read as {@link propertyOf} reads it, `JSON_QUERY … RETURNING
      * JSON`, once an Oracle release no longer crashes on the repro, and `OracleLongProperty.spec.ts` and the Cypher
@@ -399,12 +400,35 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * `OracleItemProperty.spec.ts` go with it.
      */
     rowValue(keys: string[]): string {
-        const at = pathTo(keys);
-        return (
-            `CASE WHEN JSON_VALUE(${ROW}, ${pathTo(keys, '.type()')}) = 'string' ` +
-            `THEN JSON(JSON_QUERY(JSON_SERIALIZE(${ROW} RETURNING CLOB), ${at} RETURNING CLOB)) ` +
-            `ELSE JSON_QUERY(${ROW}, ${at} RETURNING JSON) END`
-        );
+        return this.throughText(ROW, keys);
+    }
+
+    /**
+     * A value of an item of an unwound list, or of a row a write carries on, that a `RETURN` or a `WITH` returns or
+     * passes on (`UNWIND $items AS t RETURN t.a`, `WITH t.a AS a`, `SET n.a = t.a RETURN t.a`): read as
+     * {@link rowValue} reads one, a text from the item written out as text, anything else from the item as JSON, as
+     * before.
+     *
+     * **A workaround for the Oracle bug of {@link itemProperty} (liberation-data/drivine#366), to be removed with it.**
+     * Such a statement crashed the session where it took a text past 32 KB from the item, `JSON_QUERY(u1.item, '$.a'
+     * RETURNING JSON)`, for each of two or more rows. {@link itemProperty}'s form, and the item written out whole as
+     * extended JSON, ran clean, but read a map with a key as extended JSON's are (`{"$numberLong": "5"}`) as the number
+     * it writes. The `CASE` on the value's type, which made Oracle drop a label test where it read a node's properties
+     * twice (see {@link itemProperty}), reads the item here, a column of the list it is unwound from, and the labelled
+     * patterns beside it kept their tests (`CypherUnwoundWrites.spec.ts`'s "should return an unwound item's text, short
+     * or past 32 KB, only for the nodes a labelled pattern matches"). So only a value read from such an item is read so
+     * (see {@link JsonValue.fromList}); a map made of a node's properties and not unwound (`WITH n {.a} AS m`,
+     * `properties(n)`) is read as before. It cost about 1.4 times the plain read on short values: 100,000 rows of
+     * `UNWIND $items AS t RETURN t.a` took 800 ms against 560 ms, the median of 11 runs each.
+     *
+     * A pattern that matches on such a text (`MERGE (n:X {a: t.a})`) still compares it as JSON: Oracle refuses that
+     * (ORA-40180), as it refuses to sort or group a text past 32 KB, and the session stays open. To remove the
+     * workaround, delete this override with {@link itemProperty}'s, once an Oracle release no longer crashes on the
+     * repro, and `OracleLongProperty.spec.ts`'s "leaves the session open where a text past 32 KB from an unwound
+     * parameter is returned or passed on over two rows" test still passes without it.
+     */
+    itemValue(json: string, key: string): string {
+        return this.throughText(json, [key]);
     }
 
     /** Counted from the end where negative: a JSON path counts from the start. */
@@ -1030,6 +1054,18 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     withoutLabel(labels: string, label: string): string {
         return `JSON_TRANSFORM(${labels}, REMOVE ${literal(`$[*]?(@ == ${quoted(label)})`)})`;
+    }
+
+    /** The value at `keys` in the JSON `json`: a text read with one path from `json` written out as text, anything else as JSON. */
+    private throughText(json: string, keys: string[]): string {
+        return this.shared([json], ([x]) => {
+            const at = pathTo(keys);
+            return (
+                `CASE WHEN JSON_VALUE(${x}, ${pathTo(keys, '.type()')}) = 'string' ` +
+                `THEN JSON(JSON_QUERY(JSON_SERIALIZE(${x} RETURNING CLOB), ${at} RETURNING CLOB)) ` +
+                `ELSE JSON_QUERY(${x}, ${at} RETURNING JSON) END`
+            );
+        });
     }
 
     private functionOf(name: string, json: string): string | undefined {

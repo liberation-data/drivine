@@ -12,7 +12,7 @@ import { sqlStores } from '../support/SqlStores';
 
 jest.setTimeout(120_000);
 
-const LABELS = ['CyUnwound', 'CyUnwoundOther', 'CyUnwoundDecoy', 'CyUnwoundNope'];
+const LABELS = ['CyUnwound', 'CyUnwoundOther', 'CyUnwoundDecoy', 'CyUnwoundNope', 'CyUnwoundMade'];
 
 /** Neo4j, the default connection, where it is configured, and the SQL stores, on which each statement is compiled to SQL. */
 function stores(): GraphEngine[] {
@@ -45,7 +45,8 @@ const float = (value: number): CypherFloat => new CypherFloat(value);
 /**
  * A write that takes a value from an item of an unwound parameter writes it as it is given, on every store. On Oracle
  * such a value is read through the row's text where it is a text (liberation-data/drivine#356): see
- * `OracleCypherCompiler.rowValue`. drivine4j's `CypherWriteContract`.
+ * `OracleCypherCompiler.rowValue`. So is one a `RETURN` or a `WITH` gives (liberation-data/drivine#366): see
+ * `OracleCypherCompiler.itemValue`. drivine4j's `CypherWriteContract`.
  */
 describe.each(stores())('A write from an unwound parameter on $type', (store) => {
     let pm: PersistenceManager;
@@ -107,6 +108,135 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
                 )
             ).toEqual([0]);
         }
+    });
+
+    it("should return or pass on an unwound parameter's values by a RETURN or a WITH as they are given", async () => {
+        // On Oracle such a value is read through the item's text where it is a text (liberation-data/drivine#366): a
+        // list, a map, an empty text, a null and a missing key come back as they were, returned, passed on, or after a
+        // write.
+        const items = {
+            items: [
+                {
+                    id: 1,
+                    s: 'short',
+                    f: float(5),
+                    i: 5,
+                    l: [1, 2],
+                    fl: [float(1), float(2.5)],
+                    m: { k: float(2) },
+                    z: null,
+                    e: ''
+                },
+                { id: 2, s: 'x\'"y', f: float(-0.5), i: 0, l: [], fl: [float(3)], m: { k: 'v' }, e: 'e' }
+            ]
+        };
+        await query('CREATE (:CyUnwound {id: 1}), (:CyUnwound {id: 2})');
+        const expected: Record<string, any[]> = {
+            s: ['short', 'x\'"y'],
+            f: [5, -0.5],
+            i: [5, 0],
+            l: [[1, 2], []],
+            fl: [[1, 2.5], [3]],
+            m: [{ k: 2 }, { k: 'v' }],
+            z: [null, null],
+            nothing: [null, null],
+            e: ['', 'e']
+        };
+        for (const [key, values] of Object.entries(expected)) {
+            for (const cypher of [
+                `UNWIND $items AS t RETURN t.${key}`,
+                `UNWIND $items AS t WITH t.${key} AS v RETURN v`,
+                `UNWIND $items AS t WITH t RETURN t.${key}`,
+                `UNWIND $items AS t MATCH (n:CyUnwound {id: t.id}) SET n.seen = true RETURN t.${key} ORDER BY t.id`,
+                `CALL { UNWIND $items AS t RETURN t } RETURN t.${key}`
+            ]) {
+                expect([cypher, await query(cypher, items)]).toEqual([cypher, values]);
+            }
+        }
+        // An OPTIONAL CALL that unwinds nothing gives a null item, and its value is null.
+        expect(await query('UNWIND [1] AS x OPTIONAL CALL { WITH x UNWIND [] AS t RETURN t } RETURN t.s')).toEqual([
+            null
+        ]);
+        await query(
+            'UNWIND $items AS t WITH t.id AS id, t.s AS s, t.f AS f, t.l AS l, t.m.k AS k CREATE (:CyUnwoundMade {id: id, s: s, f: f, l: l, k: k})',
+            items
+        );
+        expect(await query('MATCH (n:CyUnwoundMade) RETURN properties(n) ORDER BY n.id')).toEqual([
+            { id: 1, s: 'short', f: 5, l: [1, 2], k: 2 },
+            { id: 2, s: 'x\'"y', f: -0.5, l: [], k: 'v' }
+        ]);
+        // A JavaScript number does not tell 5.0 from 5, so the store's text of each tells whether it is still a float:
+        // as the store reads the same float given as a parameter of its own (see the test of writes below).
+        const [five] = await query('RETURN toString($f)', { f: float(5) });
+        expect(await query('UNWIND $items AS t WITH t.f AS f RETURN toString(f)', items)).toEqual([five, '-0.5']);
+        expect(await query('MATCH (n:CyUnwoundMade) RETURN toString(n.f) ORDER BY n.id')).toEqual([five, '-0.5']);
+        // Oracle reads that parameter as the number 5, so the checks above can't fail there: a float the statement makes
+        // itself stays one on every store, and so must its value of an unwound item.
+        expect(await query('UNWIND [{f: 5.0}, {f: -0.5}] AS t WITH t.f AS f RETURN toString(f)')).toEqual([
+            '5.0',
+            '-0.5'
+        ]);
+        // A map with a key as extended JSON's comes back the map it is, and not the number extended JSON writes.
+        const keyed = { items: [{ d: { $numberLong: '5' } }, { d: { $numberDouble: '2.0' } }] };
+        const maps = keyed.items.map((it) => it.d);
+        expect(await query('UNWIND $items AS t RETURN t.d', keyed)).toEqual(maps);
+        expect(await query('UNWIND $items AS t WITH t RETURN t.d', keyed)).toEqual(maps);
+    });
+
+    it("should return an unwound item's text, short or past 32 KB, only for the nodes a labelled pattern matches", async () => {
+        // On Oracle such a text is read in a CASE on its type (liberation-data/drivine#366), and such a CASE on a node's
+        // properties made Oracle drop a label test (see OracleCypherCompiler.itemProperty): each node a label rules out,
+        // on either end of the pattern, is left out.
+        await query(
+            "UNWIND [1, 2, 3] AS id CREATE (:CyUnwound {id: id, o: id * 2})-[:R]->(:CyUnwoundOther {name: 'k'}), " +
+                "(:CyUnwound {id: id, o: id * 2 + 1})-[:R]->(:CyUnwoundDecoy {name: 'k'}), " +
+                "(:CyUnwoundNope {id: id})-[:R]->(:CyUnwoundOther {name: 'k'})"
+        );
+        for (const text of ['s', 'x'.repeat(40_000)]) {
+            const given = { texts: [1, 2, 3].map((id) => ({ id, a: `${text}${id}`, k: 'k' })) };
+            const texts = [1, 2, 3].map((id) => `${text}${id}`);
+            expect(
+                await query(
+                    'UNWIND $texts AS t MATCH (n:CyUnwound {id: t.id})-[r]->(k:CyUnwoundOther) RETURN t.a ORDER BY n.o',
+                    given
+                )
+            ).toEqual(texts);
+            expect(
+                await query(
+                    'UNWIND $texts AS t MATCH (k:CyUnwoundOther {name: t.k})<-[r]-(n:CyUnwound {id: t.id}) RETURN t.a ORDER BY n.o',
+                    given
+                )
+            ).toEqual(texts);
+            expect(
+                await query(
+                    'UNWIND $texts AS t MATCH (n:CyUnwound {id: t.id}) WHERE (n)-->(:CyUnwoundOther) ' +
+                        'WITH t.a AS a, n RETURN [a, n.o] ORDER BY n.o',
+                    given
+                )
+            ).toEqual([1, 2, 3].map((id) => [`${text}${id}`, id * 2]));
+            expect(
+                await query(
+                    'UNWIND $texts AS t MATCH (n:CyUnwound {id: t.id})-[r]->(k:CyUnwoundOther) SET n.seen = true RETURN t.a ORDER BY n.o',
+                    given
+                )
+            ).toEqual(texts);
+            expect(
+                await query(
+                    'UNWIND $texts AS t MATCH (k:CyUnwoundOther)<--(n {id: t.id}) RETURN t.a ORDER BY t.id',
+                    given
+                )
+            ).toEqual(texts.flatMap((it) => [it, it]));
+        }
+        // So is a value of an item of a list made of a node's properties, unwound beside the labelled pattern.
+        expect(
+            await query('MATCH (n:CyUnwound)-[r]->(k:CyUnwoundOther) UNWIND [n {.o}] AS m RETURN m.o ORDER BY m.o')
+        ).toEqual([2, 4, 6]);
+        expect(
+            await query(
+                'MATCH (n) WHERE n.seen AND (n:CyUnwoundNope OR n:CyUnwoundOther OR n:CyUnwoundDecoy OR ' +
+                    'n:CyUnwound AND n.o % 2 = 1) RETURN count(n)'
+            )
+        ).toEqual([0]);
     });
 
     /**

@@ -5,7 +5,8 @@ import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
  * On Oracle, a property that is an item of a `RETURN` or a `WITH` is read through its text, as extended JSON: Oracle
  * crashed the session where a statement took a text past 32 KB from the properties as JSON for each of two rows
  * (liberation-data/drivine#320). So is a text a write takes from the row it is writing, to work out what it writes
- * (liberation-data/drivine#356). Elsewhere a property is read as it was. drivine4j's `OracleItemPropertyTest`.
+ * (liberation-data/drivine#356), and an unwound item's value a `RETURN` or a `WITH` gives (liberation-data/drivine#366).
+ * Elsewhere a property is read as it was. drivine4j's `OracleItemPropertyTest`.
  */
 describe('A property an item of a RETURN or a WITH gives in compiled Cypher', () => {
     const long =
@@ -92,6 +93,67 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         const each = compile('UNWIND $ts AS t MATCH (n:Doc {id: t.id}) FOREACH (x IN t.xs | SET n.a = x.a, n.b = t.a)');
         expect(each).toContain(`SELECT ${read('$.v3.a')} INTO cy_value`);
         expect(each).toContain(`SELECT ${read('$.v1.a')} INTO cy_value`);
+    });
+
+    it("should read an unwound item's value an item returns or passes on through the item's text on Oracle where it is a text", () => {
+        // Oracle crashed the session where such a value, a text past 32 KB, was read as JSON for each of two rows (#366).
+        const read = (json: string): string =>
+            `CASE WHEN JSON_VALUE(${json}, '$.a.type()') = 'string' THEN JSON(JSON_QUERY(JSON_SERIALIZE(${json} RETURNING CLOB), '$.a' RETURNING CLOB)) ` +
+            `ELSE JSON_QUERY(${json}, '$.a' RETURNING JSON) END`;
+        const compiled = (cypher: string): string => new OracleCypherCompiler('g').compile(cypher, { ts: [] }).sql;
+        expect(compiled('UNWIND $ts AS t RETURN t.a')).toContain(`${read('u1.item')} AS c1`);
+        expect(compiled('UNWIND $ts AS t WITH t.a AS a CREATE (:Doc {a: a})')).toContain(`${read('u1.item')} AS c1`);
+        expect(compiled('UNWIND $ts AS t WITH t RETURN t.a')).toContain(`${read('w3.c1')} AS c1`);
+        expect(compiled('UNWIND $ts AS t MATCH (n:Doc {id: t.id}) SET n.b = 1 RETURN t.a')).toContain(
+            `${read("JSON_QUERY(r4.item, '$.v1' RETURNING JSON)")} AS c1`
+        );
+        // Tested, sorted, nested in an item, or matched by a pattern, as it was.
+        const other = compiled('UNWIND $ts AS t WITH t WHERE t.b = 1 RETURN [t.a] ORDER BY t.c');
+        expect(other).not.toContain('SERIALIZE');
+        expect(other).toContain("JSON_QUERY(w3.c1, '$.a' RETURNING JSON)");
+        expect(compiled('UNWIND $ts AS t MERGE (n:Doc {a: t.a})')).toContain(
+            "= JSON_QUERY(JSON_QUERY(cy_row, '$.v1' RETURNING JSON), '$.a' RETURNING JSON)"
+        );
+        const throughText = (cypher: string): void => {
+            const sql = compiled(cypher);
+            expect(sql).toContain('JSON_SERIALIZE(');
+            expect(sql).toContain("'$.a.type()'");
+        };
+        // A UNION whose every query returns an unwound item gives one, read so too.
+        throughText('CALL { UNWIND $ts AS m RETURN m UNION ALL UNWIND $ts AS m RETURN m } RETURN m.a');
+        // A map made of a node's properties and carried past a write is read from the write's rows, so read so too.
+        throughText('MATCH (n:Doc) WITH n, n {.a} AS m SET n.b = 1 RETURN m.a');
+        // So does a CALL that returns one, an OPTIONAL one among them.
+        throughText('CALL { UNWIND $ts AS m RETURN m } RETURN m.a');
+        throughText('OPTIONAL CALL { UNWIND $ts AS m RETURN m } RETURN m.a');
+        // A temporal value's field, or a key that may name one, is read as a temporal field is.
+        for (const cypher of ['UNWIND $ts AS t RETURN t.year', "UNWIND [date('2020-01-02')] AS t RETURN t.year"]) {
+            expect(compiled(cypher)).not.toContain("'$.year.type()'");
+        }
+    });
+
+    it("should read a value of a map made of a node's properties, or written, as elsewhere on Oracle", () => {
+        // Only a value read from an unwound item is read through its text: a CASE on a node's properties made Oracle
+        // drop a label test.
+        for (const cypher of [
+            'MATCH (n:Doc) RETURN properties(n).a',
+            'MATCH (n:Doc) WITH n {.a} AS m RETURN m.a',
+            'MATCH (n:Doc) WITH {a: n.a} AS m RETURN m.a',
+            'MATCH (n:Doc) CALL { WITH n RETURN n {.a} AS m UNION ALL UNWIND [{a: 1}] AS m RETURN m } RETURN m.a'
+        ]) {
+            expect(oracle(cypher)).not.toContain('SERIALIZE');
+        }
+    });
+
+    it("should read an unwound item's value returned on Postgres as elsewhere", () => {
+        const compiled = (cypher: string): string => new PostgresCypherCompiler('g').compile(cypher, { ts: [] }).sql;
+        expect(compiled('UNWIND $ts AS t RETURN t.a')).toContain("SELECT (u1.item -> 'a') AS c1");
+        expect(compiled('UNWIND $ts AS t WITH t RETURN t.a')).toContain("SELECT (w3.c1 -> 'a') AS c1");
+        // A statement that writes is a function on Postgres, made by the compiled statement's setup.
+        const made = new PostgresCypherCompiler('g')
+            .compile('UNWIND $ts AS t MATCH (n:Doc {id: t.id}) SET n.b = 1 RETURN t.a', { ts: [] })
+            .setup.join('\n');
+        expect(made).toContain("SELECT ((r4.item -> 'v1') -> 'a') AS c1");
     });
 
     it("should read a value a UNION in a write's subquery takes from its row in each query from what the UNION gives", () => {
