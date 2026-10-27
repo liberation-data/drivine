@@ -1148,11 +1148,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
 
     /**
      * A list of zoned values, and a list of lists of them, sorted and compared item by item as the moments they are:
-     * drivine4j's tests of liberation-data/drivine4j#199, ported for #361. Not in the spec yet (#199). Oracle sorts such a
-     * list as its JSON (liberation-data/drivine4j#331): see OracleZonedListSort.spec.ts.
+     * drivine4j's tests of liberation-data/drivine4j#199, ported for #361. Not in the spec yet (#199).
      */
     describe('lists of zoned values by their moments', () => {
-        const sorts = store.type !== DatabaseType.ORACLE;
         // As text, 10:00+02:00 (08:00 UTC) sorts after 09:00Z, and 08:30Z before both.
         const [a, b, c] = [
             "datetime('2024-03-15T10:00:00+02:00')",
@@ -1161,7 +1159,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         ];
         const hours = [10, 8, 9];
 
-        (sorts ? it : it.skip)(
+        it(
             'a list of zoned values, and a list of lists of them, sort and compare item by item as the moments they are, whatever their offsets',
             async () => {
                 // Not in the spec yet (#199).
@@ -1227,7 +1225,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
         );
 
-        (sorts ? it : it.skip)(
+        it(
             'a list of zoned values sorts as their moments however it was made, and an empty list or a null item sorts as Cypher puts it',
             async () => {
                 // Not in the spec yet (#199). By moment 10:00+02:00, 08:30Z, 09:00Z; as text 08:30Z, 09:00Z, 10:00+02:00.
@@ -1317,6 +1315,118 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 expect(await query(`${open} ORDER BY o DESC, l DESC`)).toEqual([9, 10, 8]);
             }
         );
+    });
+
+    /**
+     * A list of temporal values worked out on each row, read wherever it is read: drivine4j's test of
+     * liberation-data/drivine4j#331, ported for #374. Not in the spec yet: Oracle reads such a list by its places, not with
+     * `JSON_TABLE`, whose parse of one stalled the session.
+     */
+    describe('a list of temporal values worked out on each row', () => {
+        it('is read item by item, in order, on its own row, wherever it is read', async () => {
+            // Of 0, 1 and 2 items, at 10:01, 10:02.
+            const at = "localdatetime('2024-03-15T10:00:00')";
+            const rows = `UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, k) | ${at} + duration({minutes: i})] AS l`;
+            const minute = (m: number): string => `localdatetime('2024-03-15T10:0${m}:00')`;
+            // A comprehension, an IN, the quantifiers, and the list read twice in one statement.
+            expect(
+                await query(
+                    `${rows} RETURN k, [x IN l | x.minute], ${minute(1)} IN l, ${minute(2)} IN l, all(x IN l WHERE x.minute <= k), ` +
+                        'none(x IN l WHERE x.minute = k), single(x IN l WHERE x.minute = 1) ORDER BY k'
+                )
+            ).toEqual([
+                [0, [], false, false, true, true, false],
+                [1, [1], true, false, true, false, true],
+                [2, [1, 2], true, true, true, false, true]
+            ]);
+            // A comprehension within one over the outer item and the row, in order.
+            expect(
+                await query(`${rows} RETURN [x IN l | [y IN [x, x + duration({minutes: k})] | y.minute]] ORDER BY k`)
+            ).toEqual([[], [[1, 2]], [[1, 3], [2, 4]]]);
+            // An IN over another row's value: each pair whose minute is in the list.
+            expect(
+                await query(
+                    `${rows} UNWIND [1, 2] AS j WITH k, j, l WHERE ${at} + duration({minutes: j}) IN l WITH k, j ORDER BY j RETURN k, collect(j) ORDER BY k`
+                )
+            ).toEqual([
+                [1, [1]],
+                [2, [1, 2]]
+            ]);
+            // Null and a null item: no list, and a null that is compared.
+            expect(
+                await query(
+                    `${rows} WITH k, CASE WHEN k = 1 THEN l END AS m RETURN k, [x IN m | x.minute], any(x IN m WHERE x.minute = 1) ORDER BY k`
+                )
+            ).toEqual([
+                [0, null, null],
+                [1, [1], true],
+                [2, null, null]
+            ]);
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, k) | CASE WHEN i > 1 THEN ${at} + duration({minutes: i}) END] AS l ` +
+                        `RETURN k, [x IN l | x.minute], ${minute(1)} IN l ORDER BY k`
+                )
+            ).toEqual([
+                [0, [], false],
+                [1, [null], null],
+                [2, [null, 2], null]
+            ]);
+            // A slice, from either end, an UNWIND, and a CALL { … }.
+            expect(await query(`${rows} RETURN [x IN l[1..] | x.minute], [x IN l[-1..] | x.minute] ORDER BY k`)).toEqual([
+                [[], []],
+                [[], [1]],
+                [[2], [2]]
+            ]);
+            expect(await query(`${rows} UNWIND l AS t RETURN k, collect(t.minute) ORDER BY k`)).toEqual([
+                [1, [1]],
+                [2, [1, 2]]
+            ]);
+            expect(
+                await query(`${rows} CALL { WITH l UNWIND l AS t RETURN count(t) AS c } RETURN k, c ORDER BY k`)
+            ).toEqual([
+                [0, 0],
+                [1, 1],
+                [2, 2]
+            ]);
+            // On each side of a UNION, and a list of such lists.
+            const unioned = await query(
+                `${rows} RETURN [x IN l | x.minute] AS ms UNION ${rows} RETURN [x IN reverse(l) | x.minute] AS ms`
+            );
+            expect(unioned.map((it) => JSON.stringify(it)).sort()).toEqual(['[1,2]', '[1]', '[2,1]', '[]']);
+            expect(
+                await query(
+                    `${rows} WITH k, [l, l] AS ll RETURN [x IN ll | size(x)][1], size([x IN ll[0] WHERE x.minute > 0]) ORDER BY k`
+                )
+            ).toEqual([
+                [0, 0],
+                [1, 1],
+                [2, 2]
+            ]);
+            // collect(DISTINCT …) of such lists, and of their items, each once where first.
+            const twice = `UNWIND [2, 1, 2] AS k WITH k, [i IN range(1, k) | ${at} + duration({minutes: i})] AS l`;
+            expect(
+                await query(`${twice} WITH collect(DISTINCT l) AS ls RETURN [x IN ls | [y IN x | y.minute]]`)
+            ).toEqual([[[1, 2], [1]]]);
+            expect(
+                await query(`${twice} UNWIND l AS t WITH collect(DISTINCT t) AS ts RETURN [x IN ts | x.minute]`)
+            ).toEqual([[1, 2]]);
+            // A list that holds a null is kept once, as Cypher keeps it; zoned values of one moment and two offsets are
+            // not equal in Cypher, so each is kept, in the order first seen.
+            const nulls = `UNWIND [2, 1, 2, 1] AS k WITH k, [i IN range(1, k) | CASE WHEN i > 1 THEN ${at} + duration({minutes: i}) END] AS l`;
+            expect(
+                await query(`${nulls} WITH collect(DISTINCT l) AS ls RETURN [x IN ls | [y IN x | y.minute]]`)
+            ).toEqual([[[null, 2], [null]]]);
+            const zoned =
+                "UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, 2) | datetime(CASE k WHEN 1 THEN '2024-03-15T10:00:00+02:00' " +
+                "ELSE '2024-03-15T08:00:00Z' END) + duration({minutes: i})] AS l";
+            expect(
+                await query(`${zoned} WITH collect(DISTINCT l) AS ls RETURN [x IN ls | [y IN x | y.hour]]`)
+            ).toEqual([[[8, 8], [10, 10]]]);
+            expect(
+                await query(`${zoned} UNWIND l AS t WITH collect(DISTINCT t) AS ts RETURN [x IN ts | x.hour]`)
+            ).toEqual([[8, 8, 10, 10]]);
+        });
     });
 });
 

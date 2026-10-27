@@ -154,14 +154,6 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      */
     readonly extremesByListKey: boolean = false;
 
-    /**
-     * Oracle 23 takes many minutes to parse {@link momentsKey}'s `JSON_TABLE` over a list worked out item by item with
-     * temporal arithmetic, as a comprehension works one out (liberation-data/drivine4j#331), and neither a query timeout
-     * nor a kill ends the parse, so the session stalls: a list of zoned values sorts as its JSON, by the text of each, as
-     * it did before lists sorted by their moments.
-     */
-    readonly listsByMoments: boolean = false;
-
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
 
@@ -477,6 +469,26 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `LATERAL (SELECT ${json} AS list) ${alias}_l CROSS JOIN JSON_TABLE(${alias}_l.list, '$[*]' ${items}`;
     }
 
+    /**
+     * Each item read by its place, from as many rows as the list has items: Oracle 23 takes many seconds, or minutes, to
+     * parse a `JSON_TABLE` over a list of temporal values worked out with temporal arithmetic, item by item in a
+     * comprehension (liberation-data/drivine4j#331), and neither a query timeout nor a kill ends the parse. `JSON_QUERY`
+     * reads the same list in moments, at about ten times the cost of `JSON_TABLE` for a short list, so a list of other
+     * values is read by {@link elements}. The list is worked out once, in a lateral view of its own, and its places counted
+     * in another: where they are counted over the list's own view, or the list is written out again where it is read,
+     * Oracle reads an `EXISTS` over its items with the wrong row's columns. It reads as `JSON_TABLE`'s `$[*]` does: no rows
+     * for null, and one for a value that is no list.
+     */
+    temporalElements(json: string, alias: string): string {
+        const [list, place] = [`${alias}_l`, `${alias}_r`];
+        const size = `JSON_VALUE(${list}.list, '$.size()' RETURNING NUMBER)`;
+        return (
+            `LATERAL (SELECT /*+ NO_MERGE */ ${json} AS list FROM DUAL) ${list} CROSS JOIN ` +
+            `LATERAL (SELECT ${place}.n AS item_no, JSON_QUERY(${list}.list, '$[$i]' PASSING ${place}.n - 1 AS "i" RETURNING JSON) AS item ` +
+            `FROM (SELECT LEVEL n FROM DUAL CONNECT BY LEVEL <= GREATEST(NVL(${size}, 0), 1)) ${place} WHERE ${place}.n <= ${size}) ${alias}`
+        );
+    }
+
     aggregateList(value: string, order?: string): string {
         return `COALESCE(JSON_ARRAYAGG(${value}${
             order ? ` ORDER BY ${order}` : ''
@@ -488,7 +500,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `COALESCE(JSON_ARRAYAGG(${value}${order ? ` ORDER BY ${order}` : ''} RETURNING JSON), JSON('[]'))`;
     }
 
-    /** At most 4,000 bytes, as a `VARCHAR2`: the rest is left off, where it would fail the statement. Unused while lists sort as JSON: see {@link listsByMoments}. */
+    /** At most 4,000 bytes, as a `VARCHAR2`: the rest is left off, where it would fail the statement. */
     joinedTexts(text: string, order: string): string {
         return `LISTAGG(${text} ON OVERFLOW TRUNCATE '' WITHOUT COUNT) WITHIN GROUP (ORDER BY ${order})`;
     }
@@ -498,11 +510,11 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * at most 4,000 bytes and keeps a map's keys in the order written, and not read back from it, which would read a float
      * that is a whole number, `2.0`, as the number 2.
      */
-    distinctItems(list: string): string {
+    distinctItems(list: string, temporal: boolean = false): string {
         return (
             "(SELECT COALESCE(JSON_ARRAYAGG(d.item ORDER BY d.item_no RETURNING JSON), JSON('[]')) " +
             'FROM (SELECT e.item_no, e.item, ROW_NUMBER() OVER (PARTITION BY e.item ORDER BY e.item_no) AS n ' +
-            `FROM ${this.elements(list, 'e')}) d WHERE d.n = 1)`
+            `FROM ${this.elementsOf(list, 'e', temporal)}) d WHERE d.n = 1)`
         );
     }
 
