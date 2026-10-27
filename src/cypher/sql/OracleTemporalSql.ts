@@ -78,6 +78,10 @@ export class OracleTemporalSql extends TemporalSql {
         return `TO_NUMBER(${text})`;
     }
 
+    sortable(timestamp: string): string {
+        return `TO_CHAR(${timestamp}, 'YYYY-MM-DD"T"HH24:MI:SS.FF6')`;
+    }
+
     micros(timestamp: string): string {
         return `TO_CHAR(${timestamp}, 'FF6')`;
     }

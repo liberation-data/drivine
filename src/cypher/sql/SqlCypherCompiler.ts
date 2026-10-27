@@ -17,6 +17,7 @@ import {
 import { jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
 import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
@@ -113,6 +114,13 @@ export abstract class SqlCypherCompiler {
      * `ORDER BY` sorts it: where the store's own JSON order puts the shorter list first.
      */
     readonly extremesByListKey: boolean = true;
+
+    /**
+     * Whether a list of zoned values the statement makes, or a list of lists of them, sorts and takes its `min` and `max`
+     * by {@link momentsKey}: not where the store's parse of that key's `JSON_TABLE` over a list worked out item by item can
+     * stall the session, as Oracle's does, where the list is the store's JSON and sorts as that.
+     */
+    readonly listsByMoments: boolean = true;
 
     /**
      * Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would
@@ -366,6 +374,37 @@ export abstract class SqlCypherCompiler {
      */
     listSortKey(jsonSql: string): string {
         return this.sortKey(jsonSql);
+    }
+
+    /** The SQL text `text` ordered by its bytes, whatever the database's collation: as it is where the store orders texts so. */
+    bytewise(text: string): string {
+        return text;
+    }
+
+    /**
+     * What orders the JSON list `list` as Cypher orders it, item by item, where every item is a zoned value of `kind` or
+     * null, or with `depth` 2, a list of them or null: each item's moment in UTC as a text of one width, null as `~`,
+     * which comes after them, and a list held in it as its own items so written; each list then `!`, its end, which comes
+     * before any item, so a list that starts another comes first, as Cypher puts it, and the empty list is no null. Null
+     * where the list is.
+     */
+    momentsKey(list: string, kind: Temporal, depth: number = 1): string {
+        return this.shared([list], ([x]) => {
+            const key = (of: string, at: number): string => {
+                const alias = `mk${at}`;
+                const item = `${alias}.item`;
+                const itemKey =
+                    at === 1
+                        ? this.temporalSql.sortable(this.temporals.moment(this.text(item), kind))
+                        : key(item, at - 1);
+                const joined = this.joinedTexts(
+                    `CASE WHEN ${this.isJsonNull(item)} THEN '~' ELSE ${itemKey} END`,
+                    `${alias}.item_no`
+                );
+                return `(SELECT COALESCE(${joined}, '') || '!' FROM ${this.elements(of, alias)})`;
+            };
+            return `CASE WHEN NOT ${this.isJsonNull(x)} THEN ${this.bytewise(key(x, depth))} END`;
+        });
     }
 
     /** Where the kind of the JSON `json`, an item of a list, comes among the others as Cypher orders them: as {@link kindOrder}, null last. */
@@ -668,6 +707,9 @@ export abstract class SqlCypherCompiler {
 
     /** `collect`: the values `value` of a group that are not null, as a JSON list, in the `order` of the rows where they have one. */
     abstract collect(value: string, order?: string): string;
+
+    /** The SQL texts `text` of a group's rows put together in the `order` of the rows, with nothing between them: null where there are none. */
+    abstract joinedTexts(text: string, order: string): string;
 
     /**
      * The items of the JSON list `list` once each, where each is first: what `collect(DISTINCT …)` keeps of what a `WITH`

@@ -178,6 +178,10 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         return read ? `(${read[1]} ->> ${read[2]}) = (${value} #>> '{}')` : undefined;
     }
 
+    bytewise(text: string): string {
+        return `(${text}) COLLATE "C"`;
+    }
+
     /** Texts by their code points ({@link codePointText}); values of any other kind as `jsonb` compares them. */
     ordered(x: string, operator: string, y: string): string {
         return `CASE WHEN jsonb_typeof(${x}) = 'string' THEN ${this.textOf(x)} COLLATE "C" ${operator} ${this.textOf(
@@ -251,6 +255,10 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         return `COALESCE(json_agg(${value}${
             order ? ` ORDER BY ${order}` : ''
         }) FILTER (WHERE ${value} IS NOT NULL), '[]'::json)`;
+    }
+
+    joinedTexts(text: string, order: string): string {
+        return `string_agg(${text}, '' ORDER BY ${order})`;
     }
 
     distinctItems(list: string): string {

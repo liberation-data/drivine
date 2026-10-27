@@ -154,6 +154,14 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      */
     readonly extremesByListKey: boolean = false;
 
+    /**
+     * Oracle 23 takes many minutes to parse {@link momentsKey}'s `JSON_TABLE` over a list worked out item by item with
+     * temporal arithmetic, as a comprehension works one out (liberation-data/drivine4j#331), and neither a query timeout
+     * nor a kill ends the parse, so the session stalls: a list of zoned values sorts as its JSON, by the text of each, as
+     * it did before lists sorted by their moments.
+     */
+    readonly listsByMoments: boolean = false;
+
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
 
@@ -454,6 +462,11 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /** `JSON_ARRAYAGG` leaves nulls out. */
     collect(value: string, order?: string): string {
         return `COALESCE(JSON_ARRAYAGG(${value}${order ? ` ORDER BY ${order}` : ''} RETURNING JSON), JSON('[]'))`;
+    }
+
+    /** At most 4,000 bytes, as a `VARCHAR2`: the rest is left off, where it would fail the statement. Unused while lists sort as JSON: see {@link listsByMoments}. */
+    joinedTexts(text: string, order: string): string {
+        return `LISTAGG(${text} ON OVERFLOW TRUNCATE '' WITHOUT COUNT) WITHIN GROUP (ORDER BY ${order})`;
     }
 
     /**
