@@ -1121,7 +1121,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 ).toEqual([1]);
             });
         });
-
     });
 
     /**
