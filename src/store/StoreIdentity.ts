@@ -87,9 +87,10 @@ export class StoreIdentityResolver {
                 return false;
             }
             if (result.status === 'BLOCKED_BY_INDEX') {
+                const index = result.index?.name ? `The index ${result.index.name}` : 'An index';
                 this.logger.warn(
-                    `The index ${result.index?.name} on DrivineStore(key) on ${this.persistenceManager.database} is in the ` +
-                        `way of its uniqueness constraint. Identity is best-effort until it is dropped.`
+                    `${index} on DrivineStore(key) on ${this.persistenceManager.database} is in the way of its ` +
+                        `uniqueness constraint. Identity is best-effort until it is dropped.`
                 );
                 return false;
             }
