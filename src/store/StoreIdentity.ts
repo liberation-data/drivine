@@ -86,6 +86,13 @@ export class StoreIdentityResolver {
                 );
                 return false;
             }
+            if (result.status === 'BLOCKED_BY_INDEX') {
+                this.logger.warn(
+                    `The index ${result.index?.name} on DrivineStore(key) on ${this.persistenceManager.database} is in the ` +
+                        `way of its uniqueness constraint. Identity is best-effort until it is dropped.`
+                );
+                return false;
+            }
             return true;
         } catch (e) {
             this.logger.warn(

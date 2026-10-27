@@ -3,9 +3,13 @@ import {
     DrivineError,
     FALKORDB_SCHEMA,
     NEO4J_SCHEMA,
+    GraphBackend,
+    PersistenceManager,
     SchemaExecutor,
+    StoreIdentityResolver,
     uniquenessConstraint
 } from '@liberation-data/drivine';
+import { DrivineLogger } from '@/logger';
 
 const inTheWay = (): Error =>
     Object.assign(
@@ -469,5 +473,32 @@ describe("Neo4j's schema grammar", () => {
         expect(NEO4J_SCHEMA.dropRange({ kind: 'RANGE', label: 'Person', properties: ['email'] })).toEqual([
             'DROP INDEX Person_email_range IF EXISTS'
         ]);
+    });
+});
+
+describe("The store key's constraint", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('should not be in force, and be warned of, with an index in the way of it', async () => {
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        const blocked = {
+            ensure: async (spec: unknown) =>
+                Promise.resolve({
+                    status: 'BLOCKED_BY_INDEX',
+                    spec,
+                    index: { label: 'DrivineStore', properties: ['key'], name: 'hand_made' }
+                })
+        } as unknown as ConstraintManager;
+        const persistenceManager = { database: 'neo4j' } as unknown as PersistenceManager;
+        const resolver = new StoreIdentityResolver(persistenceManager, {} as GraphBackend, blocked);
+
+        const guarded = await (resolver as unknown as { ensureUniqueKey(): Promise<boolean> }).ensureUniqueKey();
+
+        // As drivine4j's StoreIdentityResolver: best-effort until the index is dropped.
+        expect(guarded).toBe(false);
+        const warned = warn.mock.calls.map(([message]) => String(message)).join('\n');
+        expect(warned).toContain('hand_made');
+        expect(warned).toContain('in the way');
+        expect(warned).toContain('neo4j');
     });
 });
