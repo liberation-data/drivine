@@ -52,6 +52,10 @@ describe('DrivineTestContainers', () => {
             expect(DrivineTestContainers.image(DatabaseType.POSTGRES, env)).toBe('pgvector/pgvector:pg16');
         });
 
+        it('is the default where <TYPE>_TEST_IMAGE is blank, as in drivine-python', () => {
+            expect(DrivineTestContainers.image(DatabaseType.NEO4J, { NEO4J_TEST_IMAGE: '' })).toBe('neo4j:latest');
+        });
+
         it('is undefined for a type without a container', () => {
             expect(DrivineTestContainers.image('NEPTUNE' as DatabaseType, {})).toBeUndefined();
         });

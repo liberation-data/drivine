@@ -140,10 +140,13 @@ export class DrivineTestContainers {
         return env[`USE_LOCAL_${type}`]?.toLowerCase() === 'true';
     }
 
-    /** The image the type's container runs: `<TYPE>_TEST_IMAGE`, or the type's default. Undefined for no container. */
+    /**
+     * The image the type's container runs: `<TYPE>_TEST_IMAGE`, or the type's default where that is unset or blank, as
+     * in drivine-python, so a blanked override doesn't start an image named ''. Undefined for no container.
+     */
     static image(type: DatabaseType, env: Environment = process.env): string | undefined {
         const spec = TEST_CONTAINER_SPECS[type];
-        return spec && (env[`${type}_TEST_IMAGE`] ?? spec.image);
+        return spec && (env[`${type}_TEST_IMAGE`] || spec.image);
     }
 
     /** The prefix of each datasource configured in the environment, '' for the default one, with its type. */

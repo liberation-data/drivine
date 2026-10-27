@@ -70,7 +70,7 @@ The Cypher spec's suite (`test/2.Integration/cypher`, run from `test/cypher`, se
 Neo4j, Postgres and Oracle. On Postgres and Oracle it writes a graph of its own, `cypher`, so no other suite's nodes are
 among its rows. On Neo4j it starts a container of its own, `neo4j:latest`, as drivine4j does, so a Neo4j release that
 gives other rows shows up at once. It can't share the other suites' Neo4j: its statements match labels they write
-(`Person`, `Movie`) while they run, and Neo4j 5, which the other suites run on with `NEO4J_TEST_IMAGE` set to it,
+(`Person`, `Movie`) while they run, and Neo4j 5, which the other suites run on when `NEO4J_TEST_IMAGE` names it,
 refuses two of its statements.
 `CYPHER_SPEC_NEO4J_IMAGE` picks another image; with `USE_LOCAL_NEO4J=true` it runs on your Neo4j instead, which should
 be as recent. Before each case it empties the whole graph, as the spec asks, so on a local Neo4j it deletes every node
