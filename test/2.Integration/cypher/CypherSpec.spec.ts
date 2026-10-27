@@ -296,8 +296,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             );
         });
 
-        it('compare in a statement that writes, on Oracle as null where equal as JSON and else false', async () => {
-            // On Oracle a procedure calls no function of its own, so values that differ as JSON are false there.
+        it('compare item by item in a statement that writes', async () => {
+            // On Oracle a procedure calls no function of its own, so the store's walks them (#367).
             await clear();
             expect(
                 await query(
@@ -315,12 +315,65 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             expect(
                 await query("CREATE (n:CyNullEquality) SET n.eq = coalesce([null] = [1], 'null') RETURN n.eq")
             ).toEqual(['null']);
-            // Values that differ as JSON are false on Oracle, as the README says, where Cypher's comparison is null.
             expect(
                 await query(
                     "CREATE (n:CyNullEquality) WITH n, [null] AS a, [1] AS b SET n.eq = coalesce(a = b, 'null') RETURN n.eq"
                 )
-            ).toEqual([store.type === DatabaseType.ORACLE ? false : 'null']);
+            ).toEqual(['null']);
+        });
+
+        it('that differ as JSON compare item by item in a statement that writes, maps, nested lists, IN and a null node among them', async () => {
+            // Not in the spec yet (#270): drivine4j's CypherWriteContract of liberation-data/drivine4j#323. On Oracle a
+            // procedure declares no function of its own, so the store's walks them.
+            await clear();
+            expect(
+                await query(
+                    'CREATE (n:CyWrite) WITH n, [null, 1] AS a, [2, 1] AS b, {x: null} AS m, {x: 1} AS o, [[null], 1] AS c, [[1], 2] AS d ' +
+                        'RETURN [a = b, m = o, c = d, a <> [1, 2], a IN [b, [3]], a IN [[3]], {k: [null]} = {k: [2]}, m <> {y: 1}]'
+                )
+            ).toEqual([[null, null, false, true, null, false, null, true]]);
+            // A node OPTIONAL MATCH finds none of is null in the list that holds it, beside one the statement made.
+            expect(
+                await query(
+                    'OPTIONAL MATCH (x:Nope) CREATE (n:CyWrite) WITH n, [x] AS a, [n] AS b RETURN [a = b, a = a]'
+                )
+            ).toEqual([[null, null]]);
+        });
+
+        it('are null where written alike only when one holds one, and walked where written otherwise', async () => {
+            // Not in the spec yet (#270): on Oracle two written as the same JSON text are null with no walk, so the text
+            // must be written alike only where one holds a null.
+            await clear();
+            expect(
+                await query(
+                    'CREATE (n:CyWrite) WITH n, CASE WHEN n.x IS NULL THEN [1, 2] ELSE [null] END AS a, CASE WHEN n.x IS NULL THEN [1, null] ELSE [2] END AS c ' +
+                        "RETURN [a = [1, 2], c = [1, null], c = [1.0, null], {a: 1, b: c[1]} = {b: null, a: 1}, ['é', c[1]] = ['\\u00e9', null], " +
+                        '[[1, 2], c] = [[1, 2], [1, null]]]'
+                )
+            ).toEqual([[true, null, null, null, null, null]]);
+            // And in a read, where the same text is null and any other is walked.
+            expect(
+                await query(
+                    "WITH [1, null] AS c RETURN [c = [1, null], c = [1.0, null], c = [2, null], {a: 1, b: null} = {b: null, a: 1}, ['é', null] = ['\\u00e9', null]]"
+                )
+            ).toEqual([[null, null, false, null, null]]);
+        });
+
+        it('that differ as JSON compare item by item in the step of a reduce', async () => {
+            // Not in the spec yet (#270): on Oracle a reduce's step calls no function of the query's, so the store's walks
+            // them.
+            expect(
+                await query(
+                    'WITH [2, null] AS c RETURN reduce(acc = [], x IN [[1, null], [2, null], [null, 1]] | acc + [x = c])'
+                )
+            ).toEqual([[false, null, null]]);
+            expect(
+                await query('RETURN reduce(acc = [], m IN [{x: null}, {x: 1, y: 2}, {x: 2}] | acc + [m = {x: 1}])')
+            ).toEqual([[null, false, false]]);
+            expect(
+                await query('WITH [[null], 1] AS a RETURN reduce(acc = [], x IN [[[1], 1], [[1], 2]] | acc + [x = a])')
+            ).toEqual([[null, false]]);
+            expect(await query('RETURN reduce(acc = true, x IN [[null]] | acc AND x = [1])')).toEqual([null]);
         });
     });
 
