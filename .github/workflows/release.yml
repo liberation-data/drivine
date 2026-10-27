@@ -1,12 +1,18 @@
-# Releases @liberation-data/drivine to npm from a tag. See RELEASING.md.
+# Releases @liberation-data/drivine to npm. See RELEASING.md.
 #
-# A push of a tag vX.Y.Z publishes: it checks the tag, runs the full CI gate (ci.yml), builds from a clean `npm ci`,
-# checks the package and publishes dist/ with provenance. A manual run and a pull request that changes the release
-# machinery are dry runs: they do everything but publish, and leave the built package as an artifact.
+# Merging a version bump to master publishes it, and so does a push of a tag vX.Y.Z: the run checks the version, runs
+# the full CI gate (ci.yml), builds from a clean `npm ci`, checks the package, publishes dist/ with provenance and
+# creates the GitHub release, tagging the commit if it isn't tagged yet. A manual run and a pull request that changes
+# the release machinery are dry runs: they do everything but publish, and leave the built package as an artifact.
 name: Release
 
 on:
     push:
+        # A push to master that changes package.json releases its version when that version is new: not tagged yet,
+        # and later than every vX.Y.Z tag. Any other change to package.json releases nothing, and says why.
+        branches: [master]
+        paths: [package.json]
+        # A tag pushed by hand releases too. GitHub doesn't apply `paths` to a tag push.
         tags: ['v*']
     # Always a dry run. Pick the branch or tag to try in "Use workflow from".
     workflow_dispatch:
@@ -33,6 +39,7 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             version: ${{ steps.version.outputs.version }}
+            tag: ${{ steps.version.outputs.tag }}
             publish: ${{ steps.version.outputs.publish }}
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,17 +67,40 @@ jobs:
                           exit 1
                       fi
                       publish=true
+                  elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
+                      # A push to master that changed package.json. It releases a new version, and nothing else.
+                      version="$package_version"
+                      tag="v$version"
+                      publish=false
+                      # A prerelease sorts below its release: `sort -V` puts a ~ before everything, the end included.
+                      highest=$(git tag -l 'v*' | sed -n -E 's/^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$/\1/p' \
+                          | sed 's/-/~/' | sort -V | tail -n 1 | sed 's/~/-/')
+                      later=$(printf '%s\n' "$highest" "$version" | sed 's/-/~/' | sort -V | tail -n 1 | sed 's/~/-/')
+                      if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                          echo "::error::package.json's version $version isn't X.Y.Z (or X.Y.Z-suffix), so it can't be released."
+                          exit 1
+                      elif [[ -n "$(git tag -l "$tag")" ]]; then
+                          echo "::notice::package.json's version $version is already tagged $tag, so this push releases nothing. A change to package.json that isn't a version bump does this."
+                      elif [[ -n "$highest" && ( "$version" == "$highest" || "$later" != "$version" ) ]]; then
+                          echo "::notice::package.json's version $version isn't later than the last release, v$highest, so this push releases nothing."
+                      else
+                          publish=true
+                      fi
                   else
                       version="$package_version"
+                      tag="v$version"
                       publish=false
                   fi
                   echo "version=$version" >> "$GITHUB_OUTPUT"
+                  echo "tag=$tag" >> "$GITHUB_OUTPUT"
                   echo "publish=$publish" >> "$GITHUB_OUTPUT"
                   echo "Version $version, publish: $publish" >> "$GITHUB_STEP_SUMMARY"
 
-    # The full CI, as it runs on master and on pull requests.
+    # The full CI, as it runs on master and on pull requests. Skipped on a push to master that releases nothing, as
+    # ci.yml runs on that push anyway.
     gate:
         needs: check
+        if: needs.check.outputs.publish == 'true' || github.event_name != 'push'
         uses: ./.github/workflows/ci.yml
 
     build:
@@ -135,7 +165,7 @@ jobs:
                   fi
                   if [[ "$published" == true ]]; then
                       if [[ "$PUBLISH" == true ]]; then
-                          echo "::error::npm already has @liberation-data/drivine@$VERSION."
+                          echo "::error::npm already has @liberation-data/drivine@$VERSION, so this run publishes nothing. If merging its version bump released it, and this is a tag pushed for it by hand afterwards, there is nothing left to do. Otherwise bump the version in a release PR."
                           exit 1
                       fi
                       cp -R dist "$RUNNER_TEMP/dry-run"
@@ -201,9 +231,15 @@ jobs:
             - name: Create the GitHub release
               env:
                   GH_TOKEN: ${{ github.token }}
-                  TAG: ${{ github.ref_name }}
+                  TAG: ${{ needs.check.outputs.tag }}
                   VERSION: ${{ needs.check.outputs.version }}
+              # On a push to master the tag doesn't exist yet, and the release creates it on the commit that was
+              # released. A tag made with this token starts no workflow, so it doesn't release a second time.
               run: |
                   prerelease=()
                   if [[ "$VERSION" == *-* ]]; then prerelease=(--prerelease); fi
-                  gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${prerelease[@]}"
+                  if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+                      gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${prerelease[@]}"
+                  else
+                      gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes "${prerelease[@]}"
+                  fi

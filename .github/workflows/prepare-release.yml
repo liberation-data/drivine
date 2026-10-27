@@ -1,0 +1,152 @@
+# Prepare release: opens the release PR. See RELEASING.md.
+#
+# It bumps the version in package.json and package-lock.json on a branch release/v<version>, and opens a PR "Release
+# v<version>" that lists the commits since the last tag. Merging that PR releases the version (release.yml). The
+# release train controller, liberation-data/drivine-release, starts it with `gh workflow run prepare-release.yml`.
+name: Prepare release
+
+on:
+    workflow_dispatch:
+        inputs:
+            bump:
+                description: The part of the version to bump. prerelease makes or bumps an -rc.N.
+                type: choice
+                options: [patch, minor, major, prerelease]
+                default: patch
+            version:
+                description: An exact version, such as 3.4.0 or 3.4.0-rc.1. It is used instead of bump.
+                type: string
+                required: false
+                default: ''
+    workflow_call:
+        inputs:
+            bump:
+                description: patch, minor, major or prerelease.
+                type: string
+                required: false
+                default: patch
+            version:
+                description: An exact version, used instead of bump.
+                type: string
+                required: false
+                default: ''
+        secrets:
+            RELEASE_PR_TOKEN:
+                required: false
+
+permissions:
+    contents: read
+
+concurrency:
+    group: prepare-release
+    cancel-in-progress: false
+
+jobs:
+    prepare-release:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            pull-requests: write
+        env:
+            # Named, not taken from the run, as a run called from another repository has that repository's context.
+            REPO: liberation-data/drivine
+            DEFAULT_BRANCH: master
+            BUMP: ${{ inputs.bump }}
+            EXACT: ${{ inputs.version }}
+            # A PR opened with GITHUB_TOKEN starts no workflows, so CI doesn't run on it by itself. A RELEASE_PR_TOKEN
+            # secret, when set, opens it instead, and CI runs.
+            GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
+            HAS_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN != '' }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: ${{ env.REPO }}
+                  ref: ${{ env.DEFAULT_BRANCH }}
+                  fetch-depth: 0
+                  token: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+            # npm version sets the version in package.json and package-lock.json alike.
+            - name: Bump the version
+              id: version
+              run: |
+                  current=$(jq -r .version package.json)
+                  exact="${EXACT#v}"
+                  if [[ -n "$exact" ]]; then
+                      if ! npm version "$exact" --no-git-tag-version --allow-same-version=false --ignore-scripts; then
+                          echo "::error::npm couldn't set the version to $exact (above). It must be a semver version other than $current."
+                          exit 1
+                      fi
+                  else
+                      case "$BUMP" in
+                          patch | minor | major) npm version "$BUMP" --no-git-tag-version --ignore-scripts ;;
+                          prerelease) npm version prerelease --preid rc --no-git-tag-version --ignore-scripts ;;
+                          *)
+                              echo "::error::bump is $BUMP. It must be patch, minor, major or prerelease."
+                              exit 1
+                              ;;
+                      esac
+                  fi
+                  version=$(jq -r .version package.json)
+                  tag="v$version"
+                  if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                      echo "::error::$version isn't X.Y.Z (or X.Y.Z-suffix), so it can't be released."
+                      exit 1
+                  fi
+                  for lock_version in "$(jq -r .version package-lock.json)" "$(jq -r '.packages[""].version' package-lock.json)"; do
+                      if [[ "$lock_version" != "$version" ]]; then
+                          echo "::error::package-lock.json says $lock_version, not $version."
+                          exit 1
+                      fi
+                  done
+                  # The same rule as release.yml's check: a version that isn't tagged and is later than every vX.Y.Z
+                  # tag. A prerelease sorts below its release: `sort -V` puts a ~ before everything, the end included.
+                  highest=$(git tag -l 'v*' | sed -n -E 's/^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$/\1/p' \
+                      | sed 's/-/~/' | sort -V | tail -n 1 | sed 's/~/-/')
+                  later=$(printf '%s\n' "$highest" "$version" | sed 's/-/~/' | sort -V | tail -n 1 | sed 's/~/-/')
+                  if [[ -n "$(git tag -l "$tag")" ]]; then
+                      echo "::error::$tag is already tagged. Pick a later version."
+                      exit 1
+                  elif [[ -n "$highest" && ( "$version" == "$highest" || "$later" != "$version" ) ]]; then
+                      echo "::error::$version isn't later than the last release, v$highest, so merging it would release nothing. Pick a later version."
+                      exit 1
+                  fi
+                  if git ls-remote --exit-code --heads origin "refs/heads/release/$tag" > /dev/null; then
+                      echo "::error::The branch release/$tag already exists. Merge or close its PR and delete the branch, or pick another version."
+                      exit 1
+                  fi
+                  echo "Version $current to $version"
+                  echo "current=$current" >> "$GITHUB_OUTPUT"
+                  echo "last=${highest:+v$highest}" >> "$GITHUB_OUTPUT"
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+            - name: Open the release PR
+              env:
+                  CURRENT: ${{ steps.version.outputs.current }}
+                  LAST: ${{ steps.version.outputs.last }}
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  branch="release/v$VERSION"
+                  body="$RUNNER_TEMP/release-pr.md"
+                  {
+                      echo "Bumps the version from $CURRENT to $VERSION. Merging this PR releases v$VERSION: release.yml publishes it to npm and creates the GitHub release. See RELEASING.md."
+                      echo
+                      if [[ -n "$LAST" ]]; then
+                          echo "Commits since $LAST:"
+                          echo
+                          git log --oneline --no-decorate "$LAST..HEAD" | sed 's/^/- /'
+                      else
+                          echo "There is no earlier vX.Y.Z tag."
+                      fi
+                      if [[ "$HAS_PR_TOKEN" != true ]]; then
+                          echo
+                          echo "This PR was opened with GITHUB_TOKEN, so CI hasn't started on it. Push an empty commit to the branch, or close and reopen the PR, to start it."
+                      fi
+                  } > "$body"
+                  git switch -c "$branch"
+                  git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                      commit -am "Release v$VERSION"
+                  git push origin "$branch"
+                  url=$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" --title "Release v$VERSION" --body-file "$body")
+                  echo "Opened $url"
+                  echo "Release v$VERSION: $url" >> "$GITHUB_STEP_SUMMARY"
