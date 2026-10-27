@@ -660,6 +660,188 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * Texts past 4,000 bytes measured, cut, changed, searched and added to whole, on every store: drivine4j's tests of
+     * liberation-data/drivine4j#298, ported for #347. Oracle read a text from JSON as a `VARCHAR2`, which holds 4,000
+     * bytes, and a longer one as null.
+     */
+    describe('texts past 4,000 bytes', () => {
+        const oracle = store.type === DatabaseType.ORACLE;
+
+        /** Each function of the text `t`, `length` characters long, and what it gives. */
+        const functions = (t: string, length: number): [string, unknown][] => [
+            ['size(t)', length],
+            ['toUpper(t)', t.toUpperCase()],
+            ['toLower(t)', t.toLowerCase()],
+            ['trim(t)', t.trim()],
+            ['ltrim(t)', t.trimStart()],
+            ['rtrim(t)', t.trimEnd()],
+            ['substring(t, 1, size(t) - 2)', t.substring(1, length - 1)],
+            ['substring(t, 2)', t.substring(2)],
+            ['left(t, size(t) - 1)', t.slice(0, -1)],
+            ['right(t, size(t) - 1)', t.slice(1)],
+            ["replace(t, 'B', 'bb')", t.split('B').join('bb')],
+            ["split(t, 'B')", t.split('B')],
+            // A separator past 4,000 bytes, too, but within 32 KB, past which Oracle's REPLACE looks for none.
+            ["split('x' + t + 'y', left(t, 4100))", `x${t}y`.split(t.slice(0, 4100))],
+            ["split('x', left(t, 4100))", ['x']],
+            [`t STARTS WITH '${t.slice(0, 3)}'`, true],
+            ["t STARTS WITH 'x'", false],
+            ['t STARTS WITH t', true],
+            ["t ENDS WITH 'B '", true],
+            ['t ENDS WITH t', true],
+            ['left(t, 10) STARTS WITH t', false],
+            ['left(t, 10) ENDS WITH t', false],
+            // INSTR looks for no text past 32 KB on Oracle.
+            [`t CONTAINS '${t.slice(2, 5)}'`, true],
+            ["t CONTAINS 'z'", false],
+            ['t CONTAINS left(t, 4100)', true],
+            [`t =~ ' (${t.slice(1, 3)})+ '`, true],
+            ["t + 'z'", `${t}z`],
+            ["'z' + t", `z${t}`],
+            ['t + t', t + t],
+            ['t + 1', `${t}1`],
+            ['toString(t)', t],
+            ['isEmpty(t)', false]
+        ];
+
+        it('a text past 4,000 bytes is measured, cut, changed, searched and added to whole, as a short one is', async () => {
+            // One function a statement. Past 32 KB, given only: Oracle closes the session (ORA-03113) after statements that
+            // read such a text from a property and from a parameter in turn, much as it does for one read over two rows
+            // (#320), and its sessions hold more of its memory for each statement that reads one the statement makes, up to
+            // the instance's limit (ORA-04036), as drivine4j found. The text of '€', three bytes, is 3,000 characters and
+            // 5,998 bytes: under 4,000 characters, past 4,000 bytes.
+            const texts: [string, number][] = [
+                [` ${'aB'.repeat(2_499)} `, 5_000],
+                [` ${'€B'.repeat(1_499)} `, 3_000],
+                [` ${'aB'.repeat(19_999)} `, 40_000]
+            ];
+            for (const [t, length] of texts) {
+                await clear();
+                const short = length < 32_000;
+                if (short) {
+                    await query('CREATE (n:CyLongText {t: $t})', { t });
+                }
+                const parts = { a: t.substring(0, length / 2), b: t.substring(length / 2) };
+                for (const [fn, expected] of functions(t, length)) {
+                    // Given, and stored and read in one row, and made by the statement.
+                    expect([fn, 'given', length, await query(`WITH $t AS t RETURN ${fn}`, { t })]).toEqual([
+                        fn,
+                        'given',
+                        length,
+                        [expected]
+                    ]);
+                    if (short) {
+                        expect([
+                            fn,
+                            'stored',
+                            length,
+                            await query(`MATCH (n:CyLongText) WITH n.t AS t RETURN ${fn}`)
+                        ]).toEqual([fn, 'stored', length, [expected]]);
+                        expect([fn, 'made', length, await query(`WITH $a + $b AS t RETURN ${fn}`, parts)]).toEqual([
+                            fn,
+                            'made',
+                            length,
+                            [expected]
+                        ]);
+                    }
+                }
+            }
+            await clear();
+        });
+
+        it('two short texts summed past 4,000 bytes, and texts replaced past it, are whole', async () => {
+            // Two short texts whose sum is past 4,000 bytes failed on Oracle with ORA-01489.
+            expect(await query('WITH $a AS a RETURN size(a + a)', { a: 'é'.repeat(3_000) })).toEqual([6_000]);
+            // Sums at and around 4,000 bytes, of texts of two-byte characters and of a float, put together short on Oracle
+            // only where they fit.
+            const sides: [string, string | number][] = [
+                ['é'.repeat(1_000), 'é'.repeat(1_000)],
+                ['a'.repeat(1_968), 'a'.repeat(1_968)],
+                ['a'.repeat(1_969), 'a'.repeat(1_968)],
+                ['a'.repeat(2_000), 'a'.repeat(2_001)],
+                ['a'.repeat(3_999), 1.5]
+            ];
+            for (const [a, b] of sides) {
+                expect([a.length, b, await query('WITH $a AS a, $b AS b RETURN a + b', { a, b })]).toEqual([
+                    a.length,
+                    b,
+                    [`${a}${b}`]
+                ]);
+            }
+            // What to replace, and what with, made by the statement, so their lengths are measured for each row: a short
+            // text made past 4,000 bytes, made shorter, and made no longer. A short text a given replacement makes past
+            // 4,000 bytes was cut off at 4,000 on Oracle.
+            expect(
+                await query(
+                    'WITH $a AS a RETURN replace(a, left(a, 1), left(a, 2)), replace(a, left(a, 2), left(a, 1)), replace(a, left(a, 1), right(a, 1))',
+                    { a: 'é'.repeat(1_500) }
+                )
+            ).toEqual([['é'.repeat(3_000), 'é'.repeat(750), 'é'.repeat(1_500)]]);
+            expect(await query("WITH $a AS a RETURN size(replace(a, 'é', 'éé'))", { a: 'é'.repeat(1_500) })).toEqual([
+                3_000
+            ]);
+            // A short text whose split list is written past 4,000 bytes was cut off on Oracle.
+            expect(await query("WITH $a AS a RETURN size(split(a, ','))", { a: '\u0001,'.repeat(1_000) })).toEqual([
+                1_001
+            ]);
+        });
+
+        it('a null text, or a short one a function makes empty, is not read again as a long one', async () => {
+            for (const fn of [
+                'toUpper(n)',
+                'trim(n)',
+                'substring(n, 1)',
+                "replace(n, 'a', 'b')",
+                "split(n, ',')",
+                'size(n)',
+                'toString(n)',
+                "n + 'a'",
+                "n STARTS WITH 'a'",
+                "n ENDS WITH 'a'",
+                "n CONTAINS 'a'",
+                "n =~ 'a'"
+            ]) {
+                expect([fn, await query(`WITH $n AS n RETURN ${fn}`, { n: null })]).toEqual([fn, [null]]);
+            }
+            // Oracle's empty text is null.
+            const empty = oracle ? null : '';
+            expect(
+                await query('WITH $s AS s, $w AS w RETURN substring(s, 5), left(s, 0), replace(s, $s, $e), trim(w)', {
+                    s: 'abc',
+                    w: '   ',
+                    e: ''
+                })
+            ).toEqual([[empty, empty, empty, empty]]);
+            // Two empty texts put together are empty: on Oracle null, as its empty text is, and not read as a long one.
+            expect(await query('WITH $e AS e RETURN e + e', { e: '' })).toEqual([empty]);
+        });
+
+        it('a stored text past 32 KB, read in one row, is measured and changed whole, passed on by a WITH or read where it is used', async () => {
+            // On Oracle a WITH passes a property on read through its text (#320), and a function reads a text past 4,000
+            // bytes as a CLOB (#347): the two together. One node: Oracle crashes on a long property read from two rows.
+            await clear();
+            const t = 'aB'.repeat(20_000);
+            await query('CREATE (n:CyLongText {t: $t})', { t });
+            const checks: [string, unknown][] = [
+                ['size(#)', 40_000],
+                ['toUpper(#)', t.toUpperCase()],
+                ['substring(#, 2)', t.substring(2)],
+                ["replace(#, 'B', 'b')", t.toLowerCase()],
+                ["# ENDS WITH 'aB'", true],
+                ["size(# + 'z')", 40_001],
+                ['toString(#)', t]
+            ];
+            for (const [fn, expected] of checks) {
+                const passed = await query(`MATCH (n:CyLongText) WITH n.t AS t RETURN ${fn.replace('#', 't')}`);
+                expect([fn, 'passed on', passed]).toEqual([fn, 'passed on', [expected]]);
+                const read = await query(`MATCH (n:CyLongText) RETURN ${fn.replace('#', 'n.t')}`);
+                expect([fn, 'read where used', read]).toEqual([fn, 'read where used', [expected]]);
+            }
+            await clear();
+        });
+    });
+
+    /**
      * Values of several kinds sorted as Cypher orders their kinds, a map, a list, a text, a truth value, a number, then
      * null: drivine4j's tests of liberation-data/drivine4j#299, ported for #355. Not in the spec yet (#299). Postgres takes
      * `jsonb`'s order for every kind but a text: a number before a truth value, a map and a list last

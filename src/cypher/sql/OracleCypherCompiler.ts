@@ -36,6 +36,15 @@ const MOST_PLACES = 100;
 /** The words a JSON path reads as values, not keys. */
 const JSON_WORDS = ['true', 'false', 'null'];
 
+/** A property as `propertyOf` reads it, its properties and its path, a literal whose quotes are doubled: see `propertyRead`. */
+const PROPERTY_READ = /^JSON_QUERY\((.+), ('\$(?:[^']|'')*') RETURNING JSON\)$/;
+
+/** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
+const SHORT_TEXT = 4000;
+
+/** The most bytes `asText` writes a number in: Java's text of a double, `-2.2250738585072014E-308`, and some to spare. */
+const NUMBER_TEXT = 32;
+
 /** `text` as JSON writes a string. */
 function quoted(text: string): string {
     return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -73,14 +82,55 @@ function kind(json: string): string {
     return `JSON_VALUE(${json}, '$.type()')`;
 }
 
+/** Whether `sql`'s parentheses outside its literals close each other: so it is the one argument, not two calls. */
+function balanced(sql: string): boolean {
+    let depth = 0;
+    let quoted = false;
+    for (const c of sql) {
+        if (c === "'") {
+            quoted = !quoted;
+        } else if (!quoted && c === '(') {
+            depth++;
+        } else if (!quoted && c === ')' && --depth < 0) {
+            return false;
+        }
+    }
+    return depth === 0 && !quoted;
+}
+
+/** The properties and the path of `json` where it is a property as `propertyOf` reads it, `JSON_QUERY(props, '$.a' RETURNING JSON)`. */
+function propertyRead(json: string): [string, string] | undefined {
+    const match = PROPERTY_READ.exec(json);
+    return match && balanced(match[1]) ? [match[1], match[2]] : undefined;
+}
+
+/**
+ * `sql` with each value it reads out of the JSON `json` with `JSON_VALUE(json, '$…')` read from the properties by the
+ * property's own path instead, where `json` is a property as `propertyOf` reads it, `JSON_QUERY(props, '$.a' RETURNING
+ * JSON)`. Oracle closed the session (ORA-03113) on statements, one row each, that took a text past 32 KB out of a node's
+ * properties so and read it as a CLOB or put it together with another, and a later statement in the session lost its
+ * rows: the memory corruption of liberation-data/drivine#320. A value used whole, as a list a sum joins, still takes the
+ * property out. It costs about a quarter more on short texts: 100,000 rows of `size(n.name)` took 208 ms against 162 ms,
+ * and of `toUpper(n.name)` 196 ms against 164 ms (measured by drivine4j).
+ */
+function direct(sql: string, json: string): string {
+    const read = propertyRead(json);
+    if (!read) {
+        return sql;
+    }
+    const [props, at] = read;
+    return sql.split(`JSON_VALUE(${json}, '$`).join(`JSON_VALUE(${props}, ${at.slice(0, -1)}`);
+}
+
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on Oracle: see {@link SqlCypherCompiler}.
  *
  * A value is Oracle's `JSON`, which compares, groups and orders as JSON and keeps a map's keys in the order written.
  * Oracle keeps a number as a number, so a stored `2.0` reads as `2`; a floating-point number the statement writes is a
- * `BINARY_DOUBLE`, and stays one. A text Oracle reads out of JSON is at most 4,000 bytes, and an empty one is null, as
- * Oracle's empty text is. `reduce` is a function the query declares, and does not run in a statement that writes, in
- * the step of a `reduce`, or where its step reads a path.
+ * `BINARY_DOUBLE`, and stays one. A text Oracle reads out of JSON is a `VARCHAR2` of at most 4,000 bytes, and one longer
+ * is read as a CLOB where it is measured, cut, changed or searched (see {@link texts}), but for `reverse()`, which still
+ * gives null. An empty text is null, as Oracle's empty text is. `reduce` is a function the query declares, and does not
+ * run in a statement that writes, in the step of a `reduce`, or where its step reads a path.
  *
  * A list of ids is text, each id between commas (`,1,2,`): Oracle has no array, and a recursive query takes no `JSON`
  * that changes from row to row. A recursive query reads no row outside it, so a walk starts from every node that meets
@@ -112,6 +162,12 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /** Whether the statement compiled calls the store's {@link nullsEqualName}: see {@link callsStoredNullsEqual}. */
     private storedNullsEqualCalled = false;
+
+    /**
+     * Whether the texts {@link texts} gives its body are CLOBs: see {@link scalar}, {@link startsWith}, {@link endsWith},
+     * {@link split} and {@link replaceText}, which read them otherwise.
+     */
+    private long = false;
 
     /**
      * @param graph the graph whose tables, and whose function {@link nullsEqualName}, a statement is compiled against
@@ -161,8 +217,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return value.sql;
     }
 
+    /** A CLOB that {@link texts} gives its body is null where it is empty, as a `VARCHAR2` is, and as Oracle's empty text is. */
     scalar(sql: string): string {
-        return `JSON_SCALAR(${sql})`;
+        return this.long ? `JSON_SCALAR(CASE WHEN LENGTH(${sql}) > 0 THEN ${sql} END)` : `JSON_SCALAR(${sql})`;
     }
 
     /** A floating-point number is a number, as JSON has it. */
@@ -207,8 +264,34 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         );
     }
 
+    /** A `VARCHAR2`, which holds 4,000 bytes: a longer text is null. See {@link texts}, which reads one as a CLOB. */
     text(json: string): string {
         return this.shared([json], ([x]) => `CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE(${x}, '$') END`);
+    }
+
+    /**
+     * `body` over the texts as {@link text} reads them, `VARCHAR2`s, and where it gives null, over them as CLOBs
+     * (liberation-data/drivine#347). A text past 4,000 bytes is null as a `VARCHAR2`, where Neo4j measures it, cuts it
+     * and searches it whole. `body` gives null where a text it is given is null, and where what it gives would not fit in
+     * a `VARCHAR2`: see {@link replaceText} and {@link split}. A short text is not read as a CLOB, which is slower:
+     * `COALESCE` reads its second value only where the first is null. `body` knows which it is given by {@link long}.
+     */
+    texts(jsons: string[], body: (texts: string[]) => string): string {
+        return this.shared(jsons, (xs) => {
+            // Within a body given CLOBs, as CLOBs alone.
+            if (this.long) {
+                return body(xs.map((it) => this.textOf(it, true)));
+            }
+            const read = body(xs.map((it) => this.textOf(it, false)));
+            this.long = true;
+            let whole: string;
+            try {
+                whole = body(xs.map((it) => this.textOf(it, true)));
+            } finally {
+                this.long = false;
+            }
+            return `COALESCE(${read}, ${whole})`;
+        });
     }
 
     boolOf(json: string): string {
@@ -436,8 +519,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         );
     }
 
+    /** A side that is a property is read from the properties by its own path: see `direct`. */
     add(a: string, b: string, given: [unknown, unknown] = [undefined, undefined]): string {
-        return (
+        const sum =
             `CASE WHEN ${this.typeOf(a)} = 'number' AND ${this.typeOf(b)} = 'number' THEN ${this.arithmetic(
                 a,
                 b,
@@ -450,12 +534,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `WHEN ${kind(b)} = 'array' THEN JSON_TRANSFORM(${b}, INSERT '$[0]' = ${a}) ` +
             `WHEN ${this.typeOf(a)} IN ('string', 'number') AND ${this.typeOf(
                 b
-            )} IN ('string', 'number') THEN JSON_SCALAR(${this.summed(a, given[0], given[1])} || ${this.summed(
-                b,
-                given[1],
-                given[0]
-            )}) END`
-        );
+            )} IN ('string', 'number') THEN ${this.textSum(a, b, given)} END`;
+        return direct(direct(sum, a), b);
     }
 
     /** `JSON_EQUAL`, which compares values larger than `=` does, with ORA-40180 past about 32 KB. */
@@ -525,37 +605,35 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `MOD(${a}, ${b})`;
     }
 
+    /** CLOBs, which `=` does not compare (ORA-22848), by `DBMS_LOB.COMPARE`: see {@link texts}. */
     startsWith(a: string, b: string): string {
-        return this.shared([b], ([x]) => `(SUBSTR(${a}, 1, LENGTH(${x})) = ${x})`);
+        return this.shared([b], ([x]) =>
+            this.long
+                ? `(DBMS_LOB.COMPARE(${a}, ${x}, LENGTH(${x}), 1, 1) = 0)`
+                : `(SUBSTR(${a}, 1, LENGTH(${x})) = ${x})`
+        );
     }
 
     endsWith(a: string, b: string): string {
+        if (this.long) {
+            return this.shared(
+                [a, b],
+                ([t, x]) =>
+                    `(LENGTH(${t}) >= LENGTH(${x}) AND DBMS_LOB.COMPARE(${t}, ${x}, LENGTH(${x}), LENGTH(${t}) - LENGTH(${x}) + 1, 1) = 0)`
+            );
+        }
         return this.shared([b], ([x]) => `(SUBSTR(${a}, -LENGTH(${x})) = ${x})`);
     }
 
+    /** Of CLOBs too (see {@link texts}), though `INSTR` looks for no text past 32 KB (ORA-22828). */
     containsText(a: string, b: string): string {
         return `(INSTR(${a}, ${b}) > 0)`;
     }
 
+    /** Of a property, read from the properties by its own path: see `direct`. */
     function(name: string, json: string): string | undefined {
-        const functions: Record<string, () => string> = {
-            size: () =>
-                `CASE ${kind(json)} WHEN 'array' THEN JSON_SCALAR(JSON_VALUE(${json}, '$.size()' RETURNING NUMBER)) ` +
-                `WHEN 'string' THEN JSON_SCALAR(LENGTH(JSON_VALUE(${json}, '$'))) END`,
-            tolower: () => `JSON_SCALAR(LOWER(${this.text(json)}))`,
-            toupper: () => `JSON_SCALAR(UPPER(${this.text(json)}))`,
-            trim: () => `JSON_SCALAR(TRIM(${this.text(json)}))`,
-            tostring: () => `JSON_SCALAR(${this.asText(json)})`,
-            tointeger: () => `JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR)))`,
-            tofloat: () => `JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR))`,
-            head: () => `JSON_QUERY(${json}, '$[0]' RETURNING JSON)`,
-            last: () => `JSON_QUERY(${json}, '$[last]' RETURNING JSON)`,
-            abs: () =>
-                `CASE WHEN ${kind(json)} = 'double' THEN JSON_SCALAR(ABS(TO_BINARY_DOUBLE(${this.number(json)}))) ` +
-                `ELSE JSON_SCALAR(ABS(${this.number(json)})) END`,
-            keys: () => this.keys(json)
-        };
-        return Object.prototype.hasOwnProperty.call(functions, name) ? functions[name]() : undefined;
+        const sql = this.functionOf(name, json);
+        return sql === undefined ? undefined : direct(sql, json);
     }
 
     page(skip?: string, limit?: string): string[] {
@@ -738,13 +816,50 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         });
     }
 
-    /** The text as JSON writes it, with each separator as JSON writes it made the end of one string and the start of the next. */
+    /**
+     * The text as JSON writes it, with each separator as JSON writes it made the end of one string and the start of the
+     * next. A `VARCHAR2` is cut off past 4,000 bytes where `REPLACE` makes it longer, so a text is split as one only where
+     * what it is made cannot be longer, each of its bytes written as six at most (`\u0001`), and else as a CLOB: see
+     * {@link texts}.
+     */
     split(text: string, separator: string): string {
         return this.shared([text, separator], ([t, s]) => {
-            const written = `JSON_SERIALIZE(JSON_SCALAR(${t}))`;
-            const separatorWritten = `SUBSTR(JSON_SERIALIZE(JSON_SCALAR(${s})), 2, LENGTH(JSON_SERIALIZE(JSON_SCALAR(${s}))) - 2)`;
-            return `CASE WHEN ${t} IS NOT NULL AND ${s} IS NOT NULL THEN JSON('[' || REPLACE(${written}, ${separatorWritten}, '","') || ']') END`;
+            // A separator past 4,000 bytes is a CLOB too, and written as one (ORA-40478).
+            const serialized = (x: string): string =>
+                this.long ? `JSON_SERIALIZE(JSON_SCALAR(${x}) RETURNING CLOB)` : `JSON_SERIALIZE(JSON_SCALAR(${x}))`;
+            const written = serialized(t);
+            const separatorWritten = `SUBSTR(${serialized(s)}, 2, LENGTH(${serialized(s)}) - 2)`;
+            const fits = this.long ? '' : ` AND LENGTHB(${t}) <= ${Math.floor((SHORT_TEXT - 2) / 6)}`;
+            return `CASE WHEN ${t} IS NOT NULL AND ${s} IS NOT NULL${fits} THEN JSON('[' || REPLACE(${written}, ${separatorWritten}, '","') || ']') END`;
         });
+    }
+
+    /**
+     * A `VARCHAR2` is cut off past 4,000 bytes where `REPLACE` makes it longer: as one only where it cannot be, as each
+     * `search` made `replacement` grows the text by their ratio at most, and else null, so {@link texts} replaces in a
+     * CLOB. Their lengths are worked out here where the statement gives them, and not for each row.
+     */
+    replaceText(
+        text: string,
+        search: string,
+        replacement: string,
+        searchBytes?: number,
+        replacementBytes?: number
+    ): string {
+        const replaced = `REPLACE(${text}, ${search}, ${replacement})`;
+        if (this.long) {
+            return replaced;
+        }
+        if (searchBytes !== undefined && replacementBytes !== undefined) {
+            return replacementBytes <= searchBytes
+                ? replaced
+                : `CASE WHEN LENGTHB(${text}) * ${replacementBytes} <= ${
+                      SHORT_TEXT * searchBytes
+                  } THEN ${replaced} END`;
+        }
+        const s = searchBytes?.toString() ?? `LENGTHB(${search})`;
+        const r = replacementBytes?.toString() ?? `LENGTHB(${replacement})`;
+        return `CASE WHEN ${r} <= ${s} OR LENGTHB(${text}) * ${r} <= ${SHORT_TEXT} * ${s} THEN ${replaced} END`;
     }
 
     /** Oracle has no reverse of a text that it documents: its characters, read from the last. */
@@ -893,6 +1008,29 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `JSON_TRANSFORM(${labels}, REMOVE ${literal(`$[*]?(@ == ${quoted(label)})`)})`;
     }
 
+    private functionOf(name: string, json: string): string | undefined {
+        const functions: Record<string, () => string> = {
+            // A text past 4,000 bytes, null as a VARCHAR2, is measured as a CLOB (liberation-data/drivine#347).
+            size: () =>
+                `CASE ${kind(json)} WHEN 'array' THEN JSON_SCALAR(JSON_VALUE(${json}, '$.size()' RETURNING NUMBER)) ` +
+                `WHEN 'string' THEN JSON_SCALAR(COALESCE(LENGTH(JSON_VALUE(${json}, '$')), LENGTH(JSON_VALUE(${json}, '$' RETURNING CLOB)))) END`,
+            tolower: () => this.texts([json], ([t]) => this.scalar(`LOWER(${t})`)),
+            toupper: () => this.texts([json], ([t]) => this.scalar(`UPPER(${t})`)),
+            trim: () => this.texts([json], ([t]) => this.scalar(`TRIM(${t})`)),
+            // A text past 4,000 bytes, which asText reads as null, is read as a CLOB.
+            tostring: () => `COALESCE(JSON_SCALAR(${this.asText(json)}), JSON_SCALAR(${this.longText(json)}))`,
+            tointeger: () => `JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR)))`,
+            tofloat: () => `JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR))`,
+            head: () => `JSON_QUERY(${json}, '$[0]' RETURNING JSON)`,
+            last: () => `JSON_QUERY(${json}, '$[last]' RETURNING JSON)`,
+            abs: () =>
+                `CASE WHEN ${kind(json)} = 'double' THEN JSON_SCALAR(ABS(TO_BINARY_DOUBLE(${this.number(json)}))) ` +
+                `ELSE JSON_SCALAR(ABS(${this.number(json)})) END`,
+            keys: () => this.keys(json)
+        };
+        return Object.prototype.hasOwnProperty.call(functions, name) ? functions[name]() : undefined;
+    }
+
     /**
      * `round` of `number` to `precision` places, or `number` itself where those places are past its digits: Oracle's
      * `NUMBER` stops near 10^126, so `ROUND(n, 400)`, and the scale `10^p` a mode rounds by, overflow (ORA-01426) where
@@ -916,14 +1054,54 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         });
     }
 
-    /** The side `json` of a `+` that the statement gives as `given`, and the other side as `other`, as text: see `summedText`. */
-    private summed(json: string, given: unknown, other: unknown): string {
+    /** The JSON `json` as a CLOB, where it is a string: a text of any length, slower to read than {@link text}'s `VARCHAR2`. */
+    private longText(json: string): string {
+        return this.shared(
+            [json],
+            ([x]) => `CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE(${x}, '$' RETURNING CLOB) END`
+        );
+    }
+
+    /** The JSON `json` as text, where it is a string: a CLOB where `clob`, else as {@link text} reads it; a property by its own path (see `direct`). */
+    private textOf(json: string, clob: boolean): string {
+        return direct(clob ? this.longText(json) : this.text(json), json);
+    }
+
+    /**
+     * Two texts put together, as `VARCHAR2`s where both are read so and their sum fits in one, 4,000 bytes; else as a CLOB
+     * (liberation-data/drivine#347), where a text past 4,000 bytes was left out as null, and a longer sum failed
+     * (ORA-01489). Whether they fit is told from the sides' own texts, short to read: a number may be written otherwise
+     * ({@link asText}), though in at most {@link NUMBER_TEXT} bytes. A text the statement gives is as long as it is, and
+     * not read for each row.
+     */
+    private textSum(a: string, b: string, given: [unknown, unknown]): string {
+        const swapped: [unknown, unknown] = [given[1], given[0]];
+        const bytes = (json: string, side: unknown): string =>
+            typeof side === 'string' ? Buffer.byteLength(side, 'utf8').toString() : `LENGTHB(JSON_VALUE(${json}, '$'))`;
+        const fits = `${bytes(a, given[0])} + ${bytes(b, given[1])} <= ${SHORT_TEXT - 2 * NUMBER_TEXT}`;
+        const short = `${this.summed(a, given, true)} || ${this.summed(b, swapped, true)}`;
+        const whole = `TO_CLOB(${this.summed(a, given, false)}) || ${this.summed(b, swapped, false)}`;
+        // Two empty texts are null together, as Oracle's empty text is, and not an empty CLOB.
+        const empty = `JSON_VALUE(${a}, '$.length()') = 0 AND JSON_VALUE(${b}, '$.length()') = 0`;
+        return `CASE WHEN ${fits} THEN JSON_SCALAR(${short}) WHEN ${empty} THEN NULL ELSE JSON_SCALAR(${whole}) END`;
+    }
+
+    /**
+     * The side `json` of a `+` whose sides the statement gives as `given`, this side first, as text: see `summedText`. A
+     * text as a `VARCHAR2` where `short`, null past 4,000 bytes, and else as a CLOB; a number's text is short.
+     */
+    private summed(json: string, given: [unknown, unknown], short: boolean): string {
         return this.summedText(
             json,
-            given,
-            other,
-            (it) => `JSON_VALUE(${it}, '$')`,
-            (it) => this.asText(it)
+            given[0],
+            given[1],
+            (it) => (short ? `JSON_VALUE(${it}, '$')` : `JSON_VALUE(${it}, '$' RETURNING CLOB)`),
+            (it) =>
+                short
+                    ? this.asText(it)
+                    : `CASE WHEN ${kind(
+                          it
+                      )} = 'string' THEN JSON_VALUE(${it}, '$' RETURNING CLOB) ELSE TO_CLOB(${this.asText(it)}) END`
         );
     }
 

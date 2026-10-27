@@ -1803,6 +1803,12 @@ const names = await pm.query<string>(
   value such an item gives a `RETURN` or a `WITH` (`RETURN r.a`, `WITH r.a AS a`) isn't worked around yet. See
   "In a PL/SQL block, from a `JSON` variable" in drivine4j's
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
+- On Oracle, a text past 4,000 bytes is measured, cut, changed, searched and added to whole (`size()`, `toUpper()`,
+  `substring()`, `replace()`, `split()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads a text out of JSON as a
+  `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one isn't. `reverse()` still
+  gives null for one, and `CONTAINS` fails (ORA-22828) where the text it looks for is past 32 KB. A property such a
+  function reads is read from the properties by its own path, which costs about a quarter more on short texts, and a
+  `+` that may put texts together costs about a tenth more, as drivine4j measured.
 - On Postgres, float arithmetic, `sum()` and `avg()` are worked out in exact decimal (`numeric`), not as doubles, so
   they are more accurate: `0.1 + 0.2` is `0.3`, where Neo4j gives `0.30000000000000004`. A result differs from a
   graph engine's only around its 16th significant digit, and still comes back as a float. It shows only where a result
