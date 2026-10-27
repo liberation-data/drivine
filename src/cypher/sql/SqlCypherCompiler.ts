@@ -236,6 +236,15 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The join of the lateral query `query`, named `name`, to the row: an `OPTIONAL CALL`'s or an `OPTIONAL MATCH`'s
+     * keeps the row it finds nothing for, and a `CALL`'s does not.
+     */
+    lateral(query: string, name: string, optional: boolean): string {
+        const text = `(\n${indent(query)}\n) ${name}`;
+        return optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`;
+    }
+
+    /**
      * The query `query` that makes a value anew for each row, `randomUUID()`, kept apart from the query that reads it,
      * where a store would merge the two and make the value again for each read: a `WITH`'s, and a projection's sorted by
      * it.

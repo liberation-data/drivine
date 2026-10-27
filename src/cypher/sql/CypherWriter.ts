@@ -913,7 +913,7 @@ export class CypherWriter {
             ...inner.from(),
             ...optional(inner.whereClause())
         ];
-        select.join(`LEFT JOIN LATERAL (\n${indent(text.join('\n'))}\n) ${name} ON TRUE`);
+        select.join(this.sql.lateral(text.join('\n'), name, true));
         named.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
     }
 
@@ -974,8 +974,7 @@ export class CypherWriter {
         this.rowOrder = order;
         this.redeclared([...projected.scope.keys()], [...select.bound.keys()]);
         const name = this.alias('c');
-        const text = `(\n${indent(this.sql.called(projected.sql))}\n) ${name}`;
-        select.join(call.optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`);
+        select.join(this.sql.lateral(this.sql.called(projected.sql), name, call.optional));
         projected.scope.forEach((value, variable) =>
             // A value taken from a write's row is null here where the call finds nothing: it is read as returned.
             select.bind(

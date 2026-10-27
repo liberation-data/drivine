@@ -1134,6 +1134,103 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
         });
     });
+
+    /**
+     * An `OPTIONAL CALL` or an `OPTIONAL MATCH` in a `COUNT { }` or an `EXISTS { }`: drivine4j's tests of
+     * liberation-data/drivine4j#338, ported for #377. Oracle refused an optional join on TRUE in a scalar subquery
+     * followed by WHERE … AND … (ORA-00907), and crashed the session on one without (ORA-03113, ORA-07445 in its alert
+     * log): it is joined on 1 = 1 there. See drivine4j's docs/oracle-on-true-in-scalar-subquery-crash.md.
+     */
+    describe('an OPTIONAL CALL or an OPTIONAL MATCH in a subquery', () => {
+        /**
+         * Runs `block` with a query of the statements it is given. On Oracle they run on one connection of their own,
+         * which is asked again after each: a statement that crashes the session can do so after its rows came back.
+         */
+        const onOneSession = async (
+            block: (run: (cypher: string) => Promise<any[]>) => Promise<void>
+        ): Promise<void> => {
+            if (store.type !== DatabaseType.ORACLE) {
+                await block(async (cypher) => query(cypher));
+                return;
+            }
+            const connection = await DatabaseRegistry.getInstance().connectionProvider(store.connection)!.connect();
+            const run = async (cypher: string): Promise<any[]> =>
+                connection.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }));
+            try {
+                await block(async (cypher) => {
+                    const rows = await run(cypher);
+                    expect([cypher, await run('RETURN 1')]).toEqual([cypher, [1]]);
+                    return rows;
+                });
+            } finally {
+                await connection.release();
+            }
+        };
+
+        it('keeps the row it finds nothing for', async () => {
+            // Not in the spec yet (#338).
+            await clear();
+            await query("CREATE (:CyOpt {id: 1}), (:CyOpt {k: 'p'}), (:CyOpt {k: 'q'}), (:CyOpt {k: 'q'})");
+            const none = 'OPTIONAL CALL { MATCH (z:Nope) RETURN z.k AS u }';
+            await onOneSession(async (run) => {
+                const counted = async (subquery: string): Promise<any[]> =>
+                    run(`MATCH (n:CyOpt {id: 1}) RETURN COUNT { ${subquery} }`);
+                // At the top of a statement, as it ran before.
+                expect(await run(`${none} RETURN u`)).toEqual([null]);
+                expect(await run(`${none} MATCH (y:CyOpt) WHERE y.k = 'q' RETURN count(y)`)).toEqual([2]);
+                // In a COUNT { }: refused on Oracle, with a WHERE … AND … after the join, and else crashed the session.
+                expect(await counted(`${none} MATCH (y:CyOpt) WHERE y.k = 'q' RETURN y`)).toEqual([2]);
+                expect(await counted(`${none} RETURN u`)).toEqual([1]);
+                expect(await counted(`${none} MATCH (y:CyOpt) RETURN y`)).toEqual([4]);
+                expect(await counted(`MATCH (y:CyOpt) ${none} WITH y, u WHERE y.k = u RETURN y`)).toEqual([0]);
+                // What a CALL that finds something gives is counted, and a plain CALL that finds nothing gives no row.
+                expect(
+                    await counted(
+                        "OPTIONAL CALL { MATCH (z:CyOpt) WHERE z.k = 'q' RETURN z.k AS u } MATCH (y:CyOpt) WHERE y.k = u RETURN y"
+                    )
+                ).toEqual([4]);
+                expect(
+                    await counted("CALL { MATCH (z:Nope) RETURN z.k AS u } MATCH (y:CyOpt) WHERE y.k = 'q' RETURN y")
+                ).toEqual([0]);
+                // An OPTIONAL MATCH is the same join.
+                expect(await counted("OPTIONAL MATCH (z:Nope) MATCH (y:CyOpt) WHERE y.k = 'q' RETURN y")).toEqual([2]);
+                expect(await counted('OPTIONAL MATCH (z:Nope) RETURN z')).toEqual([1]);
+                // In an EXISTS { }, and in a WHERE.
+                expect(
+                    await run(
+                        `MATCH (n:CyOpt {id: 1}) RETURN [EXISTS { ${none} RETURN u }, EXISTS { CALL { MATCH (z:Nope) RETURN z.k AS u } RETURN u }]`
+                    )
+                ).toEqual([[true, false]]);
+                expect(
+                    await run(`MATCH (n:CyOpt) WHERE COUNT { ${none} RETURN u } = 1 AND n.id = 1 RETURN n.id`)
+                ).toEqual([1]);
+            });
+        });
+
+        it("keeps the row it finds nothing for over the spec's graph", async () => {
+            // Not in the spec yet (#338): the steps proposed for "CALL subqueries".
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            await onOneSession(async (run) => {
+                expect(
+                    await run(
+                        "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { OPTIONAL CALL (p) { MATCH (p)-[:NOPE]->(f) RETURN f.name AS friend } " +
+                            'MATCH (m:Movie) WHERE m.released > 1996 AND m.released < 2010 RETURN m }'
+                    )
+                ).toEqual([2]);
+                expect(
+                    await run(
+                        "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL CALL (p) { MATCH (p)-[:KNOWS]->(f) RETURN f.name AS friend } RETURN friend }"
+                    )
+                ).toEqual([1]);
+                expect(
+                    await run(
+                        "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL MATCH (p)-[:KNOWS]->(f) RETURN f }"
+                    )
+                ).toEqual([1]);
+            });
+        });
+    });
 });
 
 /**
