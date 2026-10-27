@@ -340,6 +340,18 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * What an order sorts the JSON value `json` by where the statement leaves its kind open, a term after another: values
+     * of several kinds as Cypher orders their kinds ({@link kindOrder}), null last, and those of one kind among themselves.
+     * As {@link sortKey} where a store does not override it: Postgres's takes `jsonb`'s order of kinds, a number before a
+     * truth value, which is not yet Cypher's (liberation-data/drivine4j#307). Oracle's JSON order puts a number before a
+     * text, so its terms are where the kind comes, then the value. A value the statement makes of one kind sorts by
+     * {@link sortKey} alone.
+     */
+    openSortKey(jsonSql: string): string[] {
+        return [this.sortKey(jsonSql)];
+    }
+
+    /**
      * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): as
      * {@link sortKey} where the store orders lists as Cypher does.
      */

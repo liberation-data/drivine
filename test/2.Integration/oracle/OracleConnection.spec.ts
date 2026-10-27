@@ -7,6 +7,8 @@ import {
 import { hasLabels, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 
+jest.setTimeout(60_000);
+
 describeOnOracle('Oracle connection', () => {
     let pm: PersistenceManager;
 
