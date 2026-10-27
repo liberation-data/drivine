@@ -1322,7 +1322,7 @@ export class CypherWriter {
             )}\n) ${s}`;
             text = `SELECT * FROM (\n${indent(least)}\n) ${this.alias('s')}\nWHERE len = least`;
         }
-        select.join(`CROSS JOIN LATERAL (\n${indent(text)}\n) ${name}`);
+        select.join(this.sql.lateral(text, name, false));
         found.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
     }
 
