@@ -1134,6 +1134,179 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
         });
     });
+
+    /**
+     * A list of zoned values, and a list of lists of them, sorted and compared item by item as the moments they are:
+     * drivine4j's tests of liberation-data/drivine4j#199, ported for #361. Not in the spec yet (#199). Oracle sorts such a
+     * list as its JSON (liberation-data/drivine4j#331): see OracleZonedListSort.spec.ts.
+     */
+    describe('lists of zoned values by their moments', () => {
+        const sorts = store.type !== DatabaseType.ORACLE;
+        // As text, 10:00+02:00 (08:00 UTC) sorts after 09:00Z, and 08:30Z before both.
+        const [a, b, c] = [
+            "datetime('2024-03-15T10:00:00+02:00')",
+            "datetime('2024-03-15T09:00:00Z')",
+            "datetime('2024-03-15T08:30:00Z')"
+        ];
+        const hours = [10, 8, 9];
+
+        (sorts ? it : it.skip)(
+            'a list of zoned values, and a list of lists of them, sort and compare item by item as the moments they are, whatever their offsets',
+            async () => {
+                // Not in the spec yet (#199).
+                expect(await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts`)).toEqual(
+                    hours
+                );
+                expect(
+                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts DESC`)
+                ).toEqual([...hours].reverse());
+                expect(
+                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect(t) AS ts RETURN h ORDER BY ts`)
+                ).toEqual(hours);
+                expect(await query(`UNWIND [[${b}], [${a}], [${c}]] AS ts RETURN ts[0].hour ORDER BY ts`)).toEqual(hours);
+                expect(
+                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH [[t]] AS l RETURN l[0][0].hour ORDER BY l`)
+                ).toEqual(hours);
+                expect(
+                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect([t]) AS l RETURN h ORDER BY l`)
+                ).toEqual(hours);
+                // A list that starts another comes first; a null item after any moment.
+                expect(
+                    await query(`WITH [${a}] AS x, [${a}, ${b}] AS y UNWIND [y, x] AS l RETURN size(l) ORDER BY l`)
+                ).toEqual([1, 2]);
+                expect(
+                    await query(
+                        `WITH [${a}, null] AS x, [${a}, ${b}] AS y UNWIND [x, y] AS l RETURN size([i IN l WHERE i IS NULL]) ORDER BY l`
+                    )
+                ).toEqual([0, 1]);
+                // A long list, and lists worked out with temporal arithmetic, by a comprehension or collect(): k = 0's start
+                // at 08:00 UTC.
+                const at = `CASE k WHEN 0 THEN ${a} ELSE ${b} END`;
+                expect(
+                    await query(
+                        `UNWIND [0, 1] AS k WITH k, [x IN range(1, 200) | ${at} + duration({minutes: x})] AS l RETURN k ORDER BY l`
+                    )
+                ).toEqual([0, 1]);
+                expect(
+                    await query(
+                        `UNWIND [0, 1] AS k UNWIND range(1, 3) AS x WITH k, ${at} + duration({minutes: x}) AS t WITH k, collect(t) AS l RETURN k ORDER BY l`
+                    )
+                ).toEqual([0, 1]);
+                // min() and max() of them.
+                expect(
+                    await query(`UNWIND [[${b}], [${a}], [${c}]] AS l RETURN [min(l)[0].hour, max(l)[0].hour]`)
+                ).toEqual([[10, 9]]);
+                expect(
+                    await query(
+                        `UNWIND [${b}, ${a}, ${c}] AS t WITH [[t]] AS l RETURN [min(l)[0][0].hour, max(l)[0][0].hour]`
+                    )
+                ).toEqual([[10, 9]]);
+                // A time of day with an offset, as a moment.
+                const times = "[time('10:00:00+02:00'), time('09:00:00Z'), time('08:30:00Z')]";
+                expect(await query(`UNWIND ${times} AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts`)).toEqual(hours);
+                expect(
+                    await query(`UNWIND ${times} AS t WITH [t] AS l RETURN [min(l)[0].hour, max(l)[0].hour]`)
+                ).toEqual([[10, 9]]);
+                // Taken from a list kept in order, by head() and last().
+                expect(
+                    await query(
+                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t ORDER BY t WITH collect(t) AS ts RETURN [head(ts).hour, last(ts).hour]`
+                    )
+                ).toEqual([[10, 9]]);
+            }
+        );
+
+        (sorts ? it : it.skip)(
+            'a list of zoned values sorts as their moments however it was made, and an empty list or a null item sorts as Cypher puts it',
+            async () => {
+                // Not in the spec yet (#199). By moment 10:00+02:00, 08:30Z, 09:00Z; as text 08:30Z, 09:00Z, 10:00+02:00.
+                const sorted = async (by: string, list: string = '[[t]]'): Promise<any[]> =>
+                    query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t, ${list} AS l RETURN t.hour ORDER BY ${by}`);
+                // Taken from a list of lists, by an index, head(), last(), a slice, reverse(), tail() and a comprehension.
+                for (const by of [
+                    'l[0]',
+                    'head(l)',
+                    'last(l)',
+                    'l[0..1]',
+                    'reverse(l)',
+                    '[x IN l WHERE x IS NOT NULL]',
+                    '[x IN l | x]'
+                ]) {
+                    expect([by, await sorted(by)]).toEqual([by, hours]);
+                }
+                expect(await sorted('tail(l)', '[[t], [t]]')).toEqual(hours);
+                // Made by a CASE, collect(DISTINCT), a UNION, and a comprehension over nodes or a pattern.
+                expect(await sorted('CASE WHEN t IS NOT NULL THEN [t] END')).toEqual(hours);
+                expect(
+                    await query(
+                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect(DISTINCT [t]) AS l RETURN h ORDER BY l`
+                    )
+                ).toEqual(hours);
+                expect(
+                    await query(
+                        `CALL { UNWIND [${b}] AS t RETURN [[t]] AS l UNION UNWIND [${a}, ${c}] AS t RETURN [[t]] AS l } RETURN l[0][0].hour ORDER BY l`
+                    )
+                ).toEqual(hours);
+                await clear();
+                await query(
+                    "CREATE (:CyZoned {h: 10})-[:AT]->(:CyZonedAt {at: '2024-03-15T10:00:00+02:00'}), " +
+                        "(:CyZoned {h: 9})-[:AT]->(:CyZonedAt {at: '2024-03-15T09:00:00Z'}), " +
+                        "(:CyZoned {h: 8})-[:AT]->(:CyZonedAt {at: '2024-03-15T08:30:00Z'})"
+                );
+                expect(
+                    await query('MATCH (z:CyZoned) RETURN z.h ORDER BY [(z)-[:AT]->(w) | [datetime(w.at)]]')
+                ).toEqual(hours);
+                expect(
+                    await query(
+                        'MATCH (z:CyZoned)-[:AT]->(w) WITH z, collect(w) AS ws RETURN z.h ORDER BY [n IN ws | [datetime(n.at)]]'
+                    )
+                ).toEqual(hours);
+                // The empty list first, then a list of a moment, then a null item or no list; as items of a list too.
+                const ordered = [2, 1, 3];
+                const empty = `[i IN [${a}] WHERE false]`;
+                const cased = `CASE k WHEN 1 THEN [${a}] WHEN 2 THEN ${empty} END`;
+                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, ${cased} AS l RETURN k ORDER BY l`)).toEqual(ordered);
+                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, ${cased} AS l RETURN k ORDER BY l DESC`)).toEqual(
+                    [...ordered].reverse()
+                );
+                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, [${cased}] AS l RETURN k ORDER BY l`)).toEqual(ordered);
+                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, [${cased}] AS l RETURN k ORDER BY l DESC`)).toEqual(
+                    [...ordered].reverse()
+                );
+                // Two lists of lists of them put together, and min() or max() of lists of them, grouped.
+                expect(await sorted('l + l')).toEqual(hours);
+                expect(
+                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, min([t]) AS m RETURN h ORDER BY m`)
+                ).toEqual(hours);
+                expect(
+                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, max([[t]]) AS m RETURN h ORDER BY m`)
+                ).toEqual(hours);
+                // Carried past a write, as a list and as a list of lists.
+                expect(
+                    await query(
+                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [t] AS l CREATE (:CyZonedWrite) RETURN t.hour ORDER BY l`
+                    )
+                ).toEqual(hours);
+                expect(
+                    await query(
+                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [[t]] AS l CREATE (:CyZonedWrite) RETURN t.hour ORDER BY l`
+                    )
+                ).toEqual(hours);
+                // Read from the row a write works its value out of (rowKeys), in a subquery that sorts them.
+                expect(
+                    await query(
+                        `UNWIND [${b}, ${a}, ${c}] AS t WITH collect([t]) AS ls CREATE (n:CyZonedWrite) ` +
+                            'SET n.first = COUNT { UNWIND ls AS l WITH l ORDER BY l LIMIT 1 WITH l WHERE l[0].hour = 10 RETURN l } RETURN n.first'
+                    )
+                ).toEqual([1]);
+                // After a term whose kind is open, which sorts by its kind first (liberation-data/drivine4j#308): the text
+                // before the numbers, then by moment.
+                const open = `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [t] AS l, CASE t.hour WHEN 8 THEN 'x' ELSE 1 END AS o RETURN t.hour`;
+                expect(await query(`${open} ORDER BY o, l`)).toEqual([8, 10, 9]);
+                expect(await query(`${open} ORDER BY o DESC, l DESC`)).toEqual([9, 10, 8]);
+            }
+        );
+    });
 });
 
 /**

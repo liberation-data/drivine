@@ -15,6 +15,8 @@ export interface JsonValue {
     readonly temporal?: Temporal;
     readonly items?: Temporal;
     readonly identity?: string;
+    /** Where the statement makes it a list whose every item is a list of `items` of one kind, that kind: an item taken from it has it as its `items`. */
+    readonly itemItems?: Temporal;
     /** Whether the statement makes it a list, and with `itemLists` a list of lists: a store may sort a list as Cypher does only then. */
     readonly list?: boolean;
     readonly itemLists?: boolean;
