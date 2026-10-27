@@ -119,11 +119,20 @@ jobs:
                   node -e 'require("@liberation-data/drivine")'
                   npx --no-install drivine --help
             # npm refuses even a dry run of a version it already has, as a manual run or a pull request on a released
-            # version would be. That dry run publishes a copy under a throwaway prerelease version instead.
+            # version would be. That dry run publishes a copy under a throwaway prerelease version instead. When npm can't
+            # be asked, the run goes on with a warning: npm would refuse the publish of a version it has, overwriting
+            # nothing.
             - name: Dry run of npm publish
               run: |
-                  published=$(npm view "@liberation-data/drivine@$VERSION" version 2> /dev/null || true)
-                  if [[ "$published" == "$VERSION" ]]; then
+                  published=false
+                  if versions=$(npm view @liberation-data/drivine versions --json); then
+                      if jq -e --arg v "$VERSION" '[.] | flatten | any(.[]; . == $v)' <<< "$versions" > /dev/null; then
+                          published=true
+                      fi
+                  else
+                      echo "::warning::Couldn't ask npm whether it has @liberation-data/drivine@$VERSION. Going on."
+                  fi
+                  if [[ "$published" == true ]]; then
                       if [[ "$PUBLISH" == true ]]; then
                           echo "::error::npm already has @liberation-data/drivine@$VERSION."
                           exit 1
