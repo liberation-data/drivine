@@ -1799,10 +1799,16 @@ const names = await pm.query<string>(
 - On Oracle, writes are worked around for the same bug: a text that a write takes from an unwound parameter's item, or
   from another value of its rows, to write it (`UNWIND $rows AS r MATCH (n {id: r.id}) SET n.a = r.a`, `CREATE (:X {a:
   r.a})`, `MERGE … SET n.a = r.a`) is read from the row's text, at no cost drivine4j measured: 1,000 rows set by one
-  statement take as long as before. Any other value, a map set whole by `SET n += r` among them, is read as before. A
-  value such an item gives a `RETURN` or a `WITH` (`RETURN r.a`, `WITH r.a AS a`) isn't worked around yet. See
+  statement take as long as before. Any other value, a map set whole by `SET n += r` among them, is read as before. See
   "In a PL/SQL block, from a `JSON` variable" in drivine4j's
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
+- On Oracle, so are reads of an unwound item's value: a text that a `RETURN` or a `WITH` gives from an unwound
+  parameter's item, or from another unwound list's (`UNWIND $rows AS r RETURN r.a`, `WITH r.a AS a`, `SET n.a = r.a
+  RETURN r.a`), is read from the item's text, at about 1.4 times a plain read: 100,000 rows of `RETURN r.a` take about
+  800 ms, against 560 ms. Any other value is read as before, and so is a value of a map made of a node's properties and
+  not unwound (`WITH n {.a} AS m RETURN m.a`); after a write, which carries its rows on, such a value is read from the
+  item's text too. A pattern that matches on such a text (`MERGE (n:X {a: r.a})`) compares it as JSON, which Oracle
+  refuses past about 32 KB (ORA-40180), leaving the session open.
 - On Oracle, a text past 4,000 bytes is measured, cut, changed, searched and added to whole (`size()`, `toUpper()`,
   `substring()`, `replace()`, `split()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads a text out of JSON as a
   `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one isn't. `reverse()` still

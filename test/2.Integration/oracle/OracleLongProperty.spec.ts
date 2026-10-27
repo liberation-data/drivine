@@ -18,7 +18,8 @@ const GRAPH = 'drivine_long_property';
  * nodes leaves the session open". The Cypher spec's case "A property past 32 KB read on two nodes" (test/cypher/
  * writes.yaml) covers a node's property returned and passed on; this one asks the session again after each statement,
  * and covers a relationship's and the sorts Oracle refuses too. A text past 32 KB a write takes from an unwound
- * parameter's item crashed it alike (liberation-data/drivine#356): see `OracleCypherCompiler.rowValue`.
+ * parameter's item crashed it alike (liberation-data/drivine#356): see `OracleCypherCompiler.rowValue`. So did one a
+ * `RETURN` or a `WITH` takes from such an item (liberation-data/drivine#366): see `OracleCypherCompiler.itemValue`.
  */
 describeOnOracle('a property past 32 KB read on two nodes on Oracle', () => {
     let connection: Connection;
@@ -109,6 +110,49 @@ describeOnOracle('a property past 32 KB read on two nodes on Oracle', () => {
         await cypher('UNWIND $items AS t MATCH (n:CyWrite {id: t.id}) SET n += t', items);
         expect(await cypher('MATCH (n:CyWrite) RETURN n.a ORDER BY n.id')).toEqual(texts);
         expect(await cypher('MATCH (n:CyWrite) RETURN n.f ORDER BY n.id')).toEqual([5, 5, 5]);
+    });
+
+    it('leaves the session open where a text past 32 KB from an unwound parameter is returned or passed on over two rows', async () => {
+        // Oracle crashed the session where a statement took a text past 32 KB from an item of an unwound parameter as
+        // JSON, and returned it or passed it on, for each of two rows (liberation-data/drivine#366). The compiler reads
+        // such a value through the item's text to work round it: see OracleCypherCompiler.itemValue. drivine4j's
+        // `CypherWriteOracleTest` "a text past 32 KB from an unwound parameter returned or passed on, on two rows, leaves
+        // the session open". As above, each statement is new, and the session is asked again after it.
+        for (const label of ['CyWrite', 'CyMade', 'CyMerged']) {
+            await cypher(`MATCH (n:${label}) DETACH DELETE n`);
+        }
+        const texts = ['x', 'y', 'z'].map((it) => it.repeat(40_000));
+        const items = { items: texts.map((a, i) => ({ id: i + 1, a })) };
+        await cypher('UNWIND range(1, 3) AS id CREATE (:CyWrite {id: id})');
+        for (let i = 0; i < 3; i++) {
+            const alive = async (): Promise<void> => {
+                expect(await cypher(`RETURN 1 AS alive${i}`)).toEqual([1]);
+            };
+            expect(await cypher(`UNWIND $items AS t RETURN t.a AS a${i}`, items)).toEqual(texts);
+            await alive();
+            expect(await cypher(`UNWIND $items AS t WITH t.a AS a RETURN a AS a${i}`, items)).toEqual(texts);
+            await alive();
+            expect(await cypher(`UNWIND $items AS t WITH t RETURN t.a AS a${i}`, items)).toEqual(texts);
+            await alive();
+            await cypher(
+                `UNWIND $items AS t WITH t.a AS a, t.id AS id CREATE (:CyMade {id: id, a: a, i: ${i}})`,
+                items
+            );
+            await alive();
+            expect(
+                await cypher(
+                    `UNWIND $items AS t MATCH (n:CyWrite {id: t.id}) SET n.a${i} = t.a RETURN t.a AS a${i}`,
+                    items
+                )
+            ).toEqual(texts);
+            await alive();
+            expect(await cypher(`MATCH (n:CyMade {i: ${i}}) RETURN n.a ORDER BY n.id`)).toEqual(texts);
+            expect(await cypher(`MATCH (n:CyWrite) WHERE n.id > -${i} RETURN n.a${i} ORDER BY n.id`)).toEqual(texts);
+        }
+        // Not worked around: a pattern that matches on such a text compares it as JSON, which Oracle refuses past about
+        // 32 KB (ORA-40180), as it refuses to sort or group it, and the session stays open.
+        await expect(cypher('UNWIND $items AS t MERGE (n:CyMerged {a: t.a})', items)).rejects.toThrow(/ORA-40180/);
+        expect(await cypher('MATCH (n:CyWrite) RETURN count(n)')).toEqual([3]);
     });
 
     it('writes a map an unwound item holds, with a key as extended JSON names one, as the map it is', async () => {

@@ -474,6 +474,15 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The value of `key` in the JSON `json`, read from an item of a list the query unwinds (see
+     * {@link JsonValue.fromList}), where it is an item of a `RETURN` or a `WITH`, returned or passed on: as
+     * {@link propertyOf} reads it, but on a store that must read such an item apart.
+     */
+    itemValue(json: string, key: string): string {
+        return this.propertyOf(json, key);
+    }
+
+    /**
      * `body` over the texts of the JSON values `jsons`, each read as {@link text} reads it where it is a string. A store
      * whose text read from JSON holds only so much reads a longer one otherwise: see Oracle's.
      */

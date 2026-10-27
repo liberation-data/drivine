@@ -1055,7 +1055,8 @@ export class CypherWriter {
             .join(distinct ? '\nUNION\n' : '\nUNION ALL\n');
         // A value is of a temporal kind where each query makes it of that one. It is at keys of a write's row (`rowKeys`)
         // only where each query takes it from those: a property of it is read from the row there, which would read the
-        // first query's value for every query's rows.
+        // first query's value for every query's rows. It is read from an unwound item (`fromList`) only where each query
+        // reads it from one.
         const scope: Scope = new Map(
             [...projected[0].scope].map(([variable, value]): [string, Value] => {
                 if (value.kind !== 'Json') {
@@ -1073,6 +1074,7 @@ export class CypherWriter {
                             undefined
                                 ? value.rowKeys
                                 : undefined,
+                        fromList: all.every((it) => it?.fromList === true),
                         temporal: single(all.map((it) => it?.temporal)),
                         items: single(all.map((it) => it?.items)),
                         text: all.every((it) => it?.text === true),
@@ -1116,7 +1118,8 @@ export class CypherWriter {
                 temporal: this.itemsOf(list),
                 list: this.holdsLists(list),
                 text: this.holdsTexts(list) || this.isText(list),
-                flat: this.isFlat(list)
+                flat: this.isFlat(list),
+                fromList: true
             })
         );
         select.order.push([`${name}.item_no`, false]);
@@ -1776,7 +1779,8 @@ export class CypherWriter {
                         text: was?.text,
                         texts: was?.texts,
                         flat: was?.flat,
-                        rowKeys: written ? [key] : undefined
+                        rowKeys: written ? [key] : undefined,
+                        fromList: !written
                     })
                 );
             } else if (kind === 'PATH') {
@@ -3425,9 +3429,10 @@ export class CypherWriter {
 
     /**
      * The item `expression` of a `RETURN` or a `WITH` over `select`: a property of a node or a relationship, the item
-     * itself, read as {@link SqlCypherCompiler.itemProperty} reads it, but beside a variable-length walk; anything else
-     * as elsewhere. A node or a relationship is compiled once here: compiling the item over it again lost the rows of
-     * statements that match a relationship.
+     * itself, read as {@link SqlCypherCompiler.itemProperty} reads it, and a property of an unwound item
+     * ({@link JsonValue.fromList}) as {@link SqlCypherCompiler.itemValue} reads it, but beside a variable-length walk;
+     * anything else as elsewhere. A node or a relationship is compiled once here: compiling the item over it again lost
+     * the rows of statements that match a relationship.
      */
     private item(expression: Expression, select: Select): Value {
         if (expression.kind === 'Property' && !select.walks) {
@@ -3438,6 +3443,16 @@ export class CypherWriter {
             }
             if (subject.kind === 'Relationship') {
                 return json(this.sql.itemProperty(subject.props, expression.key), { flat: true });
+            }
+            // A value of an unwound item, but a temporal value's field, and one a write reads from its row as rowValue does.
+            if (
+                subject.kind === 'Json' &&
+                subject.fromList &&
+                subject.temporal === undefined &&
+                subject.rowKeys === undefined &&
+                !this.temporals.fieldNames.includes(expression.key)
+            ) {
+                return json(this.sql.itemValue(this.sql.comparable(subject), expression.key));
             }
         }
         return this.expression(expression, select.scope);

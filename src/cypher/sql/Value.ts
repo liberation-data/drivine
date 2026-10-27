@@ -38,6 +38,12 @@ export interface JsonValue {
      * queries take it from different keys, and an `OPTIONAL CALL`, which gives null where it finds nothing.
      */
     readonly rowKeys?: string[];
+    /**
+     * Whether it is read from an item of a list the query unwinds, an `UNWIND`'s or the rows a write carries on, and
+     * passed on as it is: it reads no node's or relationship's properties, so a property of it a `RETURN` or a `WITH`
+     * gives is read as {@link SqlCypherCompiler.itemValue} reads it.
+     */
+    readonly fromList?: boolean;
 }
 
 /** What a {@link JsonValue} is besides its SQL. */
