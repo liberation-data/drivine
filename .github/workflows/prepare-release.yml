@@ -58,6 +58,12 @@ jobs:
             GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
             HAS_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN != '' }}
         steps:
+            - name: Has a token for this repository
+              run: |
+                  if [[ "$GITHUB_REPOSITORY" != "$REPO" && "$HAS_PR_TOKEN" != true ]]; then
+                      echo "::error::Called from $GITHUB_REPOSITORY, whose GITHUB_TOKEN can't push to $REPO. Pass a RELEASE_PR_TOKEN secret that can."
+                      exit 1
+                  fi
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   repository: ${{ env.REPO }}
@@ -74,6 +80,11 @@ jobs:
                   current=$(jq -r .version package.json)
                   exact="${EXACT#v}"
                   if [[ -n "$exact" ]]; then
+                      # Checked before npm sees it, so an input such as --foo can't be read as an option.
+                      if ! [[ "$exact" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                          echo "::error::$exact isn't a version X.Y.Z (or X.Y.Z-suffix)."
+                          exit 1
+                      fi
                       if ! npm version "$exact" --no-git-tag-version --allow-same-version=false --ignore-scripts; then
                           echo "::error::npm couldn't set the version to $exact (above). It must be a semver version other than $current."
                           exit 1

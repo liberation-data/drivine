@@ -64,7 +64,9 @@ included. Only a merged version bump or a pushed tag publishes.
 ## drivine: npm
 
 - **Version:** `version` in `package.json`. The tag must be `v` and that version, character for character: `v3.4.0`
-  for `3.4.0`.
+  for `3.4.0`. `package-lock.json` records the version too; Prepare release updates both with
+  `npm version --no-git-tag-version --ignore-scripts`.
+- **Push trigger:** a push to `master` that changes `package.json`.
 - **Build:** `npm ci` then `npm run build`, which makes `dist/`: the compiled package, with `package.json`, the README
   and the licence copied in. `dist/` is what is published.
 - **Checks:** `dist/package.json` is the version being released. `npm pack ./dist` holds the entry points
