@@ -605,6 +605,199 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ).toEqual([[a499 + 'B'], [a500], [a500 + 'B'], [a499 + 'b'], [a499 + 'é']]);
         });
     });
+
+    /**
+     * Values of several kinds sorted as Cypher orders their kinds, a map, a list, a text, a truth value, a number, then
+     * null: drivine4j's tests of liberation-data/drivine4j#299, ported for #355. Not in the spec yet (#299). Postgres takes
+     * `jsonb`'s order for every kind but a text: a number before a truth value, a map and a list last
+     * (liberation-data/drivine4j#307).
+     */
+    describe('values of several kinds in Cypher order', () => {
+        const sorts = store.type !== DatabaseType.POSTGRES;
+
+        (sorts ? it : it.skip)('a text sorts before a number, and after one descending', async () => {
+            // Not in the spec yet (#299): the steps of "Texts beside nulls and other kinds" that skip Oracle in v0.6.13.
+            expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t")).toEqual([
+                'B',
+                'b',
+                1,
+                2,
+                null
+            ]);
+            expect(await query("UNWIND [2, 'b', null, 1, 'B'] AS t RETURN t ORDER BY t DESC")).toEqual([
+                null,
+                2,
+                1,
+                'b',
+                'B'
+            ]);
+        });
+
+        (sorts ? it : it.skip)(
+            'values of several kinds sort as Cypher orders their kinds, a map, a list, a text, a truth value, a number, then null',
+            async () => {
+                // Not in the spec yet (#299): Oracle sorts first by where a value's kind comes, then by the value.
+                const values = "[1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1]";
+                const ascending = [{ a: 1 }, [1, 2], [2], 'A', 'b', false, true, -1, 1, 2.5, null];
+                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t`)).toEqual(ascending);
+                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t DESC`)).toEqual([...ascending].reverse());
+                // Carried out of a WITH that pages them, kept distinct, and beside another term.
+                expect(await query(`UNWIND ${values} AS t WITH t ORDER BY t SKIP 3 LIMIT 4 RETURN t`)).toEqual([
+                    'A',
+                    'b',
+                    false,
+                    true
+                ]);
+                expect(await query("UNWIND [2, 'b', true, 2, 'b'] AS t RETURN DISTINCT t ORDER BY t")).toEqual([
+                    'b',
+                    true,
+                    2
+                ]);
+                expect(
+                    await query("UNWIND [[2, 0], [1, 3], [2, false], [1, 'a']] AS p RETURN p ORDER BY p[0], p[1]")
+                ).toEqual([
+                    [1, 'a'],
+                    [1, 3],
+                    [2, false],
+                    [2, 0]
+                ]);
+                // A truth value before a number.
+                expect(await query('UNWIND [1, true, 0, false] AS t RETURN t ORDER BY t')).toEqual([false, true, 0, 1]);
+                expect(await query("UNWIND [true, 1, 'b', [1], {a: 1}] AS t RETURN min(t), max(t)")).toEqual([
+                    [{ a: 1 }, 1]
+                ]);
+                // Carried out of a CALL { … }, grouped by, kept distinct by another name, and sorted by when it is not returned.
+                expect(await query(`CALL { UNWIND ${values} AS t RETURN t ORDER BY t LIMIT 4 } RETURN t`)).toEqual([
+                    { a: 1 },
+                    [1, 2],
+                    [2],
+                    'A'
+                ]);
+                expect(await query("UNWIND [2, 'b', true, 2, 'b', [1]] AS t RETURN t, count(*) ORDER BY t")).toEqual([
+                    [[1], 1],
+                    ['b', 2],
+                    [true, 1],
+                    [2, 2]
+                ]);
+                expect(await query("UNWIND [2, 'b', true, 2] AS t RETURN DISTINCT t AS u ORDER BY u DESC")).toEqual([
+                    2,
+                    true,
+                    'b'
+                ]);
+                expect(await query("UNWIND [2, 'b', true] AS t RETURN toString(t) AS s ORDER BY t")).toEqual([
+                    'b',
+                    'true',
+                    '2'
+                ]);
+                // Among their own kind: texts by their code points, and whole and floating-point numbers as numbers.
+                expect(await query("UNWIND ['😀', '～', 1, 'a'] AS t RETURN t ORDER BY t")).toEqual([
+                    'a',
+                    '～',
+                    '😀',
+                    1
+                ]);
+                expect(await query('UNWIND [1, 0.5, true, 1.5, 0] AS t RETURN t ORDER BY t')).toEqual([
+                    true,
+                    0,
+                    0.5,
+                    1,
+                    1.5
+                ]);
+                // Paged by the query that returns them, and nulls first descending, carried out of a CALL { … }.
+                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t SKIP 2 LIMIT 5`)).toEqual([
+                    [2],
+                    'A',
+                    'b',
+                    false,
+                    true
+                ]);
+                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t DESC SKIP 1 LIMIT 4`)).toEqual([
+                    2.5,
+                    1,
+                    -1,
+                    true
+                ]);
+                expect(
+                    await query(
+                        "CALL { UNWIND [1, null, 'a', true, null, [1]] AS t RETURN t ORDER BY t DESC LIMIT 3 } RETURN t"
+                    )
+                ).toEqual([null, null, 1]);
+                // Collected in the order a WITH gives them, and indexed or iterated there.
+                expect(
+                    await query(`UNWIND ${values} AS t WITH t ORDER BY t DESC WITH collect(t) AS xs RETURN xs`)
+                ).toEqual([ascending.slice(0, -1).reverse()]);
+                expect(
+                    await query(`UNWIND ${values} AS t WITH t ORDER BY t RETURN [x IN collect(t) | x][0..3]`)
+                ).toEqual([ascending.slice(0, 3)]);
+                expect(await query(`UNWIND ${values} AS t WITH t ORDER BY t SKIP 2 LIMIT 5 RETURN collect(t)`)).toEqual(
+                    [[[2], 'A', 'b', false, true]]
+                );
+                // The last query of a UNION sorted, and a UNION carried out of a CALL { … } sorted and paged.
+                expect(
+                    await query(
+                        "UNWIND [2, 'b', true] AS t RETURN t UNION UNWIND [[1], {a: 1}, null, 'a'] AS t RETURN t ORDER BY t"
+                    )
+                ).toEqual([2, 'b', true, { a: 1 }, [1], 'a', null]);
+                expect(
+                    await query(
+                        "CALL { UNWIND [2, 'b'] AS t RETURN t UNION UNWIND [true, [1], null] AS t RETURN t } RETURN t ORDER BY t"
+                    )
+                ).toEqual([[1], 'b', true, 2, null]);
+                expect(
+                    await query(
+                        "CALL { UNWIND [2, 'b'] AS t RETURN t UNION UNWIND [true, [1], null] AS t RETURN t } WITH t ORDER BY t DESC SKIP 1 LIMIT 3 RETURN t"
+                    )
+                ).toEqual([2, true, 'b']);
+            }
+        );
+
+        (sorts ? it : it.skip)('a property stored as several kinds sorts as Cypher orders their kinds', async () => {
+            // Not in the spec yet (#299): a property read from the store may be of any kind, so its kind is ranked first.
+            await clear();
+            await query(
+                "CREATE (:Kind {v: 2}), (:Kind {v: 'b'}), (:Kind {v: true}), (:Kind {v: [1]}), (:Kind {v: 1.5}), (:Kind {v: 'B'}), (:Kind {v: false}), (:Kind)"
+            );
+            const ascending = [[1], 'B', 'b', false, true, 1.5, 2, null];
+            expect(await query('MATCH (k:Kind) RETURN k.v ORDER BY k.v')).toEqual(ascending);
+            expect(await query('MATCH (k:Kind) RETURN k.v ORDER BY k.v DESC')).toEqual([...ascending].reverse());
+            expect(await query('MATCH (k:Kind) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v')).toEqual(['b', false]);
+            expect(await query('CALL { MATCH (k:Kind) RETURN k.v AS v ORDER BY v DESC LIMIT 2 } RETURN v')).toEqual([
+                null,
+                2
+            ]);
+            expect(await query('MATCH (k:Kind) WITH k ORDER BY k.v WITH collect(k.v) AS vs RETURN vs')).toEqual([
+                ascending.slice(0, -1)
+            ]);
+            expect(await query('MATCH (k:Kind) RETURN k.v ORDER BY k.v DESC SKIP 1 LIMIT 3')).toEqual([2, 1.5, true]);
+        });
+
+        // Oracle puts a number before a text and a null first within a list (liberation-data/drivine4j#205).
+        (sorts && store.type !== DatabaseType.ORACLE ? it : it.skip)(
+            'lists of several kinds of item, nested, sort item by item among values of other kinds',
+            async () => {
+                // Not in the spec yet (#299): a list sorts first among values of other kinds, and among lists item by
+                // item, the items of each as Cypher orders their kinds at any depth.
+                const values = "[[1, 'a'], 'x', [[2], 1], [[2], 'b'], [1, null], 3, [1], [[2], [1]], [{a: 1}], [true]]";
+                const ascending = [
+                    [{ a: 1 }],
+                    [[2], [1]],
+                    [[2], 'b'],
+                    [[2], 1],
+                    [true],
+                    [1],
+                    [1, 'a'],
+                    [1, null],
+                    'x',
+                    3
+                ];
+                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t`)).toEqual(ascending);
+                expect(await query(`UNWIND ${values} AS t RETURN t ORDER BY t DESC`)).toEqual([...ascending].reverse());
+                expect(await query(`CALL { UNWIND ${values} AS t RETURN t ORDER BY t LIMIT 4 } RETURN t`)).toEqual(
+                    ascending.slice(0, 4)
+                );
+            }
+        );
+    });
 });
 
 /**
