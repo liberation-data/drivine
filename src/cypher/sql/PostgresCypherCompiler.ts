@@ -584,9 +584,13 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         return `RAISE EXCEPTION USING MESSAGE = ${literal(message)};`;
     }
 
-    /** A text that is no whole number, cast to one: Postgres fails with the text in its message. */
+    /**
+     * A text that is no whole number, cast to one: Postgres fails with the text in its message. Joined by `concat`, which
+     * is stable, not immutable, so the planner does not work out a failure of constants alone before any row, as it
+     * works out an immutable `||` and cast in a branch of a CASE no row takes: `round(1.5, -2)` over no rows.
+     */
     failure(message: string, value: string): string {
-        return `CAST(${literal(`${message} `)} || CAST(${value} AS text) AS integer)`;
+        return `CAST(concat(${literal(`${message} `)}, ${value}) AS integer)`;
     }
 
     idOf(json: string, key?: string): string {

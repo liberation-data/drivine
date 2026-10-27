@@ -859,7 +859,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * them, but fails on zero and on numbers as small as 1.0E-129 (ORA-01428). `POWER` gives 0 for a scale past `NUMBER`'s
      * least, so zero is given back to places that many, and rounded short of them: 0 either way. The precision is read
      * first, in a WHEN of its own, as Oracle tries them in order and stops at the first that holds: a null one gives null
-     * for zero too. A negative one from data is refused before a number is rounded, and reaches here only for a null.
+     * for zero too. One out of range is failed before a number is rounded, and reaches here only for a null.
      */
     private pastItsDigits(number: string, precision: string, round: (n: string, p: string) => string): string {
         return this.shared([number, precision], ([n, p]) => {

@@ -862,10 +862,10 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ).toEqual([[null, null, null, null]]);
             // A negative precision from data fails when the row is read, as on Neo4j, in both forms.
             await expect(query("MATCH (n:Round) RETURN round(1234.5, n.r, 'HALF_UP')")).rejects.toThrow(
-                'round() takes a precision of 0 or more'
+                'round() takes a precision from 0 to 2147483647'
             );
             await expect(query('MATCH (n:Round) RETURN round(1234.5, n.r)')).rejects.toThrow(
-                'round() takes a precision of 0 or more'
+                'round() takes a precision from 0 to 2147483647'
             );
             // Places past a number's digits give it back, where Oracle's NUMBER would overflow (#324); short of them, it
             // rounds.
@@ -912,10 +912,10 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ).toEqual([[1.83, 1.8333333333333333, 1.8333333333333333, 1.8]]);
             // Zero too, whose places Oracle gives back without rounding.
             await expect(query("MATCH (n:Round) RETURN round(n.z, n.r, 'HALF_UP')")).rejects.toThrow(
-                'round() takes a precision of 0 or more'
+                'round() takes a precision from 0 to 2147483647'
             );
             await expect(query('MATCH (n:Round) RETURN round(n.z, n.r)')).rejects.toThrow(
-                'round() takes a precision of 0 or more'
+                'round() takes a precision from 0 to 2147483647'
             );
             if (store.type !== DatabaseType.ORACLE) {
                 // The least doubles, whose last digits are short of the 400 places Postgres holds a precision to.
@@ -957,7 +957,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 )
             ).toEqual([[0, [-2.0, -2.0, -2.5, -2.0]]]);
             await expect(query('UNWIND [0.0] AS x WITH x, -1 AS p RETURN p, round(sum(x), p)')).rejects.toThrow(
-                'round() takes a precision of 0 or more'
+                'round() takes a precision from 0 to 2147483647'
             );
             // In a WHERE, a grouping key and an ORDER BY, and nested.
             expect(
@@ -996,13 +996,15 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     { n: NaN }
                 )
             ).toEqual([[-2.0, -2.0, -3.0, -4.0, -2.0, null]]);
-            // Below 0 places, given or written, negated or not, is refused, as Neo4j refuses it.
+            // Below 0 places, given or written, negated or not, fails on the row that rounds a number by it, as in Neo4j.
             for (const [statement, parameters] of [
                 ['RETURN round(-2.5, $n)', { n: -1 }],
                 ['RETURN round(-2.5, -$n)', { n: 1 }],
                 ['RETURN round(-2.5, -1)', {}]
             ] as [string, Record<string, any>][]) {
-                await expect(query(statement, parameters)).rejects.toThrow('round() takes a precision of 0 or more');
+                await expect(query(statement, parameters)).rejects.toThrow(
+                    'round() takes a precision from 0 to 2147483647'
+                );
             }
         });
 
@@ -1063,7 +1065,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 'MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(sum(x), r)',
                 "MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(min(x), r, 'HALF_UP')"
             ]) {
-                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more');
+                await expect(query(statement)).rejects.toThrow('round() takes a precision from 0 to 2147483647');
             }
         });
 
@@ -1079,7 +1081,9 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 'RETURN round(1234.5, 1 - 3)',
                 "RETURN round(1234.5, toInteger('-2'))"
             ]) {
-                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more, as in Neo4j.');
+                await expect(query(statement)).rejects.toThrow(
+                    'round() takes a precision from 0 to 2147483647, as in Neo4j.'
+                );
             }
             expect(await query('MATCH (n:Round) WHERE n.r >= 0 RETURN round(1234.5, n.r)')).toEqual([1234.5]);
             expect(await query('MATCH (n:Nothing) RETURN round(1234.5, 1 - 3)')).toEqual([]);
@@ -1119,7 +1123,7 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
             ).toEqual([[null, null, null]]);
             // A value there is still refused, -0.0 and a parameter's too.
             await expect(query('MATCH (n:Round) WHERE n.k = 1 RETURN round($v, n.r)', { v: 1.5 })).rejects.toThrow(
-                'round() takes a precision of 0 or more, as in Neo4j.'
+                'round() takes a precision from 0 to 2147483647, as in Neo4j.'
             );
             for (const statement of [
                 'MATCH (n:Round) WHERE n.k = 1 RETURN round(-0.0, n.r)',
@@ -1131,8 +1135,63 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 "MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(max(x), r, 'HALF_UP')",
                 'MATCH (n:Round) RETURN collect(round(n.x, n.r))'
             ]) {
-                await expect(query(statement)).rejects.toThrow('round() takes a precision of 0 or more, as in Neo4j.');
+                await expect(query(statement)).rejects.toThrow(
+                    'round() takes a precision from 0 to 2147483647, as in Neo4j.'
+                );
             }
+        });
+
+        it('a precision written below 0 or past 2147483647 fails only on a row that rounds a number by it, with the compiler\'s message', async () => {
+            // The spec's cases since liberation-data/drivine#364, here in a WHERE, an aggregate and a CASE, on rows filtered
+            // out, and by a parameter no YAML holds.
+            await query('CREATE (:Round {x: 1.5, k: 1}), (:Round {k: 2})');
+            for (const [statement, parameters] of [
+                ['MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, -2)', {}],
+                ["MATCH (n:Round) WHERE round(n.x, 2147483648, 'UP') > 0 RETURN n.k", {}],
+                ['MATCH (n:Round) RETURN sum(round(n.x, -$p))', { p: 2 }],
+                ["MATCH (n:Round) RETURN collect(round(n.x, $p, 'HALF_UP'))", { p: 1.0e20 }],
+                ['RETURN round(1.5, $p)', { p: Infinity }],
+                ["RETURN round(1.5, $p, 'UP')", { p: -Infinity }],
+                ['RETURN round(1.5, -9223372036854775808)', {}]
+            ] as [string, Record<string, any>][]) {
+                await expect(query(statement, parameters)).rejects.toThrow(
+                    'round() takes a precision from 0 to 2147483647, as in Neo4j.'
+                );
+            }
+            // A row that holds no number rounds to null, and a row the CASE does not round, or no row at all, fails nothing.
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.k = 2 RETURN [round(n.x, -2), round(n.x, 2147483648, 'UP'), round(n.x, $p)]",
+                    { p: 1.0e20 }
+                )
+            ).toEqual([[null, null, null]]);
+            expect(
+                await query("RETURN [round(null, $p), round(null, $p, 'FLOOR')]", { p: Infinity })
+            ).toEqual([[null, null]]);
+            expect(
+                await query(
+                    'MATCH (n:Round) RETURN CASE WHEN n.k > 0 THEN 0.0 ELSE round(1.5, -2) + round(n.x, 2147483648) END ORDER BY n.k'
+                )
+            ).toEqual([0.0, 0.0]);
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.k = 1 RETURN collect(CASE WHEN n.k = 2 THEN round(n.x, -2, 'UP') END)"
+                )
+            ).toEqual([[]]);
+            expect(
+                await query("MATCH (n:Round) WHERE n.k = 3 RETURN [round(1.5, -2), round(1.5, $p, 'UP')]", {
+                    p: 1.0e20
+                })
+            ).toEqual([]);
+            expect(await query('UNWIND [] AS x RETURN round(1.5, -2)')).toEqual([]);
+            // Nor in an ORDER BY whose round() reads nothing of the row. Not in a WHERE: Neo4j may test a condition that
+            // reads nothing of a row before the rows' own, and Postgres does.
+            expect(
+                await query(
+                    "MATCH (n:Round) WHERE n.k = 3 RETURN n.k ORDER BY round(1.5, -2), round(1.5, $p, 'UP')",
+                    { p: 1.0e20 }
+                )
+            ).toEqual([]);
         });
 
         it("round() by a mode and sign() take the least positive numbers as positive, where Oracle's SIGN gives 0", async () => {

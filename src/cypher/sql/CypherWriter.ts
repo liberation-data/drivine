@@ -167,10 +167,13 @@ const TEMPORAL_NOW = TEMPORAL_KINDS.flatMap((kind) =>
     ['statement', 'transaction', 'realtime'].map((it) => `${kind}.${it}`)
 );
 
-/** What `round()` is refused with, as Neo4j refuses it, a precision below 0. */
-const NEGATIVE_PRECISION = 'round() takes a precision of 0 or more, as in Neo4j.';
+/** What `round()` fails with, as Neo4j fails it, a precision below 0 or past `MAX_COUNT`. */
+const PRECISION_OUT_OF_RANGE = 'round() takes a precision from 0 to 2147483647, as in Neo4j.';
 
-/** The greatest start or length `substring()`, `left()` and `right()` take, as Neo4j takes them: Java's greatest `int`. */
+/**
+ * The greatest start or length `substring()`, `left()` and `right()` take, and the greatest precision `round()` takes,
+ * as Neo4j takes them: Java's greatest `int`.
+ */
 const MAX_COUNT = 2147483647;
 
 /** The greatest and least long, Java's, as `cutTowardZero` holds a number to. */
@@ -4933,13 +4936,14 @@ export class CypherWriter {
     /**
      * `round(value, precision)` of the invocation `call`, by `places` over the value as a SQL number and the precision as
      * a whole number toward zero: -0.5 is 0 places. Given `whole`, to 0 places it rounds by that instead. A precision
-     * below 0 is refused, as Neo4j refuses it: when compiling, where it is written, negated or not, or a parameter's
-     * value, a bigint or the Neo4j driver's Integer too; and else when the row is read, by the store's `failure`, but
-     * for a null value, which Neo4j rounds to null whatever the precision.
+     * below 0 or past `MAX_COUNT` fails, as Neo4j fails it: only on a row that rounds a number by it, by the store's
+     * `failure`, on every store alike, whether it is written, negated or not, a parameter's value, a bigint or the Neo4j
+     * driver's Integer too, or read from data. Neo4j reads the precision only when it rounds, so a null value rounds to
+     * null by any precision, and with no row, nothing fails.
      *
      * Places known when compiling pick the rounding then: under an aggregate, where nothing is bound, a CASE of both
      * would write the number out in each, at each round() nested in another. Places from data are told apart as the
-     * statement runs, in one CASE over the value and the places, where a negative one is refused before either
+     * statement runs, in one CASE over the value and the places, where places out of range are failed before either
      * rounding, so the precision each rounding writes out, more than once on a store, is the places alone.
      */
     private rounded(
@@ -4949,8 +4953,10 @@ export class CypherWriter {
     ): string {
         const given = this.givenPlaces(call.fn.arguments[1]);
         if (given !== undefined) {
-            if (given < 0) {
-                throw new DrivineError(NEGATIVE_PRECISION);
+            // Not "given in 0..MAX_COUNT", which NaN fails: Neo4j casts NaN to 0 places, as Java casts it to a long.
+            if (given < 0 || given > MAX_COUNT) {
+                const named = Number.isFinite(given) ? BigInt(given).toString() : String(given);
+                return this.outOfPlaces(this.sql.comparable(this.asJson(call.arguments[0])), literal(named));
             }
             const number = this.numberOf(call.arguments[0]);
             // Not "given < 1", which a NaN parameter fails: Neo4j casts NaN to 0 places. NaN is no SQL number, as it is
@@ -4961,15 +4967,23 @@ export class CypherWriter {
         }
         const value = this.sql.comparable(this.asJson(call.arguments[0]));
         return this.sql.shared([value, `TRUNC(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
-            // Asked of its kind, whose test writes the value out fewer times than the number does: a null value, as
-            // anything else that is no number, rounds by its negative places to null.
+            // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
             const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
             return (
-                `CASE ${toWhole}WHEN ${t} < 0 AND ${this.sql.typeOf(x)} = 'number' ` +
-                `THEN ${this.sql.failure(NEGATIVE_PRECISION, t)} ` +
+                `CASE ${toWhole}WHEN ${t} NOT BETWEEN 0 AND ${MAX_COUNT} THEN ${this.outOfPlaces(x, t)} ` +
                 `ELSE ${places(this.sql.number(x), `CAST(${t} AS INTEGER)`)} END`
             );
         });
+    }
+
+    /**
+     * `round()` of the JSON value `x` to `precision` places out of range: it fails where `x` is a number, and is null
+     * where it is not, as a null rounds to null by any precision in Neo4j. Asked of its kind, whose test writes the value
+     * out fewer times than the number does.
+     */
+    private outOfPlaces(x: string, precision: string): string {
+        const failed = this.sql.failure(PRECISION_OUT_OF_RANGE, precision);
+        return `CASE WHEN ${this.sql.typeOf(x)} = 'number' THEN ${failed} END`;
     }
 
     /** A value as a SQL number, where it is one. */
