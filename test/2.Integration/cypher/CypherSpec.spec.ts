@@ -819,6 +819,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 // An integer among floats is summed as a double too, as Neo4j sums it, and a computed float is one.
                 ['UNWIND [9223372036854775807, 0.5] AS x RETURN sum(x)', {}, 9.223372036854776e18],
                 ['UNWIND [0.5, 2] AS x RETURN sum(x * 10)', {}, 25],
+                ['UNWIND [1, 1.0] AS x RETURN toString(sum(x))', {}, '2.0'],
+                ['UNWIND [1, 0.5, 0.5] AS x RETURN toString(sum(x))', {}, '2.0'],
                 ['UNWIND [1, 2] AS x RETURN [sum(x), toString(sum(x))]', {}, [3, '3']],
                 ['UNWIND [] AS x RETURN [sum(x), toString(sum(x))]', {}, [0, '0']],
                 ['UNWIND [1.0, 1.0] AS x RETURN toString(sum(DISTINCT x))', {}, '1.0'],
@@ -834,10 +836,28 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     ]
                 ],
                 ['MATCH (n:F) WITH n.k AS k, sum(n.x) AS s ORDER BY k RETURN collect(toString(s))', {}, ['2.0', '3']],
+                ["MATCH (n:F) WHERE n.k = 'a' AND n.x = 1.0 RETURN toString(sum(n.x))", {}, '1.0'],
+                [
+                    "UNWIND [['a', 0.5], ['a', 1.5], ['b', 1], ['b', 1]] AS r WITH r[0] AS k, r[1] AS x WITH k, [sum(x), avg(x), min(x), max(x)] AS a ORDER BY k RETURN collect([y IN a | toString(y)])",
+                    {},
+                    [
+                        ['2.0', '1.0', '0.5', '1.5'],
+                        ['2', '1.0', '1', '1']
+                    ]
+                ],
+                [
+                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x RETURN [toString(sum(round(x, 400))), toString(sum(round(x, 0))), toString(sum(round(x, 0, 'UP'))), toString(count(*))]",
+                    {},
+                    ['1500.0', '2000.0', '2000.0', '3000']
+                ],
                 // Parameters, bound as JSON on a SQL store: Oracle writes a fraction of more than 40 digits with an
-                // exponent and no point.
+                // exponent and no point. drivine4j's `[1.0]` is no case here: a JavaScript 1.0 is 1, which the Neo4j
+                // driver sends as a float and a SQL store binds as an integer.
                 ['UNWIND $xs AS x RETURN sum(x)', { xs: [0.1, 0.2] }, tenths],
                 ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e300, 1.5] }, 1e300],
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e300, 1e300] }, 2e300],
+                ['UNWIND $xs AS x RETURN toString(sum(x))', { xs: [0.5, 1, 0.5] }, '2.0'],
+                ['UNWIND $xs AS x RETURN toString(sum(x))', { xs: [0.5, 0.5] }, '1.0'],
                 ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e-41, -1e-41] }, 0],
                 ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e-41, 1e-41] }, 2e-41],
                 // A bigint is bound as an integer, as the spec's whole numbers are: see parametersFor.
@@ -853,6 +873,21 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 }
             }
             expect(differing).toEqual([]);
+            // Not compiled to SQL yet, so they give no integer for a float.
+            const uncompiled: [string, any][] = [
+                ['UNWIND [2.0, 3.0] AS x RETURN toString(percentileDisc(x, 0.5))', '2.0'],
+                ['UNWIND [1.0, 3.0] AS x RETURN toString(percentileCont(x, 0.5))', '2.0'],
+                ['UNWIND [1.0, 3.0] AS x RETURN toString(stDevP(x))', '1.0'],
+                ['UNWIND [1.0, 3.0] AS x RETURN stDev(x)', 1.4142135623730951],
+                ['UNWIND [1, 3] AS x RETURN toString(percentileDisc(x, 0.5))', '1']
+            ];
+            for (const [statement, value] of uncompiled) {
+                if (store.type === DatabaseType.NEO4J) {
+                    expect(await query(statement)).toEqual([value]);
+                } else {
+                    await expect(query(statement)).rejects.toThrow('is Cypher, and is not compiled to SQL yet.');
+                }
+            }
         });
     });
 });
