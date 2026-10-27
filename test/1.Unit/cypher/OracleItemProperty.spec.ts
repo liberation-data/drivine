@@ -94,6 +94,28 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         expect(each).toContain(`SELECT ${read('$.v1.a')} INTO cy_value`);
     });
 
+    it("should read a value a UNION in a write's subquery takes from its row in each query from what the UNION gives", () => {
+        // x is t.m in one query and t.l in the other: read from the row at the first's keys, the other's rows read t.m.a.
+        const sql = new OracleCypherCompiler('g').compile(
+            'UNWIND $ts AS t MATCH (n {id: t.id}) SET n.a = COUNT { CALL { WITH t RETURN t.m AS x UNION ALL ' +
+                'WITH t RETURN t.l AS x } MATCH (y) WHERE y.k = x.a RETURN y }',
+            { ts: [] }
+        ).sql;
+        expect(sql).not.toContain("'$.v1.m.a'");
+        expect(sql).not.toContain("'$.v1.l.a'");
+    });
+
+    it("should read a value an OPTIONAL CALL in a write's subquery returns from its row from what the call gives", () => {
+        // u is null where the call finds nothing: read from the row, it would be t, and y.k compared with t.a.
+        const cypher =
+            'UNWIND $ts AS t MATCH (n {id: t.id}) SET n.a = COUNT { OPTIONAL CALL { WITH t MATCH (y:Nope) RETURN t AS u } ' +
+            'MATCH (y) WHERE y.k = u.a RETURN y }';
+        expect(new OracleCypherCompiler('g').compile(cypher, { ts: [] }).sql).not.toContain("'$.v1.a'");
+        const made = new PostgresCypherCompiler('g').compile(cypher, { ts: [] }).setup.join('\n');
+        expect(made).toContain('cy_row');
+        expect(made).not.toContain("((cy_row -> 'v1') -> 'a')");
+    });
+
     it('should read a value a write takes from its row on Postgres as elsewhere', () => {
         // A statement that writes is a function on Postgres, made by the compiled statement's setup.
         const made = new PostgresCypherCompiler('g')

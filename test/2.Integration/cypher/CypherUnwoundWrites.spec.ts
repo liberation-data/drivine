@@ -109,6 +109,52 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
         }
     });
 
+    /**
+     * Sets `property` of the node with id 1 to the `COUNT { }` of `subquery`, over an unwound item `t` whose `a` and `m.a`
+     * are a node's `k` and whose `l.a` is none's, and gives what it set.
+     */
+    const counted = async (property: string, subquery: string): Promise<any> => {
+        await query("CREATE (:CyUnwound {id: 1}), (:CyUnwoundOther {k: 'm'}), (:CyUnwoundOther {k: 'l'})");
+        await query(`UNWIND $ts AS t MATCH (n:CyUnwound {id: t.id}) SET n.${property} = COUNT { ${subquery} }`, {
+            ts: [{ id: 1, a: 'm', m: { a: 'm' }, l: { a: 'none' } }]
+        });
+        return (await query(`MATCH (n:CyUnwound {id: 1}) RETURN n.${property}`))[0];
+    };
+
+    // A value a write's subquery gives that isn't the row's value there has its property read from what the subquery
+    // gives, not from the write's row (liberation-data/drivine4j#336).
+
+    it("should read a property of a value a UNION in a write's subquery takes from different keys of its row from each query's", async () => {
+        const subquery =
+            'CALL { WITH t RETURN t.m AS x UNION ALL WITH t RETURN t.l AS x } MATCH (y:CyUnwoundOther) WHERE y.k = x.a RETURN y';
+        expect(await counted('u', subquery)).toEqual(1);
+    });
+
+    // On Oracle an OPTIONAL CALL in a subquery expression is refused (ORA-00907): liberation-data/drivine#377. Its SQL is
+    // pinned in OracleItemProperty.spec.ts.
+    (store.type === DatabaseType.ORACLE ? it.skip : it)(
+        "should read a property of a value an OPTIONAL CALL in a write's subquery returns from its row as null where it finds nothing",
+        async () => {
+            const subquery =
+                'OPTIONAL CALL { WITH t MATCH (z:CyUnwoundNope) RETURN t AS u } MATCH (y:CyUnwoundOther) WHERE y.k = u.a RETURN y';
+            expect(await counted('o', subquery)).toEqual(0);
+        }
+    );
+
+    it("should read a property of a value a WITH in a write's subquery names as the value it names", async () => {
+        // Renamed, it is the row's value still; a CASE over two of its keys gives the one it picks.
+        expect(
+            await counted('w', 'WITH t AS x WITH x.l AS w MATCH (y:CyUnwoundOther) WHERE y.k = w.a RETURN y')
+        ).toEqual(0);
+        await clearLabels(pm, store, ...LABELS);
+        expect(
+            await counted(
+                'c',
+                'WITH CASE WHEN t.id > 0 THEN t.m ELSE t.l END AS x MATCH (y:CyUnwoundOther) WHERE y.k = x.a RETURN y'
+            )
+        ).toEqual(1);
+    });
+
     it("should write an unwound parameter's items as they are given, by SET, CREATE, MERGE and SET +=", async () => {
         // On Oracle such a value is read through its text where it is a text: a whole float is written as a float
         // parameter of the store's own is, a null or a missing key writes no property, and a list, a key of a map in the

@@ -947,7 +947,13 @@ export class CypherWriter {
         const name = this.alias('c');
         const text = `(\n${indent(this.sql.called(projected.sql))}\n) ${name}`;
         select.join(call.optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`);
-        projected.scope.forEach((value, variable) => select.bind(variable, columnsOf(value, name)));
+        projected.scope.forEach((value, variable) =>
+            // A value taken from a write's row is null here where the call finds nothing: it is read as returned.
+            select.bind(
+                variable,
+                columnsOf(call.optional && value.kind === 'Json' ? { ...value, rowKeys: undefined } : value, name)
+            )
+        );
         projected.order.forEach(([column, descending]) => select.order.push([`${name}.${column}`, descending]));
     }
 
@@ -1018,7 +1024,9 @@ export class CypherWriter {
         const sql = projected
             .map((it) => `SELECT * FROM (\n${indent(it.sql)}\n) ${this.alias('q')}`)
             .join(distinct ? '\nUNION\n' : '\nUNION ALL\n');
-        // A value is of a temporal kind where each query makes it of that one.
+        // A value is of a temporal kind where each query makes it of that one. It is at keys of a write's row (`rowKeys`)
+        // only where each query takes it from those: a property of it is read from the row there, which would read the
+        // first query's value for every query's rows.
         const scope: Scope = new Map(
             [...projected[0].scope].map(([variable, value]): [string, Value] => {
                 if (value.kind !== 'Json') {
@@ -1031,6 +1039,11 @@ export class CypherWriter {
                     variable,
                     {
                         ...value,
+                        rowKeys:
+                            single(all.map((it) => (it?.rowKeys ? JSON.stringify(it.rowKeys) : undefined))) !==
+                            undefined
+                                ? value.rowKeys
+                                : undefined,
                         temporal: single(all.map((it) => it?.temporal)),
                         items: single(all.map((it) => it?.items)),
                         text: all.every((it) => it?.text === true),

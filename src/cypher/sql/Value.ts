@@ -34,7 +34,8 @@ export interface JsonValue {
     /**
      * Where a write reads it from the row it is making, to work out what it writes, the keys it is at in that row: a
      * property of it is read from the row at those keys and the property's, as {@link SqlCypherCompiler.rowValue} reads
-     * it.
+     * it. A subquery that gives it where it no longer holds the row's value drops them: a `UNION` in `CALL { … }` whose
+     * queries take it from different keys, and an `OPTIONAL CALL`, which gives null where it finds nothing.
      */
     readonly rowKeys?: string[];
 }
