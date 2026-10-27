@@ -1,12 +1,14 @@
 # Lints, builds and tests Drivine on every push to master and every pull request. The tests run on test containers
 # (see TEST_CONTAINERS.md): Neo4j, Memgraph, FalkorDB and Postgres. Oracle, whose image is large, runs in a job of its
-# own with ORACLE_TESTS=true. A local `npm test` leaves it out unless you set that, and says so.
+# own with ORACLE_TESTS=true. A local `npm test` leaves it out unless you set that, and says so. release.yml calls it
+# as the gate before a release.
 name: CI
 
 on:
     push:
         branches: [master]
     pull_request:
+    workflow_call:
 
 jobs:
     # The Cypher spec's copies in test/cypher are the tag VERSION names, unchanged, and a later tag is shown as a

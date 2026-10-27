@@ -1,0 +1,198 @@
+# Releases @liberation-data/drivine to npm from a tag. See RELEASING.md.
+#
+# A push of a tag vX.Y.Z publishes: it checks the tag, runs the full CI gate (ci.yml), builds from a clean `npm ci`,
+# checks the package and publishes dist/ with provenance. A manual run and a pull request that changes the release
+# machinery are dry runs: they do everything but publish, and leave the built package as an artifact.
+name: Release
+
+on:
+    push:
+        tags: ['v*']
+    # Always a dry run. Pick the branch or tag to try in "Use workflow from".
+    workflow_dispatch:
+    # A dry run, so a change to the release machinery is tested on its pull request.
+    pull_request:
+        paths:
+            - .github/workflows/release.yml
+            - RELEASING.md
+            - package.json
+            - package-lock.json
+            - tsconfig.build.json
+            - scripts/rewrite-paths.js
+
+permissions:
+    contents: read
+
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        outputs:
+            version: ${{ steps.version.outputs.version }}
+            publish: ${{ steps.version.outputs.publish }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+            - name: Work out the version
+              id: version
+              env:
+                  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+              run: |
+                  package_version=$(jq -r .version package.json)
+                  if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
+                      tag="$GITHUB_REF_NAME"
+                      if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+                          echo "::error::The tag $tag isn't vX.Y.Z (or vX.Y.Z-prerelease)."
+                          exit 1
+                      fi
+                      version="${tag#v}"
+                      if [[ "$version" != "$package_version" ]]; then
+                          echo "::error::The tag $tag says $version, but package.json's version is $package_version. Tag the merge commit of the release PR that bumped it."
+                          exit 1
+                      fi
+                      if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+                          echo "::error::The tag $tag is on $GITHUB_SHA, which isn't on $DEFAULT_BRANCH. Tag the release PR's merge commit on $DEFAULT_BRANCH."
+                          exit 1
+                      fi
+                      publish=true
+                  else
+                      version="$package_version"
+                      publish=false
+                  fi
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+                  echo "publish=$publish" >> "$GITHUB_OUTPUT"
+                  echo "Version $version, publish: $publish" >> "$GITHUB_STEP_SUMMARY"
+
+    # The full CI, as it runs on master and on pull requests.
+    gate:
+        needs: check
+        uses: ./.github/workflows/ci.yml
+
+    build:
+        needs: [check, gate]
+        runs-on: ubuntu-latest
+        env:
+            VERSION: ${{ needs.check.outputs.version }}
+            PUBLISH: ${{ needs.check.outputs.publish }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+            # The npm that publishes, so the dry run checks what it will check.
+            - run: npm install -g npm@latest
+            - run: npm ci
+            - run: npm run build
+            - name: The built package is the version being released
+              run: |
+                  built=$(jq -r .version dist/package.json)
+                  if [[ "$built" != "$VERSION" ]]; then
+                      echo "::error::dist/package.json says $built, not $VERSION."
+                      exit 1
+                  fi
+            - name: Pack
+              run: |
+                  mkdir -p package
+                  npm pack ./dist --pack-destination package --json > package/pack.json
+                  jq -r '.[0].files[].path' package/pack.json | sort > package/files.txt
+                  echo "$(wc -l < package/files.txt) files in $(jq -r '.[0].filename' package/pack.json)"
+                  for f in package.json README.md LICENSE index.js index.d.ts codegen/cli.js testing/index.js nest/index.js; do
+                      grep -qx "$f" package/files.txt || { echo "::error::The package has no $f."; exit 1; }
+                  done
+                  if grep -E '(^|/)(node_modules|test|src)/|\.spec\.|\.env' package/files.txt; then
+                      echo "::error::The package holds files it shouldn't (above)."
+                      exit 1
+                  fi
+            # Installed alone, as a user gets it: no devDependencies, and no optional peers such as testcontainers.
+            - name: The package installs and loads in an empty project
+              run: |
+                  tarball="$PWD/package/$(jq -r '.[0].filename' package/pack.json)"
+                  cd "$RUNNER_TEMP"
+                  mkdir smoke && cd smoke
+                  npm init -y > /dev/null
+                  npm install --no-audit --no-fund "$tarball"
+                  node -e 'require("@liberation-data/drivine")'
+                  npx --no-install drivine --help
+            # npm refuses even a dry run of a version it already has, as a manual run or a pull request on a released
+            # version would be. That dry run publishes a copy under a throwaway prerelease version instead.
+            - name: Dry run of npm publish
+              run: |
+                  published=$(npm view "@liberation-data/drivine@$VERSION" version 2> /dev/null || true)
+                  if [[ "$published" == "$VERSION" ]]; then
+                      if [[ "$PUBLISH" == true ]]; then
+                          echo "::error::npm already has @liberation-data/drivine@$VERSION."
+                          exit 1
+                      fi
+                      cp -R dist "$RUNNER_TEMP/dry-run"
+                      (cd "$RUNNER_TEMP/dry-run" && npm pkg set version="$VERSION-dryrun.$GITHUB_RUN_ID")
+                      npm publish "$RUNNER_TEMP/dry-run" --dry-run --access public --tag dry-run
+                  elif [[ "$VERSION" == *-* ]]; then
+                      npm publish ./dist --dry-run --access public --tag next
+                  else
+                      npm publish ./dist --dry-run --access public
+                  fi
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: dist
+                  path: dist/
+                  if-no-files-found: error
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: npm-package
+                  path: package/
+                  if-no-files-found: error
+
+    publish:
+        needs: [check, build]
+        if: needs.check.outputs.publish == 'true'
+        runs-on: ubuntu-latest
+        environment: release
+        permissions:
+            contents: read
+            # npm trusted publishing (OIDC) and provenance.
+            id-token: write
+        env:
+            VERSION: ${{ needs.check.outputs.version }}
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+            # Trusted publishing needs npm 11.5.1 or later.
+            - run: npm install -g npm@latest
+            - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: dist
+                  path: dist
+            # Trusted publishing is used when it's configured on npmjs.com. An NPM_TOKEN secret, if set, is the fallback.
+            - name: Publish to npm
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+              run: |
+                  if [[ -n "$NODE_AUTH_TOKEN" ]]; then
+                      npm config set //registry.npmjs.org/:_authToken '${NODE_AUTH_TOKEN}'
+                  fi
+                  if [[ "$VERSION" == *-* ]]; then
+                      npm publish ./dist --provenance --access public --tag next
+                  else
+                      npm publish ./dist --provenance --access public
+                  fi
+
+    github-release:
+        needs: [check, publish]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Create the GitHub release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ github.ref_name }}
+                  VERSION: ${{ needs.check.outputs.version }}
+              run: |
+                  prerelease=()
+                  if [[ "$VERSION" == *-* ]]; then prerelease=(--prerelease); fi
+                  gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${prerelease[@]}"
