@@ -49,4 +49,41 @@ describe('A list of zoned values in compiled Cypher', () => {
             new OracleCypherCompiler('g').compile('UNWIND [1, 1] AS k RETURN collect(DISTINCT k)').sql
         ).not.toContain('PASSING');
     });
+
+    it('should read a list of temporal values by its places on Oracle wherever it is read, in each shape of IN too', () => {
+        // Each reader of the list `l`, which may hold a null: every JSON_TABLE that reads a list of numbers made so reads
+        // the list of temporal values by its places instead, and only the UNWIND's and range's JSON_TABLEs are left.
+        const listed = (item: string): string =>
+            `UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, k) | CASE WHEN i > 1 THEN ${item} END] AS l, $v AS v`;
+        const readers = [
+            'RETURN v IN l',
+            'WITH k, l, v WHERE v IN l RETURN k',
+            'WITH k, l WHERE $v IN l RETURN k',
+            'WITH k, l WHERE l[0] IN l RETURN k',
+            'RETURN l[0] IN l',
+            'RETURN [x IN l WHERE x IN l]',
+            'RETURN l[1..]',
+            'RETURN reverse(l)',
+            'RETURN tail(l)',
+            'UNWIND l AS t RETURN t',
+            'RETURN any(x IN l WHERE x IS NULL)',
+            'RETURN all(x IN l WHERE x IS NULL)',
+            'RETURN none(x IN l WHERE x IS NULL)',
+            'RETURN single(x IN l WHERE x IS NULL)',
+            'RETURN [x IN l | x]',
+            'RETURN collect(DISTINCT l)',
+            'UNWIND l AS t RETURN collect(DISTINCT t)'
+        ];
+        const count = (sql: string, of: string): number => sql.split(of).length - 1;
+        for (const reader of readers) {
+            const [temporal, other] = ["localdatetime('2024-03-15T10:00:00') + duration({minutes: i})", 'i + 1'].map(
+                (item) => new OracleCypherCompiler('g').compile(`${listed(item)} ${reader}`, { v: 1 }).sql
+            );
+            expect([reader, count(temporal, 'JSON_TABLE')]).toEqual([reader, 2]);
+            expect([reader, count(temporal, 'PASSING') - count(other, 'PASSING')]).toEqual([
+                reader,
+                count(other, 'JSON_TABLE') - 2
+            ]);
+        }
+    });
 });
