@@ -116,13 +116,6 @@ export abstract class SqlCypherCompiler {
     readonly extremesByListKey: boolean = true;
 
     /**
-     * Whether a list of zoned values the statement makes, or a list of lists of them, sorts and takes its `min` and `max`
-     * by {@link momentsKey}: not where the store's parse of that key's `JSON_TABLE` over a list worked out item by item can
-     * stall the session, as Oracle's does, where the list is the store's JSON and sorts as that.
-     */
-    readonly listsByMoments: boolean = true;
-
-    /**
      * Whether {@link shared} binds a long value: not in an expression that aggregates, whose aggregate a subquery would
      * take from its group, nor in a term a projection beside a variable-length walk sorts by that is none of its items
      * (see `CypherWriter.sorts`).
@@ -401,10 +394,23 @@ export abstract class SqlCypherCompiler {
                     `CASE WHEN ${this.isJsonNull(item)} THEN '~' ELSE ${itemKey} END`,
                     `${alias}.item_no`
                 );
-                return `(SELECT COALESCE(${joined}, '') || '!' FROM ${this.elements(of, alias)})`;
+                return `(SELECT COALESCE(${joined}, '') || '!' FROM ${this.temporalElements(of, alias)})`;
             };
             return `CASE WHEN NOT ${this.isJsonNull(x)} THEN ${this.bytewise(key(x, depth))} END`;
         });
+    }
+
+    /**
+     * {@link elements} of the JSON list `json` whose items the statement makes temporal values, or lists of them, as
+     * Oracle reads them apart: see its own.
+     */
+    temporalElements(json: string, alias: string): string {
+        return this.elements(json, alias);
+    }
+
+    /** {@link temporalElements} of the JSON list `json` where its items are `temporal` values or lists of them, else {@link elements}. */
+    elementsOf(json: string, alias: string, temporal: boolean): string {
+        return temporal ? this.temporalElements(json, alias) : this.elements(json, alias);
     }
 
     /** Where the kind of the JSON `json`, an item of a list, comes among the others as Cypher orders them: as {@link kindOrder}, null last. */
@@ -722,9 +728,10 @@ export abstract class SqlCypherCompiler {
 
     /**
      * The items of the JSON list `list` once each, where each is first: what `collect(DISTINCT …)` keeps of what a `WITH`
-     * before it collected, for a store dedupes no aggregate in the query that makes it.
+     * before it collected, for a store dedupes no aggregate in the query that makes it. Where `temporal`, the statement
+     * makes its items temporal values or lists of them, and they are read as {@link temporalElements} reads them.
      */
-    abstract distinctItems(list: string): string;
+    abstract distinctItems(list: string, temporal?: boolean): string;
 
     /**
      * The items of the JSON list `list` whose item in `identities`, a list as long, is first among those equal to it, as

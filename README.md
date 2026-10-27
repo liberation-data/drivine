@@ -1835,11 +1835,14 @@ const names = await pm.query<string>(
   CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A zoned value the
   statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
-  does a map that holds one. On Postgres, a list of them, or a list of lists of them, sorts item by item so in an
-  `ORDER BY`, `min` and `max`. Oracle sorts such a list as it sorts JSON, a zoned value by its text: Oracle 23 takes
-  many minutes to parse the key that sorts it by moments over a list worked out item by item with temporal arithmetic
+  does a map that holds one. A list of them, or a list of lists of them, sorts item by item so in an `ORDER BY`, `min`
+  and `max`. Oracle reads the items of a list of temporal values by their places, not with `JSON_TABLE`: Oracle 23
+  takes many seconds, or minutes, to parse a `JSON_TABLE` over a list worked out item by item with temporal arithmetic
   (`[i IN range(1, 10) | t + duration({minutes: i})]`), and neither a query timeout nor a kill ends the parse
-  ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331)).
+  ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331)). A list the statement no longer knows
+  holds them, as a list of maps that hold them, one passed through `coalesce`, or a list of lists of lists of them
+  (`collect(DISTINCT [l, l])`), is still read with `JSON_TABLE`, and can stall so
+  ([drivine4j#347](https://github.com/liberation-data/drivine4j/issues/347)).
 - A parameter is bound as JSON, so a number that is whole is a whole number, though it was written `2.0`:
   `toString($f)` of it gives `'2'`, where Neo4j, which the driver sends a number to as a float, gives `'2.0'`.
 

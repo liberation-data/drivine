@@ -122,7 +122,8 @@ interface Hop {
 /**
  * What `x IN list` compares, as `CypherWriter.membership` reads it: the `list` and the value `x`, as SQL; how an item of
  * the list `matches` the value, and how `equals` compares two values that hold no null; and where the value is a node or
- * a relationship in a list of them, its `id`, which is `x`.
+ * a relationship in a list of them, its `id`, which is `x`; and how the `elements` of the list, or of what binds it, are
+ * read as rows.
  */
 interface Member {
     list: string;
@@ -130,6 +131,7 @@ interface Member {
     id?: string;
     equals: (a: string, b: string) => string;
     matches: (item: string, value: string) => string;
+    elements: (list: string, alias: string) => string;
 }
 
 /**
@@ -646,7 +648,7 @@ export class CypherWriter {
                     return (
                         `CASE ${this.sql.typeOf(x)} WHEN 'string' THEN ${this.sql.scalar(
                             this.sql.reverseText(this.sql.text(x))
-                        )} ` + `WHEN 'array' THEN (SELECT ${reversed} FROM ${this.sql.elements(x, e)}) END`
+                        )} ` + `WHEN 'array' THEN (SELECT ${reversed} FROM ${this.listElements(call.one(), x, e)}) END`
                     );
                 }),
                 {
@@ -665,7 +667,8 @@ export class CypherWriter {
                     const rest = this.sql.comparable(
                         json(this.sql.aggregateList(`${e}.item`, `${e}.item_no`), { ordered: true })
                     );
-                    return `CASE WHEN ${this.sql.typeOf(x)} = 'array' THEN (SELECT ${rest} FROM ${this.sql.elements(
+                    return `CASE WHEN ${this.sql.typeOf(x)} = 'array' THEN (SELECT ${rest} FROM ${this.listElements(
+                        call.one(),
                         x,
                         e
                     )} WHERE ${e}.item_no > 1) END`;
@@ -1112,7 +1115,7 @@ export class CypherWriter {
                 `CASE WHEN ${this.sql.typeOf(x)} = 'array' THEN ${x} WHEN NOT ${this.sql.isJsonNull(x)} THEN ` +
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
-        select.source(this.sql.elements(items, name));
+        select.source(this.listElements(list, items, name));
         // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none.
         select.bind(
             unwind.variable,
@@ -3068,7 +3071,8 @@ export class CypherWriter {
                     ...(from !== undefined ? [`${v}.item_no > ${bound(from)}`] : []),
                     ...(to !== undefined ? [`${v}.item_no <= ${bound(to)}`] : [])
                 ];
-                const items = `SELECT ${e}.item AS item, ${e}.item_no AS item_no, COUNT(*) OVER () AS cnt FROM ${this.sql.elements(
+                const items = `SELECT ${e}.item AS item, ${e}.item_no AS item_no, COUNT(*) OVER () AS cnt FROM ${this.listElements(
+                    listed,
                     x,
                     e
                 )}`;
@@ -3236,7 +3240,7 @@ export class CypherWriter {
                     `CASE WHEN NOT ${this.sql.isJsonNull(items)} THEN (SELECT ${this.sql.aggregateList(
                         projection,
                         `${name}.item_no`
-                    )} ` + `FROM ${this.sql.elements(items, name)}${filter}) END`
+                    )} ` + `FROM ${this.listElements(listed, items, name)}${filter}) END`
             ),
             {
                 ordered: true,
@@ -3401,7 +3405,7 @@ export class CypherWriter {
         return bool(
             this.sql.shared([this.sql.comparable(this.asJson(listed))], ([items]) =>
                 quantified(
-                    `FROM ${this.sql.elements(items, name)}`,
+                    `FROM ${this.listElements(listed, items, name)}`,
                     json(`${name}.item`, { temporal: this.itemsOf(listed) }),
                     this.sql.isJsonNull(items)
                 )
@@ -3548,6 +3552,19 @@ export class CypherWriter {
     /** The temporal kind the statement makes each item of each item of the list `list`: see {@link JsonValue.itemItems}. */
     private itemItemsOf(list: Value): Temporal | undefined {
         return list.kind === 'Json' ? list.itemItems : undefined;
+    }
+
+    /**
+     * The items of the JSON list `json`, the value `list`, as rows named `alias`: by {@link SqlCypherCompiler.temporalElements}
+     * where they are temporal values or lists of them.
+     */
+    private listElements(list: Value, json: string, alias: string): string {
+        return this.sql.elementsOf(json, alias, this.holdsTemporals(list));
+    }
+
+    /** Whether the statement makes the items of the list `list` temporal values, or lists of them: see {@link SqlCypherCompiler.temporalElements}. */
+    private holdsTemporals(list: Value): boolean {
+        return this.itemsOf(list) !== undefined || this.itemItemsOf(list) !== undefined;
     }
 
     /** The temporal kind the statement makes each item of each of `values`, lists all, as {@link kindOf} tells it of values. */
@@ -4374,14 +4391,21 @@ export class CypherWriter {
             : (a: string, b: string): string => sql.jsonEquals(a, b);
         const matches = (item: string, value: string): string =>
             id !== undefined ? `${item} = ${value}` : equals(item, value);
+        const elements = (list: string, alias: string): string => this.listElements(right, list, alias);
         if (id !== undefined) {
-            return { list: (right as EntitiesValue).ids, x: id, id, equals, matches };
+            return { list: (right as EntitiesValue).ids, x: id, id, equals, matches, elements };
         }
         // A map or a list that holds a node or a relationship is in a list where an item holds the same, by identity.
         if (identities) {
-            return { list: this.identified(right), x: this.identified(left), equals, matches };
+            return { list: this.identified(right), x: this.identified(left), equals, matches, elements };
         }
-        return { list: sql.comparable(this.asJson(right)), x: sql.comparable(this.asJson(left)), equals, matches };
+        return {
+            list: sql.comparable(this.asJson(right)),
+            x: sql.comparable(this.asJson(left)),
+            equals,
+            matches,
+            elements
+        };
     }
 
     /**
@@ -4406,7 +4430,7 @@ export class CypherWriter {
     private found(member: Member, around?: (found: string, value: string) => string): string {
         const i = this.alias('i');
         const exists = (list: string, value: string): string =>
-            `EXISTS (SELECT 1 FROM ${this.sql.elements(list, i)} WHERE ${member.matches(`${i}.item`, value)})`;
+            `EXISTS (SELECT 1 FROM ${member.elements(list, i)} WHERE ${member.matches(`${i}.item`, value)})`;
         if (around === undefined) {
             return exists(member.list, member.x);
         }
@@ -4453,13 +4477,13 @@ export class CypherWriter {
             // Null is compared with each item, and is in no empty list.
             if (of.nullValue) {
                 const j = this.alias('i');
-                const empty = `CASE WHEN EXISTS (SELECT 1 FROM ${sql.elements(l, j)}) THEN NULL ELSE FALSE END`;
+                const empty = `CASE WHEN EXISTS (SELECT 1 FROM ${member.elements(l, j)}) THEN NULL ELSE FALSE END`;
                 cases.push(`WHEN ${sql.isJsonNull(v)} THEN ${of.filled ? 'NULL' : empty}`);
             }
             // A value that holds a null is equal to no item.
             const held = of.whole ? '' : `NOT (${sql.holdsNull(v)}) AND `;
             cases.push(
-                `WHEN ${held}EXISTS (SELECT 1 FROM ${sql.elements(l, i)} WHERE ${matches(`${i}.item`, v)}) THEN TRUE`
+                `WHEN ${held}EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(`${i}.item`, v)}) THEN TRUE`
             );
             if (!of.within || !of.whole) {
                 const k = this.alias('i');
@@ -4467,7 +4491,7 @@ export class CypherWriter {
                     member.id !== undefined
                         ? sql.isJsonNull(`${k}.item`)
                         : `(${this.nullableEquals(`${k}.item`, v, equals)}) IS NULL`;
-                cases.push(`WHEN EXISTS (SELECT 1 FROM ${sql.elements(l, k)} WHERE ${undecided}) THEN NULL`);
+                cases.push(`WHEN EXISTS (SELECT 1 FROM ${member.elements(l, k)} WHERE ${undecided}) THEN NULL`);
             }
             return `CASE ${cases.join(' ')} ELSE FALSE END`;
         });
@@ -4805,7 +4829,7 @@ export class CypherWriter {
                 texts: list.texts
             });
         }
-        return json(this.sql.distinctItems(this.sql.comparable(list)), {
+        return json(this.sql.distinctItems(this.sql.comparable(list), this.holdsTemporals(list)), {
             ordered: true,
             items: list.items,
             itemItems: list.itemItems,
@@ -4825,12 +4849,11 @@ export class CypherWriter {
         const temporal = value.temporal;
         const items = value.items;
         const itemItems = value.itemItems;
-        const listsByMoments = this.sql.listsByMoments;
         const key = temporal?.zoned
             ? this.temporals.moment(this.sql.text(this.sql.comparable(value)), temporal)
-            : listsByMoments && items?.zoned && value.list
+            : items?.zoned && value.list
             ? this.sql.momentsKey(this.sql.comparable(value), items)
-            : listsByMoments && itemItems?.zoned && value.itemLists
+            : itemItems?.zoned && value.itemLists
             ? this.sql.momentsKey(this.sql.comparable(value), itemItems, 2)
             : this.sql.extremesByListKey && this.isList(call.one())
             ? this.sql.listSortKey(this.sql.comparable(value))
@@ -5210,8 +5233,7 @@ export class CypherWriter {
      * What {@link sortable} sorts `value` by, in two: the value as a column carries it, and the terms that sort it, of
      * that column. A value whose kind the statement leaves open sorts as {@link SqlCypherCompiler.openSortKey} has it,
      * where its kind comes first; one it makes a truth value, a temporal value, a text, a list or a node is of one kind,
-     * and sorts by one term alone: a zoned value or a list of them ({@link SqlCypherCompiler.listsByMoments}) by its
-     * moments, another list by {@link SqlCypherCompiler.listSortKey}, any other by {@link SqlCypherCompiler.sortKey}.
+     * and sorts by one term alone: a zoned value or a list of them by its moments, another list by {@link SqlCypherCompiler.listSortKey}, any other by {@link SqlCypherCompiler.sortKey}.
      */
     private sortTerm(value: Value): [string, (column: string) => string[]] {
         if (value.kind === 'Bool') {
@@ -5238,11 +5260,10 @@ export class CypherWriter {
 
     /**
      * {@link sortTerm} of a list of zoned values the statement makes, or of a list of lists of them: item by item as the
-     * moments they are, where the store sorts it so. Of one kind, a list, it needs no rank of its kind. Undefined for any
-     * other value.
+     * moments they are. Of one kind, a list, it needs no rank of its kind. Undefined for any other value.
      */
     private momentsTerm(value: Value): [string, (column: string) => string[]] | undefined {
-        if (!this.sql.listsByMoments || value.kind !== 'Json') {
+        if (value.kind !== 'Json') {
             return undefined;
         }
         const items = value.items;
