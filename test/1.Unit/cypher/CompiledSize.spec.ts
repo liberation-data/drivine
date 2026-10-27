@@ -383,6 +383,12 @@ describe('A compiled Cypher statement', () => {
         expect(none.callsStoredNullsEqual).toBe(false);
         expect(fallback).not.toContain('nulls_equal');
         expect(fallback).toContain('THEN NULL ELSE FALSE END');
+        // And so are they in a reduce's step, which calls no function the query declares.
+        const unfolded = new OracleCypherCompiler('g', false).compile(
+            'MATCH (c:Claim) WITH [c.a, null] AS l RETURN reduce(acc = true, x IN [[1]] | acc AND x = l)'
+        ).sql;
+        expect(unfolded).not.toContain('nulls_equal');
+        expect(unfolded).toContain('THEN NULL ELSE FALSE END');
         const declared = new OracleCypherCompiler('g', false).compile(
             'MATCH (c:Claim) WITH [c.a, null] AS l, [c.b] AS m RETURN l = m'
         ).sql;
