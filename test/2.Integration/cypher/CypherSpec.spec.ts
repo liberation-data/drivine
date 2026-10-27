@@ -1900,7 +1900,8 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                     'MATCH p = (:Hub)-[r:R]->() RETURN [size(collect(DISTINCT relationships(p))), size(collect(DISTINCT {x: r}))]'
                 )
             ).toEqual([[5000, 5000]]);
-            expect(Date.now() - started).toBeLessThan(15_000);
+            // Under 8 seconds on a laptop, and up to 17 on CI's runners: 30 leaves CI room and still catches the minute.
+            expect(Date.now() - started).toBeLessThan(30_000);
         }, 300_000);
 
         it('a whole float past 2^53 written in the statement or given equals the same float worked out', async () => {
