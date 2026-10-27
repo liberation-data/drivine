@@ -1785,6 +1785,13 @@ const names = await pm.query<string>(
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
   Such a text still can't be sorted by, grouped by or made `DISTINCT`: Oracle sorts and groups JSON only up to about
   32 KB, and refuses the statement (ORA-40180), leaving the session open.
+- On Oracle, writes are worked around for the same bug: a text that a write takes from an unwound parameter's item, or
+  from another value of its rows, to write it (`UNWIND $rows AS r MATCH (n {id: r.id}) SET n.a = r.a`, `CREATE (:X {a:
+  r.a})`, `MERGE … SET n.a = r.a`) is read from the row's text, at no cost drivine4j measured: 1,000 rows set by one
+  statement take as long as before. Any other value, a map set whole by `SET n += r` among them, is read as before. A
+  value such an item gives a `RETURN` or a `WITH` (`RETURN r.a`, `WITH r.a AS a`) isn't worked around yet. See
+  "In a PL/SQL block, from a `JSON` variable" in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Postgres, float arithmetic, `sum()` and `avg()` are worked out in exact decimal (`numeric`), not as doubles, so
   they are more accurate: `0.1 + 0.2` is `0.3`, where Neo4j gives `0.30000000000000004`. A result differs from a
   graph engine's only around its 16th significant digit, and still comes back as a float. It shows only where a result

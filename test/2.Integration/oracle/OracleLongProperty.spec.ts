@@ -17,7 +17,8 @@ const GRAPH = 'drivine_long_property';
  * it: see `OracleCypherCompiler.itemProperty`. drivine4j's `CypherWriteOracleTest` "a property past 32 KB read on two
  * nodes leaves the session open". The Cypher spec's case "A property past 32 KB read on two nodes" (test/cypher/
  * writes.yaml) covers a node's property returned and passed on; this one asks the session again after each statement,
- * and covers a relationship's and the sorts Oracle refuses too.
+ * and covers a relationship's and the sorts Oracle refuses too. A text past 32 KB a write takes from an unwound
+ * parameter's item crashed it alike (liberation-data/drivine#356): see `OracleCypherCompiler.rowValue`.
  */
 describeOnOracle('a property past 32 KB read on two nodes on Oracle', () => {
     let connection: Connection;
@@ -75,5 +76,50 @@ describeOnOracle('a property past 32 KB read on two nodes on Oracle', () => {
             expect(await cypher(`MATCH ()-[r:CY_LONG]->() RETURN r.a AS a${i}`)).toEqual([texts[0], texts[0]]);
             expect(await cypher(`MATCH (n:CyWrite) RETURN count(n) AS c${i}`)).toEqual([3]);
         }
+    });
+
+    it('leaves the session open where a text past 32 KB is set from an unwound parameter on two nodes', async () => {
+        // Oracle crashed the session where the block took a text past 32 KB from an item of an unwound parameter, as
+        // JSON, for each of two rows (liberation-data/drivine#356). The compiler reads a text a write takes from its row
+        // through the row's text to work round it: see OracleCypherCompiler.rowValue. drivine4j's `CypherWriteOracleTest`
+        // "a text past 32 KB set from an unwound parameter on two nodes leaves the session open". As above, each
+        // statement is new, and the session is asked again after it.
+        for (const label of ['CyWrite', 'CyMade', 'CyBare']) {
+            await cypher(`MATCH (n:${label}) DETACH DELETE n`);
+        }
+        const texts = ['x', 'y', 'z'].map((it) => it.repeat(40_000));
+        const items = { items: texts.map((a, i) => ({ id: i + 1, a, f: 5 })) };
+        await cypher('UNWIND range(1, 3) AS id CREATE (:CyWrite {id: id})');
+        const written: string[] = [];
+        for (let i = 0; i < 3; i++) {
+            await cypher(`UNWIND $items AS t MATCH (n:CyWrite {id: t.id}) SET n.a${i} = t.a`, items);
+            await cypher(`UNWIND $items AS t MERGE (n:CyWrite {id: t.id}) SET n.m${i} = t.a`, items);
+            await cypher(`UNWIND $items AS t CREATE (:CyMade {id: t.id, a: t.a, i: ${i}})`, items);
+            await cypher(`UNWIND $texts AS t CREATE (:CyBare {a: t, i: ${i}})`, { texts });
+            written.push(`a${i}`, `m${i}`);
+            expect(await cypher(`MATCH (n:CyWrite) WHERE n.id > -${i} RETURN properties(n) ORDER BY n.id`)).toEqual(
+                texts.map((a, j) => ({ id: j + 1, ...Object.fromEntries(written.map((it) => [it, a])) }))
+            );
+            // Each read as an item of its own: one inside a list isn't worked around (see itemProperty).
+            expect(await cypher(`MATCH (n:CyMade {i: ${i}}) RETURN n.a ORDER BY n.id`)).toEqual(texts);
+            expect((await cypher(`MATCH (n:CyBare {i: ${i}}) RETURN n.a`)).sort()).toEqual(texts);
+            expect(await cypher(`MATCH (n:CyWrite) RETURN count(n) AS c${i}`)).toEqual([3]);
+        }
+        // A map item that holds the long text, set whole.
+        await cypher('UNWIND $items AS t MATCH (n:CyWrite {id: t.id}) SET n += t', items);
+        expect(await cypher('MATCH (n:CyWrite) RETURN n.a ORDER BY n.id')).toEqual(texts);
+        expect(await cypher('MATCH (n:CyWrite) RETURN n.f ORDER BY n.id')).toEqual([5, 5, 5]);
+    });
+
+    it('writes a map an unwound item holds, with a key as extended JSON names one, as the map it is', async () => {
+        // Only a text a write takes from its row is read through the row's text (liberation-data/drivine#356): a map is
+        // read as JSON, as before, and not from extended JSON, which would read {"$numberLong": "5"} as the number 5.
+        await cypher('MATCH (n:CyWrite) DETACH DELETE n');
+        const items = [
+            { id: 1, m: { $numberLong: '5' } },
+            { id: 2, m: { $numberDouble: '2.0' } }
+        ];
+        await cypher('UNWIND $items AS t CREATE (:CyWrite {id: t.id, m: t.m})', { items });
+        expect(await cypher('MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id')).toEqual(items);
     });
 });

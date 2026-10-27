@@ -464,6 +464,15 @@ export abstract class SqlCypherCompiler {
         return this.propertyOf(props, key);
     }
 
+    /**
+     * The value at `keys`, each of a map in the one before, in the row a write is making (`Procedure.ROW`), where a
+     * statement of the write reads it to work out what it writes: as {@link propertyOf} reads each key, but on a store
+     * that must read it apart.
+     */
+    rowValue(keys: string[]): string {
+        return keys.reduce((json, key) => this.propertyOf(json, key), Procedure.ROW);
+    }
+
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(

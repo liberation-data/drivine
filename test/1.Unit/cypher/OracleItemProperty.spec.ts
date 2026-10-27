@@ -4,7 +4,8 @@ import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 /**
  * On Oracle, a property that is an item of a `RETURN` or a `WITH` is read through its text, as extended JSON: Oracle
  * crashed the session where a statement took a text past 32 KB from the properties as JSON for each of two rows
- * (liberation-data/drivine#320). Elsewhere a property is read as it was. drivine4j's `OracleItemPropertyTest`.
+ * (liberation-data/drivine#320). So is a text a write takes from the row it is writing, to work out what it writes
+ * (liberation-data/drivine#356). Elsewhere a property is read as it was. drivine4j's `OracleItemPropertyTest`.
  */
 describe('A property an item of a RETURN or a WITH gives in compiled Cypher', () => {
     const long =
@@ -69,6 +70,59 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         expect(oracle('MATCH (n:Doc) WITH collect(n) AS ns RETURN ns[0].a')).toContain(
             "KEEP '$.a') RETURNING CLOB EXTENDED), '$.a' RETURNING CLOB) EXTENDED) AS c1"
         );
+    });
+
+    it("should read a text a write takes from its row through the row's text on Oracle, and match its pattern as it was", () => {
+        const read = (at: string): string =>
+            `CASE WHEN JSON_VALUE(cy_row, '${at}.type()') = 'string' THEN JSON(JSON_QUERY(JSON_SERIALIZE(cy_row RETURNING CLOB), '${at}' RETURNING CLOB)) ` +
+            `ELSE JSON_QUERY(cy_row, '${at}' RETURNING JSON) END`;
+        const compile = (cypher: string): string => new OracleCypherCompiler('g').compile(cypher, { ts: [] }).sql;
+        const set = compile('UNWIND $ts AS t MATCH (n:Doc {id: t.id}) SET n.a = t.a, n.b = t, n.c = t.m.`k.j`');
+        expect(set).toContain(`SELECT ${read('$.v1.a')} INTO cy_value`);
+        expect(set).toContain(`SELECT ${read('$.v1')} INTO cy_value`);
+        expect(set).toContain(`SELECT ${read('$.v1.m."k.j"')} INTO cy_value`);
+        expect(set).not.toContain('JSON_QUERY(JSON_QUERY(cy_row');
+        const merged = compile('UNWIND $ts AS t MERGE (n:Doc {id: t.id}) ON CREATE SET n.a = t.a');
+        expect(merged).toContain("= JSON_QUERY(JSON_QUERY(cy_row, '$.v1' RETURNING JSON), '$.id' RETURNING JSON)");
+        expect(merged).toContain(
+            `JSON_OBJECT('id' VALUE ${read('$.v1.id')} NULL ON NULL RETURNING JSON) INTO cy_value`
+        );
+        expect(merged).toContain(`SELECT ${read('$.v1.a')} INTO cy_value`);
+        // A FOREACH's write reads its own variable and the rows' alike, each from the row it is writing.
+        const each = compile('UNWIND $ts AS t MATCH (n:Doc {id: t.id}) FOREACH (x IN t.xs | SET n.a = x.a, n.b = t.a)');
+        expect(each).toContain(`SELECT ${read('$.v3.a')} INTO cy_value`);
+        expect(each).toContain(`SELECT ${read('$.v1.a')} INTO cy_value`);
+    });
+
+    it("should read a value a UNION in a write's subquery takes from its row in each query from what the UNION gives", () => {
+        // x is t.m in one query and t.l in the other: read from the row at the first's keys, the other's rows read t.m.a.
+        const sql = new OracleCypherCompiler('g').compile(
+            'UNWIND $ts AS t MATCH (n {id: t.id}) SET n.a = COUNT { CALL { WITH t RETURN t.m AS x UNION ALL ' +
+                'WITH t RETURN t.l AS x } MATCH (y) WHERE y.k = x.a RETURN y }',
+            { ts: [] }
+        ).sql;
+        expect(sql).not.toContain("'$.v1.m.a'");
+        expect(sql).not.toContain("'$.v1.l.a'");
+    });
+
+    it("should read a value an OPTIONAL CALL in a write's subquery returns from its row from what the call gives", () => {
+        // u is null where the call finds nothing: read from the row, it would be t, and y.k compared with t.a.
+        const cypher =
+            'UNWIND $ts AS t MATCH (n {id: t.id}) SET n.a = COUNT { OPTIONAL CALL { WITH t MATCH (y:Nope) RETURN t AS u } ' +
+            'MATCH (y) WHERE y.k = u.a RETURN y }';
+        expect(new OracleCypherCompiler('g').compile(cypher, { ts: [] }).sql).not.toContain("'$.v1.a'");
+        const made = new PostgresCypherCompiler('g').compile(cypher, { ts: [] }).setup.join('\n');
+        expect(made).toContain('cy_row');
+        expect(made).not.toContain("((cy_row -> 'v1') -> 'a')");
+    });
+
+    it('should read a value a write takes from its row on Postgres as elsewhere', () => {
+        // A statement that writes is a function on Postgres, made by the compiled statement's setup.
+        const made = new PostgresCypherCompiler('g')
+            .compile('UNWIND $ts AS t MATCH (n:Doc {id: t.id}) SET n.a = t.a, n.c = t.m.k', { ts: [] })
+            .setup.join('\n');
+        expect(made).toContain("SELECT ((cy_row -> 'v1') -> 'a') INTO cy_value");
+        expect(made).toContain("SELECT (((cy_row -> 'v1') -> 'm') -> 'k') INTO cy_value");
     });
 
     it('should be read on Postgres as elsewhere', () => {
