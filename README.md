@@ -1822,10 +1822,10 @@ const names = await pm.query<string>(
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A path variable in
   CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A zoned value the
-  statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text. On
-  Postgres, a list of them, or a list of lists of them, sorts item by item so in an `ORDER BY`, `min` and `max`.
-  Oracle sorts such a list as it sorts JSON, a zoned value by its text: Oracle 23 takes many minutes to parse the key
-  that sorts it by moments over a list worked out item by item with temporal arithmetic
+  statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
+  does a map that holds one. On Postgres, a list of them, or a list of lists of them, sorts item by item so in an
+  `ORDER BY`, `min` and `max`. Oracle sorts such a list as it sorts JSON, a zoned value by its text: Oracle 23 takes
+  many minutes to parse the key that sorts it by moments over a list worked out item by item with temporal arithmetic
   (`[i IN range(1, 10) | t + duration({minutes: i})]`), and neither a query timeout nor a kill ends the parse
   ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331)).
 - A parameter is bound as JSON, so a number that is whole is a whole number, though it was written `2.0`:

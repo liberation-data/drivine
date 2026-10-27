@@ -45,19 +45,21 @@ describeOnOracle('a list of zoned values on Oracle', () => {
                 return (result.rows ?? []).map((it) => JSON.stringify(it[0]));
             }
             running.catch(() => undefined);
-            const admin = await oracledb.getConnection({
-                ...attributes,
-                user: 'system',
-                password: TEST_CONTAINER_PASSWORD
-            });
             try {
-                const [[serial]] =
-                    (await admin.execute<[number]>(`SELECT serial# FROM v$session WHERE sid = ${sid}`)).rows ?? [];
-                await admin.execute(`ALTER SYSTEM KILL SESSION '${sid},${serial}' IMMEDIATE`);
+                const admin = await oracledb.getConnection({
+                    ...attributes,
+                    user: 'system',
+                    password: TEST_CONTAINER_PASSWORD
+                });
+                try {
+                    const [[serial]] =
+                        (await admin.execute<[number]>(`SELECT serial# FROM v$session WHERE sid = ${sid}`)).rows ?? [];
+                    await admin.execute(`ALTER SYSTEM KILL SESSION '${sid},${serial}' IMMEDIATE`);
+                } finally {
+                    await admin.close();
+                }
             } catch {
-                // The session may have ended already.
-            } finally {
-                await admin.close();
+                // The session may have ended already, or no admin session be had: the connection is broken all the same.
             }
             await connection.break().catch(() => undefined);
             throw new Error(`Oracle took more than ${seconds} seconds to run: ${cypher}`);
