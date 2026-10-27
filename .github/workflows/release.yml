@@ -46,12 +46,12 @@ jobs:
                   if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == tag ]]; then
                       tag="$GITHUB_REF_NAME"
                       if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-                          echo "::error::The tag $tag isn't vX.Y.Z (or vX.Y.Z-prerelease)."
+                          echo "::error::The tag $tag isn't vX.Y.Z (or vX.Y.Z-suffix). Delete it and tag the release commit vX.Y.Z."
                           exit 1
                       fi
                       version="${tag#v}"
                       if [[ "$version" != "$package_version" ]]; then
-                          echo "::error::The tag $tag says $version, but package.json's version is $package_version. Tag the merge commit of the release PR that bumped it."
+                          echo "::error::The tag $tag is version $version, but package.json's version is $package_version. Tag the commit whose version is $version, or bump package.json in a release PR first."
                           exit 1
                       fi
                       if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
@@ -83,8 +83,9 @@ jobs:
             - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
               with:
                   node-version: 24
-            # The npm that publishes, so the dry run checks what it will check.
-            - run: npm install -g npm@latest
+            # The npm that publishes, so the dry run checks what it will check. Pinned, as npm's latest can be a new
+            # major; trusted publishing needs 11.5.1 or later.
+            - run: npm install -g npm@11.21.1
             - run: npm ci
             - run: npm run build
             - name: The built package is the version being released
@@ -161,8 +162,8 @@ jobs:
             - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
               with:
                   node-version: 24
-            # Trusted publishing needs npm 11.5.1 or later.
-            - run: npm install -g npm@latest
+            # The npm build ran its dry run with. Trusted publishing needs 11.5.1 or later.
+            - run: npm install -g npm@11.21.1
             - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
               with:
                   name: dist
