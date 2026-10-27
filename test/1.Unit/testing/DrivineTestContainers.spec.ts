@@ -31,6 +31,32 @@ describe('DrivineTestContainers', () => {
         });
     });
 
+    describe('image', () => {
+        it('is the latest Neo4j, Memgraph and FalkorDB by default, and pins Postgres and Oracle', () => {
+            expect(DrivineTestContainers.image(DatabaseType.NEO4J, {})).toBe('neo4j:latest');
+            expect(DrivineTestContainers.image(DatabaseType.MEMGRAPH, {})).toBe('memgraph/memgraph:latest');
+            expect(DrivineTestContainers.image(DatabaseType.FALKORDB, {})).toBe('falkordb/falkordb:latest');
+            expect(DrivineTestContainers.image(DatabaseType.POSTGRES, {})).toBe('pgvector/pgvector:pg16');
+            expect(DrivineTestContainers.image(DatabaseType.ORACLE, {})).toBe('gvenzl/oracle-free:23-faststart');
+        });
+
+        it('is <TYPE>_TEST_IMAGE where it is set, for that type only', () => {
+            const env: Environment = {
+                NEO4J_TEST_IMAGE: 'neo4j:5.26-community',
+                MEMGRAPH_TEST_IMAGE: 'memgraph/memgraph:3.14.0',
+                FALKORDB_TEST_IMAGE: 'falkordb/falkordb:6.0.3'
+            };
+            expect(DrivineTestContainers.image(DatabaseType.NEO4J, env)).toBe('neo4j:5.26-community');
+            expect(DrivineTestContainers.image(DatabaseType.MEMGRAPH, env)).toBe('memgraph/memgraph:3.14.0');
+            expect(DrivineTestContainers.image(DatabaseType.FALKORDB, env)).toBe('falkordb/falkordb:6.0.3');
+            expect(DrivineTestContainers.image(DatabaseType.POSTGRES, env)).toBe('pgvector/pgvector:pg16');
+        });
+
+        it('is undefined for a type without a container', () => {
+            expect(DrivineTestContainers.image('NEPTUNE' as DatabaseType, {})).toBeUndefined();
+        });
+    });
+
     describe('start', () => {
         it('starts nothing, and changes nothing, for local datasources and types without a container', async () => {
             const env: Environment = {
