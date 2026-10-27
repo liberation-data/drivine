@@ -112,15 +112,13 @@ jobs:
                       fi
                   done
                   # The same rule as release.yml's check: a version that isn't tagged and is later than every vX.Y.Z
-                  # tag. A prerelease sorts below its release: `sort -V` puts a ~ before everything, the end included.
-                  highest=$(git tag -l 'v*' | sed -n -E 's/^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$/\1/p' \
-                      | sed 's/-/~/' | sort -V | tail -n 1 | sed 's/~/-/')
-                  later=$(printf '%s\n' "$highest" "$version" | sed 's/-/~/' | sort -V | tail -n 1 | sed 's/~/-/')
+                  # tag, by semver precedence, so a prerelease sorts below its release.
+                  newest=$(git tag -l 'v*' | node scripts/release-version.js newest)
                   if [[ -n "$(git tag -l "$tag")" ]]; then
                       echo "::error::$tag is already tagged. Pick a later version."
                       exit 1
-                  elif [[ -n "$highest" && ( "$version" == "$highest" || "$later" != "$version" ) ]]; then
-                      echo "::error::$version isn't later than the last release, v$highest, so merging it would release nothing. Pick a later version."
+                  elif [[ -n "$newest" ]] && ! node scripts/release-version.js greater "$version" "${newest#v}"; then
+                      echo "::error::$version isn't later than the last release, $newest, so merging it would release nothing. Pick a later version."
                       exit 1
                   fi
                   if git ls-remote --exit-code --heads origin "refs/heads/release/$tag" > /dev/null; then
@@ -129,7 +127,7 @@ jobs:
                   fi
                   echo "Version $current to $version"
                   echo "current=$current" >> "$GITHUB_OUTPUT"
-                  echo "last=${highest:+v$highest}" >> "$GITHUB_OUTPUT"
+                  echo "last=$newest" >> "$GITHUB_OUTPUT"
                   echo "version=$version" >> "$GITHUB_OUTPUT"
             - name: Open the release PR
               env:
