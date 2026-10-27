@@ -154,6 +154,14 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      */
     readonly extremesByListKey: boolean = false;
 
+    /**
+     * Oracle 23 takes many minutes to parse {@link momentsKey}'s `JSON_TABLE` over a list worked out item by item with
+     * temporal arithmetic, as a comprehension works one out (liberation-data/drivine4j#331), and neither a query timeout
+     * nor a kill ends the parse, so the session stalls: a list of zoned values sorts as its JSON, by the text of each, as
+     * it did before lists sorted by their moments.
+     */
+    readonly listsByMoments: boolean = false;
+
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
 
@@ -478,6 +486,11 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /** `JSON_ARRAYAGG` leaves nulls out. */
     collect(value: string, order?: string): string {
         return `COALESCE(JSON_ARRAYAGG(${value}${order ? ` ORDER BY ${order}` : ''} RETURNING JSON), JSON('[]'))`;
+    }
+
+    /** At most 4,000 bytes, as a `VARCHAR2`: the rest is left off, where it would fail the statement. Unused while lists sort as JSON: see {@link listsByMoments}. */
+    joinedTexts(text: string, order: string): string {
+        return `LISTAGG(${text} ON OVERFLOW TRUNCATE '' WITHOUT COUNT) WITHIN GROUP (ORDER BY ${order})`;
     }
 
     /**
@@ -825,6 +838,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      */
     called(query: string): string {
         return `SELECT /*+ NO_MERGE */ * FROM (\n${indent(query)}\n)`;
+    }
+
+    /**
+     * An optional join is on `1 = 1`, not `ON TRUE`: in a scalar subquery, as a `COUNT { … }` is, Oracle refuses a join
+     * on `TRUE` followed by a `WHERE … AND …` (ORA-00907), and crashes the session on one without (ORA-07445 in
+     * `qcsjccqb`, ORA-03113 to the client) (#377). See drivine4j's docs/oracle-on-true-in-scalar-subquery-crash.md.
+     */
+    lateral(query: string, name: string, optional: boolean): string {
+        return optional
+            ? `LEFT JOIN LATERAL (\n${indent(query)}\n) ${name} ON 1 = 1`
+            : super.lateral(query, name, false);
     }
 
     /**

@@ -42,6 +42,9 @@ export abstract class TemporalSql {
     /** The text `text` as a number: null where it is null or empty. */
     abstract number(text: string): string;
 
+    /** The timestamp `timestamp` as a text of one width, `2024-03-15T10:30:00.000000`, which orders as the timestamps do. */
+    abstract sortable(timestamp: string): string;
+
     /** The microseconds of the second of the timestamp `timestamp`, as six digits. */
     abstract micros(timestamp: string): string;
 

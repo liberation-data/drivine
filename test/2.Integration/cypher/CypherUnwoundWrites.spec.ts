@@ -260,16 +260,25 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
         expect(await counted('u', subquery)).toEqual(1);
     });
 
-    // On Oracle an OPTIONAL CALL in a subquery expression is refused (ORA-00907): liberation-data/drivine#377. Its SQL is
-    // pinned in OracleItemProperty.spec.ts.
-    (store.type === DatabaseType.ORACLE ? it.skip : it)(
-        "should read a property of a value an OPTIONAL CALL in a write's subquery returns from its row as null where it finds nothing",
-        async () => {
-            const subquery =
-                'OPTIONAL CALL { WITH t MATCH (z:CyUnwoundNope) RETURN t AS u } MATCH (y:CyUnwoundOther) WHERE y.k = u.a RETURN y';
-            expect(await counted('o', subquery)).toEqual(0);
-        }
-    );
+    // On Oracle an OPTIONAL CALL in a write's subquery was refused (ORA-06550, ORA-00907) until it was joined on 1 = 1
+    // (#377). Its SQL is pinned in OracleItemProperty.spec.ts and OracleOptionalJoin.spec.ts.
+    it("should read a property of a value an OPTIONAL CALL in a write's subquery returns from its row as null where it finds nothing", async () => {
+        const subquery =
+            'OPTIONAL CALL { WITH t MATCH (z:CyUnwoundNope) RETURN t AS u } MATCH (y:CyUnwoundOther) WHERE y.k = u.a RETURN y';
+        expect(await counted('o', subquery)).toEqual(0);
+        await clearLabels(pm, store, ...LABELS);
+        expect(
+            await counted(
+                'f',
+                'OPTIONAL CALL { WITH t RETURN t.m AS u } MATCH (y:CyUnwoundOther) WHERE y.k = u.a RETURN y'
+            )
+        ).toEqual(1);
+        // With no WHERE … AND … after the join, it closed the session there.
+        await clearLabels(pm, store, ...LABELS);
+        expect(await counted('b', 'OPTIONAL CALL { WITH t MATCH (z:CyUnwoundNope) RETURN t AS u } RETURN u')).toEqual(
+            1
+        );
+    });
 
     it("should read a property of a value a WITH in a write's subquery names as the value it names", async () => {
         // Renamed, it is the row's value still; a CASE over two of its keys gives the one it picks.

@@ -651,6 +651,7 @@ export class CypherWriter {
                 }),
                 {
                     items: this.itemsOf(call.one()),
+                    itemItems: this.itemItemsOf(call.one()),
                     list: this.isList(call.one()),
                     itemLists: this.holdsLists(call.one()),
                     text: this.isText(call.one()),
@@ -671,6 +672,7 @@ export class CypherWriter {
                 }),
                 {
                     items: this.itemsOf(call.one()),
+                    itemItems: this.itemItemsOf(call.one()),
                     list: this.isList(call.one()),
                     itemLists: this.holdsLists(call.one()),
                     texts: this.holdsTexts(call.one())
@@ -913,7 +915,7 @@ export class CypherWriter {
             ...inner.from(),
             ...optional(inner.whereClause())
         ];
-        select.join(`LEFT JOIN LATERAL (\n${indent(text.join('\n'))}\n) ${name} ON TRUE`);
+        select.join(this.sql.lateral(text.join('\n'), name, true));
         named.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
     }
 
@@ -974,8 +976,7 @@ export class CypherWriter {
         this.rowOrder = order;
         this.redeclared([...projected.scope.keys()], [...select.bound.keys()]);
         const name = this.alias('c');
-        const text = `(\n${indent(this.sql.called(projected.sql))}\n) ${name}`;
-        select.join(call.optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`);
+        select.join(this.sql.lateral(this.sql.called(projected.sql), name, call.optional));
         projected.scope.forEach((value, variable) =>
             // A value taken from a write's row is null here where the call finds nothing: it is read as returned.
             select.bind(
@@ -1077,6 +1078,7 @@ export class CypherWriter {
                         fromList: all.every((it) => it?.fromList === true),
                         temporal: single(all.map((it) => it?.temporal)),
                         items: single(all.map((it) => it?.items)),
+                        itemItems: single(all.map((it) => it?.itemItems)),
                         text: all.every((it) => it?.text === true),
                         texts: all.every((it) => it?.texts === true)
                     }
@@ -1116,6 +1118,7 @@ export class CypherWriter {
             unwind.variable,
             json(`${name}.item`, {
                 temporal: this.itemsOf(list),
+                items: this.itemItemsOf(list),
                 list: this.holdsLists(list),
                 text: this.holdsTexts(list) || this.isText(list),
                 flat: this.isFlat(list),
@@ -1326,7 +1329,7 @@ export class CypherWriter {
             )}\n) ${s}`;
             text = `SELECT * FROM (\n${indent(least)}\n) ${this.alias('s')}\nWHERE len = least`;
         }
-        select.join(`CROSS JOIN LATERAL (\n${indent(text)}\n) ${name}`);
+        select.join(this.sql.lateral(text, name, false));
         found.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
     }
 
@@ -1774,6 +1777,7 @@ export class CypherWriter {
                     json(written ? this.sql.rowValue([key]) : this.sql.propertyOf(row, key), {
                         temporal: was?.temporal,
                         items: was?.items,
+                        itemItems: was?.itemItems,
                         list: was?.list,
                         itemLists: was?.itemLists,
                         text: was?.text,
@@ -2981,6 +2985,7 @@ export class CypherWriter {
             ordered: true,
             items: this.kindOf(list.items.map((it, i) => [it, items[i]])),
             identity: this.identityHolding(items, (ids) => this.sql.jsonArray(ids)),
+            itemItems: this.itemKindOf(list.items.map((it, i) => [it, items[i]])),
             list: true,
             itemLists: entities.length > 0 && entities.every((it) => this.isList(it)),
             texts: items.every((it) => this.isText(it))
@@ -3012,6 +3017,7 @@ export class CypherWriter {
             const item = this.sql.element(subject(), at);
             return json(item, {
                 temporal: this.itemsOf(value),
+                items: this.itemItemsOf(value),
                 identity: this.identityTaken(value, item, true, (it) => this.sql.element(it, at)),
                 list: this.holdsLists(value),
                 text: this.holdsTexts(value)
@@ -3027,6 +3033,7 @@ export class CypherWriter {
         const taken = take(subject());
         return json(taken, {
             temporal: this.itemsOf(value),
+            items: this.itemItemsOf(value),
             identity: this.identityTaken(value, taken, true, take),
             list: this.holdsLists(value),
             text: this.holdsTexts(value)
@@ -3087,6 +3094,7 @@ export class CypherWriter {
         return json(taken, {
             items: this.itemsOf(listed),
             identity: this.identityTaken(listed, taken, false, sliced),
+            itemItems: this.itemItemsOf(listed),
             list: true,
             itemLists: this.holdsLists(listed),
             texts: this.holdsTexts(listed)
@@ -3196,6 +3204,7 @@ export class CypherWriter {
         return json(list, {
             ordered: true,
             items: projected?.kind === 'Json' ? projected.temporal : undefined,
+            itemItems: projected !== undefined ? this.itemsOf(projected) : undefined,
             list: true,
             itemLists: projected !== undefined && this.isList(projected)
         });
@@ -3207,7 +3216,14 @@ export class CypherWriter {
         const name = this.alias('x');
         const inner: Scope = new Map([
             ...scope,
-            [comprehension.variable, json(`${name}.item`, { temporal: this.itemsOf(listed) })]
+            [
+                comprehension.variable,
+                json(`${name}.item`, {
+                    temporal: this.itemsOf(listed),
+                    items: this.itemItemsOf(listed),
+                    list: this.holdsLists(listed)
+                })
+            ]
         ]);
         const projected = comprehension.projection ? this.expression(comprehension.projection, inner) : undefined;
         const projection = projected ? this.asJson(projected).sql : `${name}.item`;
@@ -3225,6 +3241,7 @@ export class CypherWriter {
             {
                 ordered: true,
                 items: projected ? (projected.kind === 'Json' ? projected.temporal : undefined) : this.itemsOf(listed),
+                itemItems: projected ? this.itemsOf(projected) : this.itemItemsOf(listed),
                 list: true,
                 itemLists: projected ? this.isList(projected) : this.holdsLists(listed)
             }
@@ -3322,6 +3339,7 @@ export class CypherWriter {
         return json(gathered(this.asJson(projected).sql), {
             ordered: true,
             items: projected.kind === 'Json' ? projected.temporal : undefined,
+            itemItems: this.itemsOf(projected),
             list: true,
             itemLists: this.isList(projected)
         });
@@ -3525,6 +3543,19 @@ export class CypherWriter {
     /** The temporal kind the statement makes each item of the list `list`: see {@link JsonValue.items}. */
     private itemsOf(list: Value): Temporal | undefined {
         return list.kind === 'Json' ? list.items : undefined;
+    }
+
+    /** The temporal kind the statement makes each item of each item of the list `list`: see {@link JsonValue.itemItems}. */
+    private itemItemsOf(list: Value): Temporal | undefined {
+        return list.kind === 'Json' ? list.itemItems : undefined;
+    }
+
+    /** The temporal kind the statement makes each item of each of `values`, lists all, as {@link kindOf} tells it of values. */
+    private itemKindOf(values: [Expression, Value][]): Temporal | undefined {
+        const listed = values.filter(([written]) => !isNullLiteral(written));
+        return listed.every(([, value]) => this.isList(value))
+            ? single(listed.map(([, value]) => this.itemsOf(value)))
+            : undefined;
     }
 
     /**
@@ -3921,8 +3952,9 @@ export class CypherWriter {
                         gathered
                     };
                 }
-                // Two lists of items of one kind are, together, a list of that kind. A side the statement makes a text, not
-                // given, is written as its own text; a text put together with a text, or a number given, is a text.
+                // Two lists of items of one kind are, together, a list of that kind, and so of lists of items of one kind. A
+                // side the statement makes a text, not given, is written as its own text; a text put together with a text, or
+                // a number given, is a text.
                 const items = this.itemsOf(left);
                 const [l, r] = [this.summand(binary.left, left), this.summand(binary.right, right)];
                 const given: [unknown, unknown] = [l.passed, r.passed];
@@ -3930,6 +3962,7 @@ export class CypherWriter {
                     sql.shared([a, b], ([x, y]) => sql.add(x, y, given)),
                     {
                         items: items !== undefined && items === this.itemsOf(right) ? items : undefined,
+                        itemItems: single([this.itemItemsOf(left), this.itemItemsOf(right)]),
                         list: this.isList(left) || this.isList(right),
                         itemLists: this.holdsLists(left) && (this.holdsLists(right) || !this.isList(right)),
                         ...this.summedTexts(l, r)
@@ -4633,6 +4666,7 @@ export class CypherWriter {
                 : this.sql.bound(values(), (bound) => written((_, i) => bound[i]));
         return json(sql, {
             temporal: this.kindOf(results),
+            items: this.itemKindOf(results),
             identity,
             list: results.every(([, it]) => this.isList(it)),
             itemLists: results.every(([, it]) => this.holdsLists(it)),
@@ -4683,6 +4717,7 @@ export class CypherWriter {
         if (name === 'head' || name === 'last') {
             return json(result, {
                 temporal: this.itemsOf(one),
+                items: this.itemItemsOf(one),
                 identity: this.identityTaken(one, result, true, (list) =>
                     this.sql.shared([list], ([x]) => this.sql.function(name, x)!)
                 ),
@@ -4734,6 +4769,7 @@ export class CypherWriter {
         return json(this.collected(gathered), {
             ordered: true,
             items: gathered.kind === 'Json' ? gathered.temporal : undefined,
+            itemItems: this.itemsOf(gathered),
             list: true,
             itemLists: this.isList(gathered),
             texts: this.isText(gathered),
@@ -4763,6 +4799,7 @@ export class CypherWriter {
                 ordered: true,
                 items: list.items,
                 identity: this.sql.comparable(json(this.sql.distinctItems(list.identity), { ordered: true })),
+                itemItems: list.itemItems,
                 list: true,
                 itemLists: list.itemLists,
                 texts: list.texts
@@ -4771,6 +4808,7 @@ export class CypherWriter {
         return json(this.sql.distinctItems(this.sql.comparable(list)), {
             ordered: true,
             items: list.items,
+            itemItems: list.itemItems,
             list: true,
             itemLists: list.itemLists,
             texts: list.texts
@@ -4778,18 +4816,33 @@ export class CypherWriter {
     }
 
     /**
-     * `min` or `max`: zoned values as the moments they are, whatever their offsets; of a temporal kind, still of it. A list
-     * the statement makes item by item, as an `ORDER BY` sorts it: a store's JSON may put the shorter list first.
+     * `min` or `max`: zoned values as the moments they are, whatever their offsets, and lists of them item by item so; of a
+     * temporal kind, still of it, and a list of the kinds of list it was. A list the statement makes item by item, as an
+     * `ORDER BY` sorts it: a store's JSON may put the shorter list first.
      */
     private extreme(call: Invocation, min: boolean): Value {
         const value = this.asJson(call.one());
         const temporal = value.temporal;
+        const items = value.items;
+        const itemItems = value.itemItems;
+        const listsByMoments = this.sql.listsByMoments;
         const key = temporal?.zoned
             ? this.temporals.moment(this.sql.text(this.sql.comparable(value)), temporal)
+            : listsByMoments && items?.zoned && value.list
+            ? this.sql.momentsKey(this.sql.comparable(value), items)
+            : listsByMoments && itemItems?.zoned && value.itemLists
+            ? this.sql.momentsKey(this.sql.comparable(value), itemItems, 2)
             : this.sql.extremesByListKey && this.isList(call.one())
             ? this.sql.listSortKey(this.sql.comparable(value))
             : undefined;
-        return json(this.sql.extreme(this.sql.comparable(value), min, key), { temporal, text: this.isText(value) });
+        return json(this.sql.extreme(this.sql.comparable(value), min, key), {
+            temporal,
+            items,
+            itemItems,
+            list: value.list,
+            itemLists: value.itemLists,
+            text: this.isText(value)
+        });
     }
 
     /**
@@ -5157,7 +5210,8 @@ export class CypherWriter {
      * What {@link sortable} sorts `value` by, in two: the value as a column carries it, and the terms that sort it, of
      * that column. A value whose kind the statement leaves open sorts as {@link SqlCypherCompiler.openSortKey} has it,
      * where its kind comes first; one it makes a truth value, a temporal value, a text, a list or a node is of one kind,
-     * and sorts by {@link SqlCypherCompiler.sortKey} alone.
+     * and sorts by one term alone: a zoned value or a list of them ({@link SqlCypherCompiler.listsByMoments}) by its
+     * moments, another list by {@link SqlCypherCompiler.listSortKey}, any other by {@link SqlCypherCompiler.sortKey}.
      */
     private sortTerm(value: Value): [string, (column: string) => string[]] {
         if (value.kind === 'Bool') {
@@ -5168,6 +5222,10 @@ export class CypherWriter {
             const temporal = value.temporal;
             return [this.sql.comparable(value), (it) => [this.temporals.moment(this.sql.text(it), temporal)]];
         }
+        const byMoments = this.momentsTerm(value);
+        if (byMoments) {
+            return byMoments;
+        }
         // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts it.
         if (this.isList(value)) {
             return [this.sql.comparable(this.asJson(value)), (it) => [this.sql.listSortKey(it)]];
@@ -5176,6 +5234,26 @@ export class CypherWriter {
             return [this.sql.comparable(this.asJson(value)), (it) => [this.sql.sortKey(it)]];
         }
         return [this.sql.comparable(this.asJson(value)), (it) => this.sql.openSortKey(it)];
+    }
+
+    /**
+     * {@link sortTerm} of a list of zoned values the statement makes, or of a list of lists of them: item by item as the
+     * moments they are, where the store sorts it so. Of one kind, a list, it needs no rank of its kind. Undefined for any
+     * other value.
+     */
+    private momentsTerm(value: Value): [string, (column: string) => string[]] | undefined {
+        if (!this.sql.listsByMoments || value.kind !== 'Json') {
+            return undefined;
+        }
+        const items = value.items;
+        if (value.list && items?.zoned) {
+            return [this.sql.comparable(value), (it) => [this.sql.momentsKey(it, items)]];
+        }
+        const itemItems = value.itemItems;
+        if (value.itemLists && itemItems?.zoned) {
+            return [this.sql.comparable(value), (it) => [this.sql.momentsKey(it, itemItems, 2)]];
+        }
+        return undefined;
     }
 }
 
