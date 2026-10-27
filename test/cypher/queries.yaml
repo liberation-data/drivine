@@ -747,7 +747,7 @@ cases:
         rows: [[["a", "b", "c"], [""]]]
 
   - name: "Round to a fractional or negative precision"
-    description: "round() reads its precision as a whole number toward zero, as Neo4j does, and refuses one below 0."
+    description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."
     steps:
       - note: "1.7 is read as 1, not rounded to 2: 2.555 to 2 places would be 2.56. -0.5 is read as 0. Memgraph and FalkorDB take no precision."
         only: [neo4j, sql]
@@ -767,6 +767,20 @@ cases:
         cypher: "RETURN round(1234.5, $p)"
         parameters: {p: -2}
         error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(5, -$q, 'UP')"
+        parameters: {q: 2}
+        error: true
+      - note: "Neo4j reads the precision only when it rounds a number, so one written below 0 gives null for a null, as one from data does, written, negated or a parameter's value."
+        only: [neo4j, sql]
+        cypher: "RETURN [round(null, -2), round(null, -2, 'UP'), round(null, $p), round(null, -$q, 'HALF_UP'), round(null, -2.5)]"
+        parameters: {p: -2, q: 2}
+        rows: [[null, null, null, null, null]]
+      - note: "And with no row to round, nothing fails."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) WHERE p.name = 'Nobody' RETURN round(1.5, -2), round(1.5, -2, 'UP'), round(1.5, $p)"
+        parameters: {p: -2}
+        rows: []
       - note: "A precision read from data below 0 fails the statement when the row is read, as Neo4j fails it, in both forms."
         only: [neo4j, sql]
         cypher: "UNWIND [-2] AS p RETURN round(1234.5, p)"
@@ -826,6 +840,55 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [-2] AS p RETURN round(5, p)"
         error: true
+      - note: "Neo4j takes a precision up to 2147483647, Java's greatest int, cut toward zero, written, a parameter's value or read from data, in both forms."
+        only: [neo4j, sql]
+        cypher: "RETURN [round(2.5, 2147483647), round(2.5, 2147483647, 'UP'), round(2.5, $p), round(-2.5, $p, 'FLOOR'), round(2.5, 2147483647.5)]"
+        parameters: {p: 2147483647}
+        rows: [[2.5, 2.5, 2.5, -2.5, 2.5]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [2147483647, 2147483647.5] AS p RETURN [round(2.5, p), round(2.5, p, 'HALF_EVEN')]"
+        rows: [[2.5, 2.5], [2.5, 2.5]]
+      - note: "Past 2147483647, it fails on a row it rounds a number on, written, a parameter's value or read from data, in both forms, and as far below 0 too."
+        only: [neo4j, sql]
+        cypher: "RETURN round(2.5, 2147483648)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(2.5, 2147483648, 'UP')"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(5, $p)"
+        parameters: {p: 2147483648}
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(2.5, 1.0E10)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN round(2.5, -2147483649)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [2147483648] AS p RETURN round(2.5, p)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [2147483648] AS p RETURN round(2.5, p, 'UP')"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [1.0E10] AS p RETURN round(5, p, 'HALF_EVEN')"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [-2147483649] AS p RETURN round(2.5, p)"
+        error: true
+      - note: "A null rounds to null by such a precision, and with no row to round, nothing fails."
+        only: [neo4j, sql]
+        cypher: "RETURN [round(null, 2147483648), round(null, 2147483648, 'UP'), round(null, $p), round(null, 1.0E10)]"
+        parameters: {p: 2147483648}
+        rows: [[null, null, null, null]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [2147483648, 1.0E10] AS p RETURN [round(null, p), round(null, p, 'UP')]"
+        rows: [[null, null], [null, null]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (p:Person) WHERE p.name = 'Nobody' RETURN round(1.5, 2147483648), round(1.5, 2147483648, 'UP'), round(1.5, $p)"
+        parameters: {p: 2147483648}
+        rows: []
 
   - name: "EXISTS and COUNT subqueries"
     description: "EXISTS { } and COUNT { } take a pattern, clauses or a whole query, evaluated per row."
