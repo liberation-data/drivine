@@ -125,6 +125,34 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         expect(made).toContain("SELECT (((cy_row -> 'v1') -> 'm') -> 'k') INTO cy_value");
     });
 
+    it('should be read on Oracle from the properties by its own path where a text function or a sum reads it, and not taken out as JSON first', () => {
+        // Taken out with JSON_QUERY and read as a CLOB or summed, a text past 32 KB closed the session, one row a
+        // statement, and a later statement lost its rows (#347).
+        const sql = oracle(
+            "MATCH (n:Doc) RETURN [toUpper(n.a), size(n.a), substring(n.a, 1), n.a STARTS WITH 'x', n.a + 'x', toString(n.a)]"
+        );
+        expect(sql).not.toContain("JSON_VALUE(JSON_QUERY(n1.props, '$.a' RETURNING JSON)");
+        expect(sql).toContain("JSON_VALUE(n1.props, '$.a' RETURNING CLOB)");
+        expect(sql).toContain("JSON_VALUE(n1.props, '$.a.type()')");
+        expect(sql).toContain("JSON_VALUE(n1.props, '$.a.size()' RETURNING NUMBER)");
+    });
+
+    it('should be read on Oracle by its own path where its key is quoted in its path, or by its path in a map', () => {
+        const read = (cypher: string): string => {
+            const sql = oracle(cypher);
+            expect(sql).not.toContain(`JSON_VALUE(JSON_QUERY(n1.props, '$."`);
+            return sql;
+        };
+        const quoted = read("MATCH (n:Doc) RETURN [size(n.`it's`), toUpper(n.`a b`), size(n.`x' RETURNING JSON) y`)]");
+        expect(quoted).toContain(`JSON_VALUE(n1.props, '$."it''s".size()' RETURNING NUMBER)`);
+        expect(quoted).toContain(`JSON_VALUE(n1.props, '$."a b"' RETURNING CLOB)`);
+        expect(quoted).toContain(`JSON_VALUE(n1.props, '$."x'' RETURNING JSON) y".type()')`);
+        // A key in a map is read by its path in the map, the map taken out of the properties as it was.
+        expect(read('MATCH (n:Doc) RETURN size(n.m.a)')).toContain(
+            "JSON_VALUE(JSON_QUERY(n1.props, '$.m' RETURNING JSON), '$.a.size()' RETURNING NUMBER)"
+        );
+    });
+
     it('should be read on Postgres as elsewhere', () => {
         expect(new PostgresCypherCompiler('g').compile('MATCH (n:Doc) RETURN n.a').sql).toContain("(n1.props -> 'a')");
     });

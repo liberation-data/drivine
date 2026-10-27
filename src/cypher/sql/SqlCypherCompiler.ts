@@ -473,6 +473,28 @@ export abstract class SqlCypherCompiler {
         return keys.reduce((json, key) => this.propertyOf(json, key), Procedure.ROW);
     }
 
+    /**
+     * `body` over the texts of the JSON values `jsons`, each read as {@link text} reads it where it is a string. A store
+     * whose text read from JSON holds only so much reads a longer one otherwise: see Oracle's.
+     */
+    texts(jsons: string[], body: (texts: string[]) => string): string {
+        return body(jsons.map((it) => this.text(it)));
+    }
+
+    /**
+     * `replace`: the SQL text `text` with each `search` in it made `replacement`; `searchBytes` and `replacementBytes` are
+     * how long they are in UTF-8, where the statement gives them.
+     */
+    replaceText(
+        text: string,
+        search: string,
+        replacement: string,
+        _searchBytes?: number,
+        _replacementBytes?: number
+    ): string {
+        return `REPLACE(${text}, ${search}, ${replacement})`;
+    }
+
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(

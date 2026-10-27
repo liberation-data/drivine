@@ -29,8 +29,9 @@ describe('A compiled Cypher statement', () => {
             const added = (times: number) =>
                 'MATCH (c:Claim) RETURN ' + '('.repeat(times) + 'c.day' + " + duration('P1D'))".repeat(times);
             const [one, two, four] = [1, 2, 4].map((it) => compiler.compile(added(it)).sql.length);
-            // A sum that may be a text writes each side as toString does, a float as Java writes it.
-            expect(one).toBeLessThan(25_000);
+            // A sum that may be a text writes each side as toString does, a float as Java writes it: on Oracle twice, the
+            // second time for a text past 4,000 bytes (#347).
+            expect(one).toBeLessThan(30_000);
             expect(four).toBeLessThan(3 * two);
         }
     );
@@ -166,15 +167,17 @@ describe('A compiled Cypher statement', () => {
                     'MATCH (c:Claim) WITH toLower(c.s) AS t, collect(toUpper(c.s)) AS ts UNWIND ts AS u RETURN t + u + ts[0] + head(ts)'
                 )
             ).toEqual(0);
-            // A property may hold a float: it is written as toString writes it, beside a text or not.
-            expect(writes("MATCH (c:Claim) RETURN c.s + 'b'")).toEqual(once);
-            expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + c.f')).toEqual(once);
-            expect(writes("MATCH (c:Claim) RETURN 'x' + toString(c.i) + c.f")).toEqual(2 * once);
+            // A property may hold a float: it is written as toString writes it, beside a text or not. Oracle's sum writes such
+            // a side twice, the second time in the branch it takes for a text past 4,000 bytes (#347).
+            const side = name === 'oracle' ? 2 * once : once;
+            expect(writes("MATCH (c:Claim) RETURN c.s + 'b'")).toEqual(side);
+            expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + c.f')).toEqual(side);
+            expect(writes("MATCH (c:Claim) RETURN 'x' + toString(c.i) + c.f")).toEqual(once + side);
             // A text put together with a number given, on either side, is a text; with a property, which may hold a list,
             // not.
-            expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + 1 + c.f')).toEqual(once);
-            expect(writes('MATCH (c:Claim) RETURN 1 + toUpper(c.s) + c.f')).toEqual(once);
-            expect(writes("MATCH (c:Claim) RETURN toUpper(c.s) + c.f + 'x'")).toEqual(2 * once);
+            expect(writes('MATCH (c:Claim) RETURN toUpper(c.s) + 1 + c.f')).toEqual(side);
+            expect(writes('MATCH (c:Claim) RETURN 1 + toUpper(c.s) + c.f')).toEqual(side);
+            expect(writes("MATCH (c:Claim) RETURN toUpper(c.s) + c.f + 'x'")).toEqual(2 * side);
             // A CASE, a coalesce and a list written are a text, or hold texts, where each of theirs is; a text unwound is one.
             expect(
                 writes(
@@ -199,7 +202,7 @@ describe('A compiled Cypher statement', () => {
             const joined =
                 "MATCH (c:Claim) WITH collect(toUpper(c.s)) AS ts, collect(c.f) AS fs RETURN (ts + ['a'])[0], ('b' + ts)[0], (ts + fs)[0]";
             expect(writes(joined.split('[0],').join("[0] + 'x',"))).toEqual(writes(joined));
-            expect(writes(`${joined} + 'x'`)).toEqual(writes(joined) + once);
+            expect(writes(`${joined} + 'x'`)).toEqual(writes(joined) + side);
             const added = "MATCH (c:Claim) WITH collect(toUpper(c.s)) AS ts RETURN (ts + toLower('a'))[0]";
             expect(writes(`${added} + 'x'`)).toEqual(writes(added));
             // Each query of a CALL's UNION makes it a text, and a write carries it on.
@@ -210,19 +213,19 @@ describe('A compiled Cypher statement', () => {
             ).toEqual(0);
             expect(writes("MATCH (c:Claim) WITH c, toUpper(c.s) AS t SET c.t = t RETURN t + 'x'")).toEqual(0);
             // Where any one of them may be a float, it is written as toString writes it.
-            expect(writes("MATCH (c:Claim) RETURN CASE WHEN c.b THEN 'a' ELSE c.f END + 'x'")).toEqual(once);
-            expect(writes("MATCH (c:Claim) RETURN coalesce(toUpper(c.s), c.f) + 'x'")).toEqual(once);
-            expect(writes("MATCH (c:Claim) RETURN ['a', c.f][1] + 'x'")).toEqual(once);
+            expect(writes("MATCH (c:Claim) RETURN CASE WHEN c.b THEN 'a' ELSE c.f END + 'x'")).toEqual(side);
+            expect(writes("MATCH (c:Claim) RETURN coalesce(toUpper(c.s), c.f) + 'x'")).toEqual(side);
+            expect(writes("MATCH (c:Claim) RETURN ['a', c.f][1] + 'x'")).toEqual(side);
             expect(
                 writes(
                     "MATCH (c:Claim) CALL { WITH c RETURN toUpper(c.s) AS v UNION WITH c RETURN c.f AS v } RETURN v + 'x'"
                 )
-            ).toEqual(once);
+            ).toEqual(side);
             // The least and the greatest of texts are a text; of a property, which may hold a float, not.
             expect(
                 writes("MATCH (c:Claim) WITH min(toUpper(c.s)) AS lo, max(toLower(c.s)) AS hi RETURN lo + hi + 'x'")
             ).toEqual(0);
-            expect(writes("MATCH (c:Claim) WITH max(c.f) AS hi RETURN hi + 'x'")).toEqual(once);
+            expect(writes("MATCH (c:Claim) WITH max(c.f) AS hi RETURN hi + 'x'")).toEqual(side);
         }
     );
 

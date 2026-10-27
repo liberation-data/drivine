@@ -628,8 +628,13 @@ export class CypherWriter {
             if (call.arguments.length !== 2) {
                 throw new DrivineError('split() takes a text and a separator.');
             }
-            const [text, separator] = call.arguments.map((it) => this.textOf(it));
-            return json(this.sql.split(text, separator), { list: true, texts: true });
+            return json(
+                this.sql.texts(
+                    call.arguments.map((it) => this.jsonOf(it)),
+                    ([text, separator]) => this.sql.split(text, separator)
+                ),
+                { list: true, texts: true }
+            );
         },
         reverse: (call) =>
             json(
@@ -723,8 +728,16 @@ export class CypherWriter {
         e: (call) => this.constant(call, Math.E),
         pi: (call) => this.constant(call, Math.PI),
         sign: (call) => json(this.sql.scalar(this.sql.signOf(this.numberOf(call.one())))),
-        ltrim: (call) => json(this.sql.scalar(`LTRIM(${this.textOf(call.one())})`), { text: true }),
-        rtrim: (call) => json(this.sql.scalar(`RTRIM(${this.textOf(call.one())})`), { text: true }),
+        ltrim: (call) =>
+            json(
+                this.sql.texts([this.jsonOf(call.one())], ([t]) => this.sql.scalar(`LTRIM(${t})`)),
+                { text: true }
+            ),
+        rtrim: (call) =>
+            json(
+                this.sql.texts([this.jsonOf(call.one())], ([t]) => this.sql.scalar(`RTRIM(${t})`)),
+                { text: true }
+            ),
         randomuuid: (call) => {
             if (call.arguments.length > 0) {
                 throw new DrivineError('randomUUID() takes no argument.');
@@ -736,17 +749,21 @@ export class CypherWriter {
             if (call.arguments.length < 2 || call.arguments.length > 3) {
                 throw new DrivineError('substring() takes a text, a start and a length.');
             }
-            const substring = this.sql.shared([this.textOf(call.arguments[0])], ([text]) => {
-                const start = this.countOf(call, 1, 'start', text);
-                const length = call.arguments.length === 3 ? `, ${this.countOf(call, 2, 'length', text)}` : '';
-                // The greatest start is past any text, so it is kept as it is rather than counted past Postgres's integer.
-                const position = this.sql.shared(
-                    [start],
-                    ([s]) => `CASE WHEN ${s} < ${MAX_COUNT} THEN ${s} + 1 ELSE ${s} END`
-                );
-                return `SUBSTR(${text}, ${position}${length})`;
-            });
-            return json(this.sql.scalar(substring), { text: true });
+            const substring = this.sql.texts([this.jsonOf(call.arguments[0])], ([read]) =>
+                this.sql.scalar(
+                    this.sql.shared([read], ([text]) => {
+                        const start = this.countOf(call, 1, 'start', text);
+                        const length = call.arguments.length === 3 ? `, ${this.countOf(call, 2, 'length', text)}` : '';
+                        // The greatest start is past any text, so it is kept as it is rather than counted past Postgres's integer.
+                        const position = this.sql.shared(
+                            [start],
+                            ([s]) => `CASE WHEN ${s} < ${MAX_COUNT} THEN ${s} + 1 ELSE ${s} END`
+                        );
+                        return `SUBSTR(${text}, ${position}${length})`;
+                    })
+                )
+            );
+            return json(substring, { text: true });
         },
         left: (call) => this.leftOrRight(call),
         right: (call) => this.leftOrRight(call),
@@ -754,8 +771,19 @@ export class CypherWriter {
             if (call.arguments.length !== 3) {
                 throw new DrivineError('replace() takes a text, what to replace, and what with.');
             }
-            const [text, search, replacement] = call.arguments.map((it) => this.textOf(it));
-            return json(this.sql.scalar(`REPLACE(${text}, ${search}, ${replacement})`), { text: true });
+            // How long what to replace, and what with, are, in bytes, where the statement gives them.
+            const [searchBytes, replacementBytes] = call.fn.arguments.slice(1).map((it) => {
+                const given = this.given(it);
+                return typeof given === 'string' ? Buffer.byteLength(given, 'utf8') : undefined;
+            });
+            return json(
+                this.sql.texts(
+                    call.arguments.map((it) => this.jsonOf(it)),
+                    ([text, search, replacement]) =>
+                        this.sql.scalar(this.sql.replaceText(text, search, replacement, searchBytes, replacementBytes))
+                ),
+                { text: true }
+            );
         },
         timestamp: (call) => {
             if (call.arguments.length > 0) {
@@ -3908,10 +3936,11 @@ export class CypherWriter {
                 ),
             MODULO: () => json(sql.scalar(sql.modulo(sql.number(a), sql.number(b)))),
             POWER: () => json(sql.scalar(sql.float(`power(${sql.number(a)}, ${sql.number(b)})`))),
-            STARTS_WITH: () => bool(sql.shared([sql.text(a), sql.text(b)], ([x, y]) => sql.startsWith(x, y))),
-            MATCHES: () => bool(sql.matches(sql.text(a), sql.text(b))),
-            ENDS_WITH: () => bool(sql.shared([sql.text(a), sql.text(b)], ([x, y]) => sql.endsWith(x, y))),
-            CONTAINS: () => bool(sql.containsText(sql.text(a), sql.text(b)))
+            STARTS_WITH: () => bool(sql.texts([a, b], (texts) => sql.shared(texts, ([x, y]) => sql.startsWith(x, y)))),
+            // A pattern is short: only the text is read as a long one where it is.
+            MATCHES: () => bool(sql.texts([a], ([x]) => sql.matches(x, sql.text(b)))),
+            ENDS_WITH: () => bool(sql.texts([a, b], (texts) => sql.shared(texts, ([x, y]) => sql.endsWith(x, y)))),
+            CONTAINS: () => bool(sql.texts([a, b], ([x, y]) => sql.containsText(x, y)))
         };
         return operations[binary.operator]!();
     }
@@ -4821,11 +4850,15 @@ export class CypherWriter {
         if (call.arguments.length !== 2) {
             throw new DrivineError(`${call.fn.name}() takes a text and a length.`);
         }
-        const counted = this.sql.shared([this.textOf(call.arguments[0])], ([text]) => {
-            const count = this.countOf(call, 1, 'length', text);
-            return call.name === 'left' ? `SUBSTR(${text}, 1, ${count})` : this.sql.rightText(text, count);
-        });
-        return json(this.sql.scalar(counted), { text: true });
+        const counted = this.sql.texts([this.jsonOf(call.arguments[0])], ([read]) =>
+            this.sql.scalar(
+                this.sql.shared([read], ([text]) => {
+                    const count = this.countOf(call, 1, 'length', text);
+                    return call.name === 'left' ? `SUBSTR(${text}, 1, ${count})` : this.sql.rightText(text, count);
+                })
+            )
+        );
+        return json(counted, { text: true });
     }
 
     private truncated(call: Invocation): Value {
@@ -5013,7 +5046,12 @@ export class CypherWriter {
 
     /** A value as SQL text, where it is a string. */
     private textOf(value: Value): string {
-        return this.sql.text(this.sql.comparable(this.asJson(value)));
+        return this.sql.text(this.jsonOf(value));
+    }
+
+    /** A value as JSON, as it compares: what {@link SqlCypherCompiler.texts} reads a text from. */
+    private jsonOf(value: Value): string {
+        return this.sql.comparable(this.asJson(value));
     }
 
     /** The values `value` of a group, gathered as `collect` gathers them, as JSON. */

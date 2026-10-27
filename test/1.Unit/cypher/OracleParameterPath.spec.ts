@@ -39,7 +39,8 @@ describe('A value in a map parameter in compiled Cypher', () => {
             given
         ).sql;
         expect(sql).toContain(`JSON_QUERY(JSON_QUERY($_cy_p, '$.l' RETURNING JSON), '$[$i]' PASSING`);
-        expect(sql).toContain(`JSON_QUERY(JSON_QUERY($_cy_p, '$.m' RETURNING JSON), '$[$i]' PASSING`);
+        // The key, read as a text short or long (#347), is long enough that the map is bound beside it, and read by name.
+        expect(sql).toContain(`JSON_QUERY($_cy_p, '$.m' RETURNING JSON) AS v1`);
         expect(sql).not.toContain('JSON($_cy_p)');
     });
 
