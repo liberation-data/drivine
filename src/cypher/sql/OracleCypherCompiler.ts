@@ -142,6 +142,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return this.shared([json], ([x]) => `CASE WHEN ${kind(x)} <> 'null' THEN ${x} END`);
     }
 
+    /**
+     * Where the kind comes, as {@link kindOrder} ranks them and null for null, then the value as `JSON` orders it, which
+     * is Cypher's order within a kind: `JSON` orders a number before a text, a truth value after both, and a map and a
+     * list last. A null is ranked null, so the value needs no {@link nullIfJsonNull}, which would read it again.
+     */
+    openSortKey(json: string): string[] {
+        const ranks = "'object', 1, 'array', 2, 'string', 3, 'boolean', 4, 'number', 5, 'double', 5, 'float', 5";
+        const rank = this.shared([json], ([x]) => `DECODE(${kind(x)}, ${ranks})`);
+        return [rank, json];
+    }
+
     number(json: string): string {
         return this.shared(
             [json],

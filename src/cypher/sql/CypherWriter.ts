@@ -148,9 +148,10 @@ interface Projected {
  */
 interface Sorted {
     sorts: [string, boolean][];
-    after: Map<string, string>;
-    /** What sorts each term carried out of the query as a column, of that column. */
-    sorted: Map<string, (column: string) => string>;
+    /** The terms each is sorted by, in turn: see {@link SqlCypherCompiler.openSortKey}. */
+    after: Map<string, string[]>;
+    /** The terms that sort each term carried out of the query as a column, of that column. */
+    sorted: Map<string, (column: string) => string[]>;
     /** Whether a term sorts by an item made anew for each row, `randomUUID()`, of its column: see `SqlCypherCompiler.once`. */
     anew: boolean;
 }
@@ -2334,10 +2335,22 @@ export class CypherWriter {
             ...(groupBy.length > 0 ? [`GROUP BY ${groupBy.join(', ')}`] : [])
         ].join('\n');
         // What sorts a term in the query that reads this one: worked out there, of the column carried out, or that column.
-        const sortedBy = (column: string): string =>
-            after.get(column) ?? sorted.get(column)?.(`${name}.${column}`) ?? `${name}.${column}`;
+        // Each is named for the query after it, which sorts by them in turn: the last by the term's column, any before it,
+        // where its kind comes (openSortKey), by that column with a number after it.
+        const sortedBy = (column: string): [string, string][] => {
+            const terms = after.get(column) ?? sorted.get(column)?.(`${name}.${column}`) ?? [`${name}.${column}`];
+            return terms.map((term, i): [string, string] => [
+                i === terms.length - 1 ? column : `${column}_${i + 1}`,
+                term
+            ]);
+        };
+        const order = sorts.flatMap(([column, descending]) =>
+            sortedBy(column).map(([named]): [string, boolean] => [named, descending])
+        );
         const outerColumns = this.outerColumns(final, itemColumns, name, sorts, sortedBy);
-        const ordered = sorts.map(([column, descending]) => `${sortedBy(column)}${descending ? ' DESC' : ''}`);
+        const ordered = sorts.flatMap(([column, descending]) =>
+            sortedBy(column).map(([, term]) => `${term}${descending ? ' DESC' : ''}`)
+        );
         const outer = [
             `SELECT ${outerColumns}`,
             `FROM (\n${indent(anew ? this.sql.once(inner) : inner)}\n) ${name}`,
@@ -2348,7 +2361,7 @@ export class CypherWriter {
         const scope: Scope = new Map(
             items.map((item, i) => [item.name, columnsOf(itemColumns[i][1], PENDING, itemColumns[i][0])])
         );
-        return { sql: outer, scope, order: sorts };
+        return { sql: outer, scope, order };
     }
 
     /**
@@ -2384,7 +2397,7 @@ export class CypherWriter {
         itemColumns: [string, Value][],
         name: string,
         sorts: [string, boolean][],
-        sortedBy: (column: string) => string
+        sortedBy: (column: string) => [string, string][]
     ): string {
         if (final) {
             const values = itemColumns.map(([column, value]) => this.asJson(columnsOf(value, name, column)));
@@ -2394,7 +2407,7 @@ export class CypherWriter {
             ...itemColumns.flatMap(([column, value]) =>
                 columns(value, column).map((it) => `${name}.${it.substring(it.lastIndexOf(' AS ') + 4)}`)
             ),
-            ...sorts.map(([column]) => `${sortedBy(column)} AS ${column}`)
+            ...sorts.flatMap(([column]) => sortedBy(column).map(([named, term]) => `${term} AS ${named}`))
         ].join(', ');
     }
 
@@ -2425,11 +2438,11 @@ export class CypherWriter {
         const byName: Scope = new Map(
             items.map((item, i) => [item.name, columnsOf(itemColumns[i][1], name, itemColumns[i][0])])
         );
-        const after = new Map<string, string>();
+        const after = new Map<string, string[]>();
         // A term worked out in the query is sorted by in the query that reads it: the value carried out as a column, and
         // what sorts it (JSON's null as SQL's) worked out of that column. Oracle (23.26), sorting by a value that reads
         // the row more than once beside a variable-length walk, closes the session.
-        const sorted = new Map<string, (column: string) => string>();
+        const sorted = new Map<string, (column: string) => string[]>();
         // An item made anew for each row, randomUUID(), is sorted by of its column, as it is given, not made again: see
         // SqlCypherCompiler.once.
         const madeAnew = new Set(items.filter((it) => contains(it.expression, isAnew)).map((it) => it.name));
@@ -5048,26 +5061,34 @@ export class CypherWriter {
      * What an order sorts a value by: JSON's order for a value, a node by its properties. JSON's null, as a map or a
      * list the statement builds holds it, is SQL's null, which comes last, as a graph engine orders null.
      */
-    private sortable(value: Value): string {
+    private sortable(value: Value): string[] {
         const [carried, sorts] = this.sortTerm(value);
         return sorts(carried);
     }
 
-    /** What {@link sortable} sorts `value` by, in two: the value as a column carries it, and what sorts it, of that column. */
-    private sortTerm(value: Value): [string, (column: string) => string] {
+    /**
+     * What {@link sortable} sorts `value` by, in two: the value as a column carries it, and the terms that sort it, of
+     * that column. A value whose kind the statement leaves open sorts as {@link SqlCypherCompiler.openSortKey} has it,
+     * where its kind comes first; one it makes a truth value, a temporal value, a text, a list or a node is of one kind,
+     * and sorts by {@link SqlCypherCompiler.sortKey} alone.
+     */
+    private sortTerm(value: Value): [string, (column: string) => string[]] {
         if (value.kind === 'Bool') {
-            return [value.sql, (it) => it];
+            return [value.sql, (it) => [it]];
         }
         // A zoned value the statement makes sorts as the moment it is, whatever its offset.
         if (value.kind === 'Json' && value.temporal?.zoned) {
             const temporal = value.temporal;
-            return [this.sql.comparable(value), (it) => this.temporals.moment(this.sql.text(it), temporal)];
+            return [this.sql.comparable(value), (it) => [this.temporals.moment(this.sql.text(it), temporal)]];
         }
         // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts it.
         if (this.isList(value)) {
-            return [this.sql.comparable(this.asJson(value)), (it) => this.sql.listSortKey(it)];
+            return [this.sql.comparable(this.asJson(value)), (it) => [this.sql.listSortKey(it)]];
         }
-        return [this.sql.comparable(this.asJson(value)), (it) => this.sql.sortKey(it)];
+        if (value.kind !== 'Json' || value.temporal !== undefined || this.isText(value)) {
+            return [this.sql.comparable(this.asJson(value)), (it) => [this.sql.sortKey(it)]];
+        }
+        return [this.sql.comparable(this.asJson(value)), (it) => this.sql.openSortKey(it)];
     }
 }
 
