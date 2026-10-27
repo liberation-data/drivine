@@ -798,6 +798,107 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
         );
     });
+
+    /**
+     * drivine4j's own test of liberation-data/drivine4j#304, ported for liberation-data/drivine#375: the cases whose
+     * values differ, as a JavaScript number does not tell 2.0 from 2, and toString where only the kind does.
+     */
+    describe('aggregates of floats', () => {
+        it('a sum of floats is summed as doubles, and a sum of integers is an integer', async () => {
+            await clear();
+            await query(
+                "CREATE (:F {k: 'a', x: 0.5}), (:F {k: 'a', x: 1.0}), (:F {k: 'a', x: 0.5}), (:F {k: 'b', x: 1}), (:F {k: 'b', x: 2})"
+            );
+            // Postgres works a float out in exact decimal, by choice (liberation-data/drivine4j#327).
+            const [tenths, tenthsText] =
+                store.type === DatabaseType.POSTGRES ? [0.3, '0.3'] : [0.30000000000000004, '0.30000000000000004'];
+            const cases: [string, Record<string, any>, any][] = [
+                // As NUMBERs on Oracle, 1e300 was dropped, and 0.1 + 0.2 was 0.3.
+                ['UNWIND [1e300, 1.0] AS x RETURN sum(x)', {}, 1e300],
+                ['UNWIND [0.1, 0.2] AS x RETURN [sum(x), toString(sum(x))]', {}, [tenths, tenthsText]],
+                // An integer among floats is summed as a double too, as Neo4j sums it, and a computed float is one.
+                ['UNWIND [9223372036854775807, 0.5] AS x RETURN sum(x)', {}, 9.223372036854776e18],
+                ['UNWIND [0.5, 2] AS x RETURN sum(x * 10)', {}, 25],
+                ['UNWIND [1, 1.0] AS x RETURN toString(sum(x))', {}, '2.0'],
+                ['UNWIND [1, 0.5, 0.5] AS x RETURN toString(sum(x))', {}, '2.0'],
+                ['UNWIND [1, 2] AS x RETURN [sum(x), toString(sum(x))]', {}, [3, '3']],
+                ['UNWIND [] AS x RETURN [sum(x), toString(sum(x))]', {}, [0, '0']],
+                ['UNWIND [1.0, 1.0] AS x RETURN toString(sum(DISTINCT x))', {}, '1.0'],
+                ['UNWIND [1, 1, 2] AS x RETURN [sum(DISTINCT x), toString(sum(DISTINCT x))]', {}, [3, '3']],
+                ['UNWIND [0.5, 1.0, 0.5] AS x RETURN [toString(sum(x)), sum(x) + 1, sum(x) * 2]', {}, ['2.0', 3, 4]],
+                [
+                    "UNWIND [['a', 0.1], ['a', 0.2], ['b', 1e300], ['b', 1.0], ['c', 1], ['c', 2], ['d', 1], ['d', 1.0]] AS r WITH r[0] AS k, sum(r[1]) AS s ORDER BY k RETURN collect([s, toString(s)])",
+                    {},
+                    [
+                        [tenths, tenthsText],
+                        [1e300, '1.0E300'],
+                        [3, '3'],
+                        [2, '2.0']
+                    ]
+                ],
+                ['MATCH (n:F) WITH n.k AS k, sum(n.x) AS s ORDER BY k RETURN collect(toString(s))', {}, ['2.0', '3']],
+                ["MATCH (n:F) WHERE n.k = 'a' AND n.x = 1.0 RETURN toString(sum(n.x))", {}, '1.0'],
+                [
+                    "UNWIND [['a', 0.5], ['a', 1.5], ['b', 1], ['b', 1]] AS r WITH r[0] AS k, r[1] AS x WITH k, [sum(x), avg(x), min(x), max(x)] AS a ORDER BY k RETURN collect([y IN a | toString(y)])",
+                    {},
+                    [
+                        ['2.0', '1.0', '0.5', '1.5'],
+                        ['2', '1.0', '1', '1']
+                    ]
+                ],
+                [
+                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x RETURN [toString(sum(round(x, 400))), toString(sum(round(x, 0))), toString(sum(round(x, 0, 'UP'))), toString(count(*))]",
+                    {},
+                    ['1500.0', '2000.0', '2000.0', '3000']
+                ],
+                // Parameters, bound as JSON on a SQL store: Oracle writes a fraction of more than 40 digits with an
+                // exponent and no point. drivine4j's `[1.0]` is no case here: a JavaScript 1.0 is 1, which the Neo4j
+                // driver sends as a float and a SQL store binds as an integer.
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [0.1, 0.2] }, tenths],
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e300, 1.5] }, 1e300],
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e300, 1e300] }, 2e300],
+                ['UNWIND $xs AS x RETURN toString(sum(x))', { xs: [0.5, 1, 0.5] }, '2.0'],
+                ['UNWIND $xs AS x RETURN toString(sum(x))', { xs: [0.5, 0.5] }, '1.0'],
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e-41, -1e-41] }, 0],
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [1e-41, 1e-41] }, 2e-41],
+                // A bigint is bound as an integer, as the spec's whole numbers are: see parametersFor.
+                ['UNWIND $xs AS x RETURN sum(x)', { xs: [BigInt(2), BigInt(3)] }, 5]
+            ];
+            // Each that differs, so a store's every difference shows at once.
+            const differing: string[] = [];
+            for (const [statement, parameters, value] of cases) {
+                const [given] = await query(statement, parameters);
+                const [was, is] = [given, value].map((it) => JSON.stringify(it));
+                if (was !== is) {
+                    differing.push(`${statement} ${String(parameters.xs ?? '')}: ${was}, not ${is}`);
+                }
+            }
+            expect(differing).toEqual([]);
+            // Oracle reads a text that is a number, '0.5', as that number where it is asked for one, so a sum reads no
+            // text: Cypher refuses one, and a SQL store sums the numbers alone.
+            const text = "UNWIND ['0.5', 2] AS x RETURN toString(sum(x))";
+            if (store.type === DatabaseType.NEO4J) {
+                await expect(query(text)).rejects.toThrow('can only handle numerical values');
+            } else {
+                expect(await query(text)).toEqual(['2']);
+            }
+            // Not compiled to SQL yet, so they give no integer for a float.
+            const uncompiled: [string, any][] = [
+                ['UNWIND [2.0, 3.0] AS x RETURN toString(percentileDisc(x, 0.5))', '2.0'],
+                ['UNWIND [1.0, 3.0] AS x RETURN toString(percentileCont(x, 0.5))', '2.0'],
+                ['UNWIND [1.0, 3.0] AS x RETURN toString(stDevP(x))', '1.0'],
+                ['UNWIND [1.0, 3.0] AS x RETURN stDev(x)', 1.4142135623730951],
+                ['UNWIND [1, 3] AS x RETURN toString(percentileDisc(x, 0.5))', '1']
+            ];
+            for (const [statement, value] of uncompiled) {
+                if (store.type === DatabaseType.NEO4J) {
+                    expect(await query(statement)).toEqual([value]);
+                } else {
+                    await expect(query(statement)).rejects.toThrow('is Cypher, and is not compiled to SQL yet.');
+                }
+            }
+        });
+    });
 });
 
 /**

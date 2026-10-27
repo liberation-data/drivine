@@ -394,6 +394,14 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * `sum` of the JSON values `json` of a group, `distinct` each once where it is `DISTINCT `: 0 where there are none.
+     * A store whose numbers keep whether they are floats sums them as they are: a float where any is one, as in Cypher.
+     */
+    sum(json: string, distinct: string): string {
+        return this.scalar(`COALESCE(sum(${distinct}${this.number(json)}), 0)`);
+    }
+
+    /**
      * The condition that the relationship row `edge` leaves the node whose id is `at` in `direction`, and the id of the
      * node it reaches.
      */

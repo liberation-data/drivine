@@ -1632,6 +1632,56 @@ cases:
       - cypher: "MATCH (m:Movie) RETURN [toString(avg(m.released)), toString(sum(m.released * 1.5))]"
         rows: [["1999.0", "8995.5"]]
 
+  - name: "Aggregates of floats"
+    description: "An aggregate of floats is a float, whole or not, and a sum is a float where any value it sums is one: 2.0 is not 2."
+    steps:
+      - note: "Oracle's NUMBER keeps no kind, so a sum of floats that is whole was an integer there (drivine4j#304)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.5, 1.0, 0.5] AS x RETURN sum(x)"
+        rows: [2.0]
+      - note: "A float among integers makes the sum a float; integers alone, or none, sum to an integer."
+        only: [neo4j, sql]
+        cypher: "UNWIND [['a', 1], ['a', 1.0], ['b', 1], ['b', 0.5], ['b', 0.5], ['c', 1], ['c', 2]] AS r WITH r[0] AS k, sum(r[1]) AS s ORDER BY k RETURN collect(s)"
+        rows: [[2.0, 2.0, 3]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [] AS x RETURN sum(x)"
+        rows: [0]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [1.0, 1.0] AS x RETURN sum(DISTINCT x)"
+        rows: [1.0]
+      - note: "avg() is a float, of integers too; min() and max() keep the kind of the value they pick."
+        only: [neo4j, sql]
+        cypher: "UNWIND [['a', 0.5], ['a', 1.5], ['b', 1], ['b', 1]] AS r WITH r[0] AS k, r[1] AS x WITH k, [sum(x), avg(x), min(x), max(x)] AS a ORDER BY k RETURN collect(a)"
+        rows: [[[2.0, 1.0, 0.5, 1.5], [2, 1.0, 1, 1]]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [1, 2.0] AS x RETURN [max(x), avg(x), sum(x)]"
+        rows: [[2.0, 1.5, 3.0]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.5, 1.0, 0.5] AS x RETURN [toString(sum(x)), sum(x) + 1]"
+        rows: [["2.0", 3.0]]
+      - note: "A parameter's fraction, and its whole float, are floats summed."
+        only: [neo4j, sql]
+        cypher: "UNWIND $xs AS x RETURN sum(x)"
+        parameters: {xs: [0.5, 0.5]}
+        rows: [1.0]
+      - only: [neo4j, sql]
+        cypher: "UNWIND $xs AS x RETURN sum(x)"
+        parameters: {xs: [0.5, 1.0, 0.5]}
+        rows: [2.0]
+      - note: "A float too small for a store's decimal to write with a point is still a float."
+        only: [neo4j, sql]
+        cypher: "UNWIND $xs AS x RETURN sum(x)"
+        parameters: {xs: [1.0e-41, -1.0e-41]}
+        rows: [0.0]
+      - note: "A float past a store's decimal is summed as a double, not dropped."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1e300, 1.0] AS x RETURN sum(x)"
+        rows: [1.0e+300]
+      - note: "An integer summed with a float is summed as a double."
+        only: [neo4j, sql]
+        cypher: "UNWIND [9223372036854775807, 0.5] AS x RETURN sum(x)"
+        rows: [9.223372036854776e+18]
+
   - name: "Floats written as text"
     description: "A float is written as Java writes a double: from 10^7, or under 10^-3, in scientific notation, as returned, by toString() and added to a text."
     steps:
