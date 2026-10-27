@@ -336,6 +336,26 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         )} ${direction} NULLS LAST${key !== undefined ? `, ${key} ${direction} NULLS LAST` : ''})`;
     }
 
+    /**
+     * A float, `BINARY_DOUBLE`, where any value summed is one, a double or a number with a fraction, as in Cypher: `NUMBER`
+     * keeps no such kind, so a sum of floats that is whole, 0.5 + 1.0 + 0.5, would be the integer 2. Floats are summed as
+     * doubles, as Neo4j sums them: as `NUMBER`s, 1e300 would be dropped, and 0.1 + 0.2 would be 0.3. Nothing is bound under
+     * an aggregate, so each value is written out where it is read: each read is one path that tests the value's kind
+     * itself, a text not summed and a number with a fraction written with a point, or with a negative exponent, `1E-41`,
+     * as Oracle writes one of more than 40 digits, so a sum reads it three times, as {@link number} alone does. A path
+     * compares no item to another, `@ != @.floor()` failing with ORA-40597, so a fraction is told by how it is written.
+     */
+    sum(json: string, distinct: string): string {
+        const summed = (type: string): string =>
+            `sum(${distinct}JSON_VALUE(${json}, '$?(@.type() != "string")' RETURNING ${type}))`;
+        const fraction = '@.string() has substring "." || @.string() has substring "E-"';
+        const float = `MAX(JSON_VALUE(${json}, '$?(@.type() == "double" || (@.type() == "number" && (${fraction})))')) IS NOT NULL`;
+        return (
+            `CASE WHEN ${float} THEN JSON_SCALAR(${summed('BINARY_DOUBLE')}) ` +
+            `ELSE JSON_SCALAR(COALESCE(${summed('NUMBER')}, 0)) END`
+        );
+    }
+
     /** In `BINARY_DOUBLE` where either is one, so a float stays a float, as in Cypher: `NUMBER` keeps no such kind. */
     arithmetic(a: string, b: string, operator: string): string {
         return (

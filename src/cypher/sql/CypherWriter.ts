@@ -612,7 +612,7 @@ export class CypherWriter {
         count: (call) => json(this.sql.scalar(`count(${call.distinct}${this.countable(call.one())})`)),
         collect: (call) => this.collectFunction(call),
         [DISTINCT_ITEMS]: (call) => this.distinctItemsFunction(call),
-        sum: (call) => json(this.sql.scalar(`COALESCE(sum(${call.distinct}${this.numberOf(call.one())}), 0)`)),
+        sum: (call) => json(this.sql.sum(this.sql.comparable(this.asJson(call.one())), call.distinct)),
         avg: (call) => json(this.sql.scalar(this.sql.float(`avg(${call.distinct}${this.numberOf(call.one())})`))),
         min: (call) => this.extreme(call, true),
         max: (call) => this.extreme(call, false),

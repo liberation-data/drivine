@@ -396,6 +396,24 @@ describe('A compiled Cypher statement', () => {
     );
 
     it.each(compilers)(
+        'of a sum reads each value it sums as often as an avg does, and grows under functions as an avg does, on %s',
+        (_, compilerFor) => {
+            // On Oracle a sum tests whether any value it sums is a float (liberation-data/drivine#375). Nothing is bound
+            // under an aggregate, so a test that read each value as number() does, three times more, made a sum over
+            // nested functions twice the statement.
+            const over = (aggregate: string) =>
+                `MATCH (c:Claim) RETURN ${aggregate}(` + 'ceil('.repeat(3) + 'c.p' + ')'.repeat(3) + ')';
+            const under = (aggregate: string, depth: number) =>
+                'UNWIND [1.5] AS x RETURN ' + 'sign('.repeat(depth) + `${aggregate}(x)` + ')'.repeat(depth);
+            const size = (cypher: string) => compilerFor().compile(cypher).sql.length;
+            const [sum, avg] = ['sum', 'avg'].map((it) => size(over(it)));
+            expect(sum).toBeLessThan(avg * 1.1);
+            const [sumGrowth, avgGrowth] = ['sum', 'avg'].map((it) => size(under(it, 4)) / size(under(it, 2)));
+            expect(sumGrowth).toBeLessThan(avgGrowth * 1.1);
+        }
+    );
+
+    it.each(compilers)(
         'of quantifiers nested in one another grows with each, not exponentially, three-valued or in a WHERE, on %s',
         (_, compilerFor) => {
             // Three-valued, a quantifier reads each item's condition once and counts the true, false and null ones
