@@ -1,5 +1,11 @@
 import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
 import { Stamps } from '@/model/Stamps';
+import {
+    Executes,
+    nullsEqualFunction,
+    nullsEqualName,
+    OracleStoredFunctions
+} from '@/backend/oracle/OracleStoredFunctions';
 
 export { DEFAULT_GRAPH, sqlText };
 
@@ -53,8 +59,28 @@ export class OracleGraph extends SqlGraph {
     }
 
     /**
+     * The function a compiled Cypher statement compares two values that may hold a null by, list item by list item and
+     * map key by map key (see `OracleCypherCompiler.nullsEqual`): a statement that writes is a PL/SQL block, whose
+     * queries call no function of its own, so the store keeps it. drivine4j and drivine-python make it byte for byte
+     * alike.
+     */
+    get nullsEqual(): string {
+        return nullsEqualName(this.name);
+    }
+
+    /** What makes {@link nullsEqual}: safe to run again. */
+    get functions(): string[] {
+        return [`CREATE OR REPLACE ${nullsEqualFunction(this.nullsEqual)}`];
+    }
+
+    /**
      * The block that makes the store when it is not there and does nothing when it is: the property graph is made
      * last, so its presence says the rest is. One another process made meanwhile (ORA-00955) is taken as made.
+     *
+     * The {@link functions} are made after the tables, where they are not there or not valid, so a store an earlier
+     * version made gains them. A user who may not make a function (ORA-01031: making one takes `CREATE PROCEDURE`, which
+     * the `RESOURCE` role grants) still has the store made: a statement then compares as it would without them (see
+     * {@link OracleStoredFunctions}).
      *
      * Two sessions that each find the store missing, as two pools or processes first connecting at once do, make it
      * together: a statement of one waits on the lock the other's holds, rather than being turned away at once
@@ -63,25 +89,47 @@ export class OracleGraph extends SqlGraph {
      * session's later statements are as they were.
      */
     get ensuring(): string {
+        const waits = `    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';`;
+        const resets = "    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';";
         const statements = this.ddl
             .map((it) => `    BEGIN EXECUTE IMMEDIATE ${sqlText(it)}; EXCEPTION WHEN e_exists THEN NULL; END;`)
+            .join('\n');
+        const functions = this.functions
+            .map((it) => `    BEGIN EXECUTE IMMEDIATE ${sqlText(it)}; EXCEPTION WHEN e_denied THEN NULL; END;`)
             .join('\n');
         return `DECLARE
     v_made NUMBER;
     e_exists EXCEPTION;
     PRAGMA EXCEPTION_INIT(e_exists, -955);
+    e_denied EXCEPTION;
+    PRAGMA EXCEPTION_INIT(e_denied, -1031);
 BEGIN
     SELECT COUNT(*) INTO v_made FROM user_property_graphs WHERE graph_name = '${this.name.toUpperCase()}';
     IF v_made = 0 THEN
-    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';
+${waits}
 ${statements}
-    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';
+${resets}
+    END IF;
+    SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${this.nullsEqual.toUpperCase()}' AND status = 'VALID';
+    IF v_made = 0 THEN
+${waits}
+${functions}
+${resets}
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
         EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';
         RAISE;
 END;`;
+    }
+
+    /**
+     * Runs {@link ensuring} on `connection`, outside a transaction, and has every session asked again whether it may call
+     * the {@link functions} (see {@link OracleStoredFunctions}).
+     */
+    async ensure(connection: Executes): Promise<void> {
+        await connection.execute(this.ensuring);
+        OracleStoredFunctions.ensured(this.name);
     }
 }
 

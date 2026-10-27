@@ -44,7 +44,7 @@ export class OracleConnectionProvider implements ConnectionProvider {
     async connect(): Promise<Connection> {
         const connection = await this.firstConnection.ensured(
             await (await this.poolOf()).getConnection(),
-            async (it) => it.execute(new OracleGraph(this.graphName).ensuring),
+            async (it) => new OracleGraph(this.graphName).ensure(it),
             async (it) => it.close()
         );
         const session = await connection.execute<{ SID: string }>(
@@ -56,7 +56,8 @@ export class OracleConnectionProvider implements ConnectionProvider {
             connection,
             new OracleResultMapper(),
             `oracle.${session.rows?.[0]?.SID ?? '?'}`,
-            this.graphName
+            this.graphName,
+            `${this.connectionProperties.connectString}|${this.connectionProperties.user ?? ''}`
         );
     }
 

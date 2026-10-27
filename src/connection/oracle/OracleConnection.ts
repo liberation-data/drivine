@@ -10,6 +10,7 @@ import { OracleCursor } from '@/connection/oracle/OracleCursor';
 import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
+import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -28,12 +29,15 @@ export class OracleConnection implements Connection {
 
     /**
      * @param graph the graph a Cypher statement is compiled against: its tables are `<graph>_node` and `<graph>_edge`
+     * @param database the database and the user the session is of: whether it may call the graph's functions is
+     * remembered for them (see {@link OracleStoredFunctions})
      */
     constructor(
         readonly connection: oracledb.Connection,
         readonly resultMapper: ResultMapper,
         private readonly id: string,
-        private readonly graph: string = DEFAULT_GRAPH
+        private readonly graph: string = DEFAULT_GRAPH,
+        private readonly database: string = ''
     ) {}
 
     sessionId(): string {
@@ -47,7 +51,7 @@ export class OracleConnection implements Connection {
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
         const given = spec.finalizedCopy('SQL');
         const cypher = given.statement.language === 'CYPHER';
-        const finalized = cypher ? compiledSpecification(given, new OracleCypherCompiler(this.graph)).spec : given;
+        const finalized = cypher ? await this.compiled(given) : given;
         const compiled = new OracleSpecCompiler(finalized).compile();
         const hrStart = process.hrtime();
         const result = await this.connection.execute<any>(compiled.statement, compiled.parameters, {
@@ -96,6 +100,23 @@ export class OracleConnection implements Connection {
             await this.connection.rollback();
         }
         await this.connection.close();
+    }
+
+    /**
+     * The Cypher statement `given` compiled for Oracle, calling the functions the graph's store keeps where the
+     * statement needs one and the session may call it, and compiled again to call none where it may not: see
+     * {@link OracleStoredFunctions}.
+     */
+    private async compiled<T>(given: QuerySpecification<T>): Promise<QuerySpecification<T>> {
+        const compiler = new OracleCypherCompiler(this.graph);
+        const compiled = compiledSpecification(given, compiler).spec;
+        if (
+            !compiler.callsStoredNullsEqual ||
+            (await OracleStoredFunctions.nullsEqual(this.connection, this.database, this.graph))
+        ) {
+            return compiled;
+        }
+        return compiledSpecification(given, new OracleCypherCompiler(this.graph, false)).spec;
     }
 }
 

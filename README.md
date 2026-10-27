@@ -1633,6 +1633,16 @@ they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>
 constraints Drivine made, as drivine4j records them. The layout is drivine4j's, so the JVM, Node and Python read one
 store, and each sees and drops the indexes the others made, and makes none beside them.
 
+Beside the tables the graph is made with one function, `<graph>_nulls_equal`, by which a compiled Cypher statement
+compares two lists or maps that may hold a null (see the notes in
+[Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)). Making it takes `CREATE PROCEDURE`, which the
+`RESOURCE` role grants, as well as the `CREATE TABLE` the tables take. A store an earlier version made gains it the
+next time a connection to the graph first connects. Where the user that makes the graph may not make a function, the
+graph is made without it, and Drivine logs a warning once for the graph when a statement would call it, and looks for
+it again a minute later. Until then a statement that writes, or the step of a `reduce`, compares two lists or maps that
+hold a null and differ as JSON as false, where Cypher may give null (`[null] = [1]`), and a read declares the function
+itself.
+
 Notes:
 
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher. A statement that writes and returns
@@ -1764,11 +1774,12 @@ const names = await pm.query<string>(
   properties, through a `WITH` or a `CALL { … }` too, as on a graph engine. Unwound by `UNWIND`, as a comprehension's
   or a reduce's variable, or carried past a write in the statement, it compares by its properties.
 - Lists and maps that hold a null compare item by item, as in Cypher: `[null] = [null]` is null, `[1, null] = [2, null]`
-  false, and `IN` compares a value with each item as `=` does, so `2 IN [1, null]` is null. On Oracle this is a
-  function the query declares, which a statement that writes, or the step of a `reduce`, calls none of: there two such
-  values that are equal as JSON compare as null and any other two as false, so `a = b` is false where `a` is `[null]`
-  and `b` is `[1]`, where Cypher's comparison is null. Lists and maps written out in the statement, `[null] = [1]`, are
-  compared item by item there too.
+  false, and `IN` compares a value with each item as `=` does, so `2 IN [1, null]` is null. On Oracle, where one holds
+  a null, two written as the same JSON are null at once, and any other two are walked by the graph's function
+  `<graph>_nulls_equal`, in a statement that writes and the step of a `reduce` too. Where the store has no such function
+  (see [Oracle](#oracle)), a read declares it, and a statement that writes, or the step of a `reduce`, compares two such
+  values that differ as JSON as false. Lists and maps written out in the statement, `[null] = [1]`, are compared item by
+  item everywhere.
 - `CALL db.labels()` and `CALL db.relationshipTypes()` compile, alone or within a query with `YIELD`, and give each
   label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter
   may be named by a keyword (`$limit`), as in Neo4j.

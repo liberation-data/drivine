@@ -351,6 +351,51 @@ describe('A compiled Cypher statement', () => {
         expect(sql).not.toContain('jsonb_each(');
     });
 
+    it("of values that may hold a null walks them on Oracle by the store's function where they differ as JSON, and by none where the store has none", () => {
+        // drivine4j's CompiledSizeTest of #270 (#367): a procedure's queries, and a reduce's step's, call no function of
+        // their own, so the store keeps it.
+        const write = 'MATCH (c:Claim) WITH c, [c.a, null] AS l, [c.b] AS m SET c.e = l = m';
+        const stored = new OracleCypherCompiler('g');
+        const sql = stored.compile(write).sql;
+        expect(stored.callsStoredNullsEqual).toBe(true);
+        expect(sql).toContain('THEN NULL ELSE (g_nulls_equal(');
+        expect(sql).not.toContain('cy_nulls_equal');
+        // Two written as the same JSON text are null before any walk.
+        expect(sql).toMatch(
+            /CASE WHEN JSON_SERIALIZE\((.+?) RETURNING VARCHAR2\(4000\) NULL ON ERROR\) = JSON_SERIALIZE\((.+?) RETURNING VARCHAR2\(4000\) NULL ON ERROR\) THEN NULL ELSE \(g_nulls_equal\(\1, \2\) = 1\) END/s
+        );
+        const folded = new OracleCypherCompiler('g');
+        const reduced = folded.compile(
+            'MATCH (c:Claim) WITH [c.a, null] AS l RETURN reduce(acc = true, x IN [[1]] | acc AND x = l)'
+        ).sql;
+        expect(folded.callsStoredNullsEqual).toBe(true);
+        expect(reduced).toContain('THEN NULL ELSE (g_nulls_equal(');
+        expect(reduced).not.toContain('cy_nulls_equal');
+        // A read calls the store's too, and declares no function of its own for it.
+        const read = new OracleCypherCompiler('g');
+        const readSql = read.compile('MATCH (c:Claim) WITH [c.a, null] AS l, [c.b] AS m RETURN l = m').sql;
+        expect(read.callsStoredNullsEqual).toBe(true);
+        expect(readSql.startsWith('WITH\nFUNCTION')).toBe(false);
+        expect(readSql).toContain('THEN NULL ELSE (g_nulls_equal(');
+        // Without it, two that differ as JSON are false in a procedure, and a read declares the function itself.
+        const none = new OracleCypherCompiler('g', false);
+        const fallback = none.compile(write).sql;
+        expect(none.callsStoredNullsEqual).toBe(false);
+        expect(fallback).not.toContain('nulls_equal');
+        expect(fallback).toContain('THEN NULL ELSE FALSE END');
+        const declared = new OracleCypherCompiler('g', false).compile(
+            'MATCH (c:Claim) WITH [c.a, null] AS l, [c.b] AS m RETURN l = m'
+        ).sql;
+        expect(declared.startsWith('WITH\nFUNCTION cy_nulls_equal(')).toBe(true);
+        expect(declared).toContain('THEN NULL ELSE (cy_nulls_equal(');
+        // A statement that compares no value that may hold a null calls no function.
+        const flat = new OracleCypherCompiler('g');
+        flat.compile('MATCH (c:Claim) SET c.e = c.a = c.b, c.f = c.list = [1]');
+        expect(flat.callsStoredNullsEqual).toBe(false);
+        // And calling the store's function makes a statement smaller than declaring it.
+        expect(readSql.length).toBeLessThan(declared.length);
+    });
+
     it.each(compilers)(
         'of lists and maps written out that may hold a null compares them item by item, not built and compared whole, on %s',
         (name, compilerFor) => {
