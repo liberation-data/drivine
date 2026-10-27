@@ -28,7 +28,7 @@ export const TEST_CONTAINER_USER = 'drivine';
 export const TEST_CONTAINER_PASSWORD = 'drivine-test';
 
 const NEO4J: TestContainerSpec = {
-    image: 'neo4j:5.26-community',
+    image: 'neo4j:latest',
     port: 7687,
     container: (image) =>
         new GenericContainer(image)
@@ -45,7 +45,7 @@ const NEO4J: TestContainerSpec = {
 };
 
 const MEMGRAPH: TestContainerSpec = {
-    image: 'memgraph/memgraph:3.12.0',
+    image: 'memgraph/memgraph:latest',
     port: 7687,
     // Memgraph logs that it is running before Bolt takes connections: wait on the port instead.
     container: (image) => new GenericContainer(image).withExposedPorts(7687).withWaitStrategy(Wait.forListeningPorts()),
@@ -53,7 +53,7 @@ const MEMGRAPH: TestContainerSpec = {
 };
 
 const FALKORDB: TestContainerSpec = {
-    image: 'falkordb/falkordb:6.0.0',
+    image: 'falkordb/falkordb:latest',
     port: 6379,
     container: (image) => new GenericContainer(image).withExposedPorts(6379).withWaitStrategy(Wait.forListeningPorts()),
     connection: (started) => ({ host: started.getHost(), port: started.getMappedPort(6379) })
@@ -128,6 +128,9 @@ const TYPE_KEY = /^(?:(.+)_)?DATABASE_TYPE$/;
  * `USE_LOCAL_<TYPE>=true` (`USE_LOCAL_NEO4J`, `USE_LOCAL_MEMGRAPH`, `USE_LOCAL_FALKORDB`, `USE_LOCAL_POSTGRES`,
  * `USE_LOCAL_ORACLE`) starts no container for that type and leaves its datasources as they are, to work against an
  * instance of your own. `<TYPE>_TEST_IMAGE` picks another image.
+ *
+ * Neo4j, Memgraph and FalkorDB run their `latest` images, as drivine4j's containers do, so a new engine release reaches
+ * your tests as soon as it is out. Pin one with `<TYPE>_TEST_IMAGE` to hold it back.
  */
 export class DrivineTestContainers {
     private static readonly logger = new DrivineLogger(DrivineTestContainers.name);
@@ -135,6 +138,15 @@ export class DrivineTestContainers {
     /** Whether the type's datasources use a local instance, with `USE_LOCAL_<TYPE>=true`, in place of a container. */
     static useLocal(type: DatabaseType, env: Environment = process.env): boolean {
         return env[`USE_LOCAL_${type}`]?.toLowerCase() === 'true';
+    }
+
+    /**
+     * The image the type's container runs: `<TYPE>_TEST_IMAGE`, or the type's default where that is unset or blank, as
+     * in drivine-python, so a blanked override doesn't start an image named ''. Undefined for no container.
+     */
+    static image(type: DatabaseType, env: Environment = process.env): string | undefined {
+        const spec = TEST_CONTAINER_SPECS[type];
+        return spec && (env[`${type}_TEST_IMAGE`] || spec.image);
     }
 
     /** The prefix of each datasource configured in the environment, '' for the default one, with its type. */
@@ -191,7 +203,7 @@ export class DrivineTestContainers {
             DrivineTestContainers.logger.log(`${type} (${names}): USE_LOCAL_${type}=true, so a local instance is used`);
             return undefined;
         }
-        const image = env[`${type}_TEST_IMAGE`] ?? spec.image;
+        const image = DrivineTestContainers.image(type, env) ?? spec.image;
         const first = DrivineTestContainers.settingsOf(prefixes[0], env);
         DrivineTestContainers.logger.log(`${type} (${names}): starting ${image}`);
         const started = await spec.container(image, first).start();
