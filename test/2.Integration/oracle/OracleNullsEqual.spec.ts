@@ -226,10 +226,12 @@ describeOnOracle(
     'Whether an Oracle session may call the function a graph compares values that may hold a null by',
     () => {
         const clock = OracleStoredFunctions.clock;
-        const database = `${connectString()}|${ConnectionPropertiesFromEnv('ORACLE').userName}`;
+        // Read in beforeAll, not here: a skipped describe still runs its body, where no ORACLE connection is set.
+        let database: string;
         let connection: oracledb.Connection;
 
         beforeAll(async () => {
+            database = `${connectString()}|${ConnectionPropertiesFromEnv('ORACLE').userName}`;
             connection = await session();
         });
 
