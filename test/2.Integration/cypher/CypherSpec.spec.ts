@@ -824,6 +824,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 ['UNWIND [1, 2] AS x RETURN [sum(x), toString(sum(x))]', {}, [3, '3']],
                 ['UNWIND [] AS x RETURN [sum(x), toString(sum(x))]', {}, [0, '0']],
                 ['UNWIND [1.0, 1.0] AS x RETURN toString(sum(DISTINCT x))', {}, '1.0'],
+                ['UNWIND [1, 1, 2] AS x RETURN [sum(DISTINCT x), toString(sum(DISTINCT x))]', {}, [3, '3']],
                 ['UNWIND [0.5, 1.0, 0.5] AS x RETURN [toString(sum(x)), sum(x) + 1, sum(x) * 2]', {}, ['2.0', 3, 4]],
                 [
                     "UNWIND [['a', 0.1], ['a', 0.2], ['b', 1e300], ['b', 1.0], ['c', 1], ['c', 2], ['d', 1], ['d', 1.0]] AS r WITH r[0] AS k, sum(r[1]) AS s ORDER BY k RETURN collect([s, toString(s)])",
@@ -873,6 +874,14 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 }
             }
             expect(differing).toEqual([]);
+            // Oracle reads a text that is a number, '0.5', as that number where it is asked for one, so a sum reads no
+            // text: Cypher refuses one, and a SQL store sums the numbers alone.
+            const text = "UNWIND ['0.5', 2] AS x RETURN toString(sum(x))";
+            if (store.type === DatabaseType.NEO4J) {
+                await expect(query(text)).rejects.toThrow('can only handle numerical values');
+            } else {
+                expect(await query(text)).toEqual(['2']);
+            }
             // Not compiled to SQL yet, so they give no integer for a float.
             const uncompiled: [string, any][] = [
                 ['UNWIND [2.0, 3.0] AS x RETURN toString(percentileDisc(x, 0.5))', '2.0'],
