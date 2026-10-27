@@ -674,3 +674,13 @@ cases:
       - cypher: "MATCH (k:CyWrite) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v"
         except: [postgres]
         rows: ["b", false]
+
+  - name: "A stored text past 4000 bytes"
+    description: "A stored text past 4000 bytes, read in one row, is measured and changed whole, as a short one is."
+    steps:
+      - cypher: "CREATE (:CyWrite {a: $t, b: $u})"
+        parameters: {t: {$repeat: "x", times: 5000}, u: {$repeat: "y", times: 40000}}
+      - cypher: "MATCH (n:CyWrite) WITH n.a AS x RETURN [size(x), toUpper(x), size(x + x), x STARTS WITH 'xx']"
+        rows: [[5000, {$repeat: "X", times: 5000}, 10000, true]]
+      - cypher: "MATCH (n:CyWrite) WITH n.b AS x RETURN [size(x), toUpper(x), size(x + x), x ENDS WITH 'yy']"
+        rows: [[40000, {$repeat: "Y", times: 40000}, 80000, true]]
