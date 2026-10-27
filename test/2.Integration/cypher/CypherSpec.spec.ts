@@ -622,7 +622,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     /**
      * Texts past 4,000 bytes measured, cut, changed, searched and added to whole, on every store: drivine4j's tests of
      * liberation-data/drivine4j#298, ported for #347. Oracle read a text from JSON as a `VARCHAR2`, which holds 4,000
-     * bytes, and a longer one as null.
+     * bytes, and a longer one as null. Beside the spec's cases since v0.6.17 (#298): stored and made by the statement
+     * too, and more functions and edge cases.
      */
     describe('texts past 4,000 bytes', () => {
         const oracle = store.type === DatabaseType.ORACLE;
@@ -1082,7 +1083,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         };
 
         it('keeps the row it finds nothing for', async () => {
-            // Not in the spec yet (#338).
+            // Beside the spec's case since v0.6.17 (#338).
             await clear();
             await query("CREATE (:CyOpt {id: 1}), (:CyOpt {k: 'p'}), (:CyOpt {k: 'q'}), (:CyOpt {k: 'q'})");
             const none = 'OPTIONAL CALL { MATCH (z:Nope) RETURN z.k AS u }';
@@ -1121,35 +1122,12 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             });
         });
 
-        it("keeps the row it finds nothing for over the spec's graph", async () => {
-            // Not in the spec yet (#338): the steps proposed for "CALL subqueries".
-            await clear();
-            await query(loadSpec('queries.yaml').graph!);
-            await onOneSession(async (run) => {
-                expect(
-                    await run(
-                        "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { OPTIONAL CALL (p) { MATCH (p)-[:NOPE]->(f) RETURN f.name AS friend } " +
-                            'MATCH (m:Movie) WHERE m.released > 1996 AND m.released < 2010 RETURN m }'
-                    )
-                ).toEqual([2]);
-                expect(
-                    await run(
-                        "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL CALL (p) { MATCH (p)-[:KNOWS]->(f) RETURN f.name AS friend } RETURN friend }"
-                    )
-                ).toEqual([1]);
-                expect(
-                    await run(
-                        "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL MATCH (p)-[:KNOWS]->(f) RETURN f }"
-                    )
-                ).toEqual([1]);
-            });
-        });
     });
 
     /**
      * A list of zoned values, and a list of lists of them, sorted and compared item by item as the moments they are:
-     * drivine4j's tests of liberation-data/drivine4j#199, ported for #361. Not in the spec yet (#199). Oracle sorts such a
-     * list as its JSON (liberation-data/drivine4j#331): see OracleZonedListSort.spec.ts.
+     * drivine4j's tests of liberation-data/drivine4j#199, ported for #361. Beside the spec's case since v0.6.17 (#199), which holds
+     * the rest. Oracle sorts such a list as its JSON (liberation-data/drivine4j#331): see OracleZonedListSort.spec.ts.
      */
     describe('lists of zoned values by their moments', () => {
         const sorts = store.type !== DatabaseType.ORACLE;
@@ -1162,36 +1140,10 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         const hours = [10, 8, 9];
 
         (sorts ? it : it.skip)(
-            'a list of zoned values, and a list of lists of them, sort and compare item by item as the moments they are, whatever their offsets',
+            'a list of zoned values worked out with temporal arithmetic, by a comprehension or collect(), sorts as the moments they are',
             async () => {
-                // Not in the spec yet (#199).
-                expect(await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts`)).toEqual(
-                    hours
-                );
-                expect(
-                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts DESC`)
-                ).toEqual([...hours].reverse());
-                expect(
-                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect(t) AS ts RETURN h ORDER BY ts`)
-                ).toEqual(hours);
-                expect(await query(`UNWIND [[${b}], [${a}], [${c}]] AS ts RETURN ts[0].hour ORDER BY ts`)).toEqual(hours);
-                expect(
-                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH [[t]] AS l RETURN l[0][0].hour ORDER BY l`)
-                ).toEqual(hours);
-                expect(
-                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect([t]) AS l RETURN h ORDER BY l`)
-                ).toEqual(hours);
-                // A list that starts another comes first; a null item after any moment.
-                expect(
-                    await query(`WITH [${a}] AS x, [${a}, ${b}] AS y UNWIND [y, x] AS l RETURN size(l) ORDER BY l`)
-                ).toEqual([1, 2]);
-                expect(
-                    await query(
-                        `WITH [${a}, null] AS x, [${a}, ${b}] AS y UNWIND [x, y] AS l RETURN size([i IN l WHERE i IS NULL]) ORDER BY l`
-                    )
-                ).toEqual([0, 1]);
-                // A long list, and lists worked out with temporal arithmetic, by a comprehension or collect(): k = 0's start
-                // at 08:00 UTC.
+                // Beside the spec's case since v0.6.17 (#199): its long list is worked out from one moment, not from a
+                // CASE, and it has no list collect() gathers of them. k = 0's start at 08:00 UTC.
                 const at = `CASE k WHEN 0 THEN ${a} ELSE ${b} END`;
                 expect(
                     await query(
@@ -1203,34 +1155,13 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                         `UNWIND [0, 1] AS k UNWIND range(1, 3) AS x WITH k, ${at} + duration({minutes: x}) AS t WITH k, collect(t) AS l RETURN k ORDER BY l`
                     )
                 ).toEqual([0, 1]);
-                // min() and max() of them.
-                expect(
-                    await query(`UNWIND [[${b}], [${a}], [${c}]] AS l RETURN [min(l)[0].hour, max(l)[0].hour]`)
-                ).toEqual([[10, 9]]);
-                expect(
-                    await query(
-                        `UNWIND [${b}, ${a}, ${c}] AS t WITH [[t]] AS l RETURN [min(l)[0][0].hour, max(l)[0][0].hour]`
-                    )
-                ).toEqual([[10, 9]]);
-                // A time of day with an offset, as a moment.
-                const times = "[time('10:00:00+02:00'), time('09:00:00Z'), time('08:30:00Z')]";
-                expect(await query(`UNWIND ${times} AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts`)).toEqual(hours);
-                expect(
-                    await query(`UNWIND ${times} AS t WITH [t] AS l RETURN [min(l)[0].hour, max(l)[0].hour]`)
-                ).toEqual([[10, 9]]);
-                // Taken from a list kept in order, by head() and last().
-                expect(
-                    await query(
-                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t ORDER BY t WITH collect(t) AS ts RETURN [head(ts).hour, last(ts).hour]`
-                    )
-                ).toEqual([[10, 9]]);
             }
         );
 
         (sorts ? it : it.skip)(
             'a list of zoned values sorts as their moments however it was made, and an empty list or a null item sorts as Cypher puts it',
             async () => {
-                // Not in the spec yet (#199). By moment 10:00+02:00, 08:30Z, 09:00Z; as text 08:30Z, 09:00Z, 10:00+02:00.
+                // Beside the spec's case since v0.6.17 (#199). By moment 10:00+02:00, 08:30Z, 09:00Z; as text 08:30Z, 09:00Z, 10:00+02:00.
                 const sorted = async (by: string, list: string = '[[t]]'): Promise<any[]> =>
                     query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t, ${list} AS l RETURN t.hour ORDER BY ${by}`);
                 // Taken from a list of lists, by an index, head(), last(), a slice, reverse(), tail() and a comprehension.

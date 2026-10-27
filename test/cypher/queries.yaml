@@ -945,6 +945,13 @@ cases:
           CALL (k) { OPTIONAL MATCH p = (k)-[rs:NOPE*]->(x) RETURN nodes(p) AS ns, rs, relationships(p) AS r1, x }
           RETURN [ns, rs, r1, x, ns IS NULL, rs IS NULL, size(rs), labels(x)]
         rows: [[null, null, null, null, true, true, null, null]]
+      - note: "An OPTIONAL CALL in a COUNT keeps the row it finds nothing for, with a WHERE … AND … after it."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { OPTIONAL CALL (p) { MATCH (p)-[:NOPE]->(f) RETURN f.name AS friend } MATCH (m:Movie) WHERE m.released > 1996 AND m.released < 2010 RETURN m }"
+        rows: [2]
+      - cypher: "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL CALL (p) { MATCH (p)-[:KNOWS]->(f) RETURN f.name AS friend } RETURN friend }"
+        rows: [1]
+      - cypher: "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL MATCH (p)-[:KNOWS]->(f) RETURN f }"
+        rows: [1]
 
   - name: "UNION inside subqueries"
     description: "A UNION works inside CALL, COUNT and EXISTS, evaluated per row."
@@ -1432,6 +1439,33 @@ cases:
         rows: [[400, 6290, "value number 1", "value number 0"]]
       - cypher: "UNWIND range(1, 300) AS i RETURN size(collect(DISTINCT {i: i % 250, text: 'some words to make it longer'}))"
         rows: [250]
+
+  - name: "A text past 4000 bytes"
+    description: "A text past 4000 bytes is measured, cut, changed, searched and added to whole, as a short one is."
+    steps:
+      - cypher: "WITH $t AS t RETURN [size(t), toUpper(t), toLower(t), toString(t), size(trim(' ' + t + ' ')), size(ltrim(' ' + t)), size(rtrim(t + ' '))]"
+        parameters: {t: {$repeat: "aB", times: 2500}}
+        rows: [[5000, {$repeat: "AB", times: 2500}, {$repeat: "ab", times: 2500}, {$repeat: "aB", times: 2500}, 5000, 5000, 5000]]
+      - cypher: "WITH $t AS t RETURN [substring(t, 2), substring(t, 0, 4998), left(t, 4998), right(t, 4998), replace(t, 'B', 'bb')]"
+        parameters: {t: {$repeat: "aB", times: 2500}}
+        rows: [[{$repeat: "aB", times: 2499}, {$repeat: "aB", times: 2499}, {$repeat: "aB", times: 2499}, {$repeat: "aB", times: 2499}, {$repeat: "abb", times: 2500}]]
+      - cypher: "WITH $t AS t WITH split(t + 'a', 'B') AS parts RETURN [size(parts), parts[0], parts[-1]]"
+        parameters: {t: {$repeat: "aB", times: 2500}}
+        rows: [[2501, "a", "a"]]
+      - cypher: "WITH $t AS t RETURN [t STARTS WITH 'aBa', t STARTS WITH 'B', t STARTS WITH t, t ENDS WITH 'aB', t ENDS WITH 'a', t ENDS WITH t, t CONTAINS 'BaB', t CONTAINS 'x', t CONTAINS t, t =~ '(aB)+']"
+        parameters: {t: {$repeat: "aB", times: 2500}}
+        rows: [[true, false, true, true, false, true, true, false, true, true]]
+      - cypher: "WITH $t AS t RETURN [size(t + 'z'), size('z' + t), size(t + t), size(t + 1), right(t + 'z', 2), left('z' + t, 2)]"
+        parameters: {t: {$repeat: "aB", times: 2500}}
+        rows: [[5001, 5001, 10000, 5001, "Bz", "za"]]
+      - note: "Two short texts whose sum is past 4000 bytes."
+        cypher: "WITH $a AS a RETURN [size(a + a), a + a]"
+        parameters: {a: {$repeat: "é", times: 3000}}
+        rows: [[6000, {$repeat: "é", times: 6000}]]
+      - note: "Past 32 KB."
+        cypher: "WITH $t AS t RETURN [size(t), toUpper(t), substring(t, 2), t ENDS WITH 'aB', size(t + t), size(split(t, 'a'))]"
+        parameters: {t: {$repeat: "aB", times: 20000}}
+        rows: [[40000, {$repeat: "AB", times: 20000}, {$repeat: "aB", times: 19999}, true, 80000, 20001]]
 
   - name: "A parameter past 32 KB"
     description: "A parameter whose JSON is past 32 KB is bound, and comes back as it went. Oracle compares no JSON that long, so the value is only returned."
