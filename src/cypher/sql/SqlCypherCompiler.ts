@@ -134,6 +134,9 @@ export abstract class SqlCypherCompiler {
     /** How many values {@link shared} has bound, to name each subquery it binds one in. */
     private shares = 0;
 
+    /** How many times {@link shared} has bound its values, which an aggregate's argument it would bind in is worked out first for: see {@link binds}. */
+    private sharedBindings = 0;
+
     private temporalsOf?: Temporals;
 
     /** The store's SQL for temporal values, which {@link temporals} works openCypher's out of. */
@@ -193,9 +196,28 @@ export abstract class SqlCypherCompiler {
         return { sql: call.sql, parameters: writer.parameters.values, setup: call.setup };
     }
 
-    /** Declares `fn`, a function's whole text, for the statement to call: a query's own, before it. */
+    /** Declares `fn`, a function's whole text, for the statement to call: a query's own, before it; once, however often it is declared. */
     declare(fn: string): void {
-        this.functions.push(fn);
+        if (!this.functions.includes(fn)) {
+            this.functions.push(fn);
+        }
+    }
+
+    /**
+     * Whether {@link shared} binds a value in what `work` compiles. Compiled only to see: the names it takes and the
+     * functions it declares (a `reduce`'s on Oracle) are given back, so a statement that binds nothing compiles as it did.
+     * See `CypherWriter.sharedFirst`.
+     */
+    binds(work: () => void): boolean {
+        const [shares, bindings, functions] = [this.shares, this.sharedBindings, this.functions.length];
+        try {
+            work();
+            return this.sharedBindings > bindings;
+        } finally {
+            this.shares = shares;
+            this.sharedBindings = bindings;
+            this.functions.splice(functions);
+        }
     }
 
     /**
@@ -208,6 +230,7 @@ export abstract class SqlCypherCompiler {
         if (!this.sharing || values.every((it) => it.length <= SHARED_ABOVE)) {
             return body(values);
         }
+        this.sharedBindings++;
         return this.bound(values, body);
     }
 

@@ -1464,6 +1464,149 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ]);
         });
     });
+
+    /**
+     * An aggregate of temporal arithmetic, its argument worked out first, for each row, where its values are bound:
+     * drivine4j's test of liberation-data/drivine4j#333, ported for #373. Unbound, it compiled to megabytes.
+     */
+    describe('aggregates of temporal arithmetic', () => {
+        it('give what they give of the arithmetic worked out first, grouped, distinct and over nulls', async () => {
+            await clear();
+            await query(`
+                UNWIND [
+                  {id: 1, g: 'a', at: '2024-03-15T10:00:00+02:00', m: 1}, {id: 2, g: 'a', at: '2024-03-15T10:00:00+02:00', m: 1},
+                  {id: 3, g: 'a', at: '2024-03-15T10:00:00+02:00', m: 4}, {id: 4, g: 'b', at: '2024-03-15T11:00:00Z', m: 5},
+                  {id: 5, g: 'b', at: null, m: 3}, {id: 6, g: 'b', at: '2024-03-15T12:30:00+02:00', m: 0}
+                ] AS r
+                CREATE (:CyAgg {id: r.id, g: r.g, at: r.at, m: r.m})
+            `);
+            const t = 'datetime(n.at) + duration({minutes: n.m})';
+            // b's 12:30+02:00 is 10:30 UTC, before its 11:05Z: min() and max() compare moments, not their texts. Its null is passed over.
+            expect(
+                await query(`
+                    MATCH (n:CyAgg) WITH n ORDER BY n.id
+                    WITH n.g AS g, count(${t}) AS c, count(DISTINCT ${t}) AS d, min(${t}) AS lo, max(${t}) AS hi, sum((${t}).minute) AS s, avg((${t}).minute) AS a, collect(${t}) AS l
+                    RETURN {g: g, count: c, distinct: d, lo: [lo.hour, lo.minute], hi: [hi.hour, hi.minute], sum: s, avg: a, times: [x IN l | [x.hour, x.minute]]}
+                    ORDER BY g
+                `)
+            ).toEqual([
+                {
+                    g: 'a',
+                    count: 3,
+                    distinct: 2,
+                    lo: [10, 1],
+                    hi: [10, 4],
+                    sum: 6,
+                    avg: 2.0,
+                    times: [
+                        [10, 1],
+                        [10, 1],
+                        [10, 4]
+                    ]
+                },
+                {
+                    g: 'b',
+                    count: 2,
+                    distinct: 2,
+                    lo: [12, 30],
+                    hi: [11, 5],
+                    sum: 35,
+                    avg: 17.5,
+                    times: [
+                        [11, 5],
+                        [12, 30]
+                    ]
+                }
+            ]);
+            // Kept distinct by collect(DISTINCT …), and read in an item beside the aggregate.
+            expect(
+                await query(
+                    `MATCH (n:CyAgg) WITH n ORDER BY n.id WITH n.g AS g, collect(DISTINCT ${t}) AS l RETURN {g: g, minutes: [x IN l | x.minute], n: size(l)} ORDER BY g`
+                )
+            ).toEqual([
+                { g: 'a', minutes: [1, 4], n: 2 },
+                { g: 'b', minutes: [5, 30], n: 2 }
+            ]);
+            // Sorted by an aggregate of it, which is none of the items.
+            expect(
+                await query(`MATCH (n:CyAgg) RETURN n.g AS g, count(*) AS c ORDER BY max((${t}).minute) DESC`)
+            ).toEqual([
+                ['b', 3],
+                ['a', 3]
+            ]);
+            // The size of a list of temporal values that a comprehension keeps, summed: 2 for each of b's moments after 09:30 UTC.
+            expect(
+                await query(
+                    "MATCH (n:CyAgg) RETURN sum(size([x IN [datetime(n.at), datetime(n.at) + duration('PT1H')] WHERE x > datetime('2024-03-15T09:30:00Z')]))"
+                )
+            ).toEqual([4]);
+            // Over no grouping key, the issue's statements.
+            const z = "datetime('2024-03-15T10:00:00+02:00') + duration({minutes: i})";
+            expect(
+                await query(
+                    `UNWIND range(1, 3) AS i RETURN [count(${z}), min(${z}).minute, max(${z}).minute, sum((${z}).minute)]`
+                )
+            ).toEqual([[3, 1, 3, 6]]);
+            expect(
+                await query(`UNWIND range(1, 4) AS i WITH i % 2 AS k, i WITH k, collect(${z}) AS l RETURN k ORDER BY l`)
+            ).toEqual([1, 0]);
+            // Inside a CASE and arithmetic, in a WITH a WHERE filters, and in a CALL { … }: Oracle reads no imported
+            // variable in an aggregate there, worked out first or not, so this one reads none.
+            expect(
+                await query(
+                    `UNWIND range(1, 3) AS i RETURN [CASE WHEN count(${z}) > 1 THEN 'many' END, count(${z}) + 1]`
+                )
+            ).toEqual([['many', 4]]);
+            expect(
+                await query(`UNWIND range(1, 4) AS i WITH i % 2 AS k, max((${z}).minute) AS m WHERE m < 4 RETURN k`)
+            ).toEqual([1]);
+            expect(
+                await query(
+                    `UNWIND [2] AS o CALL { WITH o UNWIND range(1, 3) AS i RETURN sum((${z}).minute) AS s } RETURN s + o`
+                )
+            ).toEqual([8]);
+            // A reduce() in the argument, which Oracle declares a function for.
+            expect(
+                await query(`UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + (${z}).minute - i + x))`)
+            ).toEqual([6]);
+            // A list of temporal values, kept distinct, read back by its items' fields: Oracle reads no temporal list by
+            // JSON_TABLE (drivine4j#331).
+            expect(
+                await query(
+                    "WITH [datetime('2024-01-01T00:00Z'), datetime('2024-01-02T00:00Z')] AS l UNWIND [1, 2, 1] AS i " +
+                        'WITH collect(DISTINCT [x IN l | x + duration({days: i})]) AS c RETURN [y IN c | [x IN y | x.day]]'
+                )
+            ).toEqual([
+                [
+                    [2, 3],
+                    [3, 4]
+                ]
+            ]);
+            // Beside a variable-length walk in the same MATCH.
+            await query(
+                'MATCH (a:CyAgg {id: 1}), (b:CyAgg {id: 2}), (c:CyAgg {id: 3}) CREATE (a)-[:NEXT]->(b)-[:NEXT]->(c)'
+            );
+            expect(
+                await query(
+                    'MATCH (a:CyAgg)-[:NEXT*1..2]->(b:CyAgg) RETURN a.id AS a, count(datetime(b.at) + duration({minutes: b.m})) AS c, ' +
+                        'sum((datetime(b.at) + duration({minutes: b.m})).minute) AS s ORDER BY a'
+                )
+            ).toEqual([
+                [1, 2, 5],
+                [2, 1, 4]
+            ]);
+            // Sorted there by an aggregate of it that is none of the items, which binds no value beside the walk: see
+            // CypherWriter.sorts.
+            expect(
+                await query(
+                    'MATCH (a:CyAgg)-[:NEXT*1..2]->(b:CyAgg) RETURN a.id AS a, count(*) AS c ORDER BY sum((datetime(b.at) + duration({minutes: b.m})).minute)'
+                )
+            ).toEqual([
+                [2, 1],
+                [1, 2]
+            ]);
+        });
+    });
 });
 
 /**

@@ -157,9 +157,6 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /** Whether the step of a `reduce` is being written, as its function's own: see {@link reduce}. */
     private folding = false;
 
-    /** Whether the query declares {@link NULLS_EQUAL}: see {@link nullsEqual}. */
-    private nullsCompared = false;
-
     /** Whether the statement compiled calls the store's {@link nullsEqualName}: see {@link callsStoredNullsEqual}. */
     private storedNullsEqualCalled = false;
 
@@ -640,10 +637,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             this.storedNullsEqualCalled = true;
             walked = `(${nullsEqualName(this.graph)}(${x}, ${y}) = 1)`;
         } else {
-            if (!this.nullsCompared) {
-                this.nullsCompared = true;
-                this.declare(nullsEqualFunction(NULLS_EQUAL));
-            }
+            // Declared once, however often it is called; and again where a compile only to see gave its declaration back.
+            this.declare(nullsEqualFunction(NULLS_EQUAL));
             walked = `(${NULLS_EQUAL}(${x}, ${y}) = 1)`;
         }
         const text = (json: string): string => `JSON_SERIALIZE(${json} RETURNING VARCHAR2(4000) NULL ON ERROR)`;
