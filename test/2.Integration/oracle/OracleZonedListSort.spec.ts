@@ -10,6 +10,35 @@ jest.setTimeout(120_000);
 const repro =
     "UNWIND [0, 1] AS k WITH k, [i IN range(1, 10) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i})] AS l";
 
+/** Statements that collect, once each, lists that hold #331's temporal values two levels down, or in maps: see liberation-data/drivine4j#347. */
+const deepRepros = [
+    `${repro} RETURN collect(DISTINCT [l, l])`,
+    `${repro} RETURN collect(DISTINCT [x IN l | [x]])`,
+    `${repro} RETURN collect(DISTINCT [x IN l | [x, null]])`,
+    `${repro} WITH k, [l, l] AS ll RETURN collect(DISTINCT ll)`,
+    `${repro} RETURN collect(DISTINCT [x IN l | {t: x}])`
+];
+
+/**
+ * Statements whose lists may hold #331's temporal values: a list of lists of them, an item of which a quantifier or reduce takes,
+ * a list worked out item by item with a coalesce or a CASE that is a temporal value or a number, a list a reduce gives of them,
+ * and a list of them at a map's key that a temporal value's field is named for.
+ */
+const mayHoldRepros = [
+    `${repro} WITH k, [l, l] AS ll RETURN [k, any(x IN ll WHERE size([y IN x WHERE y IS NOT NULL]) > 9)] ORDER BY k`,
+    `${repro} WITH k, [l, l] AS ll RETURN reduce(s = 0, x IN ll | s + size([y IN x WHERE y IS NOT NULL])) / 2`,
+    "UNWIND [0, 1] AS k WITH k, [i IN range(1, 10) | coalesce(CASE WHEN k > 5 THEN k END, localdatetime('2024-03-15T10:00:00') + duration({minutes: i}))] AS l " +
+        'RETURN size([x IN l WHERE x IS NOT NULL])',
+    "UNWIND [0, 1] AS k WITH k, [i IN range(1, 10) | CASE WHEN k > 5 THEN k ELSE localdatetime('2024-03-15T10:00:00') + duration({minutes: i}) END] AS l " +
+        'RETURN size([x IN l WHERE x IS NOT NULL])',
+    `${repro} WITH k, reduce(acc = [], x IN l | acc + [x]) AS m RETURN size([y IN m WHERE y IS NOT NULL])`,
+    `${repro} WITH k, {minute: l} AS m RETURN size([y IN m.minute WHERE y IS NOT NULL])`,
+    `${repro} WITH k, [{minute: l}] AS ms RETURN size([y IN ms[0].minute WHERE y IS NOT NULL])`
+];
+
+/** #331's list in a map whose keys are taken: Oracle reads them from the map's data guide. */
+const keyed = `${repro} WITH k, {l: l} AS m RETURN size(keys(m))`;
+
 /**
  * The statements whose reads of a list stalled Oracle's parse (liberation-data/drivine4j#331) run in moments, and lists of
  * zoned values sort by their moments. Each runs on a connection of its own, with a deadline: neither a query timeout nor a
@@ -105,6 +134,34 @@ describeOnOracle('a list of zoned values on Oracle', () => {
         expect(await rows(`${repro} WITH collect(DISTINCT l) AS ls RETURN [size(ls), size(ls[0])]`)).toEqual([
             '[1,10]'
         ]);
+    });
+
+    it('reads a coalesce of such a list, and a list of lists of them or of maps of them, in moments', async () => {
+        // 21 to 106 seconds each, before liberation-data/drivine4j#347.
+        expect(await rows(`${repro} RETURN [k, size([x IN coalesce(l, []) WHERE x IS NOT NULL])] ORDER BY k`)).toEqual([
+            '[0,10]',
+            '[1,10]'
+        ]);
+        expect(
+            (await rows(`${repro} RETURN k ORDER BY size([x IN coalesce(l, []) WHERE x IS NOT NULL])`)).sort()
+        ).toEqual(['0', '1']);
+        for (const deep of deepRepros) {
+            const found = await rows(deep);
+            expect(found).toHaveLength(1);
+            expect([deep, found[0].startsWith('[[') && found[0].includes('2024-03-15T10:10:00')]).toEqual([deep, true]);
+        }
+        expect(
+            await rows(`${repro} WITH collect(DISTINCT [l, l]) AS ls RETURN [size(ls), size(ls[0]), size(ls[0][0])]`)
+        ).toEqual(['[1,2,10]']);
+        expect(
+            await rows(`${repro} WITH k, [x IN l | {t: x}] AS ms WHERE k = 0 UNWIND ms AS m RETURN count(m.t)`)
+        ).toEqual(['10']);
+        expect(await rows(`${repro} WITH k, {l: l} AS m WHERE k = 0 UNWIND m.l AS t RETURN count(t)`)).toEqual(['10']);
+        expect(await rows(mayHoldRepros[0])).toEqual(['[0,true]', '[1,true]']);
+        for (const cypher of mayHoldRepros.slice(1)) {
+            expect([cypher, await rows(cypher)]).toEqual([cypher, ['10', '10']]);
+        }
+        expect(await rows(keyed)).toEqual(['1', '1']);
     });
 
     it('sorts a list worked out with temporal arithmetic, by a comprehension or collect, by its moments, and in moments', async () => {

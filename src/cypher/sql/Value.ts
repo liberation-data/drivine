@@ -17,6 +17,13 @@ export interface JsonValue {
     readonly identity?: string;
     /** Where the statement makes it a list whose every item is a list of `items` of one kind, that kind: an item taken from it has it as its `items`. */
     readonly itemItems?: Temporal;
+    /**
+     * Whether the statement makes it a list or a map that holds, at any depth, a value it makes temporal: deeper than `items`
+     * and `itemItems` tell, or beside values of other kinds, as in `[l, l]` of a list `l` of them. Of an item taken from such a
+     * list, of an entry read from such a map, and of a `CASE`, a `coalesce` or a `reduce` that may give one, that it may be or hold
+     * one. Oracle reads the items of such a list by their places (#331, #347): see {@link SqlCypherCompiler.temporalElements}.
+     */
+    readonly temporals?: boolean;
     /** Whether the statement makes it a list, and with `itemLists` a list of lists: a store may sort a list as Cypher does only then. */
     readonly list?: boolean;
     readonly itemLists?: boolean;

@@ -1358,6 +1358,116 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 await query(`${zoned} UNWIND l AS t WITH collect(DISTINCT t) AS ts RETURN [x IN ts | x.hour]`)
             ).toEqual([[8, 8, 10, 10]]);
         });
+
+        it('is read item by item through a coalesce, and in lists or maps that hold it deeper', async () => {
+            // drivine4j's test of liberation-data/drivine4j#347. Not in the spec yet: Oracle reads these by their places too,
+            // not with JSON_TABLE. Of 0, 1 and 2 items, at 10:01, 10:02.
+            const at = "localdatetime('2024-03-15T10:00:00')";
+            const rows = `UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, k) | ${at} + duration({minutes: i})] AS l`;
+            const each = [
+                [0, []],
+                [1, [1]],
+                [2, [1, 2]]
+            ];
+            expect(
+                await query(
+                    `${rows} RETURN k, [x IN coalesce(l, []) | x.minute], size([x IN coalesce(l, []) WHERE x IS NOT NULL]) ORDER BY k`
+                )
+            ).toEqual([
+                [0, [], 0],
+                [1, [1], 1],
+                [2, [1, 2], 2]
+            ]);
+            expect(
+                await query(
+                    `${rows} WITH k, CASE WHEN k = 1 THEN l END AS m RETURN k, [x IN coalesce(m, []) | x.minute] ORDER BY k`
+                )
+            ).toEqual([
+                [0, []],
+                [1, [1]],
+                [2, []]
+            ]);
+            // collect(DISTINCT …) of lists of lists, and of lists of maps, that hold such a list, each once where first.
+            const twice = `UNWIND [2, 1, 2] AS k WITH k, [i IN range(1, k) | ${at} + duration({minutes: i})] AS l`;
+            expect(
+                await query(`${twice} WITH collect(DISTINCT [l, l]) AS ls RETURN [x IN ls | [y IN x | [z IN y | z.minute]]]`)
+            ).toEqual([
+                [
+                    [
+                        [1, 2],
+                        [1, 2]
+                    ],
+                    [[1], [1]]
+                ]
+            ]);
+            expect(
+                await query(`${twice} WITH collect(DISTINCT [x IN l | [x]]) AS ls RETURN [x IN ls | [y IN x | y[0].minute]]`)
+            ).toEqual([[[1, 2], [1]]]);
+            expect(
+                await query(
+                    `${twice} WITH collect(DISTINCT [x IN l | [x, null]]) AS ls RETURN [x IN ls | [y IN x | [y[0].minute, y[1]]]]`
+                )
+            ).toEqual([
+                [
+                    [
+                        [1, null],
+                        [2, null]
+                    ],
+                    [[1, null]]
+                ]
+            ]);
+            expect(
+                await query(`${twice} WITH k, [l, l] AS ll WITH collect(DISTINCT ll) AS lls RETURN [x IN lls | size(x[0])]`)
+            ).toEqual([[2, 1]]);
+            expect(
+                await query(`${twice} WITH collect(DISTINCT [x IN l | {t: x}]) AS ms RETURN [x IN ms | [y IN x | y.t.minute]]`)
+            ).toEqual([[[1, 2], [1]]]);
+            expect(await query(`${rows} UNWIND [x IN l | {t: x}] AS m RETURN k, collect(m.t.minute) ORDER BY k`)).toEqual([
+                [1, [1]],
+                [2, [1, 2]]
+            ]);
+            // A list taken back out of a map that holds it.
+            expect(await query(`${rows} WITH k, {l: l} AS m RETURN k, [x IN m.l | x.minute] ORDER BY k`)).toEqual(each);
+            // An item a quantifier takes from a list of such lists, and a coalesce in a list worked out item by item that is a
+            // temporal value or a number.
+            expect(
+                await query(
+                    `${rows} WITH k, [l, l] AS ll RETURN k, any(x IN ll WHERE size([y IN x WHERE y.minute = 2]) > 0) ORDER BY k`
+                )
+            ).toEqual([
+                [0, false],
+                [1, false],
+                [2, true]
+            ]);
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, k) | coalesce(CASE WHEN k > 5 THEN k END, ${at} + duration({minutes: i}))] AS l ` +
+                        'RETURN k, [x IN l | x.minute] ORDER BY k'
+                )
+            ).toEqual(each);
+            // Such a list a reduce gives, one at a map's key a temporal value's field is named for, and the keys of a map that
+            // holds one.
+            expect(
+                await query(`${rows} WITH k, reduce(acc = [], x IN l | acc + [x]) AS m RETURN k, [x IN m | x.minute] ORDER BY k`)
+            ).toEqual(each);
+            expect(
+                await query(`${rows} WITH k, {minute: l} AS m RETURN k, [x IN m.minute | x.minute] ORDER BY k`)
+            ).toEqual(each);
+            expect(await query(`${rows} WITH k, {l: l} AS m RETURN k, keys(m) ORDER BY k`)).toEqual([
+                [0, ['l']],
+                [1, ['l']],
+                [2, ['l']]
+            ]);
+            // A list of a number and a temporal value sorts, and is searched with IN, as Cypher has it.
+            const mixed = `UNWIND [[2, ${at} + duration({minutes: 2})], [1, ${at}], [2, ${at} + duration({minutes: 1})]] AS l`;
+            expect(
+                await query(`${mixed} RETURN l[0], l[1].minute, ${at} + duration({minutes: 1}) IN l, 2 IN l ORDER BY l`)
+            ).toEqual([
+                [1, 0, false, false],
+                [2, 1, true, true],
+                [2, 2, false, true]
+            ]);
+        });
     });
 });
 

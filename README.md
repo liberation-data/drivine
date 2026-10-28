@@ -1836,13 +1836,14 @@ const names = await pm.query<string>(
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A zoned value the
   statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
   does a map that holds one. A list of them, or a list of lists of them, sorts item by item so in an `ORDER BY`, `min`
-  and `max`. Oracle reads the items of a list of temporal values by their places, not with `JSON_TABLE`: Oracle 23
-  takes many seconds, or minutes, to parse a `JSON_TABLE` over a list worked out item by item with temporal arithmetic
-  (`[i IN range(1, 10) | t + duration({minutes: i})]`), and neither a query timeout nor a kill ends the parse
-  ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331)). A list the statement no longer knows
-  holds them, as a list of maps that hold them, one passed through `coalesce`, or a list of lists of lists of them
-  (`collect(DISTINCT [l, l])`), is still read with `JSON_TABLE`, and can stall so
-  ([drivine4j#347](https://github.com/liberation-data/drivine4j/issues/347)).
+  and `max`. Oracle reads by their places, not with `JSON_TABLE`, the items of a list that holds temporal values the
+  statement makes, at any depth: a list of them, a list of lists or of maps of them (`collect(DISTINCT [l, l])`), one a
+  `CASE`, `coalesce` or `reduce` may give, or one taken back out of a map; and the keys of any map, which `keys` reads
+  from a list Oracle makes of them. Oracle 23 takes many seconds, or minutes, to parse a `JSON_TABLE` over a list
+  worked out item by item with temporal arithmetic (`[i IN range(1, 10) | t + duration({minutes: i})]`), and neither a
+  query timeout nor a kill ends the parse ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331),
+  [drivine4j#347](https://github.com/liberation-data/drivine4j/issues/347)). Other lists keep `JSON_TABLE`, which is
+  about ten times as fast for a short list; read by their places, the keys are faster than `JSON_TABLE` gave them.
 - A parameter is bound as JSON, so a number that is whole is a whole number, though it was written `2.0`:
   `toString($f)` of it gives `'2'`, where Neo4j, which the driver sends a number to as a float, gives `'2.0'`.
 

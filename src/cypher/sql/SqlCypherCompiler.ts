@@ -401,8 +401,8 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
-     * {@link elements} of the JSON list `json` whose items the statement makes temporal values, or lists of them, as
-     * Oracle reads them apart: see its own.
+     * {@link elements} of the JSON list `json` that the statement makes hold temporal values at any depth, as Oracle
+     * reads them apart: see its own.
      */
     temporalElements(json: string, alias: string): string {
         return this.elements(json, alias);
@@ -729,7 +729,7 @@ export abstract class SqlCypherCompiler {
     /**
      * The items of the JSON list `list` once each, where each is first: what `collect(DISTINCT …)` keeps of what a `WITH`
      * before it collected, for a store dedupes no aggregate in the query that makes it. Where `temporal`, the statement
-     * makes its items temporal values or lists of them, and they are read as {@link temporalElements} reads them.
+     * makes its list hold temporal values at any depth, and its items are read as {@link temporalElements} reads them.
      */
     abstract distinctItems(list: string, temporal?: boolean): string;
 
