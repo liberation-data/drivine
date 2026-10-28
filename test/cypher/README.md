@@ -38,6 +38,8 @@ A step has:
 
 A step with no `rows` and no `error` is run, and what it gives is not checked.
 
+On Neo4j a statement runs in the database's default language, Cypher 25 on Neo4j 2026.10. A step that pins what Cypher 5 gives, where the two differ, starts its statement with `CYPHER 5` and runs `only: [neo4j]`.
+
 ## Values
 
 - A whole number and the same number written with a fraction are different values: `2` is not `2.0`.

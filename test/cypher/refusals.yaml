@@ -302,3 +302,13 @@ cases:
         error: "The variable x is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."
       - cypher: "CALL db.labels() YIELD label WHERE label STARTS WITH 'A'"
         error: "A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL db.labels() YIELD label WHERE … RETURN label."
+
+  - name: "toString of a list or a map"
+    description: "toString() of a value the statement makes a list or a map is refused, as Neo4j refuses it."
+    steps:
+      - cypher: "WITH [localdatetime('2024-03-15T10:00:00')] AS l RETURN toString(l)"
+        error: "toString() takes a number, a text, a truth value or a temporal value, not a list, as in Neo4j."
+      - cypher: "MATCH (n) RETURN toString(collect(n.x))"
+        error: "toString() takes a number, a text, a truth value or a temporal value, not a list, as in Neo4j."
+      - cypher: "MATCH (n) RETURN toString(n {.name})"
+        error: "toString() takes a number, a text, a truth value or a temporal value, not a map, as in Neo4j."

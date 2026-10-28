@@ -216,6 +216,31 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * The pairs of `x`'s and `y`'s items, and of their items' where both are lists, at any depth, walked together by place,
+     * as {@link nullsEqual} walks them, each with its place, a list of where it is in each list it is in. A place that one
+     * list has and the other has not pairs an item with SQL's null: the list without it is the shorter. The pair first by
+     * place that is not equal decides; none, the two are equal.
+     */
+    listOrder(x: string, y: string): string {
+        const items = (json: string, alias: string): string =>
+            `SELECT ${alias}e.v, ${alias}e.n FROM unnest(ARRAY(SELECT jsonb_array_elements(${json}))) WITH ORDINALITY ${alias}e (v, n)`;
+        const kind = 'jsonb_typeof(low.a)';
+        const unequal =
+            `low.a IS NULL OR low.b IS NULL OR ${kind} <> jsonb_typeof(low.b) OR ${kind} = 'null' ` +
+            `OR ${kind} <> 'array' AND (low.a <> low.b OR ${kind} = 'object' AND ${this.holdsNull('low.a')})`;
+        const order =
+            `CASE WHEN low.a IS NULL THEN -1 WHEN low.b IS NULL THEN 1 WHEN ${kind} <> jsonb_typeof(low.b) OR ${kind} NOT IN ('number', 'string', 'boolean') THEN NULL ` +
+            `WHEN ${this.ordered('low.a', '<', 'low.b')} THEN -1 ELSE 1 END`;
+        return (
+            `(WITH RECURSIVE low (a, b, place) AS (SELECT ${x}, ${y}, CAST(ARRAY[] AS bigint[]) UNION ALL ` +
+            `SELECT lop.a, lop.b, low.place || lop.n FROM low CROSS JOIN LATERAL (SELECT loa.v AS a, lob.v AS b, COALESCE(loa.n, lob.n) AS n ` +
+            `FROM (${items('low.a', 'loa')}) loa FULL JOIN (${items('low.b', 'lob')}) lob ON loa.n = lob.n) lop ` +
+            "WHERE jsonb_typeof(low.a) = 'array' AND jsonb_typeof(low.b) = 'array') " +
+            `SELECT CASE WHEN COUNT(*) = 0 THEN 0 ELSE MIN(los.o) END FROM (SELECT ${order} AS o FROM low WHERE ${unequal} ORDER BY low.place LIMIT 1) los)`
+        );
+    }
+
+    /**
      * A value as `jsonb` orders it, but a text after the other texts by its code points ({@link codePointText}): a row
      * of the value, each text in it the empty text, which comes where texts come among the other kinds, then its text by
      * its code points, null for any other kind. A row of nulls, a null's, comes after every other ascending, and before

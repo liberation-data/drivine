@@ -405,6 +405,22 @@ describe('A compiled Cypher statement', () => {
         expect(readSql.length).toBeLessThan(declared.length);
     });
 
+    it("of two lists compared declares Oracle's function once, however often it is called", () => {
+        // drivine4j's CompiledSizeTest of #349: in an aggregate's argument that binds a value or not, and in an order term
+        // beside a walk.
+        for (const statement of [
+            'MATCH (n) RETURN count(CASE WHEN n.l < [2] THEN 1 END)',
+            'MATCH (n) RETURN count(CASE WHEN n.l < [2] AND (datetime(n.at) + duration({minutes: n.m})).minute > 0 THEN 1 END)',
+            'MATCH (a)-[:NEXT*1..2]->(b) RETURN a.m AS a, count(*) AS c ORDER BY sum(CASE WHEN b.l < [2] THEN 1 ELSE 0 END)',
+            'RETURN [[1] < [2], [1] <= [2], [3] > [2]]'
+        ]) {
+            new PostgresCypherCompiler('g').compile(statement);
+            const sql = new OracleCypherCompiler('g').compile(statement).sql;
+            expect(sql.match(/FUNCTION cy_list_order\(/g)).toHaveLength(1);
+            expect(sql.match(/\bcy_list_order\(/g)!.length).toBeGreaterThan(1);
+        }
+    });
+
     it.each(compilers)(
         'of lists and maps written out that may hold a null compares them item by item, not built and compared whole, on %s',
         (name, compilerFor) => {

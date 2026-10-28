@@ -105,6 +105,38 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('toString() of a list or a map the statement makes, as Neo4j refuses it', () => {
+        // drivine4j's #349: Postgres gave the list's JSON text, and Oracle null. The spec's refusals hold the rest.
+        compilers.forEach(([, compiler]) => {
+            for (const [cypher, kind] of [
+                ['WITH [1, 2] AS l RETURN toString(l)', 'list'],
+                ['RETURN toString({a: 1})', 'map']
+            ]) {
+                expect(() => compiler().compile(cypher)).toThrow(
+                    `toString() takes a number, a text, a truth value or a temporal value, not a ${kind}, as in Neo4j.`
+                );
+            }
+            // A value whose kind the statement leaves open is compiled, as Neo4j plans it.
+            compiler().compile("UNWIND [1, 'a'] AS x RETURN toString(x)");
+            compiler().compile('MATCH (n) RETURN toString(n.x)');
+        });
+    });
+
+    it('two lists compared in a statement that writes, or in the step of a reduce(), on Oracle, whose block calls no function the query declares', () => {
+        // drivine4j's #349: Oracle compares two lists by a function the query declares, which a procedure's queries do not call.
+        const write = 'CREATE (n:N {a: [1] < [2]})';
+        expect(() => new OracleCypherCompiler('g').compile(write)).toThrow(
+            'Two lists compared with <, <=, > or >= do not run on Oracle in a statement that writes'
+        );
+        new PostgresCypherCompiler('g').compile(write);
+        // Nor does a reduce()'s step, which is a function the query declares.
+        const folded = 'RETURN reduce(acc = false, x IN [[1], [2]] | acc OR [1] < x)';
+        expect(() => new OracleCypherCompiler('g').compile(folded)).toThrow(
+            'Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce()'
+        );
+        new PostgresCypherCompiler('g').compile(folded);
+    });
+
     it('a date written as a text that is no date, with what is wrong with it', () => {
         // Not in the spec: the message ends with the parser's own text.
         compilers.forEach(([, compiler]) => {
