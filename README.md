@@ -388,6 +388,8 @@ documents them; the ones you're likeliest to meet:
   in it by the database's collation ([Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)), and Oracle
   reads an empty string as null ([Oracle](#oracle)).
 
+### Or no Cypher at all
+
 You may not need Cypher at all: the [object manager](#object-manager) loads and saves your classes on every store
 without it.
 
