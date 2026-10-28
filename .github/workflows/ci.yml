@@ -9,6 +9,16 @@ on:
         branches: [master]
     pull_request:
     workflow_call:
+    # Each night on the images the tests name, without the pin below, so an engine's new release shows up here and
+    # not in a pull request's run.
+    schedule:
+        - cron: '17 4 * * *'
+
+# FalkorDB is held at a release that passes: Docker Hub's falkordb/falkordb:latest is sometimes a 4.x patch release,
+# which has no =~ (FalkorDB/FalkorDB#3551). The nightly run leaves it unset, so the tests run the image
+# DrivineTestContainers names. Move the pin to FalkorDB's latest release, or drop it, once the nightly passes.
+env:
+    FALKORDB_TEST_IMAGE: ${{ github.event_name != 'schedule' && 'falkordb/falkordb:6.0.3' || '' }}
 
 jobs:
     # The Cypher spec's copies in test/cypher are the tag VERSION names, unchanged, and a later tag is shown as a

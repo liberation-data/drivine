@@ -42,6 +42,7 @@ import {
 } from '@/cypher/ast/Query';
 import {
     children,
+    chunked,
     contains,
     DISTINCT_ITEMS,
     holdsSubquery,
@@ -53,6 +54,7 @@ import {
     literal,
     MADE_TEXT,
     MATH_FUNCTIONS,
+    MOST_ARGUMENTS,
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
@@ -2437,7 +2439,7 @@ export class CypherWriter {
 
     /**
      * The rows `select` reads with what the projection reads of them worked out first, in a `WITH` of its own, and the
-     * projection over that: see {@link casesFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
+     * projection over that: see {@link casesFirst}, {@link sharedFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
      * is.
      */
     private workedOutFirst(
@@ -2447,6 +2449,8 @@ export class CypherWriter {
     ): [Select, Projection] | undefined {
         return (
             this.casesFirst(select, projection, items) ??
+            // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
+            this.sharedFirst(select, projection, items) ??
             this.aggregatesFirst(select, projection, items) ??
             this.heldFirst(select, projection, items)
         );
@@ -2681,6 +2685,89 @@ export class CypherWriter {
         };
         // Kept apart, or Oracle merges it back into the query that aggregates.
         return [this.with(select, { kind: 'With', projection: withProjection }, new Map(), true), kept];
+    }
+
+    /**
+     * The rows `select` reads with each aggregate's argument that {@link SqlCypherCompiler.shared} would bind a value in
+     * worked out first, in a `WITH *` of its own, and the projection with the aggregate of that argument read from there;
+     * undefined where there is none. An aggregate's argument is compiled with no value bound ({@link aggregating}): bound
+     * in a subquery around the aggregate, a value would be taken from the group the aggregate reads, which no store reads
+     * from a subquery's FROM. Unbound, an operation that reads its operands more than once writes them out again at each
+     * level, and `count(t + duration({minutes: i}))` compiled to megabytes (drivine4j#333). Worked out first, for each
+     * row, the argument binds its values as any item does, and the aggregate reads its column, as it does where a `WITH`
+     * works it out first in the statement itself.
+     */
+    private sharedFirst(
+        select: Select,
+        projection: Projection,
+        items: ProjectionItem[]
+    ): [Select, Projection] | undefined {
+        if (!this.sql.sharing) {
+            return undefined;
+        }
+        // Order terms too, beside a variable-length walk as well: there `sorts` binds no value in one that is none of the
+        // items, so worked out here, in a WITH's item, is the only place its aggregate's argument binds one.
+        const terms = [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)];
+        const argumentsOf = new Map<string, Expression>();
+        terms.forEach((term) =>
+            contains(term, (e) => {
+                if (isAggregate(e) && e.kind === 'Function') {
+                    e.arguments.forEach((argument) => {
+                        const key = expressionKey(argument);
+                        if (!argumentsOf.has(key) && this.binds(argument, select)) {
+                            argumentsOf.set(key, argument);
+                        }
+                    });
+                }
+                return false;
+            })
+        );
+        if (argumentsOf.size === 0) {
+            return undefined;
+        }
+        // Named as no variable is, unless quoted so.
+        const names = new Map([...argumentsOf.keys()].map((key) => [key, `#shared${++this.counter}`]));
+        const withProjection: Projection = {
+            distinct: false,
+            star: true,
+            items: [...argumentsOf].map(([key, argument]) => ({ expression: argument, name: names.get(key)! })),
+            orderBy: []
+        };
+        const shared = (expression: Expression): Expression =>
+            replaced(expression, (term) =>
+                isAggregate(term) && term.kind === 'Function'
+                    ? {
+                          ...term,
+                          arguments: term.arguments.map((argument) => {
+                              const name = names.get(expressionKey(argument));
+                              return name !== undefined ? { kind: 'Variable', name } : argument;
+                          })
+                      }
+                    : undefined
+            );
+        const kept: Projection = {
+            ...projection,
+            star: false,
+            items: items.map((it) => ({ ...it, expression: shared(it.expression) })),
+            orderBy: projection.orderBy.map((it) => ({ ...it, expression: shared(it.expression) }))
+        };
+        // Kept apart, as casesFirst keeps its own, so no store merges it back into the query that aggregates.
+        const outer: Scope = new Map([...select.scope].filter(([variable]) => !select.bound.has(variable)));
+        return [this.with(select, { kind: 'With', projection: withProjection }, outer, true), kept];
+    }
+
+    /**
+     * Whether {@link SqlCypherCompiler.shared} binds a value in `expression`, compiled over the rows `select` reads.
+     * Compiled only to see: the names it takes and the functions it declares (a `reduce`'s on Oracle) are given back, so
+     * a statement whose aggregates bind nothing compiles as it did.
+     */
+    private binds(expression: Expression, select: Select): boolean {
+        const counter = this.counter;
+        try {
+            return this.sql.binds(() => this.expression(expression, select.scope));
+        } finally {
+            this.counter = counter;
+        }
     }
 
     /**
@@ -4287,11 +4374,12 @@ export class CypherWriter {
             return undefined;
         }
         const joined = (pairs: [Expression, Expression][]): string =>
-            `(${pairs
-                .map(([a, b]) =>
+            grouped(
+                pairs.map(([a, b]) =>
                     this.condition(this.binary({ kind: 'Binary', operator: 'EQUALS', left: a, right: b }, scope))
-                )
-                .join(' AND ')})`;
+                ),
+                'AND'
+            );
         if (binary.operator === 'IN') {
             return this.itemwiseIn(left, right, scope);
         }
@@ -4318,13 +4406,14 @@ export class CypherWriter {
         }
         // The item compiled once, and compared with each of the list's.
         const item = this.expression(left, scope);
-        return `(${right.items
-            .map((listed) => {
+        return grouped(
+            right.items.map((listed) => {
                 const equals: Binary = { kind: 'Binary', operator: 'EQUALS', left, right: listed };
                 const [l, r] = this.compared(item, this.expression(listed, scope), equals);
                 return this.equality(l, r, listed, this.plain(left, listed, l, r, scope), this.stored(left, scope));
-            })
-            .join(' OR ')})`;
+            }),
+            'OR'
+        );
     }
 
     /**
@@ -5405,6 +5494,21 @@ function isGiven(expression: Expression): boolean {
         expression.kind === 'Parameter' ||
         (expression.kind === 'Property' && expression.subject.kind === 'Parameter')
     );
+}
+
+/**
+ * The conditions `terms` joined by `operator`, in parentheses. SQLite reads `a OR b OR c` as an expression as deep as it
+ * is long, and refuses one deeper than 1,000 (liberation-data/drivine4j#332): past `MOST_ARGUMENTS` terms, each run of
+ * them is joined in parentheses of its own, and the runs joined so in turn. Postgres takes such a chain at any length
+ * (100,000 terms tried); it is grouped here too, as drivine4j groups it, so the libraries compile it alike.
+ */
+function grouped(terms: string[], operator: string): string {
+    return terms.length <= MOST_ARGUMENTS
+        ? `(${terms.join(` ${operator} `)})`
+        : grouped(
+              chunked(terms, MOST_ARGUMENTS).map((it) => grouped(it, operator)),
+              operator
+          );
 }
 
 function reversed(relationship: RelationshipPattern): RelationshipPattern {

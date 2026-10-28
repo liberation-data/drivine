@@ -494,4 +494,91 @@ describe('A compiled Cypher statement', () => {
             }
         }
     );
+
+    it.each(compilers)(
+        'of an aggregate of temporal arithmetic is about the statement a WITH working its argument out first is, on %s',
+        (_, compilerFor) => {
+            // liberation-data/drivine4j#333: an aggregate's argument was compiled with nothing bound, so
+            // count(Z + duration({minutes: i})) wrote the duration's fields and the addition's operands out again at each
+            // level. Worked out first, for each row, it binds them as any item does.
+            const z = "datetime('2024-03-15T10:00:00+02:00')";
+            const within = "datetime('2024-03-15T09:30:00Z')";
+            // Each aggregating statement, and the same with a WITH working the aggregate's argument out first.
+            const statements: [string, string][] = [
+                ...['count', 'collect', 'min', 'max', 'sum', 'avg'].map((aggregate): [string, string] => {
+                    const argument = ['sum', 'avg'].includes(aggregate)
+                        ? `(${z} + duration({minutes: i})).minute`
+                        : `${z} + duration({minutes: i})`;
+                    return [
+                        `UNWIND range(1, 3) AS i RETURN ${aggregate}(${argument})`,
+                        `UNWIND range(1, 3) AS i WITH ${argument} AS t RETURN ${aggregate}(t)`
+                    ];
+                }),
+                [
+                    `UNWIND range(1, 3) AS i WITH i % 2 AS k, collect(${z} + duration({minutes: i})) AS l RETURN k ORDER BY l`,
+                    `UNWIND range(1, 3) AS i WITH i % 2 AS k, ${z} + duration({minutes: i}) AS t WITH k, collect(t) AS l RETURN k ORDER BY l`
+                ],
+                [
+                    `UNWIND range(1, 3) AS i RETURN count(DISTINCT ${z} + duration({minutes: i}))`,
+                    `UNWIND range(1, 3) AS i WITH ${z} + duration({minutes: i}) AS t RETURN count(DISTINCT t)`
+                ],
+                [
+                    `MATCH (n:E) RETURN sum(size([x IN [datetime(n.at), datetime(n.at) + duration('PT1H')] WHERE x > ${within}]))`,
+                    `MATCH (n:E) WITH size([x IN [datetime(n.at), datetime(n.at) + duration('PT1H')] WHERE x > ${within}]) AS s RETURN sum(s)`
+                ],
+                // Sorted beside a variable-length walk by an aggregate that is none of the items.
+                [
+                    'MATCH (a:E)-[:NEXT*1..2]->(b:E) RETURN a.id AS a, count(*) AS c ORDER BY sum((datetime(b.at) + duration({minutes: b.m})).minute)',
+                    'MATCH (a:E)-[:NEXT*1..2]->(b:E) WITH a, (datetime(b.at) + duration({minutes: b.m})).minute AS t RETURN a.id AS a, count(*) AS c ORDER BY sum(t)'
+                ],
+                // A text function or + in an aggregate: liberation-data/drivine#373.
+                [
+                    "UNWIND range(1, 500) AS i WITH collect(DISTINCT 'value number ' + toString(i % 400)) AS xs RETURN size(xs)",
+                    "UNWIND range(1, 500) AS i WITH 'value number ' + toString(i % 400) AS t WITH collect(DISTINCT t) AS xs RETURN size(xs)"
+                ],
+                [
+                    "MATCH (n) RETURN collect(n.title + ': ' + n.first + ' ' + n.last)",
+                    "MATCH (n) WITH n.title + ': ' + n.first + ' ' + n.last AS t RETURN collect(t)"
+                ]
+            ];
+            for (const [aggregating, first] of statements) {
+                const [size, reference] = [aggregating, first].map((it) => compilerFor().compile(it).sql.length);
+                // Named in what a failure prints.
+                expect({
+                    aggregating,
+                    size,
+                    reference,
+                    within: size < 120_000 && size < reference * 1.2
+                }).toMatchObject({
+                    within: true
+                });
+            }
+        }
+    );
+
+    it("of an aggregate's argument compiled only to see whether it binds a value declares each function on Oracle once, under the name the query calls", () => {
+        // Compiled to see, then again: a reduce() in it was declared twice, under one name or a name no query calls.
+        const z = "datetime('2024-03-15T10:00:00Z') + duration({minutes: x})";
+        for (const statement of [
+            'UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + x))',
+            `UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + (${z}).minute))`
+        ]) {
+            const sql = new OracleCypherCompiler('g').compile(statement).sql;
+            const declared = [...sql.matchAll(/FUNCTION (cy_\w+)\(/g)].map((it) => it[1]);
+            expect(declared.length).toBeGreaterThan(0);
+            expect(declared).toEqual([...new Set(declared)]);
+            for (const name of declared) {
+                expect(sql.match(new RegExp(`\\b${name}\\(`, 'g'))!.length).toBeGreaterThan(1);
+            }
+        }
+        // Without the store's function, the query declares its own once, where the aggregate's argument binds a value or not.
+        for (const statement of [
+            'UNWIND range(1, 3) AS i WITH i, [i, null] AS l, [i] AS m RETURN collect(l = m)',
+            "UNWIND range(1, 3) AS i WITH i, [i, null] AS l, [i] AS m RETURN collect(l = m AND (datetime('2024-03-15T10:00:00Z') + duration({minutes: i})).minute > 0)"
+        ]) {
+            const sql = new OracleCypherCompiler('g', false).compile(statement).sql;
+            expect(sql.match(/FUNCTION cy_nulls_equal\(/g)).toHaveLength(1);
+            expect(sql).toContain('THEN NULL ELSE (cy_nulls_equal(');
+        }
+    });
 });

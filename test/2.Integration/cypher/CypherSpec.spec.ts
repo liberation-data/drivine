@@ -338,6 +338,170 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * Lists and maps written longer than Postgres takes arguments to a function, 100: drivine4j's own tests of
+     * liberation-data/drivine4j#332, ported for #372. Not in the spec yet.
+     */
+    describe('long list and map literals', () => {
+        /** The Cypher of the `i`th item of a long literal, and what it gives: of seven kinds in turn, a null among them. */
+        const longItem = (i: number): [string, any] => {
+            switch (i % 7) {
+                case 0:
+                    return [`${i}`, i];
+                case 1:
+                    return [`'s${i}'`, `s${i}`];
+                case 2:
+                    return ['null', null];
+                case 3:
+                    return [`${i}.5`, i + 0.5];
+                case 4:
+                    return [`${i % 2 === 0}`, i % 2 === 0];
+                case 5:
+                    return [`[${i}, 'n']`, [i, 'n']];
+                default:
+                    return [`{k: ${i}}`, { k: i }];
+            }
+        };
+        const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
+
+        it('a list literal of more than 100 items keeps its items, in order, returned, tested with IN, unwound and in a comprehension', async () => {
+            for (const n of [100, 101, 250, 1001]) {
+                const items = range(n).map(longItem);
+                const list = `[${items.map((it) => it[0]).join(', ')}]`;
+                const expected = items.map((it) => it[1]);
+                const lastWhole = range(n).filter((it) => it % 7 === 0).pop()!;
+                expect(await query(`RETURN ${list}`)).toEqual([expected]);
+                expect(await query(`WITH ${list} AS xs RETURN [size(xs), xs[-1], xs[${n - 2}]]`)).toEqual([
+                    [n, expected[n - 1], expected[n - 2]]
+                ]);
+                expect(await query(`UNWIND ${list} AS x RETURN x`)).toEqual(expected);
+                expect(await query(`RETURN [x IN ${list} WHERE x IS NOT NULL | x]`)).toEqual([
+                    expected.filter((it) => it !== null)
+                ]);
+                expect(await query(`RETURN size([x IN ${list} | x IS NULL])`)).toEqual([n]);
+                // A null among the items makes a value not found null, not false, as in Cypher. A list of numbers and nulls
+                // is tested whole, as JSON.
+                const numbers = `[${range(n)
+                    .map((it) => (it % 7 === 2 ? 'null' : `${it}`))
+                    .join(', ')}]`;
+                expect(await query(`RETURN [${lastWhole} IN ${numbers}, 999999 IN ${numbers}]`)).toEqual([[true, null]]);
+                // A list of several kinds is compared item by item, in a few hundred characters of SQL each. Oracle runs out
+                // of memory reading the comparisons of 1001 (liberation-data/drivine4j#360, here #406), so isn't asked them.
+                if (n > 250 && store.type === DatabaseType.ORACLE) {
+                    continue;
+                }
+                // (Not -1, which compiles to ten times the statement, #406.)
+                expect(await query(`RETURN [${lastWhole} IN ${list}, 999999 IN ${list}]`)).toEqual([[true, null]]);
+                // Compared with itself item by item, each pair equal but the nulls, which are null beside each other.
+                expect(await query(`RETURN ${list} = ${list}`)).toEqual([null]);
+            }
+        });
+
+        it('a long list or map literal without a null equals the same value given as a parameter or collected', async () => {
+            // Text holding the brackets and commas a long literal is spliced at on Postgres. Each item is also given as a
+            // parameter, its whole numbers as bigints, so Neo4j is sent them as integers.
+            const item = (i: number): [string, any, any] => {
+                switch (i % 4) {
+                    case 0:
+                        return [`${i}`, i, BigInt(i)];
+                    case 1:
+                        return [`'a], [b}, {${i}'`, `a], [b}, {${i}`, `a], [b}, {${i}`];
+                    case 2:
+                        return [`[${i}, [${i}]]`, [i, [i]], [BigInt(i), [BigInt(i)]]];
+                    default:
+                        return [
+                            `{k: [${i}], m: {n: ${i}}}`,
+                            { k: [i], m: { n: i } },
+                            { k: [BigInt(i)], m: { n: BigInt(i) } }
+                        ];
+                }
+            };
+            for (const n of [101, 200, 201]) {
+                const items = range(n).map(item);
+                const list = `[${items.map((it) => it[0]).join(', ')}]`;
+                expect(await query(`RETURN ${list}`)).toEqual([items.map((it) => it[1])]);
+                expect(await query(`RETURN ${list} = $p`, { p: items.map((it) => it[2]) })).toEqual([true]);
+                expect(await query(`UNWIND ${list} AS x WITH collect(x) AS xs RETURN xs = ${list}`)).toEqual([true]);
+                const map = `{${items.map((it, i) => `k${i}: ${it[0]}`).join(', ')}}`;
+                expect(await query(`RETURN ${map}`)).toEqual([Object.fromEntries(items.map((it, i) => [`k${i}`, it[1]]))]);
+                const given = Object.fromEntries(items.map((it, i) => [`k${i}`, it[2]]));
+                expect(await query(`RETURN ${map} = $p`, { p: given })).toEqual([true]);
+            }
+        });
+
+        it('a map literal of more than 50 entries keeps its entries, in order, returned, read and projected', async () => {
+            for (const n of [50, 51, 120]) {
+                const entries = range(n).map((i): [string, [string, any]] => [`k${i}`, longItem(i)]);
+                const written = entries.map(([key, [cypher]]) => `${key}: ${cypher}`).join(', ');
+                const map = `{${written}}`;
+                const expected = Object.fromEntries(entries.map(([key, [, value]]) => [key, value]));
+                const [returned] = await query(`RETURN ${map}`);
+                expect(returned).toEqual(expected);
+                // Its keys in the order written, where the store keeps them so: Neo4j and Oracle do for a few keys, not
+                // for 50.
+                if (store.type === DatabaseType.POSTGRES) {
+                    expect(Object.keys(returned)).toEqual(Object.keys(expected));
+                }
+                expect(await query(`WITH ${map} AS m RETURN [size(keys(m)), m.k${n - 1}, m['k${n - 2}']]`)).toEqual([
+                    [n, expected[`k${n - 1}`], expected[`k${n - 2}`]]
+                ]);
+                expect(await query(`RETURN ${map} = ${map}`)).toEqual([null]);
+                // Set over a map by a projection.
+                expect(await query(`WITH {a: 1} AS m RETURN m {.*, ${written}}`)).toEqual([{ a: 1, ...expected }]);
+            }
+        });
+
+        it('a long list or map literal holding long ones keeps them whole, each written in parts of its own', async () => {
+            const list = (n: number): string => `[${range(n).join(', ')}]`;
+            const map = (n: number, value: (i: number) => string): string =>
+                `{${range(n)
+                    .map((i) => `k${i}: ${value(i)}`)
+                    .join(', ')}}`;
+            const entries = (n: number, value: (i: number) => any): Record<string, any> =>
+                Object.fromEntries(range(n).map((i) => [`k${i}`, value(i)]));
+            // Long ones first, last and either side of a run's edge, the 100th and 101st items.
+            const long = (i: number): boolean => [0, 99, 100, 200].includes(i);
+            expect(await query(`RETURN [${range(201).map((i) => (long(i) ? list(150) : `${i}`)).join(', ')}]`)).toEqual([
+                range(201).map((i) => (long(i) ? range(150) : i))
+            ]);
+            const [returned] = await query(`RETURN ${map(60, (i) => (i % 25 === 0 ? map(60, (j) => `${j}`) : list(120)))}`);
+            const expected = entries(60, (i) => (i % 25 === 0 ? entries(60, (j) => j) : range(120)));
+            expect(returned).toEqual(expected);
+            // Its keys, and those of the maps it holds, in the order written, where the store keeps them so.
+            if (store.type === DatabaseType.POSTGRES) {
+                expect(Object.keys(returned)).toEqual(Object.keys(expected));
+                expect(Object.keys(returned.k50)).toEqual(Object.keys(expected.k50));
+            }
+        });
+
+        it('a long list or map literal is written whole by CREATE, MERGE, SET and an unwound CREATE', async () => {
+            const list = `[${range(250).join(', ')}]`;
+            const map = (from: number): string =>
+                `{${range(120)
+                    .map((i) => `k${i}: ${from + i}`)
+                    .join(', ')}, l: ${list}}`;
+            const read = (n: string): string => `[${n}.k0, ${n}.k60, ${n}.k119, ${n}.l]`;
+            await clear();
+            expect(await query(`CREATE (n:CyLongLiteral ${map(0)}) RETURN ${read('n')}`)).toEqual([
+                [0, 60, 119, range(250)]
+            ]);
+            expect(await query(`MERGE (n:CyLongLiteral ${map(0)}) RETURN ${read('n')}`)).toEqual([
+                [0, 60, 119, range(250)]
+            ]);
+            expect(await query(`MATCH (n:CyLongLiteral) SET n += ${map(1000)} RETURN ${read('n')}`)).toEqual([
+                [1000, 1060, 1119, range(250)]
+            ]);
+            expect(await query(`MATCH (n:CyLongLiteral) SET n = ${map(2000)} RETURN ${read('n')}`)).toEqual([
+                [2000, 2060, 2119, range(250)]
+            ]);
+            expect(
+                await query(`MATCH (a:CyLongLiteral) CREATE (a)-[r:CY_LONG ${map(3000)}]->(a) RETURN ${read('r')}`)
+            ).toEqual([[3000, 3060, 3119, range(250)]]);
+            await query(`UNWIND ${list} AS x CREATE (:CyLongUnwound {x: x})`);
+            expect(await query('MATCH (n:CyLongUnwound) RETURN n.x ORDER BY n.x')).toEqual(range(250));
+        });
+    });
+
+    /**
      * all(), any(), none() and single() three-valued, as Cypher's are, beyond the spec's cases of liberation-data/drivine#333:
      * drivine-python's own tests of it (drivine-python#159), ported.
      */
@@ -1569,6 +1733,149 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [0, []],
                 [1, [1]],
                 [2, [1, 2]]
+            ]);
+        });
+    });
+
+    /**
+     * An aggregate of temporal arithmetic, its argument worked out first, for each row, where its values are bound:
+     * drivine4j's test of liberation-data/drivine4j#333, ported for #373. Unbound, it compiled to megabytes.
+     */
+    describe('aggregates of temporal arithmetic', () => {
+        it('give what they give of the arithmetic worked out first, grouped, distinct and over nulls', async () => {
+            await clear();
+            await query(`
+                UNWIND [
+                  {id: 1, g: 'a', at: '2024-03-15T10:00:00+02:00', m: 1}, {id: 2, g: 'a', at: '2024-03-15T10:00:00+02:00', m: 1},
+                  {id: 3, g: 'a', at: '2024-03-15T10:00:00+02:00', m: 4}, {id: 4, g: 'b', at: '2024-03-15T11:00:00Z', m: 5},
+                  {id: 5, g: 'b', at: null, m: 3}, {id: 6, g: 'b', at: '2024-03-15T12:30:00+02:00', m: 0}
+                ] AS r
+                CREATE (:CyAgg {id: r.id, g: r.g, at: r.at, m: r.m})
+            `);
+            const t = 'datetime(n.at) + duration({minutes: n.m})';
+            // b's 12:30+02:00 is 10:30 UTC, before its 11:05Z: min() and max() compare moments, not their texts. Its null is passed over.
+            expect(
+                await query(`
+                    MATCH (n:CyAgg) WITH n ORDER BY n.id
+                    WITH n.g AS g, count(${t}) AS c, count(DISTINCT ${t}) AS d, min(${t}) AS lo, max(${t}) AS hi, sum((${t}).minute) AS s, avg((${t}).minute) AS a, collect(${t}) AS l
+                    RETURN {g: g, count: c, distinct: d, lo: [lo.hour, lo.minute], hi: [hi.hour, hi.minute], sum: s, avg: a, times: [x IN l | [x.hour, x.minute]]}
+                    ORDER BY g
+                `)
+            ).toEqual([
+                {
+                    g: 'a',
+                    count: 3,
+                    distinct: 2,
+                    lo: [10, 1],
+                    hi: [10, 4],
+                    sum: 6,
+                    avg: 2.0,
+                    times: [
+                        [10, 1],
+                        [10, 1],
+                        [10, 4]
+                    ]
+                },
+                {
+                    g: 'b',
+                    count: 2,
+                    distinct: 2,
+                    lo: [12, 30],
+                    hi: [11, 5],
+                    sum: 35,
+                    avg: 17.5,
+                    times: [
+                        [11, 5],
+                        [12, 30]
+                    ]
+                }
+            ]);
+            // Kept distinct by collect(DISTINCT …), and read in an item beside the aggregate.
+            expect(
+                await query(
+                    `MATCH (n:CyAgg) WITH n ORDER BY n.id WITH n.g AS g, collect(DISTINCT ${t}) AS l RETURN {g: g, minutes: [x IN l | x.minute], n: size(l)} ORDER BY g`
+                )
+            ).toEqual([
+                { g: 'a', minutes: [1, 4], n: 2 },
+                { g: 'b', minutes: [5, 30], n: 2 }
+            ]);
+            // Sorted by an aggregate of it, which is none of the items.
+            expect(
+                await query(`MATCH (n:CyAgg) RETURN n.g AS g, count(*) AS c ORDER BY max((${t}).minute) DESC`)
+            ).toEqual([
+                ['b', 3],
+                ['a', 3]
+            ]);
+            // The size of a list of temporal values that a comprehension keeps, summed: 2 for each of b's moments after 09:30 UTC.
+            expect(
+                await query(
+                    "MATCH (n:CyAgg) RETURN sum(size([x IN [datetime(n.at), datetime(n.at) + duration('PT1H')] WHERE x > datetime('2024-03-15T09:30:00Z')]))"
+                )
+            ).toEqual([4]);
+            // Over no grouping key, the issue's statements.
+            const z = "datetime('2024-03-15T10:00:00+02:00') + duration({minutes: i})";
+            expect(
+                await query(
+                    `UNWIND range(1, 3) AS i RETURN [count(${z}), min(${z}).minute, max(${z}).minute, sum((${z}).minute)]`
+                )
+            ).toEqual([[3, 1, 3, 6]]);
+            expect(
+                await query(`UNWIND range(1, 4) AS i WITH i % 2 AS k, i WITH k, collect(${z}) AS l RETURN k ORDER BY l`)
+            ).toEqual([1, 0]);
+            // Inside a CASE and arithmetic, in a WITH a WHERE filters, and in a CALL { … }: Oracle reads no imported
+            // variable in an aggregate there, worked out first or not, so this one reads none.
+            expect(
+                await query(
+                    `UNWIND range(1, 3) AS i RETURN [CASE WHEN count(${z}) > 1 THEN 'many' END, count(${z}) + 1]`
+                )
+            ).toEqual([['many', 4]]);
+            expect(
+                await query(`UNWIND range(1, 4) AS i WITH i % 2 AS k, max((${z}).minute) AS m WHERE m < 4 RETURN k`)
+            ).toEqual([1]);
+            expect(
+                await query(
+                    `UNWIND [2] AS o CALL { WITH o UNWIND range(1, 3) AS i RETURN sum((${z}).minute) AS s } RETURN s + o`
+                )
+            ).toEqual([8]);
+            // A reduce() in the argument, which Oracle declares a function for.
+            expect(
+                await query(`UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + (${z}).minute - i + x))`)
+            ).toEqual([6]);
+            // A list of temporal values, kept distinct, read back by its items' fields: Oracle reads no temporal list by
+            // JSON_TABLE (drivine4j#331).
+            expect(
+                await query(
+                    "WITH [datetime('2024-01-01T00:00Z'), datetime('2024-01-02T00:00Z')] AS l UNWIND [1, 2, 1] AS i " +
+                        'WITH collect(DISTINCT [x IN l | x + duration({days: i})]) AS c RETURN [y IN c | [x IN y | x.day]]'
+                )
+            ).toEqual([
+                [
+                    [2, 3],
+                    [3, 4]
+                ]
+            ]);
+            // Beside a variable-length walk in the same MATCH.
+            await query(
+                'MATCH (a:CyAgg {id: 1}), (b:CyAgg {id: 2}), (c:CyAgg {id: 3}) CREATE (a)-[:NEXT]->(b)-[:NEXT]->(c)'
+            );
+            expect(
+                await query(
+                    'MATCH (a:CyAgg)-[:NEXT*1..2]->(b:CyAgg) RETURN a.id AS a, count(datetime(b.at) + duration({minutes: b.m})) AS c, ' +
+                        'sum((datetime(b.at) + duration({minutes: b.m})).minute) AS s ORDER BY a'
+                )
+            ).toEqual([
+                [1, 2, 5],
+                [2, 1, 4]
+            ]);
+            // Sorted there by an aggregate of it that is none of the items, which binds no value beside the walk: see
+            // CypherWriter.sorts.
+            expect(
+                await query(
+                    'MATCH (a:CyAgg)-[:NEXT*1..2]->(b:CyAgg) RETURN a.id AS a, count(*) AS c ORDER BY sum((datetime(b.at) + duration({minutes: b.m})).minute)'
+                )
+            ).toEqual([
+                [2, 1],
+                [1, 2]
             ]);
         });
     });
