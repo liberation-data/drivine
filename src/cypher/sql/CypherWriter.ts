@@ -601,28 +601,24 @@ export class CypherWriter {
         length: (call) => json(this.sql.idCount(this.path(call, 'length').eids)),
         nodes: (call) => this.nodeList(this.path(call, 'nodes').nids),
         relationships: (call) => this.relationshipList(this.path(call, 'relationships').eids),
-        coalesce: (call) =>
-            json(
+        coalesce: (call) => {
+            const written = call.fn.arguments.map((it, i): [Expression, Value] => [it, call.arguments[i]]);
+            return json(
                 `COALESCE(${call.arguments
                     .map((it) => this.sql.nullIfJsonNull(this.sql.comparable(this.asJson(it))))
                     .join(', ')})`,
                 {
-                    temporal: this.kindOf(call.fn.arguments.map((it, i) => [it, call.arguments[i]])),
+                    temporal: this.kindOf(written),
                     // A list of one kind where each is, or is null or an empty list written, as `coalesce(l, [])`: so Oracle reads its
                     // items by their places, as it reads l's (#347).
-                    items: this.listKindOf(
-                        call.fn.arguments.map((it, i) => [it, call.arguments[i]]),
-                        (it) => this.itemsOf(it)
-                    ),
-                    itemItems: this.listKindOf(
-                        call.fn.arguments.map((it, i) => [it, call.arguments[i]]),
-                        (it) => this.itemItemsOf(it)
-                    ),
+                    items: this.listKindOf(written, (it) => this.itemsOf(it)),
+                    itemItems: this.listKindOf(written, (it) => this.itemItemsOf(it)),
                     temporals: call.arguments.some((it) => this.hasTemporals(it)),
                     text: call.arguments.every((it) => this.isText(it)),
                     texts: call.arguments.every((it) => this.holdsTexts(it))
                 }
-            ),
+            );
+        },
         count: (call) => json(this.sql.scalar(`count(${call.distinct}${this.countable(call.one())})`)),
         collect: (call) => this.collectFunction(call),
         [DISTINCT_ITEMS]: (call) => this.distinctItemsFunction(call),
@@ -3630,7 +3626,10 @@ export class CypherWriter {
      * The kind `of` gives each of `values`, lists all, where it gives every one the same: a null written among them aside, and
      * an empty list written, which holds no item of another kind. Undefined where they are of different kinds or of none.
      */
-    private listKindOf(values: [Expression, Value][], of: (value: Value) => Temporal | undefined): Temporal | undefined {
+    private listKindOf(
+        values: [Expression, Value][],
+        of: (value: Value) => Temporal | undefined
+    ): Temporal | undefined {
         const listed = values.filter(
             ([written]) => !isNullLiteral(written) && !(written.kind === 'ListLiteral' && written.items.length === 0)
         );

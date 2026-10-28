@@ -163,4 +163,41 @@ describe('A list of zoned values in compiled Cypher', () => {
             ]);
         }
     });
+
+    it('should read a list of maps of temporal values by its places on Oracle wherever the statement passes it on', () => {
+        // Each step that passes on what a list holds deeper than its items (liberation-data/drivine4j#347): every JSON_TABLE
+        // that reads a list of maps of numbers made so reads the list of maps of temporal values by its places instead, and
+        // only the UNWIND's and range's JSON_TABLEs are left.
+        const listed = (item: string): string =>
+            `UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, k) | {t: ${item}}] AS ms`;
+        const where = 'WHERE m.t IS NOT NULL';
+        const readers = [
+            `RETURN [m IN tail(ms) ${where}]`,
+            `RETURN [m IN reverse(ms) ${where}]`,
+            `RETURN [m IN ms[1..] ${where}]`,
+            `RETURN [m IN ms + ms ${where}]`,
+            `RETURN [m IN CASE WHEN k > 0 THEN ms END ${where}]`,
+            `WITH k, [ms, ms] AS mss RETURN [m IN head(mss) ${where}]`,
+            `WITH k, [ms, ms] AS mss RETURN [m IN last(mss) ${where}]`,
+            `WITH k, [ms, ms] AS mss RETURN [m IN mss[1] ${where}]`,
+            `WITH min(ms) AS mn RETURN [m IN mn ${where}]`,
+            `WITH max(ms) AS mx RETURN [m IN mx ${where}]`,
+            'WITH collect(ms) AS c RETURN [x IN c WHERE size(x) > 0]',
+            `WITH k, {s: ms} AS z RETURN [m IN z {.s}.s ${where}]`,
+            `WITH k, {s: ms} AS z RETURN [m IN z {.*, n: 1}.s ${where}]`,
+            `UNWIND [ms] AS u RETURN [m IN u ${where}]`,
+            `CALL { WITH ms RETURN [{t: 1}] AS u UNION WITH ms RETURN ms AS u } RETURN [m IN u ${where}]`
+        ];
+        const count = (sql: string, of: string): number => sql.split(of).length - 1;
+        for (const reader of readers) {
+            const [temporal, other] = ["localdatetime('2024-03-15T10:00:00') + duration({minutes: i})", 'i + 1'].map(
+                (item) => new OracleCypherCompiler('g').compile(`${listed(item)} ${reader}`).sql
+            );
+            expect([reader, count(temporal, 'JSON_TABLE')]).toEqual([reader, 2]);
+            expect([reader, count(temporal, 'PASSING') - count(other, 'PASSING')]).toEqual([
+                reader,
+                count(other, 'JSON_TABLE') - 2
+            ]);
+        }
+    });
 });
