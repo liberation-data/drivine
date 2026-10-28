@@ -56,7 +56,12 @@ export class OracleConnection implements Connection {
         const hrStart = process.hrtime();
         const result = await this.connection.execute<any>(compiled.statement, compiled.parameters, {
             ...EXECUTE_OPTIONS,
-            autoCommit: !this.inTransaction
+            autoCommit: !this.inTransaction,
+            // Oracle keeps a cursor's memory while the driver keeps its statement, and a compiled Cypher statement holds
+            // megabytes of it: about 4 MB, and over 20 MB where it reads a text past 32 KB. Kept in the driver's cache, 30
+            // statements a session, a few dozen ran the instance out of PGA (ORA-04036, liberation-data/drivine4j#313).
+            // Closed, its memory goes back. Drivine's own statements, a few the same each time, are still kept.
+            keepInStmtCache: !cypher
         });
         new StatementLogger(this.sessionId()).log(spec, hrStart);
         const rows = result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined);
