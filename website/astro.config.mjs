@@ -28,10 +28,10 @@ export default defineConfig({
                 '@fontsource/jetbrains-mono/latin-500.css',
                 './src/styles/custom.css'
             ],
-            // drivine4j's README marks Groovy build scripts as gradle.
+            // drivine4j's docs mark Groovy build scripts as gradle.
             expressiveCode: { shiki: { langAlias: { gradle: 'groovy' } } },
             plugins: [
-                // One sidebar per library, each in its README's order.
+                // One sidebar per library, each in its docs' order.
                 starlightSidebarTopics([
                     { label: 'TypeScript', link: '/ts/', items: sidebar.ts },
                     { label: 'Python', link: '/py/', items: sidebar.py },

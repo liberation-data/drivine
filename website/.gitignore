@@ -1,5 +1,5 @@
 .astro
 dist
-# Generated from the READMEs by scripts/import-readmes.mjs.
+# Generated from the libraries' docs by scripts/import-readmes.mjs.
 src/content/docs
 src/generated
