@@ -391,6 +391,10 @@ documents them; the ones you're likeliest to meet:
 You may not need Cypher at all: the [object manager](#object-manager) loads and saves your classes on every store
 without it.
 
+On Postgres and Oracle it is also the faster way. It runs SQL of its own, written for the store's tables, where a
+Cypher statement is compiled to SQL first; and on Oracle its statements stay prepared, where a compiled one is prepared
+again each time it runs (see [Oracle](#oracle)).
+
 ## Object Manager
 
 `StatelessGraphObjectManager` maps decorated classes to the graph. It writes the statements itself, and gives you a
@@ -1679,6 +1683,13 @@ Notes:
   statistics, Oracle's adaptive join plan gave no rows for a read of a graph just written, where the same plan, fixed,
   gave them all ([#331](https://github.com/liberation-data/drivine/issues/331)). A statement of yours that relies on
   an adaptive plan can ask for one with the hint `/*+ OPT_PARAM('optimizer_adaptive_plans' 'true') */`.
+- Each connection keeps the statements it runs prepared, 30 of them (`oracledb`'s `stmtCacheSize`), so a save, the same
+  block each time, is neither sent nor parsed again. A Cypher statement compiled to SQL is not kept: Oracle holds a kept
+  statement's memory for as long as the driver keeps it, from about 4 MB for a compiled statement to over 20 MB for one
+  that reads a long text, and a few dozen of them ran the instance out of memory (ORA-04036,
+  [drivine#396](https://github.com/liberation-data/drivine/issues/396)). So it is prepared again each time it runs:
+  about 0.3 ms more for a short statement (Oracle reuses its plan; it doesn't parse it again from scratch). The object
+  manager's statements are kept, so where the object manager does what you need, it is the faster way to Oracle.
 
 ### Amazon Neptune
 

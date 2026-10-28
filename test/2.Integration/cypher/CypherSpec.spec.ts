@@ -666,11 +666,11 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         ];
 
         it('a text past 4,000 bytes is measured, cut, changed, searched and added to whole, as a short one is', async () => {
-            // One function a statement. Past 32 KB, given only: Oracle closes the session (ORA-03113) after statements that
-            // read such a text from a property and from a parameter in turn, much as it does for one read over two rows
-            // (#320), and its sessions hold more of its memory for each statement that reads one the statement makes, up to
-            // the instance's limit (ORA-04036), as drivine4j found. The text of '€', three bytes, is 3,000 characters and
-            // 5,998 bytes: under 4,000 characters, past 4,000 bytes.
+            // One function a statement. Past 32 KB too, given, stored and made: Oracle closed the session (ORA-03113) after
+            // statements that read such a text from a property and from a parameter in turn, and its sessions held megabytes
+            // for each compiled statement the driver kept, up to the instance's limit (ORA-04036,
+            // liberation-data/drivine4j#313). The text of '€', three bytes, is 3,000 characters and 5,998 bytes: under 4,000
+            // characters, past 4,000 bytes.
             const texts: [string, number][] = [
                 [` ${'aB'.repeat(2_499)} `, 5_000],
                 [` ${'€B'.repeat(1_499)} `, 3_000],
@@ -678,10 +678,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ];
             for (const [t, length] of texts) {
                 await clear();
-                const short = length < 32_000;
-                if (short) {
-                    await query('CREATE (n:CyLongText {t: $t})', { t });
-                }
+                await query('CREATE (n:CyLongText {t: $t})', { t });
                 const parts = { a: t.substring(0, length / 2), b: t.substring(length / 2) };
                 for (const [fn, expected] of functions(t, length)) {
                     // Given, and stored and read in one row, and made by the statement.
@@ -691,20 +688,18 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                         length,
                         [expected]
                     ]);
-                    if (short) {
-                        expect([
-                            fn,
-                            'stored',
-                            length,
-                            await query(`MATCH (n:CyLongText) WITH n.t AS t RETURN ${fn}`)
-                        ]).toEqual([fn, 'stored', length, [expected]]);
-                        expect([fn, 'made', length, await query(`WITH $a + $b AS t RETURN ${fn}`, parts)]).toEqual([
-                            fn,
-                            'made',
-                            length,
-                            [expected]
-                        ]);
-                    }
+                    expect([
+                        fn,
+                        'stored',
+                        length,
+                        await query(`MATCH (n:CyLongText) WITH n.t AS t RETURN ${fn}`)
+                    ]).toEqual([fn, 'stored', length, [expected]]);
+                    expect([fn, 'made', length, await query(`WITH $a + $b AS t RETURN ${fn}`, parts)]).toEqual([
+                        fn,
+                        'made',
+                        length,
+                        [expected]
+                    ]);
                 }
             }
             await clear();

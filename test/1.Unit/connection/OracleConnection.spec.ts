@@ -60,6 +60,17 @@ describe('OracleConnection', () => {
         expect(it.execute.mock.calls[0][0]).not.toContain('nulls_equal');
     });
 
+    it("should keep a statement compiled from Cypher out of the driver's cache, and a SQL one in it", async () => {
+        // A kept compiled statement holds megabytes of Oracle's memory (liberation-data/drivine4j#313); Drivine's own SQL
+        // is cheap to keep.
+        const it = session(904);
+        const connection = new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', graph(), 'db|me');
+        await connection.query(cypher('MATCH (n) RETURN n'));
+        await connection.query(new QuerySpecification('SELECT 1 FROM dual'));
+        const kept = it.execute.mock.calls.map((call) => (call as any[])[2].keepInStmtCache);
+        expect(kept).toEqual([false, true]);
+    });
+
     it('should report a check that fails for any reason but there being no function, and run no statement', async () => {
         const g = graph();
         const it = session(3113);
