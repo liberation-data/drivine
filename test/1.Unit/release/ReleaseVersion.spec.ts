@@ -109,4 +109,13 @@ describe('release-version.js refs', () => {
         }
         expect(read(dir, SAMPLE)).toEqual(model('3.3.0'));
     });
+
+    it('prints the usage, which names refs, when it is not given exactly one version', () => {
+        const dir = tree({ [SAMPLE]: model('3.3.0'), [FIXTURE]: model('3.3.0') });
+
+        for (const args of [['refs'], ['refs', '3.4.0', '3.5.0']]) {
+            expect(run(dir, ...args)).toMatchObject({ status: 2, stderr: expect.stringContaining('refs <version>') });
+        }
+        expect(read(dir, SAMPLE)).toEqual(model('3.3.0'));
+    });
 });
