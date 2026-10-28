@@ -359,52 +359,38 @@ cases:
   - name: "Zoned kind in a list, and in a list of lists"
     description: "A list of zoned values, and a list of lists of them, sorts and gives min() and max() item by item, each item as the moment it is, whatever its offset; a list that starts another first, a null item after any moment."
     steps:
-      - note: "Oracle sorts such a list as its JSON text, not by its moments. drivine4j gives it a moment key (drivine4j#346); Oracle stays excepted until drivine (drivine#374) and drivine-python (drivine-python#194) do too."
-        cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts"
-        except: [oracle]
+      - cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts"
         rows: [10, 8, 9]
       - cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts DESC"
-        except: [oracle]
         rows: [9, 8, 10]
       - note: "Collected by group."
         cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH t.hour AS h, collect(t) AS ts RETURN h ORDER BY ts"
-        except: [oracle]
         rows: [10, 8, 9]
       - note: "Unwound from a list of lists."
         cypher: "UNWIND [[datetime('2024-03-15T09:00:00Z')], [datetime('2024-03-15T10:00:00+02:00')], [datetime('2024-03-15T08:30:00Z')]] AS ts RETURN ts[0].hour ORDER BY ts"
-        except: [oracle]
         rows: [10, 8, 9]
       - note: "A list of lists of them."
         cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH [[t]] AS l RETURN l[0][0].hour ORDER BY l"
-        except: [oracle]
         rows: [10, 8, 9]
       - cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH t.hour AS h, collect([t]) AS l RETURN h ORDER BY l"
-        except: [oracle]
         rows: [10, 8, 9]
       - note: "A list that starts another comes first; a null item after any moment."
         cypher: "WITH [datetime('2024-03-15T10:00:00+02:00')] AS x, [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS y UNWIND [y, x] AS l RETURN size(l) ORDER BY l"
-        except: [oracle]
         rows: [1, 2]
       - cypher: "WITH [datetime('2024-03-15T10:00:00+02:00'), null] AS x, [datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T09:00:00Z')] AS y UNWIND [x, y] AS l RETURN size([i IN l WHERE i IS NULL]) ORDER BY l"
-        except: [oracle]
         rows: [0, 1]
       - note: "A long list, whose moments are past 4000 bytes of text."
         cypher: "UNWIND [0, 1] AS k WITH k, [x IN range(1, 200) | datetime('2024-03-15T09:00:00Z') + duration({minutes: x - k})] AS l RETURN k ORDER BY l"
-        except: [oracle]
         rows: [1, 0]
       - note: "min() and max() of them."
         cypher: "UNWIND [[datetime('2024-03-15T09:00:00Z')], [datetime('2024-03-15T10:00:00+02:00')], [datetime('2024-03-15T08:30:00Z')]] AS l RETURN [min(l)[0].hour, max(l)[0].hour]"
-        except: [oracle]
         rows: [[10, 9]]
       - cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH [[t]] AS l RETURN [min(l)[0][0].hour, max(l)[0][0].hour]"
-        except: [oracle]
         rows: [[10, 9]]
       - note: "A time of day with an offset, as a moment."
         cypher: "UNWIND [time('10:00:00+02:00'), time('09:00:00Z'), time('08:30:00Z')] AS t WITH [t] AS ts RETURN ts[0].hour ORDER BY ts"
-        except: [oracle]
         rows: [10, 8, 9]
       - cypher: "UNWIND [time('10:00:00+02:00'), time('09:00:00Z'), time('08:30:00Z')] AS t WITH [t] AS l RETURN [min(l)[0].hour, max(l)[0].hour]"
-        except: [oracle]
         rows: [[10, 9]]
       - note: "Taken from a list kept in order, by head() and last()."
         cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH t ORDER BY t WITH collect(t) AS ts RETURN [head(ts).hour, last(ts).hour]"
