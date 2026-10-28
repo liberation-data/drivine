@@ -1212,8 +1212,12 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /**
      * A JSON path reads no map's keys, so they are read from the map's data guide: each path it lists one step from the
      * top is a key, written `$.name`, or `$."…"` as JSON writes a string where the name is any other. The map is bound
-     * first: the data guide's query reads a column of a row outside it, and not an expression of one. Null has no keys,
-     * and gives null.
+     * first: the data guide's query reads a column of a row outside it, and not an expression of one. The guide's paths
+     * are read by their places, as {@link temporalElements} reads them: a `JSON_TABLE` over the guide of a map that holds
+     * a list of temporal values worked out item by item stalls the parse as one over the list does (#331, #347). They are
+     * so read for every map, not only one the statement makes hold such a list: over the guide, which a subquery gives,
+     * they are read many times faster than `JSON_TABLE` reads them (`keys(n)` of 100,000 nodes: 0.4 s, not 4.8 s). Null
+     * has no keys, and gives null.
      */
     private keys(json: string): string {
         return this.bound([json], ([map]) => `CASE WHEN ${kind(map)} = 'object' THEN ${this.keysOf(map)} END`);
@@ -1221,7 +1225,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     private keysOf(json: string): string {
         const key = `CASE WHEN SUBSTR(d.p, 3, 1) = '"' THEN JSON_VALUE(JSON(SUBSTR(d.p, 3)), '$') ELSE SUBSTR(d.p, 3) END`;
-        const guide = `JSON_TABLE((SELECT JSON_DATAGUIDE(${json}, 2) FROM DUAL), '$[*]' COLUMNS (p VARCHAR2(4000) PATH '$."o:path"')) d`;
+        const paths = this.temporalElements(`(SELECT JSON_DATAGUIDE(${json}, 2) FROM DUAL)`, 'dg');
+        const guide = `(SELECT JSON_VALUE(dg.item, '$."o:path"' RETURNING VARCHAR2(4000)) AS p FROM ${paths}) d`;
         const topLevel = `REGEXP_LIKE(d.p, '^\\$\\.(\\w+|"([^"\\\\]|\\\\.)*")$')`;
         return `(SELECT COALESCE(JSON_ARRAYAGG(g.k ORDER BY g.k RETURNING JSON), JSON('[]')) FROM (SELECT ${key} AS k FROM ${guide} WHERE ${topLevel}) g)`;
     }
