@@ -1,8 +1,9 @@
 # Prepare release: opens the release PR. See RELEASING.md.
 #
-# It bumps the version in package.json and package-lock.json on a branch release/v<version>, and opens a PR "Release
-# v<version>" that lists the commits since the last tag. Merging that PR releases the version (release.yml). The
-# release train controller, liberation-data/drivine-release, starts it with `gh workflow run prepare-release.yml`.
+# It bumps the version in package.json and package-lock.json, and in the other files that name it (the model files,
+# which scripts/release-version.js lists), on a branch release/v<version>, and opens a PR "Release v<version>" that
+# lists the commits since the last tag. Merging that PR releases the version (release.yml). The release train
+# controller, liberation-data/drivine-release, starts it with `gh workflow run prepare-release.yml`.
 name: Prepare release
 
 on:
@@ -111,6 +112,13 @@ jobs:
                           exit 1
                       fi
                   done
+                  # The model files name the version that wrote them, and CI checks they are what the generator writes
+                  # now, so they move with it. The script fails if one isn't where it expects, and prints those it
+                  # changed, which the commit below adds.
+                  if ! node scripts/release-version.js refs "$version" > "$RUNNER_TEMP/version-refs"; then
+                      echo "::error::Couldn't set the version in every file that names it (above). Update REFERENCES in scripts/release-version.js."
+                      exit 1
+                  fi
                   # The same rule as release.yml's check: a version that isn't tagged and is later than every vX.Y.Z
                   # tag, by semver precedence, so a prerelease sorts below its release.
                   newest=$(git tag -l 'v*' | node scripts/release-version.js newest)
@@ -156,8 +164,9 @@ jobs:
                       fi
                   } > "$body"
                   git switch -c "$branch"
+                  git add package.json package-lock.json $(cat "$RUNNER_TEMP/version-refs")
                   git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                      commit -am "Release v$VERSION"
+                      commit -m "Release v$VERSION"
                   git push origin "$branch"
                   url=$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" --title "Release v$VERSION" --body-file "$body")
                   echo "Opened $url"

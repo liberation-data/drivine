@@ -65,7 +65,11 @@ included. Only a merged version bump or a pushed tag publishes.
 
 - **Version:** `version` in `package.json`. The tag must be `v` and that version, character for character: `v3.4.0`
   for `3.4.0`. `package-lock.json` records the version too; Prepare release updates both with
-  `npm version --no-git-tag-version --ignore-scripts`.
+  `npm version --no-git-tag-version --ignore-scripts`. The model files, `sample/.drivine/model.json` and
+  `test/1.Unit/codegen/fixture/.drivine/model.json`, name it as their generator's, and a unit test fails when they
+  aren't what the generator writes now, so Prepare release then runs `node scripts/release-version.js refs <version>`,
+  which sets it in each and fails when one isn't where it expects. A new file that names the version goes in that
+  script's `REFERENCES`.
 - **Push trigger:** a push to `master` that changes `package.json`.
 - **Build:** `npm ci` then `npm run build`, which makes `dist/`: the compiled package, with `package.json`, the README
   and the licence copied in. `dist/` is what is published.
