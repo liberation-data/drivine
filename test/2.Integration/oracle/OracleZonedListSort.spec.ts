@@ -8,7 +8,7 @@ import { describeOnOracle } from '../support/Oracle';
 
 jest.setTimeout(120_000);
 
-/** The graph the statements are compiled against: its tables are made for the one that writes, and dropped after. */
+/** The graph the statements are compiled against: its tables and function are made for the one that writes, and dropped after. */
 const GRAPH = 'drivine_unwound_temporals';
 
 /** liberation-data/drivine4j#331's list: worked out item by item with temporal arithmetic, by a comprehension. */
@@ -97,7 +97,8 @@ describeOnOracle('a list of zoned values on Oracle', () => {
             `DROP PROPERTY GRAPH IF EXISTS ${GRAPH}`,
             `DROP TABLE IF EXISTS ${GRAPH}_edge PURGE`,
             `DROP TABLE IF EXISTS ${GRAPH}_node PURGE`,
-            `DROP TABLE IF EXISTS ${GRAPH}_schema PURGE`
+            `DROP TABLE IF EXISTS ${GRAPH}_schema PURGE`,
+            `DROP FUNCTION IF EXISTS ${new OracleGraph(GRAPH).nullsEqual}`
         ]);
     });
 
