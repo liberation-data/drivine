@@ -1,14 +1,33 @@
 import * as oracledb from 'oracledb';
-import { ConnectionPropertiesFromEnv } from '@liberation-data/drivine';
+import { ConnectionPropertiesFromEnv, QuerySpecification } from '@liberation-data/drivine';
+import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
+import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { TEST_CONTAINER_PASSWORD } from '@/testing';
 import { describeOnOracle } from '../support/Oracle';
 
 jest.setTimeout(120_000);
 
-/** liberation-data/drivine4j#331's statement: a list worked out item by item with temporal arithmetic, by a comprehension. */
-const repro =
-    "UNWIND [0, 1] AS k WITH k, [i IN range(1, 10) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i})] AS l";
+/** The graph the statements are compiled against: its tables are made for the one that writes, and dropped after. */
+const GRAPH = 'drivine_unwound_temporals';
+
+/** liberation-data/drivine4j#331's list: worked out item by item with temporal arithmetic, by a comprehension. */
+const list = "[i IN range(1, 10) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i})]";
+
+/** #331's statement: its list, on each of two rows. */
+const repro = `UNWIND [0, 1] AS k WITH k, ${list} AS l`;
+
+/**
+ * #331's list in a map, unwound, and taken out by a `WITH` (liberation-data/drivine4j#369): from a map, one the list was
+ * put in after it was worked out, a map two levels down, a list of two maps, and after a write.
+ */
+const unwoundRepros = [
+    `UNWIND [0, 1] AS k WITH k, [{l: ${list}}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `${repro} UNWIND [{l: l}] AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `UNWIND [0, 1] AS k WITH k, [{m: {l: ${list}}}] AS ms UNWIND ms AS t WITH k, t.m AS m WITH k, m.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `UNWIND [0, 1] AS k WITH k, [{l: ${list}}, {l: ${list}}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `UNWIND [0, 1] AS k WITH k, [{l: ${list}}] AS ms UNWIND ms AS t CREATE (:CyUnwoundTemporals) WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`
+];
 
 /** Statements that collect, once each, lists that hold #331's temporal values two levels down, or in maps: see liberation-data/drivine4j#347. */
 const deepRepros = [
@@ -51,22 +70,50 @@ describeOnOracle('a list of zoned values on Oracle', () => {
 
     let attributes: oracledb.ConnectionAttributes;
 
-    beforeAll(() => {
+    /** Runs each statement on a connection of its own. */
+    const run = async (statements: string[]): Promise<void> => {
+        const connection = await oracledb.getConnection(attributes);
+        try {
+            for (const statement of statements) {
+                await connection.execute(statement);
+            }
+        } finally {
+            await connection.close();
+        }
+    };
+
+    beforeAll(async () => {
         const properties = ConnectionPropertiesFromEnv('ORACLE');
         attributes = {
             user: properties.userName,
             password: properties.password,
             connectString: `${properties.host}:${properties.port ?? 1521}/${properties.databaseName}`
         };
+        await run([new OracleGraph(GRAPH).ensuring]);
+    });
+
+    afterAll(async () => {
+        await run([
+            `DROP PROPERTY GRAPH IF EXISTS ${GRAPH}`,
+            `DROP TABLE IF EXISTS ${GRAPH}_edge PURGE`,
+            `DROP TABLE IF EXISTS ${GRAPH}_node PURGE`,
+            `DROP TABLE IF EXISTS ${GRAPH}_schema PURGE`
+        ]);
     });
 
     /**
      * The first column of each row `cypher`, compiled for Oracle, gives, as JSON text; failing where they take past
      * `seconds`, which is short of the 21 seconds the parse of a `JSON_TABLE` over liberation-data/drivine4j#331's list
      * took, and far past the 15 to 200 milliseconds each of these statements takes, so a loaded machine does not fail them.
+     * A statement that writes is a block that hands its rows back in one, as OracleConnection reads them, and what it
+     * writes is rolled back.
      */
     const rows = async (cypher: string, seconds: number = 10): Promise<string[]> => {
-        const compiled = new OracleCypherCompiler('cypher').compile(cypher);
+        const cypherCompiled = new OracleCypherCompiler(GRAPH).compile(cypher);
+        // Its parameters bound as OracleConnection binds them: a write reads them from one, `$_cy_params`.
+        const compiled = new OracleSpecCompiler(
+            new QuerySpecification(cypherCompiled.sql).bind(cypherCompiled.parameters).finalizedCopy('SQL')
+        ).compile();
         const connection = await oracledb.getConnection(attributes);
         const sid = ((await connection.execute<[string]>("SELECT SYS_CONTEXT('USERENV', 'SID') FROM dual")).rows ??
             [])[0][0];
@@ -74,11 +121,16 @@ describeOnOracle('a list of zoned values on Oracle', () => {
         const deadline = new Promise<undefined>((resolve) => {
             timer = setTimeout(() => resolve(undefined), seconds * 1000);
         });
-        const running = connection.execute<any[]>(compiled.sql, compiled.parameters);
+        const running = connection.execute<any[]>(compiled.statement, compiled.parameters, {
+            fetchTypeHandler: (meta) => (meta.dbType === oracledb.DB_TYPE_CLOB ? { type: oracledb.STRING } : undefined)
+        });
         try {
             const result = await Promise.race([running, deadline]);
             if (result !== undefined) {
-                return (result.rows ?? []).map((it) => JSON.stringify(it[0]));
+                const written = result.rows ? undefined : (result.implicitResults?.[0] as any[][] | undefined);
+                return (written ? JSON.parse(written[0][0]) : (result.rows ?? []).map((it) => it[0])).map((it: any) =>
+                    JSON.stringify(it)
+                );
             }
             running.catch(() => undefined);
             try {
@@ -101,6 +153,10 @@ describeOnOracle('a list of zoned values on Oracle', () => {
             throw new Error(`Oracle took more than ${seconds} seconds to run: ${cypher}`);
         } finally {
             clearTimeout(timer);
+            await Promise.race([
+                connection.rollback().catch(() => undefined),
+                new Promise((resolve) => setTimeout(resolve, 1000).unref())
+            ]);
             // Not awaited past the deadline: a session still parsing would hold the close.
             const closed = connection.close().catch(() => undefined);
             await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 1000).unref())]);
@@ -162,6 +218,16 @@ describeOnOracle('a list of zoned values on Oracle', () => {
             expect([cypher, await rows(cypher)]).toEqual([cypher, ['10', '10']]);
         }
         expect(await rows(keyed)).toEqual(['1', '1']);
+    });
+
+    it('reads a list of temporal values a WITH takes out of an unwound map in moments', async () => {
+        // No answer within 30 seconds before liberation-data/drivine4j#369; the session had to be killed.
+        for (const cypher of unwoundRepros.slice(0, -2)) {
+            expect([cypher, await rows(cypher)]).toEqual([cypher, ['10', '10']]);
+        }
+        expect(await rows(unwoundRepros[3])).toEqual(['10', '10', '10', '10']);
+        // After a write, rolled back with the session's work.
+        expect(await rows(unwoundRepros[4])).toEqual(['10', '10']);
     });
 
     it('sorts a list worked out with temporal arithmetic, by a comprehension or collect, by its moments, and in moments', async () => {

@@ -1,9 +1,23 @@
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 
-/** liberation-data/drivine4j#331's statement: a list worked out item by item with temporal arithmetic, by a comprehension. */
-const repro =
-    "UNWIND [0, 1] AS k WITH k, [i IN range(1, 10) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i})] AS l";
+/** liberation-data/drivine4j#331's list: worked out item by item with temporal arithmetic, by a comprehension. */
+const list = "[i IN range(1, 10) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i})]";
+
+/** #331's statement: its list, on each of two rows. */
+const repro = `UNWIND [0, 1] AS k WITH k, ${list} AS l`;
+
+/**
+ * #331's list in a map, unwound, and taken out by a `WITH` (liberation-data/drivine4j#369): from a map, one the list was
+ * put in after it was worked out, a map two levels down, a list of two maps, and after a write.
+ */
+const unwoundRepros = [
+    `UNWIND [0, 1] AS k WITH k, [{l: ${list}}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `${repro} UNWIND [{l: l}] AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `UNWIND [0, 1] AS k WITH k, [{m: {l: ${list}}}] AS ms UNWIND ms AS t WITH k, t.m AS m WITH k, m.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `UNWIND [0, 1] AS k WITH k, [{l: ${list}}, {l: ${list}}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`,
+    `UNWIND [0, 1] AS k WITH k, [{l: ${list}}] AS ms UNWIND ms AS t CREATE (:CyUnwoundTemporals) WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`
+];
 
 /** Statements that collect, once each, lists that hold #331's temporal values two levels down, or in maps: see liberation-data/drivine4j#347. */
 const deepRepros = [
@@ -125,6 +139,34 @@ describe('A list of zoned values in compiled Cypher', () => {
         const keys = new OracleCypherCompiler('g').compile(keyed).sql;
         expect(keys).toContain('PASSING dg_r.n - 1');
         expect(keys).not.toContain('JSON_TABLE((SELECT JSON_DATAGUIDE');
+    });
+
+    it('should read a list of temporal values a WITH takes out of an unwound map item by item on Oracle too', () => {
+        // A property of an unwound item held no temporal values deeper, and such a list was read with JSON_TABLE again
+        // (liberation-data/drivine4j#369). Zoned values and durations, and a list with nulls among them, as well.
+        const others = [
+            "datetime('2024-03-15T10:00:00+02:00') + duration({minutes: i})",
+            'duration({minutes: i})',
+            'CASE i WHEN 1 THEN null ELSE date() END'
+        ].map(
+            (it) =>
+                `UNWIND [0, 1] AS k WITH k, [{l: [i IN range(1, 10) | ${it}]}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN size([x IN l WHERE x IS NOT NULL])`
+        );
+        for (const cypher of [...unwoundRepros, ...others]) {
+            const sql = new OracleCypherCompiler('g').compile(cypher).sql;
+            expect([cypher, sql]).toEqual([cypher, expect.stringMatching(/PASSING x\d+_r\.n - 1/)]);
+            expect([cypher, sql]).toEqual([cypher, expect.not.stringMatching(/JSON_TABLE\((w|q|u)\d+\.(c|item)/)]);
+        }
+        // A list of other values out of an unwound map is still read with JSON_TABLE, and the value is read as
+        // liberation-data/drivine4j#344 reads it.
+        const numbers = new OracleCypherCompiler('g').compile(
+            'UNWIND [0, 1] AS k WITH k, [{l: range(1, 10)}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN size([x IN l WHERE x > 1])'
+        ).sql;
+        expect(numbers).not.toContain('PASSING');
+        for (const cypher of [unwoundRepros[0], "UNWIND [{a: 'x', l: [date()]}] AS t WITH t.a AS a RETURN a"]) {
+            const sql = new OracleCypherCompiler('g').compile(cypher).sql;
+            expect([cypher, sql]).toEqual([cypher, expect.stringContaining('JSON(JSON_QUERY(JSON_SERIALIZE(')]);
+        }
     });
 
     it('should read a list of temporal values by its places on Oracle wherever it is read, in each shape of IN too', () => {

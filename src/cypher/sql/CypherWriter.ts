@@ -3499,6 +3499,8 @@ export class CypherWriter {
                 return json(this.sql.itemProperty(subject.props, expression.key), { flat: true });
             }
             // A value of an unwound item, but a temporal value's field, and one a write reads from its row as rowValue does.
+            // It may hold temporal values deeper, as property() has it, so that a list of them is read by its places
+            // (liberation-data/drivine4j#369).
             if (
                 subject.kind === 'Json' &&
                 subject.fromList &&
@@ -3506,7 +3508,9 @@ export class CypherWriter {
                 subject.rowKeys === undefined &&
                 !this.temporals.fieldNames.includes(expression.key)
             ) {
-                return json(this.sql.itemValue(this.sql.comparable(subject), expression.key));
+                return json(this.sql.itemValue(this.sql.comparable(subject), expression.key), {
+                    temporals: subject.temporals
+                });
             }
         }
         return this.expression(expression, select.scope);
