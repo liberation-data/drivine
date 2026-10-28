@@ -338,6 +338,170 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * Lists and maps written longer than Postgres takes arguments to a function, 100: drivine4j's own tests of
+     * liberation-data/drivine4j#332, ported for #372. Not in the spec yet.
+     */
+    describe('long list and map literals', () => {
+        /** The Cypher of the `i`th item of a long literal, and what it gives: of seven kinds in turn, a null among them. */
+        const longItem = (i: number): [string, any] => {
+            switch (i % 7) {
+                case 0:
+                    return [`${i}`, i];
+                case 1:
+                    return [`'s${i}'`, `s${i}`];
+                case 2:
+                    return ['null', null];
+                case 3:
+                    return [`${i}.5`, i + 0.5];
+                case 4:
+                    return [`${i % 2 === 0}`, i % 2 === 0];
+                case 5:
+                    return [`[${i}, 'n']`, [i, 'n']];
+                default:
+                    return [`{k: ${i}}`, { k: i }];
+            }
+        };
+        const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
+
+        it('a list literal of more than 100 items keeps its items, in order, returned, tested with IN, unwound and in a comprehension', async () => {
+            for (const n of [100, 101, 250, 1001]) {
+                const items = range(n).map(longItem);
+                const list = `[${items.map((it) => it[0]).join(', ')}]`;
+                const expected = items.map((it) => it[1]);
+                const lastWhole = range(n).filter((it) => it % 7 === 0).pop()!;
+                expect(await query(`RETURN ${list}`)).toEqual([expected]);
+                expect(await query(`WITH ${list} AS xs RETURN [size(xs), xs[-1], xs[${n - 2}]]`)).toEqual([
+                    [n, expected[n - 1], expected[n - 2]]
+                ]);
+                expect(await query(`UNWIND ${list} AS x RETURN x`)).toEqual(expected);
+                expect(await query(`RETURN [x IN ${list} WHERE x IS NOT NULL | x]`)).toEqual([
+                    expected.filter((it) => it !== null)
+                ]);
+                expect(await query(`RETURN size([x IN ${list} | x IS NULL])`)).toEqual([n]);
+                // A null among the items makes a value not found null, not false, as in Cypher. A list of numbers and nulls
+                // is tested whole, as JSON.
+                const numbers = `[${range(n)
+                    .map((it) => (it % 7 === 2 ? 'null' : `${it}`))
+                    .join(', ')}]`;
+                expect(await query(`RETURN [${lastWhole} IN ${numbers}, 999999 IN ${numbers}]`)).toEqual([[true, null]]);
+                // A list of several kinds is compared item by item, in a few hundred characters of SQL each. Oracle runs out
+                // of memory reading the comparisons of 1001 (liberation-data/drivine4j#360, here #406), so isn't asked them.
+                if (n > 250 && store.type === DatabaseType.ORACLE) {
+                    continue;
+                }
+                // (Not -1, which compiles to ten times the statement, #406.)
+                expect(await query(`RETURN [${lastWhole} IN ${list}, 999999 IN ${list}]`)).toEqual([[true, null]]);
+                // Compared with itself item by item, each pair equal but the nulls, which are null beside each other.
+                expect(await query(`RETURN ${list} = ${list}`)).toEqual([null]);
+            }
+        });
+
+        it('a long list or map literal without a null equals the same value given as a parameter or collected', async () => {
+            // Text holding the brackets and commas a long literal is spliced at on Postgres. Each item is also given as a
+            // parameter, its whole numbers as bigints, so Neo4j is sent them as integers.
+            const item = (i: number): [string, any, any] => {
+                switch (i % 4) {
+                    case 0:
+                        return [`${i}`, i, BigInt(i)];
+                    case 1:
+                        return [`'a], [b}, {${i}'`, `a], [b}, {${i}`, `a], [b}, {${i}`];
+                    case 2:
+                        return [`[${i}, [${i}]]`, [i, [i]], [BigInt(i), [BigInt(i)]]];
+                    default:
+                        return [
+                            `{k: [${i}], m: {n: ${i}}}`,
+                            { k: [i], m: { n: i } },
+                            { k: [BigInt(i)], m: { n: BigInt(i) } }
+                        ];
+                }
+            };
+            for (const n of [101, 200, 201]) {
+                const items = range(n).map(item);
+                const list = `[${items.map((it) => it[0]).join(', ')}]`;
+                expect(await query(`RETURN ${list}`)).toEqual([items.map((it) => it[1])]);
+                expect(await query(`RETURN ${list} = $p`, { p: items.map((it) => it[2]) })).toEqual([true]);
+                expect(await query(`UNWIND ${list} AS x WITH collect(x) AS xs RETURN xs = ${list}`)).toEqual([true]);
+                const map = `{${items.map((it, i) => `k${i}: ${it[0]}`).join(', ')}}`;
+                expect(await query(`RETURN ${map}`)).toEqual([Object.fromEntries(items.map((it, i) => [`k${i}`, it[1]]))]);
+                const given = Object.fromEntries(items.map((it, i) => [`k${i}`, it[2]]));
+                expect(await query(`RETURN ${map} = $p`, { p: given })).toEqual([true]);
+            }
+        });
+
+        it('a map literal of more than 50 entries keeps its entries, in order, returned, read and projected', async () => {
+            for (const n of [50, 51, 120]) {
+                const entries = range(n).map((i): [string, [string, any]] => [`k${i}`, longItem(i)]);
+                const written = entries.map(([key, [cypher]]) => `${key}: ${cypher}`).join(', ');
+                const map = `{${written}}`;
+                const expected = Object.fromEntries(entries.map(([key, [, value]]) => [key, value]));
+                const [returned] = await query(`RETURN ${map}`);
+                expect(returned).toEqual(expected);
+                // Its keys in the order written, where the store keeps them so: Neo4j and Oracle do for a few keys, not
+                // for 50.
+                if (store.type === DatabaseType.POSTGRES) {
+                    expect(Object.keys(returned)).toEqual(Object.keys(expected));
+                }
+                expect(await query(`WITH ${map} AS m RETURN [size(keys(m)), m.k${n - 1}, m['k${n - 2}']]`)).toEqual([
+                    [n, expected[`k${n - 1}`], expected[`k${n - 2}`]]
+                ]);
+                expect(await query(`RETURN ${map} = ${map}`)).toEqual([null]);
+                // Set over a map by a projection.
+                expect(await query(`WITH {a: 1} AS m RETURN m {.*, ${written}}`)).toEqual([{ a: 1, ...expected }]);
+            }
+        });
+
+        it('a long list or map literal holding long ones keeps them whole, each written in parts of its own', async () => {
+            const list = (n: number): string => `[${range(n).join(', ')}]`;
+            const map = (n: number, value: (i: number) => string): string =>
+                `{${range(n)
+                    .map((i) => `k${i}: ${value(i)}`)
+                    .join(', ')}}`;
+            const entries = (n: number, value: (i: number) => any): Record<string, any> =>
+                Object.fromEntries(range(n).map((i) => [`k${i}`, value(i)]));
+            // Long ones first, last and either side of a run's edge, the 100th and 101st items.
+            const long = (i: number): boolean => [0, 99, 100, 200].includes(i);
+            expect(await query(`RETURN [${range(201).map((i) => (long(i) ? list(150) : `${i}`)).join(', ')}]`)).toEqual([
+                range(201).map((i) => (long(i) ? range(150) : i))
+            ]);
+            const [returned] = await query(`RETURN ${map(60, (i) => (i % 25 === 0 ? map(60, (j) => `${j}`) : list(120)))}`);
+            const expected = entries(60, (i) => (i % 25 === 0 ? entries(60, (j) => j) : range(120)));
+            expect(returned).toEqual(expected);
+            // Its keys, and those of the maps it holds, in the order written, where the store keeps them so.
+            if (store.type === DatabaseType.POSTGRES) {
+                expect(Object.keys(returned)).toEqual(Object.keys(expected));
+                expect(Object.keys(returned.k50)).toEqual(Object.keys(expected.k50));
+            }
+        });
+
+        it('a long list or map literal is written whole by CREATE, MERGE, SET and an unwound CREATE', async () => {
+            const list = `[${range(250).join(', ')}]`;
+            const map = (from: number): string =>
+                `{${range(120)
+                    .map((i) => `k${i}: ${from + i}`)
+                    .join(', ')}, l: ${list}}`;
+            const read = (n: string): string => `[${n}.k0, ${n}.k60, ${n}.k119, ${n}.l]`;
+            await clear();
+            expect(await query(`CREATE (n:CyLongLiteral ${map(0)}) RETURN ${read('n')}`)).toEqual([
+                [0, 60, 119, range(250)]
+            ]);
+            expect(await query(`MERGE (n:CyLongLiteral ${map(0)}) RETURN ${read('n')}`)).toEqual([
+                [0, 60, 119, range(250)]
+            ]);
+            expect(await query(`MATCH (n:CyLongLiteral) SET n += ${map(1000)} RETURN ${read('n')}`)).toEqual([
+                [1000, 1060, 1119, range(250)]
+            ]);
+            expect(await query(`MATCH (n:CyLongLiteral) SET n = ${map(2000)} RETURN ${read('n')}`)).toEqual([
+                [2000, 2060, 2119, range(250)]
+            ]);
+            expect(
+                await query(`MATCH (a:CyLongLiteral) CREATE (a)-[r:CY_LONG ${map(3000)}]->(a) RETURN ${read('r')}`)
+            ).toEqual([[3000, 3060, 3119, range(250)]]);
+            await query(`UNWIND ${list} AS x CREATE (:CyLongUnwound {x: x})`);
+            expect(await query('MATCH (n:CyLongUnwound) RETURN n.x ORDER BY n.x')).toEqual(range(250));
+        });
+    });
+
+    /**
      * all(), any(), none() and single() three-valued, as Cypher's are, beyond the spec's cases of liberation-data/drivine#333:
      * drivine-python's own tests of it (drivine-python#159), ported.
      */
