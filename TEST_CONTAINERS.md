@@ -64,6 +64,11 @@ engine release reaches the tests as soon as it is out. Drivine's own suite runs 
 release that changes what Drivine reads or writes shows up at once. To hold an engine back, pin it with
 `<TYPE>_TEST_IMAGE`, for instance `MEMGRAPH_TEST_IMAGE=memgraph/memgraph:3.14.0`.
 
+CI holds FalkorDB at a release that passes, with `FALKORDB_TEST_IMAGE` in
+[`ci.yml`](.github/workflows/ci.yml): Docker Hub's `falkordb/falkordb:latest` is sometimes a 4.x patch release, which
+has no `=~` ([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)). CI's nightly run leaves the
+pin out and runs `latest`, so it shows when the pin can move or go.
+
 ## The Cypher spec
 
 The Cypher spec's suite (`test/2.Integration/cypher`, run from `test/cypher`, see AGENTS.md) runs its statements on
