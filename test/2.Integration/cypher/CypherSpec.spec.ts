@@ -449,6 +449,56 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 expect(await query(`WITH {a: 1} AS m RETURN m {.*, ${written}}`)).toEqual([{ a: 1, ...expected }]);
             }
         });
+
+        it('a long list or map literal holding long ones keeps them whole, each written in parts of its own', async () => {
+            const list = (n: number): string => `[${range(n).join(', ')}]`;
+            const map = (n: number, value: (i: number) => string): string =>
+                `{${range(n)
+                    .map((i) => `k${i}: ${value(i)}`)
+                    .join(', ')}}`;
+            const entries = (n: number, value: (i: number) => any): Record<string, any> =>
+                Object.fromEntries(range(n).map((i) => [`k${i}`, value(i)]));
+            // Long ones first, last and either side of a run's edge, the 100th and 101st items.
+            const long = (i: number): boolean => [0, 99, 100, 200].includes(i);
+            expect(await query(`RETURN [${range(201).map((i) => (long(i) ? list(150) : `${i}`)).join(', ')}]`)).toEqual([
+                range(201).map((i) => (long(i) ? range(150) : i))
+            ]);
+            const [returned] = await query(`RETURN ${map(60, (i) => (i % 25 === 0 ? map(60, (j) => `${j}`) : list(120)))}`);
+            const expected = entries(60, (i) => (i % 25 === 0 ? entries(60, (j) => j) : range(120)));
+            expect(returned).toEqual(expected);
+            // Its keys, and those of the maps it holds, in the order written, where the store keeps them so.
+            if (store.type === DatabaseType.POSTGRES) {
+                expect(Object.keys(returned)).toEqual(Object.keys(expected));
+                expect(Object.keys(returned.k50)).toEqual(Object.keys(expected.k50));
+            }
+        });
+
+        it('a long list or map literal is written whole by CREATE, MERGE, SET and an unwound CREATE', async () => {
+            const list = `[${range(250).join(', ')}]`;
+            const map = (from: number): string =>
+                `{${range(120)
+                    .map((i) => `k${i}: ${from + i}`)
+                    .join(', ')}, l: ${list}}`;
+            const read = (n: string): string => `[${n}.k0, ${n}.k60, ${n}.k119, ${n}.l]`;
+            await clear();
+            expect(await query(`CREATE (n:CyLongLiteral ${map(0)}) RETURN ${read('n')}`)).toEqual([
+                [0, 60, 119, range(250)]
+            ]);
+            expect(await query(`MERGE (n:CyLongLiteral ${map(0)}) RETURN ${read('n')}`)).toEqual([
+                [0, 60, 119, range(250)]
+            ]);
+            expect(await query(`MATCH (n:CyLongLiteral) SET n += ${map(1000)} RETURN ${read('n')}`)).toEqual([
+                [1000, 1060, 1119, range(250)]
+            ]);
+            expect(await query(`MATCH (n:CyLongLiteral) SET n = ${map(2000)} RETURN ${read('n')}`)).toEqual([
+                [2000, 2060, 2119, range(250)]
+            ]);
+            expect(
+                await query(`MATCH (a:CyLongLiteral) CREATE (a)-[r:CY_LONG ${map(3000)}]->(a) RETURN ${read('r')}`)
+            ).toEqual([[3000, 3060, 3119, range(250)]]);
+            await query(`UNWIND ${list} AS x CREATE (:CyLongUnwound {x: x})`);
+            expect(await query('MATCH (n:CyLongUnwound) RETURN n.x ORDER BY n.x')).toEqual(range(250));
+        });
     });
 
     /**
