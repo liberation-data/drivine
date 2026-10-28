@@ -221,6 +221,11 @@ const names = await pm.query<string>(
   (see [Oracle](#oracle)), a read declares it, and a statement that writes, or the step of a `reduce`, compares two such
   values that differ as JSON as false. Lists and maps written out in the statement, `[null] = [1]`, are compared item by
   item everywhere.
+- `<`, `<=`, `>` and `>=` order two lists item by item where the statement makes one of them a list (`n.tags < ['b']`).
+  Two values whose kind it leaves open, such as two parameters or two properties, compare as null where they hold
+  lists. Two maps compare as null, and two that differ do in a list too, where Neo4j orders them. On Oracle, two lists
+  so ordered are walked item by item by a function the query declares, so such a comparison is refused in a statement
+  that writes and in the step of a `reduce`.
 - `CALL db.labels()` and `CALL db.relationshipTypes()` compile, alone or within a query with `YIELD`, and give each
   label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter
   may be named by a keyword (`$limit`), as in Neo4j.

@@ -497,3 +497,17 @@ cases:
           RETURN [date('2024-03-15'), datetime('2024-03-15T10:30:45.123+02:00'), localdatetime('2024-03-15T10:30'), localtime('10:30'),
                   duration('P1Y2M3DT4H5M6S'), duration({days: 1, hours: 12}), duration('PT0S'), time('10:30+0200')]
         rows: [["2024-03-15", "2024-03-15T10:30:45.123+02:00", "2024-03-15T10:30:00", "10:30:00", "P1Y2M3DT4H5M6S", "P1DT12H", "PT0S", "10:30:00+02:00"]]
+
+  - name: "A temporal list beside a text list"
+    description: "Two lists of temporal values are ordered item by item, and a temporal value beside a text is not ordered, though its ISO text would be."
+    steps:
+      - cypher: "RETURN [[date('2024-01-01')] < [date('2024-01-02')], [duration('P1D')] <= [duration('P1D')], [date('2024-01-01')] < [localdatetime('2024-01-02T00:00')]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, null]]
+      - note: "A zoned value is ordered as the moment it is, and two durations that differ are not ordered."
+        cypher: "RETURN [[datetime('2024-01-01T10:00+02:00')] < [datetime('2024-01-01T09:00Z')], [duration('P1D')] < [duration('P2D')], [time('10:00+01:00')] < [time('09:30Z')], [localtime('10:00')] < [localtime('10:00:00.5')]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, null, true, true]]
+      - cypher: "RETURN [[date('2024-01-01')] < ['2024-01-02'], ['2024-01-02'] > [date('2024-01-01')], [duration('P1D')] < ['P2D'], [localdatetime('2024-01-01T10:00')] <= ['2024-01-01T10:00']]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[null, null, null, null]]

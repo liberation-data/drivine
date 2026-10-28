@@ -1771,6 +1771,80 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ]);
         });
     });
+
+    /**
+     * Two lists ordered item by item with `<`, `<=`, `>` and `>=`: drivine4j's tests of liberation-data/drivine4j#349, ported
+     * for #393. Beside the spec's cases since v0.6.19, which hold the rest.
+     */
+    describe('two lists ordered item by item', () => {
+        const row = async (cypher: string): Promise<any> => {
+            const rows = await query(cypher);
+            expect(rows).toHaveLength(1);
+            return rows[0];
+        };
+
+        it('at any depth, temporal values among them, and null where a pair that is not ordered decides', async () => {
+            // A list that starts the other comes first, at any depth.
+            expect(await row('RETURN [[[]] < [[], 1], [[]] <= [[]], [[], 1] > [[]]]')).toEqual([true, true, true]);
+            // An empty list before one of durations; a null beside a temporal value is not ordered, as on Neo4j.
+            expect(
+                await row(
+                    "RETURN [[] < [duration('P1D')], [date('2024-01-01'), null] < [date('2024-01-01'), date('2024-01-02')], " +
+                        "[date('2024-01-01'), null] < [date('2024-01-02'), null], " +
+                        "[localdatetime('2024-01-01T10:00'), null] <= [localdatetime('2024-01-01T10:00')], " +
+                        "[datetime('2024-01-01T10:00+02:00'), null] < [datetime('2024-01-01T09:00Z'), null]]"
+                )
+            ).toEqual([true, null, true, false, true]);
+            // Lists of lists of temporal values: zoned ones as their moments, and two kinds not ordered.
+            expect(
+                await row(
+                    "RETURN [[[datetime('2024-01-01T10:00+02:00')]] < [[datetime('2024-01-01T09:00Z')]], " +
+                        "[[date('2024-01-01')]] < [[date('2024-01-01')], []], " +
+                        "[[date('2024-01-01')]] < [[localdatetime('2024-01-02T00:00')]]]"
+                )
+            ).toEqual([true, true, null]);
+        });
+
+        it('of whole numbers past 2^53, as they are', async () => {
+            // A SQL store is given each literal as the nearest JavaScript number, the same one, so it compares them as equal
+            // (liberation-data/drivine#417). Expected as Neo4j gives them there too once #417 is fixed.
+            const compared = await row(
+                'RETURN [[9007199254740993] > [9007199254740992], [9007199254740992] < [9007199254740993]]'
+            );
+            expect(compared).toEqual(store.type === DatabaseType.NEO4J ? [true, true] : [false, false]);
+        });
+
+        it("in an aggregate's argument, beside a walk, against a long literal, and out of an unwound map", async () => {
+            // Beside #423, which works an aggregate's argument out first, #420's literals written in parts, and #400's
+            // temporal values of an unwound map: on Oracle, the query declares its function once, and calls it.
+            await clear();
+            await query('CREATE (a:L {m: 1, l: [3]})-[:NEXT]->(b:L {m: 2, l: [1]})-[:NEXT]->(:L {m: 3, l: [1, 5]})');
+            expect(await query('MATCH (n:L) RETURN count(CASE WHEN n.l < [2] THEN 1 END)')).toEqual([2]);
+            expect(
+                await query(
+                    'MATCH (a:L)-[:NEXT*1..2]->(b:L) RETURN a.m AS a, count(*) AS c ORDER BY sum(CASE WHEN b.l < [2] THEN 1 ELSE 0 END)'
+                )
+            ).toEqual([
+                [2, 1],
+                [1, 2]
+            ]);
+            const long = `[${Array.from({ length: 150 }, (_, i) => i + 1).join(', ')}]`;
+            expect(await query(`UNWIND [[1, 2], [200]] AS l RETURN l < ${long}`)).toEqual([true, false]);
+            const unwound =
+                "UNWIND [0, 1] AS k WITH k, [{l: [i IN range(1, 3) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i + k})], " +
+                "z: [i IN range(1, 3) | datetime('2024-03-15T10:00:00+02:00') + duration({minutes: i + k})]}] AS ms UNWIND ms AS t WITH k, t.l AS l, t.z AS z";
+            // A zoned value read out of a map compares as its text on the SQL stores, as it sorts, so the one beside it keeps
+            // its offset.
+            expect(
+                await query(
+                    `${unwound} RETURN [k, l < [localdatetime('2024-03-15T10:02:00')], z < [datetime('2024-03-15T10:01:30+02:00')]] ORDER BY k`
+                )
+            ).toEqual([
+                [0, true, true],
+                [1, false, false]
+            ]);
+        });
+    });
 });
 
 /**

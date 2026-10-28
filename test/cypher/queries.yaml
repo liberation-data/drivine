@@ -2057,3 +2057,91 @@ cases:
           WITH r1, r2, [r1, r2] AS a, {x: r2} AS m
           RETURN [[r1, r2] = [r1, r2], {a: r1, b: r2} = {a: r1, b: r2}, a = a, m = m, a = [r1, r1], r1 IN [r2], a = [r1]]
         rows: [[null, null, null, null, null, null, false]]
+
+  - name: "Two lists ordered item by item"
+    description: "<, <=, > and >= order two lists by the first pair of items that differ, a list that starts the other first, and give null where that pair has a null or is of two kinds."
+    steps:
+      - cypher: "RETURN [[1, 2] < [1, 3], [1, 3] > [1, 2], [1, 2] <= [1, 3], [1, 2] >= [1, 3]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, true, false]]
+      - note: "A list that starts the other comes first."
+        cypher: "RETURN [[1] < [1, 2], [1, 2] > [1], [] < [1], [] < [], [1, 3] > [1, 2, 5], [1, 2] >= [1]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, true, false, true, true]]
+      - note: "Two equal lists, and a whole number equal to its float."
+        cypher: "WITH [1, 2] AS l RETURN [l < l, l <= l, l >= l, l > l, [] <= [], [1, 2] <= [1.0, 2.0]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[false, true, true, false, true, true]]
+      - note: "A null in the first pair, and a list beside null."
+        cypher: "RETURN [[null, 1] < [2, 3], [null] <= [null], [null] < [1], [] < [null], [1, 2] < null, null < [1, 2]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[null, null, null, true, null, null]]
+      - note: "A null after the pair that decides is not read, and a null in the pair that decides makes it null."
+        cypher: "RETURN [[1, null] < [2, 3], [1, null] <= [1, null], [1, null] < [1], [1, null] < [1, 2], [1, 2, null] > [1, 3, null]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, null, false, null, false]]
+      - note: "Two kinds after the pair that decides are not read, nor past the end of the shorter list, and two equal maps are equal."
+        cypher: "RETURN [[1, 'a'] < [2], [1] < [1, 'a'], [[1, 2], 'x'] < [[1, 3], 1], [{a: 1}] <= [{a: 1}]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, true, true]]
+      - note: "Lists within lists, item by item at any depth; a list beside a number is not ordered."
+        cypher: "RETURN [[[1, 2]] < [[1, 3]], [[1], 2] < [[1], 3], [[1]] < [[1, 0]], [[[1]]] < [[[2]]], [[1, 2], [3]] < [[1, 2], [3, null]], [[1]] < [1], [[null, 1]] < [[null, 2]]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, true, true, true, null, null]]
+      - note: "false comes before true, and a truth value beside a number is not ordered."
+        cypher: "RETURN [[false] < [true], [true, false] < [true, true], [true] >= [false, true], [true] < [1]]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, true, null]]
+      - note: "A whole number and a float are ordered as numbers; a number beside a text is not ordered."
+        cypher: "RETURN [[1] < [1.5], [2.0] <= [2], [1] < [1.0], [2] > [1.5], [1, 'a'] < [1, 2], [1] < ['1']]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true, false, true, null, null]]
+      - note: "Texts are ordered by their code points: an emoji, past the Basic Multilingual Plane, after a fullwidth tilde, which UTF-16 would put after it."
+        cypher: "RETURN [['a'] < ['B'], ['b'] >= ['a', 'z'], ['😀'] > ['～'], ['a😀'] > ['a～'], ['～', 'x'] < ['😀']]"
+        except: [memgraph, falkordb, neptune]
+        rows: [[false, true, true, true, true]]
+      - note: "In a WHERE, of lists unwound."
+        cypher: "UNWIND [[1, 2], [1], [2], [1, null], []] AS l WITH l WHERE l < [1, 5] RETURN l"
+        except: [memgraph, falkordb, neptune]
+        rows: [[1, 2], [1], []]
+      - note: "Of lists bound as parameters, whose kind the statement leaves open. The SQL stores order two lists only where the statement makes one side a list, so $a < $b gives null there (drivine4j#385)."
+        cypher: "RETURN [$a < $b, $a < [1, 3], [1] < $a, $b >= $a]"
+        parameters: {a: [1, 2], b: [1, 3]}
+        only: [neo4j]
+        rows: [[true, true, true, true]]
+      - note: "A list parameter beside a list literal is ordered on the SQL stores too."
+        cypher: "RETURN [$a < [1, 3], [1] < $a]"
+        parameters: {a: [1, 2]}
+        except: [memgraph, falkordb, neptune]
+        rows: [[true, true]]
+      - note: "A parameter that is not a list, or a list whose deciding pair is of two kinds, beside a list literal gives null."
+        cypher: "RETURN [$a < [1, 3], [1] < $a, $b < [2], [1, 2] < $b]"
+        parameters: {a: 1, b: [1, "a"]}
+        except: [memgraph, falkordb, neptune]
+        rows: [[null, null, true, null]]
+      - note: "In the step of a reduce(): Oracle refuses it, as below."
+        cypher: "RETURN reduce(acc = false, x IN [[1], [2]] | acc OR [1] < x)"
+        except: [memgraph, falkordb, neptune, oracle]
+        rows: [true]
+      - only: [oracle]
+        cypher: "RETURN reduce(acc = false, x IN [[1], [2]] | acc OR [1] < x)"
+        error: "Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL."
+
+  - name: "toString of a list or a map"
+    description: "toString() of a list or a map the statement makes is refused, as Neo4j refuses it, and of a value whose kind it leaves open is run."
+    steps:
+      - note: "The compiler refuses both as Neo4j refuses them under Cypher 5. Neo4j 2026.10's default language, Cypher 25, gives toString({a: 1}) as '{a: 1}', and toString([1, 'a']) as '[1, a]' though it refuses toString([1, 2])."
+        only: [neo4j]
+        cypher: "CYPHER 5 RETURN toString([1, 2])"
+        error: true
+      - only: [neo4j]
+        cypher: "CYPHER 5 RETURN toString({a: 1})"
+        error: true
+      - only: [sql]
+        cypher: "RETURN toString([1, 2])"
+        error: "toString() takes a number, a text, a truth value or a temporal value, not a list, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString({a: 1})"
+        error: "toString() takes a number, a text, a truth value or a temporal value, not a map, as in Neo4j."
+      - cypher: "UNWIND [1, 'a'] AS x RETURN toString(x)"
+        rows: ["1", "a"]

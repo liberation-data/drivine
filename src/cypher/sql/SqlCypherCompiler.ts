@@ -740,6 +740,16 @@ export abstract class SqlCypherCompiler {
      */
     abstract nullsEqual(x: string, y: string, equals: (x: string, y: string) => string): string;
 
+    /**
+     * Where the JSON list `x` comes beside the JSON list `y`, neither of them null, as Cypher orders two lists in a
+     * comparison (`<`, `>=` …), as a SQL number: -1 before, 0 equal, 1 after. Item by item from the first, at any depth:
+     * the first pair that is not equal decides, and a list that the other starts with comes before it. Null where that
+     * pair is not ordered: a null in it, values of two kinds, or two maps that differ, which Cypher orders and no store
+     * does here yet. A number, a text (by its code points) and a truth value are ordered among their own kind, as
+     * {@link ordered} orders them.
+     */
+    abstract listOrder(x: string, y: string): string;
+
     /** The values `value` of a group, or of a query's rows ordered by `order`, as a JSON list: empty where there are none. */
     abstract aggregateList(value: string, order?: string): string;
 

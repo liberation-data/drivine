@@ -24,6 +24,72 @@ const CURSOR = 'cy_cursor';
  */
 const NULLS_EQUAL = 'cy_nulls_equal';
 
+/** The function a query declares that compares two lists as Cypher orders them: see `OracleCypherCompiler.listOrder`. */
+const LIST_ORDER = 'cy_list_order';
+
+/**
+ * The function `name`, which gives where the JSON list `cy_x` comes beside the JSON list `cy_y` as Cypher orders two values
+ * in a comparison (see `SqlCypherCompiler.listOrder`): -1, 0 or 1, and null where the pair that decides is not ordered. It
+ * walks the two together with `JSON_ELEMENT_T`, as `nullsEqualFunction`'s does. A text is compared as a `VARCHAR2`, by its
+ * bytes, which in UTF-8 order as its code points do; Oracle's empty text is null there, and comes before any other.
+ */
+function listOrderFunction(name: string): string {
+    return [
+        `FUNCTION ${name}(cy_x JSON, cy_y JSON) RETURN NUMBER IS`,
+        '    FUNCTION cmp(a JSON_ELEMENT_T, b JSON_ELEMENT_T) RETURN NUMBER IS',
+        '        c NUMBER;',
+        '        sa VARCHAR2(32767);',
+        '        sb VARCHAR2(32767);',
+        '        la JSON_ARRAY_T;',
+        '        lb JSON_ARRAY_T;',
+        '        oa JSON_OBJECT_T;',
+        '        ob JSON_OBJECT_T;',
+        '        ks JSON_KEY_LIST;',
+        '        too_long EXCEPTION;',
+        '        PRAGMA EXCEPTION_INIT(too_long, -40478);',
+        '    BEGIN',
+        '        IF a.is_Null OR b.is_Null THEN RETURN NULL; END IF;',
+        '        IF a.is_Array AND b.is_Array THEN',
+        '            la := TREAT(a AS JSON_ARRAY_T);',
+        '            lb := TREAT(b AS JSON_ARRAY_T);',
+        '            FOR i IN 0 .. LEAST(la.get_Size, lb.get_Size) - 1 LOOP',
+        '                c := cmp(la.get(i), lb.get(i));',
+        '                IF c IS NULL OR c <> 0 THEN RETURN c; END IF;',
+        '            END LOOP;',
+        '            RETURN SIGN(la.get_Size - lb.get_Size);',
+        '        END IF;',
+        // Two maps are equal or not ordered: Cypher orders maps, which the compiler does not yet.
+        '        IF a.is_Object AND b.is_Object THEN',
+        '            oa := TREAT(a AS JSON_OBJECT_T);',
+        '            ob := TREAT(b AS JSON_OBJECT_T);',
+        '            IF oa.get_Size <> ob.get_Size THEN RETURN NULL; END IF;',
+        '            ks := oa.get_Keys;',
+        '            FOR i IN 1 .. ks.COUNT LOOP',
+        '                IF NOT ob.has(ks(i)) THEN RETURN NULL; END IF;',
+        '                IF NVL(cmp(oa.get(ks(i)), ob.get(ks(i))), 1) <> 0 THEN RETURN NULL; END IF;',
+        '            END LOOP;',
+        '            RETURN 0;',
+        '        END IF;',
+        '        IF a.is_Number AND b.is_Number THEN RETURN SIGN(a.to_Number - b.to_Number); END IF;',
+        '        IF a.is_String AND b.is_String THEN',
+        '            BEGIN',
+        '                sa := a.to_String;',
+        '                sb := b.to_String;',
+        '            EXCEPTION WHEN too_long THEN',
+        '                RETURN SIGN(DBMS_LOB.COMPARE(a.to_Clob, b.to_Clob));',
+        '            END;',
+        '            IF sa IS NULL OR sb IS NULL THEN RETURN CASE WHEN sb IS NOT NULL THEN -1 WHEN sa IS NOT NULL THEN 1 ELSE 0 END; END IF;',
+        '            RETURN CASE WHEN sa = sb THEN 0 WHEN sa < sb THEN -1 ELSE 1 END;',
+        '        END IF;',
+        '        IF a.is_Boolean AND b.is_Boolean THEN RETURN CASE WHEN a.to_Boolean = b.to_Boolean THEN 0 WHEN b.to_Boolean THEN -1 ELSE 1 END; END IF;',
+        '        RETURN NULL;',
+        '    END;',
+        'BEGIN',
+        '    RETURN cmp(JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB)), JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_y RETURNING CLOB)));',
+        'END;'
+    ].join('\n');
+}
+
 /** A key a JSON path writes bare: what SQL would take for an identifier. */
 const PLAIN_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -643,6 +709,27 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         }
         const text = (json: string): string => `JSON_SERIALIZE(${json} RETURNING VARCHAR2(4000) NULL ON ERROR)`;
         return `CASE WHEN ${text(x)} = ${text(y)} THEN NULL ELSE ${walked} END`;
+    }
+
+    /**
+     * By {@link LIST_ORDER}, a function the query declares, which walks the two with `JSON_ELEMENT_T`, as {@link nullsEqual}'s
+     * does: Oracle's recursive queries take no `JSON`. A procedure's queries call no function it declares, nor do a
+     * `reduce`'s step's, so two lists are not compared there.
+     */
+    listOrder(x: string, y: string): string {
+        if (this.procedural) {
+            throw new DrivineError(
+                'Two lists compared with <, <=, > or >= do not run on Oracle in a statement that writes: its block calls no function of its own from SQL.'
+            );
+        }
+        if (this.folding) {
+            throw new DrivineError(
+                "Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL."
+            );
+        }
+        // Declared once, however often it is called.
+        this.declare(listOrderFunction(LIST_ORDER));
+        return `${LIST_ORDER}(${x}, ${y})`;
     }
 
     modulo(a: string, b: string): string {

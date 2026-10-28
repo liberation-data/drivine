@@ -4094,7 +4094,10 @@ export class CypherWriter {
         const sql = this.sql;
         const comparison = COMPARISONS[binary.operator];
         if (comparison) {
-            // Values of two kinds are not ordered, as in Cypher: the comparison is null.
+            // Values of two kinds are not ordered, as in Cypher: the comparison is null. Two lists are, item by item.
+            if (this.listed(left, right)) {
+                return bool(this.listCompared(left, a, right, b, comparison));
+            }
             return bool(
                 sql.shared(
                     [a, b],
@@ -4164,6 +4167,113 @@ export class CypherWriter {
             CONTAINS: () => bool(sql.texts([a, b], ([x, y]) => sql.containsText(x, y)))
         };
         return operations[binary.operator]!();
+    }
+
+    /**
+     * Whether `<`, `<=`, `>` or `>=` of `left` and `right` compares two lists, item by item: where the statement makes
+     * either a list, of values (a list of nodes or of relationships compares as before). Any other comparison is written
+     * as it was.
+     */
+    private listed(left: Value, right: Value): boolean {
+        return left.kind === 'Json' && right.kind === 'Json' && (left.list === true || right.list === true);
+    }
+
+    /**
+     * `<`, `<=`, `>` or `>=`, `operator`, of `left` and `right`, whose JSON is `a` and `b`: where both are lists, as
+     * {@link SqlCypherCompiler.listOrder} orders them, their temporal items as {@link comparedItems} gives them; else null,
+     * as a list and a value of another kind are not ordered.
+     */
+    private listCompared(left: Value, a: string, right: Value, b: string, operator: string): string {
+        const sql = this.sql;
+        const [x, y] = this.comparedItems(left, a, right, b);
+        return sql.shared(
+            [x, y],
+            ([p, q]) =>
+                `CASE WHEN ${sql.typeOf(p)} = 'array' AND ${sql.typeOf(q)} = 'array' THEN ${sql.listOrder(
+                    p,
+                    q
+                )} ${operator} 0 END`
+        );
+    }
+
+    /**
+     * `a` and `b`, the JSON of the lists `left` and `right`, as {@link SqlCypherCompiler.listOrder} compares them, where the
+     * statement makes the items of both, or the items of their items, temporal: a zoned value as the moment it is, whatever
+     * its offset, as `ORDER BY` sorts it (see {@link SqlCypherCompiler.momentsKey}); a duration as a map of it alone, equal
+     * where it is equal and else not ordered, as in Cypher; and a value of one kind beside one of another as a map of its
+     * kind, so the two are not ordered, as is one beside a text, where the statement makes the other list's items texts. A
+     * local value is its ISO text, which orders as it does. Each as it is otherwise: a list of temporal values beside one of
+     * values of several kinds, a list whose temporal values are deeper, or one whose items the statement does not know,
+     * compares its ISO texts. Their items are read by their places ({@link SqlCypherCompiler.temporalElements}), as Oracle
+     * must read a list of temporal values.
+     */
+    private comparedItems(left: Value, a: string, right: Value, b: string): [string, string] {
+        const kind = (list: Value): [Temporal, number] | undefined => {
+            const items = this.itemsOf(list);
+            if (items !== undefined) {
+                return [items, 1];
+            }
+            const itemItems = this.itemItemsOf(list);
+            return itemItems !== undefined && this.holdsLists(list) ? [itemItems, 2] : undefined;
+        };
+        const [l, r] = [kind(left), kind(right)];
+        // A temporal value beside a text: its ISO text would order where Cypher does not.
+        if (l?.[1] === 1 && r === undefined && this.holdsTexts(right)) {
+            return [this.mappedItems(a, 1, this.kindWrapped(l[0])), b];
+        }
+        if (r?.[1] === 1 && l === undefined && this.holdsTexts(left)) {
+            return [a, this.mappedItems(b, 1, this.kindWrapped(r[0]))];
+        }
+        const each = l !== undefined && r !== undefined && l[1] === r[1] ? this.comparedItem(l[0], r[0]) : undefined;
+        return each === undefined ? [a, b] : [this.mappedItems(a, l![1], each[0]), this.mappedItems(b, l![1], each[1])];
+    }
+
+    /**
+     * How {@link comparedItems} gives each item of a list of `kind` beside one of `other`, as a pair for the two lists:
+     * undefined where it gives them as they are, as it does local values of one kind.
+     */
+    private comparedItem(
+        kind: Temporal,
+        other: Temporal
+    ): [(item: string) => string, (item: string) => string] | undefined {
+        if (kind !== other || kind === Temporal.DURATION) {
+            return [this.kindWrapped(kind), this.kindWrapped(other)];
+        }
+        if (!kind.zoned) {
+            return undefined;
+        }
+        const moment = (item: string): string =>
+            this.sql.scalar(this.sql.temporalSql.sortable(this.temporals.moment(this.sql.text(item), kind)));
+        return [moment, moment];
+    }
+
+    /** A temporal value of `kind`, an item of a list, as a map of it alone at its kind's name, so it is ordered by no other kind. */
+    private kindWrapped(kind: Temporal): (item: string) => string {
+        return (item) =>
+            this.sql.comparable(json(this.sql.jsonObject([[kind.name.toLowerCase(), item]]), { ordered: true }));
+    }
+
+    /** The JSON list `jsonSql` with each item at `depth`, 1 its own items and 2 theirs, that is not null as `each` gives it. */
+    private mappedItems(jsonSql: string, depth: number, each: (item: string) => string): string {
+        const sql = this.sql;
+        return sql.shared([jsonSql], ([x]) => {
+            const over = (list: string, at: number): string => {
+                const e = this.alias('lc');
+                const item = `${e}.item`;
+                const mapped =
+                    at === 1
+                        ? each(item)
+                        : `CASE WHEN ${sql.typeOf(item)} = 'array' THEN ${over(item, at - 1)} ELSE ${item} END`;
+                const items = sql.aggregateList(
+                    `CASE WHEN ${sql.isJsonNull(item)} THEN ${sql.literalJson(null)} ELSE ${mapped} END`,
+                    `${e}.item_no`
+                );
+                return sql.comparable(
+                    json(`(SELECT ${items} FROM ${sql.temporalElements(list, e)})`, { ordered: true })
+                );
+            };
+            return `CASE WHEN ${sql.typeOf(x)} = 'array' THEN ${over(x, depth)} END`;
+        });
     }
 
     /**
@@ -4894,6 +5004,9 @@ export class CypherWriter {
             unsupported(`The function ${fn.name}()`);
         }
         const one = call.one();
+        if (name === 'tostring') {
+            this.textOfKind(fn, one);
+        }
         const argument = this.sql.comparable(this.asJson(one));
         const result = this.sql.shared([argument], ([x]) => this.sql.function(name, x)!);
         // An item taken from a list is of the kind its items are.
@@ -4910,6 +5023,24 @@ export class CypherWriter {
             });
         }
         return json(result, { text: TEXT_FUNCTIONS.includes(name) });
+    }
+
+    /**
+     * Refuses `toString` of `value`, the argument of `fn`, where the statement makes it a list or a map: Neo4j refuses it
+     * when it plans the statement. A value whose kind the statement leaves open is compiled as before.
+     */
+    private textOfKind(fn: FunctionCall, value: Value): void {
+        const written = fn.arguments[0];
+        const kind = this.isList(value)
+            ? 'list'
+            : written.kind === 'MapLiteral' || written.kind === 'MapProjection'
+            ? 'map'
+            : undefined;
+        if (kind !== undefined) {
+            throw new DrivineError(
+                `${fn.name}() takes a number, a text, a truth value or a temporal value, not a ${kind}, as in Neo4j.`
+            );
+        }
     }
 
     private idFunction(call: Invocation): Value {
