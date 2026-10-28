@@ -1627,6 +1627,114 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [2, 2, false, true]
             ]);
         });
+
+        it('is read item by item, in order, on its own row, where a WITH takes it out of an unwound map', async () => {
+            // drivine4j's test of liberation-data/drivine4j#369. Not in the spec yet: Oracle reads such a list by its places,
+            // not with JSON_TABLE. Of 0, 1 and 2 items, at 10:01, 10:02.
+            const at = "localdatetime('2024-03-15T10:00:00')";
+            const list = `[i IN range(1, k) | ${at} + duration({minutes: i})]`;
+            const each = [
+                [0, []],
+                [1, [1]],
+                [2, [1, 2]]
+            ];
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${list}}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN k, [x IN l | x.minute] ORDER BY k`
+                )
+            ).toEqual(each);
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, ${list} AS l0 UNWIND [{l: l0}] AS t WITH k, t.l AS l RETURN k, [x IN l | x.minute] ORDER BY k`
+                )
+            ).toEqual(each);
+            // A map two levels down, and a list of two maps.
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{m: {l: ${list}}}] AS ms UNWIND ms AS t WITH k, t.m AS m WITH k, m.l AS l RETURN k, [x IN l | x.minute] ORDER BY k`
+                )
+            ).toEqual(each);
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${list}}, {l: [i IN range(1, k) | ${at} + duration({minutes: 10 + i})]}] AS ms UNWIND ms AS t ` +
+                        'WITH k, t.l AS l RETURN k, [x IN l | x.minute] AS m ORDER BY k, m'
+                )
+            ).toEqual([
+                [0, []],
+                [0, []],
+                [1, [1]],
+                [1, [11]],
+                [2, [1, 2]],
+                [2, [11, 12]]
+            ]);
+            // After a write.
+            await clear();
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${list}}] AS ms UNWIND ms AS t CREATE (:CyUnwoundTemporals) WITH k, t.l AS l RETURN k, [x IN l | x.minute] ORDER BY k`
+                )
+            ).toEqual(each);
+            expect(await query('MATCH (n:CyUnwoundTemporals) RETURN count(n)')).toEqual([3]);
+        });
+
+        it('is read item by item where it is of zoned values, durations or partly null, and beside a list of numbers', async () => {
+            // drivine4j's test of liberation-data/drivine4j#369. Not in the spec yet. Zoned values compare by their moments:
+            // 10:02+02:00 alone is past 08:01:30Z.
+            const zoned = "[i IN range(1, k) | datetime('2024-03-15T10:00:00+02:00') + duration({minutes: i})]";
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${zoned}}] AS ms UNWIND ms AS t WITH k, t.l AS l ` +
+                        "RETURN k, [x IN l | x.minute], size([x IN l WHERE x > datetime('2024-03-15T08:01:30Z')]) ORDER BY k"
+                )
+            ).toEqual([
+                [0, [], 0],
+                [1, [1], 0],
+                [2, [1, 2], 1]
+            ]);
+            const durations = '[i IN range(1, k) | duration({minutes: i})]';
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${durations}}] AS ms UNWIND ms AS t WITH k, t.l AS l RETURN k, [x IN l | x.minutes] ORDER BY k`
+                )
+            ).toEqual([
+                [0, []],
+                [1, [1]],
+                [2, [1, 2]]
+            ]);
+            const partlyNull =
+                "[i IN range(1, k) | CASE i WHEN 1 THEN null ELSE localdatetime('2024-03-15T10:00:00') + duration({minutes: i}) END]";
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${partlyNull}}] AS ms UNWIND ms AS t WITH k, t.l AS l ` +
+                        'RETURN k, [x IN l | x.minute], size([x IN l WHERE x IS NOT NULL]) ORDER BY k'
+                )
+            ).toEqual([
+                [0, [], 0],
+                [1, [null], 0],
+                [2, [null, 2], 1]
+            ]);
+            // Numbers beside such a list in the map, and the list read two levels down in one WITH.
+            const local = "[i IN range(1, k) | localdatetime('2024-03-15T10:00:00') + duration({minutes: i})]";
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{l: ${local}, n: range(1, k)}] AS ms UNWIND ms AS t WITH k, t.l AS l, t.n AS n ` +
+                        'RETURN k, [x IN l | x.minute], [x IN n WHERE x > 1] ORDER BY k'
+                )
+            ).toEqual([
+                [0, [], []],
+                [1, [1], []],
+                [2, [1, 2], [2]]
+            ]);
+            expect(
+                await query(
+                    `UNWIND [0, 1, 2] AS k WITH k, [{m: {l: ${local}}}] AS ms UNWIND ms AS t WITH k, t.m.l AS l RETURN k, [x IN l | x.minute] ORDER BY k`
+                )
+            ).toEqual([
+                [0, []],
+                [1, [1]],
+                [2, [1, 2]]
+            ]);
+        });
     });
 
     /**
