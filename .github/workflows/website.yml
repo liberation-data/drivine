@@ -1,11 +1,12 @@
-# Builds the website (website/) and publishes it to GitHub Pages. Its docs are generated from this repository's
-# README and drivine4j's, so it also runs daily, to pick up drivine4j's changes.
+# Builds the website (website/) and publishes it to GitHub Pages. Its docs are generated from the docs/ of this
+# repository, drivine-python and drivine4j (or their READMEs, where they have none), so it also runs daily, to pick up
+# the other two's changes.
 name: Website
 
 on:
     push:
         branches: [master]
-        paths: ['website/**', 'README.md', '.github/workflows/website.yml']
+        paths: ['website/**', 'docs/**', 'README.md', '.github/workflows/website.yml']
     schedule:
         - cron: '17 3 * * *'
     workflow_dispatch:
@@ -34,7 +35,7 @@ jobs:
             - run: npm run build
               working-directory: website
               env:
-                  # For the repositories' star counts, without the anonymous API's rate limit.
+                  # For the repositories' star counts and the docs/ listings, without the anonymous API's rate limit.
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             - uses: actions/upload-pages-artifact@v5
               with:
