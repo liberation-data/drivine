@@ -959,6 +959,95 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
             await clear();
         });
+
+        it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
+            // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
+            // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its
+            // characters, so a character past U+FFFF, two UTF-16 units, stays whole. drivine4j's test of
+            // liberation-data/drivine4j#311.
+            const reversed = (t: string): string => [...t].reverse().join('');
+            const texts = [
+                // 5,000 characters, and past 32 KB.
+                ` ${'aB'.repeat(2_499)}é`,
+                'aB'.repeat(20_000),
+                // Multibyte, under 4,000 characters and past 4,000 bytes; and at 4,000 bytes, short, and one byte past.
+                `${'é中'.repeat(1_999)}x`,
+                'é'.repeat(2_000),
+                `${'é'.repeat(2_000)}x`,
+                // Characters past U+FFFF, two UTF-16 units each: across each 1,000th unit, where Oracle cuts a long text,
+                // and reversed, across each other unit; then the other way about.
+                `x${'😀'.repeat(1_500)}aé${'😀'.repeat(1_000)}`,
+                `${'😀'.repeat(5_000)}x`,
+                // One that ends on a character across the 2,000th unit, so the last piece Oracle cuts is empty; and a
+                // piece of the most bytes, 999 three-byte characters and one of four.
+                `x${'😀'.repeat(1_000)}`,
+                `${'中'.repeat(999)}😀${'中'.repeat(1_000)}`,
+                // What JSON writes otherwise: quotes, a backslash, a line break and a control character.
+                'a"","x\\\n\u0001'.repeat(800),
+                'abc',
+                'a😀é中'
+            ];
+            for (const t of texts) {
+                await clear();
+                const label = `${t.length} units, ${Buffer.byteLength(t)} bytes`;
+                await query('CREATE (n:CyLongText {t: $t})', { t });
+                const characters = [...t];
+                const half = Math.floor(characters.length / 2);
+                const parts = { a: characters.slice(0, half).join(''), b: characters.slice(half).join('') };
+                const expected = [reversed(t)];
+                expect([label, 'given', await query('WITH $t AS t RETURN reverse(t)', { t })]).toEqual([
+                    label,
+                    'given',
+                    expected
+                ]);
+                expect([label, 'stored', await query('MATCH (n:CyLongText) RETURN reverse(n.t)')]).toEqual([
+                    label,
+                    'stored',
+                    expected
+                ]);
+                expect([
+                    label,
+                    'passed on',
+                    await query('MATCH (n:CyLongText) WITH n.t AS t RETURN reverse(t)')
+                ]).toEqual([label, 'passed on', expected]);
+                expect([label, 'collected', await query('MATCH (n:CyLongText) RETURN collect(reverse(n.t))')]).toEqual([
+                    label,
+                    'collected',
+                    [expected]
+                ]);
+                // Not where a sum on Oracle puts a character past U+FFFF across its 4,000th UTF-16 unit: the sum gives
+                // two U+FFFD there (#416).
+                if (!oracle || characters.length === t.length) {
+                    expect([label, 'made', await query('WITH $a + $b AS t RETURN reverse(t)', parts)]).toEqual([
+                        label,
+                        'made',
+                        expected
+                    ]);
+                }
+                expect([label, 'twice', await query('WITH $t AS t RETURN reverse(reverse(t))', { t })]).toEqual([
+                    label,
+                    'twice',
+                    [t]
+                ]);
+                // In a statement that writes, which Oracle runs as a PL/SQL block.
+                expect([
+                    label,
+                    'written',
+                    await query('MATCH (n:CyLongText) SET n.r = reverse(n.t) RETURN n.r')
+                ]).toEqual([label, 'written', expected]);
+            }
+            await clear();
+            // Several in one statement, each row and each item reversed from its own text, long and short.
+            const rows = ['aB'.repeat(3_000), 'abc', `x${'😀'.repeat(1_500)}`, `${'é中'.repeat(1_999)}x`];
+            expect(await query('UNWIND $ts AS t RETURN reverse(t)', { ts: rows })).toEqual(rows.map(reversed));
+            expect(await query('RETURN [t IN $ts | reverse(t)]', { ts: rows })).toEqual([rows.map(reversed)]);
+            // A null text is null, and an empty one empty: on Oracle null, as its empty text is, and not read again as a
+            // long one.
+            expect(await query('WITH $n AS n RETURN reverse(n)', { n: null })).toEqual([null]);
+            expect(await query('WITH $e AS e RETURN reverse(e)', { e: '' })).toEqual([oracle ? null : '']);
+            // A literal, a text or a list, whose CLOB Oracle bound without a type, and found no DBMS_LOB.SUBSTR for (PLS-307).
+            expect(await query("RETURN [reverse('Keanu'), reverse([1, 2, 3])]")).toEqual([['unaeK', [3, 2, 1]]]);
+        });
     });
 
     /**
