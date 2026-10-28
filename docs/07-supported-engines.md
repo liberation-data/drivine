@@ -255,12 +255,12 @@ const names = await pm.query<string>(
   not unwound (`WITH n {.a} AS m RETURN m.a`); after a write, which carries its rows on, such a value is read from the
   item's text too. A pattern that matches on such a text (`MERGE (n:X {a: r.a})`) compares it as JSON, which Oracle
   refuses past about 32 KB (ORA-40180), leaving the session open.
-- On Oracle, a text past 4,000 bytes is measured, cut, changed, searched and added to whole (`size()`, `toUpper()`,
-  `substring()`, `replace()`, `split()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads a text out of JSON as a
-  `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one isn't. `reverse()` still
-  gives null for one, and `CONTAINS` fails (ORA-22828) where the text it looks for is past 32 KB. A property such a
-  function reads is read from the properties by its own path, which costs about a quarter more on short texts, and a
-  `+` that may put texts together costs about a tenth more, as drivine4j measured.
+- On Oracle, a text past 4,000 bytes is measured, cut, changed, searched, reversed and added to whole (`size()`,
+  `toUpper()`, `substring()`, `replace()`, `split()`, `reverse()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads
+  a text out of JSON as a `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one
+  isn't. `CONTAINS` fails (ORA-22828) where the text it looks for is past 32 KB. A property such a function reads is
+  read from the properties by its own path, which costs about a quarter more on short texts, and a `+` that may put
+  texts together costs about a tenth more, as drivine4j measured.
 - On Oracle, an `OPTIONAL CALL` or an `OPTIONAL MATCH` is joined `ON 1 = 1`, where Postgres joins `ON TRUE`. This works
   around an Oracle bug, seen on 23.26.3: in a scalar subquery, as a `COUNT { … }` is compiled, a join `ON TRUE` is
   refused (ORA-00907) or crashes the session (ORA-03113, with ORA-07445 in the alert log)
