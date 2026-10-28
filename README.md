@@ -41,6 +41,14 @@ DATABASE_PASSWORD=password
 Then, without Nest, make the factories once and hand the managers to your classes:
 
 ```typescript
+import {
+    DatabaseRegistry,
+    GraphObjectManagerFactory,
+    PersistenceManagerFactory,
+    StatelessGraphObjectManager,
+    Transactional
+} from '@liberation-data/drivine';
+
 DatabaseRegistry.buildOrResolveFromEnv();
 const persistenceManagers = new PersistenceManagerFactory();
 const graphObjectManagers = new GraphObjectManagerFactory(persistenceManagers);

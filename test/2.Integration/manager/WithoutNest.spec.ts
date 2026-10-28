@@ -18,7 +18,8 @@ class Person {
     name: string;
 }
 
-// The guide's "Without Nest" (docs/03-quick-start.md): factories made by hand, and @Transactional with no module and no middleware.
+// The guide's "Without Nest" (docs/03-quick-start.md): factories made by hand, and @Transactional with no module and
+// no middleware.
 describe.each(graphEngines())('Drivine without Nest on $type', (engine) => {
     let gom: StatelessGraphObjectManager;
 

@@ -51,15 +51,17 @@ const GUIDE_FILE = /^\d\d-.+\.md$/;
 /**
  * The guide's files joined into the README they were split from: a single newline between files, and the links
  * between them, and to the repository's files, made as they were from the repository's root (`NN-slug.md#a` is `#a`,
- * `../x` is `x`). `files` holds each file's path in the repository, one to each section, the introduction first.
+ * `../x` is `x`). `names` are docs/'s files, and `read` gives one's text by its name. The result's `files` holds each
+ * guide file's path in the repository, one to each section, the introduction first.
  */
-function guide(name, contents, names) {
-    const markdown = contents
+async function guide(name, names, read) {
+    const files = names.filter((it) => GUIDE_FILE.test(it)).sort();
+    const markdown = (await Promise.all(files.map(read)))
         .join('\n')
         .replace(/\]\(\d\d-[^)\s#]+\.md#([^)\s]+)\)/g, '](#$1)')
         .replace(/\]\(\.\.\/([^)\s]+)\)/g, ']($1)')
         .replace(/(href|src)="\.\.\/([^"]+)"/g, '$1="$2"');
-    return { markdown: `# ${name}\n\n${markdown}\n`, files: names.map((it) => `docs/${it}`) };
+    return { markdown: `# ${name}\n\n${markdown}\n`, files: files.map((it) => `docs/${it}`) };
 }
 
 /** Whether these names, of docs/'s files, hold a guide. A docs/ of other notes, without one, doesn't count. */
@@ -71,8 +73,7 @@ async function localDocs(dir, name) {
     if (!isGuide(names)) {
         return null;
     }
-    const files = names.filter((it) => GUIDE_FILE.test(it)).sort();
-    return guide(name, await Promise.all(files.map((it) => readFile(join(dir, it), 'utf8'))), files);
+    return guide(name, names, (it) => readFile(join(dir, it), 'utf8'));
 }
 
 /** A repository checked out at `root`: its docs/ guide, or its README where it has none. */
@@ -119,8 +120,7 @@ async function remote(docsVariable, readmeVariable, repo, branch) {
     if (!isGuide(names)) {
         return { markdown: await fetchText(raw('README.md')) };
     }
-    const files = names.filter((it) => GUIDE_FILE.test(it)).sort();
-    return guide(name, await Promise.all(files.map((it) => fetchText(raw(`docs/${it}`)))), files);
+    return guide(name, names, (it) => fetchText(raw(`docs/${it}`)));
 }
 
 /** Sections that only list the others, which the sidebar does now. */
