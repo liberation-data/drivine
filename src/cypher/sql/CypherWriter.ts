@@ -654,8 +654,8 @@ export class CypherWriter {
                         json(this.sql.aggregateList(`${e}.item`, `${e}.item_no DESC`), { ordered: true })
                     );
                     return (
-                        `CASE ${this.sql.typeOf(x)} WHEN 'string' THEN ${this.sql.scalar(
-                            this.sql.reverseText(this.sql.text(x))
+                        `CASE ${this.sql.typeOf(x)} WHEN 'string' THEN ${this.sql.texts([x], ([t]) =>
+                            this.sql.reversedText(t)
                         )} ` + `WHEN 'array' THEN (SELECT ${reversed} FROM ${this.listElements(call.one(), x, e)}) END`
                     );
                 }),

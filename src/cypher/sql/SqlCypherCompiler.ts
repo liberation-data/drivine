@@ -544,6 +544,11 @@ export abstract class SqlCypherCompiler {
         return body(jsons.map((it) => this.text(it)));
     }
 
+    /** The SQL text `text`, its characters backwards, as JSON: see Oracle's, which reverses a text past 4,000 bytes otherwise. */
+    reversedText(text: string): string {
+        return this.scalar(this.reverseText(text));
+    }
+
     /**
      * `replace`: the SQL text `text` with each `search` in it made `replacement`; `searchBytes` and `replacementBytes` are
      * how long they are in UTF-8, where the statement gives them.
