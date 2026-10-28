@@ -42,6 +42,7 @@ import {
 } from '@/cypher/ast/Query';
 import {
     children,
+    chunked,
     contains,
     DISTINCT_ITEMS,
     holdsSubquery,
@@ -53,6 +54,7 @@ import {
     literal,
     MADE_TEXT,
     MATH_FUNCTIONS,
+    MOST_ARGUMENTS,
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
@@ -4283,11 +4285,12 @@ export class CypherWriter {
             return undefined;
         }
         const joined = (pairs: [Expression, Expression][]): string =>
-            `(${pairs
-                .map(([a, b]) =>
+            grouped(
+                pairs.map(([a, b]) =>
                     this.condition(this.binary({ kind: 'Binary', operator: 'EQUALS', left: a, right: b }, scope))
-                )
-                .join(' AND ')})`;
+                ),
+                'AND'
+            );
         if (binary.operator === 'IN') {
             return this.itemwiseIn(left, right, scope);
         }
@@ -4314,13 +4317,14 @@ export class CypherWriter {
         }
         // The item compiled once, and compared with each of the list's.
         const item = this.expression(left, scope);
-        return `(${right.items
-            .map((listed) => {
+        return grouped(
+            right.items.map((listed) => {
                 const equals: Binary = { kind: 'Binary', operator: 'EQUALS', left, right: listed };
                 const [l, r] = this.compared(item, this.expression(listed, scope), equals);
                 return this.equality(l, r, listed, this.plain(left, listed, l, r, scope), this.stored(left, scope));
-            })
-            .join(' OR ')})`;
+            }),
+            'OR'
+        );
     }
 
     /**
@@ -5401,6 +5405,21 @@ function isGiven(expression: Expression): boolean {
         expression.kind === 'Parameter' ||
         (expression.kind === 'Property' && expression.subject.kind === 'Parameter')
     );
+}
+
+/**
+ * The conditions `terms` joined by `operator`, in parentheses. SQLite reads `a OR b OR c` as an expression as deep as it
+ * is long, and refuses one deeper than 1,000 (liberation-data/drivine4j#332): past `MOST_ARGUMENTS` terms, each run of
+ * them is joined in parentheses of its own, and the runs joined so in turn. Postgres takes such a chain at any length
+ * (100,000 terms tried); it is grouped here too, as drivine4j groups it, so the libraries compile it alike.
+ */
+function grouped(terms: string[], operator: string): string {
+    return terms.length <= MOST_ARGUMENTS
+        ? `(${terms.join(` ${operator} `)})`
+        : grouped(
+              chunked(terms, MOST_ARGUMENTS).map((it) => grouped(it, operator)),
+              operator
+          );
 }
 
 function reversed(relationship: RelationshipPattern): RelationshipPattern {

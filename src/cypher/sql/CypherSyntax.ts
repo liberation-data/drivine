@@ -18,6 +18,21 @@ export function literal(text: string): string {
     return `'${text.replace(/'/g, "''")}'`;
 }
 
+/**
+ * The most arguments a function takes on Postgres: a list or a map written by one call of a function past them, as a
+ * literal of more than 100 items or 50 entries is, is written in parts (liberation-data/drivine#372).
+ */
+export const MOST_ARGUMENTS = 100;
+
+/** `items` in runs of `size`, in order, the last of what is left. */
+export function chunked<T>(items: T[], size: number): T[][] {
+    const runs: T[][] = [];
+    for (let start = 0; start < items.length; start += size) {
+        runs.push(items.slice(start, start + size));
+    }
+    return runs;
+}
+
 /** `text`, each line indented a step. */
 export function indent(text: string): string {
     return text

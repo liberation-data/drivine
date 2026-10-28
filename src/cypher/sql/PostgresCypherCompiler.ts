@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { Stamps } from '@/model/Stamps';
-import { indent, literal, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
+import { chunked, indent, literal, MOST_ARGUMENTS, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { PostgresTemporalSql } from '@/cypher/sql/PostgresTemporalSql';
@@ -47,6 +47,28 @@ const READ_PROPERTY = /^\(([\w.]+) -> ('(?:[^']|'')*')\)$/;
  * are 16,000 places, and Postgres holds 16,383 after a number's point.
  */
 const CODE_POINT_PREFIX = 500;
+
+/**
+ * What `build` writes of `items`, where they are at most `most`; past them, as Postgres takes no more than 100 arguments
+ * to a function (liberation-data/drivine#372), what it writes of each part of them, spliced as text into the text one
+ * call would write of them all: the first part without its closing bracket, the last without its opening one, and those
+ * between without either, joined as `json_build_array` and `json_build_object` join their items. It stays `json`, so the
+ * keys of a map keep their order, where `jsonb`'s `||` would sort them.
+ */
+function spliced<T>(items: T[], most: number, build: (part: T[]) => string): string {
+    if (items.length <= most) {
+        return build(items);
+    }
+    const parts = chunked(items, most);
+    const texts = parts.map((part, i) => {
+        const text = `CAST(${build(part)} AS text)`;
+        if (i === 0) {
+            return `left(${text}, -1)`;
+        }
+        return i === parts.length - 1 ? `right(${text}, -1)` : `right(left(${text}, -1), -1)`;
+    });
+    return `CAST(${texts.join(" || ', ' || ")} AS json)`;
+}
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on Postgres: see {@link SqlCypherCompiler}.
@@ -141,11 +163,15 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
     }
 
     jsonArray(items: string[]): string {
-        return `json_build_array(${items.join(', ')})`;
+        return spliced(items, MOST_ARGUMENTS, (part) => `json_build_array(${part.join(', ')})`);
     }
 
     jsonObject(entries: [string, string][]): string {
-        return `json_build_object(${entries.map(([key, value]) => `${literal(key)}, ${value}`).join(', ')})`;
+        return spliced(
+            entries,
+            MOST_ARGUMENTS / 2,
+            (part) => `json_build_object(${part.map(([key, value]) => `${literal(key)}, ${value}`).join(', ')})`
+        );
     }
 
     withEntries(json: string, entries: [string, string][]): string {
