@@ -2160,6 +2160,121 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             expect(longPrefixes(saved)).toBeLessThanOrEqual(2);
         });
     });
+
+    /**
+     * An order term over an aggregate that reads a grouping key, on every store: drivine4j's own test of
+     * liberation-data/drivine4j#413, ported for #433. On Oracle `me.age` in the term read the properties, where the key is
+     * grouped by as read through its text, and Oracle refused it (ORA-00979).
+     */
+    describe('an order term over an aggregate that reads a grouping key', () => {
+        it('is sorted by the key as it is grouped by', async () => {
+            await clear();
+            // Sorted by the key alone, A, B, C, D; by the key and the count, B, A, C, D.
+            await query(
+                "CREATE (a:CyKey {name: 'A', age: 10, born: date('2000-01-01')}), (b:CyKey {name: 'B', age: 11, born: date('2000-01-05')}), " +
+                    "(c:CyKey {name: 'C', age: 20, born: date('2000-01-20')}), (d:CyKey {name: 'D', age: 21, born: date('2000-01-25')}), " +
+                    '(a)-[:K]->(b), (a)-[:K]->(c), (a)-[:K]->(d)'
+            );
+            const match = 'MATCH (me:CyKey)--(you:CyKey)';
+            const byKey = [
+                [10, 3],
+                [11, 1],
+                [20, 1],
+                [21, 1]
+            ];
+            const byBoth = [
+                [11, 1],
+                [10, 3],
+                [20, 1],
+                [21, 1]
+            ];
+            const cases: [string, any[]][] = [
+                [`${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)`, byBoth],
+                [
+                    `${match} WITH me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age) RETURN age, cnt`,
+                    byBoth
+                ],
+                [`${match} RETURN DISTINCT me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)`, byBoth],
+                [`${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY age + count(you.age)`, byBoth],
+                // Sorted, skipped and limited before the WITH's WHERE, as Cypher reads it; a node keying the groups, read by
+                // property.
+                [
+                    `${match} WITH me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age) SKIP 1 LIMIT 2 WHERE cnt = 1 RETURN age`,
+                    [20]
+                ],
+                [`${match} WITH me, count(you) AS cnt ORDER BY me.age * count(you) RETURN me.name`, ['B', 'C', 'D', 'A']],
+                // An aggregate that is no item; a comprehension that names its own variable as the key's; the key in a
+                // function. On Oracle the comprehension's term compiles to 4.7 MB, which Oracle is still parsing minutes
+                // later: + over an aggregate's result is written out at every level until #414 is ported.
+                [`${match} RETURN me.age AS age, count(*) AS c ORDER BY me.age + count(you.age)`, byBoth],
+                ...(store.type === DatabaseType.ORACLE
+                    ? []
+                    : [
+                          [
+                              `${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + size([me IN [1] | me]) + count(you.age)`,
+                              byBoth
+                          ] as [string, any[]]
+                      ]),
+                [`${match} RETURN me.age AS age, count(*) AS cnt ORDER BY toString(me.age) + count(*)`, byKey],
+                // Two keys, one a part of the other.
+                [
+                    `${match} RETURN me.age AS a, me.age + 1 AS b, count(*) AS cnt ORDER BY me.age + 1 + count(*), me.age * 2 - count(*)`,
+                    [
+                        [11, 12, 1],
+                        [10, 11, 3],
+                        [20, 21, 1],
+                        [21, 22, 1]
+                    ]
+                ],
+                // Beside a variable-length walk, where the key is read as elsewhere.
+                [
+                    'MATCH (me:CyKey)-[:K*1..1]-(you:CyKey) RETURN me.age AS age, count(you) AS cnt ORDER BY me.age * count(you)',
+                    [
+                        [11, 1],
+                        [20, 1],
+                        [21, 1],
+                        [10, 3]
+                    ]
+                ],
+                [`${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age`, byKey],
+                // A key that is an expression, and several keys.
+                [
+                    `${match} RETURN me.age + 1 AS k, count(*) AS cnt ORDER BY me.age + 1 + count(*)`,
+                    [
+                        [12, 1],
+                        [11, 3],
+                        [21, 1],
+                        [22, 1]
+                    ]
+                ],
+                [
+                    `${match} RETURN me.name AS name, me.age AS age, count(*) AS cnt ORDER BY me.age * count(*) DESC, me.name`,
+                    [
+                        ['A', 10, 3],
+                        ['D', 21, 1],
+                        ['C', 20, 1],
+                        ['B', 11, 1]
+                    ]
+                ]
+            ];
+            // Each that differs, so a store's every difference shows at once.
+            const differing: string[] = [];
+            for (const [cypher, rows] of cases) {
+                try {
+                    const given = await query(cypher);
+                    if (JSON.stringify(given) !== JSON.stringify(rows)) {
+                        differing.push(`${cypher}: ${JSON.stringify(given)}`);
+                    }
+                } catch (e: any) {
+                    differing.push(`${cypher}: ${e.message.split('\n')[0]}`);
+                }
+            }
+            expect(differing).toEqual([]);
+            // A temporal key: A's 30 days are past C's 10.
+            const temporal = `${match} RETURN me.name AS name, me.born AS born, count(*) AS cnt ORDER BY me.born + duration({days: 10 * count(*)})`;
+            expect([temporal, (await query(temporal)).map((it) => it[0])]).toEqual([temporal, ['B', 'C', 'A', 'D']]);
+        });
+    });
 });
 
 /**

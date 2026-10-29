@@ -330,6 +330,16 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         );
     });
 
+    it('should be read through its text once, for the item and the GROUP BY, where it keys the groups an order term over the items reads', () => {
+        // liberation-data/drivine4j#413: the term read the key from the properties again, `JSON_VALUE(n1.props, '$.age' …)`,
+        // which isn't what the GROUP BY holds, and Oracle refused it (ORA-00979). It reads the items' columns now.
+        const sql = oracle(
+            'MATCH (me:P)--(you:P) RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)'
+        );
+        expect(count(sql, 'JSON_SERIALIZE')).toBe(2);
+        expect(sql).not.toContain("JSON_VALUE(n1.props, '$.age");
+    });
+
     it('should be read on Postgres as elsewhere', () => {
         expect(new PostgresCypherCompiler('g').compile('MATCH (n:Doc) RETURN n.a').sql).toContain("(n1.props -> 'a')");
     });
