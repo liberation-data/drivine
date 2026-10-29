@@ -2102,6 +2102,64 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ]);
         });
     });
+
+    /**
+     * Random UUIDs and the stamp tokens made of them, on every store: drivine4j's own tests of
+     * liberation-data/drivine4j#401, ported for #428. On Oracle `randomUUID()` was `SYS_GUID()`, whose consecutive
+     * values shared all but a counter's digits.
+     */
+    describe('random UUIDs', () => {
+        /** How many of the values share more than 4 leading characters with the one before. */
+        const longPrefixes = (values: string[]): number =>
+            values.slice(1).filter((it, i) => it.slice(0, 5) === values[i].slice(0, 5)).length;
+
+        it('randomUUID gives a new random version 4 UUID each time, in lower case, seldom sharing a long prefix with the one before', async () => {
+            const uuids = (await query('UNWIND range(1, 50) AS i RETURN randomUUID()')) as string[];
+            expect(new Set(uuids).size).toBe(50);
+            uuids.forEach((it) =>
+                expect(it).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+            );
+            // Two random UUIDs share 5 characters once in about a million; three such pairs in 49, about once in 6e13 runs.
+            expect(longPrefixes(uuids)).toBeLessThanOrEqual(2);
+        });
+
+        it('randomUUID read into a longer expression is made again for each row', async () => {
+            // An Oracle expression for randomUUID() past SHARED_ABOVE is bound in a subquery of its own, which Oracle makes
+            // once for the statement, so each row would read the same one: one made of DBMS_RANDOM digits did.
+            for (const expression of ["randomUUID() + ''", "'id-' + randomUUID()"]) {
+                const values = await query(`UNWIND range(1, 100) AS i RETURN ${expression}`);
+                expect([expression, new Set(values).size]).toEqual([expression, 100]);
+            }
+        });
+
+        it("the tokens the stamp clauses make are random, so a stale object's stamp does not come round again", async () => {
+            // On Oracle a token was the first 16 hex digits of a SYS_GUID(), of which a counter's 4 changed.
+            await clear();
+            const stamp = '`__drivine.stamp`';
+            await query('UNWIND range(1, 1000) AS i CREATE (:CyWrite {id: i})');
+            await query(`MATCH (n:CyWrite) SET ${Stamps.setClause('n')}`);
+            await query(`MATCH (n:CyWrite) SET ${Stamps.linksClause('n')}`);
+            const stamps = (await query(`MATCH (n:CyWrite) RETURN n.${stamp}`)) as string[];
+            const tokens = stamps.flatMap((it) => it.split(':'));
+            expect(new Set(stamps).size).toBe(1000);
+            expect(new Set(tokens).size).toBe(2000);
+            // Each hex digit but the 13th, a version 4 UUID's version, takes nearly every value across the tokens.
+            for (let position = 0; position < Stamps.TOKEN; position++) {
+                if (position !== 12) {
+                    const digits = new Set(tokens.map((it) => it[position]));
+                    expect([position, digits.size >= 12]).toEqual([position, true]);
+                }
+            }
+            // Saved one after another, a node's tokens seldom share a long prefix, where SYS_GUID()'s always did.
+            const saved: string[] = [];
+            for (let i = 0; i < 20; i++) {
+                await query(`MATCH (n:CyWrite {id: 1}) SET ${Stamps.setClause('n')}`);
+                saved.push(((await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`))[0] as string).split(':')[0]);
+            }
+            // Two random tokens share 5 digits once in about a million; three such pairs in 19, about once in 1e15 runs.
+            expect(longPrefixes(saved)).toBeLessThanOrEqual(2);
+        });
+    });
 });
 
 /**
@@ -2128,12 +2186,6 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
         afterAll(async () => {
             await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
             DatabaseRegistry.tearDown();
-        });
-
-        it('randomUUID gives a new UUID each time', async () => {
-            const [a, b] = await query('UNWIND [1, 2] AS x RETURN randomUUID()');
-            expect(a).not.toEqual(b);
-            expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
         });
 
         it('toString of a float that is a whole number keeps its fraction, as in Cypher', async () => {

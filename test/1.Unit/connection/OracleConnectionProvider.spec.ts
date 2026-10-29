@@ -1,5 +1,5 @@
 import { DatabaseType } from '@/connection/DatabaseType';
-import { OracleConnectionProvider } from '@/connection/oracle/OracleConnectionProvider';
+import { OracleConnectionProvider, oracleRefusal } from '@/connection/oracle/OracleConnectionProvider';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -71,5 +71,111 @@ describe('OracleConnectionProvider and the graph function', () => {
             new QuerySpecification({ text: 'WITH [null] AS a, [1] AS b RETURN a = b', language: 'CYPHER' })
         );
         expect(asked).toHaveBeenCalledWith(expect.anything(), 'host:1521/svc|me', graph);
+    });
+});
+
+/** What node-oracledb gives for a server of version `full`, `23.26.3.0.0`: its number and its text. */
+function server(full: string): { oracleServerVersion: number; oracleServerVersionString: string } {
+    const [version, release, update, portRelease, portUpdate] = full.split('.').map(Number);
+    return {
+        oracleServerVersion:
+            version * 100_000_000 + release * 1_000_000 + update * 10_000 + portRelease * 100 + portUpdate,
+        oracleServerVersionString: full
+    };
+}
+
+/**
+ * Drivine needs Oracle 23.9 or later, whose `UUID()` compiled Cypher's `randomUUID()` is: on an older one plain SQL runs,
+ * and Cypher is refused with the version found (#428, as liberation-data/drivine4j#401).
+ */
+describe('The Oracle version, read on the first connection', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('should refuse an Oracle older than 23.9 with the version it is and why, and not 23.9 or later', () => {
+        expect(oracleRefusal(server('23.8.0.25.4'))).toEqual(
+            'Drivine needs Oracle 23.9 or later (it uses UUID()); this database is 23.8.0.25.4. ' +
+                'Upgrade, or use an Oracle Free image 23.9 or newer. Plain SQL over this provider still runs; Cypher does not.'
+        );
+        expect(oracleRefusal(server('19.3.0.0.0'))).toContain('this database is 19.3.0.0.0');
+        expect(oracleRefusal(server('23.9.0.25.7'))).toBeUndefined();
+        expect(oracleRefusal(server('23.26.3.0.0'))).toBeUndefined();
+        expect(oracleRefusal(server('26.1.0.0.0'))).toBeUndefined();
+        // With no text, the version is named by its number's version and release.
+        expect(oracleRefusal({ oracleServerVersion: server('21.3.0.0.0').oracleServerVersion })).toContain(
+            'this database is 21.3.'
+        );
+        // A version that can't be read refuses nothing.
+        expect(oracleRefusal({})).toBeUndefined();
+        expect(oracleRefusal({ oracleServerVersion: Number.NaN })).toBeUndefined();
+    });
+
+    /** A session of `version`, whose every statement gives no rows, counting how often its version is read. */
+    const session = (version: () => number, text = ''): { execute: jest.Mock; close: jest.Mock; reads: number } => {
+        const it = {
+            execute: jest.fn(async (sql: string) =>
+                Promise.resolve(sql.includes("SYS_CONTEXT('USERENV', 'SID')") ? { rows: [{ SID: '7' }] } : { rows: [] })
+            ),
+            close: jest.fn(),
+            reads: 0
+        };
+        Object.defineProperty(it, 'oracleServerVersion', {
+            get: () => {
+                it.reads++;
+                return version();
+            }
+        });
+        Object.defineProperty(it, 'oracleServerVersionString', { get: () => text });
+        return it;
+    };
+
+    const provider = (...sessions: object[]): OracleConnectionProvider => {
+        const handed = [...sessions];
+        jest.spyOn(oracledb, 'createPool').mockResolvedValue({
+            getConnection: async () => Promise.resolve(handed.length > 1 ? handed.shift() : handed[0])
+        });
+        jest.spyOn(OracleStoredFunctions, 'nullsEqual').mockResolvedValue(true);
+        return new OracleConnectionProvider('ORACLE', DatabaseType.ORACLE, {
+            connectString: 'host:1521/svc',
+            graph: `version_${Date.now()}`
+        });
+    };
+
+    it('should hand out a connection that runs SQL on an Oracle older than 23.9, and refuse Cypher with why, the version read once', async () => {
+        // The first connection ensures the graph and is then handed out; the second is only handed out.
+        const old = server('23.8.0.25.4');
+        const first = session(() => old.oracleServerVersion, old.oracleServerVersionString);
+        const second = session(() => old.oracleServerVersion, old.oracleServerVersionString);
+        const it = provider(first, second);
+
+        const connection = await it.connect();
+        expect(await connection.query(new QuerySpecification('SELECT 1 FROM dual'))).toEqual([]);
+        await expect(
+            connection.query(new QuerySpecification({ text: 'RETURN randomUUID()', language: 'CYPHER' }))
+        ).rejects.toThrow('Drivine needs Oracle 23.9 or later (it uses UUID()); this database is 23.8.0.25.4.');
+        await expect(
+            (await it.connect()).query(new QuerySpecification({ text: 'RETURN 1', language: 'CYPHER' }))
+        ).rejects.toThrow('Drivine needs Oracle 23.9 or later');
+
+        expect(first.reads).toBe(1);
+        expect(second.reads).toBe(0);
+    });
+
+    it('should run Cypher on Oracle 23.9 or later', async () => {
+        const recent = server('23.26.3.0.0');
+        const it = session(() => recent.oracleServerVersion, recent.oracleServerVersionString);
+        const connection = await provider(it).connect();
+        const before = it.execute.mock.calls.length;
+        await connection.query(new QuerySpecification({ text: 'RETURN 1', language: 'CYPHER' }));
+        expect(it.execute.mock.calls).toHaveLength(before + 1);
+    });
+
+    it('should not refuse Cypher on an Oracle whose version cannot be read', async () => {
+        const unread = session(() => {
+            throw new Error('closed');
+        });
+        const connection = await provider(unread).connect();
+        const before = unread.execute.mock.calls.length;
+        await connection.query(new QuerySpecification({ text: 'RETURN 1', language: 'CYPHER' }));
+        expect(unread.execute.mock.calls).toHaveLength(before + 1);
     });
 });

@@ -7,7 +7,7 @@ The same models, queries and DSL run on each graph store. Switch the engine with
 | Neo4j 5 | `NEO4J` | yes | full | vector, full-text |
 | Memgraph | `MEMGRAPH` | yes | full | vector, text |
 | FalkorDB | `FALKORDB` | yes | each statement commits by itself | vector, full-text |
-| Oracle 23ai / 26ai | `ORACLE` | yes | full | vector, Oracle Text |
+| Oracle 23.9 or later | `ORACLE` | yes | full | vector, Oracle Text |
 | Amazon Neptune | `NEPTUNE` | no: `PersistenceManager` only | full | no |
 | Postgres 14 or later | `POSTGRES` | yes | full | vector (pgvector), full-text |
 
@@ -40,9 +40,13 @@ injection.
 
 ### Oracle
 
-Oracle Database 23ai or later, through `oracledb` in thin mode. Oracle doesn't speak Cypher: Drivine reads the graph
+Oracle Database 23.9 or later, through `oracledb` in thin mode. Oracle doesn't speak Cypher: Drivine reads the graph
 with SQL/PGQ (`GRAPH_TABLE`) and writes it as rows. Models, the DSL and the object manager are the same as on the graph
 engines.
+
+Drivine needs 23.9 because Cypher's `randomUUID()` is Oracle's `UUID()`, a random version 4 UUID, which Oracle added
+in 23.9. A provider reads the version the driver found on its first connection, which needs no grant. On an older
+Oracle, plain SQL still runs, and a Cypher statement is refused with the version found.
 
 ```bash
 DATABASE_TYPE=ORACLE

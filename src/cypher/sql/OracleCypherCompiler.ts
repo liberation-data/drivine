@@ -1112,9 +1112,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return this.long ? this.bound([`TO_CLOB(${text})`], ([t]) => this.reversedPieces(t)) : super.reversedText(text);
     }
 
-    /** Oracle's GUID, in a UUID's form: unique, though not random as a version 4 UUID is. */
+    /**
+     * Oracle's `UUID()`, a random version 4 UUID, as Neo4j's is, written in lower case with hyphens
+     * (liberation-data/drivine#428, as liberation-data/drivine4j#401). Oracle added it in 23.9, which is why Drivine needs
+     * 23.9 or later: see `oracleRefusal`. Not `SYS_GUID()`, whose consecutive values share all but a counter's digits,
+     * which left a stamp's token about 16 bits that changed, in order. Short enough not to be bound once for the
+     * statement (see {@link SHARED_ABOVE}), so each row gets a UUID of its own.
+     */
     uuid(): string {
-        return "LOWER(REGEXP_REPLACE(RAWTOHEX(SYS_GUID()), '(.{8})(.{4})(.{4})(.{4})(.{12})', '\\1-\\2-\\3-\\4-\\5'))";
+        return "LOWER(REGEXP_REPLACE(RAWTOHEX(UUID()), '(.{8})(.{4})(.{4})(.{4})(.{12})', '\\1-\\2-\\3-\\4-\\5'))";
     }
 
     /**
