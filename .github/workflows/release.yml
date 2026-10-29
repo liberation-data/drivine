@@ -1,9 +1,10 @@
 # Releases @liberation-data/drivine to npm. See RELEASING.md.
 #
 # Merging a version bump to master publishes it, and so does a push of a tag vX.Y.Z: the run checks the version, runs
-# the full CI gate (ci.yml), builds from a clean `npm ci`, checks the package, publishes dist/ with provenance and
-# creates the GitHub release, tagging the commit if it isn't tagged yet. A manual run and a pull request that changes
-# the release machinery are dry runs: they do everything but publish, and leave the built package as an artifact.
+# the full CI gate (ci.yml) unless CI has already passed on the same tree, builds from a clean `npm ci`, checks the
+# package, publishes dist/ with provenance and creates the GitHub release, tagging the commit if it isn't tagged yet.
+# A manual run and a pull request that changes the release machinery are dry runs: they do everything but publish,
+# and leave the built package as an artifact.
 name: Release
 
 on:
@@ -27,6 +28,7 @@ on:
             - tsconfig.build.json
             - scripts/rewrite-paths.js
             - scripts/release-version.js
+            - scripts/ci-trust.js
 
 permissions:
     contents: read
@@ -101,15 +103,54 @@ jobs:
                   echo "publish=$publish" >> "$GITHUB_OUTPUT"
                   echo "Version $version, publish: $publish" >> "$GITHUB_STEP_SUMMARY"
 
-    # The full CI, as it runs on master and on pull requests. Skipped on a push to master that releases nothing, as
-    # ci.yml runs on that push anyway.
-    gate:
+    # Whether ci.yml has already passed on the git tree this run builds, from a push or a pull request, so the gate
+    # needn't run it again: the release PR's run, when it was up to date with master and squash merged, or the push
+    # run on the merge commit, which starts beside this one and is waited for. A run on this tree that fails fails the
+    # release. scripts/ci-trust.js says how a run's tree is known, and why a pull request's run can be believed; the
+    # step summary links the run trusted, or says why none was. Skipped, as the gate is, on a push that releases
+    # nothing.
+    trust:
         needs: check
         if: needs.check.outputs.publish == 'true' || github.event_name != 'push'
+        runs-on: ubuntu-latest
+        timeout-minutes: 70
+        permissions:
+            # The checkout's, as for the workflow.
+            contents: read
+            # Reading ci.yml's runs, their jobs and their artifacts.
+            actions: read
+        outputs:
+            trusted: ${{ steps.trust.outputs.trusted }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+            # On a pull request the checkout is its merge ref, and ci.yml's runs for it name its head commit.
+            - name: Look for a run of CI on this tree
+              id: trust
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  PR_HEAD: ${{ github.event.pull_request.head.sha }}
+              run: |
+                  tree=$(git rev-parse 'HEAD^{tree}')
+                  node scripts/ci-trust.js "$GITHUB_REPOSITORY" "$tree" "$(git rev-parse HEAD)" "$PR_HEAD"
+
+    # The full CI, as it runs on master and on pull requests, unless trust found it has already passed on this tree.
+    # Skipped on a push to master that releases nothing, as ci.yml runs on that push anyway.
+    gate:
+        needs: [check, trust]
+        if: needs.trust.outputs.trusted != 'true'
         uses: ./.github/workflows/ci.yml
 
+    # Runs when the gate passed, or was skipped because trust found CI had passed on this tree. A failed or cancelled
+    # check, trust or gate stops it, and so does a gate skipped for any other reason (a push that releases nothing).
     build:
-        needs: [check, gate]
+        needs: [check, trust, gate]
+        if: >-
+            ${{ !cancelled() && needs.check.result == 'success' && needs.trust.result == 'success' &&
+            (needs.gate.result == 'success' ||
+            (needs.gate.result == 'skipped' && needs.trust.outputs.trusted == 'true')) }}
         runs-on: ubuntu-latest
         env:
             VERSION: ${{ needs.check.outputs.version }}
@@ -192,9 +233,11 @@ jobs:
                   path: package/
                   if-no-files-found: error
 
+    # A skipped gate is still upstream of this job, so its condition checks build's result itself rather than leave it
+    # to the default, which would skip it.
     publish:
         needs: [check, build]
-        if: needs.check.outputs.publish == 'true'
+        if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
         runs-on: ubuntu-latest
         environment: release
         permissions:
@@ -229,6 +272,7 @@ jobs:
 
     github-release:
         needs: [check, publish]
+        if: ${{ !cancelled() && needs.publish.result == 'success' }}
         runs-on: ubuntu-latest
         permissions:
             contents: write
