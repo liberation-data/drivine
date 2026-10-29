@@ -56,8 +56,9 @@ git push origin vX.Y.Z
     released.
   - When one has passed, `gate` is skipped. When one is still going, as the push run on the merge commit is when
     the release starts beside it, `trust` waits for it, up to an hour: if it passes `gate` is skipped, and if it fails
-    or is cancelled the release fails, linking it. When none counts, or the wait runs out, or the API can't be asked,
-    `gate` runs as before.
+    or is cancelled the release fails, linking it. Re-running the release's failed jobs then runs `gate`, unless that
+    CI run has been re-run too, which `trust` then waits for or trusts. When none counts, or the wait runs out, or
+    the API can't be asked, `gate` runs as before.
   - The run's summary links the run trusted, or says of each run it looked at why it didn't count.
 - **`gate`** runs the repository's full CI, `ci.yml`, unchanged, unless `trust` found it has already passed on this
   tree. A push to the default branch that releases nothing skips both, as `ci.yml` runs on that push anyway.

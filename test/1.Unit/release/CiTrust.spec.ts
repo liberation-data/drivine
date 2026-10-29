@@ -218,6 +218,27 @@ describe('ci-trust.js', () => {
         expect(result.text).toContain('not every job passed: test (Oracle) (skipped)');
     });
 
+    it("doesn't trust a green run the API gives no jobs for, as nothing shows it tested anything", async () => {
+        const result = await decide({
+            [runsOn(SHA)]: { workflow_runs: [run(20)] },
+            [records]: recordOn(),
+            [jobsOf(20)]: { jobs: [] }
+        });
+
+        expect(result.decision).toBe('gate');
+        expect(result.text).toContain('not every job passed: no jobs at all');
+    });
+
+    it('passes over a record whose run the API no longer names, as of a deleted run', async () => {
+        const result = await decide({
+            [runsOn(SHA)]: { workflow_runs: [run(21)] },
+            [records]: { artifacts: [{ name: `ci-tree-${TREE}`, workflow_run: null }] },
+            [jobsOf(21)]: passedJobs
+        });
+
+        expect(result).toMatchObject({ decision: 'trust', run: { id: 21 } });
+    });
+
     it('runs the gate after a run on this tree that had already failed, as a re-run might pass', async () => {
         const result = await decide({
             [runsOn(SHA)]: { workflow_runs: [run(11, { conclusion: 'failure' })] },
