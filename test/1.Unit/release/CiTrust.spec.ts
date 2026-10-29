@@ -368,9 +368,10 @@ describe('ci-trust.js', () => {
 describe('ci-trust.js, run as the workflow runs it', () => {
     /**
      * Runs the script with a `gh` on PATH that answers from the answers given, a list of answers being one for each
-     * time it is asked in turn and the last from then on, and fails on a path it has no answer for.
+     * time it is asked in turn and the last from then on, and fails on a path it has no answer for. The environment
+     * given is added to the workflow's, which polls without waiting here.
      */
-    function main(answers: Record<string, unknown> | undefined) {
+    function main(answers: Record<string, unknown> | undefined, env: Record<string, string> = {}) {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-ci-trust-'));
         const fake = path.join(dir, 'fake-gh.js');
         fs.writeFileSync(path.join(dir, 'answers.json'), JSON.stringify(answers ?? {}));
@@ -397,7 +398,8 @@ describe('ci-trust.js, run as the workflow runs it', () => {
                 PATH: `${dir}${path.delimiter}${process.env.PATH}`,
                 GITHUB_OUTPUT: output,
                 GITHUB_STEP_SUMMARY: stepSummary,
-                CI_TRUST_POLL_SECONDS: '0'
+                CI_TRUST_POLL_SECONDS: '0',
+                ...env
             }
         });
         const read = (file: string) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
@@ -430,6 +432,28 @@ describe('ci-trust.js, run as the workflow runs it', () => {
             `::error::CI failed on this tree, in ${run(19).html_url}: it concluded failure.`
         );
         expect(result.summary).toContain('Failed: [push run 19]');
+    });
+
+    it('reads the wait from CI_TRUST_WAIT_MINUTES, and one that is empty or below zero as an hour', () => {
+        const answers = {
+            [runsOn(SHA)]: [
+                { workflow_runs: [run(20, { status: 'in_progress', conclusion: null })] },
+                { workflow_runs: [run(20)] }
+            ],
+            [records]: recordOn(),
+            [jobsOf(20)]: passedJobs
+        };
+
+        const none = main(answers, { CI_TRUST_WAIT_MINUTES: '0' });
+        expect(none).toMatchObject({ status: 0, output: 'trusted=false\nrun=\n' });
+        expect(none.summary).toContain('it waited 0 minutes and a run was still going');
+        // Read as a number, either would be no wait at all, and the run going would run the gate rather than be waited for.
+        for (const wait of ['', '-5']) {
+            expect(main(answers, { CI_TRUST_WAIT_MINUTES: wait })).toMatchObject({
+                status: 0,
+                output: `trusted=true\nrun=${run(20).html_url}\n`
+            });
+        }
     });
 
     it("runs the gate when the API can't be asked, as not trusting a run is always safe", () => {
