@@ -1045,6 +1045,172 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
+        it('CONTAINS finds a text past 32 KB in a text of any length, given, stored, on several rows and in a write', async () => {
+            // On Oracle INSTR refuses to look for a text past 32,767 UTF-16 units (ORA-22828, #457). Each text is looked
+            // for as a parameter, as a property on the node beside it, and of each node in a cross join, three times on
+            // one session. drivine4j's test of liberation-data/drivine4j#312.
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const pair = '😀';
+            const cases: [string | null, string | null][] = [
+                // A short text in a long one, and texts just within and just past what INSTR looks for.
+                [long, 'aB'],
+                [long, 'zz'],
+                [long, long.substring(1, 32_768)],
+                [long, long.substring(1, 32_769)],
+                [long, `${long.substring(0, 32_768)}z`],
+                // A long text in a longer one, found only at its end, and not found.
+                [`${long}c`, `${'aB'.repeat(19_000)}c`],
+                [`${long}c`, `${'aB'.repeat(19_000)}d`],
+                // As long: the issue's own, and one that differs in its last character.
+                [long, long],
+                [long, `${long.slice(0, -1)}b`],
+                // Longer than the text.
+                [long, `${long}x`],
+                ['abc', long],
+                // Empty and null.
+                [long, ''],
+                ['', long],
+                [long, null],
+                [null, long],
+                // Three-byte characters, past 32 KB within INSTR's units and past them.
+                ['€'.repeat(40_000), '€'.repeat(32_767)],
+                ['€'.repeat(40_000), '€'.repeat(33_000)],
+                ['€'.repeat(40_000), `${'€'.repeat(33_000)}x`],
+                // Characters past U+FFFF: across the 1,000th unit the search starts with, across INSTR's 32,767th, and
+                // only those.
+                [`z${'x'.repeat(999)}${pair}${'y'.repeat(40_000)}`, `${'x'.repeat(999)}${pair}${'y'.repeat(39_000)}`],
+                [`z${'y'.repeat(32_766)}${pair}${'y'.repeat(100)}`, `${'y'.repeat(32_766)}${pair}${'y'.repeat(10)}`],
+                [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}q`],
+                [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}z`],
+                // A long text whose first units are nowhere in the text, so no place is compared.
+                [long, 'c'.repeat(33_000)]
+            ];
+            // Oracle's empty text is null, so CONTAINS of one is null there.
+            const expected = (t: string | null, x: string | null): boolean | null => {
+                if (t === null || x === null) {
+                    return null;
+                }
+                if (store.type === DatabaseType.ORACLE && (t === '' || x === '')) {
+                    return null;
+                }
+                return t.includes(x);
+            };
+            const parameters = Object.fromEntries(
+                cases.flatMap(([t, x], i) => [
+                    [`t${i}`, t],
+                    [`x${i}`, x]
+                ])
+            );
+            // One node at a time: on Oracle, UNWIND of a list of texts past 32 KB into CREATE closes the session.
+            for (const [i, [t, x]] of cases.entries()) {
+                await query('CREATE (:CyContains {i: $i, t: $t, x: $x})', { i: BigInt(i), t, x });
+            }
+            const each = cases.map(([t, x]) => expected(t, x));
+            await onOneSession(async (run) => {
+                for (let r = 1; r <= 3; r++) {
+                    for (const [i, [t, x]] of cases.entries()) {
+                        const described = `${x?.length} in ${t?.length}, case ${i}, run ${r}`;
+                        expect([described, await run(`WITH $t${i} AS t, $x${i} AS x RETURN t CONTAINS x`)]).toEqual([
+                            described,
+                            [expected(t, x)]
+                        ]);
+                    }
+                    expect([r, await run('MATCH (n:CyContains) RETURN n.t CONTAINS n.x ORDER BY n.i')]).toEqual([
+                        r,
+                        each
+                    ]);
+                    // The text of one node, looked for in each other's; and in a write, which runs as a block of its own.
+                    expect([
+                        r,
+                        await run('MATCH (n:CyContains {i: 7}), (m:CyContains) RETURN m.t CONTAINS n.x ORDER BY m.i')
+                    ]).toEqual([r, cases.map(([t]) => expected(t, long))]);
+                    expect([
+                        r,
+                        await run('MATCH (n:CyContains) SET n.r = n.t CONTAINS n.x WITH n ORDER BY n.i RETURN n.r')
+                    ]).toEqual([r, each]);
+                }
+            }, parameters);
+            await clear();
+        }, 600_000);
+
+        it("CONTAINS of a text past 32 KB in an aggregate's argument, over an aggregate's result and beside a grouping key", async () => {
+            // On Oracle the search of a text past 32,767 UTF-16 units is a subquery (#457): here an aggregate reads it,
+            // it reads an aggregate's result, and it is a grouping key. drivine4j's test of liberation-data/drivine4j#312.
+            // Over an aggregate's result Oracle looks only for a text of 32,767 units or fewer until #414 works the
+            // aggregates out first, as drivine4j does, so there it looks for the last 30,000 units.
+            const over = (x: string): string => (store.type === DatabaseType.ORACLE ? `right(${x}, 30000)` : x);
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const found = `${'aB'.repeat(19_000)}c`;
+            const texts = [
+                [`${long}c`, found],
+                [long, found],
+                [`${long}c`, found]
+            ];
+            for (const [i, [t, x]] of texts.entries()) {
+                await query('CREATE (:CyContainsAgg {i: $i, k: $k, t: $t, x: $x})', {
+                    i: BigInt(i),
+                    k: BigInt(i % 2),
+                    t,
+                    x
+                });
+            }
+            const all = 'MATCH (n:CyContainsAgg)';
+            expect(await query(`${all} RETURN count(CASE WHEN n.t CONTAINS n.x THEN 1 END)`)).toEqual([2]);
+            expect(
+                await query(`${all} RETURN n.k AS k, count(CASE WHEN n.t CONTAINS n.x THEN 1 END) AS c ORDER BY k`)
+            ).toEqual([
+                [0, 2],
+                [1, 0]
+            ]);
+            expect(await query(`${all} RETURN DISTINCT n.k AS k, n.t CONTAINS n.x AS c ORDER BY k`)).toEqual([
+                [0, true],
+                [1, false]
+            ]);
+            expect(await query(`${all} RETURN n.i AS i, n.t CONTAINS n.x AS c, count(*) AS m ORDER BY i`)).toEqual([
+                [0, true, 1],
+                [1, false, 1],
+                [2, true, 1]
+            ]);
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i RETURN head(collect(n.t)) CONTAINS ${over('head(collect(n.x))')}`
+                )
+            ).toEqual([true]);
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i RETURN n.k AS k, head(collect(n.t)) CONTAINS ${over(
+                        'last(collect(n.x))'
+                    )} AS c ORDER BY k`
+                )
+            ).toEqual([
+                [0, true],
+                [1, false]
+            ]);
+            await clear();
+        });
+
+        it('CONTAINS of a text past 32 KB filters in a WHERE and runs in the step of a reduce()', async () => {
+            // On Oracle the search of a text past 32,767 UTF-16 units is a subquery (#457): here a WHERE filters by it,
+            // and a reduce() runs it in its function's own query. drivine4j's test of liberation-data/drivine4j#312.
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const found = `${'aB'.repeat(19_000)}c`;
+            for (const [i, t] of [`${long}c`, long, `${long}c`].entries()) {
+                await query('CREATE (:CyContainsWhere {i: $i, t: $t, x: $x})', { i: BigInt(i), t, x: found });
+            }
+            const all = 'MATCH (n:CyContainsWhere)';
+            expect(await query(`${all} WHERE n.t CONTAINS n.x RETURN n.i ORDER BY n.i`)).toEqual([0, 2]);
+            expect(await query(`${all} WHERE NOT n.t CONTAINS n.x RETURN n.i ORDER BY n.i`)).toEqual([1]);
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i WITH collect(n.t) AS ts, head(collect(n.x)) AS x RETURN reduce(acc = [], s IN ts | acc + [s CONTAINS x])`
+                )
+            ).toEqual([[true, false, true]]);
+            await clear();
+        });
+
         it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
             // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
             // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its

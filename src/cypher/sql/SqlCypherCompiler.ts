@@ -123,6 +123,13 @@ export abstract class SqlCypherCompiler {
     sharing = true;
 
     /**
+     * Whether the expression compiled may read an aggregate's result, of the query it is in: in an item or an order term
+     * that aggregates, outside its aggregates' arguments (see `CypherWriter.aggregating`). Oracle reads no aggregate of
+     * the query it is in from a subquery (ORA-00937): see Oracle's `containsText`.
+     */
+    overAggregates = false;
+
+    /**
      * Whether a walk reads the row it is in: a condition of a quantified path pattern may then read a variable bound
      * outside it.
      */

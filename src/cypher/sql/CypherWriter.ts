@@ -2974,9 +2974,23 @@ export class CypherWriter {
         return [this.with(select, { kind: 'With', projection: grouped }), keptProjection];
     }
 
-    /** `work`, with no value bound in a subquery where `expression` aggregates: see {@link SqlCypherCompiler.sharing}. */
+    /**
+     * `work`, with no value bound in a subquery where `expression` aggregates, and over its aggregates' results: see
+     * {@link SqlCypherCompiler.sharing} and {@link SqlCypherCompiler.overAggregates}.
+     */
     private aggregating<T>(expression: Expression, work: () => T): T {
-        return contains(expression, isAggregate) ? this.unshared(work) : work();
+        return contains(expression, isAggregate) ? this.unshared(() => this.overAggregates(true, work)) : work();
+    }
+
+    /** `work`, with {@link SqlCypherCompiler.overAggregates} `over`. */
+    private overAggregates<T>(over: boolean, work: () => T): T {
+        const was = this.sql.overAggregates;
+        this.sql.overAggregates = over;
+        try {
+            return work();
+        } finally {
+            this.sql.overAggregates = was;
+        }
     }
 
     /** `work`, with no value bound in a subquery: see {@link SqlCypherCompiler.sharing}. */
@@ -4987,7 +5001,10 @@ export class CypherWriter {
     }
 
     private function(fn: FunctionCall, scope: Scope): Value {
-        const values = fn.arguments.map((it) => this.expression(it, scope));
+        // An aggregate's arguments are read from each row, not from its result.
+        const values = this.overAggregates(this.sql.overAggregates && !isAggregate(fn), () =>
+            fn.arguments.map((it) => this.expression(it, scope))
+        );
         const name = fn.name.toLowerCase();
         const call: Invocation = {
             fn,
