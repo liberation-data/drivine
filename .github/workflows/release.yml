@@ -149,7 +149,8 @@ jobs:
         needs: [check, trust, gate]
         if: >-
             ${{ !cancelled() && needs.check.result == 'success' && needs.trust.result == 'success' &&
-            (needs.gate.result == 'success' || (needs.gate.result == 'skipped' && needs.trust.outputs.trusted == 'true')) }}
+            (needs.gate.result == 'success' ||
+            (needs.gate.result == 'skipped' && needs.trust.outputs.trusted == 'true')) }}
         runs-on: ubuntu-latest
         env:
             VERSION: ${{ needs.check.outputs.version }}
