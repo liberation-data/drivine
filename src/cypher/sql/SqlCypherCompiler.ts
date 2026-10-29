@@ -24,7 +24,7 @@ import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
 import { CypherFloat } from '@/cypher/ast/Expression';
 
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
-const SHARED_ABOVE = 200;
+export const SHARED_ABOVE = 200;
 
 /**
  * The format a float from 10^-3 up to 10^7 is written in by `TO_CHAR` or `to_char`, as Java writes a double: no
@@ -227,11 +227,26 @@ export abstract class SqlCypherCompiler {
      * no subquery, so a projection that would group by a value so bound works it out first.
      */
     shared(values: string[], body: (names: string[]) => string): string {
-        if (!this.sharing || values.every((it) => it.length <= SHARED_ABOVE)) {
+        if (!this.bindsLong(values)) {
             return body(values);
         }
+        return this.sharedBound(values, body);
+    }
+
+    /** `body` over `values` {@link bound} as {@link shared} binds them, and counted so: see {@link binds}. */
+    sharedBound(values: string[], body: (names: string[]) => string): string {
         this.sharedBindings++;
         return this.bound(values, body);
+    }
+
+    /** Whether {@link shared} binds `values`: where one is long, and values are bound here at all. */
+    bindsLong(values: string[]): boolean {
+        return this.sharing && values.some((it) => it.length > SHARED_ABOVE);
+    }
+
+    /** `body` over the sides `a` and `b` of a `+`, as {@link shared} binds them: see Oracle's. */
+    sharedSum(a: string, b: string, body: (names: string[]) => string): string {
+        return this.shared([a, b], body);
     }
 
     /** `body` over `values`, each bound in a subquery and read by name whatever its length: see {@link shared}. */

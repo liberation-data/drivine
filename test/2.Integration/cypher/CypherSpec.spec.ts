@@ -142,6 +142,35 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         }
     };
 
+    /**
+     * Runs `block` with a query of the statements it is given, each given `parameters`. On Oracle they run on one
+     * connection of their own, which is asked again after each: a statement that crashes the session can do so after
+     * its rows came back.
+     */
+    const onOneSession = async (
+        block: (run: (cypher: string) => Promise<any[]>) => Promise<void>,
+        parameters: Record<string, any> = {}
+    ): Promise<void> => {
+        if (store.type !== DatabaseType.ORACLE) {
+            await block(async (cypher) => query(cypher, parameters));
+            return;
+        }
+        const connection = await DatabaseRegistry.getInstance().connectionProvider(store.connection)!.connect();
+        const run = async (cypher: string, bound: Record<string, any> = {}): Promise<any[]> =>
+            connection.query(
+                new QuerySpecification({ text: cypher, language: 'CYPHER' }).bind(parametersFor(store, bound))
+            );
+        try {
+            await block(async (cypher) => {
+                const rows = await run(cypher, parameters);
+                expect([cypher, await run('RETURN 1')]).toEqual([cypher, [1]]);
+                return rows;
+            });
+        } finally {
+            await connection.release();
+        }
+    };
+
     describe.each(['queries.yaml', 'writes.yaml', 'temporal.yaml'])('%s', (file) => {
         const spec = loadSpec(file);
         it.each(spec.cases.map((it) => [it.name, it] as const))('%s', async (__, cypherCase) => {
@@ -960,6 +989,62 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
+        it('a stored text past 32 KB that a text function or a sum reads beside a long value, on two rows, is read whole', async () => {
+            // On Oracle a value past SHARED_ABOVE's length is bound in a subquery, and a property beside it was bound
+            // too, taken out as JSON and read as a CLOB: a text past 32 KB so closed the session from the second run on
+            // (ORA-03113, liberation-data/drivine4j#370), as #320's did. A node of another label holds the same text, and
+            // is not read. drivine4j's test of #370.
+            await clear();
+            const bio = 'a'.repeat(40_000) + 'x';
+            // A text past 4,000 bytes but within 32 KB, too, which a list is added to; and one of fewer than 32,767
+            // characters that is past 32 KB, each of three bytes.
+            const mid = 'b'.repeat(20_000);
+            const euros = '€'.repeat(12_000);
+            const props = "{name: 'x', first: 'A', bio: $bio, mid: $mid, euros: $euros, span: 'p1d'}";
+            await query(`CREATE (:CyBio ${props}), (:CyBio ${props}), (:CyBioOther ${props})`, { bio, mid, euros });
+            // Long to write as SQL, so bound: a coalesce of a parameter's key, trimmed and made lower case.
+            const long = (text: string): string => `toLower(trim(coalesce($p.q, ${text})))`;
+            const each = <T>(value: T): T[] => [value, value, value, value];
+            const statements: [string, unknown[]][] = [
+                [`MATCH (n:CyBio), (m:CyBio) WHERE n.bio CONTAINS ${long('m.name')} RETURN count(*)`, [4]],
+                [`MATCH (n:CyBio), (m:CyBio) WHERE n.bio STARTS WITH ${long('m.first')} RETURN count(*)`, [4]],
+                [`MATCH (n:CyBio), (m:CyBio) WHERE n.bio ENDS WITH ${long('m.name')} RETURN count(*)`, [4]],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(n.bio + ${long('m.name')})`, each(40_002)],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(${long('m.name')} + n.bio)`, each(40_002)],
+                // A sum of short texts too, which closed the session on Oracle where the property was left where it is read.
+                ["MATCH (n:CyBio), (m:CyBio) RETURN n.name + '->' + m.first", each('x->A')],
+                ["MATCH (n:CyBio), (m:CyBio) RETURN size(n.bio + '->' + m.name)", each(40_004)],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(n.mid + ${long('m.name')})`, each(20_001)],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(last([${long('m.name')}] + n.mid))`, each(20_000)],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(n.euros + ${long('m.name')})`, each(12_001)],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(n.bio + size(${long('m.name')}))`, each(40_002)],
+                // A duration, added to a text as any value is.
+                [
+                    'MATCH (n:CyBio), (m:CyBio) RETURN size(n.bio + duration(toUpper(trim(coalesce($p.q, m.span)))))',
+                    each(40_004)
+                ],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(split(n.bio, ${long('m.name')}))`, each(2)],
+                [`MATCH (n:CyBio), (m:CyBio) RETURN size(replace(n.bio, ${long('m.name')}, 'yy'))`, each(40_002)],
+                [
+                    `MATCH (n:CyBio), (m:CyBio) RETURN right(replace(n.bio, 'x', ${long('m.first')} + 'b'), 3)`,
+                    each('aab')
+                ],
+                [`MATCH (n:CyBio) WITH n WHERE n.bio CONTAINS ${long('n.name')} RETURN count(*)`, [2]]
+            ];
+            await onOneSession(
+                async (run) => {
+                    // Oracle closed the session from the second run on.
+                    for (let i = 1; i <= 3; i++) {
+                        for (const [cypher, expected] of statements) {
+                            expect([cypher, i, await run(cypher)]).toEqual([cypher, i, expected]);
+                        }
+                    }
+                },
+                { p: { q: null } }
+            );
+            await clear();
+        });
+
         it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
             // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
             // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its
@@ -1305,31 +1390,6 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
      * log): it is joined on 1 = 1 there. See drivine4j's docs/oracle-on-true-in-scalar-subquery-crash.md.
      */
     describe('an OPTIONAL CALL or an OPTIONAL MATCH in a subquery', () => {
-        /**
-         * Runs `block` with a query of the statements it is given. On Oracle they run on one connection of their own,
-         * which is asked again after each: a statement that crashes the session can do so after its rows came back.
-         */
-        const onOneSession = async (
-            block: (run: (cypher: string) => Promise<any[]>) => Promise<void>
-        ): Promise<void> => {
-            if (store.type !== DatabaseType.ORACLE) {
-                await block(async (cypher) => query(cypher));
-                return;
-            }
-            const connection = await DatabaseRegistry.getInstance().connectionProvider(store.connection)!.connect();
-            const run = async (cypher: string): Promise<any[]> =>
-                connection.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }));
-            try {
-                await block(async (cypher) => {
-                    const rows = await run(cypher);
-                    expect([cypher, await run('RETURN 1')]).toEqual([cypher, [1]]);
-                    return rows;
-                });
-            } finally {
-                await connection.release();
-            }
-        };
-
         it('keeps the row it finds nothing for', async () => {
             // Beside the spec's case since v0.6.17 (#338).
             await clear();

@@ -3818,10 +3818,12 @@ export class CypherWriter {
         const temporals = this.temporals;
         const of = (text: string, kind: Temporal): Value => json(this.sql.scalar(text), { temporal: kind });
         // A side read from the store: `temporal` of the two texts, null where neither is of a kind it reads; then, in an
-        // addition, the two added as any two values are, as Cypher adds a temporal value to a list or to a text.
+        // addition, the two added as any two values are, as Cypher adds a temporal value to a list or to a text. Bound as
+        // a sum's sides are, so a stored text past 32 KB beside a long duration leaves Oracle's session open
+        // (liberation-data/drivine4j#370).
         const read = (kind: Temporal | undefined, temporal: (x: string, y: string) => string): Value =>
             json(
-                this.sql.shared([jsonA, jsonB], ([x, y]) => {
+                this.sql.sharedSum(jsonA, jsonB, ([x, y]) => {
                     const value = this.sql.scalar(
                         this.sql.shared([this.sql.text(x), this.sql.text(y)], ([tx, ty]) => temporal(tx, ty))
                     );
@@ -4138,7 +4140,7 @@ export class CypherWriter {
                 const [l, r] = [this.summand(binary.left, left), this.summand(binary.right, right)];
                 const given: [unknown, unknown] = [l.passed, r.passed];
                 return json(
-                    sql.shared([a, b], ([x, y]) => sql.add(x, y, given)),
+                    sql.sharedSum(a, b, ([x, y]) => sql.add(x, y, given)),
                     {
                         items: items !== undefined && items === this.itemsOf(right) ? items : undefined,
                         itemItems: single([this.itemItemsOf(left), this.itemItemsOf(right)]),
