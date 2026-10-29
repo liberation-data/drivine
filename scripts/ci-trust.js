@@ -35,8 +35,9 @@
  * another tree, so it is never looked at.
  *
  * A run on this tree that is still going, as ci.yml's push run on a merge commit is when this starts beside it, is
- * waited for, up to CI_TRUST_WAIT_MINUTES (60), polling every CI_TRUST_POLL_SECONDS (30). If it passes the gate is
- * skipped, and if it fails or is cancelled the release fails, linking it. A wait that runs out runs the gate. So does
+ * waited for, up to CI_TRUST_WAIT_MINUTES (60), polling every CI_TRUST_POLL_SECONDS (60): each poll makes three or
+ * four API calls, and GITHUB_TOKEN has 1,000 an hour for the whole repository. If it passes the gate is skipped, and
+ * if it fails or is cancelled the release fails, linking it. A wait that runs out runs the gate. So does
  * an API call that fails: not trusting a run is always safe, as the gate is what ran before.
  *
  * It reads Node alone, so it runs before `npm ci`.
@@ -124,7 +125,7 @@ const link = (run) => `[${run.event} run ${run.id}](${run.html_url}) on ${(run.h
  * Decides, waiting while a run on this tree is going. Returns `{ decision, run?, reason, looked }`, where looked is
  * each run it considered and why it did or didn't count.
  */
-async function assess({ api, repo, tree, shas, waitSeconds = 3600, pollSeconds = 30, now, sleep, log = () => {} }) {
+async function assess({ api, repo, tree, shas, waitSeconds = 3600, pollSeconds = 60, now, sleep, log = () => {} }) {
     const deadline = now() + waitSeconds * 1000;
     const waited = new Set();
     for (;;) {
@@ -193,7 +194,7 @@ async function main(args) {
             tree,
             shas: shas.filter(Boolean),
             waitSeconds: Number(env.CI_TRUST_WAIT_MINUTES ?? 60) * 60,
-            pollSeconds: Number(env.CI_TRUST_POLL_SECONDS ?? 30),
+            pollSeconds: Number(env.CI_TRUST_POLL_SECONDS ?? 60),
             now: Date.now,
             sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
             log: console.log
