@@ -8,7 +8,7 @@ import { jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
-import { PLAIN_FLOAT, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import { PLAIN_FLOAT, SHARED_ABOVE, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
 
@@ -107,6 +107,19 @@ const PROPERTY_READ = /^JSON_QUERY\((.+), ('\$(?:[^']|'')*') RETURNING JSON\)$/;
 
 /** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
 const SHORT_TEXT = 4000;
+
+/**
+ * The most characters of a text `sharedSum` binds as JSON: one of 40,001, bound as JSON beside a long value, closed the
+ * session (liberation-data/drivine4j#370), where one of 12,000 three-byte characters, 36 KB, did not, so a text is
+ * counted in characters, as `.length()` counts them. One as long or shorter is bound as it was.
+ */
+const BOUND_TEXT = 32_767;
+
+/** A text as a `VARCHAR2`, null past 4,000 bytes, and as a CLOB: see `texts`. */
+interface Texts {
+    short: string;
+    whole: string;
+}
 
 /**
  * How many UTF-16 units of a CLOB `reversedPieces` reverses as one `VARCHAR2`: with one more, where a pair is not cut,
@@ -344,22 +357,92 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * and searches it whole. `body` gives null where a text it is given is null, and where what it gives would not fit in
      * a `VARCHAR2`: see {@link replaceText} and {@link split}. A short text is not read as a CLOB, which is slower:
      * `COALESCE` reads its second value only where the first is null. `body` knows which it is given by {@link long}.
+     *
+     * A property beside a long value, which is bound in a subquery, has its texts bound beside it, each read by the
+     * property's own path (see `direct`): Oracle closed the session (ORA-03113) where a text past 32 KB was read as a
+     * CLOB, and searched or compared, beside such a subquery for each of two rows or more
+     * (liberation-data/drivine4j#370), where the property was left where it is read, and where it was bound as JSON and
+     * read as a CLOB from that.
      */
     texts(jsons: string[], body: (texts: string[]) => string): string {
-        return this.shared(jsons, (xs) => {
-            // Within a body given CLOBs, as CLOBs alone.
-            if (this.long) {
-                return body(xs.map((it) => this.textOf(it, true)));
+        const properties = jsons.map((it) => this.besideLong(it));
+        if (!this.bindsLong(jsons) || !properties.some((it) => it)) {
+            return this.shared(jsons, (xs) =>
+                this.textsOf(
+                    xs.map((it) => this.textsOfJson(it)),
+                    body
+                )
+            );
+        }
+        // Within a body given CLOBs, a property's CLOB alone: its VARCHAR2 is not read.
+        const columns = jsons.flatMap((json, i) => {
+            if (!properties[i]) {
+                return [json];
             }
-            const read = body(xs.map((it) => this.textOf(it, false)));
-            this.long = true;
-            let whole: string;
-            try {
-                whole = body(xs.map((it) => this.textOf(it, true)));
-            } finally {
-                this.long = false;
+            return this.long ? [this.textOf(json, true)] : [this.textOf(json, false), this.textOf(json, true)];
+        });
+        return this.sharedBound(columns, (names) => {
+            let next = 0;
+            const texts = jsons.map((_, i): Texts => {
+                if (!properties[i]) {
+                    return this.textsOfJson(names[next++]);
+                }
+                if (this.long) {
+                    const whole = names[next++];
+                    return { short: whole, whole };
+                }
+                return { short: names[next++], whole: names[next++] };
+            });
+            return this.textsOf(texts, body);
+        });
+    }
+
+    /**
+     * A side of a `+` that is a property, beside a long value, is bound by the property's own path, as {@link texts}
+     * binds its texts: its kind and its CLOB, each a column the body's reads of them are rewritten to, and the property
+     * as JSON only where it is no text past {@link BOUND_TEXT} characters. Bound as JSON whole and read as a CLOB from
+     * that, a text past 32 KB closed the session on two rows or more (ORA-03113, liberation-data/drivine4j#370); left
+     * where it is read beside the subquery, as `direct` reads it, a sum of short texts closed it on one,
+     * `a.id + '->' + b.id`. A text past {@link BOUND_TEXT} characters is summed with a text or a number from its CLOB,
+     * and is null added to a list, which takes it as JSON: read as JSON beside the subquery, it closed the session.
+     */
+    sharedSum(a: string, b: string, body: (names: string[]) => string): string {
+        const sides = [a, b];
+        const properties = sides.map((it) => this.besideLong(it));
+        if (!this.bindsLong(sides) || !properties.some((it) => it)) {
+            return this.shared(sides, body);
+        }
+        const columns = sides.flatMap((json, i) => {
+            if (!properties[i]) {
+                return [json];
             }
-            return `COALESCE(${read}, ${whole})`;
+            const [props, at] = propertyRead(json)!;
+            const method = (name: string): string => `${at.slice(0, -1)}${name}'`;
+            return [
+                `CASE WHEN JSON_VALUE(${props}, ${method(
+                    '.length()'
+                )} RETURNING NUMBER) > ${BOUND_TEXT} THEN NULL ELSE ${json} END`,
+                `JSON_VALUE(${props}, ${method('.type()')})`,
+                `JSON_VALUE(${props}, ${at} RETURNING CLOB)`
+            ];
+        });
+        return this.sharedBound(columns, (names) => {
+            let next = 0;
+            const bound = properties.map((property) =>
+                property ? names.slice(next, (next += 3)) : names.slice(next, (next += 1))
+            );
+            // A property's kind and CLOB are read from their own columns: its JSON is null past BOUND_TEXT characters.
+            return bound
+                .filter((it) => it.length === 3)
+                .reduce(
+                    (sql, [json, kindColumn, clob]) =>
+                        sql
+                            .split(kind(json))
+                            .join(kindColumn)
+                            .split(`JSON_VALUE(${json}, '$' RETURNING CLOB)`)
+                            .join(clob),
+                    body(bound.map((it) => it[0]))
+                );
         });
     }
 
@@ -1265,6 +1348,33 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             [json],
             ([x]) => `CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE(${x}, '$' RETURNING CLOB) END`
         );
+    }
+
+    /** The JSON `json`'s texts: see {@link textOf}. */
+    private textsOfJson(json: string): Texts {
+        return { short: this.textOf(json, false), whole: this.textOf(json, true) };
+    }
+
+    /** `body` over `texts` as `VARCHAR2`s, and where it gives null, as CLOBs: see {@link texts}. */
+    private textsOf(texts: Texts[], body: (texts: string[]) => string): string {
+        // Within a body given CLOBs, as CLOBs alone.
+        if (this.long) {
+            return body(texts.map((it) => it.whole));
+        }
+        const read = body(texts.map((it) => it.short));
+        this.long = true;
+        let whole: string;
+        try {
+            whole = body(texts.map((it) => it.whole));
+        } finally {
+            this.long = false;
+        }
+        return `COALESCE(${read}, ${whole})`;
+    }
+
+    /** Whether `json` is a property as `propertyOf` reads it, short beside a long value: see {@link texts} and {@link sharedSum}. */
+    private besideLong(json: string): boolean {
+        return json.length <= SHARED_ABOVE && propertyRead(json) !== undefined;
     }
 
     /** The JSON `json` as text, where it is a string: a CLOB where `clob`, else as {@link text} reads it; a property by its own path (see `direct`). */

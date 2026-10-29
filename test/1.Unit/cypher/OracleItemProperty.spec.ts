@@ -199,6 +199,121 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         expect(sql).toContain("JSON_VALUE(n1.props, '$.a.size()' RETURNING NUMBER)");
     });
 
+    describe('beside a long value, which is bound in a subquery', () => {
+        // A value past SHARED_ABOVE's length is bound in a subquery. A property beside it was bound there as JSON, and read
+        // as a CLOB from that; left where it is read, its CLOB was read beside the subquery. On two rows or more, a text
+        // past 32 KB so closed the session either way (liberation-data/drivine4j#370).
+        const long = 'toLower(trim(coalesce($p.q, m.name)))';
+
+        /** `cypher`, whose long value is bound, compiled; its property `a` is not bound as JSON, and the nodes' labels are tested. */
+        const compiledBeside = (cypher: string): string => {
+            const sql = new OracleCypherCompiler('g').compile(cypher, { p: { q: null } }).sql;
+            expect([cypher, / AS v1\b/.test(sql)]).toEqual([cypher, true]);
+            expect([cypher, /JSON_QUERY\([\w.]+props, '\$.[ab]' RETURNING JSON\) AS v/.test(sql)]).toEqual([
+                cypher,
+                false
+            ]);
+            expect([cypher, /JSON_VALUE\(JSON_QUERY\([\w.]+props, '\$.[ab]' RETURNING JSON\)/.test(sql)]).toEqual([
+                cypher,
+                false
+            ]);
+            expect([cypher, count(sql, 'JSON_EXISTS(')]).toEqual([cypher, 2]);
+            return sql;
+        };
+
+        it('should bind the texts of a property a text function reads on Oracle beside it, by its own path', () => {
+            const shapes = [
+                'n.a CONTAINS #',
+                '# CONTAINS n.a',
+                'n.a STARTS WITH #',
+                'n.a ENDS WITH #',
+                'split(n.a, #)',
+                "replace(n.a, #, 'x')",
+                "replace(n.a, 'x', #)",
+                'replace(n.a, n.b, #)'
+            ];
+            for (const shape of shapes) {
+                const term = shape.replace('#', long);
+                for (const cypher of [
+                    `MATCH (n:Doc), (m:Doc) RETURN ${term}`,
+                    `MATCH (n:Doc), (m:Doc) WITH n, m WHERE ${term} IS NOT NULL RETURN 1`
+                ]) {
+                    const sql = compiledBeside(cypher);
+                    expect([cypher, /JSON_VALUE\([\w.]+props, '\$.a'\) END AS v\d+/.test(sql)]).toEqual([cypher, true]);
+                    expect([cypher, /JSON_VALUE\([\w.]+props, '\$.a' RETURNING CLOB\) END AS v\d+/.test(sql)]).toEqual([
+                        cypher,
+                        true
+                    ]);
+                    expect([
+                        cypher,
+                        /THEN JSON_VALUE\([\w.]+props, '\$.a' RETURNING CLOB\) END(?! AS v)/.test(sql)
+                    ]).toEqual([cypher, false]);
+                }
+            }
+        });
+
+        it('should bind the kind and the CLOB of a property a sum reads on Oracle beside it, by its own path', () => {
+            // Bound beside the long value as JSON and read as a CLOB from that, a text past 32 KB closed the session; left
+            // where it is read beside the subquery, a sum of short texts closed it on one row, `a.id + '->' + b.id`.
+            for (const shape of [
+                'n.a + #',
+                '# + n.a',
+                'size(n.a + #)',
+                'n.a + duration(#)',
+                'duration(#) + n.a',
+                'n.a - duration(#)'
+            ]) {
+                const sql = compiledBeside(`MATCH (n:Doc), (m:Doc) RETURN ${shape.replace('#', long)}`);
+                expect([shape, sql]).toEqual([
+                    shape,
+                    expect.stringContaining("JSON_VALUE(n1.props, '$.a.type()') AS v")
+                ]);
+                expect([shape, sql]).toEqual([
+                    shape,
+                    expect.stringContaining("JSON_VALUE(n1.props, '$.a' RETURNING CLOB) AS v")
+                ]);
+                expect([shape, sql]).toEqual([
+                    shape,
+                    expect.stringContaining(
+                        "CASE WHEN JSON_VALUE(n1.props, '$.a.length()' RETURNING NUMBER) > 32767 THEN NULL ELSE JSON_QUERY(n1.props, '$.a' RETURNING JSON) END AS v"
+                    )
+                ]);
+                // Read nowhere else: its length, its JSON, its kind and its CLOB.
+                expect([shape, count(sql, "n1.props, '$.a")]).toEqual([shape, 4]);
+                // Its kind and its CLOB are read from their own columns, not from its JSON, which is null past 32,767 characters.
+                const [, json, kindColumn] = /END AS (v\d+), JSON_VALUE\(n1.props, '\$.a.type\(\)'\) AS (v\d+)/.exec(
+                    sql
+                )!;
+                const view = new RegExp(`(sh\\d+)\\.${kindColumn}\\b`).exec(sql)![1];
+                const fromJson = new RegExp(
+                    `JSON_VALUE\\(${view}\\.${json}, '\\$(\\.type\\(\\)'\\)|' RETURNING CLOB\\))`
+                );
+                expect([shape, fromJson.test(sql)]).toEqual([shape, false]);
+            }
+            const sum = oracle("MATCH (a)-[:R]->(b) RETURN a.id + '->' + b.id");
+            expect(sum).toContain("JSON_VALUE(n2.props, '$.id.type()') AS v");
+            expect(count(sum, "n2.props, '$.id")).toBe(4);
+        });
+
+        it('should work out first an aggregate of a text function a property is read by beside it, its texts bound there', () => {
+            // An aggregate's argument binds no value; one that would is worked out first, for each row (drivine4j#333), which the
+            // texts' binding says as shared's does, so the property's texts are bound beside the long value there too. A
+            // long literal binds nothing of its own, so only the texts' binding says the argument binds a value.
+            const literal = `'${'y'.repeat(250)}'`;
+            for (const aggregate of [
+                `count(CASE WHEN n.a CONTAINS ${literal} THEN 1 END)`,
+                `collect(split(n.a, ${literal}))`
+            ]) {
+                const cypher = `MATCH (n:Doc), (m:Doc) RETURN ${aggregate}`;
+                const sql = compiledBeside(cypher);
+                expect([cypher, /JSON_VALUE\([\w.]+props, '\$.a' RETURNING CLOB\) END AS v\d+/.test(sql)]).toEqual([
+                    cypher,
+                    true
+                ]);
+            }
+        });
+    });
+
     it('should be read on Oracle by its own path where its key is quoted in its path, or by its path in a map', () => {
         const read = (cypher: string): string => {
             const sql = oracle(cypher);
