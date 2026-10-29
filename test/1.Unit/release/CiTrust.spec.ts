@@ -306,6 +306,39 @@ describe('ci-trust.js', () => {
         expect(result).toMatchObject({ decision: 'trust', run: { id: 14 }, sleeps: [30000, 30000] });
     });
 
+    it("runs the gate, not failing, when a pull request's run it waited on records another tree", async () => {
+        const going = run(22, { event: 'pull_request', head_sha: HEAD, status: 'in_progress', conclusion: null });
+        const result = await decide(
+            {
+                [runsOn(SHA)]: { workflow_runs: [] },
+                [runsOn(HEAD)]: [
+                    { workflow_runs: [going] },
+                    { workflow_runs: [run(22, { event: 'pull_request', head_sha: HEAD, conclusion: 'failure' })] }
+                ],
+                [records]: recordOn(),
+                [artifactsOf(22)]: [recorded(), recorded(OTHER)]
+            },
+            [SHA, HEAD]
+        );
+
+        expect(result).toMatchObject({ decision: 'gate', reason: 'no run on this tree passed', sleeps: [30000] });
+        expect(result.text).toContain(`it tested its merge ref, tree ${OTHER}, as its base had moved on`);
+    });
+
+    it('runs the gate, not failing, when a run it waited for ends green with a job skipped', async () => {
+        const result = await decide({
+            [runsOn(SHA)]: [
+                { workflow_runs: [run(23, { status: 'in_progress', conclusion: null })] },
+                { workflow_runs: [run(23)] }
+            ],
+            [records]: recordOn(),
+            [jobsOf(23)]: { jobs: [job('success')('build'), job('skipped')('test (Oracle)')] }
+        });
+
+        expect(result).toMatchObject({ decision: 'gate', reason: 'no run on this tree passed', sleeps: [30000] });
+        expect(result.text).toContain('not every job passed: test (Oracle) (skipped)');
+    });
+
     it('runs the gate when a run is still going once the wait is up', async () => {
         const result = await decide(
             {
