@@ -1,7 +1,7 @@
 # Lints, builds and tests Drivine on every push to master and every pull request. The tests run on test containers
 # (see TEST_CONTAINERS.md): Neo4j, Memgraph, FalkorDB and Postgres. Oracle, whose image is large, runs in a job of its
 # own with ORACLE_TESTS=true. A local `npm test` leaves it out unless you set that, and says so. release.yml calls it
-# as the gate before a release.
+# as the gate before a release, unless a push or pull_request run of it has already passed on the same tree.
 name: CI
 
 on:
@@ -21,6 +21,30 @@ env:
     FALKORDB_TEST_IMAGE: ${{ github.event_name != 'schedule' && 'falkordb/falkordb:6.0.3' || '' }}
 
 jobs:
+    # Records the git tree this run tests, as an artifact named ci-tree-<tree>, so a release of the same tree can trust
+    # this run and skip its gate (scripts/ci-trust.js). It matters on a pull request, which tests its merge ref, not the
+    # head commit the run names. It has no condition, as no job here may: release.yml trusts a run only when every job
+    # in it passed, and a job skipped by a condition doesn't.
+    tree:
+        name: record the tree
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - name: Work out the tree
+              id: tree
+              run: |
+                  tree=$(git rev-parse 'HEAD^{tree}')
+                  echo "tree=$tree" >> "$GITHUB_OUTPUT"
+                  echo "$tree $(git rev-parse HEAD)" > ci-tree.txt
+                  echo "This run tests tree $tree, of commit $(git rev-parse HEAD)." >> "$GITHUB_STEP_SUMMARY"
+            # Overwritten when the run is re-run, as an artifact's name is unique within a run.
+            - uses: actions/upload-artifact@v7
+              with:
+                  name: ci-tree-${{ steps.tree.outputs.tree }}
+                  path: ci-tree.txt
+                  if-no-files-found: error
+                  overwrite: true
+
     # The Cypher spec's copies in test/cypher are the tag VERSION names, unchanged, and a later tag is shown as a
     # warning.
     cypher-spec:
