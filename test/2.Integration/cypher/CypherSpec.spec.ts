@@ -1432,6 +1432,104 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * The keys of a node, a relationship, a map or a parameter, on each row its own: drivine4j's tests of
+     * liberation-data/drivine4j#414, ported for #434. The spec's cases read one row's keys only.
+     */
+    describe('keys()', () => {
+        it("gives each row's own keys, of a node, a relationship, a map or a parameter, in a comprehension, a quantifier, a DISTINCT or an order", async () => {
+            // On Oracle every row had the first row's keys: the map's data guide was worked out by a subquery in a lateral
+            // view's select list, which Oracle works out once.
+            await clear();
+            await query(
+                "CREATE (a:CyKeyed {id: 1, name: 'Andres', surname: 'Lopez'}), (b:CyKeyed {id: 2, otherName: 'Andres', otherSurname: 'Lopez'}), " +
+                    '(c:CyKeyed {id: 3, a: 1}), (d:CyKeyed {id: 4, b: 2}), (a)-[:CY_KEYED {w: 1, p: 1}]->(b), (c)-[:CY_KEYED {w: 2, q: 2, z: 3}]->(d)'
+            );
+            expect(await query('MATCH (n:CyKeyed) UNWIND keys(n) AS k RETURN n.id, k ORDER BY n.id, k')).toEqual([
+                [1, 'id'],
+                [1, 'name'],
+                [1, 'surname'],
+                [2, 'id'],
+                [2, 'otherName'],
+                [2, 'otherSurname'],
+                [3, 'a'],
+                [3, 'id'],
+                [4, 'b'],
+                [4, 'id']
+            ]);
+            // The TCK's Graph8 #2.
+            expect(await query('MATCH (n:CyKeyed) UNWIND keys(n) AS x RETURN DISTINCT x ORDER BY x')).toEqual([
+                'a',
+                'b',
+                'id',
+                'name',
+                'otherName',
+                'otherSurname',
+                'surname'
+            ]);
+            expect(await query('MATCH (n:CyKeyed) WITH n ORDER BY n.id RETURN collect(size(keys(n)))')).toEqual([
+                [3, 3, 2, 2]
+            ]);
+            expect(await query("MATCH (n:CyKeyed) RETURN 'b' IN keys(n) ORDER BY n.id")).toEqual([
+                false,
+                false,
+                false,
+                true
+            ]);
+            expect(
+                await query("MATCH (n:CyKeyed) RETURN [k IN keys(n) WHERE k IN ['a', 'b'] | k + '!'] ORDER BY n.id")
+            ).toEqual([[], [], ['a!'], ['b!']]);
+            expect(
+                await query('MATCH (:CyKeyed)-[r:CY_KEYED]->() UNWIND keys(r) AS k RETURN r.w, k ORDER BY r.w, k')
+            ).toEqual([
+                [1, 'p'],
+                [1, 'w'],
+                [2, 'q'],
+                [2, 'w'],
+                [2, 'z']
+            ]);
+            expect(await query('UNWIND [{a: 1}, {b: 2}] AS m RETURN keys(m)')).toEqual([['a'], ['b']]);
+            expect(await query('UNWIND $ms AS m RETURN keys(m)', { ms: [{ a: 1 }, { b: 2 }] })).toEqual([['a'], ['b']]);
+            expect(await query('WITH [{a: 1}, {b: 2}] AS ms RETURN [m IN ms | keys(m)]')).toEqual([[['a'], ['b']]]);
+            expect(await query('UNWIND [{a: 1}, {b: 2}] AS m RETURN [x IN [m, {c: 3}] | keys(x)]')).toEqual([
+                [['a'], ['c']],
+                [['b'], ['c']]
+            ]);
+            expect(
+                await query('UNWIND [{b: 1}, {a: 2}, {b: 3}] AS m RETURN DISTINCT keys(m) ORDER BY keys(m)')
+            ).toEqual([['a'], ['b']]);
+            expect(await query('UNWIND [{b: 1}, {a: 2}] AS m RETURN coalesce(m.a, m.b) ORDER BY keys(m)')).toEqual([
+                2, 1
+            ]);
+            // A quantifier over each row's keys in a WHERE, the keys of a relationship an OPTIONAL MATCH didn't find, and
+            // of maps in a list each row holds.
+            expect(
+                await query(
+                    "UNWIND $rows AS row MATCH (n:CyKeyed {id: row.id}) WHERE any(k IN keys(row.props) WHERE k = 'b') RETURN n.id",
+                    {
+                        rows: [
+                            { id: 1, props: { a: 1 } },
+                            { id: 4, props: { b: 2 } }
+                        ]
+                    }
+                )
+            ).toEqual([4]);
+            expect(
+                await query(
+                    'MATCH (n:CyKeyed) OPTIONAL MATCH (n)-[r:CY_KEYED]->() RETURN n.id, size(keys(r)) ORDER BY n.id'
+                )
+            ).toEqual([
+                [1, 2],
+                [2, null],
+                [3, 3],
+                [4, null]
+            ]);
+            expect(
+                await query('UNWIND [[{a: 1}, {b: 2, c: 3}], [{d: 4, e: 5, f: 6}]] AS l RETURN [x IN l | size(keys(x))]')
+            ).toEqual([[1, 2], [3]]);
+        });
+    });
+
+    /**
      * A list of zoned values, and a list of lists of them, sorted and compared item by item as the moments they are:
      * drivine4j's tests of liberation-data/drivine4j#199, ported for #361. Beside the spec's case since v0.6.17 (#199), which holds
      * the rest.
