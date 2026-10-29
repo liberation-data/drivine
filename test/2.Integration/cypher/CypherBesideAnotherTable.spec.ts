@@ -92,4 +92,32 @@ describe.each(stores())('Properties of a node beside another node on $type', (st
             expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
         }
     });
+
+    it("should write to the nodes of the pattern, and give that node's values, in a statement that writes", async () => {
+        await query(
+            "CREATE (a:CyBesideN1 {n: 1, m: 10, s: 'x', l: [1]}) CREATE (b:CyBesideN2 {n: 2, m: 20, s: 'y', l: [2]}) " +
+                "CREATE (c:CyBesideN3 {n: 3, m: 30, s: 'z', l: [3]}) CREATE (a)-[:R]->(b), (a)-[:R]->(c)"
+        );
+        // A write reads its rows by a SELECT … INTO, a MERGE its match by a loop, and the rows it returns by a cursor. The
+        // first, unhinted, gave a row for each two nodes, and set x and y on the N2 and the N3 too.
+        const cases: [string, any[]][] = [
+            [
+                'MATCH (a:CyBesideN1), (b:CyBesideN2) WITH a, b, a.n + b.n AS s, a.n - b.n AS d SET a.x = s, a.y = d RETURN s, d',
+                [[3, -1]]
+            ],
+            ['MATCH (a:CyBesideN1) MERGE (a)-[:R]->(b:CyBesideN2) RETURN b.n - b.m, b.s', [[-18, 'y']]],
+            ['MATCH (a:CyBesideN1), (b:CyBesideN2) SET a.z = 1 RETURN a.n + b.n, a.n - b.n', [[3, -1]]],
+            [
+                'MATCH (a) WHERE a:CyBesideN1 OR a:CyBesideN2 OR a:CyBesideN3 RETURN a.n, a.x, a.y, a.z ORDER BY a.n',
+                [
+                    [1, 3, -1, 1],
+                    [2, null, null, null],
+                    [3, null, null, null]
+                ]
+            ]
+        ];
+        for (const [cypher, rows] of cases) {
+            expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
+        }
+    });
 });

@@ -45,6 +45,10 @@ describe("Oracle's JSON table transformation in compiled Cypher", () => {
         expect(compiled('MATCH (a:N1) MERGE (a)-[:R]->(b:N2) RETURN b.n')).toMatch(
             new RegExp(`FOR \\w+ IN \\(\\s*SELECT /\\*\\+ ${hint} \\*/`)
         );
+        // The rows it returns, read from two tables, are a query of their own, which holds the hint.
+        expect(compiled('CREATE (a:N1 {n: 1})-[:R]->(b:N2 {n: 2}) RETURN a.n, b.n')).toMatch(
+            new RegExp(`OPEN \\w+ FOR[^;]*FROM \\(\\s*SELECT /\\*\\+ ${hint} \\*/`)
+        );
     });
 
     it("should count the graph's own tables, its name read as it is, and join the hints a query opens with", () => {
