@@ -3,6 +3,14 @@
 
 **Docs: [drivine.org](https://drivine.org/ts/)**, for TypeScript, Python, and Kotlin & Java.
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=uETP0EN_04E" target="_blank">
+    <img src="https://raw.githubusercontent.com/liberation-data/drivine/master/website/src/assets/video-poster.jpg" alt="Watch: Drivine, graph RAG on any database (4:26)" width="700">
+  </a>
+  <br>
+  <a href="https://www.youtube.com/watch?v=uETP0EN_04E" target="_blank">▶ Watch Drivine in four and a half minutes: graph RAG on any database</a> (4:26, with captions)
+</p>
+
 Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module, and no need
 for one. It supports **Neo4j**, **Memgraph**, **FalkorDB**, **Oracle** (SQL/PGQ) and **Postgres** as graph stores, plus
 Amazon Neptune through the low-level API. It gives you two ways to work with a graph:
