@@ -37,8 +37,8 @@
  * A run on this tree that is still going, as ci.yml's push run on a merge commit is when this starts beside it, is
  * waited for, up to CI_TRUST_WAIT_MINUTES (60), polling every CI_TRUST_POLL_SECONDS (60): each poll makes three or
  * four API calls, and GITHUB_TOKEN has 1,000 an hour for the whole repository. If it passes the gate is skipped, and
- * if it fails or is cancelled the release fails, linking it. A wait that runs out runs the gate. So does
- * an API call that fails: not trusting a run is always safe, as the gate is what ran before.
+ * if it fails or is cancelled the release fails, linking it. A wait that runs out runs the gate. So does an API call
+ * that fails: not trusting a run is always safe, as the gate is what ran before.
  *
  * It reads Node alone, so it runs before `npm ci`.
  */
@@ -172,6 +172,13 @@ function summary({ decision, run, reason, looked = [] }, tree) {
     return lines.join('\n') + '\n';
 }
 
+// A number of minutes or seconds from the environment, or the default when it is unset or isn't a number, so a typo
+// can't make the wait unbounded or the polling continuous.
+function setting(text, otherwise) {
+    const value = Number(text);
+    return text !== undefined && text !== '' && Number.isFinite(value) && value >= 0 ? value : otherwise;
+}
+
 async function main(args) {
     if (args.length < 3 || args.length > 4) {
         console.error('Usage: node scripts/ci-trust.js <owner/repo> <tree> <commit> [<pull request head>]');
@@ -193,8 +200,8 @@ async function main(args) {
             repo,
             tree,
             shas: shas.filter(Boolean),
-            waitSeconds: Number(env.CI_TRUST_WAIT_MINUTES ?? 60) * 60,
-            pollSeconds: Number(env.CI_TRUST_POLL_SECONDS ?? 60),
+            waitSeconds: setting(env.CI_TRUST_WAIT_MINUTES, 60) * 60,
+            pollSeconds: setting(env.CI_TRUST_POLL_SECONDS, 60),
             now: Date.now,
             sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
             log: console.log
