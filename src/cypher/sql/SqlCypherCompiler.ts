@@ -177,7 +177,11 @@ export abstract class SqlCypherCompiler {
         }
         if (!query.clauses.some(writes)) {
             const writer = new CypherWriter(this, this.readParameters(parameters));
-            return this.withFunctions({ sql: writer.query(query), parameters: writer.parameters.values, setup: [] });
+            return this.withFunctions({
+                sql: this.planned(writer.query(query)),
+                parameters: writer.parameters.values,
+                setup: []
+            });
         }
         this.procedural = true;
         // A procedure takes its parameters as one object, and reads each from it.
@@ -271,6 +275,15 @@ export abstract class SqlCypherCompiler {
      * query, where a store would merge the two and read a value bound in the row wrongly.
      */
     called(query: string): string {
+        return query;
+    }
+
+    /**
+     * The query `query`, a statement of its own that opens with `SELECT`, with what the store's planner is told of it:
+     * nothing here. A compiled query, a `UNION`, and each query of a procedure (a `SELECT … INTO`, a `FOR … IN` loop's,
+     * and the rows it returns) are told.
+     */
+    planned(query: string): string {
         return query;
     }
 
@@ -660,7 +673,7 @@ export abstract class SqlCypherCompiler {
             )}\n) u\nGROUP BY ${key}`;
             sql = `SELECT d.result FROM (\n${indent(grouped)}\n) d\nORDER BY d.k`;
         }
-        return { sql, parameters: writer.parameters.values, setup: [] };
+        return { sql: this.planned(sql), parameters: writer.parameters.values, setup: [] };
     }
     // ----- A store's SQL -----
 

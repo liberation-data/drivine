@@ -841,7 +841,9 @@ export class CypherWriter {
         let select = new Select(new Map());
         for (const clause of this.creates(query.clauses)) {
             if (clause.kind === 'Return') {
-                this.sql.returnRows(this.project(select, clause.projection, true).sql).forEach((it) => this.emit(it));
+                this.sql
+                    .returnRows(this.sql.planned(this.project(select, clause.projection, true).sql))
+                    .forEach((it) => this.emit(it));
             } else {
                 select = this.next(select, clause);
             }
@@ -1678,7 +1680,17 @@ export class CypherWriter {
     }
 
     private assign(variable: string, sql: string): void {
-        this.emit(`SELECT ${sql} INTO ${variable};`);
+        this.selectInto(`SELECT ${sql} INTO ${variable}`);
+    }
+
+    /** The query `query`, a `SELECT … INTO`, as a statement of the procedure, with what the store's planner is told of it. */
+    private selectInto(query: string): void {
+        this.emit(`${this.sql.planned(query)};`);
+    }
+
+    /** The head of a loop over each row of the query `query`, as `RECORD`, with what the store's planner is told of it. */
+    private loop(query: string): void {
+        this.emit(`FOR ${RECORD} IN (${this.sql.planned(query)}) LOOP`);
     }
 
     private key(variable: string): string {
@@ -1707,8 +1719,8 @@ export class CypherWriter {
         const list = this.sql.comparable(
             json(this.sql.aggregateList(this.sql.jsonObject(entries), this.orderOf(select)), { ordered: true })
         );
-        this.emit(
-            [`SELECT ${list} INTO ${ROWS}`, ...this.from(select), ...optional(select.whereClause())].join('\n') + ';'
+        this.selectInto(
+            [`SELECT ${list} INTO ${ROWS}`, ...this.from(select), ...optional(select.whereClause())].join('\n')
         );
     }
 
@@ -1834,7 +1846,7 @@ export class CypherWriter {
             read.some(holdsSubquery) ? undefined : new Set(read.flatMap((it) => [...variablesIn(it)])),
             true
         );
-        this.emit([`SELECT ${value(select.scope)} INTO ${variable}`, ...this.from(select)].join('\n') + ';');
+        this.selectInto([`SELECT ${value(select.scope)} INTO ${variable}`, ...this.from(select)].join('\n'));
     }
 
     /** One write: made for each row of `ROWS` in turn, and the rows it leaves put back there. */
@@ -1845,7 +1857,7 @@ export class CypherWriter {
             this.assign(DOOMED, this.sql.literalJson([]));
         }
         const r = this.alias('r');
-        this.emit(`FOR ${RECORD} IN (SELECT ${r}.item FROM ${this.sql.elements(ROWS, r)} ORDER BY ${r}.item_no) LOOP`);
+        this.loop(`SELECT ${r}.item FROM ${this.sql.elements(ROWS, r)} ORDER BY ${r}.item_no`);
         this.depth++;
         this.emit(`${ROW} := ${RECORD}.item;`);
         this.writeRow(clause);
@@ -1856,8 +1868,8 @@ export class CypherWriter {
             // A node is deleted when the clause has deleted the relationships it deletes: one it does not delete must not be there.
             const d = this.alias('d');
             const doomed = `SELECT ${this.sql.idOf(`${d}.item`)} FROM ${this.sql.elements(DOOMED, d)}`;
-            this.emit(
-                `SELECT count(*) INTO ${COUNT} FROM ${this.sql.edges} WHERE src IN (${doomed}) OR dst IN (${doomed});`
+            this.selectInto(
+                `SELECT count(*) INTO ${COUNT} FROM ${this.sql.edges} WHERE src IN (${doomed}) OR dst IN (${doomed})`
             );
             this.emit(`IF ${COUNT} > 0 THEN`);
             this.emit(
@@ -1979,7 +1991,7 @@ export class CypherWriter {
                 const all = this.sql.comparable(
                     json(this.sql.aggregateList(`${g}.item`, `${g}.part, ${g}.item_no`), { ordered: true })
                 );
-                this.emit(`SELECT ${all} INTO ${gathered} FROM (${both}) ${g};`);
+                this.selectInto(`SELECT ${all} INTO ${gathered} FROM (${both}) ${g}`);
             }
         });
         if (returned) {
@@ -1999,7 +2011,7 @@ export class CypherWriter {
      */
     private eachRow(rows: string, body: () => void): void {
         const r = this.alias('r');
-        this.emit(`FOR ${RECORD} IN (SELECT ${r}.item FROM ${this.sql.elements(rows, r)} ORDER BY ${r}.item_no) LOOP`);
+        this.loop(`SELECT ${r}.item FROM ${this.sql.elements(rows, r)} ORDER BY ${r}.item_no`);
         this.depth++;
         this.assign(ROWS, this.sql.appended(this.sql.literalJson([]), `${RECORD}.item`));
         this.unread = undefined;
@@ -2177,7 +2189,7 @@ export class CypherWriter {
             ...optional(select.whereClause())
         ];
         this.emit(`${FOUND} := FALSE;`);
-        this.emit(`FOR ${MATCHED} IN (\n${indent(match.join('\n'))}\n) LOOP`);
+        this.emit(`FOR ${MATCHED} IN (\n${indent(this.sql.planned(match.join('\n')))}\n) LOOP`);
         this.depth++;
         this.emit(`${FOUND} := TRUE;`);
         this.emit(`${ROW} := ${MATCHED}.item;`);

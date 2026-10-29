@@ -271,6 +271,12 @@ const names = await pm.query<string>(
   ([#377](https://github.com/liberation-data/drivine/issues/377)). It goes once an Oracle release no longer fails the
   repro in drivine4j's
   [docs/oracle-on-true-in-scalar-subquery-crash.md](https://github.com/liberation-data/drivine4j/blob/main/docs/oracle-on-true-in-scalar-subquery-crash.md).
+- On Oracle, a compiled query that reads the graph's node or relationship table twice or more, and each query of a
+  write that does, carries the hint `NO_JSON_TABLE_TRANSFORM`. This works around an Oracle bug, seen on 23.26.3:
+  Oracle's JSON table transformation reads several JSON values of one node's row by one `JSON_TABLE`, and so rewritten
+  beside another node's table the query lost that node's label and property tests, giving rows its pattern doesn't
+  have and values of the wrong node, or crashing the session (ORA-03113)
+  ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint.
 - On Postgres, float arithmetic, `sum()` and `avg()` are worked out in exact decimal (`numeric`), not as doubles, so
   they are more accurate: `0.1 + 0.2` is `0.3`, where Neo4j gives `0.30000000000000004`. A result differs from a
   graph engine's only around its 16th significant digit, and still comes back as a float. It shows only where a result

@@ -108,6 +108,17 @@ const PROPERTY_READ = /^JSON_QUERY\((.+), ('\$(?:[^']|'')*') RETURNING JSON\)$/;
 /** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
 const SHORT_TEXT = 4000;
 
+/** The hint that turns Oracle's JSON table transformation off: see `OracleCypherCompiler.planned`. */
+const NO_JSON_TABLE_TRANSFORM = 'NO_JSON_TABLE_TRANSFORM';
+
+/** A query that opens with hints, and those hints: Oracle reads the first hint comment of a query alone. */
+const HINTED = /^SELECT \/\*\+ (.*?) \*\//;
+
+/** `text` as a regular expression matches it, each character as itself. */
+function escapedForRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * The most characters of a text `sharedSum` binds as JSON: one of 40,001, bound as JSON beside a long value, closed the
  * session (liberation-data/drivine4j#370), where one of 12,000 three-byte characters, 36 KB, did not, so a text is
@@ -1021,6 +1032,31 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      */
     called(query: string): string {
         return `SELECT /*+ NO_MERGE */ * FROM (\n${indent(query)}\n)`;
+    }
+
+    /**
+     * A query that reads the graph's tables twice or more is not rewritten by Oracle's JSON table transformation
+     * (`NO_JSON_TABLE_TRANSFORM`), which reads several JSON values of a column, `n1.props`, by one `JSON_TABLE`: so
+     * rewritten, a node's table beside another table, or beside a subquery of one, lost the tests of that node's labels
+     * and properties, and the query gave rows its pattern doesn't have, and values of the wrong node (#435,
+     * liberation-data/drivine4j#415): `MATCH (a:N1), (b:N2) RETURN a.n + b.n` gave a row for each two nodes, and so did
+     * `a.n - a.m`, `toUpper(a.s), size(a.s)` and `a.l + b.l`. Seen on Oracle 23.26.3 (gvenzl/oracle-free 23). The hint
+     * is the statement's, whichever query of it holds it, so the outermost one holds it. A query of one table reads as
+     * it did: none lost a test.
+     */
+    planned(query: string): string {
+        // A read of the graph's node or relationship table.
+        const graphTable = new RegExp(
+            `\\b(?:${escapedForRegExp(this.nodes)}|${escapedForRegExp(this.edges)}) \\w`,
+            'g'
+        );
+        if ((query.match(graphTable) ?? []).length < 2) {
+            return query;
+        }
+        const hinted = HINTED.exec(query);
+        return hinted
+            ? `SELECT /*+ ${hinted[1]} ${NO_JSON_TABLE_TRANSFORM} */${query.slice(hinted[0].length)}`
+            : query.replace(/^SELECT /, `SELECT /*+ ${NO_JSON_TABLE_TRANSFORM} */ `);
     }
 
     /**
