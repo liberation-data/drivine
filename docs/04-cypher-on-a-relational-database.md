@@ -19,7 +19,7 @@ DATABASE_USER=app
 DATABASE_PASSWORD=secret
 ```
 
-For Oracle 23ai or later, set `DATABASE_TYPE=ORACLE`, `DATABASE_PORT=1521` and `DATABASE_NAME` to the service, such as
+For Oracle 23.9 or later, set `DATABASE_TYPE=ORACLE`, `DATABASE_PORT=1521` and `DATABASE_NAME` to the service, such as
 `FREEPDB1`. On either, `DATABASE_DEFAULT_GRAPH_PATH` names the graph's tables, `drivine` unless given. The
 [Postgres](07-supported-engines.md#postgres) and [Oracle](07-supported-engines.md#oracle) sections have the rest.
 

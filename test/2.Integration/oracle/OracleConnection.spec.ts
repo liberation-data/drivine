@@ -5,6 +5,8 @@ import {
     QuerySpecification
 } from '@liberation-data/drivine';
 import { hasLabels, OracleGraph } from '@/backend/oracle/OracleGraph';
+import { oracleRefusal } from '@/connection/oracle/OracleConnectionProvider';
+import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 
 jest.setTimeout(60_000);
@@ -256,6 +258,24 @@ describeOnOracle('Oracle connection', () => {
             }
             await cursor.close();
             expect(seen).toEqual([1, 2, 3, 4, 5, 6, 7]);
+        } finally {
+            await connection.release();
+        }
+    });
+
+    it("should find the test image is Oracle 23.9 or later, from the driver's version, and run Cypher's randomUUID", async () => {
+        // The driver reads the version as it connects, which needs no grant (#428, as liberation-data/drivine4j#401).
+        const connection = await DatabaseRegistry.getInstance().connectionProvider('ORACLE')!.connect();
+        try {
+            const session = (connection as OracleConnection).connection;
+            expect([session.oracleServerVersionString, oracleRefusal(session)]).toEqual([
+                session.oracleServerVersionString,
+                undefined
+            ]);
+            const [uuid] = await connection.query(
+                new QuerySpecification({ text: 'RETURN randomUUID()', language: 'CYPHER' })
+            );
+            expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
         } finally {
             await connection.release();
         }
