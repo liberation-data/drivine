@@ -6,6 +6,37 @@ import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { FirstConnection } from '@/connection/FirstConnection';
+import { DrivineLogger } from '@/logger';
+
+/** The oldest Oracle Drivine runs Cypher on, 23.9: see {@link oracleRefusal}. */
+const ORACLE_MAJOR = 23;
+const ORACLE_MINOR = 9;
+
+/**
+ * Why Drivine runs no Cypher on the Oracle behind `connection`: one older than 23.9, which has no `UUID()`, the random
+ * version 4 UUID compiled Cypher's `randomUUID()` is (liberation-data/drivine#428, as liberation-data/drivine4j#401).
+ * Undefined for 23.9 or later, and where the version can't be read: the database says what is missing when a statement
+ * needs it. node-oracledb gives 23.26.3 as `oracleServerVersion` 2326030000 and `oracleServerVersionString` '23.26.3.0.0'.
+ */
+export function oracleRefusal(connection: {
+    oracleServerVersion?: number;
+    oracleServerVersionString?: string;
+}): string | undefined {
+    const number = connection.oracleServerVersion;
+    if (typeof number !== 'number' || !(number > 0)) {
+        return undefined;
+    }
+    const major = Math.floor(number / 100_000_000);
+    const minor = Math.floor(number / 1_000_000) % 100;
+    if (major > ORACLE_MAJOR || (major === ORACLE_MAJOR && minor >= ORACLE_MINOR)) {
+        return undefined;
+    }
+    const version = connection.oracleServerVersionString || `${major}.${minor}`;
+    return (
+        `Drivine needs Oracle ${ORACLE_MAJOR}.${ORACLE_MINOR} or later (it uses UUID()); this database is ${version}. ` +
+        `Upgrade, or use an Oracle Free image ${ORACLE_MAJOR}.${ORACLE_MINOR} or newer. Plain SQL over this provider still runs; Cypher does not.`
+    );
+}
 
 export interface OracleConnectionProperties {
     user?: string;
@@ -18,10 +49,17 @@ export interface OracleConnectionProperties {
     graph?: string;
 }
 
-/** Connections to Oracle, from a pool of its own, through node-oracledb in thin mode (no Instant Client). */
+/**
+ * Connections to Oracle, from a pool of its own, through node-oracledb in thin mode (no Instant Client). Drivine needs
+ * Oracle 23.9 or later: on an older one, found on the first connection, a connection is still handed out and plain SQL
+ * runs, and Cypher, which needs Oracle's `UUID()`, is refused with why (see {@link oracleRefusal}).
+ */
 export class OracleConnectionProvider implements ConnectionProvider {
+    private readonly logger = new DrivineLogger(OracleConnectionProvider.name);
     private pool?: Promise<oracledb.Pool>;
     private readonly firstConnection = new FirstConnection();
+    /** Why this store runs no Cypher, read from the server's version on the first connection; undefined where it does. */
+    private cypherRefusal?: string;
 
     constructor(
         readonly name: string,
@@ -39,12 +77,16 @@ export class OracleConnectionProvider implements ConnectionProvider {
 
     /**
      * A connection, the graph's tables made first if this is the provider's first (schema statements commit on their
-     * own): see {@link FirstConnection}.
+     * own): see {@link FirstConnection}. The first connection's server version, which the driver reads as it connects and
+     * which needs no grant, says whether the store runs Cypher, once for the provider: see {@link oracleRefusal}.
      */
     async connect(): Promise<Connection> {
         const connection = await this.firstConnection.ensured(
             await (await this.poolOf()).getConnection(),
-            async (it) => new OracleGraph(this.graphName).ensure(it),
+            async (it) => {
+                this.checkVersion(it);
+                return new OracleGraph(this.graphName).ensure(it);
+            },
             async (it) => it.close()
         );
         const session = await connection.execute<{ SID: string }>(
@@ -57,7 +99,8 @@ export class OracleConnectionProvider implements ConnectionProvider {
             new OracleResultMapper(),
             `oracle.${session.rows?.[0]?.SID ?? '?'}`,
             this.graphName,
-            `${this.connectionProperties.connectString}|${this.connectionProperties.user ?? ''}`
+            `${this.connectionProperties.connectString}|${this.connectionProperties.user ?? ''}`,
+            this.cypherRefusal
         );
     }
 
@@ -66,6 +109,19 @@ export class OracleConnectionProvider implements ConnectionProvider {
             const pool = await this.pool;
             this.pool = undefined;
             await pool.close(0);
+        }
+    }
+
+    /** Finds whether the Oracle behind `connection` is too old for Cypher, and warns if so. */
+    private checkVersion(connection: oracledb.Connection): void {
+        try {
+            this.cypherRefusal = oracleRefusal(connection);
+        } catch (e) {
+            this.logger.debug(`Could not read the version of Oracle database '${this.name}': ${e}`);
+            this.cypherRefusal = undefined;
+        }
+        if (this.cypherRefusal) {
+            this.logger.warn(`ORACLE database '${this.name}': ${this.cypherRefusal}`);
         }
     }
 

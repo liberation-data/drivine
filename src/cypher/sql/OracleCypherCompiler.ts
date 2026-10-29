@@ -108,6 +108,17 @@ const PROPERTY_READ = /^JSON_QUERY\((.+), ('\$(?:[^']|'')*') RETURNING JSON\)$/;
 /** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
 const SHORT_TEXT = 4000;
 
+/** The hint that turns Oracle's JSON table transformation off: see `OracleCypherCompiler.planned`. */
+const NO_JSON_TABLE_TRANSFORM = 'NO_JSON_TABLE_TRANSFORM';
+
+/** A query that opens with hints, and those hints: Oracle reads the first hint comment of a query alone. */
+const HINTED = /^SELECT \/\*\+ (.*?) \*\//;
+
+/** `text` as a regular expression matches it, each character as itself. */
+function escapedForRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * The most characters of a text `sharedSum` binds as JSON: one of 40,001, bound as JSON beside a long value, closed the
  * session (liberation-data/drivine4j#370), where one of 12,000 three-byte characters, 36 KB, did not, so a text is
@@ -1024,6 +1035,31 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * A query that reads the graph's tables twice or more is not rewritten by Oracle's JSON table transformation
+     * (`NO_JSON_TABLE_TRANSFORM`), which reads several JSON values of a column, `n1.props`, by one `JSON_TABLE`: so
+     * rewritten, a node's table beside another table, or beside a subquery of one, lost the tests of that node's labels
+     * and properties, and the query gave rows its pattern doesn't have, and values of the wrong node (#435,
+     * liberation-data/drivine4j#415): `MATCH (a:N1), (b:N2) RETURN a.n + b.n` gave a row for each two nodes, and so did
+     * `a.n - a.m`, `toUpper(a.s), size(a.s)` and `a.l + b.l`. Seen on Oracle 23.26.3 (gvenzl/oracle-free 23). The hint
+     * is the statement's, whichever query of it holds it, so the outermost one holds it. A query of one table reads as
+     * it did: none lost a test.
+     */
+    planned(query: string): string {
+        // A read of the graph's node or relationship table.
+        const graphTable = new RegExp(
+            `\\b(?:${escapedForRegExp(this.nodes)}|${escapedForRegExp(this.edges)}) \\w`,
+            'g'
+        );
+        if ((query.match(graphTable) ?? []).length < 2) {
+            return query;
+        }
+        const hinted = HINTED.exec(query);
+        return hinted
+            ? `SELECT /*+ ${hinted[1]} ${NO_JSON_TABLE_TRANSFORM} */${query.slice(hinted[0].length)}`
+            : query.replace(/^SELECT /, `SELECT /*+ ${NO_JSON_TABLE_TRANSFORM} */ `);
+    }
+
+    /**
      * An optional join is on `1 = 1`, not `ON TRUE`: in a scalar subquery, as a `COUNT { … }` is, Oracle refuses a join
      * on `TRUE` followed by a `WHERE … AND …` (ORA-00907), and crashes the session on one without (ORA-07445 in
      * `qcsjccqb`, ORA-03113 to the client) (#377). See drivine4j's docs/oracle-on-true-in-scalar-subquery-crash.md.
@@ -1112,9 +1148,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return this.long ? this.bound([`TO_CLOB(${text})`], ([t]) => this.reversedPieces(t)) : super.reversedText(text);
     }
 
-    /** Oracle's GUID, in a UUID's form: unique, though not random as a version 4 UUID is. */
+    /**
+     * Oracle's `UUID()`, a random version 4 UUID, as Neo4j's is, written in lower case with hyphens
+     * (liberation-data/drivine#428, as liberation-data/drivine4j#401). Oracle added it in 23.9, which is why Drivine needs
+     * 23.9 or later: see `oracleRefusal`. Not `SYS_GUID()`, whose consecutive values share all but a counter's digits,
+     * which left a stamp's token about 16 bits that changed, in order. Short enough not to be bound once for the
+     * statement (see {@link SHARED_ABOVE}), so each row gets a UUID of its own.
+     */
     uuid(): string {
-        return "LOWER(REGEXP_REPLACE(RAWTOHEX(SYS_GUID()), '(.{8})(.{4})(.{4})(.{4})(.{12})', '\\1-\\2-\\3-\\4-\\5'))";
+        return "LOWER(REGEXP_REPLACE(RAWTOHEX(UUID()), '(.{8})(.{4})(.{4})(.{4})(.{12})', '\\1-\\2-\\3-\\4-\\5'))";
     }
 
     /**
