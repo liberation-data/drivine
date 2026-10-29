@@ -1025,10 +1025,64 @@ export class CypherWriter {
      */
     private calledPart(select: Select, clauses: Clause[], names: string[] | undefined, distinct: boolean): Projected {
         let inner = new Select(select.scope);
+        const apart = this.importsApart(select.scope, clauses);
+        if (apart) {
+            inner.source(apart.source);
+            apart.imports.forEach((value, variable) => inner.bind(variable, value));
+        }
         clauses.slice(0, -1).forEach((it) => (inner = this.read(inner, it, select.scope)));
         const projection = (clauses[clauses.length - 1] as Return).projection;
         const items = names ? names.map((name) => projection.items.find((it) => it.name === name)!) : projection.items;
         return this.project(inner, { ...projection, items, distinct: distinct || projection.distinct }, false);
+    }
+
+    /**
+     * Where the query `clauses` of a `CALL { … }` aggregates, the variables of the row it is in, `scope`, read from a
+     * query of no table of their own in the call's rows: that query, as a source, and the variables as read from it;
+     * undefined where it aggregates nothing. Read from the row, a variable is of the row's query, not the call's: Postgres
+     * takes an aggregate of it alone, `count(o)`, as one of the row's query, which it refuses in a FROM; Oracle's
+     * aggregate reads a variable of an unwound row as null there, so `sum(i + o)` gave 0 (#429). Kept apart with
+     * `boundSelect`, or Oracle merges it back. Bound as the call's own, so a `WITH *` a projection works out first carries
+     * them: not a name the call binds itself, as a CALL within it yields one, and not where its `RETURN` and each `WITH`
+     * is `*`, which would return them: a `WITH` of named items before a `RETURN *` passes on only those, as it does
+     * without them.
+     */
+    private importsApart(scope: Scope, clauses: Clause[]): { source: string; imports: Scope } | undefined {
+        const projections = clauses.flatMap((it) => (it.kind === 'With' || it.kind === 'Return' ? [it.projection] : []));
+        const aggregates = (p: Projection): boolean =>
+            [...p.items.map((it) => it.expression), ...p.orderBy.map((it) => it.expression)].some((it) =>
+                contains(it, isAggregate)
+            );
+        if (!projections.some(aggregates) || projections.every((it) => it.star)) {
+            return undefined;
+        }
+        const declared = new Set(
+            clauses.flatMap((clause) => {
+                switch (clause.kind) {
+                    case 'Unwind':
+                        return [clause.variable];
+                    case 'Call':
+                        return [clause.query.clauses, ...clause.query.unions.map((it) => it.clauses)].flatMap((it) => {
+                            const last = it[it.length - 1];
+                            return last.kind === 'Return' ? last.projection.items.map((item) => item.name) : [];
+                        });
+                    default:
+                        return [];
+                }
+            })
+        );
+        const named = [...scope]
+            .filter(([variable]) => !declared.has(variable))
+            .map(([variable, value]): [string, Value, string] => [variable, value, this.alias('v')]);
+        if (named.length === 0) {
+            return undefined;
+        }
+        const name = this.alias('i');
+        const selected = named.flatMap(([, value, column]) => columns(value, column));
+        return {
+            source: `(${this.sql.boundSelect(selected.join(', '))}) ${name}`,
+            imports: new Map(named.map(([variable, value, column]) => [variable, columnsOf(value, name, column)]))
+        };
     }
 
     /** A `UNION` in a `CALL { … }`: each query's rows, the same items of the same kinds, matched by name as Cypher matches them. */

@@ -2104,6 +2104,217 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * An aggregate in a `CALL { … }` of the variables the call imports: drivine4j's test of
+     * liberation-data/drivine4j#368, ported for #429. Not in the spec yet. On Oracle, an aggregate in a CALL read a variable
+     * of an unwound row as null, so sum() gave 0 and collect() gave []; Postgres refused an aggregate of an imported
+     * variable alone, count(o), as the row's query's. The rows are Neo4j's (2026.10).
+     */
+    describe('an aggregate in a CALL', () => {
+        it('reads the variables the CALL imports', async () => {
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            const aggregates =
+                'RETURN sum(i + o) AS s, collect(o) AS c, count(o) AS n, max(i * o) AS m } RETURN o, s, c, n, m ORDER BY o';
+            const rows = [
+                [1, 9, [1, 1, 1], 3, 3],
+                [2, 12, [2, 2, 2], 3, 6]
+            ];
+            expect(
+                await query('UNWIND [2] AS o CALL { WITH o UNWIND range(1, 3) AS i RETURN sum(i + o) AS s } RETURN s')
+            ).toEqual([12]);
+            expect(
+                await query('UNWIND [2] AS o CALL { WITH o UNWIND range(1, 3) AS i RETURN collect(o) AS s } RETURN s')
+            ).toEqual([[2, 2, 2]]);
+            // Imported by a WITH, or by the CALL's scope clause.
+            expect(await query(`UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 3) AS i ${aggregates}`)).toEqual(rows);
+            expect(await query(`UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i ${aggregates}`)).toEqual(rows);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o OPTIONAL CALL (o) { UNWIND range(1, 3) AS i RETURN sum(i + o) AS s, collect(o) AS c } RETURN o, s, c ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9, [1, 1, 1]],
+                [2, 12, [2, 2, 2]]
+            ]);
+            // Aggregated in a WITH within the CALL.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 3) AS i WITH sum(i + o) AS t RETURN t * 10 AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 90],
+                [2, 120]
+            ]);
+            // Grouped within the CALL, by a key worked out first where it holds a subquery or a parameter.
+            const grouped = [
+                [1, 0, [3, 5], 2],
+                [1, 1, [2, 4], 2],
+                [2, 0, [4, 6], 4],
+                [2, 1, [3, 5], 4]
+            ];
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 4) AS i RETURN i % 2 AS k, collect(o + i) AS xs, sum(o) AS s } RETURN o, k, xs, s ORDER BY o, k'
+                )
+            ).toEqual(grouped);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 4) AS i RETURN i % 2 AS k, collect(o + i) AS xs, sum(o) AS s } RETURN o, k, xs, s ORDER BY o, k'
+                )
+            ).toEqual(grouped);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 4) AS i RETURN i % $m AS k, collect(o + i) AS xs, sum(o) AS s } RETURN o, k, xs, s ORDER BY o, k',
+                    { m: 2 }
+                )
+            ).toEqual(grouped);
+            // Over an imported node's property.
+            expect(
+                await query(
+                    'MATCH (p:Person) CALL (p) { UNWIND range(1, 2) AS i RETURN sum(p.born + i) AS s, collect(p.name) AS ns, max(p.born) AS b } RETURN p.name, s, ns, b ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 3937, ['Carrie', 'Carrie'], 1967],
+                ['Hugo', 0, ['Hugo', 'Hugo'], null],
+                ['Keanu', 3931, ['Keanu', 'Keanu'], 1964],
+                ['Laurence', 3925, ['Laurence', 'Laurence'], 1961]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person) CALL { WITH p UNWIND [10, 20] AS i RETURN count(p) AS n, sum(i) + max(p.born) AS t } RETURN p.name, n, t ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 2, 1997],
+                ['Hugo', 2, null],
+                ['Keanu', 2, 1994],
+                ['Laurence', 2, 1991]
+            ]);
+            // Each row's own values, a null among them; two imports; a map and a relationship.
+            expect(
+                await query(
+                    'UNWIND [1, null] AS o CALL (o) { UNWIND range(1, 3) AS i RETURN count(o) AS n, collect(o) AS c, max(o) AS s } RETURN o, n, c, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 3, [1, 1, 1], 1],
+                [null, 0, [], null]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS a UNWIND [10, 20] AS b CALL { WITH a, b UNWIND range(1, 2) AS i RETURN sum(a * b + i) AS s, collect(a) AS ca, count(b) AS nb } RETURN a, b, s, ca, nb ORDER BY a, b'
+                )
+            ).toEqual([
+                [1, 10, 23, [1, 1], 2],
+                [1, 20, 43, [1, 1], 2],
+                [2, 10, 43, [2, 2], 2],
+                [2, 20, 83, [2, 2], 2]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [{a: 1}, {a: 2}] AS o CALL { WITH o UNWIND range(1, 2) AS i RETURN sum(o.a + i) AS s, collect(o) AS c } RETURN o.a, s, c ORDER BY o.a'
+                )
+            ).toEqual([
+                [1, 5, [{ a: 1 }, { a: 1 }]],
+                [2, 7, [{ a: 2 }, { a: 2 }]]
+            ]);
+            expect(
+                await query(
+                    "MATCH (p:Person {name: 'Laurence'})-[r:ACTED_IN]->() CALL { WITH r UNWIND [1, 2] AS i RETURN collect(r.role) AS rs, count(r) AS n } RETURN p.name, rs, n"
+                )
+            ).toEqual([['Laurence', ['Morpheus', 'Morpheus'], 2]]);
+            // In each query of a UNION in the CALL, in a CALL within the CALL, and in a CALL after a write.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND [1, 2] AS i RETURN sum(i + o) AS s UNION ALL UNWIND [3] AS i RETURN sum(i + o) AS s } RETURN o, s ORDER BY o, s'
+                )
+            ).toEqual([
+                [1, 4],
+                [1, 5],
+                [2, 5],
+                [2, 7]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND [1, 2] AS j CALL (o, j) { UNWIND range(1, 3) AS i RETURN sum(o * j + i) AS s } RETURN collect(s) AS ss } RETURN o, ss ORDER BY o'
+                )
+            ).toEqual([
+                [1, [9, 12]],
+                [2, [12, 18]]
+            ]);
+            expect(
+                await query(
+                    'CREATE (x:CyCallWrite {v: 1}) WITH x UNWIND range(1, 2) AS o CALL { WITH o, x UNWIND range(1, 2) AS i RETURN sum(i + o) AS s, collect(x.v) AS xs, count(o) AS n } RETURN o, s, xs, n ORDER BY o'
+                )
+            ).toEqual([
+                [1, 5, [1, 1], 2],
+                [2, 7, [1, 1], 2]
+            ]);
+            // Under a RETURN * after a WITH that names what it passes on; and a variable the CALL unwinds itself, of a
+            // name the row has.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 3) AS i WITH sum(i + o) AS s RETURN * } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i WITH sum(i + o) AS s, collect(o) AS c RETURN * } RETURN o, s, c ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9, [1, 1, 1]],
+                [2, 12, [2, 2, 2]]
+            ]);
+            expect(
+                await query('UNWIND [1, 2] AS o CALL { UNWIND [5, 6] AS o RETURN sum(o) AS s } RETURN o, s ORDER BY o')
+            ).toEqual([
+                [1, 11],
+                [2, 11]
+            ]);
+            // Under a RETURN that aggregates after a WITH *; an aggregate within a comprehension or a CASE; an import
+            // renamed by the first WITH; a boolean and a path imported.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i WITH * RETURN sum(i + o) AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    "UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i RETURN [x IN collect(o) | x + 1] AS c, CASE WHEN count(o) > 2 THEN 'many' ELSE 'few' END AS k } RETURN o, c, k ORDER BY o"
+                )
+            ).toEqual([
+                [1, [2, 2, 2], 'many'],
+                [2, [3, 3, 3], 'many']
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { WITH o AS x UNWIND range(1, 3) AS i RETURN sum(x + i) AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o WITH o, o > 1 AS b CALL (o, b) { UNWIND [1, 2] AS i RETURN collect(b) AS bs, sum(i + o) AS s } RETURN o, bs, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, [false, false], 5],
+                [2, [true, true], 7]
+            ]);
+            expect(
+                await query(
+                    "MATCH path = (p:Person {name: 'Laurence'})-[:ACTED_IN]->() CALL (path) { UNWIND [1, 2] AS i RETURN count(path) AS n, collect(length(path)) AS ls } RETURN n, ls"
+                )
+            ).toEqual([[2, [1, 1]]]);
+        });
+    });
+
+    /**
      * Random UUIDs and the stamp tokens made of them, on every store: drivine4j's own tests of
      * liberation-data/drivine4j#401, ported for #428. On Oracle `randomUUID()` was `SYS_GUID()`, whose consecutive
      * values shared all but a counter's digits.
