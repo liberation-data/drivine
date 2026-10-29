@@ -2272,6 +2272,45 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [1, 11],
                 [2, 11]
             ]);
+            // Under a RETURN that aggregates after a WITH *; an aggregate within a comprehension or a CASE; an import
+            // renamed by the first WITH; a boolean and a path imported.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i WITH * RETURN sum(i + o) AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    "UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i RETURN [x IN collect(o) | x + 1] AS c, CASE WHEN count(o) > 2 THEN 'many' ELSE 'few' END AS k } RETURN o, c, k ORDER BY o"
+                )
+            ).toEqual([
+                [1, [2, 2, 2], 'many'],
+                [2, [3, 3, 3], 'many']
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { WITH o AS x UNWIND range(1, 3) AS i RETURN sum(x + i) AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o WITH o, o > 1 AS b CALL (o, b) { UNWIND [1, 2] AS i RETURN collect(b) AS bs, sum(i + o) AS s } RETURN o, bs, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, [false, false], 5],
+                [2, [true, true], 7]
+            ]);
+            expect(
+                await query(
+                    "MATCH path = (p:Person {name: 'Laurence'})-[:ACTED_IN]->() CALL (path) { UNWIND [1, 2] AS i RETURN count(path) AS n, collect(length(path)) AS ls } RETURN n, ls"
+                )
+            ).toEqual([[2, [1, 1]]]);
         });
     });
 });
