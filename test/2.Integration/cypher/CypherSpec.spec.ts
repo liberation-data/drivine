@@ -2649,23 +2649,13 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
      * not for each row, where that view is first in a subquery's FROM: the WHEREs found nothing.
      */
     describe('a list each row works out by a subquery', () => {
-        /** Whether the rows are those expected, as `toEqual` compares them. */
-        const equals = (given: any[], rows: any[]): boolean => {
-            try {
-                expect(given).toEqual(rows);
-                return true;
-            } catch {
-                return false;
-            }
-        };
-
         /** The cases whose rows differ, or that fail, so a store's every difference shows at once. */
         const differing = async (cases: [string, any[]][]): Promise<string[]> => {
             const found: string[] = [];
             for (const [cypher, rows] of cases) {
                 try {
                     const given = await query(cypher);
-                    if (!equals(given, rows)) {
+                    if (!isDeepStrictEqual(given, rows)) {
                         found.push(`${cypher}: ${JSON.stringify(given)}`);
                     }
                 } catch (e: any) {
