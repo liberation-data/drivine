@@ -73,6 +73,41 @@ drivine-python and drivine4j run the same spec. Reads and writes compile, with v
 quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
 anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
 
+### How complete is it?
+
+The [openCypher TCK](https://github.com/opencypher/openCypher/tree/main/tck) is openCypher's own test suite: 3,896
+scenarios, each a graph, a query, and the rows or the error the query must give.
+[drivine4j](https://github.com/liberation-data/drivine4j) runs all of them through its compiler on each store. The
+scores below are measured on drivine4j; Drivine for TypeScript's compiler follows it through the shared spec above.
+They are drivine4j's `main` on 31 October 2026.
+
+| store | scenarios passed | of all 3,896 | leaving out the 482 refused on purpose |
+|---|---:|---:|---:|
+| Postgres | 2,684 | 68.9% | 78.6% |
+| Oracle | 2,666 | 68.4% | 78.1% |
+| Neo4j | 3,821 | 98.1% | (none refused) |
+
+The 482 refused on purpose are Cypher the compiler doesn't take yet, refused by name with a clear error: temporal values
+built from a week, a quarter or another date, `rand()`, a path as a value, and a few more.
+
+Most of the rest are not wrong answers. Of the 730 left on Postgres:
+
+- 494 are in openCypher's temporal features, which are being compiled now: 364 call `truncate()` with a map of fields,
+  which Drivine fails with an error of its own, and 130 give another result.
+- 116 are about errors: 77 statements that run where the TCK expects an error, and 39 that Drivine fails where the TCK
+  expects rows.
+- 59 are steps the harness can't run through Drivine, such as a test procedure or a CSV file.
+- 53 give another result outside the temporal features, and 8 make the database fail.
+
+Oracle's are split alike. The comparison is lenient where Drivine's results are shaped differently from the TCK's: a
+node is compared by its properties, and any error meets an expected one. Counting an expected error only where Drivine
+raised it, before the database, Postgres passes 2,644 and Oracle 2,631.
+
+Neo4j runs the same scenarios through the same harness and misses only the 59 it can't run and 16 where Neo4j itself
+differs from the TCK, so the harness is sound and the gap on the SQL stores is the compiler's. Every night drivine4j
+holds each store to the scenarios it passed, one by one, so none can slip back unnoticed.
+[drivine4j's TCK.md](https://github.com/liberation-data/drivine4j/blob/main/TCK.md) has the method and how to run it.
+
 ### Differences you'll meet
 
 The results match a graph engine's, with a few differences. [Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)
