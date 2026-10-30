@@ -123,13 +123,6 @@ export abstract class SqlCypherCompiler {
     sharing = true;
 
     /**
-     * Whether the expression compiled may read an aggregate's result, of the query it is in: in an item or an order term
-     * that aggregates, outside its aggregates' arguments (see `CypherWriter.aggregating`). Oracle reads no aggregate of
-     * the query it is in from a subquery (ORA-00937): see Oracle's `containsText`.
-     */
-    overAggregates = false;
-
-    /**
      * Whether a walk reads the row it is in: a condition of a quantified path pattern may then read a variable bound
      * outside it.
      */
@@ -220,10 +213,32 @@ export abstract class SqlCypherCompiler {
      * See `CypherWriter.sharedFirst`.
      */
     binds(work: () => void): boolean {
-        const [shares, bindings, functions] = [this.shares, this.sharedBindings, this.functions.length];
-        try {
+        return this.toSee(() => {
+            const bindings = this.sharedBindings;
             work();
             return this.sharedBindings > bindings;
+        });
+    }
+
+    /**
+     * Whether what `work` compiles binds a value in a subquery: by {@link shared}, or by {@link bound} whatever its
+     * length, as Oracle's `containsText` binds its CLOBs. Oracle reads no aggregate of the query it is in from such a
+     * subquery (ORA-00937). See `CypherWriter.bindsOverAggregates`, which compiles it {@link toSee}.
+     */
+    boundIn(work: () => void): boolean {
+        const shares = this.shares;
+        work();
+        return this.shares > shares;
+    }
+
+    /**
+     * What `work` gives, compiled only to see: the names it takes and the functions it declares are given back, as
+     * {@link binds} gives them back.
+     */
+    toSee<T>(work: () => T): T {
+        const [shares, bindings, functions] = [this.shares, this.sharedBindings, this.functions.length];
+        try {
+            return work();
         } finally {
             this.shares = shares;
             this.sharedBindings = bindings;
