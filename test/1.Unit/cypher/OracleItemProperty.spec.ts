@@ -5,8 +5,9 @@ import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
  * On Oracle, a property that is an item of a `RETURN` or a `WITH` is read through its text, as extended JSON: Oracle
  * crashed the session where a statement took a text past 32 KB from the properties as JSON for each of two rows
  * (liberation-data/drivine#320). So is a text a write takes from the row it is writing, to work out what it writes
- * (liberation-data/drivine#356), and an unwound item's value a `RETURN` or a `WITH` gives (liberation-data/drivine#366).
- * Elsewhere a property is read as it was. drivine4j's `OracleItemPropertyTest`.
+ * (liberation-data/drivine#356), an unwound item's value a `RETURN` or a `WITH` gives (liberation-data/drivine#366),
+ * and an item of a list read by its place (liberation-data/drivine#455). Elsewhere a property is read as it was.
+ * drivine4j's `OracleItemPropertyTest`.
  */
 describe('A property an item of a RETURN or a WITH gives in compiled Cypher', () => {
     const long =
@@ -328,6 +329,59 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         expect(read('MATCH (n:Doc) RETURN size(n.m.a)')).toContain(
             "JSON_VALUE(JSON_QUERY(n1.props, '$.m' RETURNING JSON), '$.a.size()' RETURNING NUMBER)"
         );
+    });
+
+    it("should read an item of a list read by its place on Oracle through the list's text where it is a text", () => {
+        // Taken out of the list as JSON, a text past 32 KB closed the session from the second run on, given two rows
+        // (#455). So the item's kind is read first, and only an item of another kind is taken out as JSON, in the
+        // CASE's ELSE.
+        const shapes = [
+            "RETURN size(split(n.a, 'x')[0])",
+            "WITH split(n.a, 'x') AS parts RETURN size(parts[0])",
+            "RETURN split(n.a, 'x')[0]",
+            "WITH split(n.a, 'x') AS parts RETURN parts[-1]",
+            "RETURN size(split(n.a, 'x')[n.i])",
+            "RETURN size(split(n.a, 'x')[0..1][0])",
+            'RETURN n.tags[0]',
+            'RETURN [x IN range(0, 1) | toUpper(n.tags[x])]'
+        ];
+        for (const shape of shapes) {
+            const sql = oracle(`MATCH (n:Doc) ${shape}`);
+            // Each read of the item is its kind's, its text's, and in the ELSE, its JSON's.
+            const [kinds, texts, all] = [
+                "'$[$i].type()' PASSING ",
+                "RETURNING CLOB), '$[$i]' PASSING ",
+                "'$[$i]' PASSING "
+            ].map((it) => count(sql, it));
+            expect([shape, kinds > 0, texts, all]).toEqual([shape, true, kinds, 2 * kinds]);
+            expect([shape, count(sql, 'ELSE JSON_QUERY(') >= kinds]).toEqual([shape, true]);
+            // The node's label test stays.
+            expect([shape, count(sql, 'JSON_EXISTS(')]).toEqual([shape, 1]);
+        }
+        // By head and last; of a stored list, its kind read by the property's own path (see direct).
+        const ends = oracle("MATCH (n:Doc) RETURN [size(head(split(n.a, 'x'))), last(split(n.a, 'x')), head(n.tags)]");
+        expect(ends).toContain("'$[0].type()') = 'string'");
+        expect(ends).toContain("'$[last].type()') = 'string'");
+        expect(ends).toContain("RETURNING CLOB), '$[0]' RETURNING CLOB)");
+        expect(ends).toContain("RETURNING CLOB), '$[last]' RETURNING CLOB)");
+        expect(ends).toContain("JSON_VALUE(n1.props, '$.tags[0].type()') = 'string'");
+        for (const end of ['0', 'last']) {
+            const [texts, all] = [`RETURNING CLOB), '$[${end}]' RETURNING CLOB)`, `'$[${end}]' RETURNING`].map((it) =>
+                count(ends, it)
+            );
+            expect([end, texts > 0, all]).toEqual([end, true, 2 * texts]);
+        }
+        // An unwound item is read as it was: JSON_TABLE's item did not close the session.
+        expect(oracle("MATCH (n:Doc) UNWIND split(n.a, 'x') AS p RETURN size(p)")).not.toContain(
+            "RETURNING CLOB), '$["
+        );
+        // Postgres reads an item as before.
+        const postgres = new PostgresCypherCompiler('g').compile(
+            "MATCH (n:Doc) RETURN [split(n.a, 'x')[0], head(n.tags), last(n.tags)]"
+        ).sql;
+        expect(postgres).toContain('-> 0)');
+        expect(postgres).toContain('-> -1)');
+        expect(postgres).not.toContain('CLOB');
     });
 
     it('should be read on Postgres as elsewhere', () => {

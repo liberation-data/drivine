@@ -1211,6 +1211,68 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
+        it('a text past 32 KB that is an item of a list, read by its place on two rows, is read whole', async () => {
+            // On Oracle an item of a list was taken out as JSON, JSON_QUERY(list, '$[$i]' RETURNING JSON): a text past
+            // 32 KB so closed the session from the second run on (ORA-03113, #455), as #320's did, given two rows or
+            // more. A node of another label holds the same values, and is not read. drivine4j's test of #388.
+            await clear();
+            const [a, b] = ['a'.repeat(40_000), 'b'.repeat(33_000)];
+            const props = '{bio: $bio, tags: $tags, i: 0}';
+            await query(`CREATE (:CyItem ${props}), (:CyItem ${props}), (:CyItemOther ${props})`, {
+                bio: a + 'x' + b,
+                tags: [a, 'y']
+            });
+            const all = 'MATCH (n:CyItem)';
+            const each = <T>(value: T): T[] => [value, value];
+            const statements: [string, unknown[]][] = [
+                // The issue's: by index, of a list split makes, and of one a WITH passes on.
+                [`${all} RETURN size(split(n.bio, 'x')[0])`, each(40_000)],
+                [`${all} WITH split(n.bio, 'x') AS parts RETURN size(parts[0])`, each(40_000)],
+                // Returned or passed on whole, counted from the end, and by an index the statement works out.
+                [`${all} RETURN split(n.bio, 'x')[0]`, each(a)],
+                [`${all} WITH split(n.bio, 'x') AS parts RETURN parts[1]`, each(b)],
+                [`${all} WITH split(n.bio, 'x')[1] AS part RETURN size(part)`, each(33_000)],
+                [`${all} RETURN size(split(n.bio, 'x')[-1])`, each(33_000)],
+                [`${all} RETURN size(split(n.bio, 'x')[n.i])`, each(40_000)],
+                // By head and last, and after a slice.
+                [`${all} RETURN size(head(split(n.bio, 'x')))`, each(40_000)],
+                [`${all} RETURN last(split(n.bio, 'x'))`, each(b)],
+                [`${all} RETURN size(split(n.bio, 'x')[0..1][0])`, each(40_000)],
+                [`${all} RETURN size(split(n.bio, 'x')[1..][0])`, each(33_000)],
+                // Unwound, which read it whole already.
+                [
+                    `${all} UNWIND split(n.bio, 'x') AS part RETURN size(part) AS s ORDER BY s`,
+                    [33_000, 33_000, 40_000, 40_000]
+                ],
+                // Read by text functions.
+                [
+                    `${all} RETURN [size(split(n.bio, 'x')[0] + 'z'), split(n.bio, 'x')[1] ENDS WITH 'b', ` +
+                        `substring(split(n.bio, 'x')[0], 39998), right(toUpper(split(n.bio, 'x')[1]), 2)]`,
+                    each([40_001, true, 'aa', 'BB'])
+                ],
+                // Of a stored list.
+                [`${all} RETURN size(n.tags[0])`, each(40_000)],
+                [`${all} RETURN n.tags[0]`, each(a)],
+                [`${all} RETURN [size(head(n.tags)), last(n.tags)]`, each([40_000, 'y'])],
+                [`${all} RETURN count(split(n.bio, 'x')[0])`, [2]]
+            ];
+            await onOneSession(async (run) => {
+                // Oracle closed the session from the second run on.
+                for (let i = 1; i <= 3; i++) {
+                    for (const [cypher, expected] of statements) {
+                        expect([cypher, i, await run(cypher)]).toEqual([cypher, i, expected]);
+                    }
+                }
+            });
+            // An item of every other kind is read as it was.
+            expect(
+                await query(
+                    "WITH [1, 'a', 2.0, [3], {k: 4}, null] AS l RETURN [i IN range(0, 5) | l[i]] + [head(['y']), last([2, 1]), head([])]"
+                )
+            ).toEqual([[1, 'a', 2, [3], { k: 4 }, null, 'y', 1, null]]);
+            await clear();
+        });
+
         it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
             // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
             // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its
