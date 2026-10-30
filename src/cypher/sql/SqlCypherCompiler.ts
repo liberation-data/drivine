@@ -14,7 +14,7 @@ import {
     unsupported,
     writes
 } from '@/cypher/sql/CypherSyntax';
-import { jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
+import { javaDouble, jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Temporal } from '@/cypher/sql/Temporal';
@@ -43,31 +43,6 @@ function givenText(value: number | bigint | CypherFloat | Integer): string {
     return typeof value === 'number' && (!Number.isInteger(value) || Math.abs(value) >= LONG_RANGE)
         ? javaDouble(value)
         : value.toString();
-}
-
-/**
- * The double `value` as Java's `Double.toString` writes it: with no exponent from 10^-3 up to 10^7, a point and a digit
- * after it at least, and else as `1.0E7`, `1.2E-4`, from the shortest decimal that reads back as it.
- */
-export function javaDouble(value: number): string {
-    if (Number.isNaN(value)) {
-        return 'NaN';
-    }
-    if (!Number.isFinite(value)) {
-        return value > 0 ? 'Infinity' : '-Infinity';
-    }
-    if (value === 0) {
-        return Object.is(value, -0) ? '-0.0' : '0.0';
-    }
-    const magnitude = Math.abs(value);
-    if (magnitude >= 1e-3 && magnitude < 1e7) {
-        const text = String(value);
-        return text.includes('.') ? text : `${text}.0`;
-    }
-    // Two digits at least, as Java writes them: the least double, 5e-324, is 4.9E-324.
-    const [shortest] = value.toExponential().split('e');
-    const [mantissa, exponent] = (shortest.includes('.') ? value.toExponential() : value.toExponential(1)).split('e');
-    return `${mantissa}E${Number(exponent)}`;
 }
 
 /**
@@ -189,11 +164,12 @@ export abstract class SqlCypherCompiler {
             this,
             new Parameters(
                 parameters,
-                (it) => this.nullIfJsonNull(this.propertyOf(Procedure.PARAMS, it)),
-                (it) => this.number(this.propertyOf(Procedure.PARAMS, it)),
+                (it, value) => this.nullIfJsonNull(this.procedureParameter(it, value)),
+                (it, value) => this.number(this.procedureParameter(it, value)),
                 true,
                 (it) => this.parameterText(it),
-                this.parameterPath && ((name, keys) => this.parameterPath!(Procedure.PARAMS, [name, ...keys]))
+                this.parameterPath &&
+                    ((name, keys, value) => this.parameterPath!(Procedure.PARAMS, [name, ...keys], value))
             )
         );
         const call = this.procedure(writer.procedure(query));
@@ -584,6 +560,14 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The parameter `name`, of value `_value`, as JSON, in a procedure, which takes its parameters as one object
+     * (`Procedure.PARAMS`), each entry written by {@link parameterText}.
+     */
+    procedureParameter(name: string, _value: any): string {
+        return this.propertyOf(Procedure.PARAMS, name);
+    }
+
+    /**
      * The property `key` of the node or relationship whose properties are `props`, where it is an item of a `RETURN` or
      * a `WITH`, returned or passed on: as {@link propertyOf} reads it, but on a store that must read such an item apart.
      */
@@ -640,7 +624,7 @@ export abstract class SqlCypherCompiler {
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(
             parameters,
-            (it) => this.parameterJson(it),
+            (it, value) => this.parameterJson(it, value),
             (it) => this.parameterCount(it),
             false,
             (it) => this.parameterText(it),
@@ -702,15 +686,16 @@ export abstract class SqlCypherCompiler {
     /** A value `value` the statement writes, as JSON. */
     abstract literalJson(value: any): string;
 
-    /** The parameter bound as `marker`, JSON text, as JSON. */
-    abstract parameterJson(marker: string): string;
+    /** The parameter bound as `marker`, JSON text that {@link parameterText} wrote of `value`, as JSON. */
+    abstract parameterJson(marker: string, value: any): string;
 
     /**
      * Where a store reads a value in a parameter that is a map, `$p.text`, straight from the JSON text bound as `marker`
      * (in a procedure, from the parameters' object, with the parameter's name first among `keys`): the value at `keys`,
-     * as JSON. None where the store reads the parameter as JSON, then each key of it.
+     * as JSON. `value` is the parameter's, which {@link parameterText} wrote the text of. None where the store reads
+     * the parameter as JSON, then each key of it.
      */
-    parameterPath?(marker: string, keys: string[]): string;
+    parameterPath?(marker: string, keys: string[], value: any): string;
 
     /** The parameter bound as `marker`, a whole number, as one. */
     abstract parameterCount(marker: string): string;
