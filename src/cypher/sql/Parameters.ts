@@ -23,37 +23,50 @@ export class Parameters {
     private readonly items: Map<string, unknown[]> = new Map();
 
     /**
-     * @param asJson the bound JSON text at a marker, or with `inObject` the parameter of a name, as the store's JSON
+     * @param asJson the bound JSON text at a marker, or with `inObject` the parameter of a name, as the store's JSON:
+     * given the parameter's value too, which the text was written from
      * @param asCount the bound whole number at a marker, or with `inObject` the parameter of a name, as the store's
-     * number
-     * @param text a value as the JSON text it is bound as
+     * number: given the parameter's value too
+     * @param text a value as the JSON text it is bound as. With `inObject`, each parameter's value is written apart,
+     * as an entry of the object
      * @param asPath the value at a path of keys in a parameter that is a map, read straight from the text it is bound
-     * as: given the marker (or with `inObject` the parameter's name) and the keys; none where the store reads the
-     * parameter as JSON, then each key of it
+     * as: given the marker (or with `inObject` the parameter's name), the keys and the parameter's value; none where
+     * the store reads the parameter as JSON, then each key of it
      */
     constructor(
         private readonly given: Record<string, any>,
-        private readonly asJson: (marker: string) => string,
-        private readonly asCount: (marker: string) => string,
+        private readonly asJson: (marker: string, value: any) => string,
+        private readonly asCount: (marker: string, value: any) => string,
         private readonly inObject: boolean = false,
         private readonly text: (value: any) => string = jsonText,
-        private readonly asPath?: (marker: string, keys: string[]) => string
+        private readonly asPath?: (marker: string, keys: string[], value: any) => string
     ) {}
 
-    /** What the SQL binds. */
+    /**
+     * What the SQL binds. With `inObject`, the object of every parameter, each written apart (see `text`), as
+     * {@link jsonText} writes a map: its entries in the order given, those undefined left out.
+     */
     get values(): Record<string, any> {
-        return this.inObject
-            ? { [PARAMETERS_OBJECT]: this.text({ ...this.given, ...Object.fromEntries(this.items) }) }
-            : this.bound;
+        if (!this.inObject) {
+            return this.bound;
+        }
+        const entries = Object.entries({ ...this.given, ...Object.fromEntries(this.items) }).filter(
+            ([, value]) => value !== undefined
+        );
+        return {
+            [PARAMETERS_OBJECT]: `{${entries
+                .map(([name, value]) => `${JSON.stringify(name)}:${this.text(value)}`)
+                .join(',')}}`
+        };
     }
 
     /** The parameter `name`, as JSON. */
     json(name: string): string {
         const value = this.value(name);
         if (this.inObject) {
-            return this.asJson(name);
+            return this.asJson(name, value);
         }
-        return this.asJson(this.bind(name, value));
+        return this.asJson(this.bind(name, value), value);
     }
 
     /**
@@ -73,21 +86,21 @@ export class Parameters {
             return undefined;
         }
         if (this.inObject) {
-            return this.asPath(name, keys);
+            return this.asPath(name, keys, value);
         }
-        return this.asPath(this.bind(name, value), keys);
+        return this.asPath(this.bind(name, value), keys, value);
     }
 
     /** The parameter `name`, as a whole number. */
     count(name: string): string {
         const value = this.value(name);
         if (this.inObject) {
-            return this.asCount(name);
+            return this.asCount(name, value);
         }
         const key = `_cyn_${name}`;
         // The Neo4j driver's Integer, as a number the driver of the store binds.
         this.bound[key] = isInt(value) ? BigInt(value.toString()) : value;
-        return this.asCount(`$${key}`);
+        return this.asCount(`$${key}`, value);
     }
 
     /** The value bound to the parameter `name`, as the caller gave it: an iterator as the list of its items. */

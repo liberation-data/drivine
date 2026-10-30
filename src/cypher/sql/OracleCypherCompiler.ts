@@ -4,7 +4,7 @@ import { nullsEqualFunction, nullsEqualName } from '@/backend/oracle/OracleStore
 import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
 import { DEGREES_TO_RADIANS, indent, literal, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
-import { jsonText } from '@/cypher/sql/JsonText';
+import { extendedDoubles, jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
@@ -337,17 +337,41 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             : `JSON(${literal(jsonText(value))})`;
     }
 
-    parameterJson(marker: string): string {
-        return `JSON(${marker})`;
+    /**
+     * A JavaScript number past a whole number's range, such as `1e20`, written as Oracle's extended JSON writes a
+     * double, `{"$numberDouble": "1.0E20"}`, so it is a float, as the Neo4j driver sends it: Oracle reads JSON's `1e+20`
+     * as a whole number (liberation-data/drivine#378). See {@link extendedDoubles}, and {@link parameterJson}, which
+     * reads such a text as extended JSON. A whole number within the range is one: a JavaScript number does not tell
+     * it from a float.
+     */
+    parameterText(value: any): string {
+        return jsonText(value, extendedDoubles(value) ? 'extended' : false);
+    }
+
+    /**
+     * A text that holds an extended JSON double (see {@link parameterText}) is read as extended JSON, and only one:
+     * else a map of the parameter's whose key is `$numberDouble` would be read as a double.
+     */
+    parameterJson(marker: string, value: any): string {
+        return extendedDoubles(value) ? `JSON(${marker} EXTENDED)` : `JSON(${marker})`;
     }
 
     /**
      * Read with one path from the text the parameter is bound as, and not from the parameter read as JSON first: Oracle
      * crashed the session (ORA-07445 `ksmem_malloc`, ORA-00600) where a statement read a value from a parameter past
-     * 32 KB, taken as JSON, for each of two rows.
+     * 32 KB, taken as JSON, for each of two rows. Read as extended JSON where the parameter holds a double so (see
+     * {@link parameterText}): the value at the path as text, then that text as extended JSON.
      */
-    parameterPath(marker: string, keys: string[]): string {
-        return `JSON_QUERY(${marker}, ${path(keys[0], ...keys.slice(1))} RETURNING JSON)`;
+    parameterPath(marker: string, keys: string[], value: any): string {
+        const at = path(keys[0], ...keys.slice(1));
+        return extendedDoubles(value)
+            ? `JSON(JSON_QUERY(${marker}, ${at} RETURNING CLOB) EXTENDED)`
+            : `JSON_QUERY(${marker}, ${at} RETURNING JSON)`;
+    }
+
+    /** Read as extended JSON where it holds a double so: see {@link parameterPath}. */
+    procedureParameter(name: string, value: any): string {
+        return this.parameterPath(PARAMS, [name], value);
     }
 
     parameterCount(marker: string): string {
@@ -1299,8 +1323,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         ]);
         const sql = [
             'DECLARE',
-            // Text, read as JSON where each parameter is read (propertyOf): Oracle crashed the session where a block read
-            // a value past 32 KB more than once from a JSON variable (liberation-data/drivine#308).
+            // Text, read as JSON where each parameter is read (procedureParameter): Oracle crashed the session where a
+            // block read a value past 32 KB more than once from a JSON variable (liberation-data/drivine#308).
             `    ${PARAMS} CLOB := $${PARAMETERS_OBJECT};`,
             `    ${ROWS} JSON;`,
             `    ${OUT} JSON;`,

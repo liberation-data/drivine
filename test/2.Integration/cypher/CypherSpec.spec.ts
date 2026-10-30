@@ -1,4 +1,5 @@
 import neo4j from 'neo4j-driver';
+import { isDeepStrictEqual } from 'util';
 import {
     ConnectionPropertiesFromEnv,
     DatabaseRegistry,
@@ -1608,6 +1609,77 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     await expect(query(statement)).rejects.toThrow('is Cypher, and is not compiled to SQL yet.');
                 }
             }
+        });
+    });
+
+    /**
+     * A whole JavaScript number past 2^63, such as 1e20, given as a parameter: no whole number in Cypher, so a float, as
+     * the Neo4j driver sends it. Oracle bound it as a whole number, and gave its text without a fraction
+     * (liberation-data/drivine#378). A whole number here is a bigint, bound as an integer on each store: see
+     * parametersFor.
+     */
+    describe('a whole number parameter past 2^63', () => {
+        it('is a float, alone, summed, in a map and in a list, read or written', async () => {
+            await clear();
+            const two = BigInt(2);
+            const cases: [string, Record<string, any>, any][] = [
+                ['RETURN toString($x)', { x: 1e20 }, '1.0E20'],
+                ['RETURN toString($x)', { x: -1e20 }, '-1.0E20'],
+                ['RETURN [$x, $x * 2, toString($x + 1)]', { x: 1e20 }, [1e20, 2e20, '1.0E20']],
+                ['UNWIND $xs AS x RETURN toString(sum(x))', { xs: [1e20, 1e20] }, '2.0E20'],
+                ['UNWIND $xs AS x RETURN toString(sum(x))', { xs: [-1e20, -1e20] }, '-2.0E20'],
+                ['UNWIND $xs AS x RETURN collect(toString(x))', { xs: [1e20, two, 1.5] }, ['1.0E20', '2', '1.5']],
+                ['RETURN [toString($m.x), toString($m.y)]', { m: { x: 1e20, y: two } }, ['1.0E20', '2']],
+                ["RETURN toString($m['x'])", { m: { x: -1e20 } }, '-1.0E20'],
+                // Beside such a float, a text, a null and a missing key are read as they are.
+                ['RETURN [$m.s, $m.n, $m.z, $m.b]', { m: { x: 1e20, s: 's', n: null, b: true } }, ['s', null, null, true]],
+                ['RETURN [toString($l[0]), toString($l[1])]', { l: [1e20, two] }, ['1.0E20', '2']],
+                [
+                    'RETURN [toString($m.l[0]), toString($m.n.x)]',
+                    { m: { l: [1e20], n: { x: 1e20 } } },
+                    ['1.0E20', '1.0E20']
+                ],
+                [
+                    'RETURN [$m, $l]',
+                    { m: { x: 1e20, l: [-1e20] }, l: [1e20, { x: 1e20 }] },
+                    [{ x: 1e20, l: [-1e20] }, [1e20, { x: 1e20 }]]
+                ],
+                // A map with a key as Oracle's extended JSON writes one is the map it is, its keys kept.
+                ['RETURN $m', { m: { $numberDouble: '1.0E20', x: 1e20 } }, { $numberDouble: '1.0E20', x: 1e20 }],
+                // In a statement that writes, which takes its parameters as one object.
+                [
+                    'CREATE (n:Big {x: $x, y: $m.y, z: $l}) RETURN [toString(n.x), toString(n.y), toString(n.z[0])]',
+                    { x: 1e20, m: { y: -1e20 }, l: [1e20, -1e20] },
+                    ['1.0E20', '-1.0E20', '1.0E20']
+                ],
+                [
+                    'MATCH (n:Big) RETURN [toString(n.x), toString(n.y), toString(n.z[1])]',
+                    {},
+                    ['1.0E20', '-1.0E20', '-1.0E20']
+                ],
+                [
+                    'CREATE (n:Big {s: $m.s, b: $m.b}) RETURN [n.s, n.b]',
+                    { m: { x: 1e20, s: 's', b: true } },
+                    ['s', true]
+                ],
+                ['UNWIND $xs AS x CREATE (n:Big {k: x}) RETURN toString(n.k)', { xs: [1e20] }, '1.0E20'],
+                ['MATCH (n:Big) WHERE n.k IS NOT NULL RETURN toString(n.k)', {}, '1.0E20'],
+                // Each parameter of a write apart: one with a map keyed as extended JSON's are leaves the others floats.
+                [
+                    'CREATE (n:Big {j: $x, m: $m.k}) RETURN [toString(n.j), n.m]',
+                    { x: 1e20, m: { $k: 'a', k: 'b' } },
+                    ['1.0E20', 'b']
+                ]
+            ];
+            // Each that differs, so a store's every difference shows at once.
+            const differing: string[] = [];
+            for (const [statement, parameters, value] of cases) {
+                const [given] = await query(statement, parameters);
+                if (!isDeepStrictEqual(given, value)) {
+                    differing.push(`${statement}: ${JSON.stringify(given)}, not ${JSON.stringify(value)}`);
+                }
+            }
+            expect(differing).toEqual([]);
         });
     });
 
