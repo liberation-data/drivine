@@ -22,6 +22,37 @@ describe('OracleGraph', () => {
         expect(ensuring).toContain(`WHEN OTHERS THEN\n        ${resets}\n        RAISE;`);
     });
 
+    it('should run the block again when a deadlock turned it away, and once when it failed for another reason', async () => {
+        const failing = (...messages: string[]): { execute: () => Promise<void>; runs: number } => {
+            const connection = {
+                runs: 0,
+                execute: async (): Promise<void> => {
+                    const message = messages[connection.runs++];
+                    return message ? Promise.reject(new Error(message)) : Promise.resolve();
+                }
+            };
+            return connection;
+        };
+        const graph = new OracleGraph('tenant_a');
+        const deadlocked = failing(
+            'ORA-04020: deadlock detected while trying to lock object DRIVINE.TENANT_A_NODE',
+            'ORA-06512: at line 22\nORA-00060: deadlock detected while waiting for resource'
+        );
+        await graph.ensure(deadlocked);
+        expect(deadlocked.runs).toEqual(3);
+
+        // A lock still busy has had its DDL_LOCK_TIMEOUT inside the block: waiting it again would hold the connection.
+        const busy = failing(
+            'ORA-06512: at line 22\nORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'
+        );
+        await expect(graph.ensure(busy)).rejects.toThrow(/ORA-00054/);
+        expect(busy.runs).toEqual(1);
+
+        const refused = failing('ORA-01031: insufficient privileges');
+        await expect(graph.ensure(refused)).rejects.toThrow(/ORA-01031/);
+        expect(refused.runs).toEqual(1);
+    });
+
     it("should name its tables after the graph, drivine's unless named", () => {
         expect(new OracleGraph().name).toEqual(DEFAULT_GRAPH);
         const graph = new OracleGraph('tenant_a');

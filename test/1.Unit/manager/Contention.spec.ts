@@ -3,6 +3,8 @@ import {
     CONTENDED_PAUSE_MILLIS,
     contendedPause,
     CypherBackend,
+    ddlContended,
+    ddlDeadlocked,
     DrivineError,
     NEO4J_GRAMMAR,
     whenNotContended
@@ -49,6 +51,27 @@ describe('whenNotContended', () => {
         ).rejects.toBe(first);
         expect(calls).toEqual(CONTENDED_ATTEMPTS);
         expect(pauses.length).toEqual(CONTENDED_ATTEMPTS - 1);
+    });
+
+    it('should not run again what an inner run gave up on, as a schema statement over a first connection would', async () => {
+        let calls = 0;
+        const inner = async (): Promise<string> =>
+            whenNotContended(
+                async () => {
+                    calls++;
+                    return Promise.reject(contended);
+                },
+                isContended,
+                sleep
+            );
+        await expect(
+            whenNotContended(
+                async () => inner().catch(async (e) => Promise.reject(DrivineError.withRootCause(e))),
+                (it) => isContended((it as DrivineError).rootCause),
+                sleep
+            )
+        ).rejects.toMatchObject({ rootCause: contended });
+        expect(calls).toEqual(CONTENDED_ATTEMPTS);
     });
 
     it('should throw a failure of another kind at once', async () => {
@@ -102,5 +125,41 @@ describe('whenNotContended', () => {
             }
             expect(pauses).toEqual([]);
         });
+    });
+});
+
+describe('ddlContended', () => {
+    it("should take Oracle's busy lock, library cache deadlock and row deadlock for contention, under a cause or not", () => {
+        for (const message of [
+            'ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired',
+            'ORA-04020: deadlock detected while trying to lock object DRIVINE.FC_RACE_X_NODE',
+            'ORA-00060: deadlock detected while waiting for resource'
+        ]) {
+            expect(ddlContended(new Error(message))).toBe(true);
+            expect(ddlContended(DrivineError.withRootCause(new Error(`ORA-06512: at line 7\n${message}`)))).toBe(true);
+        }
+    });
+
+    it("should take Postgres's deadlock for contention, not a lock not had in time", () => {
+        expect(ddlContended(Object.assign(new Error('deadlock detected'), { code: '40P01' }))).toBe(true);
+        expect(ddlContended(Object.assign(new Error('lock timeout'), { code: '55P03' }))).toBe(false);
+    });
+
+    it('should take only deadlocks for a deadlock, not a lock busy or not had in time', () => {
+        expect(ddlDeadlocked(new Error('ORA-04020: deadlock detected while trying to lock object X'))).toBe(true);
+        expect(ddlDeadlocked(DrivineError.withRootCause(new Error('ORA-00060: deadlock detected')))).toBe(true);
+        expect(ddlDeadlocked(Object.assign(new Error('deadlock detected'), { code: '40P01' }))).toBe(true);
+        expect(ddlDeadlocked(new Error('ORA-00054: resource busy and acquire with NOWAIT specified'))).toBe(false);
+        expect(ddlDeadlocked(Object.assign(new Error('lock timeout'), { code: '55P03' }))).toBe(false);
+        expect(ddlDeadlocked(undefined)).toBe(false);
+    });
+
+    it('should not take another failure for contention', () => {
+        expect(ddlContended(new Error('ORA-01031: insufficient privileges'))).toBe(false);
+        expect(ddlContended(new Error('ORA-040200: not a code'))).toBe(false);
+        expect(ddlContended(Object.assign(new Error('permission denied for schema public'), { code: '42501' }))).toBe(
+            false
+        );
+        expect(ddlContended(undefined)).toBe(false);
     });
 });

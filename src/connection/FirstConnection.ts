@@ -4,7 +4,9 @@
  * finds them (liberation-data/drivine#343). It runs once per provider, so once per pool and graph, not per statement:
  * the connections asked for meanwhile wait for it, and one that fails is run again by the next connection. The block is
  * the one the object manager runs, and does nothing over a store already there, so a user who may only read a graph
- * already made can connect, and which of the two comes first doesn't matter.
+ * already made can connect, and which of the two comes first doesn't matter. A block turned away by a deadlock with another
+ * session is run again by `ensure` itself (liberation-data/drivine#454): the connections waiting wait through it, and
+ * only a failure it gives up on is one here.
  */
 export class FirstConnection {
     private made?: Promise<void>;

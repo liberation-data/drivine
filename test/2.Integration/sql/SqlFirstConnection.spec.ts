@@ -52,6 +52,23 @@ function nodeTableCount(store: SqlStore, graph: string): string {
         : `SELECT COUNT(*) FROM pg_tables WHERE tablename = '${graph.toLowerCase()}_node'`;
 }
 
+/**
+ * How many of the graph's store objects are there, as the store's catalog says: its node, edge and schema tables, and on
+ * Oracle the property graph over them, made last. A whole store has all four, or three on Postgres.
+ */
+function storeObjectCount(store: SqlStore, graph: string): string {
+    const tables = ['node', 'edge', 'schema'];
+    return store.type === DatabaseType.ORACLE
+        ? `SELECT (SELECT COUNT(*) FROM user_tables WHERE table_name IN (${tables
+              .map((it) => `'${graph.toUpperCase()}_${it.toUpperCase()}'`)
+              .join(
+                  ', '
+              )})) + (SELECT COUNT(*) FROM user_property_graphs WHERE graph_name = '${graph.toUpperCase()}') FROM dual`
+        : `SELECT COUNT(*) FROM pg_tables WHERE tablename IN (${tables
+              .map((it) => `'${graph.toLowerCase()}_${it}'`)
+              .join(', ')})`;
+}
+
 const merge = async (pm: PersistenceManager, name: string): Promise<void> =>
     pm.execute(new QuerySpecification(cypherStatement('MERGE (:FirstUse {name: $name})')).bind({ name }));
 
@@ -71,11 +88,15 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
     const readers = ['POSTGRES_FC_RO', 'POSTGRES_FC_RO_NEW'];
     let admin: PersistenceManager;
 
-    /** A non-transactional persistence manager on a connection of its own name, working on `graph`. */
-    const managerOn = (connection: string, graph: string): PersistenceManager => {
+    /** A non-transactional persistence manager on a connection of its own name, working on `graph`, its pool as large as `poolMax`. */
+    const managerOn = (connection: string, graph: string, poolMax?: number): PersistenceManager => {
         registry
             .builder()
-            .withProperties({ ...ConnectionPropertiesFromEnv(store.name), defaultGraphPath: graph })
+            .withProperties({
+                ...ConnectionPropertiesFromEnv(store.name),
+                defaultGraphPath: graph,
+                ...(poolMax ? { poolMax } : {})
+            })
             .register(connection);
         return new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance()).get(
             connection,
@@ -88,10 +109,11 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
         return graph;
     };
     /** Oracle gives a row of one column as its value; Postgres gives the row. */
-    const tableCount = async (graph: string): Promise<number> => {
-        const row = await admin.getOne<any>(new QuerySpecification(nodeTableCount(store, graph)));
+    const count = async (statement: string): Promise<number> => {
+        const row = await admin.getOne<any>(new QuerySpecification(statement));
         return Number(typeof row === 'object' ? Object.values(row)[0] : row);
     };
+    const tableCount = async (graph: string): Promise<number> => count(nodeTableCount(store, graph));
 
     beforeAll(() => {
         admin = sqlPersistenceManager(store);
@@ -105,7 +127,12 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
         }
         await Promise.all(
             registry.providers
-                .filter((it) => it.name.startsWith(`${store.name}_FC_`) && !readers.includes(it.name))
+                .filter(
+                    (it) =>
+                        it.name.startsWith(`${store.name}_FC_`) &&
+                        !readers.includes(it.name) &&
+                        !it.name.startsWith(`${store.name}_FC_SWARM_`)
+                )
                 .map(async (it) => it.end())
         );
     });
@@ -152,6 +179,37 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
         ]);
         expect(await names(two)).toEqual([...written, 'om'].sort());
         expect((await manager.load(FirstUse, 'om'))?.name).toEqual('om');
+    });
+
+    /**
+     * Each pool makes the tables on its first connection while the others' first statements, compiled writes, and the
+     * object managers' own making run: on Oracle, DDL over a table that other sessions' writes hold could deadlock on
+     * its library cache lock (ORA-04020), and the first use failed (liberation-data/drivine#454).
+     */
+    it('should make the tables once when many pools and object managers first use them together, round after round', async () => {
+        const factory = new GraphObjectManagerFactory(
+            new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance())
+        );
+        for (let round = 0; round < 3; round++) {
+            const graph = graphFor(`swarm${round}`);
+            const pools = Array.from({ length: 6 }, (_, i) => `${store.name}_FC_SWARM_${round}_${i}`);
+            const managers = pools.map((it) => managerOn(it, graph, 2));
+            const written = Array.from({ length: 24 }, (_, i) => `n${i}`);
+            const saved = pools.filter((_, i) => i % 2 === 0).map((it, i) => ({ id: `om${i}`, pool: it }));
+            try {
+                await Promise.all([
+                    ...written.map(async (name, i) => merge(managers[i % managers.length], name)),
+                    ...saved.map(async (it) =>
+                        factory.get(it.pool).save(Object.assign(new FirstUse(), { id: it.id, name: it.id }))
+                    )
+                ]);
+                expect(await names(managers[0])).toEqual([...written, ...saved.map((it) => it.id)].sort());
+                expect(await count(storeObjectCount(store, graph))).toEqual(store.type === DatabaseType.ORACLE ? 4 : 3);
+            } finally {
+                // Ended each round, failed or not, so the pools don't hold the store's connections from the tests after.
+                await Promise.all(pools.map(async (it) => registry.connectionProvider(it)?.end()));
+            }
+        }
     });
 
     it('should leave the tables an object manager made first, and read them through a persistence manager', async () => {
