@@ -15,6 +15,22 @@ export function contendedPause(attempt: number, random: () => number = Math.rand
 }
 
 /**
+ * Whether a SQL store turned schema statements away because of another session's, as sessions that make a graph's
+ * tables or a store's indexes together do. Then running them again may succeed. On Oracle, a lock they wanted was busy
+ * (ORA-00054), or two sessions were each waiting on the other: for an object's library cache lock (ORA-04020), as DDL
+ * over a table that other sessions' writes hold may be, or for a row (ORA-00060). On Postgres, it is a deadlock (40P01)
+ * or a lock not had in time (55P03). The failure and each cause under it are looked at.
+ */
+export function ddlContended(failure: unknown): boolean {
+    for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
+        if (/ORA-(00054|00060|04020)\b/.test(cause.message ?? '') || ['40P01', '55P03'].includes(cause.code)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Runs `statement`, again after a pause when the engine turned it away because another writer held what it writes.
  * The first failure is thrown once attempts run out; a failure of another kind is thrown at once.
  */

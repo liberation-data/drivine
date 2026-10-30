@@ -5,17 +5,20 @@ import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnec
 import { DrivineError } from '@/DrivineError';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { NativeOperation } from '@/schema/SchemaGrammar';
-import { whenNotContended } from '@/manager/Contention';
+import { ddlContended, whenNotContended } from '@/manager/Contention';
 import { transientOverBolt } from '@/backend/CypherGrammar';
 
 /**
- * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or Oracle refusing DDL on a
- * table another session's DDL holds: busy (ORA-00054), or each waiting on the other (ORA-04020), as when managers that
- * start together each make the indexes of the store's key.
+ * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or a SQL store turning DDL
+ * away because of another session's (see {@link ddlContended}), as when managers that start together each make the
+ * indexes of the store's key.
  */
 function contended(failure: unknown): boolean {
+    if (ddlContended(failure)) {
+        return true;
+    }
     for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
-        if (transientOverBolt(cause) || /another write is in progress|ORA-(00054|04020)\b/i.test(cause.message ?? '')) {
+        if (transientOverBolt(cause) || /another write is in progress/i.test(cause.message ?? '')) {
             return true;
         }
     }

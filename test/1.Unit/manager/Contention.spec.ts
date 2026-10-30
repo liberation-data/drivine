@@ -3,6 +3,7 @@ import {
     CONTENDED_PAUSE_MILLIS,
     contendedPause,
     CypherBackend,
+    ddlContended,
     DrivineError,
     NEO4J_GRAMMAR,
     whenNotContended
@@ -102,5 +103,33 @@ describe('whenNotContended', () => {
             }
             expect(pauses).toEqual([]);
         });
+    });
+});
+
+describe('ddlContended', () => {
+    it("should take Oracle's busy lock, library cache deadlock and row deadlock for contention, under a cause or not", () => {
+        for (const message of [
+            'ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired',
+            'ORA-04020: deadlock detected while trying to lock object DRIVINE.FC_RACE_X_NODE',
+            'ORA-00060: deadlock detected while waiting for resource'
+        ]) {
+            expect(ddlContended(new Error(message))).toBe(true);
+            expect(ddlContended(DrivineError.withRootCause(new Error(`ORA-06512: at line 7\n${message}`)))).toBe(true);
+        }
+    });
+
+    it("should take Postgres's deadlock and lock not had in time for contention", () => {
+        for (const code of ['40P01', '55P03']) {
+            expect(ddlContended(Object.assign(new Error('deadlock detected'), { code }))).toBe(true);
+        }
+    });
+
+    it('should not take another failure for contention', () => {
+        expect(ddlContended(new Error('ORA-01031: insufficient privileges'))).toBe(false);
+        expect(ddlContended(new Error('ORA-040200: not a code'))).toBe(false);
+        expect(ddlContended(Object.assign(new Error('permission denied for schema public'), { code: '42501' }))).toBe(
+            false
+        );
+        expect(ddlContended(undefined)).toBe(false);
     });
 });

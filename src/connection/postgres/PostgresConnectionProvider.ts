@@ -7,6 +7,7 @@ import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper
 import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { FirstConnection } from '@/connection/FirstConnection';
+import { ddlContended, whenNotContended } from '@/manager/Contention';
 
 /** Connections to Postgres, from a pool of its own, through `pg`. */
 export class PostgresConnectionProvider implements ConnectionProvider {
@@ -36,12 +37,15 @@ export class PostgresConnectionProvider implements ConnectionProvider {
     /**
      * A connection, the graph's tables made first if this is the provider's first: see {@link FirstConnection}. The
      * block runs on the connection outside a transaction, so it is applied whole or not at all, and is the same one
-     * the object manager runs (`PostgresGraph.ensuring`).
+     * the object manager runs (`PostgresGraph.ensuring`). One turned away by a deadlock with other sessions' writes
+     * (40P01), as a session that waited for another's making may be when it then runs the block's statements over
+     * tables in use, is run again after a pause, and finds the store made (see {@link ddlContended}).
      */
     async connect(): Promise<Connection> {
         const client = await this.firstConnection.ensured(
             await this.pool.connect(),
-            async (it) => it.query(new PostgresGraph(this.graphName).ensuring),
+            async (it) =>
+                whenNotContended(async () => it.query(new PostgresGraph(this.graphName).ensuring), ddlContended),
             (it, failure) => it.release(failure)
         );
         if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
