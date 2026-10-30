@@ -1526,6 +1526,13 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             expect(
                 await query('UNWIND [[{a: 1}, {b: 2, c: 3}], [{d: 4, e: 5, f: 6}]] AS l RETURN [x IN l | size(keys(x))]')
             ).toEqual([[1, 2], [3]]);
+            // A nested map's paths are in its parent's data guide too, and only those one step from the top are keys.
+            expect(
+                await query('UNWIND [{a: {x: 1}}, {b: {y: 2}, c: 3}] AS m RETURN size(keys(m)), keys(coalesce(m.a, m.b))')
+            ).toEqual([
+                [1, ['x']],
+                [2, ['y']]
+            ]);
         });
     });
 
