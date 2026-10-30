@@ -2203,6 +2203,11 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     [20]
                 ],
                 [`${match} WITH me, count(you) AS cnt ORDER BY me.age * count(you) RETURN me.name`, ['B', 'C', 'D', 'A']],
+                // A subquery in a term made of items, which overItems leaves to be worked out in the query that groups.
+                [
+                    `${match} WITH me, count(you) AS cnt ORDER BY COUNT { (me)--() } * count(you) * 100 - me.age RETURN me.name`,
+                    ['D', 'C', 'B', 'A']
+                ],
                 // An aggregate that is no item; a comprehension that names its own variable as the key's; the key in a
                 // function. On Oracle the comprehension's term compiles to 4.7 MB, which Oracle is still parsing minutes
                 // later: + over an aggregate's result is written out at every level until #414 is ported.
