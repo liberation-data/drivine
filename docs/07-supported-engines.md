@@ -259,6 +259,13 @@ const names = await pm.query<string>(
   not unwound (`WITH n {.a} AS m RETURN m.a`); after a write, which carries its rows on, such a value is read from the
   item's text too. A pattern that matches on such a text (`MERGE (n:X {a: r.a})`) compares it as JSON, which Oracle
   refuses past about 32 KB (ORA-40180), leaving the session open.
+- On Oracle, so are reads of a list's item by its place ([#455](https://github.com/liberation-data/drivine/issues/455)):
+  an item read by index, by `head()` or `last()`, or after a slice, of a list `split` makes, a stored list, or one a
+  `WITH` passes on (`split(n.bio, 'x')[0]`, `head(n.tags)`), is read from the list's text where it is a text, at about
+  1.4 to 2.5 times a plain read, as drivine4j measured, and the list is written out whole for it. Any other item is read
+  as before, and so is an unwound item. A list made of a long property (`[n.bio, 'y']`) still takes the property out as
+  JSON, as above. See "An item of a list, read by its place" in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Oracle, a text past 4,000 bytes is measured, cut, changed, searched, reversed and added to whole (`size()`,
   `toUpper()`, `substring()`, `replace()`, `split()`, `reverse()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads
   a text out of JSON as a `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one
