@@ -47,9 +47,16 @@ describe('FirstConnection', () => {
         const denied = DrivineError.withRootCause(
             Object.assign(new Error('permission denied for schema public'), { code: '42501' })
         );
-        const ensure = jest.fn().mockRejectedValue(denied);
+        let refuse!: () => void;
+        const ensure = jest.fn(
+            async (): Promise<void> => new Promise<void>((_resolve, reject) => (refuse = () => reject(denied)))
+        );
         const close = jest.fn();
-        expect(await Promise.all(['a', 'b'].map(async (it) => first.ensured(it, ensure, close)))).toEqual(['a', 'b']);
+        // The block is refused only once all three are waiting on it.
+        const waiting = Promise.all(['a', 'b', 'b2'].map(async (it) => first.ensured(it, ensure, close)));
+        await Promise.resolve();
+        refuse();
+        expect(await waiting).toEqual(['a', 'b', 'b2']);
         expect(await first.ensured('c', ensure, close)).toEqual('c');
         expect(ensure).toHaveBeenCalledTimes(1);
         expect(close).not.toHaveBeenCalled();
