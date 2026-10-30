@@ -5,6 +5,7 @@ import {
     CypherBackend,
     ddlContended,
     ddlDeadlocked,
+    ddlWillNotMake,
     DrivineError,
     NEO4J_GRAMMAR,
     whenNotContended
@@ -161,5 +162,38 @@ describe('ddlContended', () => {
             false
         );
         expect(ddlContended(undefined)).toBe(false);
+    });
+});
+
+describe('ddlWillNotMake', () => {
+    it("should take Oracle's insufficient privileges and read-only database, under a cause or not", () => {
+        for (const message of [
+            'ORA-01031: insufficient privileges',
+            'ORA-16000: database or pluggable database open for read-only access'
+        ]) {
+            expect(ddlWillNotMake(new Error(message))).toBe(true);
+            expect(ddlWillNotMake(DrivineError.withRootCause(new Error(`${message}\nORA-06512: at line 40`)))).toBe(
+                true
+            );
+        }
+    });
+
+    it("should take Postgres's insufficient privilege and read-only transaction, under a cause or not", () => {
+        for (const code of ['42501', '25006']) {
+            const failure = Object.assign(new Error('refused'), { code });
+            expect(ddlWillNotMake(failure)).toBe(true);
+            expect(ddlWillNotMake(DrivineError.withRootCause(failure))).toBe(true);
+            expect(ddlWillNotMake(Object.assign(new Error('wrapped'), { cause: failure }))).toBe(true);
+        }
+    });
+
+    it('should not take contention or another failure, which may pass', () => {
+        expect(ddlWillNotMake(new Error('ORA-00054: resource busy and acquire with NOWAIT specified'))).toBe(false);
+        expect(ddlWillNotMake(new Error('ORA-04020: deadlock detected while trying to lock object X'))).toBe(false);
+        expect(ddlWillNotMake(new Error('ORA-010310: not a code'))).toBe(false);
+        for (const code of ['40P01', '55P03', '40001', '08006']) {
+            expect(ddlWillNotMake(Object.assign(new Error('failed'), { code }))).toBe(false);
+        }
+        expect(ddlWillNotMake(undefined)).toBe(false);
     });
 });

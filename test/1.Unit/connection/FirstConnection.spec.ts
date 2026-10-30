@@ -1,10 +1,12 @@
 import { FirstConnection } from '@/connection/FirstConnection';
 import { OracleGraph } from '@/backend/oracle';
+import { DrivineError } from '@/DrivineError';
+import { DrivineLogger } from '@/logger';
 
 /** A SQL store's graph is made once per provider, on its first connection (liberation-data/drivine#343). */
 describe('FirstConnection', () => {
     it('should run the block once, on the first connection, however many connections ask together', async () => {
-        const first = new FirstConnection();
+        const first = new FirstConnection(() => "graph 'g'");
         const ran: string[] = [];
         let finish!: () => void;
         const ensure = async (connection: string): Promise<void> => {
@@ -22,8 +24,8 @@ describe('FirstConnection', () => {
     });
 
     it('should close each connection that waited on a block that failed, and run it again on the next', async () => {
-        const first = new FirstConnection();
-        const failure = new Error('permission denied for schema public');
+        const first = new FirstConnection(() => "graph 'g'");
+        const failure = Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
         const ensure = jest.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
         const closed: [string, Error][] = [];
         const close = (connection: string, error: Error): void => {
@@ -39,8 +41,27 @@ describe('FirstConnection', () => {
         expect(ensure.mock.calls.map((it) => it[0])).toEqual(['a', 'c']);
     });
 
+    it('should hand out each connection, warn once and not run the block again, when the store will not make the tables', async () => {
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        const first = new FirstConnection(() => "graph 'g' on POSTGRES database 'PG'");
+        const denied = DrivineError.withRootCause(
+            Object.assign(new Error('permission denied for schema public'), { code: '42501' })
+        );
+        const ensure = jest.fn().mockRejectedValue(denied);
+        const close = jest.fn();
+        expect(await Promise.all(['a', 'b'].map(async (it) => first.ensured(it, ensure, close)))).toEqual(['a', 'b']);
+        expect(await first.ensured('c', ensure, close)).toEqual('c');
+        expect(ensure).toHaveBeenCalledTimes(1);
+        expect(close).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain(
+            "Could not make the tables of graph 'g' on POSTGRES database 'PG': the user may not make them"
+        );
+        warn.mockRestore();
+    });
+
     it("should hand out every connection that waited while Oracle's block ran again after a deadlock", async () => {
-        const first = new FirstConnection();
+        const first = new FirstConnection(() => "graph 'g'");
         const ran: string[] = [];
         const deadlock = 'ORA-04020: deadlock detected while trying to lock object DRIVINE.FC_RACE_X_NODE';
         const connection = (name: string): { name: string; execute: () => Promise<void> } => ({

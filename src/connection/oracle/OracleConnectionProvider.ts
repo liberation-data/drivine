@@ -57,7 +57,9 @@ export interface OracleConnectionProperties {
 export class OracleConnectionProvider implements ConnectionProvider {
     private readonly logger = new DrivineLogger(OracleConnectionProvider.name);
     private pool?: Promise<oracledb.Pool>;
-    private readonly firstConnection = new FirstConnection();
+    private readonly firstConnection = new FirstConnection(
+        () => `graph '${this.graphName}' on ${this.type} database '${this.name}'`
+    );
     /** Why this store runs no Cypher, read from the server's version on the first connection; undefined where it does. */
     private cypherRefusal?: string;
 

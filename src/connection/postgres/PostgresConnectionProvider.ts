@@ -12,7 +12,9 @@ import { ddlDeadlocked, whenNotContended } from '@/manager/Contention';
 /** Connections to Postgres, from a pool of its own, through `pg`. */
 export class PostgresConnectionProvider implements ConnectionProvider {
     private readonly pool: Pool;
-    private readonly firstConnection = new FirstConnection();
+    private readonly firstConnection = new FirstConnection(
+        () => `graph '${this.graphName}' on ${this.type} database '${this.name}'`
+    );
 
     /**
      * @param graph the graph this store works on: `drivine` unless named. Its tables are made on first connection, when
