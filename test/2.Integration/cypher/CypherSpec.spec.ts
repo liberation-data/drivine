@@ -3667,6 +3667,15 @@ describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) =
                 ['Carrie', 'Trinity'],
                 ['Laurence', 'Morpheus']
             ]);
+            // An operation over it works the collection out first (#414), and reads the item by its id.
+            expect(
+                await query(
+                    "MATCH (p:Person)-[r:ACTED_IN]->() WHERE p.name <> 'Keanu' RETURN p.name, toLower(toLower(collect(r)[0].role)) + '!' ORDER BY p.name"
+                )
+            ).toEqual([
+                ['Carrie', 'trinity!'],
+                ['Laurence', 'morpheus!']
+            ]);
             expect(
                 await query(
                     "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() MATCH (:Person {name: 'Carrie'})-[s:ACTED_IN]->() " +

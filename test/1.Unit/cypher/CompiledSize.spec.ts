@@ -374,6 +374,11 @@ describe('A compiled Cypher statement', () => {
                     `MATCH (n) RETURN ${four('toLower', 'collect(n.name)[0]')}`,
                     `MATCH (n) WITH collect(n.name) AS c RETURN ${four('toLower', 'c[0]')}`
                 ],
+                // An item of a list of nodes, read by its id over the aggregate's column: inline, 956 KB on Oracle.
+                [
+                    `MATCH (n) RETURN ${four('toLower', 'collect(n)[0].name')}`,
+                    `MATCH (n) WITH collect(n) AS c RETURN ${four('toLower', 'c[0].name')}`
+                ],
                 [
                     `MATCH (n) RETURN ${four('trim', 'max(n.name)')}`,
                     `MATCH (n) WITH max(n.name) AS m RETURN ${four('trim', 'm')}`
@@ -480,6 +485,17 @@ describe('A compiled Cypher statement', () => {
             }
         }
     );
+
+    it("of a CASE of lists of relationships over an aggregate's result works nothing out first on Oracle, where it binds no value", () => {
+        // A CASE that reads an aggregate binds no result in a subquery, which would aggregate it again over its one row:
+        // seen to bind with each aggregate replaced by its result, it worked the aggregate out first, a third larger.
+        const sql = new OracleCypherCompiler('g').compile(
+            'MATCH (n)-[r]->(m) RETURN m AS m, CASE WHEN count(*) > 1 THEN collect(r) ELSE [m] END AS c'
+        ).sql;
+        // No WITH's query, and no subquery binding the CASE's results.
+        expect(sql).not.toMatch(/\bw\d+\./);
+        expect(sql).not.toContain('NO_MERGE');
+    });
 
     it('of values that may hold a null walks them on Postgres over arrays unnested, which the planner costs low', () => {
         // As the sort key's walk is: a set-returning function's 100 rows, multiplied through the walk, bring in its JIT.

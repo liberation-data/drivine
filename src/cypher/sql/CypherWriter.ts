@@ -5135,12 +5135,13 @@ export class CypherWriter {
             : undefined;
         // On Oracle a list of nodes or relationships, read from their rows in a subquery, beside a result that reads the
         // row, as `CASE WHEN … THEN [r] ELSE [m.title] END`, closes the session (ORA-03113): its results are worked out in
-        // a subquery first. Not a CASE that reads an aggregate, which the subquery would aggregate again, over its one row.
+        // a subquery first. Not a CASE that reads an aggregate, which the subquery would aggregate again, over its one row,
+        // nor one that reads an aggregate's result bindsOverAggregates put in its place, which it reads so.
         const values = (): string[] => results.map(([, it]) => this.sql.comparable(this.asJson(it)));
         const sql =
             this.sql.aggregatesCaseSubqueries ||
             !results.some(([, it]) => it.kind === 'Entities') ||
-            contains(expression, isAggregate)
+            contains(expression, (it) => isAggregate(it) || (it.kind === 'Variable' && it.name.startsWith('#over')))
                 ? written((it) => this.sql.comparable(this.asJson(it)))
                 : this.sql.bound(values(), (bound) => written((_, i) => bound[i]));
         return json(sql, {
