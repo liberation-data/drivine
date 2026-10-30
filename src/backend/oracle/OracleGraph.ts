@@ -1,5 +1,5 @@
 import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
-import { ddlContended, whenNotContended } from '@/manager/Contention';
+import { ddlDeadlocked, whenNotContended } from '@/manager/Contention';
 import { Stamps } from '@/model/Stamps';
 import {
     Executes,
@@ -128,14 +128,14 @@ END;`;
      * Runs {@link ensuring} on `connection`, outside a transaction, and has every session asked again whether it may call
      * the {@link functions} (see {@link OracleStoredFunctions}).
      *
-     * A block turned away because of another session's, as when the DDL of one pool's first connection and other
-     * pools' first writes each wait on the other's lock on the node table (ORA-04020), is run again after a pause, as a
-     * schema statement is (see {@link ddlContended}): what the block made before it was turned away stays, and the
-     * block makes the rest, or finds the store another session finished meanwhile and does nothing
-     * (liberation-data/drivine#454).
+     * A block turned away by a deadlock with another session, as when the DDL of one pool's first connection and other
+     * pools' first writes each wait on the other's lock on the node table (ORA-04020), is run again after a pause (see
+     * {@link ddlDeadlocked}): what the block made before it was turned away stays, and the block makes the rest, or
+     * finds the store another session finished meanwhile and does nothing (liberation-data/drivine#454). One whose lock
+     * stayed busy (ORA-00054) is not: it has waited {@link OracleGraph.DDL_WAIT_SECONDS} inside the block already.
      */
     async ensure(connection: Executes): Promise<void> {
-        await whenNotContended(async () => connection.execute(this.ensuring), ddlContended);
+        await whenNotContended(async () => connection.execute(this.ensuring), ddlDeadlocked);
         OracleStoredFunctions.ensured(this.name);
     }
 }

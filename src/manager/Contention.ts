@@ -14,16 +14,10 @@ export function contendedPause(attempt: number, random: () => number = Math.rand
     return base + Math.floor(random() * base);
 }
 
-/**
- * Whether a SQL store turned schema statements away because of another session's, as sessions that make a graph's
- * tables or a store's indexes together do. Then running them again may succeed. On Oracle, a lock they wanted was busy
- * (ORA-00054), or two sessions were each waiting on the other: for an object's library cache lock (ORA-04020), as DDL
- * over a table that other sessions' writes hold may be, or for a row (ORA-00060). On Postgres, it is a deadlock (40P01)
- * or a lock not had in time (55P03). The failure and each cause under it are looked at.
- */
-export function ddlContended(failure: unknown): boolean {
+/** Whether `failure`, or a cause under it, as deep as ten, is one `matches` takes. */
+function anyCause(failure: unknown, matches: (cause: any) => boolean): boolean {
     for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
-        if (/ORA-(00054|00060|04020)\b/.test(cause.message ?? '') || ['40P01', '55P03'].includes(cause.code)) {
+        if (matches(cause)) {
             return true;
         }
     }
@@ -31,8 +25,55 @@ export function ddlContended(failure: unknown): boolean {
 }
 
 /**
+ * Whether a SQL store turned schema statements away because two sessions were each waiting on the other, so that
+ * running them again may succeed. On Oracle, that is for an object's library cache lock (ORA-04020), as DDL over
+ * a table that other sessions' writes hold may be, or for a row (ORA-00060); on Postgres, a deadlock (40P01). A graph's
+ * first-use block runs again only for these: a lock merely busy has had its wait inside the block already (on Oracle,
+ * `OracleGraph.DDL_WAIT_SECONDS`), and running it again would hold the app's first connection for that wait again each
+ * time. The failure and each cause under it are looked at.
+ */
+export function ddlDeadlocked(failure: unknown): boolean {
+    return anyCause(failure, (it) => /ORA-(00060|04020)\b/.test(it.message ?? '') || it.code === '40P01');
+}
+
+/**
+ * Whether a SQL store turned schema statements away because of another session's, as sessions that make a store's
+ * indexes together do, so that running them again may succeed: a deadlock (see {@link ddlDeadlocked}), or on Oracle a
+ * lock that was busy (ORA-00054). The failure and each cause under it are looked at.
+ */
+export function ddlContended(failure: unknown): boolean {
+    return ddlDeadlocked(failure) || anyCause(failure, (it) => /ORA-00054\b/.test(it.message ?? ''));
+}
+
+/**
+ * The failures a run of {@link whenNotContended} threw: ran out of attempts on, or would not run again. Held weakly, by
+ * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does.
+ */
+const givenUp = new WeakSet();
+
+/**
+ * Whether `failure`, or a cause under it, is one a run of {@link whenNotContended} inside this one already threw, as a
+ * graph's first-use block is under a schema statement or a save that asked for the first connection.
+ */
+function gaveUpOn(failure: unknown): boolean {
+    return anyCause(failure, (it) => typeof it === 'object' && givenUp.has(it));
+}
+
+/** `failure`, marked as one a run gave up on (see {@link gaveUpOn}). */
+function givingUp(failure: unknown): unknown {
+    if (typeof failure === 'object' && failure) {
+        givenUp.add(failure);
+    }
+    return failure;
+}
+
+/**
  * Runs `statement`, again after a pause when the engine turned it away because another writer held what it writes.
- * The first failure is thrown once attempts run out; a failure of another kind is thrown at once.
+ * The first failure is thrown once attempts run out; a failure of another kind is thrown at once. So is one a run
+ * inside `statement` already threw, having run out of attempts on it or taken it for one not to run again, so that
+ * runs one inside the other don't multiply their attempts (six by six), nor run again what the inner one would not, as
+ * a schema statement would the first-use block whose lock stayed busy on Oracle: each of those may wait a minute for
+ * its lock (see `OracleGraph.DDL_WAIT_SECONDS`).
  */
 export async function whenNotContended<T>(
     statement: () => Promise<T>,
@@ -44,8 +85,8 @@ export async function whenNotContended<T>(
         try {
             return await statement();
         } catch (failure) {
-            if (!contended(failure)) {
-                throw first ?? failure;
+            if (gaveUpOn(failure) || !contended(failure)) {
+                throw givingUp(first ?? failure);
             }
             first = first ?? failure;
             if (attempt < CONTENDED_ATTEMPTS - 1) {
@@ -53,5 +94,5 @@ export async function whenNotContended<T>(
             }
         }
     }
-    throw first;
+    throw givingUp(first);
 }

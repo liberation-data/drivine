@@ -196,16 +196,19 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
             const managers = pools.map((it) => managerOn(it, graph, 2));
             const written = Array.from({ length: 24 }, (_, i) => `n${i}`);
             const saved = pools.filter((_, i) => i % 2 === 0).map((it, i) => ({ id: `om${i}`, pool: it }));
-            await Promise.all([
-                ...written.map(async (name, i) => merge(managers[i % managers.length], name)),
-                ...saved.map(async (it) =>
-                    factory.get(it.pool).save(Object.assign(new FirstUse(), { id: it.id, name: it.id }))
-                )
-            ]);
-            expect(await names(managers[0])).toEqual([...written, ...saved.map((it) => it.id)].sort());
-            expect(await count(storeObjectCount(store, graph))).toEqual(store.type === DatabaseType.ORACLE ? 4 : 3);
-            // Ended each round, so the pools don't hold the store's connections from the tests after.
-            await Promise.all(pools.map(async (it) => registry.connectionProvider(it)?.end()));
+            try {
+                await Promise.all([
+                    ...written.map(async (name, i) => merge(managers[i % managers.length], name)),
+                    ...saved.map(async (it) =>
+                        factory.get(it.pool).save(Object.assign(new FirstUse(), { id: it.id, name: it.id }))
+                    )
+                ]);
+                expect(await names(managers[0])).toEqual([...written, ...saved.map((it) => it.id)].sort());
+                expect(await count(storeObjectCount(store, graph))).toEqual(store.type === DatabaseType.ORACLE ? 4 : 3);
+            } finally {
+                // Ended each round, failed or not, so the pools don't hold the store's connections from the tests after.
+                await Promise.all(pools.map(async (it) => registry.connectionProvider(it)?.end()));
+            }
         }
     });
 

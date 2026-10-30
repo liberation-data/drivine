@@ -1,4 +1,12 @@
-import { Connection, ConnectionProvider, DatabaseType, SchemaExecutor } from '@liberation-data/drivine';
+import {
+    CONTENDED_ATTEMPTS,
+    Connection,
+    ConnectionProvider,
+    DatabaseType,
+    SchemaExecutor
+} from '@liberation-data/drivine';
+import { FirstConnection } from '@/connection/FirstConnection';
+import { OracleGraph } from '@/backend/oracle';
 import { error, Neo4jError } from 'neo4j-driver';
 
 describe('SchemaExecutor', () => {
@@ -58,6 +66,71 @@ describe('SchemaExecutor', () => {
         ]);
         await expect(new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)')).resolves.toEqual([]);
         expect(runs()).toEqual(3);
+    });
+
+    it('should run DDL again that Postgres turned away for a deadlock, but not for a lock not had in time', async () => {
+        for (const [code, expected] of [
+            ['40P01', 2],
+            ['55P03', 1]
+        ] as const) {
+            let runs = 0;
+            const provider = {
+                name: 'postgres',
+                type: DatabaseType.POSTGRES,
+                connect: async () =>
+                    Promise.resolve({
+                        query: async () =>
+                            ++runs === 1
+                                ? Promise.reject(Object.assign(new Error('deadlock detected'), { code }))
+                                : Promise.resolve([]),
+                        release: async () => Promise.resolve()
+                    })
+            } as any;
+            const run = new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)');
+            await (expected === 2 ? expect(run).resolves.toEqual([]) : expect(run).rejects.toMatchObject({ rootCause: { code } }));
+            expect(runs).toEqual(expected);
+        }
+    });
+
+    /** A provider whose first connection runs a graph's first-use block that fails with `message` each time. */
+    const firstUseFailing = (message: string): { provider: ConnectionProvider; runs: () => number } => {
+        let runs = 0;
+        const first = new FirstConnection();
+        const graph = new OracleGraph('tenant_a');
+        const connection = {
+            execute: async () => {
+                runs++;
+                return Promise.reject(new Error(message));
+            },
+            release: async () => Promise.resolve()
+        };
+        const provider = {
+            name: 'oracle',
+            type: DatabaseType.ORACLE,
+            connect: async () =>
+                first.ensured(
+                    connection,
+                    async (it) => graph.ensure(it),
+                    async () => Promise.resolve()
+                )
+        } as any;
+        return { provider, runs: () => runs };
+    };
+
+    it("should not run the graph's first-use block again once its first connection gave up on it", async () => {
+        const { provider, runs }: { provider: ConnectionProvider; runs: () => number } = firstUseFailing(
+            'ORA-04020: deadlock detected while trying to lock object X'
+        );
+        await expect(new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)')).rejects.toThrow(/ORA-04020/);
+        expect(runs()).toEqual(CONTENDED_ATTEMPTS);
+    });
+
+    it("should not run the graph's first-use block again when its lock stayed busy, though a schema statement's would be", async () => {
+        const { provider, runs }: { provider: ConnectionProvider; runs: () => number } = firstUseFailing(
+            'ORA-00054: resource busy and acquire with NOWAIT specified'
+        );
+        await expect(new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)')).rejects.toThrow(/ORA-00054/);
+        expect(runs()).toEqual(1);
     });
 
     it('should not run again a statement Oracle refused for another reason', async () => {
