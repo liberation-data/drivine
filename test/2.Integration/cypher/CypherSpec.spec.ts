@@ -1045,6 +1045,172 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
+        it('CONTAINS finds a text past 32 KB in a text of any length, given, stored, on several rows and in a write', async () => {
+            // On Oracle INSTR refuses to look for a text past 32,767 UTF-16 units (ORA-22828, #457). Each text is looked
+            // for as a parameter, as a property on the node beside it, and of each node in a cross join, three times on
+            // one session. drivine4j's test of liberation-data/drivine4j#312.
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const pair = '😀';
+            const cases: [string | null, string | null][] = [
+                // A short text in a long one, and texts just within and just past what INSTR looks for.
+                [long, 'aB'],
+                [long, 'zz'],
+                [long, long.substring(1, 32_768)],
+                [long, long.substring(1, 32_769)],
+                [long, `${long.substring(0, 32_768)}z`],
+                // A long text in a longer one, found only at its end, and not found.
+                [`${long}c`, `${'aB'.repeat(19_000)}c`],
+                [`${long}c`, `${'aB'.repeat(19_000)}d`],
+                // As long: the issue's own, and one that differs in its last character.
+                [long, long],
+                [long, `${long.slice(0, -1)}b`],
+                // Longer than the text.
+                [long, `${long}x`],
+                ['abc', long],
+                // Empty and null.
+                [long, ''],
+                ['', long],
+                [long, null],
+                [null, long],
+                // Three-byte characters, past 32 KB within INSTR's units and past them.
+                ['€'.repeat(40_000), '€'.repeat(32_767)],
+                ['€'.repeat(40_000), '€'.repeat(33_000)],
+                ['€'.repeat(40_000), `${'€'.repeat(33_000)}x`],
+                // Characters past U+FFFF: across the 1,000th unit the search starts with, across INSTR's 32,767th, and
+                // only those.
+                [`z${'x'.repeat(999)}${pair}${'y'.repeat(40_000)}`, `${'x'.repeat(999)}${pair}${'y'.repeat(39_000)}`],
+                [`z${'y'.repeat(32_766)}${pair}${'y'.repeat(100)}`, `${'y'.repeat(32_766)}${pair}${'y'.repeat(10)}`],
+                [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}q`],
+                [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}z`],
+                // A long text whose first units are nowhere in the text, so no place is compared.
+                [long, 'c'.repeat(33_000)]
+            ];
+            // Oracle's empty text is null, so CONTAINS of one is null there.
+            const expected = (t: string | null, x: string | null): boolean | null => {
+                if (t === null || x === null) {
+                    return null;
+                }
+                if (store.type === DatabaseType.ORACLE && (t === '' || x === '')) {
+                    return null;
+                }
+                return t.includes(x);
+            };
+            const parameters = Object.fromEntries(
+                cases.flatMap(([t, x], i) => [
+                    [`t${i}`, t],
+                    [`x${i}`, x]
+                ])
+            );
+            // One node at a time: on Oracle, UNWIND of a list of texts past 32 KB into CREATE closes the session.
+            for (const [i, [t, x]] of cases.entries()) {
+                await query('CREATE (:CyContains {i: $i, t: $t, x: $x})', { i: BigInt(i), t, x });
+            }
+            const each = cases.map(([t, x]) => expected(t, x));
+            await onOneSession(async (run) => {
+                for (let r = 1; r <= 3; r++) {
+                    for (const [i, [t, x]] of cases.entries()) {
+                        const described = `${x?.length} in ${t?.length}, case ${i}, run ${r}`;
+                        expect([described, await run(`WITH $t${i} AS t, $x${i} AS x RETURN t CONTAINS x`)]).toEqual([
+                            described,
+                            [expected(t, x)]
+                        ]);
+                    }
+                    expect([r, await run('MATCH (n:CyContains) RETURN n.t CONTAINS n.x ORDER BY n.i')]).toEqual([
+                        r,
+                        each
+                    ]);
+                    // The text of one node, looked for in each other's; and in a write, which runs as a block of its own.
+                    expect([
+                        r,
+                        await run('MATCH (n:CyContains {i: 7}), (m:CyContains) RETURN m.t CONTAINS n.x ORDER BY m.i')
+                    ]).toEqual([r, cases.map(([t]) => expected(t, long))]);
+                    expect([
+                        r,
+                        await run('MATCH (n:CyContains) SET n.r = n.t CONTAINS n.x WITH n ORDER BY n.i RETURN n.r')
+                    ]).toEqual([r, each]);
+                }
+            }, parameters);
+            await clear();
+        }, 600_000);
+
+        it("CONTAINS of a text past 32 KB in an aggregate's argument, over an aggregate's result and beside a grouping key", async () => {
+            // On Oracle the search of a text past 32,767 UTF-16 units is a subquery (#457): here an aggregate reads it,
+            // it reads an aggregate's result, and it is a grouping key. drivine4j's test of liberation-data/drivine4j#312.
+            // Over an aggregate's result Oracle looks only for a text of 32,767 units or fewer until #414 works the
+            // aggregates out first, as drivine4j does, so there it looks for the last 30,000 units.
+            const over = (x: string): string => (store.type === DatabaseType.ORACLE ? `right(${x}, 30000)` : x);
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const found = `${'aB'.repeat(19_000)}c`;
+            const texts = [
+                [`${long}c`, found],
+                [long, found],
+                [`${long}c`, found]
+            ];
+            for (const [i, [t, x]] of texts.entries()) {
+                await query('CREATE (:CyContainsAgg {i: $i, k: $k, t: $t, x: $x})', {
+                    i: BigInt(i),
+                    k: BigInt(i % 2),
+                    t,
+                    x
+                });
+            }
+            const all = 'MATCH (n:CyContainsAgg)';
+            expect(await query(`${all} RETURN count(CASE WHEN n.t CONTAINS n.x THEN 1 END)`)).toEqual([2]);
+            expect(
+                await query(`${all} RETURN n.k AS k, count(CASE WHEN n.t CONTAINS n.x THEN 1 END) AS c ORDER BY k`)
+            ).toEqual([
+                [0, 2],
+                [1, 0]
+            ]);
+            expect(await query(`${all} RETURN DISTINCT n.k AS k, n.t CONTAINS n.x AS c ORDER BY k`)).toEqual([
+                [0, true],
+                [1, false]
+            ]);
+            expect(await query(`${all} RETURN n.i AS i, n.t CONTAINS n.x AS c, count(*) AS m ORDER BY i`)).toEqual([
+                [0, true, 1],
+                [1, false, 1],
+                [2, true, 1]
+            ]);
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i RETURN head(collect(n.t)) CONTAINS ${over('head(collect(n.x))')}`
+                )
+            ).toEqual([true]);
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i RETURN n.k AS k, head(collect(n.t)) CONTAINS ${over(
+                        'last(collect(n.x))'
+                    )} AS c ORDER BY k`
+                )
+            ).toEqual([
+                [0, true],
+                [1, false]
+            ]);
+            await clear();
+        });
+
+        it('CONTAINS of a text past 32 KB filters in a WHERE and runs in the step of a reduce()', async () => {
+            // On Oracle the search of a text past 32,767 UTF-16 units is a subquery (#457): here a WHERE filters by it,
+            // and a reduce() runs it in its function's own query. drivine4j's test of liberation-data/drivine4j#312.
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const found = `${'aB'.repeat(19_000)}c`;
+            for (const [i, t] of [`${long}c`, long, `${long}c`].entries()) {
+                await query('CREATE (:CyContainsWhere {i: $i, t: $t, x: $x})', { i: BigInt(i), t, x: found });
+            }
+            const all = 'MATCH (n:CyContainsWhere)';
+            expect(await query(`${all} WHERE n.t CONTAINS n.x RETURN n.i ORDER BY n.i`)).toEqual([0, 2]);
+            expect(await query(`${all} WHERE NOT n.t CONTAINS n.x RETURN n.i ORDER BY n.i`)).toEqual([1]);
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i WITH collect(n.t) AS ts, head(collect(n.x)) AS x RETURN reduce(acc = [], s IN ts | acc + [s CONTAINS x])`
+                )
+            ).toEqual([[true, false, true]]);
+            await clear();
+        });
+
         it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
             // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
             // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its
@@ -2100,6 +2266,217 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [0, true, true],
                 [1, false, false]
             ]);
+        });
+    });
+
+    /**
+     * An aggregate in a `CALL { … }` of the variables the call imports: drivine4j's test of
+     * liberation-data/drivine4j#368, ported for #429. Not in the spec yet. On Oracle, an aggregate in a CALL read a variable
+     * of an unwound row as null, so sum() gave 0 and collect() gave []; Postgres refused an aggregate of an imported
+     * variable alone, count(o), as the row's query's. The rows are Neo4j's (2026.10).
+     */
+    describe('an aggregate in a CALL', () => {
+        it('reads the variables the CALL imports', async () => {
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            const aggregates =
+                'RETURN sum(i + o) AS s, collect(o) AS c, count(o) AS n, max(i * o) AS m } RETURN o, s, c, n, m ORDER BY o';
+            const rows = [
+                [1, 9, [1, 1, 1], 3, 3],
+                [2, 12, [2, 2, 2], 3, 6]
+            ];
+            expect(
+                await query('UNWIND [2] AS o CALL { WITH o UNWIND range(1, 3) AS i RETURN sum(i + o) AS s } RETURN s')
+            ).toEqual([12]);
+            expect(
+                await query('UNWIND [2] AS o CALL { WITH o UNWIND range(1, 3) AS i RETURN collect(o) AS s } RETURN s')
+            ).toEqual([[2, 2, 2]]);
+            // Imported by a WITH, or by the CALL's scope clause.
+            expect(await query(`UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 3) AS i ${aggregates}`)).toEqual(rows);
+            expect(await query(`UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i ${aggregates}`)).toEqual(rows);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o OPTIONAL CALL (o) { UNWIND range(1, 3) AS i RETURN sum(i + o) AS s, collect(o) AS c } RETURN o, s, c ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9, [1, 1, 1]],
+                [2, 12, [2, 2, 2]]
+            ]);
+            // Aggregated in a WITH within the CALL.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 3) AS i WITH sum(i + o) AS t RETURN t * 10 AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 90],
+                [2, 120]
+            ]);
+            // Grouped within the CALL, by a key worked out first where it holds a subquery or a parameter.
+            const grouped = [
+                [1, 0, [3, 5], 2],
+                [1, 1, [2, 4], 2],
+                [2, 0, [4, 6], 4],
+                [2, 1, [3, 5], 4]
+            ];
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 4) AS i RETURN i % 2 AS k, collect(o + i) AS xs, sum(o) AS s } RETURN o, k, xs, s ORDER BY o, k'
+                )
+            ).toEqual(grouped);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 4) AS i RETURN i % 2 AS k, collect(o + i) AS xs, sum(o) AS s } RETURN o, k, xs, s ORDER BY o, k'
+                )
+            ).toEqual(grouped);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 4) AS i RETURN i % $m AS k, collect(o + i) AS xs, sum(o) AS s } RETURN o, k, xs, s ORDER BY o, k',
+                    { m: 2 }
+                )
+            ).toEqual(grouped);
+            // Over an imported node's property.
+            expect(
+                await query(
+                    'MATCH (p:Person) CALL (p) { UNWIND range(1, 2) AS i RETURN sum(p.born + i) AS s, collect(p.name) AS ns, max(p.born) AS b } RETURN p.name, s, ns, b ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 3937, ['Carrie', 'Carrie'], 1967],
+                ['Hugo', 0, ['Hugo', 'Hugo'], null],
+                ['Keanu', 3931, ['Keanu', 'Keanu'], 1964],
+                ['Laurence', 3925, ['Laurence', 'Laurence'], 1961]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person) CALL { WITH p UNWIND [10, 20] AS i RETURN count(p) AS n, sum(i) + max(p.born) AS t } RETURN p.name, n, t ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Carrie', 2, 1997],
+                ['Hugo', 2, null],
+                ['Keanu', 2, 1994],
+                ['Laurence', 2, 1991]
+            ]);
+            // Each row's own values, a null among them; two imports; a map and a relationship.
+            expect(
+                await query(
+                    'UNWIND [1, null] AS o CALL (o) { UNWIND range(1, 3) AS i RETURN count(o) AS n, collect(o) AS c, max(o) AS s } RETURN o, n, c, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 3, [1, 1, 1], 1],
+                [null, 0, [], null]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS a UNWIND [10, 20] AS b CALL { WITH a, b UNWIND range(1, 2) AS i RETURN sum(a * b + i) AS s, collect(a) AS ca, count(b) AS nb } RETURN a, b, s, ca, nb ORDER BY a, b'
+                )
+            ).toEqual([
+                [1, 10, 23, [1, 1], 2],
+                [1, 20, 43, [1, 1], 2],
+                [2, 10, 43, [2, 2], 2],
+                [2, 20, 83, [2, 2], 2]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [{a: 1}, {a: 2}] AS o CALL { WITH o UNWIND range(1, 2) AS i RETURN sum(o.a + i) AS s, collect(o) AS c } RETURN o.a, s, c ORDER BY o.a'
+                )
+            ).toEqual([
+                [1, 5, [{ a: 1 }, { a: 1 }]],
+                [2, 7, [{ a: 2 }, { a: 2 }]]
+            ]);
+            expect(
+                await query(
+                    "MATCH (p:Person {name: 'Laurence'})-[r:ACTED_IN]->() CALL { WITH r UNWIND [1, 2] AS i RETURN collect(r.role) AS rs, count(r) AS n } RETURN p.name, rs, n"
+                )
+            ).toEqual([['Laurence', ['Morpheus', 'Morpheus'], 2]]);
+            // In each query of a UNION in the CALL, in a CALL within the CALL, and in a CALL after a write.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND [1, 2] AS i RETURN sum(i + o) AS s UNION ALL UNWIND [3] AS i RETURN sum(i + o) AS s } RETURN o, s ORDER BY o, s'
+                )
+            ).toEqual([
+                [1, 4],
+                [1, 5],
+                [2, 5],
+                [2, 7]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND [1, 2] AS j CALL (o, j) { UNWIND range(1, 3) AS i RETURN sum(o * j + i) AS s } RETURN collect(s) AS ss } RETURN o, ss ORDER BY o'
+                )
+            ).toEqual([
+                [1, [9, 12]],
+                [2, [12, 18]]
+            ]);
+            expect(
+                await query(
+                    'CREATE (x:CyCallWrite {v: 1}) WITH x UNWIND range(1, 2) AS o CALL { WITH o, x UNWIND range(1, 2) AS i RETURN sum(i + o) AS s, collect(x.v) AS xs, count(o) AS n } RETURN o, s, xs, n ORDER BY o'
+                )
+            ).toEqual([
+                [1, 5, [1, 1], 2],
+                [2, 7, [1, 1], 2]
+            ]);
+            // Under a RETURN * after a WITH that names what it passes on; and a variable the CALL unwinds itself, of a
+            // name the row has.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL { WITH o UNWIND range(1, 3) AS i WITH sum(i + o) AS s RETURN * } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i WITH sum(i + o) AS s, collect(o) AS c RETURN * } RETURN o, s, c ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9, [1, 1, 1]],
+                [2, 12, [2, 2, 2]]
+            ]);
+            expect(
+                await query('UNWIND [1, 2] AS o CALL { UNWIND [5, 6] AS o RETURN sum(o) AS s } RETURN o, s ORDER BY o')
+            ).toEqual([
+                [1, 11],
+                [2, 11]
+            ]);
+            // Under a RETURN that aggregates after a WITH *; an aggregate within a comprehension or a CASE; an import
+            // renamed by the first WITH; a boolean and a path imported.
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i WITH * RETURN sum(i + o) AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    "UNWIND [1, 2] AS o CALL (o) { UNWIND range(1, 3) AS i RETURN [x IN collect(o) | x + 1] AS c, CASE WHEN count(o) > 2 THEN 'many' ELSE 'few' END AS k } RETURN o, c, k ORDER BY o"
+                )
+            ).toEqual([
+                [1, [2, 2, 2], 'many'],
+                [2, [3, 3, 3], 'many']
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o CALL (o) { WITH o AS x UNWIND range(1, 3) AS i RETURN sum(x + i) AS s } RETURN o, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, 9],
+                [2, 12]
+            ]);
+            expect(
+                await query(
+                    'UNWIND [1, 2] AS o WITH o, o > 1 AS b CALL (o, b) { UNWIND [1, 2] AS i RETURN collect(b) AS bs, sum(i + o) AS s } RETURN o, bs, s ORDER BY o'
+                )
+            ).toEqual([
+                [1, [false, false], 5],
+                [2, [true, true], 7]
+            ]);
+            expect(
+                await query(
+                    "MATCH path = (p:Person {name: 'Laurence'})-[:ACTED_IN]->() CALL (path) { UNWIND [1, 2] AS i RETURN count(path) AS n, collect(length(path)) AS ls } RETURN n, ls"
+                )
+            ).toEqual([[2, [1, 1]]]);
         });
     });
 
