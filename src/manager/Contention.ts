@@ -46,6 +46,17 @@ export function ddlContended(failure: unknown): boolean {
 }
 
 /**
+ * Whether a SQL store refused schema statements for good, so that running them again would fail the same way: the user
+ * may not make tables (ORA-01031 on Oracle, 42501 on Postgres), or the database may only be read (ORA-16000, and 25006,
+ * as on a hot standby). A graph's first-use block refused so is not run again by its provider (see `FirstConnection`).
+ * The failure and each cause under it are looked at. drivine4j's `JdbcConnectionProvider.cannotMake` and
+ * drivine-python's `will_not_make` take the same codes.
+ */
+export function ddlWillNotMake(failure: unknown): boolean {
+    return anyCause(failure, (it) => /ORA-(01031|16000)\b/.test(it.message ?? '') || ['42501', '25006'].includes(it.code));
+}
+
+/**
  * The failures a run of {@link whenNotContended} threw: ran out of attempts on, or would not run again. Held weakly, by
  * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does.
  */

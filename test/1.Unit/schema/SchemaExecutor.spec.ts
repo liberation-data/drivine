@@ -95,7 +95,7 @@ describe('SchemaExecutor', () => {
     /** A provider whose first connection runs a graph's first-use block that fails with `message` each time. */
     const firstUseFailing = (message: string): { provider: ConnectionProvider; runs: () => number } => {
         let runs = 0;
-        const first = new FirstConnection();
+        const first = new FirstConnection(() => "graph 'tenant_a'");
         const graph = new OracleGraph('tenant_a');
         const connection = {
             execute: async () => {

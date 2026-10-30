@@ -3,6 +3,7 @@ import { OracleConnectionProvider, oracleRefusal } from '@/connection/oracle/Ora
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { DrivineLogger } from '@/logger';
 
 const oracledb = require('oracledb');
 
@@ -177,5 +178,78 @@ describe('The Oracle version, read on the first connection', () => {
         const before = unread.execute.mock.calls.length;
         await connection.query(new QuerySpecification({ text: 'RETURN 1', language: 'CYPHER' }));
         expect(unread.execute.mock.calls).toHaveLength(before + 1);
+    });
+});
+
+/**
+ * A first-use block the store refuses for good, as a user who may not make tables (ORA-01031) or a database open for
+ * reading only (ORA-16000) does, is warned of once and not run again by the provider: the connection is handed out, so
+ * plain SQL works. Another failure, a busy lock among them, is thrown and run again on the next connection
+ * (liberation-data/drivine4j#453, liberation-data/drivine-python#290).
+ */
+describe('OracleConnectionProvider, over a store it may not make', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    /** A provider whose sessions fail the block with `message` each time, counting the block's runs and the closes. */
+    const providerFailing = (
+        message: string
+    ): { provider: OracleConnectionProvider; blocks: () => number; close: jest.Mock } => {
+        const graph = `wont_make_${Date.now()}`;
+        let blocks = 0;
+        const close = jest.fn();
+        const execute = jest.fn(async (sql: string) => {
+            if (sql === new OracleGraph(graph).ensuring) {
+                blocks++;
+                return Promise.reject(Object.assign(new Error(message), { code: message.slice(0, 9) }));
+            }
+            return Promise.resolve(
+                sql.includes("SYS_CONTEXT('USERENV', 'SID')") ? { rows: [{ SID: '7' }] } : { rows: [] }
+            );
+        });
+        jest.spyOn(oracledb, 'createPool').mockResolvedValue({
+            getConnection: async () => Promise.resolve({ execute, close })
+        });
+        const provider = new OracleConnectionProvider('ORACLE', DatabaseType.ORACLE, {
+            connectString: 'host:1521/svc',
+            graph
+        });
+        return { provider, blocks: () => blocks, close };
+    };
+
+    it('should hand out each connection, warn once, and not run the block again, where the user or the database may not make the tables', async () => {
+        for (const message of [
+            'ORA-01031: insufficient privileges\nORA-06512: at line 40',
+            'ORA-16000: database or pluggable database open for read-only access\nORA-06512: at line 40'
+        ]) {
+            const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+            const { provider, blocks, close }: ReturnType<typeof providerFailing> = providerFailing(message);
+            await expect(provider.connect()).resolves.toBeDefined();
+            await expect(provider.connect()).resolves.toBeDefined();
+            expect(blocks()).toEqual(1);
+            expect(close).not.toHaveBeenCalled();
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn.mock.calls[0][0]).toContain(message.slice(0, 9));
+            jest.restoreAllMocks();
+        }
+    });
+
+    it('should check again on a new provider over the same store', async () => {
+        jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        const message = 'ORA-01031: insufficient privileges';
+        const first = providerFailing(message);
+        await first.provider.connect();
+        const second = providerFailing(message);
+        await second.provider.connect();
+        expect(second.blocks()).toEqual(1);
+    });
+
+    it('should throw a busy lock, hand the connection back, and run the block again on the next connection', async () => {
+        const { provider, blocks, close }: ReturnType<typeof providerFailing> = providerFailing(
+            'ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'
+        );
+        await expect(provider.connect()).rejects.toThrow(/ORA-00054/);
+        await expect(provider.connect()).rejects.toThrow(/ORA-00054/);
+        expect(blocks()).toEqual(2);
+        expect(close).toHaveBeenCalledTimes(2);
     });
 });

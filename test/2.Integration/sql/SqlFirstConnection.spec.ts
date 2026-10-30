@@ -266,11 +266,18 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
                 expect(await names(readerOn('POSTGRES_FC_RO', graph))).toEqual(['Edsger']);
             });
 
-            it('should refuse each connection to a graph not made, and hand each back to the pool', async () => {
+            /**
+             * The reader may not make the graph's tables: the provider warns once and hands out each connection, so
+             * plain SQL runs, and a statement over the tables says they are not there (liberation-data/drivine#468).
+             */
+            it('should hand out each connection over a graph not made, plain SQL running and the graph not there', async () => {
                 const reader = readerOn('POSTGRES_FC_RO_NEW', graphFor('ronew'));
                 // More tries than the pool's two connections: one kept back would leave the last waiting.
                 for (let i = 0; i < 4; i++) {
-                    await expect(names(reader)).rejects.toThrow(/permission denied/);
+                    expect(await reader.getOne<any>(new QuerySpecification('SELECT 1 AS one'))).toMatchObject({
+                        one: 1
+                    });
+                    await expect(names(reader)).rejects.toThrow(/does not exist/);
                 }
             });
         });
