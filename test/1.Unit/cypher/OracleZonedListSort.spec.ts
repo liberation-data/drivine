@@ -139,6 +139,10 @@ describe('A list of zoned values in compiled Cypher', () => {
         const keys = new OracleCypherCompiler('g').compile(keyed).sql;
         expect(keys).toContain('PASSING dg_r.n - 1');
         expect(keys).not.toContain('JSON_TABLE((SELECT JSON_DATAGUIDE');
+        // Worked out by the lateral view itself: a subquery in its select list is worked out once, for every row
+        // (liberation-data/drivine4j#414, here #434).
+        expect(keys).toContain('LATERAL (SELECT /*+ NO_MERGE */ JSON_DATAGUIDE(');
+        expect(keys).not.toContain('(SELECT JSON_DATAGUIDE');
     });
 
     it('should read a list of temporal values a WITH takes out of an unwound map item by item on Oracle too', () => {

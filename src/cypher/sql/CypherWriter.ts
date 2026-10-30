@@ -2464,7 +2464,8 @@ export class CypherWriter {
             itemColumns,
             selectList,
             name,
-            compared
+            compared,
+            aggregating
         );
         const groupBy = aggregating ? this.groupBy(select, items, itemColumns) : [];
         const inner = [
@@ -2574,7 +2575,8 @@ export class CypherWriter {
         itemColumns: [string, Value][],
         selectList: string[],
         name: string,
-        compared: boolean
+        compared: boolean,
+        aggregating: boolean
     ): Sorted {
         const byName: Scope = new Map(
             items.map((item, i) => [item.name, columnsOf(itemColumns[i][1], name, itemColumns[i][0])])
@@ -2597,6 +2599,7 @@ export class CypherWriter {
             const column = `s${i + 1}`;
             // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.
             const item = items.findIndex((it) => sameExpression(it.expression, sort.expression));
+            const overItems = aggregating ? this.overItems(sort.expression, items, byName) : undefined;
             if (
                 contains(sort.expression, (it) => it.kind === 'Variable' && madeAnew.has(it.name)) &&
                 [...variablesIn(sort.expression)].every((it) => byName.has(it))
@@ -2613,15 +2616,26 @@ export class CypherWriter {
                 )
             ) {
                 after.set(column, this.sortable(this.expression(sort.expression, byName)));
+            } else if (overItems !== undefined) {
+                // Where rows are grouped, so is one whose every aggregate and key is an item, each such part read by its
+                // item's name, as aggregatesFirst reads it: worked out in the query, each key is read again as the GROUP BY
+                // reads it (keysRead), on Oracle through its text (itemProperty), at each level of an operation over it, and
+                // `me.age + count(you.age)` compiled to twice what it did before (liberation-data/drivine4j#413).
+                after.set(column, this.sortable(this.expression(overItems, byName)));
             } else {
                 // One that aggregates reads the rows it aggregates, as an item does; so does one that reads an aggregate
                 // aggregatesFirst worked out first, which no item is. Beside a variable-length walk it binds no value in a
                 // subquery: carried out of a WITH's query, one so bound closes Oracle's (23.26) session (ORA-03113), as
                 // `WITH b ORDER BY toString(coalesce(b.name, b.title))` did, its argument long enough to be bound. Elsewhere
                 // it does, so operations nested in it compile to a statement that grows with them, not exponentially.
-                const scope = new Map([...select.scope, ...compiled]);
-                const term = (): void =>
-                    carried(column, () => this.expression(sort.expression, scope), sort.expression);
+                // Where rows are grouped, a part of it that is an item keying the groups reads that item's column value, as
+                // the GROUP BY does: Oracle refuses another read of the key (ORA-00979), as `me.age` read from the
+                // properties beside `me.age AS age` read through its text (itemProperty) was (liberation-data/drivine4j#413).
+                const [read, keys] = aggregating
+                    ? this.keysRead(sort.expression, items, itemColumns)
+                    : [sort.expression, new Map<string, Value>()];
+                const scope = new Map([...select.scope, ...compiled, ...keys]);
+                const term = (): void => carried(column, () => this.expression(read, scope), sort.expression);
                 if (select.walks) {
                     this.unshared(term);
                 } else {
@@ -2643,6 +2657,58 @@ export class CypherWriter {
             sorted,
             anew
         };
+    }
+
+    /**
+     * `term`, an order term of a grouping projection, with each part of it that is one of `items` read by that item's
+     * name, where so it reads no aggregate, no subquery and nothing but the items, `byName`; undefined where it does. A
+     * variable an item is named after is that item, not the variable of that name before it.
+     */
+    private overItems(term: Expression, items: ProjectionItem[], byName: Scope): Expression | undefined {
+        const read = replaced(term, (part): Expression | undefined => {
+            if (part.kind === 'Variable' && byName.has(part.name)) {
+                return part;
+            }
+            const named = items.find((it) => sameExpression(it.expression, part))?.name;
+            return named !== undefined ? { kind: 'Variable', name: named } : undefined;
+        });
+        return !holdsSubquery(read) &&
+            !contains(read, isAggregate) &&
+            [...variablesIn(read)].every((it) => byName.has(it))
+            ? read
+            : undefined;
+    }
+
+    /**
+     * `term`, each part of it that is an item of a grouping projection keying the groups, one of `items`, read by a name
+     * no variable has, and what each such name is bound to: the item's value among `itemColumns`, as it is grouped by.
+     * {@link replaced} reads no comprehension's, quantifier's or reduce's own expressions, so a part it reads is never one
+     * whose variables such a one binds again: a key is read beside `[me IN [1] | me]` as anywhere else.
+     */
+    private keysRead(
+        term: Expression,
+        items: ProjectionItem[],
+        itemColumns: [string, Value][]
+    ): [Expression, Map<string, Value>] {
+        const keys = new Map<string, number>();
+        items.forEach((item, i) => {
+            const key = expressionKey(item.expression);
+            if (!contains(item.expression, isAggregate) && variablesIn(item.expression).size > 0) {
+                keys.set(key, i);
+            }
+        });
+        const bound = new Map<string, Value>();
+        const read = replaced(term, (part): Expression | undefined => {
+            const i = keys.get(expressionKey(part));
+            if (i === undefined) {
+                return undefined;
+            }
+            // Named as no variable is, unless quoted so.
+            const name = `#key ${i + 1}`;
+            bound.set(name, itemColumns[i][1]);
+            return { kind: 'Variable', name };
+        });
+        return [read, bound];
     }
 
     /** What a projection that aggregates is grouped by: what its items hold outside their aggregates. */
