@@ -216,6 +216,39 @@ function propertyRead(json: string): [string, string] | undefined {
 }
 
 /**
+ * The value at the path `at` in the JSON `json`, with `passing` its `PASSING` clause where it has one: a text read with
+ * that path from `json` written out as text, anything else as JSON. `typed` is the path to its kind, `.type()`.
+ */
+function throughText(json: string, at: string, typed: string, passing: string = ''): string {
+    return (
+        `CASE WHEN JSON_VALUE(${json}, ${typed}${passing}) = 'string' ` +
+        `THEN JSON(JSON_QUERY(JSON_SERIALIZE(${json} RETURNING CLOB), ${at}${passing} RETURNING CLOB)) ` +
+        `ELSE JSON_QUERY(${json}, ${at}${passing} RETURNING JSON) END`
+    );
+}
+
+/**
+ * The item at the path `at` of the JSON list `json`, `'$[0]'`, read as `throughText` reads a value: a text from the list
+ * written out as text, anything else as JSON, as before.
+ *
+ * **A workaround for the Oracle bug of `OracleCypherCompiler.itemProperty` (liberation-data/drivine#455), to be removed
+ * with it.** A statement crashed the session where it took a text past 32 KB from a list as JSON, `JSON_QUERY(list,
+ * '$[$i]' RETURNING JSON)`, for each of two or more rows, from the second run on: an item of a list `split` made, read by
+ * index, by `head` or `last`, or after a slice, of a stored list, and of one a `WITH` passed on. Its text read straight
+ * from the list by its path, `JSON_VALUE(list, '$[0]' RETURNING CLOB)`, ran clean too, but a value the item is read as
+ * whole, returned or passed on, needs it as JSON. An item is read as text only where it is a text: the list is written
+ * out whole for it, so a short text of a long list costs that list's length. An unwound item, which `JSON_TABLE` takes
+ * out, ran clean, and is read as before. To remove it, read the item with `JSON_QUERY(… RETURNING JSON)` again, once an
+ * Oracle release no longer crashes on the repro in drivine4j's
+ * [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md),
+ * and `CypherSpec.spec.ts`'s "a text past 32 KB that is an item of a list, read by its place on two rows, is read
+ * whole" test still passes without it.
+ */
+function listItem(json: string, at: string, passing: string = ''): string {
+    return throughText(json, at, `${at.slice(0, -1)}.type()'`, passing);
+}
+
+/**
  * `sql` with each value it reads out of the JSON `json` with `JSON_VALUE(json, '$…')` read from the properties by the
  * property's own path instead, where `json` is a property as `propertyOf` reads it, `JSON_QUERY(props, '$.a' RETURNING
  * JSON)`. Oracle closed the session (ORA-03113) on statements, one row each, that took a text past 32 KB out of a node's
@@ -530,8 +563,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * item that is the property itself is read so: a property inside an item (`[n.a]`, `collect(n.a)`) is read as
      * {@link propertyOf} reads it, and isn't worked around. Read so, a text past 32 KB still can't be sorted by, grouped
      * by or made `DISTINCT`: Oracle refuses it (ORA-40180), as it does any JSON that large, and the session stays open.
-     * A write's block is worked around too, where it takes a text from the row it is writing: see {@link rowValue}; and
-     * so is an unwound item's value an item gives: see {@link itemValue}.
+     * A write's block is worked around too, where it takes a text from the row it is writing: see {@link rowValue}; so
+     * is an unwound item's value an item gives: see {@link itemValue}; and so is an item of a list read by its place:
+     * see {@link listItem}.
      *
      * To remove it, delete this override, so the item is read as {@link propertyOf} reads it, `JSON_QUERY … RETURNING
      * JSON`, once an Oracle release no longer crashes on the repro, and `OracleLongProperty.spec.ts` and the Cypher
@@ -601,13 +635,14 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return this.throughText(json, [key]);
     }
 
-    /** Counted from the end where negative: a JSON path counts from the start. */
+    /** Counted from the end where negative: a JSON path counts from the start. Read as {@link listItem} reads an item. */
     element(json: string, index: string): string {
         return this.shared([json, index], ([list, i]) => {
             const at = `JSON_VALUE(${i}, '$' RETURNING NUMBER)`;
-            return (
-                `JSON_QUERY(${list}, '$[$i]' PASSING CASE WHEN ${at} < 0 THEN JSON_VALUE(${list}, '$.size()' RETURNING NUMBER) + ${at} ` +
-                `ELSE ${at} END AS "i" RETURNING JSON)`
+            return listItem(
+                list,
+                `'$[$i]'`,
+                ` PASSING CASE WHEN ${at} < 0 THEN JSON_VALUE(${list}, '$.size()' RETURNING NUMBER) + ${at} ELSE ${at} END AS "i"`
             );
         });
     }
@@ -1392,14 +1427,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /** The value at `keys` in the JSON `json`: a text read with one path from `json` written out as text, anything else as JSON. */
     private throughText(json: string, keys: string[]): string {
-        return this.shared([json], ([x]) => {
-            const at = pathTo(keys);
-            return (
-                `CASE WHEN JSON_VALUE(${x}, ${pathTo(keys, '.type()')}) = 'string' ` +
-                `THEN JSON(JSON_QUERY(JSON_SERIALIZE(${x} RETURNING CLOB), ${at} RETURNING CLOB)) ` +
-                `ELSE JSON_QUERY(${x}, ${at} RETURNING JSON) END`
-            );
-        });
+        return this.shared([json], ([x]) => throughText(x, pathTo(keys), pathTo(keys, '.type()')));
     }
 
     private functionOf(name: string, json: string): string | undefined {
@@ -1415,8 +1443,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             tostring: () => `COALESCE(JSON_SCALAR(${this.asText(json)}), JSON_SCALAR(${this.longText(json)}))`,
             tointeger: () => `JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR)))`,
             tofloat: () => `JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE(${json}, '$') DEFAULT NULL ON CONVERSION ERROR))`,
-            head: () => `JSON_QUERY(${json}, '$[0]' RETURNING JSON)`,
-            last: () => `JSON_QUERY(${json}, '$[last]' RETURNING JSON)`,
+            // An item read as JSON where it is a text past 32 KB crashed the session: see listItem.
+            head: () => listItem(json, `'$[0]'`),
+            last: () => listItem(json, `'$[last]'`),
             abs: () =>
                 `CASE WHEN ${kind(json)} = 'double' THEN JSON_SCALAR(ABS(TO_BINARY_DOUBLE(${this.number(json)}))) ` +
                 `ELSE JSON_SCALAR(ABS(${this.number(json)})) END`,
