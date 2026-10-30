@@ -286,6 +286,11 @@ const names = await pm.query<string>(
   beside another node's table the query lost that node's label and property tests, giving rows its pattern doesn't
   have and values of the wrong node, or crashing the session (ORA-03113)
   ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint.
+- On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
+  is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
+  that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for
+  the statement and not for each row, so `WHERE 'b' IN keys(n)` found nothing
+  ([#448](https://github.com/liberation-data/drivine/issues/448)).
 - On Postgres, float arithmetic, `sum()` and `avg()` are worked out in exact decimal (`numeric`), not as doubles, so
   they are more accurate: `0.1 + 0.2` is `0.3`, where Neo4j gives `0.30000000000000004`. A result differs from a
   graph engine's only around its 16th significant digit, and still comes back as a float. It shows only where a result

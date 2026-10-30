@@ -2644,6 +2644,154 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * A list each row works out by a subquery (#448): drivine4j's tests of liberation-data/drivine4j#433. Not in the spec
+     * yet. On Oracle such a list was worked out by a subquery in a lateral view's select list, which Oracle works out once,
+     * not for each row, where that view is first in a subquery's FROM: the WHEREs found nothing.
+     */
+    describe('a list each row works out by a subquery', () => {
+        /** The cases whose rows differ, or that fail, so a store's every difference shows at once. */
+        const differing = async (cases: [string, any[]][]): Promise<string[]> => {
+            const found: string[] = [];
+            for (const [cypher, rows] of cases) {
+                try {
+                    const given = await query(cypher);
+                    if (!isDeepStrictEqual(given, rows)) {
+                        found.push(`${cypher}: ${JSON.stringify(given)}`);
+                    }
+                } catch (e: any) {
+                    found.push(`${cypher}: ${e.message.split('\n')[0]}`);
+                }
+            }
+            return found;
+        };
+
+        it("x IN a list each row works out by a subquery finds the row's items, in a WHERE, an EXISTS, a RETURN, a quantifier and an UNWIND", async () => {
+            await clear();
+            await query(
+                "CREATE (:K {a: 1}), (:K {b: 2}), (:K {a: 3, b: 4}), (:P {name: 'a'})-[:R]->(:Q {name: 'x'}), " +
+                    "(:P {name: 'b'})-[:R]->(:Q {name: 'y'})"
+            );
+            const each = 'UNWIND [1, 2, 3] AS k WITH k WHERE';
+            const cases: [string, any[]][] = [
+                // The issue's statements.
+                ['UNWIND [1, 2] AS k WITH k WHERE 2 IN [i IN range(1, k) | i] RETURN k', [2]],
+                ["MATCH (n:K) WHERE 'b' IN keys(n) RETURN count(n)", [2]],
+                ["MATCH (n:K) WHERE 'b' IN [k IN keys(n) | k] RETURN count(n)", [2]],
+                [
+                    "UNWIND [{a: 1}, {b: 2}, {a: 3, b: 4}] AS m WITH m WHERE 'b' IN keys(m) RETURN m",
+                    [{ b: 2 }, { a: 3, b: 4 }]
+                ],
+                // A comprehension that filters, and a list a pattern comprehension collects, in a WHERE, an EXISTS and a
+                // RETURN.
+                ['UNWIND [1, 2, 3] AS k WITH k WHERE 3 IN [i IN range(1, k) WHERE i > 1 | i] RETURN k', [3]],
+                ["MATCH (p:P) WHERE 'y' IN [(p)-[:R]->(q) | q.name] RETURN p.name", ['b']],
+                [
+                    "MATCH (p:P) WHERE EXISTS { MATCH (p)-[:R]->(q) WHERE 'y' IN [(p)-->(r) | r.name] } RETURN p.name",
+                    ['b']
+                ],
+                [
+                    "MATCH (n:K) WHERE EXISTS { MATCH (m:K) WHERE m.a = n.a AND 'b' IN keys(n) } RETURN n.a, n.b",
+                    [[3, 4]]
+                ],
+                [
+                    'UNWIND [1, 2] AS k RETURN k, 2 IN [i IN range(1, k) | i] ORDER BY k',
+                    [
+                        [1, false],
+                        [2, true]
+                    ]
+                ],
+                [
+                    "MATCH (p:P) RETURN p.name, 'y' IN [(p)-[:R]->(q) | q.name] ORDER BY p.name",
+                    [
+                        ['a', false],
+                        ['b', true]
+                    ]
+                ],
+                // Quantifiers over such a list.
+                [`${each} any(i IN [j IN range(1, k) | j] WHERE i = 3) RETURN k`, [3]],
+                [`${each} all(i IN [j IN range(1, k) | j] WHERE i < 3) RETURN k ORDER BY k`, [1, 2]],
+                [`${each} none(i IN [j IN range(1, k) | j] WHERE i = 2) RETURN k`, [1]],
+                [`${each} single(i IN [j IN range(1, k) | j] WHERE i >= 2) RETURN k`, [2]],
+                ["MATCH (n:K) WHERE any(x IN keys(n) WHERE x = 'b') RETURN count(n)", [2]],
+                ["MATCH (n:K) WHERE none(x IN keys(n) WHERE x = 'b') RETURN count(n)", [1]],
+                // Unwound beside the table whose row it reads.
+                [
+                    'UNWIND [1, 2] AS k UNWIND [i IN range(1, k) | i] AS j RETURN k, j ORDER BY k, j',
+                    [
+                        [1, 1],
+                        [2, 1],
+                        [2, 2]
+                    ]
+                ],
+                [
+                    'MATCH (p:P) UNWIND [(p)-[:R]->(q) | q.name] AS x RETURN p.name, x ORDER BY p.name',
+                    [
+                        ['a', 'x'],
+                        ['b', 'y']
+                    ]
+                ],
+                // A list that may hold temporal values, which Oracle reads by its places.
+                [
+                    'UNWIND [1, 2] AS k WITH k WHERE 2 IN ' +
+                        "[i IN range(1, k) | CASE WHEN i = 2 THEN 2 ELSE date('2024-01-01') END] RETURN k",
+                    [2]
+                ],
+                [
+                    'UNWIND [1, 2] AS k WITH k WHERE 2 IN ' +
+                        "[i IN range(1, k) | coalesce(CASE WHEN i = 2 THEN 2 END, date('2024-01-01'))] RETURN k",
+                    [2]
+                ],
+                [
+                    "UNWIND [1, 2] AS k UNWIND [i IN range(1, k) | date('2024-01-01') + duration({days: i - 1})] AS t " +
+                        'RETURN k, t.day ORDER BY k, t.day',
+                    [
+                        [1, 1],
+                        [2, 1],
+                        [2, 2]
+                    ]
+                ]
+            ];
+            expect(await differing(cases)).toEqual([]);
+            await clear();
+        });
+
+        it('a list each row works out by a subquery is read for each row in a CALL, a WITH, an OPTIONAL MATCH, a COUNT, a comprehension and reduce', async () => {
+            // Each reads keys(n) where a subquery's FROM may begin with the list's view. Before the fix, Oracle gave the
+            // OPTIONAL MATCH no m.b and the COUNT 0 on every row.
+            await clear();
+            await query('CREATE (:K {a: 1}), (:K {b: 2}), (:K {a: 3, b: 4})');
+            const cases: [string, any[]][] = [
+                ["MATCH (n:K) CALL { WITH n RETURN keys(n) AS ks } WITH n, ks WHERE 'b' IN ks RETURN count(n)", [2]],
+                ["MATCH (n:K) WITH n, [k IN keys(n) | k] AS ks WHERE 'b' IN ks RETURN count(n)", [2]],
+                ["MATCH (n:K) WHERE size([k IN keys(n) WHERE k = 'b']) > 0 RETURN count(n)", [2]],
+                [
+                    "MATCH (n:K) WHERE reduce(s = 0, k IN keys(n) | s + CASE WHEN k = 'b' THEN 1 ELSE 0 END) = 1 " +
+                        'RETURN count(n)',
+                    [2]
+                ],
+                [
+                    "MATCH (n:K) OPTIONAL MATCH (m:K) WHERE m.a = n.a AND 'b' IN keys(m) RETURN n.a, m.b ORDER BY n.a",
+                    [
+                        [1, null],
+                        [3, 4],
+                        [null, null]
+                    ]
+                ],
+                [
+                    "MATCH (n:K) RETURN n.a, COUNT { MATCH (m:K) WHERE 'b' IN keys(n) } ORDER BY n.a",
+                    [
+                        [1, 0],
+                        [3, 3],
+                        [null, 3]
+                    ]
+                ]
+            ];
+            expect(await differing(cases)).toEqual([]);
+            await clear();
+        });
+    });
+
+    /**
      * Two lists ordered item by item with `<`, `<=`, `>` and `>=`: drivine4j's tests of liberation-data/drivine4j#349, ported
      * for #393. Beside the spec's cases since v0.6.19, which hold the rest.
      */
