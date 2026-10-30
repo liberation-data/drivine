@@ -126,6 +126,21 @@ function escapedForRegExp(text: string): string {
  */
 const BOUND_TEXT = 32_767;
 
+/**
+ * The most UTF-16 units of a text `INSTR` looks for in a CLOB: 32,767 of one byte, or of three, or 16,385 pairs, each two
+ * units; one more it refuses (ORA-22828). See `containsText`.
+ */
+const SEARCHED_TEXT = 32_767;
+
+/** How many units of a longer text `containsText` looks for first, with `INSTR`, before comparing it whole there. */
+const SEARCHED_PREFIX = 1000;
+
+/**
+ * The most places `containsText` compares a long text at, as `MODEL`'s `ITERATE` takes a number: 2^32 - 1, far more than
+ * a stored text has units, so the search stops where the text is found or no place is left first.
+ */
+const SEARCHED_PLACES = 4_294_967_295;
+
 /** A text as a `VARCHAR2`, null past 4,000 bytes, and as a CLOB: see `texts`. */
 interface Texts {
     short: string;
@@ -258,7 +273,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /**
      * Whether the texts {@link texts} gives its body are CLOBs: see {@link scalar}, {@link startsWith}, {@link endsWith},
-     * {@link split}, {@link replaceText} and {@link reversedText}, which read them otherwise.
+     * {@link containsText}, {@link split}, {@link replaceText} and {@link reversedText}, which read them otherwise.
      */
     private long = false;
 
@@ -856,9 +871,35 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return this.shared([b], ([x]) => `(SUBSTR(${a}, -LENGTH(${x})) = ${x})`);
     }
 
-    /** Of CLOBs too (see {@link texts}), though `INSTR` looks for no text past 32 KB (ORA-22828). */
+    /**
+     * By `INSTR`, of `VARCHAR2`s, and of CLOBs (see {@link texts}) where the text looked for is at most
+     * {@link SEARCHED_TEXT} UTF-16 units: `INSTR` refuses a longer one (ORA-22828, liberation-data/drivine4j#312), and
+     * `DBMS_LOB.INSTR` one past 4,000 bytes (ORA-22835). A longer one is in the text where the two are as long and
+     * `DBMS_LOB.COMPARE` finds them equal, and where it is shorter, where {@link searched} finds it. The CLOBs are bound,
+     * so a property is read inside the bound subquery: see {@link texts}.
+     *
+     * Each way gives a number, 1 where the text is found, and only the `CASE` that chooses between them is compared with
+     * 1: `(SELECT … MODEL …) = 1` and `> 0` were false where the subquery alone gave 1, as was a `CASE` with the
+     * comparison in a branch; a `CASE` of numbers compared outside gave the right answer in a select, a `WHERE`, a cross
+     * join, a `COUNT(CASE …)` and a PL/SQL block.
+     *
+     * Over an aggregate's result ({@link overAggregates}) the CLOBs are looked for by `INSTR` alone, as before: Oracle
+     * reads no aggregate of the query it is in from a subquery (ORA-00937), and the bound CLOBs are one. drivine4j works
+     * such an expression's aggregates out first (its `bindsOverAggregates`, ported by liberation-data/drivine#414), where
+     * the search runs as anywhere else; until then, a text past {@link SEARCHED_TEXT} units looked for over an
+     * aggregate's result still raises ORA-22828 here.
+     */
     containsText(a: string, b: string): string {
-        return `(INSTR(${a}, ${b}) > 0)`;
+        if (!this.long || this.overAggregates) {
+            return `(INSTR(${a}, ${b}) > 0)`;
+        }
+        return this.bound(
+            [a, b],
+            ([t, x]) =>
+                `(CASE WHEN ${t} IS NULL OR ${x} IS NULL THEN NULL WHEN LENGTH(${x}) <= ${SEARCHED_TEXT} THEN SIGN(INSTR(${t}, ${x})) ` +
+                `WHEN LENGTH(${x}) >= LENGTH(${t}) THEN CASE WHEN LENGTH(${x}) = LENGTH(${t}) AND DBMS_LOB.COMPARE(${t}, ${x}) = 0 THEN 1 ELSE 0 END ` +
+                `ELSE ${this.searched(t, x)} END = 1)`
+        );
     }
 
     /** Of a property, read from the properties by its own path: see `direct`. */
@@ -1289,6 +1330,29 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     withoutLabel(labels: string, label: string): string {
         return `JSON_TRANSFORM(${labels}, REMOVE ${literal(`$[*]?(@ == ${quoted(label)})`)})`;
+    }
+
+    /**
+     * 1 where the CLOB `x`, longer than {@link SEARCHED_TEXT} units and shorter than the CLOB `t`, is in `t`, else -1. At
+     * each place in turn where its first {@link SEARCHED_PREFIX} units are, `INSTR` finding each from the one before, it
+     * is compared whole by `DBMS_LOB.COMPARE`. A recursive `WITH` would carry the place from one to the next, but reads no
+     * column of the row it is in (ORA-00904); the `MODEL` clause carries it, and does. So the time grows with the length
+     * of `t` and with how many places are compared, each as far as the two are equal: as `INSTR`'s own, which compares at
+     * each place.
+     *
+     * The first units may end on the first of a pair, which `SUBSTR` of a CLOB cuts where `DBMS_LOB.SUBSTR` refuses to
+     * (ORA-22831): `INSTR` finds the half where the whole pair is, and the comparison is of the whole text.
+     */
+    private searched(t: string, x: string): string {
+        const prefix = `SUBSTR(${x}, 1, ${SEARCHED_PREFIX})`;
+        const found =
+            `CASE WHEN cs_at[0] = 0 OR cs_at[0] > LENGTH(${t}) - LENGTH(${x}) + 1 THEN -1 ` +
+            `WHEN DBMS_LOB.COMPARE(${t}, ${x}, LENGTH(${x}), cs_at[0], 1) = 0 THEN 1 ELSE 0 END`;
+        return (
+            `(SELECT cs_found FROM DUAL MODEL DIMENSION BY (0 cs_i) MEASURES (INSTR(${t}, ${prefix}) cs_at, 0 cs_found) ` +
+            `RULES ITERATE (${SEARCHED_PLACES}) UNTIL (cs_found[0] <> 0) ` +
+            `(cs_found[0] = ${found}, cs_at[0] = CASE WHEN cs_found[0] = 0 THEN INSTR(${t}, ${prefix}, cs_at[0] + 1) ELSE cs_at[0] END))`
+        );
     }
 
     /**
