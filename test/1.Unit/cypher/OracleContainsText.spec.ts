@@ -93,7 +93,10 @@ describe('CONTAINS of a text in compiled Cypher', () => {
         ]) {
             const sql = oracle(cypher);
             expect([cypher, count(sql, 'MODEL DIMENSION BY')]).toEqual([cypher, 1]);
-            expect(sql).toMatch(/NO_MERGE \*\/ CASE WHEN JSON_VALUE\(w\d+\.c\d+, '\$\[0\]\.type\(\)'\) = 'string'/);
+            // The item is read through its text, as listItem reads it (liberation-data/drivine#462), of the worked-out column.
+            expect(sql).toMatch(
+                /NO_MERGE \*\/ CASE WHEN JSON_VALUE\(CASE WHEN JSON_VALUE\(w\d+\.c\d+, '\$\[0\]\.type\(\)'\) = 'string'/
+            );
         }
     });
 });
