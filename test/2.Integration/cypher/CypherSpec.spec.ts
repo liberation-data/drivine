@@ -1137,9 +1137,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         it("CONTAINS of a text past 32 KB in an aggregate's argument, over an aggregate's result and beside a grouping key", async () => {
             // On Oracle the search of a text past 32,767 UTF-16 units is a subquery (#457): here an aggregate reads it,
             // it reads an aggregate's result, and it is a grouping key. drivine4j's test of liberation-data/drivine4j#312.
-            // Over an aggregate's result Oracle looks only for a text of 32,767 units or fewer until #414 works the
-            // aggregates out first, as drivine4j does, so there it looks for the last 30,000 units.
-            const over = (x: string): string => (store.type === DatabaseType.ORACLE ? `right(${x}, 30000)` : x);
+            // Over an aggregate's result, the aggregate is worked out first (#414).
             await clear();
             const long = 'aB'.repeat(20_000);
             const found = `${'aB'.repeat(19_000)}c`;
@@ -1174,20 +1172,31 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [2, true, 1]
             ]);
             expect(
-                await query(
-                    `${all} WITH n ORDER BY n.i RETURN head(collect(n.t)) CONTAINS ${over('head(collect(n.x))')}`
-                )
+                await query(`${all} WITH n ORDER BY n.i RETURN head(collect(n.t)) CONTAINS head(collect(n.x))`)
             ).toEqual([true]);
             expect(
                 await query(
-                    `${all} WITH n ORDER BY n.i RETURN n.k AS k, head(collect(n.t)) CONTAINS ${over(
-                        'last(collect(n.x))'
-                    )} AS c ORDER BY k`
+                    `${all} WITH n ORDER BY n.i RETURN n.k AS k, head(collect(n.t)) CONTAINS last(collect(n.x)) AS c ORDER BY k`
                 )
             ).toEqual([
                 [0, true],
                 [1, false]
             ]);
+            // And as an order term, beside a key and a count, and in a DISTINCT projection.
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i RETURN n.k AS k, count(*) AS c ORDER BY head(collect(n.t)) CONTAINS last(collect(n.x)) DESC`
+                )
+            ).toEqual([
+                [0, 2],
+                [1, 1]
+            ]);
+            // Not of max(): Oracle sorts no JSON text past 32 KB (ORA-40180).
+            expect(
+                await query(
+                    `${all} WITH n ORDER BY n.i RETURN DISTINCT toUpper(head(collect(n.t))) CONTAINS toUpper(last(collect(n.x))) AS c`
+                )
+            ).toEqual([true]);
             await clear();
         });
 
@@ -2301,6 +2310,206 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * Operations over an aggregate's result, worked out over the aggregate's column where they would bind a value
+     * (#414): drivine4j's test of liberation-data/drivine4j#373. The three aggregates concatenated compiled to 68 MB on
+     * Postgres, and past the longest text JavaScript holds on Oracle.
+     */
+    describe("operations over an aggregate's result", () => {
+        it("texts, text functions and arithmetic over an aggregate's result, beside grouping keys, a walk, DISTINCT and an order", async () => {
+            await clear();
+            await query(
+                "CREATE (a:CyAgg {k: 'x', title: 'Dr', first: 'Ann', last: 'Bell', name: ' Bo ', a: 1, b: 10})-[:NEXT]->" +
+                    "(b:CyAgg {k: 'x', title: 'Mr', first: 'Cy', last: 'Ames', name: ' Al ', a: 3, b: 20})-[:NEXT]->" +
+                    "(:CyAgg {k: 'y', title: 'Ms', first: 'Di', last: 'Cole', name: ' Ed ', a: 5, b: 30})"
+            );
+            const all = 'MATCH (n:CyAgg)';
+            const ordered = 'MATCH (n:CyAgg) WITH n ORDER BY n.a';
+            const cases: [string, any[]][] = [
+                [`${all} RETURN max(n.title) + ': ' + max(n.first) + ' ' + max(n.last)`, ['Ms: Di Cole']],
+                [
+                    `${ordered} RETURN head(collect(n.title)) + ': ' + head(collect(n.first)) + ' ' + head(collect(n.last))`,
+                    ['Dr: Ann Bell']
+                ],
+                [
+                    `${ordered} RETURN [toLower(toLower(toLower(toLower(collect(n.name)[0])))), trim(trim(max(n.name))), ` +
+                        'substring(substring(toUpper(max(n.first)), 0), 1), toLower(trim(head(collect(n.name))))]',
+                    [[' bo ', 'Ed', 'I', 'bo']]
+                ],
+                [`${all} RETURN [sum(n.a) / count(*), (sum(n.a) + sum(n.b)) * 2 / count(*) - max(n.a)]`, [[3, 41]]],
+                // Beside a grouping key, ordered by it, and by an operation over aggregates, which Neo4j sorts by only
+                // where it is an item.
+                [
+                    `${all} RETURN n.k AS k, max(n.title) + ': ' + toLower(max(n.last)) AS t ORDER BY k`,
+                    [
+                        ['x', 'Mr: bell'],
+                        ['y', 'Ms: cole']
+                    ]
+                ],
+                [
+                    `${all} RETURN n.k AS k, toLower(min(n.last)) + max(n.first) AS t ORDER BY toLower(min(n.last)) + max(n.first) DESC`,
+                    [
+                        ['y', 'coleDi'],
+                        ['x', 'amesCy']
+                    ]
+                ],
+                [
+                    `${all} RETURN n.k AS k, sum(n.b) / count(*) AS m ORDER BY sum(n.b) / count(*) DESC`,
+                    [
+                        ['y', 30],
+                        ['x', 15]
+                    ]
+                ],
+                // DISTINCT, with a key and without.
+                [
+                    `${all} RETURN DISTINCT n.k AS k, toLower(max(n.first)) + toString(count(*)) AS t ORDER BY k`,
+                    [
+                        ['x', 'cy2'],
+                        ['y', 'di1']
+                    ]
+                ],
+                [`${all} RETURN DISTINCT max(n.title) + ': ' + max(n.first) + ' ' + max(n.last)`, ['Ms: Di Cole']]
+            ];
+            // Beside a variable-length walk, in an item, and in an order term too.
+            const walk = 'MATCH (s:CyAgg)-[:NEXT*1..2]->(e:CyAgg)';
+            const sorted = 'toLower(toLower(max(e.last))) + toString(sum(e.a))';
+            cases.push(
+                [`${walk} RETURN min(e.title) + ': ' + min(e.first) + ' ' + min(e.last)`, ['Mr: Cy Ames']],
+                [
+                    `${walk} RETURN s.first AS s, ${sorted} AS t ORDER BY ${sorted}`,
+                    [
+                        ['Cy', 'cole5'],
+                        ['Ann', 'cole8']
+                    ]
+                ],
+                [
+                    `${walk} RETURN s.first AS s, ${sorted} AS t ORDER BY ${sorted} DESC SKIP 1 LIMIT 1`,
+                    [['Cy', 'cole5']]
+                ],
+                // An order term that reads an item by its name beside an aggregate, with a walk and without.
+                [
+                    `${all} RETURN n.k AS k, sum(n.a) AS m ORDER BY toString(10 - sum(n.a)) + toLower(toLower(k))`,
+                    [
+                        ['y', 5],
+                        ['x', 4]
+                    ]
+                ],
+                [
+                    `${walk} RETURN s.first AS s, sum(e.a) AS c ORDER BY toLower(toLower(s)) + toString(sum(e.a)) DESC`,
+                    [
+                        ['Cy', 5],
+                        ['Ann', 8]
+                    ]
+                ],
+                // Where a comprehension's own name hides an item's, and where the item's expression reads a name the
+                // comprehension binds.
+                [
+                    `${all} RETURN n.k AS k, sum(n.a) AS m ORDER BY toString([k IN [10] | k - m][0]) + toString(sum(n.a))`,
+                    [
+                        ['y', 5],
+                        ['x', 4]
+                    ]
+                ],
+                [
+                    `${all} RETURN n.k AS k, sum(n.a) AS m ORDER BY [n IN ['b'] | k + n][0] + toString(sum(n.a)) DESC`,
+                    [
+                        ['y', 5],
+                        ['x', 4]
+                    ]
+                ]
+            );
+            // Beside a key that is an expression, in a CASE and in a map.
+            const texts = "toLower(max(n.title)) + ': ' + toLower(max(n.last))";
+            cases.push(
+                [
+                    `${all} RETURN n.a + 1 AS k, ${texts} AS t ORDER BY k`,
+                    [
+                        [2, 'dr: bell'],
+                        [4, 'mr: ames'],
+                        [6, 'ms: cole']
+                    ]
+                ],
+                [
+                    `${all} RETURN n.k AS k, CASE WHEN count(*) > 1 THEN ${texts} ELSE '' END AS t ORDER BY k`,
+                    [
+                        ['x', 'mr: bell'],
+                        ['y', '']
+                    ]
+                ],
+                [
+                    `${all} RETURN n.k AS k, {t: ${texts}, c: count(*) + 1} AS m ORDER BY k`,
+                    [
+                        ['x', { t: 'mr: bell', c: 3 }],
+                        ['y', { t: 'ms: cole', c: 2 }]
+                    ]
+                ],
+                // Over no rows, the aggregate is null, and so is what is worked out over it; a count is 0.
+                [`${all} WHERE n.k = 'z' RETURN toLower(max(n.title)) + '!'`, [null]],
+                [`${all} WHERE n.k = 'z' RETURN [toLower(toString(count(*))) + '!', count(*) + 1]`, [['0!', 1]]]
+            );
+            for (const [cypher, rows] of cases) {
+                expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
+            }
+            await clear();
+        });
+
+        it("a long text reversed, and a map's keys read, over an aggregate's result", async () => {
+            // On Oracle each is read in a subquery, which reads no aggregate of the query it is in (ORA-00937).
+            await clear();
+            const long = `${'aB'.repeat(2_499)}é`;
+            const reversed = [...long].reverse().join('');
+            await query(
+                'CREATE (:CyAggText {i: 1, k: 1, t: $t}), (:CyAggText {i: 2, k: 1, t: $s}), (:CyAggText {i: 3, k: 2, t: $s})',
+                {
+                    t: long,
+                    s: 'abc'
+                }
+            );
+            const all = 'MATCH (n:CyAggText)';
+            const ordered = `${all} WITH n ORDER BY n.i`;
+            const cases: [string, any[]][] = [
+                [`${ordered} RETURN reverse(head(collect(n.t)))`, [reversed]],
+                [`${ordered} RETURN toLower(reverse(toUpper(head(collect(n.t)))))`, [reversed.toLowerCase()]],
+                [
+                    `${ordered} RETURN n.k AS k, reverse(head(collect(n.t))) AS r ORDER BY k`,
+                    [
+                        [1, reversed],
+                        [2, 'cba']
+                    ]
+                ],
+                // A map's keys come in no order Cypher promises: they are compared sorted.
+                [`${ordered} RETURN keys(head(collect({b: n.t, a: n.i})))`, [['a', 'b']]],
+                [`${ordered} RETURN keys(last(collect(properties(n))))`, [['i', 'k', 't']]],
+                [
+                    `${ordered} RETURN n.k AS k, keys(head(collect({b: n.i, a: n.k}))) AS ks, count(*) AS c ORDER BY k`,
+                    [
+                        [1, ['a', 'b'], 2],
+                        [2, ['a', 'b'], 1]
+                    ]
+                ],
+                // Neo4j sorts by an operation over aggregates only where it is an item.
+                [
+                    `${ordered} RETURN n.k AS k, size(keys(head(collect({b: n.i, a: n.k})))) + count(*) AS s ` +
+                        'ORDER BY size(keys(head(collect({b: n.i, a: n.k})))) + count(*) DESC, k',
+                    [
+                        [1, 4],
+                        [2, 3]
+                    ]
+                ]
+            ];
+            const sortedKeys = (value: any): any =>
+                Array.isArray(value)
+                    ? value.every((it) => typeof it === 'string')
+                        ? [...value].sort()
+                        : value.map(sortedKeys)
+                    : value;
+            for (const [cypher, rows] of cases) {
+                expect([cypher, sortedKeys(await query(cypher))]).toEqual([cypher, rows]);
+            }
+            await clear();
+        });
+    });
+
+    /**
      * Two lists ordered item by item with `<`, `<=`, `>` and `>=`: drivine4j's tests of liberation-data/drivine4j#349, ported
      * for #393. Beside the spec's cases since v0.6.19, which hold the rest.
      */
@@ -2691,17 +2900,13 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     ['D', 'C', 'B', 'A']
                 ],
                 // An aggregate that is no item; a comprehension that names its own variable as the key's; the key in a
-                // function. On Oracle the comprehension's term compiles to 4.7 MB, which Oracle is still parsing minutes
-                // later: + over an aggregate's result is written out at every level until #414 is ported.
+                // function. On Oracle the comprehension's term compiled to 4.7 MB, which Oracle was still parsing minutes
+                // later, until #414 worked the aggregate out first: + over its result was written out at every level.
                 [`${match} RETURN me.age AS age, count(*) AS c ORDER BY me.age + count(you.age)`, byBoth],
-                ...(store.type === DatabaseType.ORACLE
-                    ? []
-                    : [
-                          [
-                              `${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + size([me IN [1] | me]) + count(you.age)`,
-                              byBoth
-                          ] as [string, any[]]
-                      ]),
+                [
+                    `${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + size([me IN [1] | me]) + count(you.age)`,
+                    byBoth
+                ],
                 [`${match} RETURN me.age AS age, count(*) AS cnt ORDER BY toString(me.age) + count(*)`, byKey],
                 // Two keys, one a part of the other.
                 [

@@ -67,12 +67,12 @@ describe('CONTAINS of a text in compiled Cypher', () => {
         expect(beside).toMatch(/JSON_VALUE\(n1\.props, '\$\.t' RETURNING CLOB\) END AS v\d/);
     });
 
-    it("should take the same search on Oracle in an aggregate's argument, and INSTR alone over an aggregate's result", () => {
+    it("should take the same search on Oracle in an aggregate's argument, and over an aggregate's result worked out first", () => {
         // An aggregate's argument is read from each row, where the CLOBs may be bound.
         expect(
             count(oracle('MATCH (n:Doc) RETURN count(CASE WHEN n.t CONTAINS n.x THEN 1 END)'), 'MODEL DIMENSION BY')
         ).toBe(1);
-        // Past an aggregate's argument, and past an item that aggregates, the CLOBs are bound again.
+        // Past an aggregate's argument too, and past an item that aggregates.
         expect(
             count(
                 oracle(
@@ -80,20 +80,20 @@ describe('CONTAINS of a text in compiled Cypher', () => {
                 ),
                 'MODEL DIMENSION BY'
             )
-        ).toBe(1);
+        ).toBe(2);
         expect(count(oracle('MATCH (n:Doc) RETURN count(*) AS m, n.t CONTAINS n.x AS c'), 'MODEL DIMENSION BY')).toBe(
             1
         );
-        // Oracle reads no aggregate of the query it is in from a subquery (ORA-00937), so over one the CLOBs are looked
-        // for as before, until liberation-data/drivine#414 works the aggregates out first.
+        // Oracle reads no aggregate of the query it is in from a subquery (ORA-00937), so over one the aggregate is worked
+        // out first, in a WITH of its own, and the CLOBs are bound of its column (liberation-data/drivine#414).
         for (const cypher of [
             'MATCH (n:Doc) RETURN head(collect(n.t)) CONTAINS head(collect(n.x))',
             'MATCH (n:Doc) RETURN n.k AS k, head(collect(n.t)) CONTAINS last(collect(n.x)) AS c',
             "MATCH (n:Doc) RETURN n.k AS k, count(*) AS c ORDER BY head(collect(n.t)) CONTAINS 'x'"
         ]) {
             const sql = oracle(cypher);
-            expect([cypher, sql.includes('MODEL'), sql.includes('NO_MERGE */ CASE')]).toEqual([cypher, false, false]);
-            expect(sql).toContain('RETURNING CLOB) END) > 0)');
+            expect([cypher, count(sql, 'MODEL DIMENSION BY')]).toEqual([cypher, 1]);
+            expect(sql).toMatch(/NO_MERGE \*\/ CASE WHEN JSON_VALUE\(w\d+\.c\d+, '\$\[0\]\.type\(\)'\) = 'string'/);
         }
     });
 });

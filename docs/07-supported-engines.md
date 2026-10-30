@@ -263,10 +263,9 @@ const names = await pm.query<string>(
   `toUpper()`, `substring()`, `replace()`, `split()`, `reverse()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads
   a text out of JSON as a `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one
   isn't. `CONTAINS` looks for a text past 32,767 UTF-16 units, which `INSTR` refuses (ORA-22828), by comparing it whole
-  at each place its first 1,000 units are ([#457](https://github.com/liberation-data/drivine/issues/457)); over an
-  aggregate's result (`head(collect(n.t)) CONTAINS $x`) it still fails so, until
-  [#414](https://github.com/liberation-data/drivine/issues/414) works the aggregates out first. A property such a
-  function reads is read from the properties by its own path, which costs about a quarter more on short texts, and a `+`
+  at each place its first 1,000 units are ([#457](https://github.com/liberation-data/drivine/issues/457)), over an
+  aggregate's result too (`head(collect(n.t)) CONTAINS $x`), whose aggregates are worked out first
+  ([#414](https://github.com/liberation-data/drivine/issues/414)). A property such a function reads is read from the properties by its own path, which costs about a quarter more on short texts, and a `+`
   that may put texts together costs about a tenth more, as drivine4j measured.
 - On Oracle, an `OPTIONAL CALL` or an `OPTIONAL MATCH` is joined `ON 1 = 1`, where Postgres joins `ON TRUE`. This works
   around an Oracle bug, seen on 23.26.3: in a scalar subquery, as a `COUNT { … }` is compiled, a join `ON TRUE` is

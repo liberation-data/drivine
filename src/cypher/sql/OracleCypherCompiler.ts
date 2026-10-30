@@ -883,14 +883,11 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * comparison in a branch; a `CASE` of numbers compared outside gave the right answer in a select, a `WHERE`, a cross
      * join, a `COUNT(CASE …)` and a PL/SQL block.
      *
-     * Over an aggregate's result ({@link overAggregates}) the CLOBs are looked for by `INSTR` alone, as before: Oracle
-     * reads no aggregate of the query it is in from a subquery (ORA-00937), and the bound CLOBs are one. drivine4j works
-     * such an expression's aggregates out first (its `bindsOverAggregates`, ported by liberation-data/drivine#414), where
-     * the search runs as anywhere else; until then, a text past {@link SEARCHED_TEXT} units looked for over an
-     * aggregate's result still raises ORA-22828 here.
+     * Oracle reads no aggregate of the query it is in from a subquery (ORA-00937), and the bound CLOBs are one: over an
+     * aggregate's result, the aggregate is worked out first (`CypherWriter.bindsOverAggregates`).
      */
     containsText(a: string, b: string): string {
-        if (!this.long || this.overAggregates) {
+        if (!this.long) {
             return `(INSTR(${a}, ${b}) > 0)`;
         }
         return this.bound(

@@ -2903,6 +2903,45 @@ export class CypherWriter {
     }
 
     /**
+     * Whether an operation over an aggregate's result in `term`, which is no aggregate itself, would bind a value in a
+     * subquery ({@link SqlCypherCompiler.boundIn}): each aggregate in it compiled as it is, with nothing bound
+     * ({@link aggregating}), and the operations over them with {@link SqlCypherCompiler.shared} on. Compiled only to see,
+     * as {@link binds} is. An order term reads each item it names, in `named`, by its name: the item's value, compiled
+     * over the rows `select` reads as `project` compiles it, is bound to that name, so a comprehension's own name hides it
+     * as it hides any variable, and the item's expression is never read where a comprehension binds its variables.
+     */
+    private bindsOverAggregates(term: Expression, select: Select, named: Map<string, Expression> = new Map()): boolean {
+        if (isAggregate(term) || !contains(term, isAggregate)) {
+            return false;
+        }
+        const counter = this.counter;
+        try {
+            return this.sql.toSee(() => {
+                // Each item compiled as `project` compiles it, with shared on where it does not aggregate, lest one nested
+                // deep be written out again at each level; what it binds is its own, not the term's.
+                const variables = variablesIn(term);
+                const items: [string, Value][] = [...named]
+                    .filter(([name]) => variables.has(name))
+                    .map(([name, item]) => [name, this.aggregating(item, () => this.expression(item, select.scope))]);
+                const results: [string, Value][] = [];
+                // Named as no variable is, unless quoted so.
+                const over = replaced(term, (part) => {
+                    if (!isAggregate(part)) {
+                        return undefined;
+                    }
+                    const name = `#over${results.length + 1}`;
+                    results.push([name, this.unshared(() => this.expression(part, select.scope))]);
+                    return { kind: 'Variable', name };
+                });
+                const scope: Scope = new Map([...select.scope, ...items, ...results]);
+                return this.sql.boundIn(() => this.expression(over, scope));
+            });
+        } finally {
+            this.counter = counter;
+        }
+    }
+
+    /**
      * Where a projection that aggregates would group by an item whose SQL holds a subquery, which Oracle groups by no
      * subquery, or a parameter, each mention of which the driver binds as a marker of its own, so the item in the select
      * list is not the one grouped by, the rows `select` reads with each such item worked out first, in a `WITH *` of its
@@ -2958,7 +2997,12 @@ export class CypherWriter {
      * or a relationship, not its properties. An order term, or a part of one, that is an item is read by the item's name.
      * A store dedupes no aggregate in the query that makes it, and Oracle's `LISTAGG`, which does, gives at most 4,000
      * bytes; and Oracle reads no aggregate of the query it is in from a subquery, which reading a list item by item is.
-     * Undefined where the projection does neither.
+     * So too where an operation over an aggregate's result would bind a value ({@link bindsOverAggregates}): in the query
+     * that aggregates, nothing is bound ({@link aggregating}), so `max(n.title) + ': ' + max(n.first) + ' ' + max(n.last)`
+     * wrote each aggregate out again at every level, past the longest text JavaScript holds on Oracle, and
+     * `head(collect(n.t)) CONTAINS $x` read the aggregate from the subquery Oracle's search of a long text binds
+     * (ORA-00937); over the aggregates' columns, the operation binds its values as any item does (#414). Undefined where
+     * the projection does none of these.
      */
     private aggregatesFirst(
         select: Select,
@@ -2970,7 +3014,13 @@ export class CypherWriter {
         const iteratesAggregate = (expression: Expression): boolean =>
             iterated(expression).some((it) => contains(it, isAggregate));
         const terms = [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)];
-        if (!terms.some((it) => contains(it, collectsDistinct) || contains(it, iteratesAggregate))) {
+        // An order term reads an item by its name.
+        const byName = new Map(items.map((it) => [it.name, it.expression]));
+        if (
+            !terms.some((it) => contains(it, collectsDistinct) || contains(it, iteratesAggregate)) &&
+            !items.some((it) => this.bindsOverAggregates(it.expression, select)) &&
+            !projection.orderBy.some((it) => this.bindsOverAggregates(it.expression, select, byName))
+        ) {
             return undefined;
         }
         // Named as no variable is, unless quoted so.
@@ -3075,7 +3125,6 @@ export class CypherWriter {
         // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
         // can only be; a variable an item is named after is that item, not the variable of that name before it.
         const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
-        const aliases = new Set(items.map((it) => it.name));
         const keptProjection: Projection = {
             ...projection,
             star: false,
@@ -3083,7 +3132,7 @@ export class CypherWriter {
             orderBy: projection.orderBy.map((sort) => ({
                 ...sort,
                 expression: replaced(sort.expression, (term) => {
-                    if (term.kind === 'Variable' && aliases.has(term.name)) {
+                    if (term.kind === 'Variable' && byName.has(term.name)) {
                         return term;
                     }
                     const item = itemNames.get(expressionKey(term));
@@ -3094,23 +3143,9 @@ export class CypherWriter {
         return [this.with(select, { kind: 'With', projection: grouped }), keptProjection];
     }
 
-    /**
-     * `work`, with no value bound in a subquery where `expression` aggregates, and over its aggregates' results: see
-     * {@link SqlCypherCompiler.sharing} and {@link SqlCypherCompiler.overAggregates}.
-     */
+    /** `work`, with no value bound in a subquery where `expression` aggregates: see {@link SqlCypherCompiler.sharing}. */
     private aggregating<T>(expression: Expression, work: () => T): T {
-        return contains(expression, isAggregate) ? this.unshared(() => this.overAggregates(true, work)) : work();
-    }
-
-    /** `work`, with {@link SqlCypherCompiler.overAggregates} `over`. */
-    private overAggregates<T>(over: boolean, work: () => T): T {
-        const was = this.sql.overAggregates;
-        this.sql.overAggregates = over;
-        try {
-            return work();
-        } finally {
-            this.sql.overAggregates = was;
-        }
+        return contains(expression, isAggregate) ? this.unshared(work) : work();
     }
 
     /** `work`, with no value bound in a subquery: see {@link SqlCypherCompiler.sharing}. */
@@ -5121,10 +5156,7 @@ export class CypherWriter {
     }
 
     private function(fn: FunctionCall, scope: Scope): Value {
-        // An aggregate's arguments are read from each row, not from its result.
-        const values = this.overAggregates(this.sql.overAggregates && !isAggregate(fn), () =>
-            fn.arguments.map((it) => this.expression(it, scope))
-        );
+        const values = fn.arguments.map((it) => this.expression(it, scope));
         const name = fn.name.toLowerCase();
         const call: Invocation = {
             fn,

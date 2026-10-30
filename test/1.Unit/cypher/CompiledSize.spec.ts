@@ -344,6 +344,143 @@ describe('A compiled Cypher statement', () => {
         }
     });
 
+    it.each(compilers)(
+        "of text functions, texts added and arithmetic over an aggregate's result is about the statement a WITH working the aggregate out first makes, on %s",
+        (name, compilerFor) => {
+            // #414: an operation over an aggregate's result was compiled with nothing bound, as the aggregate is, so it wrote
+            // the aggregate out again at each level: max(n.title) + ': ' + max(n.first) + ' ' + max(n.last) compiled to 68 MB
+            // on Postgres and past the longest text JavaScript holds on Oracle, and toString() four deep over
+            // head(collect(…)) to 23 MB on Oracle.
+            const four = (fn: string, over: string) => `${fn}(`.repeat(4) + over + ')'.repeat(4);
+            const texts = "max(n.title) + ': ' + max(n.first) + ' ' + max(n.last)";
+            const worked = 'WITH max(n.title) AS a, max(n.first) AS b, max(n.last) AS c';
+            const days = "((((n.day + duration('P1D')) + duration('P1D')) + duration('P1D')) + duration('P1D'))";
+            // Each statement, and the same with a WITH working its aggregates out first.
+            const statements: [string, string][] = [
+                [`MATCH (n) RETURN ${texts}`, `MATCH (n) ${worked} RETURN a + ': ' + b + ' ' + c`],
+                [
+                    "MATCH (n) RETURN head(collect(n.title)) + ': ' + head(collect(n.first)) + ' ' + head(collect(n.last))",
+                    "MATCH (n) WITH collect(n.title) AS a, collect(n.first) AS b, collect(n.last) AS c RETURN head(a) + ': ' + head(b) + ' ' + head(c)"
+                ],
+                [
+                    `MATCH (n) RETURN ${four('toLower', 'max(n.name)')}`,
+                    `MATCH (n) WITH max(n.name) AS m RETURN ${four('toLower', 'm')}`
+                ],
+                [
+                    `MATCH (n) RETURN ${four('toLower', 'head(collect(n.name))')}`,
+                    `MATCH (n) WITH collect(n.name) AS c RETURN ${four('toLower', 'head(c)')}`
+                ],
+                [
+                    `MATCH (n) RETURN ${four('toLower', 'collect(n.name)[0]')}`,
+                    `MATCH (n) WITH collect(n.name) AS c RETURN ${four('toLower', 'c[0]')}`
+                ],
+                [
+                    `MATCH (n) RETURN ${four('trim', 'max(n.name)')}`,
+                    `MATCH (n) WITH max(n.name) AS m RETURN ${four('trim', 'm')}`
+                ],
+                [
+                    `MATCH (n) RETURN ${four('toString', 'head(collect(n.name))')}`,
+                    `MATCH (n) WITH collect(n.name) AS c RETURN ${four('toString', 'head(c)')}`
+                ],
+                [
+                    'MATCH (n) RETURN substring(substring(substring(substring(max(n.name), 0), 0), 0), 0)',
+                    'MATCH (n) WITH max(n.name) AS m RETURN substring(substring(substring(substring(m, 0), 0), 0), 0)'
+                ],
+                [
+                    'MATCH (n) RETURN (sum(n.a) + sum(n.b)) * 2 / count(*) - max(n.a)',
+                    'MATCH (n) WITH sum(n.a) AS a, sum(n.b) AS b, count(*) AS c, max(n.a) AS m RETURN (a + b) * 2 / c - m'
+                ],
+                // Beside a grouping key, with DISTINCT, as an order term, and beside a variable-length walk.
+                [
+                    `MATCH (n) RETURN n.k AS k, ${texts} AS t`,
+                    "MATCH (n) WITH n.k AS k, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k, a + ': ' + b + ' ' + c AS t"
+                ],
+                [`MATCH (n) RETURN DISTINCT ${texts}`, `MATCH (n) ${worked} RETURN DISTINCT a + ': ' + b + ' ' + c`],
+                [
+                    `MATCH (n) RETURN n.k AS k ORDER BY ${texts}`,
+                    "MATCH (n) WITH n.k AS k, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k ORDER BY a + ': ' + b + ' ' + c"
+                ],
+                // An order term that reads an item by its name.
+                [
+                    `MATCH (n) RETURN n.k AS k, count(*) AS c ORDER BY ${four('toString', 'count(*) * 10 + size(k)')}`,
+                    `MATCH (n) WITH n.k AS k, count(*) AS x RETURN k, x AS c ORDER BY ${four(
+                        'toString',
+                        'x * 10 + size(k)'
+                    )}`
+                ],
+                // And one where a comprehension's own name hides an item's, or the item's expression reads a name the
+                // comprehension binds.
+                [
+                    `MATCH (n) RETURN n.k AS k, sum(n.a) AS m ORDER BY ${four(
+                        'toString',
+                        '[k IN [1] | k + m][0]'
+                    )} + toString(sum(n.a))`,
+                    `MATCH (n) WITH n.k AS k, sum(n.a) AS x RETURN k, x AS m ORDER BY ${four(
+                        'toString',
+                        '[k IN [1] | k + x][0]'
+                    )} + toString(x)`
+                ],
+                [
+                    `MATCH (n) RETURN n.k AS k, sum(n.a) AS m ORDER BY ${four(
+                        'toString',
+                        '[n IN [1] | n + size(k)][0]'
+                    )} + toString(sum(n.a))`,
+                    `MATCH (n) WITH n.k AS k, sum(n.a) AS x RETURN k, x AS m ORDER BY ${four(
+                        'toString',
+                        '[n IN [1] | n + size(k)][0]'
+                    )} + toString(x)`
+                ],
+                // And one that reads an item nested deep.
+                [
+                    `MATCH (n) RETURN ${days} AS k, count(*) AS c ORDER BY ${four(
+                        'toString',
+                        'count(*)'
+                    )} + toString(k)`,
+                    `MATCH (n) WITH ${days} AS k, count(*) AS x RETURN k, x AS c ORDER BY ${four(
+                        'toString',
+                        'x'
+                    )} + toString(k)`
+                ],
+                [
+                    "MATCH (n)-[*1..3]->(m) RETURN max(m.title) + ': ' + max(m.first) + ' ' + max(m.last)",
+                    "MATCH (n)-[*1..3]->(m) WITH max(m.title) AS a, max(m.first) AS b, max(m.last) AS c RETURN a + ': ' + b + ' ' + c"
+                ],
+                [
+                    `MATCH (n)-[*1..3]->(m) RETURN ${four('toLower', 'max(m.name)')}`,
+                    `MATCH (n)-[*1..3]->(m) WITH max(m.name) AS x RETURN ${four('toLower', 'x')}`
+                ],
+                [
+                    `MATCH (n)-[*1..3]->(m) RETURN n.k AS k ORDER BY ${four('toLower', 'max(m.name)')}`,
+                    `MATCH (n)-[*1..3]->(m) WITH n.k AS k, max(m.name) AS x RETURN k ORDER BY ${four('toLower', 'x')}`
+                ],
+                // On Oracle a long text is searched, reversed and a map's keys read in a subquery, which reads no
+                // aggregate of the query it is in (ORA-00937): there the aggregate is worked out first too. Postgres binds
+                // no value in these, and works nothing out first.
+                ...((name === 'oracle'
+                    ? [
+                          [
+                              'MATCH (n) RETURN head(collect(n.t)) CONTAINS last(collect(n.x))',
+                              'MATCH (n) WITH collect(n.t) AS a, collect(n.x) AS b RETURN head(a) CONTAINS last(b)'
+                          ],
+                          ['MATCH (n) RETURN reverse(max(n.t))', 'MATCH (n) WITH max(n.t) AS a RETURN reverse(a)'],
+                          [
+                              'MATCH (n) RETURN keys(head(collect({a: n.a})))',
+                              'MATCH (n) WITH collect({a: n.a}) AS a RETURN keys(head(a))'
+                          ]
+                      ]
+                    : []) as [string, string][])
+            ];
+            for (const [over, first] of statements) {
+                const [size, reference] = [over, first].map((it) => compilerFor().compile(it).sql.length);
+                expect({ over, size, small: size < 120_000 && size < reference * 1.2 }).toEqual({
+                    over,
+                    size,
+                    small: true
+                });
+            }
+        }
+    );
+
     it('of values that may hold a null walks them on Postgres over arrays unnested, which the planner costs low', () => {
         // As the sort key's walk is: a set-returning function's 100 rows, multiplied through the walk, bring in its JIT.
         const sql = new PostgresCypherCompiler('g').compile(
@@ -577,7 +714,9 @@ describe('A compiled Cypher statement', () => {
         const z = "datetime('2024-03-15T10:00:00Z') + duration({minutes: x})";
         for (const statement of [
             'UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + x))',
-            `UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + (${z}).minute))`
+            `UNWIND range(1, 3) AS i RETURN sum(reduce(a = 0, x IN [i] | a + (${z}).minute))`,
+            // And an operation over an aggregate's result, compiled to see whether it binds one (#414).
+            "UNWIND range(1, 3) AS i RETURN toLower(toLower(toString(reduce(a = max(i), x IN [1] | a + x)))) + 'x'"
         ]) {
             const sql = new OracleCypherCompiler('g').compile(statement).sql;
             const declared = [...sql.matchAll(/FUNCTION (cy_\w+)\(/g)].map((it) => it[1]);
@@ -587,6 +726,16 @@ describe('A compiled Cypher statement', () => {
                 expect(sql.match(new RegExp(`\\b${name}\\(`, 'g'))!.length).toBeGreaterThan(1);
             }
         }
+        // Or an order term over one that reads an item declaring a function, compiled in the trial by the item's name: the
+        // statement declares what it does without the term, each once.
+        const declaredIn = (statement: string) =>
+            [...new OracleCypherCompiler('g').compile(statement).sql.matchAll(/FUNCTION (cy_\w+)\(/g)].map(
+                (it) => it[1]
+            );
+        const grouped = 'UNWIND range(1, 3) AS i RETURN reduce(a = 0, x IN [i] | a + x) AS r, count(*) AS c';
+        const sorted = declaredIn(`${grouped} ORDER BY toLower(toLower(toString(count(*)))) + toString(r)`);
+        expect(sorted).toEqual([...new Set(sorted)]);
+        expect(sorted).toHaveLength(declaredIn(grouped).length);
         // Without the store's function, the query declares its own once, where the aggregate's argument binds a value or not.
         for (const statement of [
             'UNWIND range(1, 3) AS i WITH i, [i, null] AS l, [i] AS m RETURN collect(l = m)',
