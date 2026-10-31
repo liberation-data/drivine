@@ -42,6 +42,18 @@ const UNIQUE_THERE =
  */
 export const BUSY_ATTEMPTS = 300;
 
+/** What declares the busy lock {@link made} waits out: a block that holds it has waited before it fails for that lock. */
+const WAITS_OUT_BUSY = 'PRAGMA EXCEPTION_INIT(e_busy, -54);';
+
+/**
+ * Whether `statement` waited out another session's busy lock (ORA-00054) itself before it failed for it, as a block of
+ * {@link made} does for thirty seconds: the schema executor doesn't run it again for that lock, or each run would wait
+ * as long again.
+ */
+export function waitsOutBusyLock(statement: string): boolean {
+    return statement.includes(WAITS_OUT_BUSY);
+}
+
 /**
  * A block that runs `ddl`, an index over the node table, an object another session made meanwhile (ORA-00955) taken as
  * made. A statement turned away because another session holds the node table's lock (ORA-00054), as one making the same
@@ -54,7 +66,7 @@ function made(ddl: string): string {
     e_exists EXCEPTION;
     PRAGMA EXCEPTION_INIT(e_exists, -955);
     e_busy EXCEPTION;
-    PRAGMA EXCEPTION_INIT(e_busy, -54);
+    ${WAITS_OUT_BUSY}
 BEGIN
     FOR attempt IN 1 .. ${BUSY_ATTEMPTS} LOOP
         BEGIN
