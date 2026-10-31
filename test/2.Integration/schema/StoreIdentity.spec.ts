@@ -78,7 +78,10 @@ describe.each(allStores())('store identity on $type', (engine) => {
         } finally {
             warn.mockRestore();
         }
-    }, 120_000);
+        // On Oracle each round builds the unique index over the whole node table, which the suites before this one have
+        // filled: a run took 3 s on an empty table, 32 s on 300,000 nodes, and 50 s on a million with one CPU, and CI's
+        // runner, slower still, took more than two minutes.
+    }, 300_000);
 
     it("should replace a plain index on the key in the way of its constraint, the label being Drivine's", async () => {
         if (engine.type !== DatabaseType.NEO4J) {
