@@ -180,6 +180,88 @@ describe('The Cypher compiler refuses', () => {
         }
     );
 
+    /** Why `compiler` refuses `cypher`, or undefined where it compiles it. */
+    const refusal = (compiler: () => SqlCypherCompiler, cypher: string): string | undefined => {
+        try {
+            compiler().compile(cypher);
+            return undefined;
+        } catch (e) {
+            return (e as Error).message;
+        }
+    };
+
+    it('a CALL sees only the variables of the row it imports, and a bracketed name not of the row is refused', () => {
+        // drivine4j's #410 (#473 here). A CALL saw every variable of its row, so a name it does not import joined the row's.
+        const undefinedVariable = (name: string): string =>
+            `${name} is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.`;
+        compilers.forEach(([store, compiler]) => {
+            [
+                // A CALL's brackets import only variables of its row; a nested CALL imports from the outer CALL's scope.
+                ['MATCH (a) CALL (x) { RETURN 1 AS n } RETURN n', 'x'],
+                ['MATCH (a), (b) CALL (a) { CALL (b) { MATCH (b)-->(d) RETURN d } RETURN d.x AS x } RETURN x', 'b'],
+                // A procedure's call sees the whole row, which holds no a after a WITH that does not pass it on.
+                ['MATCH (a) WITH 1 AS x CALL db.labels() YIELD label WHERE label = a.kind RETURN label', 'a'],
+                // A CALL holding a randomUUID() reads the UUID made for its row, and still imports only what it names (#471).
+                ['UNWIND [1] AS i CALL { RETURN toString(i) + randomUUID() AS u } RETURN u', 'i'],
+                ['UNWIND [1] AS i CALL (x) { RETURN randomUUID() AS u } RETURN u', 'x'],
+                // A variable quoted as the compiler names its own is imported as any other is.
+                ['UNWIND [1] AS `#anew9` CALL () { RETURN `#anew9` AS x } RETURN x', '#anew9']
+            ].forEach(([cypher, name]) => {
+                expect(() => compiler().compile(cypher)).toThrow(undefinedVariable(name));
+            });
+            // A name a CALL does not import is a new variable in it, of any kind.
+            [
+                'MATCH (a) CALL { MATCH ()-[a]->() RETURN 1 AS x } RETURN a, x',
+                'MATCH (a) CALL () { MATCH ()-[a]->() RETURN 1 AS x } RETURN a, x',
+                'MATCH (a), (b) CALL (a) { MATCH ()-[b]->() RETURN 1 AS x } RETURN x',
+                'MATCH (a) CALL { WITH a WITH 1 AS one MATCH ()-[a]->() RETURN 1 AS x } RETURN x',
+                'MATCH (a) CALL () { CREATE (a) RETURN 1 AS x } RETURN x',
+                'MATCH (a) CALL { WITH a MATCH (a)-->(b) RETURN b } MATCH (b)-->() RETURN b',
+                'MATCH (a) CALL (a) { MATCH (a)-->(b) RETURN b } MATCH (b)-->() RETURN b',
+                'MATCH (a) CALL (a) { CREATE (a)-[:R]->(b) RETURN b } RETURN b',
+                // A procedure's call imports each variable of the row, so its WHERE reads them.
+                'MATCH (a) CALL db.labels() YIELD label WHERE label = a.kind RETURN label'
+            ].forEach((cypher) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+        });
+    });
+
+    it("a CALL's leading WITH that imports names variables of the row alone, as Neo4j has it", () => {
+        // drivine4j's #410 (#473 here): Neo4j refuses an importing WITH with anything more (its 42I28), which was compiled as any WITH.
+        compilers.forEach(([store, compiler]) => {
+            [
+                'MATCH (a), (b) CALL { WITH a, b AS c MATCH (a)-->(c) RETURN c.x AS x } RETURN x',
+                'MATCH (a) CALL { WITH a AS c MATCH (c)-->(d) RETURN d.x AS x } RETURN x',
+                'MATCH (a) CALL { WITH a WHERE a.x > 1 RETURN count(*) AS n } RETURN a, n',
+                'MATCH (a) CALL { WITH a ORDER BY a.x LIMIT 1 MATCH (a)-->(d) RETURN d.x AS x } RETURN x',
+                'MATCH (a) CALL { WITH a SKIP 0 RETURN 1 AS x } RETURN x',
+                'MATCH (a) CALL { WITH DISTINCT a MATCH (a)-->(d) RETURN d.x AS x } RETURN x',
+                'MATCH (a) CALL { WITH a, 1 AS one MATCH (a)-->(d) RETURN d.x + one AS x } RETURN x',
+                'MATCH (a) CALL { WITH * WHERE true RETURN 1 AS x } RETURN x',
+                'MATCH (a) CALL { UNWIND [1] AS x RETURN x UNION WITH a WHERE true RETURN 1 AS x } RETURN x',
+                'MATCH (a) CALL { WITH a WHERE a.x > 1 SET a.y = 1 } RETURN a',
+                // One holding a randomUUID() too, whose query reads a UUID made for the row before its WITH (#471).
+                'MATCH (a) CALL { WITH a AS c RETURN c.x + randomUUID() AS x } RETURN x'
+            ].forEach((cypher) => {
+                expect(() => compiler().compile(cypher)).toThrow(
+                    'The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, ' +
+                        'DISTINCT, WHERE, ORDER BY, SKIP or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after.'
+                );
+            });
+            // A leading WITH that names no variable of the row as it is imports nothing, and is any WITH; so is one of a CALL with brackets.
+            [
+                'MATCH (a) CALL { WITH 1 AS one WHERE one > 0 RETURN one } RETURN one',
+                'MATCH (a) CALL { WITH DISTINCT 1 AS one RETURN one } RETURN one',
+                'MATCH (a) CALL { WITH a AS a RETURN 1 AS one } RETURN one',
+                'MATCH (a) CALL (a) { WITH a WHERE a.x > 1 RETURN a.x AS x } RETURN x',
+                'MATCH (a) CALL (a) { WITH DISTINCT a, 1 AS one ORDER BY a.x LIMIT 1 RETURN one } RETURN one'
+            ].forEach((cypher) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+        });
+    });
+
     it('a statement that is not Cypher, with where it goes wrong', () => {
         expect(() => new PostgresCypherCompiler('g').compile('MATCH (n RETURN n')).toThrow(
             "The statement is not Cypher, at line 1, column 10: no viable alternative at input 'MATCH (n RETURN'"

@@ -2,7 +2,7 @@ import { Integer, isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { CypherFloat, Expression } from '@/cypher/ast/Expression';
 import { Pattern } from '@/cypher/ast/Pattern';
-import { Clause } from '@/cypher/ast/Query';
+import { Call, Clause, Projection, ProjectionItem, Query, With } from '@/cypher/ast/Query';
 
 /** The functions that aggregate the rows of a group. */
 const AGGREGATES = ['count', 'collect', 'sum', 'avg', 'min', 'max'];
@@ -63,6 +63,68 @@ export function writes(clause: Clause): boolean {
     }
 }
 
+/**
+ * The variables of the row, of `names`, that the query `clauses` of `call` imports, as Neo4j has it: those its brackets
+ * name, `CALL (a, b) { … }`, or each with `CALL (*) { … }`; with no brackets, those its leading `WITH` names as they
+ * are, or each with `WITH *`; none where it has neither, `CALL () { … }` or `CALL { MATCH … }`. In a `UNION`, each
+ * query's own leading `WITH`. Refuses a bracketed name not of the row, and, as Neo4j does (its 42I28), a leading `WITH`
+ * that names a variable of the row, or `*`, with anything more: such a `WITH` imports, and one that names none is any
+ * `WITH`, `CALL { WITH 1 AS one WHERE … }`.
+ */
+export function imports(call: Call, clauses: Clause[], names: Iterable<string>): Set<string> {
+    const all = new Set(names);
+    if (call.importsAll) {
+        return all;
+    }
+    if (call.imports !== undefined) {
+        const missing = call.imports.find((it) => !all.has(it));
+        if (missing !== undefined) {
+            throw new DrivineError(
+                `${missing} is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.`
+            );
+        }
+        return new Set(call.imports);
+    }
+    const first = clauses[0];
+    if (first?.kind !== 'With') {
+        return new Set();
+    }
+    const leading = first.projection;
+    const named = (item: ProjectionItem): string | undefined =>
+        item.expression.kind === 'Variable' ? item.expression.name : undefined;
+    const ofRow = (item: ProjectionItem): boolean => {
+        const name = named(item);
+        return name !== undefined && all.has(name);
+    };
+    if (!leading.star && !leading.items.some(ofRow)) {
+        return new Set();
+    }
+    if (!leading.items.every((it) => named(it) === it.name) || !plainWith(first)) {
+        throw new DrivineError(
+            'The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, DISTINCT, ' +
+                'WHERE, ORDER BY, SKIP or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after.'
+        );
+    }
+    return leading.star ? all : new Set(leading.items.map((it) => it.name).filter((it) => all.has(it)));
+}
+
+/** Whether `clause` has no `WHERE`, `DISTINCT`, `ORDER BY`, `SKIP` or `LIMIT`: a `WITH` that only names what it passes on. */
+function plainWith(clause: With): boolean {
+    const projection = clause.projection;
+    return (
+        clause.where === undefined &&
+        !projection.distinct &&
+        projection.orderBy.length === 0 &&
+        projection.skip === undefined &&
+        projection.limit === undefined
+    );
+}
+
+/** Whether `call` imports by its brackets, `CALL (a) { … }` or `CALL (*) { … }`: what it imports so it sees throughout. */
+export function bracketed(call: Call): boolean {
+    return call.imports !== undefined || call.importsAll === true;
+}
+
 /** openCypher's functions of one number that a store's `math` works out, as Neo4j names them, lowered. */
 export const MATH_FUNCTIONS = [
     'exp',
@@ -119,6 +181,151 @@ export const ROUNDING_MODES: RoundingMode[] = [
 /** Whether `expression` is a call of `randomUUID()`, the one function compiled here that gives a value anew each time it is called. */
 export function isAnew(expression: Expression): boolean {
     return expression.kind === 'Function' && expression.name.toLowerCase() === 'randomuuid';
+}
+
+/**
+ * What the name of a variable begins with that holds a randomUUID() made first, for each row: see
+ * `CypherWriter.anewFirst`. Named as no variable is, unless quoted so.
+ */
+export const ANEW = '#anew';
+
+/**
+ * Whether `expression` holds a call of randomUUID() anywhere: in a comprehension's, a quantifier's, a reduce's or a
+ * pattern comprehension's own expressions too, where {@link contains} does not look. Not in a subquery's query.
+ */
+export function holdsAnew(expression: Expression): boolean {
+    const any = (...expressions: (Expression | undefined)[]): boolean => present(...expressions).some(holdsAnew);
+    switch (expression.kind) {
+        case 'ListComprehension':
+            return any(expression.list, expression.where, expression.projection);
+        case 'Quantifier':
+            return any(expression.list, expression.where);
+        case 'Reduce':
+            return any(expression.initial, expression.list, expression.expression);
+        case 'PatternComprehension':
+            return any(expression.where, expression.projection);
+        default:
+            return isAnew(expression) || children(expression).some(holdsAnew);
+    }
+}
+
+/** Whether a clause of `query`, or of a query it calls, holds a call of randomUUID() ({@link holdsAnew}) in its expressions. */
+export function queryHoldsAnew(query: Query): boolean {
+    const projected = (projection: Projection): boolean =>
+        [...projection.items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)].some(
+            holdsAnew
+        );
+    return [query.clauses, ...query.unions.map((it) => it.clauses)].flat().some((clause) => {
+        switch (clause.kind) {
+            case 'With':
+                return projected(clause.projection) || (clause.where !== undefined && holdsAnew(clause.where));
+            case 'Return':
+                return projected(clause.projection);
+            case 'Unwind':
+                return holdsAnew(clause.list);
+            case 'Match':
+                return clause.where !== undefined && holdsAnew(clause.where);
+            case 'Call':
+                return queryHoldsAnew(clause.query);
+            default:
+                return false;
+        }
+    });
+}
+
+/**
+ * `expression` with each randomUUID() in a comprehension's, a quantifier's, a reduce's or a pattern comprehension's own
+ * expressions read beside the variable `seed`, made anew for each row: `CASE WHEN seed IS NULL THEN null ELSE
+ * randomUUID() END`, which is randomUUID() still, as `seed` is never null. So the subquery that works the body out
+ * reads the row, and a store works it out again for each row, as it does not for a subquery that reads nothing of it
+ * (drivine4j#412). One so read already is left as it is ({@link isSeeded}). Each item's variable is read beside `seed`
+ * too (`own`), the path's of a pattern comprehension, named here where it has none: read beside the row's alone, a
+ * value bound in a subquery (`SqlCypherCompiler.shared`) reads nothing of the item, and Postgres and Oracle worked it
+ * out once for all of them, so `[x IN range(1, 20) WHERE left(randomUUID(), 1) < '8' | x]` kept every item or none; and
+ * an aggregate of a pattern comprehension's body that reads only the row's columns is an aggregate of the row's query,
+ * which Postgres refuses.
+ */
+export function seeded(expression: Expression, seed: string, inBody: boolean = false, own: string[] = []): Expression {
+    const body = (part: Expression, variable: string): Expression => seeded(part, seed, true, [...own, variable]);
+    const same = (part: Expression): Expression => seeded(part, seed, inBody, own);
+    return replaced(expression, (e): Expression | undefined => {
+        if (isSeeded(e)) {
+            return e;
+        }
+        if (inBody && isAnew(e)) {
+            const condition = [seed, ...own]
+                .map(
+                    (it): Expression => ({
+                        kind: 'Unary',
+                        operator: 'IS_NULL',
+                        operand: { kind: 'Variable', name: it }
+                    })
+                )
+                .reduce((a, b): Expression => ({ kind: 'Binary', operator: 'AND', left: a, right: b }));
+            return { kind: 'Case', alternatives: [[condition, { kind: 'Literal', value: null }]], otherwise: e };
+        }
+        return seededBody(e, seed, own.length, same, body);
+    });
+}
+
+/**
+ * `e`, a comprehension, a quantifier, a reduce or a pattern comprehension, with its own expressions read beside `seed`
+ * as {@link seeded} reads them: `same` for those read in its own scope, `body` for those read for each item. A pattern
+ * comprehension's path is named after `seed` and how deep in bodies it is, `depth`, where it has no name. Undefined for
+ * any other expression, and for a pattern comprehension whose own expressions hold no randomUUID().
+ */
+function seededBody(
+    e: Expression,
+    seed: string,
+    depth: number,
+    same: (part: Expression) => Expression,
+    body: (part: Expression, variable: string) => Expression
+): Expression | undefined {
+    switch (e.kind) {
+        case 'ListComprehension':
+            return {
+                ...e,
+                list: same(e.list),
+                where: e.where && body(e.where, e.variable),
+                projection: e.projection && body(e.projection, e.variable)
+            };
+        case 'Quantifier':
+            return { ...e, list: same(e.list), where: e.where && body(e.where, e.variable) };
+        case 'Reduce':
+            return { ...e, initial: same(e.initial), list: same(e.list), expression: body(e.expression, e.variable) };
+        case 'PatternComprehension': {
+            // Named only where its body holds one, so a statement without randomUUID() is compiled as it was.
+            if (!present(e.where, e.projection).some(holdsAnew)) {
+                return undefined;
+            }
+            const path = e.pattern.variable ?? `${seed} path${depth}`;
+            return {
+                ...e,
+                pattern: { ...e.pattern, variable: path },
+                where: e.where && body(e.where, path),
+                projection: body(e.projection, path)
+            };
+        }
+        default:
+            return undefined;
+    }
+}
+
+/** Whether `expression` is a randomUUID() read beside a variable made first for the row, as {@link seeded} reads one. */
+export function isSeeded(expression: Expression): boolean {
+    if (expression.kind !== 'Case' || expression.alternatives.length !== 1) {
+        return false;
+    }
+    let condition = expression.alternatives[0][0];
+    while (condition.kind === 'Binary' && condition.operator === 'AND') {
+        condition = condition.left;
+    }
+    return (
+        condition.kind === 'Unary' &&
+        condition.operator === 'IS_NULL' &&
+        condition.operand.kind === 'Variable' &&
+        condition.operand.name.startsWith(ANEW)
+    );
 }
 
 export function isAggregate(expression: Expression): boolean {
