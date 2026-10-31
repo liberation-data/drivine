@@ -1235,7 +1235,9 @@ export class CypherWriter {
             match.where !== undefined && holdsAnew(match.where) && (match.optional || shortestWhere !== undefined);
         const [row, seed] = seededFirst ? this.seededRows(select) : [select, undefined];
         const metByPaths =
-            shortestWhere !== undefined && seed !== undefined ? seeded(shortestWhere, seed, true) : shortestWhere;
+            shortestWhere !== undefined && seed !== undefined
+                ? seeded(shortestWhere, seed, this.madeAnew, true)
+                : shortestWhere;
         if (!match.optional) {
             this.patterns(row, match.patterns, metByPaths);
             return where ? this.filteredRows(row, where) : row;
@@ -1261,7 +1263,9 @@ export class CypherWriter {
             inner =
                 seed === undefined
                     ? this.filteredRows(inner, where)
-                    : this.filteredRows(inner, seeded(where, seed, true), isSeeded);
+                    : this.filteredRows(inner, seeded(where, seed, this.madeAnew, true), (it) =>
+                          isSeeded(it, this.madeAnew)
+                      );
         }
         const outer = row.scope;
         const found = [...inner.bound].filter(([variable]) => !outer.has(variable) && !this.madeAnew.has(variable));
@@ -2994,9 +2998,10 @@ export class CypherWriter {
         anew: (expression: Expression) => boolean = isAnew
     ): [Select, Expression[]] | undefined {
         // A call read beside a row's UUID already (isSeeded) reads the row: left as it is, as a call alone is.
-        const alone = (term: Expression): boolean => anew(term) || isSeeded(term);
-        const holds = (e: Expression): boolean => anew(e) || (!isSeeded(e) && children(e).some(holds));
-        const inBodies = terms.some((it) => !sameExpression(seeded(it, ANEW), it));
+        const isSeededHere = (e: Expression): boolean => isSeeded(e, this.madeAnew);
+        const alone = (term: Expression): boolean => anew(term) || isSeededHere(term);
+        const holds = (e: Expression): boolean => anew(e) || (!isSeededHere(e) && children(e).some(holds));
+        const inBodies = terms.some((it) => !sameExpression(seeded(it, ANEW, this.madeAnew), it));
         if (!inBodies && !terms.some((it) => (whole || !alone(it)) && holds(it))) {
             return undefined;
         }
@@ -3016,9 +3021,9 @@ export class CypherWriter {
                     made.push({ expression: e, name });
                     return { kind: 'Variable', name };
                 }
-                return isSeeded(e) ? e : undefined;
+                return isSeededHere(e) ? e : undefined;
             });
-            return seed === undefined ? read : seeded(read, seed);
+            return seed === undefined ? read : seeded(read, seed, this.madeAnew);
         });
         const projection: Projection = { distinct: false, star: true, items: made, orderBy: [] };
         // Kept apart, as sharedFirst keeps its own, so no store merges it back into the query that reads it.

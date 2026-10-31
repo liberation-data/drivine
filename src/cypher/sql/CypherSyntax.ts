@@ -238,18 +238,24 @@ export function queryHoldsAnew(query: Query): boolean {
  * expressions read beside the variable `seed`, made anew for each row: `CASE WHEN seed IS NULL THEN null ELSE
  * randomUUID() END`, which is randomUUID() still, as `seed` is never null. So the subquery that works the body out
  * reads the row, and a store works it out again for each row, as it does not for a subquery that reads nothing of it
- * (drivine4j#412). One so read already is left as it is ({@link isSeeded}). Each item's variable is read beside `seed`
- * too (`own`), the path's of a pattern comprehension, named here where it has none: read beside the row's alone, a
- * value bound in a subquery (`SqlCypherCompiler.shared`) reads nothing of the item, and Postgres and Oracle worked it
- * out once for all of them, so `[x IN range(1, 20) WHERE left(randomUUID(), 1) < '8' | x]` kept every item or none; and
- * an aggregate of a pattern comprehension's body that reads only the row's columns is an aggregate of the row's query,
- * which Postgres refuses.
+ * (drivine4j#412). One so read already is left as it is ({@link isSeeded}, of the variables the compiler `made`). Each
+ * item's variable is read beside `seed` too (`own`), the path's of a pattern comprehension, named here where it has
+ * none: read beside the row's alone, a value bound in a subquery (`SqlCypherCompiler.shared`) reads nothing of the
+ * item, and Postgres and Oracle worked it out once for all of them, so `[x IN range(1, 20) WHERE left(randomUUID(), 1)
+ * < '8' | x]` kept every item or none; and an aggregate of a pattern comprehension's body that reads only the row's
+ * columns is an aggregate of the row's query, which Postgres refuses.
  */
-export function seeded(expression: Expression, seed: string, inBody: boolean = false, own: string[] = []): Expression {
-    const body = (part: Expression, variable: string): Expression => seeded(part, seed, true, [...own, variable]);
-    const same = (part: Expression): Expression => seeded(part, seed, inBody, own);
+export function seeded(
+    expression: Expression,
+    seed: string,
+    made: ReadonlySet<string>,
+    inBody: boolean = false,
+    own: string[] = []
+): Expression {
+    const body = (part: Expression, variable: string): Expression => seeded(part, seed, made, true, [...own, variable]);
+    const same = (part: Expression): Expression => seeded(part, seed, made, inBody, own);
     return replaced(expression, (e): Expression | undefined => {
-        if (isSeeded(e)) {
+        if (isSeeded(e, made)) {
             return e;
         }
         if (inBody && isAnew(e)) {
@@ -311,8 +317,11 @@ function seededBody(
     }
 }
 
-/** Whether `expression` is a randomUUID() read beside a variable made first for the row, as {@link seeded} reads one. */
-export function isSeeded(expression: Expression): boolean {
+/**
+ * Whether `expression` is a randomUUID() read beside a variable made first for the row, as {@link seeded} reads one: of
+ * those the compiler `made`, never a variable of the statement's named alike.
+ */
+export function isSeeded(expression: Expression, made: ReadonlySet<string>): boolean {
     if (expression.kind !== 'Case' || expression.alternatives.length !== 1) {
         return false;
     }
@@ -324,7 +333,7 @@ export function isSeeded(expression: Expression): boolean {
         condition.kind === 'Unary' &&
         condition.operator === 'IS_NULL' &&
         condition.operand.kind === 'Variable' &&
-        condition.operand.name.startsWith(ANEW)
+        made.has(condition.operand.name)
     );
 }
 

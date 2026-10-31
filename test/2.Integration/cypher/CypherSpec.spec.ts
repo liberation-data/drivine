@@ -3150,6 +3150,13 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     'UNWIND range(1, 100) AS `#anewi` CALL (`#anewi`) { RETURN toString(`#anewi`) + randomUUID() AS u } RETURN u',
                     100
                 ],
+                // ... and a CASE reading it, named as the compiler names the row's UUID here, is not taken for a
+                // randomUUID() read beside that UUID already (#483).
+                [
+                    'UNWIND range(1, 100) AS i WITH i, 1 AS `#anew4` ' +
+                        'RETURN [x IN [1] | CASE WHEN `#anew4` IS NULL THEN null ELSE randomUUID() END][0]',
+                    100
+                ],
                 // A CALL that writes makes one for each row it writes, as it did.
                 [
                     'UNWIND range(1, 100) AS i CALL (i) { CREATE (n:CyUuidCall {id: toUpper(randomUUID())}) RETURN n.id AS u } RETURN u',
