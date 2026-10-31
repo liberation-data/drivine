@@ -76,11 +76,15 @@ import { Temporals } from '@/cypher/sql/Temporals';
 import {
     bool,
     BoolValue,
+    capitalNounOf,
     EntitiesValue,
     json,
     JsonValue,
+    Known,
+    knownOf,
     NodeValue,
     nodeOf,
+    nounOf,
     relationshipOf,
     Value
 } from '@/cypher/sql/Value';
@@ -582,7 +586,15 @@ export class CypherWriter {
     private readonly functions: Record<string, (call: Invocation) => Value> = {
         properties: (call) => {
             const subject = call.one();
-            return subject.kind === 'Node' || subject.kind === 'Relationship' ? this.asJson(subject) : subject;
+            if (subject.kind === 'Node' || subject.kind === 'Relationship') {
+                return this.asJson(subject);
+            }
+            this.requireKind(
+                subject,
+                'MAP',
+                (kind) => `properties() takes a node, a relationship or a map, not ${kind}, as in Neo4j.`
+            );
+            return subject;
         },
         labels: (call) => {
             const subject = call.one();
@@ -631,6 +643,15 @@ export class CypherWriter {
         range: (call) => {
             if (call.arguments.length < 2 || call.arguments.length > 3) {
                 throw new DrivineError('range() takes a start, an end and a step.');
+            }
+            call.arguments.forEach((it) =>
+                this.requireKind(it, 'INTEGER', (kind) => `range() takes integers, not ${kind}, as in Neo4j.`)
+            );
+            // A step written or given as 0 would never reach the end.
+            const written = call.fn.arguments[2];
+            const given = written !== undefined ? this.known(written) : undefined;
+            if (given === 0 || given === BigInt(0) || (isInt(given) && given.isZero())) {
+                throw new DrivineError('range() takes a step other than 0, as in Neo4j.');
             }
             const [from, to] = call.arguments.map((it) => this.numberOf(it));
             const step = call.arguments[2];
@@ -1152,7 +1173,9 @@ export class CypherWriter {
                         itemItems: single(all.map((it) => it?.itemItems)),
                         temporals: all.some((it) => it?.temporals === true),
                         text: all.every((it) => it?.text === true),
-                        texts: all.every((it) => it?.texts === true)
+                        texts: all.every((it) => it?.texts === true),
+                        // Its kind is known only where each query writes it as a value of that one.
+                        known: single(all.map((it) => it?.known))
                     }
                 ];
             })
@@ -1868,7 +1891,8 @@ export class CypherWriter {
                         texts: was?.texts,
                         flat: was?.flat,
                         rowKeys: written ? [key] : undefined,
-                        fromList: !written
+                        fromList: !written,
+                        known: was?.known
                     })
                 );
             } else if (kind === 'PATH') {
@@ -2282,7 +2306,21 @@ export class CypherWriter {
         const [table, id, row] = this.target(item.variable, 'SET');
         const nodes = this.sql.nodes;
         switch (item.kind) {
-            case 'Property':
+            case 'Property': {
+                // A map written, or a list written that holds one or a list, is no property, as Neo4j refuses it, and as
+                // drivine's saves do.
+                const written = item.value;
+                if (
+                    written.kind === 'MapLiteral' ||
+                    (written.kind === 'ListLiteral' &&
+                        written.items.some((it) => it.kind === 'MapLiteral' || it.kind === 'ListLiteral'))
+                ) {
+                    throw new DrivineError(
+                        `A property is a number, a text, a truth value, a temporal value or a list of them, not ${
+                            written.kind === 'MapLiteral' ? 'a map' : 'a list of maps or lists'
+                        }, as in Neo4j.`
+                    );
+                }
                 this.evaluate(VALUE, [item.value], (scope) =>
                     this.sql.comparable(this.asJson(this.expression(item.value, scope)))
                 );
@@ -2293,6 +2331,7 @@ export class CypherWriter {
                     this.emit(`UPDATE ${table} SET props = ${this.sql.merged('props', map)} WHERE ${id} = ${row};`);
                 }
                 return;
+            }
             case 'Replace':
                 this.evaluate(VALUE, [item.value], (scope) => this.properties(this.expression(item.value, scope)));
                 if (table === nodes) {
@@ -3216,7 +3255,7 @@ export class CypherWriter {
 
     /**
      * The value `expression` gives in `scope`, marked {@link JsonValue.flat} where it is known to hold no null in a list
-     * or a map.
+     * or a map, and with its {@link JsonValue.known} kind where the statement writes it as a value of one.
      */
     private expression(expression: Expression, scope: Scope): Value {
         const outer = this.filtering;
@@ -3229,6 +3268,12 @@ export class CypherWriter {
             value = this.expressions[expression.kind](expression, scope);
         } finally {
             this.filtering = outer;
+        }
+        if (value.kind === 'Json' && value.known === undefined) {
+            const known = this.knownKind(expression, scope);
+            if (known !== undefined) {
+                value = { ...value, known };
+            }
         }
         if ((value.kind === 'Json' || value.kind === 'Entities') && !value.flat && this.flat(expression, scope)) {
             return { ...value, flat: true };
@@ -3278,6 +3323,7 @@ export class CypherWriter {
     }
 
     private index(index: Index, scope: Scope): Value {
+        this.indexOfKind(index, scope);
         let listedValue: Value | undefined;
         const listed = (): Value => (listedValue ??= this.expression(index.subject, scope));
         const subject = (): string => this.sql.comparable(this.asJson(listed()));
@@ -3388,6 +3434,81 @@ export class CypherWriter {
             texts: this.holdsTexts(listed),
             temporals: this.holdsTemporals(listed)
         });
+    }
+
+    /**
+     * The kind of value `expression` is in `scope`, where the statement writes it as one ({@link JsonValue.known}): a
+     * literal, a negated number, a list or a map written, or a variable bound to one. Read from the statement alone,
+     * compiling nothing, so a check may run before its operand is compiled. Undefined where the kind is left open, as it is
+     * for a property, a parameter or a function's value: Neo4j checks those when the row is read.
+     */
+    private knownKind(expression: Expression, scope: Scope): Known | undefined {
+        switch (expression.kind) {
+            case 'Literal':
+                return knownOf(expression.value);
+            case 'Unary': {
+                const operand = this.knownKind(expression.operand, scope);
+                return expression.operator === 'NEGATE' && (operand === 'INTEGER' || operand === 'FLOAT')
+                    ? operand
+                    : undefined;
+            }
+            case 'ListLiteral':
+                return 'LIST';
+            case 'MapLiteral':
+                return 'MAP';
+            case 'Variable': {
+                const value = scope.get(expression.name);
+                return value?.kind === 'Json' ? value.known : undefined;
+            }
+            default:
+                return undefined;
+        }
+    }
+
+    /**
+     * Refuses `index`, `subject[index]`, where the statement writes its subject as a value that is no list or map, or its
+     * index as a value of a kind its subject is not indexed by ({@link knownKind}): a list by an integer, a map by a text.
+     * As Neo4j refuses it; where the subject's kind is left open, it is compiled as before. An index given as a parameter
+     * is of its value's kind: the statement is compiled for each call, and its SQL is already made by that value, a text
+     * read as a property and a number as an item, so one of the other kind would be read as neither.
+     */
+    private indexOfKind(index: Index, scope: Scope): void {
+        const subject = this.knownKind(index.subject, scope);
+        if (subject === undefined) {
+            return;
+        }
+        if (subject !== 'LIST' && subject !== 'MAP') {
+            throw new DrivineError(`${capitalNounOf(subject)} is not a list or a map, and is indexed as one, as in Neo4j.`);
+        }
+        const by: Known = subject === 'LIST' ? 'INTEGER' : 'TEXT';
+        const kind =
+            this.knownKind(index.index, scope) ??
+            (index.index.kind === 'Parameter' ? knownOf(this.known(index.index)) : undefined);
+        if (kind !== undefined && kind !== by) {
+            throw new DrivineError(
+                `${capitalNounOf(subject)} is indexed by ${nounOf(by)}, not ${nounOf(kind)}, as in Neo4j.`
+            );
+        }
+    }
+
+    /** Refuses `expression`, an operand of `operator`, where its kind is known ({@link knownKind}) to be other than a truth value, as Neo4j refuses it. */
+    private requireCondition(expression: Expression, scope: Scope, operator: string): void {
+        const kind = this.knownKind(expression, scope);
+        if (kind !== undefined && kind !== 'BOOLEAN') {
+            throw new DrivineError(`${operator} takes a truth value, not ${nounOf(kind)}, as in Neo4j.`);
+        }
+    }
+
+    /**
+     * Refuses `value`, an argument, where the statement writes it as a value of a kind ({@link JsonValue.known}) other than
+     * `allowed`, with the `message` of that kind's noun, as Neo4j refuses it when it plans the statement. A value whose kind
+     * the statement leaves open is compiled as before.
+     */
+    private requireKind(value: Value, allowed: Known, message: (noun: string) => string): void {
+        const kind = value.kind === 'Json' ? value.known : undefined;
+        if (kind !== undefined && kind !== allowed) {
+            throw new DrivineError(message(nounOf(kind)));
+        }
     }
 
     /** The value of an index, where the statement writes it or binds it to a parameter: `-1` is a negated number. */
@@ -3588,7 +3709,11 @@ export class CypherWriter {
                             const of = was?.kind === 'Json' ? was : undefined;
                             return [
                                 it,
-                                json(this.sql.propertyOf(map, it), { temporal: of?.temporal, items: of?.items })
+                                json(this.sql.propertyOf(map, it), {
+                                    temporal: of?.temporal,
+                                    items: of?.items,
+                                    known: of?.known
+                                })
                             ];
                         })
                     );
@@ -3774,7 +3899,9 @@ export class CypherWriter {
                 subject.fromList &&
                 subject.temporal === undefined &&
                 subject.rowKeys === undefined &&
-                !this.temporals.fieldNames.includes(expression.key)
+                !this.temporals.fieldNames.includes(expression.key) &&
+                // One of a kind known other than a map is left to property(), which refuses it.
+                (subject.known === undefined || subject.known === 'MAP')
             ) {
                 return json(this.sql.itemValue(this.sql.comparable(subject), expression.key), {
                     temporals: subject.temporals
@@ -3795,6 +3922,10 @@ export class CypherWriter {
             case 'Relationship':
                 return json(this.sql.propertyOf(subject.props, key));
             case 'Json': {
+                // A value the statement writes as one of a kind other than a map has none, as Neo4j says when it plans the statement.
+                if (subject.known !== undefined && subject.known !== 'MAP') {
+                    throw new DrivineError(`${capitalNounOf(subject.known)} has no properties.`);
+                }
                 const field = this.temporalField(subject, key);
                 if (field) {
                     return field;
@@ -4187,6 +4318,7 @@ export class CypherWriter {
     private binary(binary: Binary, scope: Scope): Value {
         const filter = this.filtered;
         if (binary.operator === 'AND' || binary.operator === 'OR' || binary.operator === 'XOR') {
+            [binary.left, binary.right].forEach((it) => this.requireCondition(it, scope, binary.operator));
             const left = this.condition(this.expression(binary.left, scope));
             const right = this.condition(this.expression(binary.right, scope));
             if (binary.operator === 'AND') {
@@ -4194,6 +4326,12 @@ export class CypherWriter {
             }
             // Each side whole: a condition may be several, and `a = b <> c` is no SQL.
             return bool(binary.operator === 'OR' ? `(${left} OR ${right})` : `((${left}) <> (${right}))`);
+        }
+        if (binary.operator === 'IN') {
+            const kind = this.knownKind(binary.right, scope);
+            if (kind !== undefined && kind !== 'LIST') {
+                throw new DrivineError(`IN takes a list, not ${nounOf(kind)}, as in Neo4j.`);
+            }
         }
         const itemwise = this.itemwise(binary, scope);
         if (itemwise !== undefined) {
@@ -5068,6 +5206,9 @@ export class CypherWriter {
     }
 
     private unary(unary: Unary, scope: Scope): Value {
+        if (unary.operator === 'NOT') {
+            this.requireCondition(unary.operand, scope, 'NOT');
+        }
         const operand = this.expression(unary.operand, scope);
         switch (unary.operator) {
             case 'NOT':
@@ -5692,12 +5833,19 @@ export class CypherWriter {
         }
     }
 
-    /** A value as a condition: a boolean as itself, JSON's `true` and `false` as theirs, anything else as null. */
+    /**
+     * A value as a condition: a boolean as itself, JSON's `true` and `false` as theirs, anything else as null. One the
+     * statement writes as a value of another kind ({@link JsonValue.known}) is refused, as Neo4j refuses it when it plans
+     * the statement.
+     */
     private condition(value: Value): string {
         if (value.kind === 'Bool') {
             return value.sql;
         }
         if (value.kind === 'Json') {
+            if (value.known !== undefined && value.known !== 'BOOLEAN') {
+                throw new DrivineError(`${capitalNounOf(value.known)} is not a condition, as in Neo4j.`);
+            }
             return this.sql.boolOf(this.sql.comparable(value));
         }
         throw new DrivineError('A node, a relationship or a path is not a condition.');
