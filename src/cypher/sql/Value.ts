@@ -61,6 +61,14 @@ export interface JsonValue {
      * `WITH` binds to one. Undefined where the statement leaves its kind open, as for a property or a parameter.
      */
     readonly known?: Known;
+    /**
+     * Whether it may be JSON's null: a value read out of a map or a list that may hold a null, as `x.a` of `{a: null}` is, an
+     * entry of a parameter, a null written, a `reduce()`, or a `CASE` that may give one of them. A key that is missing reads as
+     * SQL's null, and the two compare apart, where Cypher has one null: so a projection that groups its rows or keeps them
+     * distinct, and a part of a `UNION`, compares it with the two nulls read as one, and an order ties them (#497). A property
+     * read from the store is never JSON's null, as a graph engine stores none, so the SQL that reads one is unchanged.
+     */
+    readonly jsonNull?: boolean;
 }
 
 /** A kind of value the statement writes: see {@link JsonValue.known}. */

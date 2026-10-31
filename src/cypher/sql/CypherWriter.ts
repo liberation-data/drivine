@@ -627,6 +627,13 @@ function short(tree: unknown): boolean {
  * columns. What is the same on each store is here; the store's own SQL is the compiler's.
  */
 export class CypherWriter {
+    /**
+     * Whether the query compiled is a part of a `UNION` without ALL, whose rows are compared as a whole: there a value that
+     * may be JSON's null ({@link JsonValue.jsonNull}) is given as SQL's, as Cypher has one null (#497). Set only for the work
+     * {@link comparingParts} does, so an exception leaves it as it was.
+     */
+    private distinctParts = false;
+
     private readonly logger = new DrivineLogger(CypherWriter.name);
     private counter = 0;
 
@@ -696,7 +703,12 @@ export class CypherWriter {
 
     /** How each kind of expression is compiled. */
     private readonly expressions: { [K in Expression['kind']]: (expression: any, scope: Scope) => Value } = {
-        Literal: (it) => json(this.sql.literalJson(it.value), { text: typeof it.value === 'string' }),
+        // A null written is JSON's null, as a map's is: see JsonValue.jsonNull.
+        Literal: (it) =>
+            json(this.sql.literalJson(it.value), {
+                text: typeof it.value === 'string',
+                jsonNull: it.value === null || it.value === undefined
+            }),
         Parameter: (it) =>
             this.givenParameters?.get(it.name) ??
             json(this.parameters.json(it.name), { temporal: Temporal.ofValue(this.parameters.value(it.name)) }),
@@ -704,7 +716,7 @@ export class CypherWriter {
         Property: (it, scope) => {
             const inParameter = this.inParameter(it);
             return inParameter !== undefined
-                ? json(inParameter)
+                ? json(inParameter, { jsonNull: true })
                 : this.property(this.expression(it.subject, scope), it.key);
         },
         HasLabels: (it, scope) => {
@@ -1071,6 +1083,17 @@ export class CypherWriter {
         this.queries.push(query);
     }
 
+    /** `work`, its parts of a `UNION` compared as a whole where `distinct` ({@link distinctParts}), as it was after. */
+    comparingParts<T>(distinct: boolean, work: () => T): T {
+        const was = this.distinctParts;
+        this.distinctParts = distinct;
+        try {
+            return work();
+        } finally {
+            this.distinctParts = was;
+        }
+    }
+
     /** The query `query` is, which reads and ends with a `RETURN`. */
     query(query: Query): string {
         this.give(query);
@@ -1331,15 +1354,17 @@ export class CypherWriter {
     /** Each query of a subquery's `UNION`, its rows as one value each, as a statement's are; without ALL, each once. */
     private correlatedUnion(query: Query, scope: Scope): string {
         const distinct = !query.unions[0].all;
-        return [query.clauses, ...query.unions.map((it) => it.clauses)]
-            .map((clauses) => {
-                let select = new Select(scope);
-                clauses.slice(0, -1).forEach((it) => (select = this.read(select, it, scope)));
-                const sql = this.project(select, (clauses[clauses.length - 1] as Return).projection, true).sql;
-                const result = distinct ? this.sql.comparable(json('q.result', { ordered: true })) : 'q.result';
-                return `SELECT ${result} AS result FROM (\n${indent(sql)}\n) q`;
-            })
-            .join(distinct ? '\nUNION\n' : '\nUNION ALL\n');
+        return this.comparingParts(distinct, () =>
+            [query.clauses, ...query.unions.map((it) => it.clauses)]
+                .map((clauses) => {
+                    let select = new Select(scope);
+                    clauses.slice(0, -1).forEach((it) => (select = this.read(select, it, scope)));
+                    const sql = this.project(select, (clauses[clauses.length - 1] as Return).projection, true).sql;
+                    const result = distinct ? this.sql.comparable(json('q.result', { ordered: true })) : 'q.result';
+                    return `SELECT ${result} AS result FROM (\n${indent(sql)}\n) q`;
+                })
+                .join(distinct ? '\nUNION\n' : '\nUNION ALL\n')
+        );
     }
 
     /** `CALL { … }`: a lateral query for each row, what it returns bound as variables of the row. */
@@ -1529,7 +1554,9 @@ export class CypherWriter {
             throw new DrivineError('Each query of a UNION returns the same names, as in Cypher.');
         }
         const distinct = !query.unions[0].all;
-        let projected = parts.map((it) => this.calledPart(select, call, it, names, distinct));
+        let projected = this.comparingParts(distinct, () =>
+            parts.map((it) => this.calledPart(select, call, it, names, distinct))
+        );
         if (new Set(projected.map((p) => JSON.stringify([...p.scope.values()].map((it) => it.kind)))).size > 1) {
             unsupported('A UNION in CALL { … } whose queries return values of different kinds');
         }
@@ -1542,7 +1569,9 @@ export class CypherWriter {
             const was = this.identities;
             this.identities = false;
             try {
-                projected = parts.map((it) => this.calledPart(select, call, it, names, distinct));
+                projected = this.comparingParts(distinct, () =>
+                    parts.map((it) => this.calledPart(select, call, it, names, distinct))
+                );
             } finally {
                 this.identities = was;
             }
@@ -1578,6 +1607,8 @@ export class CypherWriter {
                         temporals: all.some((it) => it?.temporals === true),
                         text: all.every((it) => it?.text === true),
                         texts: all.every((it) => it?.texts === true),
+                        // It may be JSON's null where any query's may be (#497).
+                        jsonNull: all.some((it) => it?.jsonNull === true),
                         // Its kind is known only where each query writes it as a value of that one.
                         known: single(all.map((it) => it?.known))
                     }
@@ -1612,7 +1643,7 @@ export class CypherWriter {
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
         select.source(this.listElements(list, items, name));
-        // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none.
+        // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none, nor is JSON's null.
         select.bind(
             unwind.variable,
             json(`${name}.item`, {
@@ -1622,7 +1653,8 @@ export class CypherWriter {
                 list: this.holdsLists(list),
                 text: this.holdsTexts(list) || this.isText(list),
                 flat: this.isFlat(list),
-                fromList: true
+                fromList: true,
+                jsonNull: !this.isFlat(list)
             })
         );
         select.order.push([`${name}.item_no`, false]);
@@ -2905,13 +2937,11 @@ export class CypherWriter {
             this.carriedOut(this.aggregating(item.expression, () => this.item(item.expression, select)))
         ]);
         const aggregating = items.some((it) => contains(it.expression, isAggregate));
-        // Where rows are compared (DISTINCT, GROUP BY), JSON is compared as what compares.
+        // Where rows are compared (DISTINCT, GROUP BY), each item is compared as rowCompared() has it.
         const compared = projection.distinct || aggregating;
         const itemColumns = compiled.map(([, value], i): [string, Value] => [
             `c${i + 1}`,
-            compared && value.kind === 'Json' && value.ordered
-                ? { ...value, sql: this.sql.comparable(value), ordered: false }
-                : value
+            compared ? this.rowCompared(value) : value
         ]);
         const selectList = itemColumns.flatMap(([column, value]) => columns(value, column));
         const name = this.alias('p');
@@ -3073,6 +3103,33 @@ export class CypherWriter {
         return [this.with(select, { kind: 'With', projection }, this.around(select), true), reads];
     }
 
+    /**
+     * `value` as rows are compared by it, where they are grouped or kept distinct: JSON as what compares, and JSON's null,
+     * which a value read out of a map or a list may be ({@link JsonValue.jsonNull}), and SQL's as one, as Cypher has one
+     * null (#497). It may still be JSON's null, as Oracle's {@link SqlCypherCompiler.groupedNull} gives it, so it is still
+     * read as one that may be. In a part of a `UNION` that compares rows ({@link distinctParts}) it is SQL's, as another
+     * part's value that is never JSON's null gives it.
+     */
+    private rowCompared(value: Value): Value {
+        if (value.kind !== 'Json') {
+            return value;
+        }
+        if (value.jsonNull) {
+            const it = this.sql.comparable(value);
+            return {
+                ...value,
+                sql: this.distinctParts ? this.sql.comparedNull(it) : this.sql.groupedNull(it),
+                ordered: false
+            };
+        }
+        return value.ordered ? { ...value, sql: this.sql.comparable(value), ordered: false } : value;
+    }
+
+    /** Whether `value` may be JSON's null: see {@link JsonValue.jsonNull}. */
+    private mayBeJsonNull(value: Value): boolean {
+        return value.kind === 'Json' && value.jsonNull === true;
+    }
+
     /** `value` as a projection carries it out: without its identity where none is carried (see {@link identities}). */
     private carriedOut(value: Value): Value {
         return value.kind === 'Json' && !this.identities && value.identity !== undefined
@@ -3093,7 +3150,15 @@ export class CypherWriter {
     ): string {
         if (final) {
             const values = itemColumns.map(([column, value]) => this.asJson(columnsOf(value, name, column)));
-            return `${values.length === 1 ? values[0].sql : this.sql.jsonArray(values.map((it) => it.sql))} AS result`;
+            // A value that may be JSON's null is given as SQL's where a UNION compares rows by it; in a row of several, a
+            // list's item, SQL's null is JSON's (#497).
+            const result =
+                values.length === 1
+                    ? this.distinctParts && values[0].jsonNull
+                        ? this.sql.comparedNull(values[0].sql)
+                        : values[0].sql
+                    : this.sql.jsonArray(values.map((it) => it.sql));
+            return `${result} AS result`;
         }
         return [
             ...itemColumns.flatMap(([column, value]) =>
@@ -3157,7 +3222,13 @@ export class CypherWriter {
                 after.set(column, this.sortable(this.expression(sort.expression, byName)));
                 anew = true;
             } else if (item >= 0) {
-                carried(column, () => compiled[item][1], sort.expression);
+                // One that may be JSON's null, where rows are compared, as its column is grouped by: see rowCompared().
+                carried(
+                    column,
+                    () =>
+                        compared && this.mayBeJsonNull(compiled[item][1]) ? itemColumns[item][1] : compiled[item][1],
+                    sort.expression
+                );
             } else if (
                 compared &&
                 !contains(
@@ -3510,7 +3581,9 @@ export class CypherWriter {
             (item) =>
                 !contains(item.expression, isAggregate) &&
                 (contains(item.expression, (it) => it.kind === 'Parameter') ||
-                    groupKeys(this.expression(item.expression, select.scope)).some((it) => /select/i.test(it)))
+                    groupKeys(this.rowCompared(this.expression(item.expression, select.scope))).some((it) =>
+                        /select/i.test(it)
+                    ))
         );
         if (held.length === 0) {
             return undefined;
@@ -3936,7 +4009,7 @@ export class CypherWriter {
         if (typeof known === 'string') {
             const inParameter = this.inParameter(index);
             return inParameter !== undefined
-                ? json(inParameter)
+                ? json(inParameter, { jsonNull: true })
                 : this.property(this.expression(index.subject, scope), known);
         }
         // An item of a list of nodes or relationships is the node or the relationship, so it is compared by its id; of one
@@ -3955,7 +4028,8 @@ export class CypherWriter {
                 identity: this.identityTaken(value, item, true, (it) => this.sql.element(it, at)),
                 list: this.holdsLists(value),
                 text: this.holdsTexts(value),
-                temporals: this.itemTemporalsOf(value)
+                temporals: this.itemTemporalsOf(value),
+                jsonNull: !this.isFlat(value)
             });
         }
         const take = (list: string): string =>
@@ -3972,7 +4046,8 @@ export class CypherWriter {
             identity: this.identityTaken(value, taken, true, take),
             list: this.holdsLists(value),
             text: this.holdsTexts(value),
-            temporals: this.itemTemporalsOf(value)
+            temporals: this.itemTemporalsOf(value),
+            jsonNull: !this.isFlat(value)
         });
     }
 
@@ -4351,7 +4426,9 @@ export class CypherWriter {
                 temporals:
                     this.hasTemporals(start) ||
                     this.hasTemporals(listed) ||
-                    read.some((it) => this.hasTemporals(scope.get(it)!))
+                    read.some((it) => this.hasTemporals(scope.get(it)!)),
+                // Its step may give JSON's null, as a null written or read from a map does.
+                jsonNull: true
             }
         );
     }
@@ -4534,7 +4611,8 @@ export class CypherWriter {
                 !knownNoMap(subject)
             ) {
                 return json(this.sql.itemValue(this.sql.comparable(subject), expression.key), {
-                    temporals: subject.temporals
+                    temporals: subject.temporals,
+                    jsonNull: !subject.flat
                 });
             }
         }
@@ -4562,12 +4640,13 @@ export class CypherWriter {
                 }
                 if (subject.rowKeys) {
                     const keys = [...subject.rowKeys, key];
-                    return json(this.sql.rowValue(keys), { rowKeys: keys });
+                    return json(this.sql.rowValue(keys), { rowKeys: keys, jsonNull: !subject.flat });
                 }
                 const taken = this.sql.propertyOf(this.sql.comparable(subject), key);
                 return json(taken, {
                     identity: this.identityTaken(subject, taken, true, (it) => this.sql.propertyOf(it, key)),
-                    temporals: subject.temporals
+                    temporals: subject.temporals,
+                    jsonNull: !subject.flat
                 });
             }
             case 'Bool':
@@ -5918,7 +5997,8 @@ export class CypherWriter {
             list: results.every(([, it]) => this.isList(it)),
             itemLists: results.every(([, it]) => this.holdsLists(it)),
             text: results.every(([, it]) => this.isText(it)),
-            texts: results.every(([, it]) => this.holdsTexts(it))
+            texts: results.every(([, it]) => this.holdsTexts(it)),
+            jsonNull: results.some(([, it]) => this.mayBeJsonNull(it))
         });
     }
 
@@ -5973,7 +6053,8 @@ export class CypherWriter {
                 ),
                 list: this.holdsLists(one),
                 text: this.holdsTexts(one),
-                temporals: this.itemTemporalsOf(one)
+                temporals: this.itemTemporalsOf(one),
+                jsonNull: !this.isFlat(one)
             });
         }
         return json(result, { text: TEXT_FUNCTIONS.includes(name) });
@@ -6573,6 +6654,10 @@ export class CypherWriter {
         }
         if (value.kind !== 'Json' || value.temporal !== undefined || this.isText(value)) {
             return [this.sql.comparable(this.asJson(value)), (it) => [this.sql.sortKey(it)]];
+        }
+        // One that may be JSON's null ties it with SQL's, so the next term decides between them (#497).
+        if (this.mayBeJsonNull(value)) {
+            return [this.sql.comparable(this.asJson(value)), (it) => this.sql.jsonNullSortKey(it)];
         }
         return [this.sql.comparable(this.asJson(value)), (it) => this.sql.openSortKey(it)];
     }
