@@ -3105,6 +3105,203 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
         });
 
+        it('randomUUID inside a larger expression in a read is made again for each row', async () => {
+            // drivine4j's #412 and #471 (#471 here). A term holding randomUUID() was bound in a subquery that reads nothing
+            // of the row, or a CALL's was joined so, and the store made it once for the statement: each row read the same
+            // one. Each statement gives a value for each of 100 rows, and the count of distinct values among them. Not one
+            // in an aggregate's argument, which Neo4j refuses.
+            await clear();
+            const text = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
+            const distinct = (rows: unknown[]): number =>
+                new Set(rows.flatMap((row) => (Array.isArray(row) ? row.map(text) : [text(row)]))).size;
+            const shapes: [string, number][] = [
+                ...[
+                    "left(replace(randomUUID(), '-', ''), 16)",
+                    'substring(randomUUID(), 0, 16)',
+                    'toUpper(randomUUID())',
+                    '[x IN [1] | randomUUID()][0]',
+                    'CASE WHEN i > 0 THEN randomUUID() END',
+                    'CASE WHEN true THEN toUpper(randomUUID()) END',
+                    '{u: randomUUID()}.u',
+                    '{u: randomUUID()}',
+                    'coalesce(null, randomUUID()) + toString(i % 2)'
+                ].map((it): [string, number] => [`UNWIND range(1, 100) AS i RETURN ${it}`, 100]),
+                ['UNWIND range(1, 100) AS i RETURN [randomUUID(), randomUUID()]', 200],
+                ['UNWIND range(1, 100) AS i RETURN [x IN range(1, 3) | toUpper(randomUUID())]', 300],
+                ["UNWIND range(1, 100) AS i RETURN reduce(s = '', x IN [1, 2] | s + randomUUID())", 100],
+                ['UNWIND range(1, 100) AS i UNWIND [toUpper(randomUUID())] AS u RETURN u', 100],
+                ['UNWIND range(1, 100) AS i RETURN toUpper(randomUUID()) AS u ORDER BY u', 100],
+                ['UNWIND range(1, 100) AS i CALL { RETURN randomUUID() AS u } RETURN u', 100],
+                ["UNWIND range(1, 100) AS i CALL { RETURN toUpper(randomUUID()) + '-' AS u } RETURN u", 100],
+                // However the CALL imports, it reads the UUID made for its row, which it never names (#473).
+                ['UNWIND range(1, 100) AS i CALL () { RETURN toUpper(randomUUID()) AS u } RETURN u', 100],
+                ['UNWIND range(1, 100) AS i CALL (i) { RETURN toString(i) + randomUUID() AS u } RETURN u', 100],
+                ['UNWIND range(1, 100) AS i CALL { WITH i RETURN toString(i) + randomUUID() AS u } RETURN u', 100],
+                [
+                    'UNWIND range(1, 100) AS i CALL { WITH i WITH i AS j RETURN toString(j) + randomUUID() AS u } RETURN u',
+                    100
+                ],
+                [
+                    "UNWIND range(1, 100) AS i CALL { RETURN toUpper(randomUUID()) AS u UNION RETURN 'x' AS u } RETURN u",
+                    101
+                ],
+                // A variable quoted as the compiler names its own is the statement's: imported as named, and a UUID made still.
+                [
+                    'UNWIND range(1, 100) AS `#anewi` CALL (`#anewi`) { RETURN toString(`#anewi`) + randomUUID() AS u } RETURN u',
+                    100
+                ],
+                // A CALL that writes makes one for each row it writes, as it did.
+                [
+                    'UNWIND range(1, 100) AS i CALL (i) { CREATE (n:CyUuidCall {id: toUpper(randomUUID())}) RETURN n.id AS u } RETURN u',
+                    100
+                ],
+                [
+                    'UNWIND range(1, 100) AS i CALL () { CREATE (n:CyUuidSet) SET n.id = toUpper(randomUUID()) RETURN n.id AS u } RETURN u',
+                    100
+                ],
+                // ... and one for each item of a list it writes.
+                [
+                    'UNWIND range(1, 100) AS i CREATE (n:CyUuidList {ids: [x IN [1, 2] | toUpper(randomUUID())]}) RETURN n.ids',
+                    200
+                ],
+                // A CALL in a CALL, and an item made again in a reduce's body.
+                [
+                    'UNWIND range(1, 100) AS i CALL () { CALL () { RETURN toUpper(randomUUID()) AS u } RETURN u } RETURN u',
+                    100
+                ],
+                ['UNWIND range(1, 100) AS i RETURN reduce(s = [], x IN [1, 2] | s + [toUpper(randomUUID())])', 200],
+                ['UNWIND range(1, 100) AS i WITH i, toUpper(randomUUID()) AS u RETURN u', 100],
+                // Two items written alike are a UUID each, as in Neo4j.
+                ['UNWIND range(1, 100) AS i RETURN toUpper(randomUUID()) AS a, toUpper(randomUUID()) AS b', 200],
+                [
+                    'UNWIND range(1, 100) AS i WITH toUpper(randomUUID()) AS a, toUpper(randomUUID()) AS b RETURN a, b',
+                    200
+                ]
+            ];
+            const failed: string[] = [];
+            const failing = async (cypher: string, wrong: (rows: any[]) => boolean): Promise<void> => {
+                try {
+                    const rows = await query(cypher);
+                    if (wrong(rows)) {
+                        failed.push(`${cypher}: ${JSON.stringify(rows).slice(0, 300)}`);
+                    }
+                } catch (e) {
+                    failed.push(`${cypher}: ${(e as Error).message.slice(0, 300)}`);
+                }
+            };
+            for (const [cypher, expected] of shapes) {
+                await failing(cypher, (rows) => distinct(rows) !== expected);
+            }
+            // A FOREACH makes one for each node it makes.
+            await failing(
+                'UNWIND range(1, 50) AS i FOREACH (x IN [1, 2] | CREATE (:CyUuidEach {id: toUpper(randomUUID())}))',
+                () => false
+            );
+            await failing('MATCH (n:CyUuidEach) RETURN n.id', (rows) => distinct(rows) !== 100);
+            // A condition that reads one keeps about half of 1,000 rows, not all of them or none.
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            for (const cypher of [
+                "UNWIND range(1, 1000) AS i WITH i WHERE left(randomUUID(), 1) < '8' RETURN count(*)",
+                "UNWIND range(1, 1000) AS i WITH i WHERE [x IN [1] | left(randomUUID(), 1)][0] < '8' RETURN count(*)",
+                "UNWIND range(1, 1000) AS i MATCH (p:Person {name: 'Keanu'}) WHERE left(randomUUID(), 1) < '8' RETURN count(*)",
+                // An OPTIONAL MATCH's lateral query read nothing of the row, and Oracle worked it out once.
+                "UNWIND range(1, 1000) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE randomUUID() < '8' RETURN count(p)",
+                "UNWIND range(1, 1000) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE left(randomUUID(), 1) < '8' RETURN count(p)",
+                "UNWIND range(1, 1000) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE [x IN [1] | left(randomUUID(), 1)][0] < '8' RETURN count(p)",
+                // Made for each of the 4 people a row finds, not once for the row: some of them kept, not all or none.
+                "UNWIND range(1, 1000) AS i OPTIONAL MATCH (p:Person) WHERE left(randomUUID(), 1) < '8' WITH i, count(p) AS c WHERE c > 0 AND c < 4 RETURN count(*)",
+                // One in a CALL that imports nothing, made for each row the CALL is joined to.
+                "UNWIND range(1, 1000) AS i CALL () { OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE left(randomUUID(), 1) < '8' RETURN p } RETURN count(p)",
+                // Two OPTIONAL MATCHes, each a UUID of its own: one kept and not the other in about half the rows.
+                "UNWIND range(1, 1000) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE left(randomUUID(), 1) < '8' " +
+                    "OPTIONAL MATCH (q:Person {name: 'Keanu'}) WHERE left(randomUUID(), 1) < '8' WITH p, q WHERE (p IS NULL) <> (q IS NULL) RETURN count(*)",
+                // A shortest path's condition, met where its one path is found.
+                "UNWIND range(1, 1000) AS i MATCH (a:Person {name: 'Laurence'}), (b:Person {name: 'Carrie'}) " +
+                    "MATCH p = shortestPath((a)-[:KNOWS*]->(b)) WHERE left(randomUUID(), 1) < '8' RETURN count(p)",
+                "UNWIND range(1, 1000) AS i MATCH (a:Person {name: 'Laurence'}), (b:Person {name: 'Carrie'}) " +
+                    "MATCH p = allShortestPaths((a)-[:KNOWS*]->(b)) WHERE left(randomUUID(), 1) < '8' RETURN count(p)",
+                // Made again for each item: one of two kept in about half the rows, which Postgres and Oracle kept both or neither of.
+                "UNWIND range(1, 1000) AS i WITH i WHERE single(x IN range(1, 2) WHERE left(randomUUID(), 1) < '8') RETURN count(*)",
+                "UNWIND range(1, 1000) AS i WITH i WHERE size([x IN range(1, 2) WHERE left(randomUUID(), 1) < '8' | x]) = 1 RETURN count(*)"
+            ]) {
+                await failing(cypher, (rows) => rows[0] === 0 || rows[0] === 1000);
+            }
+            // One for each item a pattern comprehension finds, 8 of them, where Postgres refused the statement.
+            for (const cypher of [
+                'MATCH (p:Person) RETURN p.name, [(p)-->() | toUpper(randomUUID())]',
+                "MATCH (p:Person) RETURN p.name, [(p)-->(m) WHERE left(randomUUID(), 1) <> 'z' | left(randomUUID(), 36)]"
+            ]) {
+                await failing(cypher, (rows) => {
+                    const made = rows.flatMap((it) => it[1]);
+                    return rows.length !== 4 || made.length !== 8 || new Set(made).size !== 8;
+                });
+            }
+            // The UUID made first for the row is no variable of the statement's, nor is the variable a CALL's query
+            // unwinds it to: a star in the query gives j alone, before u.
+            for (const [cypher, columns] of [
+                ["UNWIND range(1, 2) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE randomUUID() < 'z' RETURN *", 2],
+                ['UNWIND range(1, 2) AS i CALL { RETURN toUpper(randomUUID()) AS u } RETURN *', 2],
+                ['UNWIND range(1, 2) AS i CALL (*) { RETURN toUpper(randomUUID()) AS u } RETURN *', 2],
+                ["UNWIND range(1, 2) AS i WITH * WHERE left(randomUUID(), 1) < 'z' RETURN *, 1 AS one", 2],
+                ['UNWIND range(1, 2) AS i CALL { UNWIND [1] AS j RETURN *, toUpper(randomUUID()) AS u } RETURN *', 3]
+            ] as const) {
+                await failing(cypher, (rows) => rows.length !== 2 || rows.some((it) => it.length !== columns));
+            }
+            // A variable quoted as the compiler names its own is the statement's: it was taken for the UUID's, so read as
+            // the UUID, and left out of a star.
+            for (const [cypher, expected] of [
+                ['UNWIND [1, 2] AS `#anew2` RETURN `#anew2` AS a, toUpper(randomUUID()) AS u ORDER BY a', [[1], [2]]],
+                [
+                    'UNWIND [1, 2] AS i WITH i, 1 AS `#anew1`, 2 AS `#anew2`, 3 AS `#anew3`, 4 AS `#anew4`, 5 AS `#anew5`, ' +
+                        '6 AS `#anew6` CALL { RETURN toUpper(randomUUID()) AS u } RETURN * ORDER BY i',
+                    [
+                        [1, 2, 3, 4, 5, 6, 1],
+                        [1, 2, 3, 4, 5, 6, 2]
+                    ]
+                ],
+                // A UNION's queries are compiled one by one: the name made in the first was a later one's variable.
+                [
+                    'UNWIND [1] AS i CALL (i) { RETURN toString(i) + randomUUID() AS u } RETURN 0 AS x, u ' +
+                        'UNION ALL WITH 2 AS `#anew2` WITH * RETURN `#anew2` AS x, 0 AS u',
+                    [[0], [2]]
+                ]
+            ] as const) {
+                await failing(
+                    cypher,
+                    (rows) => JSON.stringify(rows.map((it) => it.slice(0, -1))) !== JSON.stringify(expected)
+                );
+            }
+            // An OPTIONAL MATCH that finds nothing, or keeps nothing it finds, keeps the row, with nulls.
+            for (const cypher of [
+                "UNWIND range(1, 3) AS i OPTIONAL MATCH (p:Person {name: 'Nobody'}) WHERE randomUUID() < 'z' RETURN i, p",
+                "UNWIND range(1, 3) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE left(randomUUID(), 1) < '0' RETURN i, p",
+                "UNWIND range(1, 3) AS i OPTIONAL MATCH (p:Person {name: 'Nobody'}) WHERE randomUUID() < 'z' OPTIONAL MATCH (p)-->(m) WHERE toUpper(randomUUID()) < 'Z' RETURN i, p, m"
+            ]) {
+                await failing(
+                    cypher,
+                    (rows) => rows.length !== 3 || rows.some((it) => it.slice(1).some((v: unknown) => v !== null))
+                );
+            }
+            expect(failed).toEqual([]);
+        });
+
+        it('randomUUID bound by a WITH is one value for each row, the same however often the row reads it', async () => {
+            // drivine4j's #412: one value for each row, not for each read of it.
+            const rows = (await query(
+                "UNWIND range(1, 100) AS i WITH i, randomUUID() AS u RETURN u AS a, u AS b, toUpper(u) AS c, left(replace(u, '-', ''), 16) AS d"
+            )) as string[][];
+            expect(new Set(rows.map((it) => it[0])).size).toBe(100);
+            rows.forEach(([a, b, upper, short]) =>
+                expect([b, upper, short]).toEqual([a, a.toUpperCase(), a.replace(/-/g, '').slice(0, 16)])
+            );
+            const made = (await query(
+                "UNWIND range(1, 100) AS i WITH i, toUpper(randomUUID()) AS u RETURN u AS a, toLower(u) AS b, u + '' AS c"
+            )) as string[][];
+            expect(new Set(made.map((it) => it[0])).size).toBe(100);
+            made.forEach(([a, lower, plus]) => expect([lower, plus]).toEqual([a.toLowerCase(), a]));
+        });
+
         it("the tokens the stamp clauses make are random, so a stale object's stamp does not come round again", async () => {
             // On Oracle a token was the first 16 hex digits of a SYS_GUID(), of which a counter's 4 changed.
             await clear();
@@ -3131,6 +3328,197 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
             // Two random tokens share 5 digits once in about a million; three such pairs in 19, about once in 1e15 runs.
             expect(longPrefixes(saved)).toBeLessThanOrEqual(2);
+        });
+    });
+
+    /**
+     * What a CALL sees of its row, on every store: drivine4j's own tests of liberation-data/drivine4j#410, ported for
+     * #473. A CALL saw every variable of its row, so an inner MATCH that reused a name it did not import joined to the
+     * row's variable, and gave no rows, or was refused where it bound a relationship of a node's name; and a CREATE of
+     * such a name joined the row's node, so no node was made. The rows are Neo4j's (2026.10).
+     */
+    describe('a CALL imports only what it names', () => {
+        it('a CALL sees only the variables it imports, and a name it does not import is a new variable in it', async () => {
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            const titles = ['Johnny Mnemonic', 'The Matrix', 'The Matrix Reloaded'];
+            // A CALL with no brackets and no leading WITH imports nothing.
+            expect(
+                await query(
+                    'MATCH (p:Person) CALL { MATCH (p:Movie) RETURN p.title AS t } RETURN count(*) AS n, count(DISTINCT t) AS d'
+                )
+            ).toEqual([[12, 3]]);
+            expect(
+                await query('MATCH (p:Person) CALL { MATCH (p:Movie) RETURN count(p) AS n } RETURN p.name, n ORDER BY p.name')
+            ).toEqual([
+                ['Carrie', 3],
+                ['Hugo', 3],
+                ['Keanu', 3],
+                ['Laurence', 3]
+            ]);
+            // CALL () imports nothing.
+            expect(
+                await query(
+                    "MATCH (p:Person {name: 'Keanu'}) CALL () { MATCH (p:Movie) RETURN p.title AS t } RETURN p.name, t ORDER BY t"
+                )
+            ).toEqual(titles.map((it) => ['Keanu', it]));
+            // CALL (a) imports a alone, and a leading WITH a alone: b in it is new.
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) CALL (a) { MATCH (a)-[:ACTED_IN]->(b) RETURN b.title AS t } RETURN b.name, t ORDER BY t"
+                )
+            ).toEqual(titles.map((it) => ['Carrie', it]));
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(b) RETURN b.title AS t } RETURN b.name, t ORDER BY t"
+                )
+            ).toEqual(titles.map((it) => ['Carrie', it]));
+            // A node's name, not imported, is a relationship's in the CALL.
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL { MATCH ()-[a:KNOWS]->() RETURN count(a) AS n } RETURN a.name, n"
+                )
+            ).toEqual([['Keanu', 2]]);
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Laurence'}) CALL () { MATCH ()-[a:KNOWS]->(b) RETURN b.name AS k } RETURN a.name, k ORDER BY k"
+                )
+            ).toEqual([
+                ['Laurence', 'Carrie'],
+                ['Laurence', 'Keanu']
+            ]);
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}), (b:Movie {title: 'The Matrix'}) CALL (a) { MATCH (a)-[b]->() RETURN count(b) AS n } RETURN b.title, n"
+                )
+            ).toEqual([['The Matrix', 4]]);
+            // What a leading WITH imports is gone after a WITH that does not pass it on.
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a WITH 1 AS one MATCH (a:Movie) RETURN count(a) AS n } RETURN n"
+                )
+            ).toEqual([3]);
+            // What brackets import is seen throughout the CALL, after a WITH that does not pass it on too, as Neo4j has it.
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) CALL (a, b) { WITH 1 AS one RETURN b.name AS n } RETURN n"
+                )
+            ).toEqual(['Carrie']);
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL (a) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+                )
+            ).toEqual([3]);
+            expect(
+                await query(
+                    'MATCH (a:Person) CALL (a) { UNWIND [1, 2] AS i WITH i RETURN a.name AS n, sum(i) AS s } RETURN n, s ORDER BY n'
+                )
+            ).toEqual([
+                ['Carrie', 3],
+                ['Hugo', 3],
+                ['Keanu', 3],
+                ['Laurence', 3]
+            ]);
+            // CALL (*), and a leading WITH *, import every variable.
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+                )
+            ).toEqual([3]);
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+                )
+            ).toEqual([3]);
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+                )
+            ).toEqual([3]);
+            // In a UNION, each query imports what its own leading WITH names.
+            expect(
+                await query(
+                    "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n " +
+                        'UNION ALL MATCH (a:Movie) RETURN count(a) AS n } RETURN a.name, n'
+                )
+            ).toEqual([
+                ['Keanu', 3],
+                ['Keanu', 3]
+            ]);
+        });
+
+        it('a CALL that writes sees only the variables it imports, so a CREATE of a name it does not import makes a new node', async () => {
+            await clear();
+            await query('CREATE (:CyWrite {id: 1}), (:CyWrite {id: 2})');
+            expect(
+                await query(
+                    'MATCH (a:CyWrite) CALL () { CREATE (a:CyWrite {made: true}) RETURN a.made AS m } RETURN a.id, m ORDER BY a.id'
+                )
+            ).toEqual([
+                [1, true],
+                [2, true]
+            ]);
+            expect(
+                await query(
+                    'MATCH (a:CyWrite {id: 1}) CALL { CREATE (a:CyWrite {made: false}) RETURN 1 AS x } RETURN [a.id, x]'
+                )
+            ).toEqual([[1, 1]]);
+            expect(await query('MATCH (n:CyWrite) RETURN [count(n.id), count(n.made)]')).toEqual([[2, 3]]);
+            // CALL (a) imports a alone: b in it is new, and the row's b is as it was after it.
+            await query(
+                'MATCH (a:CyWrite {id: 1}), (b:CyWrite {id: 2}) CALL (a) { CREATE (a)-[:R]->(b:CyWrite {id: 3}) } RETURN 1'
+            );
+            expect(await query('MATCH (a:CyWrite)-[:R]->(b) RETURN [a.id, b.id]')).toEqual([[1, 3]]);
+            expect(
+                await query(
+                    'MATCH (a:CyWrite {id: 1}), (b:CyWrite {id: 2}) CALL (a) { CREATE (b:CyWrite {id: 4}) RETURN b.id AS made } RETURN [b.id, made]'
+                )
+            ).toEqual([[2, 4]]);
+            // What brackets import is seen after a leading WITH that does not pass it on, as Neo4j has it.
+            expect(
+                await query(
+                    'MATCH (a:CyWrite {id: 1}), (b:CyWrite {id: 2}) CALL (a, b) { WITH a SET b.seen = true } RETURN b.seen'
+                )
+            ).toEqual([true]);
+            // ... and after any WITH: a CREATE of it joins the row's node, and a SET writes it.
+            await query('MATCH (a:CyWrite {id: 1}) CALL (a) { WITH 1 AS one CREATE (a)-[:S]->(:CyWrite {id: 5}) } RETURN 1');
+            expect(await query('MATCH (a:CyWrite)-[:S]->(b) RETURN [a.id, b.id]')).toEqual([[1, 5]]);
+            expect(
+                await query(
+                    'MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyWrite {id: 5}) WITH c SET a.next = c.id RETURN a.next AS n } RETURN n'
+                )
+            ).toEqual([5]);
+            expect(
+                await query('MATCH (a:CyWrite {id: 2}) CALL (*) { WITH 1 AS one SET a.one = one } RETURN a.one')
+            ).toEqual([1]);
+            // An aggregate over no rows still gives its row, and the WITH's WHERE reads what brackets import.
+            expect(
+                await query(
+                    'MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyNone) WITH count(c) AS n SET a.none = n RETURN a.none AS v } RETURN v'
+                )
+            ).toEqual([0]);
+            expect(
+                await query(
+                    'MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyWrite) WITH c WHERE c.id = a.next SET c.prev = a.id RETURN c.prev AS p, c.id AS i } RETURN [p, i]'
+                )
+            ).toEqual([[1, 5]]);
+            // Reading the imports again after a WITH that aggregates, or keeps rows distinct, gives one row for each row of the call.
+            expect(
+                await query(
+                    'MATCH (a:CyWrite) WHERE a.id IN [1, 2] CALL (a) { MATCH (c:CyWrite) WITH count(*) AS n SET a.count = n RETURN n } RETURN [a.id, n, a.count] ORDER BY a.id'
+                )
+            ).toEqual([
+                [1, 8, 8],
+                [2, 8, 8]
+            ]);
+            expect(
+                await query(
+                    'MATCH (a:CyWrite) WHERE a.id IN [1, 2] CALL (a) { MATCH (c:CyWrite) WITH DISTINCT 1 AS one SET a.d = one RETURN one } RETURN [a.id, a.d] ORDER BY a.id'
+                )
+            ).toEqual([
+                [1, 1],
+                [2, 1]
+            ]);
         });
     });
 

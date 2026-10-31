@@ -660,6 +660,8 @@ export abstract class SqlCypherCompiler {
             );
         }
         const writer = new CypherWriter(this, this.readParameters(parameters));
+        // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
+        writer.give(query);
         const rows = parts
             .map(
                 (clauses, i) =>
