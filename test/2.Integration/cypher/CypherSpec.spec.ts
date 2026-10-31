@@ -1,5 +1,8 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import neo4j from 'neo4j-driver';
 import { isDeepStrictEqual } from 'util';
+import { parse } from 'yaml';
 import {
     ConnectionPropertiesFromEnv,
     DatabaseRegistry,
@@ -11,7 +14,7 @@ import {
     TransactionContextHolder
 } from '@liberation-data/drivine';
 import { DrivineTestContainers, Environment } from '@/testing';
-import { check, loadSpec, runsOn, skipped, trimIndent, valuesFor } from '../../cypher/CypherSpec';
+import { check, CypherCase, loadSpec, runsOn, skipped, trimIndent, valuesFor } from '../../cypher/CypherSpec';
 
 jest.setTimeout(120_000);
 
@@ -184,6 +187,32 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     await check(file, cypherCase, i, store.name, async (step) =>
                         query(step.cypher, step.parameters ?? {})
                     );
+                }
+            }
+        });
+    });
+
+    /**
+     * A null in a map or a list and a missing key are one null, grouped, kept distinct and sorted as one (#497): the
+     * spec's cases of it at v0.17.0, and drivine4j's beside them, held in `one-null.yaml` until Drivine runs that spec.
+     */
+    describe('one-null.yaml', () => {
+        const held: { queries: CypherCase[]; writes: CypherCase[] } = parse(
+            fs.readFileSync(path.join(__dirname, 'one-null.yaml'), 'utf8'),
+            { intAsBigInt: true }
+        );
+        const cases = [
+            ...held.queries.map((it) => [it.name, it, loadSpec('queries.yaml').graph] as const),
+            ...held.writes.map((it) => [it.name, it, undefined] as const)
+        ];
+        it.each(cases)('%s', async (__, cypherCase, graph) => {
+            await clear();
+            if (graph) {
+                await query(graph);
+            }
+            for (let i = 0; i < cypherCase.steps.length; i++) {
+                if (runsOn(cypherCase.steps[i], store.name)) {
+                    await check(cypherCase, i, store.name, async (step) => query(step.cypher, step.parameters ?? {}));
                 }
             }
         });

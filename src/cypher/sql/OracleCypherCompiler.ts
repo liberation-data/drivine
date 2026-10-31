@@ -411,6 +411,24 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return [rank, json];
     }
 
+    /** JSON's null is ranked null, as SQL's is, but `JSON` orders it apart from SQL's: so the value is read as {@link groupedNull} has it (#497). */
+    jsonNullSortKey(json: string): string[] {
+        return [this.openSortKey(json)[0], this.groupedNull(json)];
+    }
+
+    /** Oracle groups by no subquery, so the value is not bound in one, as {@link nullIfJsonNull} binds a long one: it is read twice. */
+    comparedNull(json: string): string {
+        return `CASE WHEN ${kind(json)} <> 'null' THEN ${json} END`;
+    }
+
+    /**
+     * SQL's null read as JSON's, which reads the value once and reads no kind of it, where {@link comparedNull} reads both:
+     * that kept `DISTINCT` over 300,000 maps' values much longer than without it (#497).
+     */
+    groupedNull(json: string): string {
+        return `NVL(${json}, ${this.literalJson(null)})`;
+    }
+
     number(json: string): string {
         return this.shared(
             [json],
