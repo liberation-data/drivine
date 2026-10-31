@@ -3,6 +3,7 @@ import { DrivineError } from '@/DrivineError';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
+import { Aggregates } from '@/cypher/sql/Aggregates';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
 import {
@@ -150,6 +151,8 @@ export abstract class SqlCypherCompiler {
     compileQuery(query: Query, parameters: Record<string, any>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
         VariableKinds.check(query);
+        // An aggregate in a WHERE too.
+        Aggregates.check(query);
         if (query.unions.length > 0) {
             return this.withFunctions(this.union(query, parameters));
         }
