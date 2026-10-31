@@ -417,6 +417,33 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * {@link openSortKey} of a value that may be JSON's null ({@link JsonValue.jsonNull}): JSON's null ties with SQL's, as
+     * Cypher has one null, so a term after it decides their order (#497). Where a store's {@link openSortKey} does not tie
+     * them already, it says so.
+     */
+    jsonNullSortKey(jsonSql: string): string[] {
+        return this.openSortKey(jsonSql);
+    }
+
+    /**
+     * The JSON value `json`, JSON's null read as SQL's, where rows are given by it to a `UNION` that compares them, and by
+     * default where they are grouped or kept distinct ({@link groupedNull}): as {@link nullIfJsonNull}, but where a store
+     * binds a long value in a subquery there, which no store groups by, written out where it is read.
+     */
+    comparedNull(jsonSql: string): string {
+        return this.nullIfJsonNull(jsonSql);
+    }
+
+    /**
+     * The JSON value `json` as rows are grouped or kept distinct by it, JSON's null and SQL's one: as {@link comparedNull},
+     * but where a store makes them one more cheaply in a value that each row reads alike, as SQL's null read as JSON's, it
+     * says so (#497).
+     */
+    groupedNull(jsonSql: string): string {
+        return this.comparedNull(jsonSql);
+    }
+
+    /**
      * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): as
      * {@link sortKey} where the store orders lists as Cypher does.
      */
@@ -668,6 +695,8 @@ export abstract class SqlCypherCompiler {
         const writer = new CypherWriter(this, this.readParameters(parameters));
         // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
         writer.give(query);
+        // Its rows are compared, as a UNION without ALL compares them: see CypherWriter.distinctParts.
+        writer.distinctParts = !query.unions[0].all;
         const rows = parts
             .map(
                 (clauses, i) =>
