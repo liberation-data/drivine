@@ -2,7 +2,7 @@ import { DrivineError } from '@/DrivineError';
 import { Expression } from '@/cypher/ast/Expression';
 import { Pattern } from '@/cypher/ast/Pattern';
 import { Clause, Projection, Query, SetItem } from '@/cypher/ast/Query';
-import { children, isAggregate } from '@/cypher/sql/CypherSyntax';
+import { children, isAggregate, present } from '@/cypher/sql/CypherSyntax';
 
 /**
  * Where a statement aggregates, as Neo4j refuses it when it plans the statement: an aggregate in a `WHERE` (its
@@ -184,6 +184,7 @@ function parts(expression: Expression): Expression[] {
     }
 }
 
+/** Each expression `pattern` holds: its parts' properties, and a quantified path pattern's parts and condition. */
 function patternParts(pattern: Pattern): Expression[] {
     return [
         ...present(...pattern.nodes.map((it) => it.properties)),
@@ -194,8 +195,4 @@ function patternParts(pattern: Pattern): Expression[] {
                 : [])
         ])
     ];
-}
-
-function present(...expressions: (Expression | undefined)[]): Expression[] {
-    return expressions.filter((it): it is Expression => it !== undefined);
 }

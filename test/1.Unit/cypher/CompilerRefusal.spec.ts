@@ -475,7 +475,15 @@ describe('The Cypher compiler refuses', () => {
                 ['MATCH (n) SET n.v = [x IN [1, 2] WHERE sum(x) > 0 | x]', 'sum()'],
                 ['MERGE (n:N) ON CREATE SET n.v = [x IN [1, 2] WHERE min(x) > 0 | x]', 'min()'],
                 ['CREATE (n:N {v: [x IN [1, 2] WHERE avg(x) > 0 | x]})', 'avg()'],
-                ['FOREACH (i IN [1] | CREATE (:N {v: [x IN [1, 2] WHERE max(x) > 0 | x]}))', 'max()']
+                ['FOREACH (i IN [1] | CREATE (:N {v: [x IN [1, 2] WHERE max(x) > 0 | x]}))', 'max()'],
+                // Each other place a WHERE may be, as Neo4j 2026.10 refuses it.
+                ['MATCH (n) DELETE [x IN [n] WHERE count(x) > 0 | x][0]', 'count()'],
+                ['MERGE (n:N) ON MATCH SET n.v = [x IN [1, 2] WHERE min(x) > 0 | x]', 'min()'],
+                ['MATCH (n {v: [x IN [1, 2] WHERE sum(x) > 0 | x]}) RETURN n', 'sum()'],
+                ['UNWIND [1] AS i RETURN i ORDER BY size([x IN [1, 2] WHERE sum(x) > 0 | x])', 'sum()'],
+                ['UNWIND [1] AS i WITH i ORDER BY size([x IN [1, 2] WHERE sum(x) > 0 | x]) RETURN i', 'sum()'],
+                ['MATCH (n) WHERE reduce(s = 0, x IN [1] | s + count(x)) > 0 RETURN n', 'count()'],
+                ['MATCH (n) WHERE (n)-->({v: [x IN [1] WHERE sum(x) > 0 | x]}) RETURN n', 'sum()']
             ].forEach(([cypher, aggregate]) =>
                 expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, where(aggregate)])
             );
@@ -563,6 +571,12 @@ describe('The Cypher compiler refuses', () => {
                 'UNWIND [1, 2] AS x RETURN x AS y, count(*) AS c ORDER BY x + count(*)',
                 'UNWIND [1, 2] AS x RETURN x AS y, count(*) AS c ORDER BY y + count(*)',
                 'UNWIND [{a: 1, b: 2}] AS x RETURN x.a + x.b, count(*) AS cnt ORDER BY x.a + x.b + count(*)',
+                // A key matched whole however it is written: spaced, bracketed, or its function named in another case, as Neo4j
+                // names a function.
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), count(*) AS c ORDER BY toUpper(x.a) + count(*)",
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper( x.a ) AS u, count(*) AS c ORDER BY (toUpper(x . a))+count(*)",
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), count(*) AS c ORDER BY TOUPPER(x.a) + count(*)",
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), size([y IN collect(x) WHERE ToUpper(y.a) = TOUPPER(x.a)]) AS n",
                 'UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + x]',
                 // A key an item renames, named by an order term's map projection, or by a pattern where no item renames it.
                 'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size(keys(p {.name})) + count(*)',
