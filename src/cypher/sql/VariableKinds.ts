@@ -2,6 +2,7 @@ import { DrivineError } from '@/DrivineError';
 import { Expression, FunctionCall } from '@/cypher/ast/Expression';
 import { Group, Pattern } from '@/cypher/ast/Pattern';
 import { Call, Clause, Projection, Query, SetItem } from '@/cypher/ast/Query';
+import { bracketed, imports } from '@/cypher/sql/CypherSyntax';
 import { knownOf } from '@/cypher/sql/Value';
 
 /** A kind of variable: see {@link VariableKinds}. A value's kinds are named as {@link knownOf} names them; `ANY` is any kind at all. */
@@ -62,9 +63,10 @@ function queryKinds(query: Query, outer: Scope): Scope[] {
 
 /**
  * `list`, the clauses, in turn, over `scope`: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`,
- * `foreach`, a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there.
+ * `foreach`, a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there. `kept` stay in scope
+ * after each `WITH` that does not name them, as what a `CALL`'s brackets import does.
  */
-function clauses(list: Clause[], scope: Scope, foreach = false): Scope {
+function clauses(list: Clause[], scope: Scope, foreach = false, kept: Scope = new Map()): Scope {
     let current = scope;
     let returned: Scope = new Map();
     for (const clause of list) {
@@ -81,6 +83,11 @@ function clauses(list: Clause[], scope: Scope, foreach = false): Scope {
                 break;
             case 'With':
                 current = projected(clause.projection, current, clause.where);
+                kept.forEach((kind, name) => {
+                    if (!current.has(name)) {
+                        current.set(name, kind);
+                    }
+                });
                 break;
             case 'Return':
                 returned = projected(clause.projection, current, undefined);
@@ -125,16 +132,10 @@ function clauses(list: Clause[], scope: Scope, foreach = false): Scope {
 function called(call: Call, scope: Scope): Scope {
     const query = call.query;
     const parts = [query.clauses, ...query.unions.map((it) => it.clauses)].map((list) => {
-        const first = list[0];
-        const importing = call.imports === undefined && first?.kind === 'With' ? first.projection : undefined;
-        const imported = new Set(
-            call.imports ??
-                (importing?.items ?? [])
-                    .filter((it) => it.expression.kind === 'Variable' && it.expression.name === it.name)
-                    .map((it) => it.name)
-        );
-        const all = call.importsAll === true || importing?.star === true;
-        return clauses(list, new Map([...scope].filter(([name]) => all || imported.has(name))));
+        const imported = imports(call, list, scope.keys());
+        const inner: Scope = new Map([...scope].filter(([name]) => imported.has(name)));
+        // What its brackets import stays in scope after a WITH that does not name it.
+        return clauses(list, new Map(inner), false, bracketed(call) ? inner : new Map());
     });
     return new Map(
         [...parts[0]].map(([name, kind]): [string, Kind] => [

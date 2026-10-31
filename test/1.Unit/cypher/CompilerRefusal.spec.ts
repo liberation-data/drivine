@@ -235,8 +235,6 @@ describe('The Cypher compiler refuses', () => {
                 ['MATCH ()-[r]->() WITH r MATCH ()-[r]->() RETURN r', boundBefore],
                 ['MATCH (a)-[r]->() RETURN EXISTS { (a)-[r]->() } AS e', boundBefore],
                 ['MATCH (a)-[r]->(b) MERGE (a)-[r]->(b)', boundBefore],
-                ['MATCH (a) CALL { MATCH ()-[a]->() RETURN 1 AS x } RETURN a, x', boundBefore],
-                ['MATCH (a) CALL () { MATCH ()-[a]->() RETURN 1 AS x } RETURN a, x', boundBefore],
                 ['MATCH ()-[r]->() FOREACH (x IN [1] | CREATE ()-[r:T]->())', boundBefore],
                 [
                     'MATCH (a) CALL { WITH a RETURN a AS b UNION WITH a MATCH ()-[b]->() RETURN b } RETURN b',
