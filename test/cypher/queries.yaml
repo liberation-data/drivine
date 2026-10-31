@@ -1436,6 +1436,119 @@ cases:
       - cypher: "RETURN CASE null WHEN null THEN 'null' ELSE 'other' END"
         rows: ["other"]
 
+  - name: "A null in a map and a missing key are one null"
+    description: "A map's or a list's null, written or given, and a key or an item that is missing are the same null: grouped as one, kept once by DISTINCT and UNION, and tied in an order."
+    steps:
+      - note: "On the SQL stores a map's null is JSON's null, and a missing key SQL's: they are grouped, kept distinct and sorted as one."
+        cypher: "UNWIND [{a: null}, {b: 1}] AS x RETURN x.a, count(*)"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}, {a: 1}] AS x RETURN x.a AS a, count(*) AS c ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x WITH x.a AS a, count(*) AS c RETURN a, c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x WITH x.a AS a RETURN a, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x RETURN x['a'] AS a, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: {b: null}}, {a: {}}] AS x RETURN x.a.b AS v, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [[null], []] AS l RETURN l[0] AS v, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}, {c: 2}] AS x RETURN CASE WHEN x.c IS NULL THEN x.a ELSE null END AS v, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 3]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x WITH collect(x) AS xs UNWIND xs AS y RETURN y.a AS a, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND $p AS x RETURN x.a AS a, count(*) AS c"
+        only: [neo4j, sql]
+        parameters: {p: [{a: null}, {b: 1}]}
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{b: 1}, $p] AS x RETURN x.a AS a, count(*) AS c"
+        only: [neo4j, sql]
+        parameters: {p: {a: null}}
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x RETURN x.a = $p AS e, x.a AS a, count(*) AS c"
+        only: [neo4j, sql]
+        parameters: {p: null}
+        rows: [[null, null, 2]]
+      - note: "DISTINCT keeps the one null once."
+        cypher: "UNWIND [{a: null}, {b: 1}] AS x RETURN DISTINCT x.a"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x WITH DISTINCT x.a AS a RETURN count(*)"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND $p AS x RETURN DISTINCT x.a AS a"
+        only: [neo4j, sql]
+        parameters: {p: [{a: null}, {b: 1}]}
+        rows: [null]
+      - note: "So does UNION."
+        cypher: "UNWIND [{a: null}] AS x RETURN x.a AS v UNION UNWIND [{b: 1}] AS x RETURN x.a AS v"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "UNWIND [{b: 1}] AS x RETURN x.a AS v UNION RETURN $p.a AS v"
+        only: [neo4j, sql]
+        parameters: {p: {a: null}}
+        rows: [null]
+      - cypher: "UNWIND [{b: 1}] AS x RETURN x.a AS v UNION RETURN $p[0] AS v"
+        only: [neo4j, sql]
+        parameters: {p: [null, 1]}
+        rows: [null]
+      - cypher: "UNWIND [{b: 1}] AS x RETURN x.a AS v UNION RETURN null AS v"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "UNWIND [null] AS v RETURN v UNION MATCH (p:Person {name: 'Keanu'}) RETURN p.nickname AS v"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "RETURN $p.a AS a UNION RETURN $q.a AS a"
+        only: [neo4j, sql]
+        parameters: {p: {a: null}, q: {}}
+        rows: [null]
+      - note: "A null written is the same null as a property a node has not."
+        cypher: "MATCH (p:Person) RETURN CASE WHEN p.born > 1960 THEN p.nickname ELSE null END AS v, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 4]]
+      - cypher: "MATCH (p:Person) RETURN DISTINCT CASE WHEN p.born > 1960 THEN null END AS v"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "MATCH (p:Person) WITH p ORDER BY CASE WHEN p.born > 1964 THEN null ELSE p.nickname END, p.name DESC RETURN collect(p.name) AS l"
+        only: [neo4j, sql]
+        rows: [["Laurence", "Keanu", "Hugo", "Carrie"]]
+      - cypher: "UNWIND [1, null] AS v WITH v RETURN CASE WHEN v = 1 THEN {}.a ELSE v END AS w, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x RETURN reduce(s = null, t IN [1] | x.a) AS v, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - note: "An order ties them, so the next term decides."
+        cypher: "UNWIND [{a: null, i: 1}, {b: 1, i: 2}, {a: 0, i: 3}] AS x RETURN x.i AS i ORDER BY x.a, x.i DESC"
+        only: [neo4j, sql]
+        rows: [3, 2, 1]
+      - cypher: "UNWIND [{a: null, i: 1}, {b: 1, i: 2}, {a: 0, i: 3}] AS x RETURN x.i AS i ORDER BY x.a DESC, x.i DESC"
+        only: [neo4j, sql]
+        rows: [2, 1, 3]
+      - cypher: "UNWIND [{a: null, i: 1}, {b: 1, i: 2}, {a: 0, i: 3}] AS x WITH x ORDER BY x.a, x.i DESC RETURN collect(x.i) AS l"
+        only: [neo4j, sql]
+        rows: [[3, 2, 1]]
+      - note: "count(DISTINCT), collect(DISTINCT), = and IN read the one null as null already."
+        cypher: "UNWIND [{a: null, k: 1}, {b: 1, k: 1}] AS x RETURN x.k AS k, collect(DISTINCT x.a) AS l, count(DISTINCT x.a) AS n"
+        only: [neo4j, sql]
+        rows: [[1, [], 0]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS x UNWIND [{a: null}, {b: 1}] AS y RETURN x.a = y.a AS e, x.a <> y.a AS ne, count(*) AS n"
+        only: [neo4j, sql]
+        rows: [[null, null, 4]]
+      - cypher: "UNWIND [{a: null}, {a: 2}] AS x RETURN x.a IN [1] AS i, x.a IN [null] AS j, x.a IN [2, null] AS k, x.a = 1 AS e ORDER BY e"
+        only: [neo4j, sql]
+        rows: [[false, null, true, false], [null, null, null, null]]
+
   - name: "Relationships in lists compare by identity"
     description: "Two relationships with the same properties are different, as items of a list too."
     steps:
@@ -1581,6 +1694,60 @@ cases:
       - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, any(t IN collect(m.title) WHERE t CONTAINS r.role) AS n ORDER BY role"
         only: [neo4j, sql]
         rows: [["Johnny", true], ["Morpheus", false], ["Neo", false], ["Neo", false], ["Trinity", false], ["Trinity", false]]
+      - note: "Inside a list comprehension's WHERE, the key all through: in a quantifier's WHERE, a reduce()'s step or a comprehension's projection there too. Two x share a = 1, so a row for each x would give a = 1 twice."
+        cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, size([t IN collect(m.title) WHERE any(u IN [t] WHERE u CONTAINS r.role)]) AS n ORDER BY role"
+        only: [neo4j, sql]
+        rows: [["Johnny", 1], ["Morpheus", 0], ["Neo", 0], ["Trinity", 0]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, size([t IN collect(x.b) WHERE reduce(s = false, u IN [t] | s OR u > x.a)]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [2, 0]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, size([t IN collect(x.b) WHERE [u IN [t] | u > x.a][0]]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [2, 0]]
+      - note: "Not the other way about: a list comprehension's WHERE inside a quantifier's WHERE over an aggregate is grouped by x."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(t IN collect(x.b) WHERE size([u IN [t] WHERE u > x.a]) > 0) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, false], [1, true], [2, false]]
+      - note: "A comprehension, a quantifier or a reduce() that holds no aggregate reads the key in each of its bodies."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) + [y IN [1] | x.a][0] AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 3], [2, 3]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) + reduce(s = 0, y IN [1] | s + x.a) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 3], [2, 3]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, [count(*), any(y IN [0, 1] WHERE y > x.a)] AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, [2, false]], [2, [1, false]]]
+      - note: "But in the projection of a comprehension over an aggregate, x, whatever the projection holds."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, size([t IN collect(x.b) WHERE t >= x.a | [y IN [1] | x.a][0]]) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 0]]
+      - note: "Neo4j reads any(y IN list WHERE y = e) as e IN list, and none(…) as NOT e IN list, where e reads no y, so these read the key; y IN [e] is y = e. all() and single() are not read so."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, false]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, none(y IN collect(x.b) WHERE x.a = y) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, false], [2, true]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y IN [x.a]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, false]]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, any(t IN collect(m.title) WHERE t = r.role) AS n ORDER BY role"
+        only: [neo4j, sql]
+        rows: [["Johnny", false], ["Morpheus", false], ["Neo", false], ["Trinity", false]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, all(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, false], [1, true], [2, false]]
+      - note: "An order term that aggregates reads the key as an item does."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) AS n ORDER BY size([y IN collect(x.b) WHERE y > x.a])"
+        only: [neo4j, sql]
+        rows: [[2, 1], [1, 2]]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, count(*) AS n ORDER BY size([t IN collect(m.title) WHERE t CONTAINS r.role]) DESC, role"
+        only: [neo4j, sql]
+        rows: [["Johnny", 1], ["Morpheus", 1], ["Neo", 2], ["Trinity", 2]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) AS n ORDER BY size([y IN collect(x.b) | x.a]), a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 1]]
       - note: "Unnamed, a map projection is an item named after its variable, which an order term or the next clause reads."
         cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p {.name}, count(*) AS c ORDER BY p.name"
         only: [neo4j, sql]
@@ -1603,7 +1770,7 @@ cases:
         rows: [["X", 2], ["Y", 1]]
 
   - name: "Aggregate beside a WHERE"
-    description: "A WHERE over what an aggregate gave, and one in a subquery's or a CALL's own query, which aggregates in its projection, filters as Neo4j does. An aggregate in a WHERE is refused (see refusals.yaml, \"Aggregate in a WHERE\")."
+    description: "A WHERE over what an aggregate gave, and one in a subquery's or a CALL's own query, which aggregates in its projection, filters as Neo4j does. An aggregate in the WHERE of a WITH that groups is in \"Aggregate in the WHERE of a WITH that groups\"; in any other WHERE it is refused (see refusals.yaml, \"Aggregate in a WHERE\")."
     steps:
       - cypher: "UNWIND [1, 2] AS i WITH count(*) AS c WHERE c > 1 RETURN c"
         rows: [2]
@@ -1615,6 +1782,153 @@ cases:
         rows: ["Carrie", "Keanu"]
       - cypher: "MATCH (p:Person) CALL (p) { MATCH (p)-[:ACTED_IN]->(m) WITH count(m) AS c WHERE c > 1 RETURN c } RETURN p.name, c ORDER BY p.name"
         rows: [["Carrie", 2], ["Keanu", 3]]
+
+  - name: "Aggregate in the WHERE of a WITH that groups"
+    description: "The WHERE of a WITH that aggregates, or is DISTINCT, filters its groups, as SQL's HAVING does, and holds an aggregate, as Neo4j has it: one that is no item is worked out over each group's rows too. There a variable from before the WITH is read where it is a key the WITH groups by, written as its item is, and inside an aggregate; a name an item has is that item, in a larger expression too. The WHERE is met after the WITH's ORDER BY, SKIP and LIMIT. An aggregate in the WHERE of a WITH that groups nothing, or in a comprehension's or a pattern's own WHERE, is refused, and so is a variable no key is (see refusals.yaml, \"Aggregate in a WHERE\" and \"Variable before a WITH that groups, in its WHERE\")."
+    steps:
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(*) > 1 RETURN i"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN i"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i WITH i AS j, count(*) AS c WHERE j > count(*) RETURN j"
+        only: [neo4j, sql]
+        rows: [2]
+      - note: "An aggregate no item is, over each group's rows."
+        cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE max(i) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[2, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE avg(i) >= 1.5 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[2, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE size(collect(i)) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(DISTINCT i) = 1 RETURN i, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, 2], [2, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE size(collect(DISTINCT i)) = 1 AND count(*) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE max(i) + count(*) > 2 RETURN i, c ORDER BY i"
+        only: [neo4j, sql]
+        rows: [[1, 2], [2, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, count(*) AS c WHERE max(m.released) > p.born + 37 RETURN p.name, c ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Keanu", 3], ["Laurence", 1]]
+      - note: "An aggregate an item is, by the item's name or written again."
+        cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE c = count(*) RETURN i, c ORDER BY i"
+        only: [neo4j, sql]
+        rows: [[1, 2], [2, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, collect(m.title) AS ts WHERE size(collect(m.title)) > 1 RETURN p.name ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu"]
+      - note: "Beside a condition on a key, in a CASE, and as the list a quantifier reads."
+        cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE i > 1 OR count(*) > 1 RETURN i, c ORDER BY i"
+        only: [neo4j, sql]
+        rows: [[1, 2], [2, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE i > 1 AND count(*) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: []
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE CASE WHEN count(*) > 1 THEN true ELSE false END RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE all(x IN collect(i) WHERE x > 1) RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[2, 1]]
+      - note: "With no key, the rows are one group, an empty one where there are none."
+        cypher: "UNWIND [1, 2, 3] AS i WITH count(*) AS c WHERE sum(i) > 2 RETURN c"
+        only: [neo4j, sql]
+        rows: [3]
+      - cypher: "UNWIND [1, 2, 3] AS i WITH count(*) AS c WHERE count(*) > 5 RETURN c"
+        only: [neo4j, sql]
+        rows: []
+      - cypher: "UNWIND [] AS i WITH count(*) AS c WHERE count(*) = 0 RETURN c"
+        only: [neo4j, sql]
+        rows: [0]
+      - note: "A key, written as its item is before its name; its variable inside an aggregate, over each group's rows."
+        cypher: "UNWIND [1, 1, 2] AS i WITH i AS j, count(*) AS c WHERE i > 1 RETURN j, c"
+        only: [neo4j, sql]
+        rows: [[2, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i AS j, count(*) AS c WHERE sum(i) > 1 RETURN j, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, 2], [2, 1]]
+      - cypher: "UNWIND [1, 2, 3] AS i WITH i % 2 AS k, count(*) AS c WHERE i % 2 = 1 RETURN k, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "UNWIND [1, 2, 3] AS i WITH i % 2 AS k, count(*) AS c WHERE sum(i) > 2 RETURN k, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS n, count(*) AS c WHERE p.name STARTS WITH 'K' AND count(*) > 1 RETURN n, c"
+        only: [neo4j, sql]
+        rows: [["Keanu", 3]]
+      - note: "A name an item has is that item, in a larger expression too: i + 10 is the item i, plus 10."
+        cypher: "UNWIND [1, 1, 2] AS i WITH i + 10 AS i, count(*) AS c WHERE i + 10 > 20 RETURN i, c ORDER BY i"
+        only: [neo4j, sql]
+        rows: [[11, 2], [12, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i AS j, i + 1 AS i, count(*) AS c WHERE i > 2 RETURN j, i, c"
+        only: [neo4j, sql]
+        rows: [[2, 3, 1]]
+      - note: "A DISTINCT WITH groups by its items."
+        cypher: "UNWIND [1, 1, 2] AS i WITH DISTINCT i WHERE count(*) > 1 RETURN i"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH DISTINCT i, count(*) AS c WHERE count(*) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH DISTINCT * WHERE count(*) > 1 RETURN i"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH DISTINCT i AS j WHERE i > 1 RETURN j"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH DISTINCT p WHERE count(m) > 1 RETURN p.name ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu"]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH DISTINCT p.name AS n WHERE p.name STARTS WITH 'K' OR count(*) = 1 RETURN n ORDER BY n"
+        only: [neo4j, sql]
+        rows: ["Keanu", "Laurence"]
+      - note: "Met after the WITH's ORDER BY, SKIP and LIMIT, in their order."
+        cypher: "UNWIND [1, 1, 2, 3, 3, 3] AS i WITH i, count(*) AS c ORDER BY i LIMIT 2 WHERE count(*) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[1, 2]]
+      - cypher: "UNWIND [1, 1, 2, 3, 3, 3] AS i WITH i, count(*) AS c ORDER BY i SKIP 1 WHERE count(*) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[3, 3]]
+      - cypher: "UNWIND [1, 1, 2, 3, 3, 3] AS i WITH i, count(*) AS c ORDER BY count(*) DESC WHERE count(*) > 1 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[3, 3], [1, 2]]
+      - cypher: "UNWIND [1, 1, 2, 3, 3, 3] AS i WITH i, count(*) AS c ORDER BY sum(i) DESC LIMIT 2 WHERE sum(i) > 2 RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[3, 3]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH DISTINCT i ORDER BY i DESC LIMIT 1 WHERE count(*) > 1 RETURN i"
+        only: [neo4j, sql]
+        rows: []
+      - note: "An aggregate no item is, is no variable after the WITH."
+        cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN *"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[2, 1], [1, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(*) > 1 WITH i, c, count(*) AS d WHERE count(*) = 1 RETURN i, c, d"
+        only: [neo4j, sql]
+        rows: [[1, 2, 1]]
+      - note: "In a subquery's and a CALL's own query."
+        cypher: "MATCH (p:Person) CALL (p) { MATCH (p)-[:ACTED_IN]->(m) WITH p, count(*) AS k WHERE count(m) > 1 RETURN k } RETURN p.name, k ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 2], ["Keanu", 3]]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i, 3] AS x WITH x, count(*) AS c WHERE count(*) > 1 AND x = i RETURN c } RETURN i, c"
+        only: [neo4j, sql]
+        rows: [[1, 2], [2, 2]]
+      - cypher: "MATCH (p:Person) RETURN p.name, COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH m, count(*) AS k WHERE count(*) > 0 RETURN m } AS n ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 2], ["Hugo", 0], ["Keanu", 3], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, count(*) AS c WHERE EXISTS { MATCH (p)-[:KNOWS]->(q) WITH q, count(*) AS k WHERE count(*) > 0 RETURN q } RETURN p.name ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: ["Keanu", "Laurence"]
 
   - name: "Variable-length ranges"
     description: "A variable-length relationship matches each length in its range."

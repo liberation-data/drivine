@@ -38,6 +38,7 @@ const INSTANT_FIELDS = [
     'weekYear',
     'day',
     'ordinalDay',
+    'dayOfQuarter',
     'dayOfWeek',
     'weekDay',
     'hour',
@@ -47,6 +48,9 @@ const INSTANT_FIELDS = [
     'microsecond',
     'nanosecond'
 ];
+
+/** The fields that give a date by the calendar's other fields, beside the year, in place of a month and a day: see {@link Temporals.ofCalendar}. */
+export const CALENDAR_FIELDS = ['week', 'dayOfWeek', 'ordinalDay', 'quarter', 'dayOfQuarter'];
 
 /** The fields of a zoned value that are of its zone. */
 const ZONE_FIELDS = ['timezone', 'offset', 'offsetMinutes', 'offsetSeconds'];
@@ -237,6 +241,60 @@ export class Temporals {
             throw new Error('a duration is made of its own fields');
         }
         return this.convert(text, kind, kind);
+    }
+
+    /**
+     * {@link of} for `fields` that give the date by the calendar's other fields beside the `year`, SQL numbers each: a
+     * `week` of the ISO week-based year and its `dayOfWeek`, an `ordinalDay`, or a `quarter` and its `dayOfQuarter`. The
+     * date is so many days after the first of the year, of the quarter, or of the year's first ISO week, the week of
+     * January 4th. As Neo4j has them, a field that is null is given as its least (the year 0, the first week, day or
+     * quarter), and a week runs to 53 and a day of the quarter to 92 in any year, carried into the next where it has
+     * fewer. A field that is not whole or is past its range gives the day 0, which the store fails on as it fails on
+     * `{day: 0}`.
+     */
+    ofCalendar(fields: Record<string, string>, timezone: string | undefined, kind: Temporal): string {
+        const time = Object.fromEntries(
+            Object.entries(fields).filter(([name]) => name !== 'year' && !CALENDAR_FIELDS.includes(name))
+        );
+        const given = (name: string, least: number): string =>
+            fields[name] !== undefined ? `COALESCE(${fields[name]}, ${least})` : `${least}`;
+        const january = (y: string, day: number): string =>
+            this.sql.local(`to_char(${y}, 'FM0000') || '-01-0${day}'`, Temporal.DATE);
+        const whole = (...values: string[]): string => values.map((it) => `${it} = TRUNC(${it})`).join(' AND ');
+        const year = given('year', 0);
+        if (fields.week !== undefined) {
+            return this.shared([year, given('week', 1), given('dayOfWeek', 1)], ([y, w, d]) =>
+                this.shared([january(y, 4)], ([january4]) =>
+                    this.calendarDate(
+                        this.sql.addTime(january4, `(${w} - 1) * 7 + ${d} - ${this.sql.dayOfWeek(january4)}`, '0'),
+                        time,
+                        timezone,
+                        kind,
+                        () => `${whole(y, w, d)} AND ${w} BETWEEN 1 AND 53 AND ${d} BETWEEN 1 AND 7`
+                    )
+                )
+            );
+        }
+        if (fields.ordinalDay !== undefined) {
+            return this.shared([year, given('ordinalDay', 1)], ([y, n]) =>
+                this.calendarDate(
+                    this.sql.addTime(january(y, 1), `${n} - 1`, '0'),
+                    time,
+                    timezone,
+                    kind,
+                    (day) => `${whole(y, n)} AND ${n} >= 1 AND EXTRACT(YEAR FROM ${day}) = ${y}`
+                )
+            );
+        }
+        return this.shared([year, given('quarter', 1), given('dayOfQuarter', 1)], ([y, q, n]) =>
+            this.calendarDate(
+                this.sql.addTime(this.sql.addMonths(january(y, 1), `(${q} - 1) * 3`), `${n} - 1`, '0'),
+                time,
+                timezone,
+                kind,
+                () => `${whole(y, q, n)} AND ${q} BETWEEN 1 AND 4 AND ${n} BETWEEN 1 AND 92`
+            )
+        );
     }
 
     /**
@@ -505,6 +563,44 @@ export class Temporals {
         return from.zoned ? this.offset(text) : "'Z'";
     }
 
+    /**
+     * {@link of} the date the timestamp `date` reads where `valid` holds of it, else of the day 0, and the fields of the
+     * time `time`. A moment's date is read as a date first: every store fails on a date's day 0, where Oracle reads a
+     * moment's text as a JSON value's, null where it is no moment.
+     */
+    private calendarDate(
+        date: string,
+        time: Record<string, string>,
+        timezone: string | undefined,
+        kind: Temporal,
+        valid: (day: string) => string
+    ): string {
+        return this.shared([date], ([day]) => {
+            const fields = {
+                year: `EXTRACT(YEAR FROM ${day})`,
+                month: `EXTRACT(MONTH FROM ${day})`,
+                day: `CASE WHEN NOT (${valid(day)}) THEN 0 ELSE EXTRACT(DAY FROM ${day}) END`
+            };
+            if (kind === Temporal.DATE) {
+                return this.of(fields, undefined, kind);
+            }
+            return this.shared(
+                [this.sql.local(this.of(fields, undefined, Temporal.DATE), Temporal.DATE)],
+                ([checked]) =>
+                    this.of(
+                        {
+                            ...time,
+                            year: `EXTRACT(YEAR FROM ${checked})`,
+                            month: `EXTRACT(MONTH FROM ${checked})`,
+                            day: `EXTRACT(DAY FROM ${checked})`
+                        },
+                        timezone,
+                        kind
+                    )
+            );
+        });
+    }
+
     /** A field of the wall clock `t`, a timestamp, by Cypher's name for it. */
     private clockField(t: string, name: string): string {
         const second = `EXTRACT(SECOND FROM ${t})`;
@@ -516,6 +612,10 @@ export class Temporals {
             weekYear: () => this.sql.number(`to_char(${t}, 'IYYY')`),
             day: () => `EXTRACT(DAY FROM ${t})`,
             ordinalDay: () => this.sql.number(`to_char(${t}, 'DDD')`),
+            dayOfQuarter: () =>
+                `(${this.sql.number(`to_char(${t}, 'DDD')`)} - ${this.sql.number(
+                    `to_char(${this.sql.truncate('quarter', t)!}, 'DDD')`
+                )} + 1)`,
             dayOfWeek: () => this.sql.dayOfWeek(t),
             weekDay: () => this.sql.dayOfWeek(t),
             hour: () => `EXTRACT(HOUR FROM ${t})`,

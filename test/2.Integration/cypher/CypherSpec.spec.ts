@@ -184,15 +184,17 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
             for (let i = 0; i < cypherCase.steps.length; i++) {
                 if (runsOn(cypherCase.steps[i], store.name) && !skipped(file, cypherCase, i, store.name)) {
-                    await check(cypherCase, i, store.name, async (step) => query(step.cypher, step.parameters ?? {}));
+                    await check(file, cypherCase, i, store.name, async (step) =>
+                        query(step.cypher, step.parameters ?? {})
+                    );
                 }
             }
         });
     });
 
     /**
-     * A null in a map or a list and a missing key are one null, grouped, kept distinct and sorted as one (#497): the
-     * spec's cases of it at v0.17.0, and drivine4j's beside them, held in `one-null.yaml` until Drivine runs that spec.
+     * A null in a map or a list and a missing key are one null, grouped, kept distinct and sorted as one (#497):
+     * drivine4j's cases of it and Drivine's own, which the spec does not hold, in `one-null.yaml`.
      */
     describe('one-null.yaml', () => {
         const held: { queries: CypherCase[]; writes: CypherCase[] } = parse(
@@ -210,7 +212,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
             for (let i = 0; i < cypherCase.steps.length; i++) {
                 if (runsOn(cypherCase.steps[i], store.name)) {
-                    await check(cypherCase, i, store.name, async (step) => query(step.cypher, step.parameters ?? {}));
+                    await check('one-null.yaml', cypherCase, i, store.name, async (step) =>
+                        query(step.cypher, step.parameters ?? {})
+                    );
                 }
             }
         });
@@ -3874,6 +3878,158 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             // A temporal key: A's 30 days are past C's 10.
             const temporal = `${match} RETURN me.name AS name, me.born AS born, count(*) AS cnt ORDER BY me.born + duration({days: 10 * count(*)})`;
             expect([temporal, (await query(temporal)).map((it) => it[0])]).toEqual([temporal, ['B', 'C', 'A', 'D']]);
+        });
+    });
+
+    /**
+     * The WHERE of a WITH that aggregates, or is DISTINCT, filters its groups, as SQL's HAVING does: drivine4j's test of
+     * liberation-data/drivine4j#497, ported for #496, less the statements the spec holds since v0.16.0. The rows are
+     * Neo4j's (2026.10.1).
+     */
+    describe('an aggregate in the WHERE of a WITH that groups', () => {
+        it('compares keys and aggregates as grouping does, and names what it makes as no variable of the statement is', async () => {
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            const sorted = (rows: any[]): string[] => rows.map((it) => JSON.stringify(it)).sort();
+            const ordered: [string, any[]][] = [
+                // A key's property, read through the item it is renamed to, of a map and of a node.
+                [
+                    'UNWIND [{a: 1}, {a: 1}, {a: 2}] AS x WITH x AS y, count(*) AS c WHERE x.a > 1 AND count(*) = 1 RETURN y.a, c',
+                    [[2, 1]]
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p AS q, count(*) AS c WHERE p.born > 1965 RETURN q.name, c ORDER BY q.name',
+                    [['Carrie', 2]]
+                ],
+                // A key and an aggregate compared as grouping compares them, a function's name in any case; count(DISTINCT i) is not count(i).
+                [
+                    "UNWIND ['a', 'A', 'b'] AS x WITH toUpper(x) AS u, count(*) AS c WHERE TOUPPER(x) = 'A' RETURN u, c",
+                    [['A', 2]]
+                ],
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, Sum(i) AS s WHERE SUM(i) > 1 RETURN i, s ORDER BY i',
+                    [
+                        [1, 2],
+                        [2, 2]
+                    ]
+                ],
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, count(i) AS c WHERE count(DISTINCT i) = 1 AND count(i) > 1 RETURN i, c',
+                    [[1, 2]]
+                ],
+                // A property's name keeps its case: sum(x.A) is not sum(x.a).
+                [
+                    'UNWIND [{a: 1, A: 10}, {a: 2, A: 20}] AS x WITH count(*) AS c, sum(x.a) AS s WHERE sum(x.A) > 25 RETURN c, s',
+                    [[2, 3]]
+                ],
+                // An item quoted as a made item would be named is the statement's own.
+                ...[1, 2, 3, 4, 5, 6].map((n): [string, any[]] => [
+                    `UNWIND [1, 1, 2] AS i WITH i, count(*) AS \`#having${n}\` WHERE sum(i) > 1 RETURN i, \`#having${n}\` ORDER BY i`,
+                    [
+                        [1, 2],
+                        [2, 1]
+                    ]
+                ])
+            ];
+            for (const [cypher, rows] of ordered) {
+                expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
+            }
+            const unordered: [string, any[]][] = [
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 WITH * RETURN *',
+                    [
+                        [1, 2],
+                        [2, 1]
+                    ]
+                ],
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN i UNION UNWIND [5] AS `#having2` RETURN `#having2` AS i',
+                    [1, 2, 5]
+                ],
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(DISTINCT i) = 1 RETURN i, c',
+                    [
+                        [1, 2],
+                        [2, 1]
+                    ]
+                ],
+                // What is made for the WHERE is no column of a star, in a bracketed CALL's WITH and beside a UUID made for each row.
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i] AS x WITH x, count(*) AS c WHERE sum(x) > 1 RETURN * } RETURN *',
+                    [
+                        [2, 1, 1],
+                        [2, 2, 2]
+                    ]
+                ],
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 AND randomUUID() IS NOT NULL RETURN *',
+                    [
+                        [2, 1],
+                        [1, 2]
+                    ]
+                ]
+            ];
+            for (const [cypher, rows] of unordered) {
+                expect([cypher, sorted(await query(cypher))]).toEqual([cypher, sorted(rows)]);
+            }
+        });
+    });
+
+    /**
+     * A date or a moment made from a week, an ordinal day or a quarter that an expression gives, worked out by the store:
+     * drivine4j's test of liberation-data/drivine4j#495, ported for #495, less the statements the spec holds since
+     * v0.15.0.
+     */
+    describe('a date or a moment from calendar fields an expression gives', () => {
+        it("fails past their range as the statement runs, a moment's too", async () => {
+            const differing: string[] = [];
+            for (const cypher of [
+                'UNWIND [[2023, 2, 0]] AS p RETURN date({year: p[0], week: p[1], dayOfWeek: p[2]})',
+                'UNWIND [[2024, 4, 93]] AS p RETURN date({year: p[0], quarter: p[1], dayOfQuarter: p[2]})',
+                'UNWIND [[2023, 2.5]] AS p RETURN date({year: p[0], week: p[1]})',
+                // A moment's too, which Oracle reads as a JSON value's, null where it is no moment.
+                'UNWIND [[2023, 366]] AS p RETURN localdatetime({year: p[0], ordinalDay: p[1], hour: 3})',
+                "UNWIND [[2020, 54]] AS p RETURN datetime({year: p[0], week: p[1], timezone: '+01:00'})",
+                'UNWIND [[2024, 4, 93]] AS p RETURN localdatetime({year: p[0], quarter: p[1], dayOfQuarter: p[2]})'
+            ]) {
+                try {
+                    differing.push(`${cypher} gave ${JSON.stringify(await query(cypher))}`);
+                } catch {
+                    // Fails, as on Neo4j.
+                }
+            }
+            expect(differing).toEqual([]);
+        });
+
+        it('gives the date Neo4j gives at the turn of a year, the least a null gives, and a moment beside its time', async () => {
+            const rows = await query(
+                'UNWIND [[2020, 53, 7, 2024, 366, 4, 92], [2019, 53, 1, 2023, 365, 1, 91], [2015, 53, 5, 2024, 60, null, null], [2026, 1, 1, 2025, null, 2, 1]] AS p ' +
+                    'WITH date({year: p[0], week: p[1], dayOfWeek: p[2]}) AS w, localdatetime({year: p[3], ordinalDay: p[4], hour: 12}) AS o, ' +
+                    "datetime({year: p[0], quarter: p[5], dayOfQuarter: p[6], hour: 0, minute: 5, timezone: '-05:00'}) AS q " +
+                    'RETURN [[w.year, w.month, w.day], [o.year, o.month, o.day, o.hour], [q.year, q.month, q.day, q.minute, q.timezone]]'
+            );
+            expect(rows).toEqual([
+                [
+                    [2021, 1, 3],
+                    [2024, 12, 31, 12],
+                    [2020, 12, 31, 5, '-05:00']
+                ],
+                [
+                    [2019, 12, 30],
+                    [2023, 12, 31, 12],
+                    [2019, 4, 1, 5, '-05:00']
+                ],
+                [
+                    [2016, 1, 1],
+                    [2024, 2, 29, 12],
+                    [2015, 1, 1, 5, '-05:00']
+                ],
+                [
+                    [2025, 12, 29],
+                    [2025, 1, 1, 12],
+                    [2026, 4, 1, 5, '-05:00']
+                ]
+            ]);
         });
     });
 });

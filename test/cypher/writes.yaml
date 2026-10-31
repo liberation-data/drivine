@@ -27,6 +27,20 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN properties(n)"
         rows: [{name: "Ada", age: 36}]
 
+  - name: "A null in a written row and a missing key are one null"
+    description: "A write's rows, read after it, group a map's null and a missing key as one null, and keep it once by DISTINCT."
+    steps:
+      - cypher: "UNWIND $rows AS r CREATE (:CyWrite {b: 9}) RETURN r.a AS a, count(*) AS c"
+        only: [neo4j, sql]
+        parameters: {rows: [{a: null}, {b: 1}]}
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS r CREATE (:CyWrite {b: 9}) WITH r RETURN DISTINCT r.a AS a"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "MATCH (n:CyWrite) RETURN n.b AS b, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[9, 4]]
+
   - name: "MERGE"
     description: "MERGE finds what exists, or what an earlier row made, and makes it once."
     steps:
