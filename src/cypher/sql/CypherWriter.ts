@@ -344,21 +344,44 @@ function truncationKeys(fn: FunctionCall, kind: Temporal, entries: [string, Expr
  * {@link TRUNCATION_RANGES}); with `millis`, a millisecond is given or kept, beside which a microsecond runs to 999.
  */
 function truncationWhole(fn: FunctionCall, key: string, literal: unknown, millis: boolean): number {
-    if (typeof literal !== 'number' || !Number.isInteger(literal)) {
-        const shown = typeof literal === 'string' ? `'${literal}'` : String(literal);
-        throw new DrivineError(`${fn.name}() takes a whole number for ${key}, not ${shown}.`);
-    }
     const beside = key === 'microsecond' && millis;
-    const range: [number, number] | undefined = beside ? [0, 999] : TRUNCATION_RANGES[key];
+    return wholeField(
+        fn.name,
+        key,
+        literal,
+        beside ? [0, 999] : TRUNCATION_RANGES[key],
+        beside ? 'millisecond' : undefined
+    );
+}
+
+/**
+ * `literal`, written as the field `key` of a temporal map given `name`, where it is a whole number in `range`, the
+ * range it has `beside` another field given where one is named, as Neo4j takes it: fails on any other.
+ */
+function wholeField(
+    name: string,
+    key: string,
+    literal: unknown,
+    range: [number, number] | undefined,
+    beside: string | undefined
+): number {
+    if (typeof literal !== 'number' || !Number.isInteger(literal)) {
+        throw new DrivineError(`${name}() takes a whole number for ${key}, not ${shownLiteral(literal)}.`);
+    }
     if (range !== undefined && (literal < range[0] || literal > range[1])) {
-        const name = FIELD_NOUNS[key] ?? `a ${key}`;
+        const besides = beside !== undefined ? ` beside a ${beside}` : '';
         throw new DrivineError(
-            `${fn.name}() takes ${name} from ${range[0]} to ${range[1]}${
-                beside ? ' beside a millisecond' : ''
-            }, not ${literal}.`
+            `${name}() takes ${FIELD_NOUNS[key] ?? `a ${key}`} from ${range[0]} to ${
+                range[1]
+            }${besides}, not ${literal}.`
         );
     }
     return literal;
+}
+
+/** The value `literal` that a statement writes, as a message shows it: a text in quotes, `'3'`, else as written. */
+function shownLiteral(literal: unknown): string {
+    return typeof literal === 'string' ? `'${literal}'` : String(literal);
 }
 
 /**
@@ -584,20 +607,8 @@ function overTakes(kind: Temporal, dated: boolean): Set<string> {
  * `keys`, a microsecond or a nanosecond runs to the next one's.
  */
 function overNumber(name: string, key: string, literal: unknown, keys: Set<string>): number {
-    if (typeof literal !== 'number' || !Number.isInteger(literal)) {
-        const shown = typeof literal === 'string' ? `'${literal}'` : String(literal);
-        throw new DrivineError(`${name}() takes a whole number for ${key}, not ${shown}.`);
-    }
     const [range, beside] = overRange(key, keys);
-    if (range !== undefined && (literal < range[0] || literal > range[1])) {
-        const besides = beside !== undefined ? ` beside a ${beside}` : '';
-        throw new DrivineError(
-            `${name}() takes ${FIELD_NOUNS[key] ?? `a ${key}`} from ${range[0]} to ${
-                range[1]
-            }${besides}, not ${literal}.`
-        );
-    }
-    return literal;
+    return wholeField(name, key, literal, range, beside);
 }
 
 /**
@@ -5490,8 +5501,7 @@ export class CypherWriter {
             );
         };
         if (value.kind === 'Literal') {
-            const v = value.value;
-            refused(v === null ? 'null' : typeof v === 'string' ? `'${v}'` : String(v));
+            refused(shownLiteral(value.value));
         }
         const given = this.expression(value, scope);
         if (given.kind !== 'Json') {
