@@ -3654,26 +3654,56 @@ export class CypherWriter {
                   }
                 : { kind: 'Variable', name: aggregate[1] };
         };
-        // A list comprehension's WHERE reads a key by its name too, where it binds no variable the key reads. In its
-        // projection, a quantifier's WHERE or a reduce's step, Neo4j groups by each variable the key reads as well, so the
-        // body is kept as it is, and those variables beside: `[t IN collect(m.title) | r.role]` beside `r.role` gives a row
-        // for each `r`.
-        const rekeyed = (term: Expression, bound: ReadonlySet<string> = new Set()): Expression =>
+        // Each key `term` reads, by its name, in a comprehension's, a quantifier's or a reduce's body too, where the body
+        // binds no variable the key reads.
+        const readingKeys = (term: Expression, bound: ReadonlySet<string>): Expression =>
             replaced(term, (part) => {
-                const read =
-                    (bound.size === 0 || keys.has(expressionKey(part))) &&
-                    ![...variablesIn(part)].some((it) => bound.has(it))
-                        ? kept(part)
-                        : undefined;
+                if (keys.has(expressionKey(part)) && ![...variablesIn(part)].some((it) => bound.has(it))) {
+                    return kept(part);
+                }
+                const within = (...names: string[]): ReadonlySet<string> => new Set([...bound, ...names]);
+                switch (part.kind) {
+                    case 'ListComprehension':
+                        return {
+                            ...part,
+                            list: readingKeys(part.list, bound),
+                            where: part.where && readingKeys(part.where, within(part.variable)),
+                            projection: part.projection && readingKeys(part.projection, within(part.variable))
+                        };
+                    case 'Quantifier':
+                        return {
+                            ...part,
+                            list: readingKeys(part.list, bound),
+                            where: part.where && readingKeys(part.where, within(part.variable))
+                        };
+                    case 'Reduce':
+                        return {
+                            ...part,
+                            initial: readingKeys(part.initial, bound),
+                            list: readingKeys(part.list, bound),
+                            expression: readingKeys(part.expression, within(part.accumulator, part.variable))
+                        };
+                    default:
+                        return undefined;
+                }
+            });
+        // As Neo4j reads a key in an item that aggregates: by its name in a part that holds no aggregate, and in a list
+        // comprehension's WHERE, all through. In the projection of a comprehension that holds one, or its quantifier's
+        // WHERE or reduce's step, Neo4j groups by each variable the key reads as well, so the body is kept as it is, and
+        // those variables beside: `[t IN collect(m.title) | r.role]` beside `r.role` gives a row for each `r`, where
+        // `[t IN collect(m.title) WHERE t STARTS WITH r.role]` and `count(*) + [y IN [1] | r.role][0]` give one for each
+        // role.
+        const rekeyed = (term: Expression): Expression =>
+            replaced(term, (part) => {
+                const read = kept(part);
                 if (read) {
                     return read;
                 }
+                if (!aggregating(part)) {
+                    return readingKeys(part, new Set());
+                }
                 return part.kind === 'ListComprehension' && part.where
-                    ? {
-                          ...part,
-                          list: rekeyed(part.list, bound),
-                          where: rekeyed(part.where, new Set([...bound, part.variable]))
-                      }
+                    ? { ...part, list: rekeyed(part.list), where: readingKeys(part.where, new Set([part.variable])) }
                     : undefined;
             });
         const rekeyedItems = items.map((it) => ({ ...it, expression: rekeyed(it.expression) }));

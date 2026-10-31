@@ -58,6 +58,64 @@ describe.each(stores())('An aggregating item over a key that is a property on $t
                     ['N', 2]
                 ]
             ],
+            // Inside a list comprehension's WHERE, a quantifier's WHERE, a reduce's step and a comprehension's projection
+            // read the key too.
+            [
+                "UNWIND [{r: 'N', t: 'Neo'}, {r: 'N', t: 'Nix'}, {r: 'M', t: 'Neo'}] AS x " +
+                    'RETURN x.r AS role, size([t IN collect(x.t) WHERE any(u IN [t] WHERE u STARTS WITH x.r)]) AS n ORDER BY role',
+                [
+                    ['M', 0],
+                    ['N', 2]
+                ]
+            ],
+            [
+                "UNWIND [{r: 'N', t: 'Neo'}, {r: 'N', t: 'Nix'}, {r: 'M', t: 'Neo'}] AS x " +
+                    'RETURN x.r AS role, size([t IN collect(x.t) WHERE reduce(s = false, u IN [t] | s OR u STARTS WITH x.r)]) AS n ORDER BY role',
+                [
+                    ['M', 0],
+                    ['N', 2]
+                ]
+            ],
+            [
+                "UNWIND [{r: 'N', t: 'Neo'}, {r: 'N', t: 'Nix'}, {r: 'M', t: 'Neo'}] AS x " +
+                    'RETURN x.r AS role, size([t IN collect(x.t) WHERE [u IN [t] | u STARTS WITH x.r][0]]) AS n ORDER BY role',
+                [
+                    ['M', 0],
+                    ['N', 2]
+                ]
+            ],
+            // So does the body of a comprehension, a quantifier or a reduce that holds no aggregate.
+            [
+                'UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) + [y IN [1] | x.a][0] AS n ORDER BY a',
+                [
+                    [1, 3],
+                    [2, 3]
+                ]
+            ],
+            [
+                'UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) + reduce(s = 0, y IN [1] | s + x.a) AS n ORDER BY a',
+                [
+                    [1, 3],
+                    [2, 3]
+                ]
+            ],
+            [
+                'UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, [count(*), any(y IN [0, 1] WHERE y > x.a)] AS n ORDER BY a',
+                [
+                    [1, [2, false]],
+                    [2, [1, false]]
+                ]
+            ],
+            // But a comprehension's projection over an aggregate is grouped by the key's variable, whatever it holds.
+            [
+                'UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x ' +
+                    'RETURN x.a AS a, size([t IN collect(x.b) WHERE t >= x.a | [y IN [1] | x.a][0]]) AS n ORDER BY a, n',
+                [
+                    [1, 1],
+                    [1, 1],
+                    [2, 0]
+                ]
+            ],
             // Not where a comprehension binds the key's variable again.
             [
                 'UNWIND [{a: 1}, {a: 2}, {a: 2}] AS x RETURN x.a AS a, size([x IN [{a: 5}] WHERE x.a > 1]) + count(*) AS n ORDER BY a',

@@ -403,19 +403,19 @@ export function readsOutsideAggregates(expression: Expression, parts: ReadonlySe
     if (parts.has(expressionKey(expression))) {
         return true;
     }
-    const bodies = ((): (Expression | undefined)[] => {
+    const bodies = ((): Expression[] => {
         switch (expression.kind) {
             case 'ListComprehension':
-                return [expression.where, expression.projection];
+                return present(expression.where, expression.projection);
             case 'Quantifier':
-                return [expression.where];
+                return present(expression.where);
             case 'Reduce':
                 return [expression.expression];
             default:
                 return [];
         }
     })();
-    return [...children(expression), ...bodies].some((it) => it !== undefined && readsOutsideAggregates(it, parts));
+    return [...children(expression), ...bodies].some((it) => readsOutsideAggregates(it, parts));
 }
 
 /**
