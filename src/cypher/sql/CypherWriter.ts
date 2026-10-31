@@ -80,7 +80,8 @@ import { Select } from '@/cypher/sql/Select';
 import { Procedure, Walk, Walked } from '@/cypher/sql/Procedure';
 import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Temporal } from '@/cypher/sql/Temporal';
-import { Temporals } from '@/cypher/sql/Temporals';
+import { TRUNCATION_UNITS } from '@/cypher/sql/TemporalSql';
+import { Overrides, Temporals } from '@/cypher/sql/Temporals';
 import {
     bool,
     BoolValue,
@@ -201,6 +202,176 @@ const LONG_MIN = BigInt('-9223372036854775808');
 
 /** The functions of a temporal kind that truncate a value to a unit. */
 const TEMPORAL_TRUNCATE = TEMPORAL_KINDS.map((it) => `${it}.truncate`);
+
+/** The fields of a date a truncation's map may give, as Neo4j takes them. */
+const TRUNCATION_DATE_FIELDS = [
+    'year',
+    'month',
+    'day',
+    'dayOfWeek',
+    'week',
+    'weekYear',
+    'quarter',
+    'dayOfQuarter',
+    'ordinalDay'
+];
+
+/** The fields of a time of day a truncation's map may give, as Neo4j takes them. */
+const TRUNCATION_TIME_FIELDS = ['hour', 'minute', 'second', 'millisecond', 'microsecond', 'nanosecond'];
+
+/** The fields a truncation's map may give that the stores have no SQL for yet: nanoseconds, and the fields of a week or a quarter. */
+const TRUNCATION_FIELDS_NOT_COMPILED = ['nanosecond', 'week', 'weekYear', 'quarter', 'dayOfQuarter', 'ordinalDay'];
+
+/** The values each field a truncation's map gives may take, as Neo4j takes them, but for the year, which runs past what a store's text holds. */
+const TRUNCATION_RANGES: Partial<Record<string, [number, number]>> = {
+    month: [1, 12],
+    day: [1, 31],
+    dayOfWeek: [1, 7],
+    hour: [0, 23],
+    minute: [0, 59],
+    second: [0, 59],
+    millisecond: [0, 999],
+    microsecond: [0, 999999]
+};
+
+/** The least of each field a truncation's map gives that is not 0, which a field given as null is. */
+const TRUNCATION_LEAST: Partial<Record<string, number>> = { month: 1, day: 1, dayOfWeek: 1 };
+
+/**
+ * Refuses `written`, the value a `SET` gives a property, where it is a map written, or a list written that holds one or
+ * a list: no property, as Neo4j refuses it, and as drivine's saves do.
+ */
+function propertyOfKind(written: Expression): void {
+    if (
+        written.kind === 'MapLiteral' ||
+        (written.kind === 'ListLiteral' &&
+            written.items.some((it) => it.kind === 'MapLiteral' || it.kind === 'ListLiteral'))
+    ) {
+        throw new DrivineError(
+            `A property is a number, a text, a truth value, a temporal value or a list of them, not ${
+                written.kind === 'MapLiteral' ? 'a map' : 'a list of maps or lists'
+            }, as in Neo4j.`
+        );
+    }
+}
+
+/** Whether the statement writes `value` as a value of a kind other than a map ({@link JsonValue.known}), which has no properties. */
+function knownNoMap(value: JsonValue): boolean {
+    return value.known !== undefined && value.known !== 'MAP';
+}
+
+/** A truncation's fields as a message names them, where it is not `a <field>`. */
+const TRUNCATION_FIELD_NAMES: Partial<Record<string, string>> = { dayOfWeek: 'a day of the week', hour: 'an hour' };
+
+/**
+ * The keys of `entries`, a truncation's map of fields given `fn`, which truncates to `kind`: refused where Neo4j refuses
+ * one, as a field of no such value or a day or a month beside a day of the week, or where no store has SQL for it yet.
+ */
+function truncationKeys(fn: FunctionCall, kind: Temporal, entries: [string, Expression][]): Set<string> {
+    const takes = new Set([
+        ...(kind !== Temporal.LOCAL_TIME && kind !== Temporal.TIME ? TRUNCATION_DATE_FIELDS : []),
+        ...(kind !== Temporal.DATE ? TRUNCATION_TIME_FIELDS : []),
+        ...(kind.zoned ? ['timezone'] : [])
+    ]);
+    entries.forEach(([key]) => {
+        if (!takes.has(key)) {
+            throw new DrivineError(`${fn.name}() takes no field ${key}.`);
+        }
+        if (TRUNCATION_FIELDS_NOT_COMPILED.includes(key)) {
+            unsupported(`${fn.name}() of a map with ${key}`);
+        }
+    });
+    const keys = new Set(entries.map(([key]) => key));
+    ['day', 'month'].forEach((it) => {
+        if (keys.has(it) && keys.has('dayOfWeek')) {
+            throw new DrivineError(`${fn.name}() takes a ${it} or a day of the week, not both.`);
+        }
+    });
+    return keys;
+}
+
+/**
+ * `literal`, written as the field `key` of a truncation of `fn`, where it is a whole number in the field's range (see
+ * {@link TRUNCATION_RANGES}); with `millis`, a millisecond is given or kept, beside which a microsecond runs to 999.
+ */
+function truncationWhole(fn: FunctionCall, key: string, literal: unknown, millis: boolean): number {
+    if (typeof literal !== 'number' || !Number.isInteger(literal)) {
+        const shown = typeof literal === 'string' ? `'${literal}'` : String(literal);
+        throw new DrivineError(`${fn.name}() takes a whole number for ${key}, not ${shown}.`);
+    }
+    const beside = key === 'microsecond' && millis;
+    const range: [number, number] | undefined = beside ? [0, 999] : TRUNCATION_RANGES[key];
+    if (range !== undefined && (literal < range[0] || literal > range[1])) {
+        const name = TRUNCATION_FIELD_NAMES[key] ?? `a ${key}`;
+        throw new DrivineError(
+            `${fn.name}() takes ${name} from ${range[0]} to ${range[1]}${
+                beside ? ' beside a millisecond' : ''
+            }, not ${literal}.`
+        );
+    }
+    return literal;
+}
+
+/**
+ * The value `value` is written as, where it is a literal or a negated whole number, `-1`, which is written as much as
+ * `1` is: undefined for any other expression.
+ */
+function writtenNumber(value: Expression): unknown {
+    if (value.kind === 'Literal') {
+        return value.value;
+    }
+    const negated = value.kind === 'Unary' && value.operator === 'NEGATE' ? value.operand : undefined;
+    return negated?.kind === 'Literal' && typeof negated.value === 'number' ? -negated.value : undefined;
+}
+
+/**
+ * The offset a truncation's `timezone` field, `value`, gives `fn`, as SQL text. Neo4j takes an offset written as `Z` or
+ * `+01:00` alone, as Java's ZoneOffset does (up to 18 hours, and 0 is UTC's, `Z`), and a zone by name, which no store's
+ * text holds yet, so it is refused as not compiled yet.
+ */
+function truncationZone(fn: FunctionCall, value: Expression): string {
+    if (isNullLiteral(value)) {
+        throw new DrivineError(`${fn.name}() takes a time zone, not null.`);
+    }
+    if (value.kind !== 'Literal' || typeof value.value !== 'string') {
+        return unsupported('A truncation to a time zone an expression gives');
+    }
+    const zone = value.value;
+    const offset = offsetText(zone);
+    if (offset !== undefined) {
+        return offset;
+    }
+    if (!/^[+-]/.test(zone) && namedZone(zone)) {
+        return unsupported(`The time zone '${zone}'`);
+    }
+    throw new DrivineError(`'${zone}' is no time zone.`);
+}
+
+/** The SQL text of the offset `zone` writes, `Z` or `+01:00`, as Java's ZoneOffset takes it: undefined where it is none. */
+function offsetText(zone: string): string | undefined {
+    if (zone === 'Z') {
+        return "'Z'";
+    }
+    const offset = /^[+-]([0-9]{2}):([0-9]{2})$/.exec(zone);
+    if (!offset) {
+        return undefined;
+    }
+    const [hours, minutes] = [Number(offset[1]), Number(offset[2])];
+    if (minutes >= 60 || hours > 18 || (hours === 18 && minutes > 0)) {
+        return undefined;
+    }
+    return hours === 0 && minutes === 0 ? "'Z'" : `'${zone}'`;
+}
+
+/** Whether `zone` names a time zone, as `Europe/Stockholm` does. */
+function namedZone(zone: string): boolean {
+    try {
+        new Intl.DateTimeFormat('en', { timeZone: zone });
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 /** The kinds of expression whose value, null aside, is a number, a text, a truth value or a temporal value: no list or map. */
 const SCALAR_KINDS: ReadonlySet<Expression['kind']> = new Set<Expression['kind']>([
@@ -2520,20 +2691,7 @@ export class CypherWriter {
         const nodes = this.sql.nodes;
         switch (item.kind) {
             case 'Property': {
-                // A map written, or a list written that holds one or a list, is no property, as Neo4j refuses it, and as
-                // drivine's saves do.
-                const written = item.value;
-                if (
-                    written.kind === 'MapLiteral' ||
-                    (written.kind === 'ListLiteral' &&
-                        written.items.some((it) => it.kind === 'MapLiteral' || it.kind === 'ListLiteral'))
-                ) {
-                    throw new DrivineError(
-                        `A property is a number, a text, a truth value, a temporal value or a list of them, not ${
-                            written.kind === 'MapLiteral' ? 'a map' : 'a list of maps or lists'
-                        }, as in Neo4j.`
-                    );
-                }
+                propertyOfKind(item.value);
                 this.evaluate(VALUE, [item.value], (scope) =>
                     this.sql.comparable(this.asJson(this.expression(item.value, scope)))
                 );
@@ -3783,7 +3941,9 @@ export class CypherWriter {
             return;
         }
         if (subject !== 'LIST' && subject !== 'MAP') {
-            throw new DrivineError(`${capitalNounOf(subject)} is not a list or a map, and is indexed as one, as in Neo4j.`);
+            throw new DrivineError(
+                `${capitalNounOf(subject)} is not a list or a map, and is indexed as one, as in Neo4j.`
+            );
         }
         const by: Known = subject === 'LIST' ? 'INTEGER' : 'TEXT';
         const kind =
@@ -3793,6 +3953,14 @@ export class CypherWriter {
             throw new DrivineError(
                 `${capitalNounOf(subject)} is indexed by ${nounOf(by)}, not ${nounOf(kind)}, as in Neo4j.`
             );
+        }
+    }
+
+    /** Refuses `binary` where it is `IN` a value the statement writes as one of a kind other than a list ({@link knownKind}), as Neo4j refuses it. */
+    private inOfKind(binary: Binary, scope: Scope): void {
+        const kind = binary.operator === 'IN' ? this.knownKind(binary.right, scope) : undefined;
+        if (kind !== undefined && kind !== 'LIST') {
+            throw new DrivineError(`IN takes a list, not ${nounOf(kind)}, as in Neo4j.`);
         }
     }
 
@@ -4206,7 +4374,7 @@ export class CypherWriter {
                 subject.rowKeys === undefined &&
                 !this.temporals.fieldNames.includes(expression.key) &&
                 // One of a kind known other than a map is left to property(), which refuses it.
-                (subject.known === undefined || subject.known === 'MAP')
+                !knownNoMap(subject)
             ) {
                 return json(this.sql.itemValue(this.sql.comparable(subject), expression.key), {
                     temporals: subject.temporals
@@ -4228,8 +4396,8 @@ export class CypherWriter {
                 return json(this.sql.propertyOf(subject.props, key));
             case 'Json': {
                 // A value the statement writes as one of a kind other than a map has none, as Neo4j says when it plans the statement.
-                if (subject.known !== undefined && subject.known !== 'MAP') {
-                    throw new DrivineError(`${capitalNounOf(subject.known)} has no properties.`);
+                if (knownNoMap(subject)) {
+                    throw new DrivineError(`${capitalNounOf(subject.known!)} has no properties.`);
                 }
                 const field = this.temporalField(subject, key);
                 if (field) {
@@ -4632,12 +4800,7 @@ export class CypherWriter {
             // Each side whole: a condition may be several, and `a = b <> c` is no SQL.
             return bool(binary.operator === 'OR' ? `(${left} OR ${right})` : `((${left}) <> (${right}))`);
         }
-        if (binary.operator === 'IN') {
-            const kind = this.knownKind(binary.right, scope);
-            if (kind !== undefined && kind !== 'LIST') {
-                throw new DrivineError(`IN takes a list, not ${nounOf(kind)}, as in Neo4j.`);
-            }
-        }
+        this.inOfKind(binary, scope);
         const itemwise = this.itemwise(binary, scope);
         if (itemwise !== undefined) {
             return bool(binary.operator === 'NOT_EQUALS' ? `(NOT ${itemwise})` : itemwise);
@@ -5884,8 +6047,11 @@ export class CypherWriter {
     private truncated(call: Invocation): Value {
         const fn = call.fn;
         const to = Temporal.ofFunction(call.name.substring(0, call.name.indexOf('.')))!;
-        if (call.arguments.length !== 2) {
+        if (call.arguments.length < 2) {
             throw new DrivineError(`${fn.name}() takes a unit and a value.`);
+        }
+        if (call.arguments.length > 3) {
+            throw new DrivineError(`${fn.name}() takes a unit, a value and a map of fields.`);
         }
         const written = fn.arguments[0];
         const unit =
@@ -5896,11 +6062,18 @@ export class CypherWriter {
         if (given.kind !== 'Json') {
             throw new DrivineError(`${fn.name}() takes a unit and a value.`);
         }
+        const fields =
+            fn.arguments[2] !== undefined
+                ? this.truncationFields(fn, unit, to, fn.arguments[2], call.scope)
+                : undefined;
         const cut = (text: string, from: Temporal): string => {
-            const truncated = this.temporals.truncate(unit, text, from, to);
+            const truncated = this.temporals.truncate(unit, text, from, to, fields);
             if (truncated === undefined) {
+                const units = TRUNCATION_UNITS.slice(0, -1).join(', ');
                 throw new DrivineError(
-                    `${fn.name}() truncates to year, quarter, month, week, day, hour, minute, second or millisecond, not ${unit}.`
+                    `${fn.name}() truncates to ${units} or ${
+                        TRUNCATION_UNITS[TRUNCATION_UNITS.length - 1]
+                    }, not ${unit}.`
                 );
             }
             return truncated;
@@ -5910,6 +6083,59 @@ export class CypherWriter {
         return json(this.sql.scalar(from ? cut(text, from) : this.temporals.byKind(text, (kind, t) => cut(t, kind))), {
             temporal: to
         });
+    }
+
+    /**
+     * The fields the map `written`, the third argument of `fn`, gives the value of `kind` it truncates, in place of its
+     * own, as Neo4j takes them. A field of no such value, a day or a month beside a day of the week, a number that is not
+     * whole, or a number written past its field's range (see {@link TRUNCATION_RANGES}; a microsecond beside a millisecond
+     * given or kept by a cut to `unit` runs to 999), fails, where a store would carry it into the next field or fail on it
+     * at its own time. A field that is null is given as its least, as a map that leaves it out makes a value: the year 0,
+     * the first month, day or day of the week, and no time; a time zone that is null fails. Fields the stores have no SQL
+     * for yet (nanoseconds, the fields of a week or a quarter, a time zone by name) are refused. As drivine4j's #468.
+     */
+    private truncationFields(
+        fn: FunctionCall,
+        unit: string,
+        kind: Temporal,
+        written: Expression,
+        scope: Scope
+    ): Overrides {
+        // Null gives no fields, as Neo4j has it.
+        if (isNullLiteral(written)) {
+            return { fields: {} };
+        }
+        if (written.kind !== 'MapLiteral') {
+            return unsupported("A truncation's fields that an expression gives");
+        }
+        const keys = truncationKeys(fn, kind, written.entries);
+        const millis = keys.has('millisecond') || unit === 'millisecond';
+        let timezone: string | undefined;
+        const fields: Record<string, string> = {};
+        for (const [key, value] of written.entries) {
+            if (key === 'timezone') {
+                timezone = truncationZone(fn, value);
+            } else {
+                fields[key] = this.truncationNumber(fn, key, value, millis, scope);
+            }
+        }
+        return { fields, timezone };
+    }
+
+    /**
+     * The SQL number of the field `key` of a truncation of `fn`, which `value` gives: see {@link truncationFields}. With
+     * `millis`, a millisecond is given or kept, beside which a microsecond runs to 999.
+     */
+    private truncationNumber(fn: FunctionCall, key: string, value: Expression, millis: boolean, scope: Scope): string {
+        const least = TRUNCATION_LEAST[key] ?? 0;
+        const literal = writtenNumber(value);
+        if (literal === null || (literal === undefined && value.kind === 'Literal')) {
+            return `${least}`;
+        }
+        if (literal === undefined) {
+            return `COALESCE(${this.numberOf(this.expression(value, scope))}, ${least})`;
+        }
+        return `${truncationWhole(fn, key, literal, millis)}`;
     }
 
     private between(call: Invocation): Value {

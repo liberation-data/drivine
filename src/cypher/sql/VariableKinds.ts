@@ -66,62 +66,69 @@ function queryKinds(query: Query, outer: Scope): Scope[] {
  * `foreach`, a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there. `kept` stay in scope
  * after each `WITH` that does not name them, as what a `CALL`'s brackets import does.
  */
-function clauses(list: Clause[], scope: Scope, foreach = false, kept: Scope = new Map()): Scope {
+function clauses(list: Clause[], scope: Scope, foreach: boolean = false, kept: Scope = new Map()): Scope {
     let current = scope;
     let returned: Scope = new Map();
     for (const clause of list) {
-        switch (clause.kind) {
-            case 'Match':
-                clause.patterns.forEach((it) => matched(it, current));
-                if (clause.where) {
-                    expression(clause.where, current);
+        if (clause.kind === 'With') {
+            const next = projected(clause.projection, current, clause.where);
+            kept.forEach((kind, name) => {
+                if (!next.has(name)) {
+                    next.set(name, kind);
                 }
-                break;
-            case 'Unwind':
-                expression(clause.list, current);
-                current.set(clause.variable, 'ANY');
-                break;
-            case 'With':
-                current = projected(clause.projection, current, clause.where);
-                kept.forEach((kind, name) => {
-                    if (!current.has(name)) {
-                        current.set(name, kind);
-                    }
-                });
-                break;
-            case 'Return':
-                returned = projected(clause.projection, current, undefined);
-                break;
-            case 'Create': {
-                const made = new Set<string>();
-                clause.patterns.forEach((it) => madeOf(it, current, made, false, foreach));
-                break;
-            }
-            case 'Merge':
-                madeOf(clause.pattern, current, new Set(), true, foreach);
-                [...clause.onCreate, ...clause.onMatch].forEach((it) => set(it, current));
-                break;
-            case 'Set':
-                clause.items.forEach((it) => set(it, current));
-                break;
-            case 'Remove':
-                break;
-            case 'Delete':
-                clause.expressions.forEach((it) => expression(it, current));
-                break;
-            case 'Foreach': {
-                expression(clause.list, current);
-                const inner = new Map(current);
-                inner.set(clause.variable, 'ANY');
-                clauses(clause.clauses, inner, true);
-                break;
-            }
-            case 'Call':
-                called(clause, current).forEach((kind, name) => current.set(name, kind));
-                break;
+            });
+            current = next;
+        } else if (clause.kind === 'Return') {
+            returned = projected(clause.projection, current, undefined);
+        } else {
+            other(clause, current, foreach);
         }
     }
     return returned;
+}
+
+/** A clause other than a `WITH` or a `RETURN`, over `scope`, which it binds what it names in: see {@link clauses}. */
+function other(clause: Clause, scope: Scope, foreach: boolean): void {
+    switch (clause.kind) {
+        case 'Match':
+            clause.patterns.forEach((it) => matched(it, scope));
+            optional(clause.where).forEach((it) => expression(it, scope));
+            break;
+        case 'Unwind':
+            expression(clause.list, scope);
+            scope.set(clause.variable, 'ANY');
+            break;
+        case 'Create': {
+            const made = new Set<string>();
+            clause.patterns.forEach((it) => madeOf(it, scope, made, false, foreach));
+            break;
+        }
+        case 'Merge':
+            madeOf(clause.pattern, scope, new Set(), true, foreach);
+            [...clause.onCreate, ...clause.onMatch].forEach((it) => set(it, scope));
+            break;
+        case 'Set':
+            clause.items.forEach((it) => set(it, scope));
+            break;
+        case 'Delete':
+            clause.expressions.forEach((it) => expression(it, scope));
+            break;
+        case 'Foreach':
+            expression(clause.list, scope);
+            clauses(clause.clauses, new Map(scope).set(clause.variable, 'ANY'), true);
+            break;
+        case 'Call':
+            called(clause, scope).forEach((kind, name) => scope.set(name, kind));
+            break;
+        default:
+            // A REMOVE names nothing.
+            break;
+    }
+}
+
+/** Each of `values` that is there. */
+function optional(...values: (Expression | undefined)[]): Expression[] {
+    return values.filter((it): it is Expression => it !== undefined);
 }
 
 /**
@@ -187,7 +194,7 @@ function kindOf(value: Expression, scope: Scope): Kind {
  * A pattern a `MATCH` finds, over `scope`: what it names, bound as it names it, or used as it is bound. Its path
  * variable is new, but in a pattern within an expression, `within`, where it is the pattern's own.
  */
-function matched(pattern: Pattern, scope: Scope, within = false): void {
+function matched(pattern: Pattern, scope: Scope, within: boolean = false): void {
     // In the order written, so the first of two kinds is the one the variable is bound as.
     pattern.nodes.forEach((node, i) => {
         if (node.properties) {
@@ -280,7 +287,9 @@ function madeOf(pattern: Pattern, scope: Scope, made: Set<string>, merging: bool
         }
         if (pattern.relationships.length === 0) {
             if (!foreach) {
-                throw new DrivineError(`${variable} is bound already, so a ${clause} makes no node of it, as in Neo4j.`);
+                throw new DrivineError(
+                    `${variable} is bound already, so a ${clause} makes no node of it, as in Neo4j.`
+                );
             }
             return;
         }
@@ -325,80 +334,69 @@ function set(item: SetItem, scope: Scope): void {
  * whose kind they do not take.
  */
 function expression(value: Expression, scope: Scope): void {
-    switch (value.kind) {
-        case 'Literal':
-        case 'Parameter':
-        case 'Variable':
-        case 'CountStar':
-            return;
-        case 'Property':
-        case 'HasLabels':
-            return expression(value.subject, scope);
-        case 'ListLiteral':
-            return value.items.forEach((it) => expression(it, scope));
-        case 'MapLiteral':
-            return value.entries.forEach(([, it]) => expression(it, scope));
-        case 'MapProjection':
-            return value.elements.forEach((it) => {
-                if (it.kind === 'Entry') {
-                    expression(it.value, scope);
-                }
-            });
-        case 'Binary':
-            expression(value.left, scope);
-            return expression(value.right, scope);
-        case 'Unary':
-            return expression(value.operand, scope);
-        case 'Index':
-            expression(value.subject, scope);
-            return expression(value.index, scope);
-        case 'Slice':
-            return [value.subject, value.from, value.to].forEach((it) => it && expression(it, scope));
-        case 'Function':
-            value.arguments.forEach((it) => expression(it, scope));
-            return functionOf(value, scope);
-        case 'Case':
-            [value.subject, value.otherwise].forEach((it) => it && expression(it, scope));
-            return value.alternatives.forEach(([key, result]) => {
-                expression(key, scope);
-                expression(result, scope);
-            });
-        case 'ListComprehension': {
-            expression(value.list, scope);
-            const inner: Scope = new Map(scope).set(value.variable, 'ANY');
-            return [value.where, value.projection].forEach((it) => it && expression(it, inner));
-        }
-        case 'Quantifier': {
-            expression(value.list, scope);
-            const inner: Scope = new Map(scope).set(value.variable, 'ANY');
-            return value.where && expression(value.where, inner);
-        }
-        case 'Reduce': {
-            expression(value.initial, scope);
-            expression(value.list, scope);
-            const inner: Scope = new Map(scope).set(value.accumulator, 'ANY').set(value.variable, 'ANY');
-            return expression(value.expression, inner);
-        }
-        case 'PatternComprehension': {
-            const inner: Scope = new Map(scope);
-            matched(value.pattern, inner, true);
-            if (value.where) {
-                expression(value.where, inner);
-            }
-            return expression(value.projection, inner);
-        }
-        case 'PatternPredicate':
-            return matched(value.pattern, new Map(scope), true);
-        case 'Exists': {
-            const inner: Scope = new Map(scope);
-            value.patterns.forEach((it) => matched(it, inner, true));
-            return value.where && expression(value.where, inner);
-        }
-        case 'Subquery':
-            queryKinds(value.query, scope);
-            return;
-    }
+    (EXPRESSIONS[value.kind] as (value: Expression, scope: Scope) => void)(value, scope);
 }
+
+/** Each of `values` read over `scope`: see {@link expression}. */
+function each(values: (Expression | undefined)[], scope: Scope): void {
+    optional(...values).forEach((it) => expression(it, scope));
+}
+
+/** How {@link expression} reads each kind of expression. */
+const EXPRESSIONS: { [K in Expression['kind']]: (value: Extract<Expression, { kind: K }>, scope: Scope) => void } = {
+    Literal: () => undefined,
+    Parameter: () => undefined,
+    Variable: () => undefined,
+    CountStar: () => undefined,
+    Property: (it, scope) => expression(it.subject, scope),
+    HasLabels: (it, scope) => expression(it.subject, scope),
+    ListLiteral: (it, scope) => each(it.items, scope),
+    MapLiteral: (it, scope) =>
+        each(
+            it.entries.map(([, value]) => value),
+            scope
+        ),
+    MapProjection: (it, scope) =>
+        each(
+            it.elements.map((element) => (element.kind === 'Entry' ? element.value : undefined)),
+            scope
+        ),
+    Binary: (it, scope) => each([it.left, it.right], scope),
+    Unary: (it, scope) => expression(it.operand, scope),
+    Index: (it, scope) => each([it.subject, it.index], scope),
+    Slice: (it, scope) => each([it.subject, it.from, it.to], scope),
+    Function: (it, scope) => {
+        each(it.arguments, scope);
+        functionOf(it, scope);
+    },
+    Case: (it, scope) => each([it.subject, it.otherwise, ...it.alternatives.flat()], scope),
+    ListComprehension: (it, scope) => {
+        expression(it.list, scope);
+        each([it.where, it.projection], new Map(scope).set(it.variable, 'ANY'));
+    },
+    Quantifier: (it, scope) => {
+        expression(it.list, scope);
+        each([it.where], new Map(scope).set(it.variable, 'ANY'));
+    },
+    Reduce: (it, scope) => {
+        each([it.initial, it.list], scope);
+        expression(it.expression, new Map(scope).set(it.accumulator, 'ANY').set(it.variable, 'ANY'));
+    },
+    PatternComprehension: (it, scope) => {
+        const inner: Scope = new Map(scope);
+        matched(it.pattern, inner, true);
+        each([it.where, it.projection], inner);
+    },
+    PatternPredicate: (it, scope) => matched(it.pattern, new Map(scope), true),
+    Exists: (it, scope) => {
+        const inner: Scope = new Map(scope);
+        it.patterns.forEach((pattern) => matched(pattern, inner, true));
+        each([it.where], inner);
+    },
+    Subquery: (it, scope) => {
+        queryKinds(it.query, scope);
+    }
+};
 
 /** A function of a variable whose kind it does not take, as Neo4j refuses it: `size()` of a path. */
 function functionOf(fn: FunctionCall, scope: Scope): void {

@@ -132,8 +132,16 @@ describe('The Cypher compiler refuses', () => {
                     ['RETURN range(2, 8, $s)', { s: 0 }, 'range() takes a step other than 0, as in Neo4j.'],
                     ['RETURN range(2, 8, $s)', { s: BigInt(0) }, 'range() takes a step other than 0, as in Neo4j.'],
                     ['RETURN range(2, 8, $s)', { s: int(0) }, 'range() takes a step other than 0, as in Neo4j.'],
-                    ['WITH [1] AS l RETURN l[$k]', { k: 'a' }, 'A list is indexed by an integer, not a text, as in Neo4j.'],
-                    ['WITH {a: 1} AS m RETURN m[$k]', { k: 1 }, 'A map is indexed by a text, not an integer, as in Neo4j.'],
+                    [
+                        'WITH [1] AS l RETURN l[$k]',
+                        { k: 'a' },
+                        'A list is indexed by an integer, not a text, as in Neo4j.'
+                    ],
+                    [
+                        'WITH {a: 1} AS m RETURN m[$k]',
+                        { k: 1 },
+                        'A map is indexed by a text, not an integer, as in Neo4j.'
+                    ],
                     // A value carried across a write is of the kind the statement made it.
                     ['WITH 1 AS x CREATE (n) RETURN x.num', {}, 'An integer has no properties.']
                 ] as const
@@ -148,7 +156,10 @@ describe('The Cypher compiler refuses', () => {
                     ['RETURN $p AND true', { p: 1 }],
                     ['MATCH (n) RETURN n.x.y, n.x[0], 1 IN n.x, range(0, n.x), properties(n.x)', {}],
                     ["UNWIND [{a: 1}] AS m RETURN m.a, m['a']", {}],
-                    ['RETURN NOT null, null XOR true, null.num, null[0], [1, 2, 3][null], 1 IN null, properties(null)', {}],
+                    [
+                        'RETURN NOT null, null XOR true, null.num, null[0], [1, 2, 3][null], 1 IN null, properties(null)',
+                        {}
+                    ],
                     ["WITH {a: 1} AS m, 'a' AS k RETURN m.a, m[k], properties(m), [1, 2][-1], range(0, 10, -2)", {}],
                     ["MATCH (a) SET a.tags = ['x', 'y'], a.n = -1", {}],
                     // A variable each query of a UNION makes of another kind is of none known.
@@ -230,7 +241,8 @@ describe('The Cypher compiler refuses', () => {
             ].forEach((cypher) => compiler().compile(cypher));
             // Neo4j takes these too, and the compiler refuses them for what it does not compile yet, as before. So it refuses a
             // relationship bound before a CREATE or a MERGE that makes it again, as the spec has it, which Neo4j refuses as bound already.
-            const boundBefore = 'A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.';
+            const boundBefore =
+                'A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.';
             [
                 ['MATCH ()-[r]->() WITH r MATCH ()-[r]->() RETURN r', boundBefore],
                 ['MATCH (a)-[r]->() RETURN EXISTS { (a)-[r]->() } AS e', boundBefore],
@@ -282,10 +294,50 @@ describe('The Cypher compiler refuses', () => {
     });
 
     it('a truncation to a unit named as a property every JavaScript object has, as any unit it has no SQL for', () => {
+        const units =
+            'millennium, century, decade, year, weekYear, quarter, month, week, day, hour, minute, second, millisecond or microsecond';
         compilers.forEach(([, compiler]) => {
-            expect(() => compiler().compile("RETURN date.truncate('constructor', date('2024-03-15'))")).toThrow(
-                'date.truncate() truncates to year, quarter, month, week, day, hour, minute, second or millisecond, not constructor.'
-            );
+            for (const unit of ['constructor', 'toString', 'hasOwnProperty']) {
+                expect(() => compiler().compile(`RETURN date.truncate('${unit}', date('2024-03-15'))`)).toThrow(
+                    `date.truncate() truncates to ${units}, not ${unit}.`
+                );
+            }
+        });
+    });
+
+    it("a truncation's fields given beside a value the compiler takes, past what the spec holds", () => {
+        // drivine4j's #468, and liberation-data/drivine#442: Neo4j takes a time zone as an offset alone or by name, which no
+        // store's text holds yet, and the fields of a week or a quarter, which no store has SQL for yet.
+        compilers.forEach(([, compiler]) => {
+            (
+                [
+                    ["RETURN datetime.truncate('day', datetime(), {timezone: '+19:00'})", "'+19:00' is no time zone."],
+                    ["RETURN datetime.truncate('day', datetime(), {timezone: '+05:60'})", "'+05:60' is no time zone."],
+                    [
+                        "RETURN datetime.truncate('day', datetime(), {timezone: 'UTC'})",
+                        "The time zone 'UTC' is Cypher, and is not compiled to SQL yet."
+                    ],
+                    [
+                        "RETURN date.truncate('year', date(), {quarter: 2})",
+                        'date.truncate() of a map with quarter is Cypher, and is not compiled to SQL yet.'
+                    ],
+                    ["RETURN time.truncate('hour', time(), {year: 2000})", 'time.truncate() takes no field year.'],
+                    [
+                        "RETURN date.truncate('month', date(), {day: -1})",
+                        'date.truncate() takes a day from 1 to 31, not -1.'
+                    ],
+                    [
+                        "RETURN date.truncate('month', date(), {day: true})",
+                        'date.truncate() takes a whole number for day, not true.'
+                    ]
+                ] as const
+            ).forEach(([cypher, message]) => expect(() => compiler().compile(cypher)).toThrow(message));
+            // A field given as an expression, or as a whole number negated, a time zone at UTC or at 18 hours, and a map of none.
+            [
+                "MATCH (n) RETURN date.truncate('month', date(), {day: n.day, year: -1})",
+                "RETURN datetime.truncate('day', datetime(), {timezone: '-00:00'}), datetime.truncate('day', datetime(), {timezone: '+18:00'})",
+                "RETURN localdatetime.truncate('day', localdatetime(), {}), localtime.truncate('hour', localtime(), null)"
+            ].forEach((cypher) => compiler().compile(cypher));
         });
     });
 

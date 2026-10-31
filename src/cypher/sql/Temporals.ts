@@ -10,6 +10,16 @@ interface Parts {
     seconds: string;
 }
 
+/**
+ * The fields the third argument of a truncation gives the value cut short, in place of its own: SQL numbers by Cypher's
+ * names (`year`, `month`, `day`, `hour`, `minute`, `second`, `millisecond`, `microsecond`), `dayOfWeek`, and `timezone`,
+ * an offset's text.
+ */
+export interface Overrides {
+    fields: Record<string, string>;
+    timezone?: string;
+}
+
 /** A field of a value: its SQL, and whether it is a text, where it is not a number. */
 export interface Field {
     sql: string;
@@ -289,13 +299,26 @@ export class Temporals {
         });
     }
 
-    /** The text of `to` the text `text` of `from` is, cut short to `unit`: undefined where the store truncates to no such unit. */
-    truncate(unit: string, text: string, from: Temporal, to: Temporal): string | undefined {
+    /**
+     * The text of `to` the text `text` of `from` is, cut short to `unit`, with `overrides` in place of its fields where it
+     * has any: undefined where the store truncates to no such unit.
+     */
+    truncate(unit: string, text: string, from: Temporal, to: Temporal, overrides?: Overrides): string | undefined {
         if (this.sql.truncate(unit, 'NULL') === undefined) {
             return undefined;
         }
+        if (
+            overrides === undefined ||
+            (Object.keys(overrides.fields).length === 0 && overrides.timezone === undefined)
+        ) {
+            return this.shared([text], ([t]) =>
+                this.format(this.sql.truncate(unit, this.sql.local(t, from))!, to, this.offsetOf(t, from, to))
+            );
+        }
         return this.shared([text], ([t]) =>
-            this.format(this.sql.truncate(unit, this.sql.local(t, from))!, to, this.offsetOf(t, from, to))
+            this.shared([this.sql.truncate(unit, this.sql.local(t, from))!], ([cut]) =>
+                this.overridden(cut, unit, to, overrides, overrides.timezone ?? this.offsetOf(t, from, to))
+            )
         );
     }
 
@@ -391,6 +414,49 @@ export class Temporals {
             read(to, toKind),
             TIMES.includes(kind) || TIMES.includes(toKind),
             unit
+        );
+    }
+
+    /**
+     * The text of `kind` of the timestamp `cut`, cut short to `unit`, with the fields `overrides` gives in place of its
+     * own, and the offset `offset`, as Neo4j lays a truncation's fields over the value: the year, month and day, then the
+     * time, then the day of the week, which moves the value within its ISO week. A millisecond or a microsecond given makes
+     * the whole fraction of the second, but a microsecond given a value cut to the millisecond is added to the millisecond
+     * kept.
+     */
+    private overridden(cut: string, unit: string, kind: Temporal, overrides: Overrides, offset?: string): string {
+        const given = overrides.fields;
+        const own: Record<string, string> = Object.fromEntries(
+            ['year', 'month', 'day', 'hour', 'minute', 'second'].map((it) => [
+                it,
+                given[it] ?? this.clockField(cut, it)
+            ])
+        );
+        const micros = this.sql.number(this.sql.micros(cut));
+        const carried = unit === 'millisecond' && given.microsecond !== undefined;
+        let fraction: string;
+        if (given.millisecond !== undefined) {
+            fraction =
+                `${given.millisecond} * 1000` +
+                (carried || given.microsecond === undefined ? '' : ` + ${given.microsecond}`);
+        } else if (given.microsecond !== undefined) {
+            fraction = carried ? `(${micros} + ${given.microsecond})` : given.microsecond;
+        } else {
+            fraction = micros;
+        }
+        const made = this.of({ ...own, microsecond: fraction }, offset, kind);
+        const day = given.dayOfWeek;
+        if (day === undefined) {
+            return made;
+        }
+        return this.shared([made], ([m]) =>
+            this.shared([this.sql.local(m, kind)], ([clock]) =>
+                this.format(
+                    this.sql.addTime(clock, `${day} - ${this.sql.dayOfWeek(clock)}`, '0'),
+                    kind,
+                    kind.zoned ? this.offset(m) : undefined
+                )
+            )
         );
     }
 
