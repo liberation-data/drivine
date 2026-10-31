@@ -96,12 +96,13 @@ interface Neo4jStore {
  * the constraint is run again as it would be, and whose stamp MERGE fails with the next of `mergeFailures`, if any. The
  * first `createFailures` CREATE CONSTRAINTs deadlock, or, given `madeMeanwhile`, are refused with it, another session
  * having made the constraint, unless `foundAfter` is false: then nothing made it, and the refusal is for something else.
- * The stamp is written as on `stampedOn`, so a SQL store's refusal of it is judged by its code.
+ * Given a list, the nth CREATE is refused with its nth, and deadlocks past its end. The stamp is written as on
+ * `stampedOn`, so a SQL store's refusal of it is judged by its code.
  */
 const neo4jStore = (
     createFailures: number,
     mergeFailures: Error[],
-    madeMeanwhile?: Error,
+    madeMeanwhile?: Error | Error[],
     foundAfter: boolean = true,
     stampedOn: DatabaseType = DatabaseType.NEO4J
 ): Neo4jStore => {
@@ -113,9 +114,10 @@ const neo4jStore = (
             const statement = spec.statement.text;
             if (statement.startsWith('CREATE CONSTRAINT')) {
                 if (++creates <= createFailures) {
-                    created = madeMeanwhile != null && foundAfter;
+                    const refusal = Array.isArray(madeMeanwhile) ? madeMeanwhile[creates - 1] : madeMeanwhile;
+                    created = refusal != null && foundAfter;
                     return Promise.reject(
-                        madeMeanwhile ??
+                        refusal ??
                             new Neo4jError(
                                 "ForsetiClient can't acquire EXCLUSIVE LABEL because holders of that lock are waiting for " +
                                     'ForsetiClient. Deadlock wait cycle.',
@@ -275,6 +277,17 @@ describe('Managers making the store key constraint at once', () => {
 
         expect((await resolver.resolve()).id).toEqual('store-8');
         expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        expect(warned()).toContain('best-effort');
+    });
+
+    it('should run the constraint at most twice refused at once and then as many times as the executor runs one', async () => {
+        // The worst case: ensured again for each refusal made meanwhile, until the last ensure, whose deadlocks the
+        // executor runs again in full. Not three ensures of CONTENDED_ATTEMPTS each.
+        const refusal = new Error('There already exists an index (:DrivineStore {key}).');
+        const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], [refusal, refusal], false);
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(2 + CONTENDED_ATTEMPTS);
         expect(warned()).toContain('best-effort');
     });
 

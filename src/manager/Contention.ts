@@ -58,7 +58,9 @@ export function ddlWillNotMake(failure: unknown): boolean {
 
 /**
  * The failures a run of {@link whenNotContended} threw: ran out of attempts on, or would not run again. Held weakly, by
- * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does.
+ * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does. Every
+ * failure a run throws is here, contended or not, for an outer run should run again neither; that it was run again as
+ * turned away is the narrower `runAgainAlready`.
  */
 const givenUp = new WeakSet();
 
