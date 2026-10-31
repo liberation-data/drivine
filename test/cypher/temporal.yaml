@@ -336,6 +336,371 @@ cases:
                   nano: localtime({hour: 1, minute: 0, second: 0, nanosecond: 5000}).microsecond}
         rows: [{millis: 1710491445123, zone: "+02:00", offset: 120, micro: 7, nano: 5}]
 
+  - name: "Dates from a week, an ordinal day or a quarter"
+    description: "A date or a moment made from a map takes a week of the week-based year and a day of the week, a day of the year, or a quarter and a day of the quarter, in place of a month and a day."
+    steps:
+      - cypher: |
+          RETURN {week: date({year: 1984, week: 10}), weekDay: date({year: 1984, week: 10, dayOfWeek: 3}), ordinal: date({year: 1984, ordinalDay: 202}),
+                  quarter: date({year: 1984, quarter: 3}), quarterDay: date({year: 1984, quarter: 3, dayOfQuarter: 45})}
+        only: [sql]
+        rows: [{week: "1984-03-05", weekDay: "1984-03-07", ordinal: "1984-07-20", quarter: "1984-07-01", quarterDay: "1984-08-14"}]
+      - cypher: |
+          WITH date({year: 2020, week: 53}) AS long, date({year: 2020, week: 53, dayOfWeek: 7}) AS sunday, date({year: 2019, week: 1}) AS before,
+               date({year: 2021, week: 1}) AS after, date({year: 2015, week: 53, dayOfWeek: 5}) AS friday
+          RETURN [[long.year, long.month, long.day], [sunday.year, sunday.month, sunday.day], [before.year, before.month, before.day],
+                  [after.year, after.month, after.day], [friday.year, friday.month, friday.day]]
+        only: [neo4j, sql]
+        note: "The year is the week-based year: its first week is the one with January 4th, which may start in the year before. 2020 and 2015 have 53 weeks."
+        rows: [[[2020, 12, 28], [2021, 1, 3], [2018, 12, 31], [2021, 1, 4], [2016, 1, 1]]]
+      - cypher: |
+          WITH date({year: 2019, week: 53}) AS w, date({year: 2023, quarter: 1, dayOfQuarter: 91}) AS q1, date({year: 2023, quarter: 2, dayOfQuarter: 92}) AS q2
+          RETURN [[w.year, w.month, w.day], [q1.year, q1.month, q1.day], [q2.year, q2.month, q2.day]]
+        only: [neo4j, sql]
+        note: "Week 53 of a year of 52 weeks is the first week of the next, and a day of the quarter past its last runs into the next quarter, as Neo4j has them."
+        rows: [[[2019, 12, 30], [2023, 4, 1], [2023, 7, 1]]]
+      - cypher: |
+          WITH date({year: 2024, ordinalDay: 366}) AS leap, date({year: 2023, ordinalDay: 365}) AS common, date({year: 2024, ordinalDay: 60}) AS feb29,
+               date({year: 2023, ordinalDay: 60}) AS mar1, date({year: 2024, quarter: 4, dayOfQuarter: 92}) AS q4, date({year: 2024, quarter: 1, dayOfQuarter: 91}) AS q1
+          RETURN [[leap.month, leap.day], [common.month, common.day], [feb29.month, feb29.day], [mar1.month, mar1.day], [q4.month, q4.day], [q1.month, q1.day]]
+        only: [neo4j, sql]
+        rows: [[[12, 31], [12, 31], [2, 29], [3, 1], [12, 31], [3, 31]]]
+      - cypher: |
+          WITH date({year: 2023, week: null}) AS w, date({year: 2023, week: 2, dayOfWeek: null}) AS d, date({year: 2023, ordinalDay: null}) AS o,
+               date({year: 2023, quarter: 2, dayOfQuarter: null}) AS q
+          RETURN [[w.month, w.day], [d.month, d.day], [o.month, o.day], [q.month, q.day]]
+        only: [neo4j, sql]
+        note: "A field that is null is given as its least: the first week, day of the week, day of the year or day of the quarter."
+        rows: [[[1, 2], [1, 9], [1, 1], [4, 1]]]
+      - cypher: |
+          WITH localdatetime({year: 1984, week: 10, dayOfWeek: 3, hour: 12, minute: 31, second: 14, millisecond: 645}) AS l,
+               datetime({year: 2020, week: 53, dayOfWeek: 7, hour: 23, timezone: '-05:00'}) AS w,
+               datetime({year: 1984, ordinalDay: 202, hour: 12, timezone: '+01:00'}) AS o,
+               localdatetime({year: 2024, quarter: 4, dayOfQuarter: 92, hour: 23, minute: 59}) AS q
+          RETURN [[l.day, l.hour, l.millisecond], [w.year, w.day, w.hour, w.timezone], [o.month, o.day, o.hour, o.timezone], [q.month, q.day, q.minute]]
+        only: [neo4j, sql]
+        note: "A moment takes them beside its time and its offset."
+        rows: [[[7, 12, 645], [2021, 3, 23, "-05:00"], [7, 20, 12, "+01:00"], [12, 31, 59]]]
+      - cypher: |
+          UNWIND [[2020, 53, 7], [2019, 53, 1], [1984, 10, null], [2024, null, null]] AS p
+          WITH date({year: p[0], week: p[1], dayOfWeek: p[2]}) AS d
+          RETURN [d.year, d.month, d.day]
+        only: [neo4j, sql]
+        note: "Fields an expression gives, worked out as the statement runs."
+        rows: [[2021, 1, 3], [2019, 12, 30], [1984, 3, 5], [2024, 1, 1]]
+      - cypher: |
+          UNWIND [[2024, 366, 4, 92], [2023, 1, 1, 91], [2023, null, null, null]] AS p
+          WITH date({year: p[0], ordinalDay: p[1]}) AS o, date({year: p[0], quarter: p[2], dayOfQuarter: p[3]}) AS q
+          RETURN [o.month, o.day, q.year, q.month, q.day]
+        only: [neo4j, sql]
+        rows: [[12, 31, 2024, 12, 31], [1, 1, 2023, 4, 1], [1, 1, 2023, 1, 1]]
+      - cypher: "RETURN date({year: 2020, week: 54})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007: data exception - invalid date, time, or datetime format. A week runs to 53, a day of the week to 7, a quarter to 4."
+        error: true
+      - cypher: "RETURN date({year: 2023, ordinalDay: 366})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A day of the year runs to the year's last, 365 in a common year."
+        error: true
+      - cypher: "RETURN date({year: 2024, quarter: 4, dayOfQuarter: 93})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A day of the quarter runs to 92."
+        error: true
+      - cypher: "UNWIND [[2023, 366]] AS p RETURN date({year: p[0], ordinalDay: p[1]})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A field past its range that an expression gives fails as the statement runs."
+        error: true
+      - cypher: "UNWIND [[2024, 5]] AS p RETURN date({year: p[0], quarter: p[1]})"
+        only: [neo4j, sql]
+        error: true
+      - cypher: "UNWIND [[2020, 54]] AS p RETURN date({year: p[0], week: p[1]})"
+        only: [neo4j, sql]
+        error: true
+
+  - name: "Day of the quarter and the fields of the week at the year's turn"
+    description: "A date or a moment gives the day of its quarter, and the week, week-based year and day of the year where the week-based year is not the year."
+    steps:
+      - cypher: |
+          RETURN [date('1984-10-11').dayOfQuarter, date('2024-12-31').dayOfQuarter, date('2023-03-31').dayOfQuarter, date('2024-03-31').dayOfQuarter,
+                  date('2024-01-01').dayOfQuarter, datetime('2024-05-20T10:00+02:00').dayOfQuarter, localdatetime('2024-08-01T23:00').dayOfQuarter]
+        only: [neo4j, sql]
+        rows: [[11, 92, 90, 91, 1, 50, 32]]
+      - cypher: |
+          RETURN [date('2021-01-03').week, date('2021-01-03').weekYear, date('2021-01-03').dayOfWeek, date('2018-12-31').week, date('2018-12-31').weekYear,
+                  date('2020-12-31').week, date('2024-12-31').ordinalDay, date('2021-01-03').quarter]
+        only: [neo4j, sql]
+        rows: [[53, 2020, 7, 1, 2019, 53, 366, 1]]
+      - cypher: "CREATE (:CyTemporal {at: date('1984-10-11')}), (:CyTemporal {at: localdatetime('1984-11-11T12:31:14')})"
+        only: [neo4j, sql]
+      - note: "A value read from the store, its kind told by its text."
+        cypher: "MATCH (n:CyTemporal) RETURN [n.at.quarter, n.at.dayOfQuarter, n.at.week, n.at.weekYear, n.at.ordinalDay, n.at.weekDay] ORDER BY n.at.month"
+        only: [neo4j, sql]
+        rows: [[4, 11, 41, 1984, 285, 4], [4, 42, 45, 1984, 316, 7]]
+
+  - name: "Dates, times and moments from another temporal value"
+    description: "A map's date, time or datetime gives the value made the fields of another temporal value, and the map's other fields are laid over them."
+    steps:
+      - cypher: |
+          WITH date('1984-11-11') AS d, localdatetime('1984-11-11T12:31:14.645') AS l, datetime('1984-11-11T23:30-05:00') AS z
+          WITH date({date: d}) AS a, date({date: l}) AS b, date({date: z}) AS c
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day]]
+        only: [neo4j, sql]
+        note: "A date from a date, a local moment or a zoned one: the date its wall clock reads."
+        rows: [[[1984, 11, 11], [1984, 11, 11], [1984, 11, 11]]]
+      - cypher: |
+          WITH localtime('12:31:14.645') AS lt, time('12:31:14.645+01:00') AS t, localdatetime('1984-03-07T12:31:14') AS l, datetime('1984-10-11T23:00-05:00') AS z
+          WITH localtime({time: lt}) AS a, localtime({time: t}) AS b, localtime({time: l}) AS c, localtime({time: z}) AS e
+          RETURN [[a.hour, a.minute, a.second, a.millisecond], [b.hour, b.minute, b.second, b.millisecond], [c.hour, c.minute, c.second], [e.hour, e.minute]]
+        only: [neo4j, sql]
+        note: "A time of day from a time of day or a moment, local or zoned: the time its wall clock reads."
+        rows: [[[12, 31, 14, 645], [12, 31, 14, 645], [12, 31, 14], [23, 0]]]
+      - cypher: |
+          WITH localtime('12:31:14.645') AS lt, time('12:31:14.645+01:00') AS t, localdatetime('1984-03-07T12:31:14') AS l, datetime('1984-10-11T23:00-05:00') AS z
+          WITH time({time: lt}) AS a, time({time: t}) AS b, time({time: l}) AS c, time({time: z}) AS e
+          RETURN [[a.hour, a.millisecond, a.timezone], [b.hour, b.millisecond, b.timezone], [c.hour, c.second, c.timezone], [e.hour, e.timezone]]
+        only: [neo4j, sql]
+        note: "A zoned time keeps the offset of a zoned value, and is at UTC from a local one."
+        rows: [[[12, 645, "Z"], [12, 645, "+01:00"], [12, 14, "Z"], [23, "-05:00"]]]
+      - cypher: |
+          WITH date('1984-10-11') AS d, localtime('12:31:14.645') AS lt, time('12:31:14+01:00') AS t, localdatetime('1984-03-07T12:31:14') AS l, datetime('1984-10-11T12:00-05:00') AS z
+          WITH localdatetime({date: d}) AS a, localdatetime({date: z, time: lt}) AS b, localdatetime({date: l, time: t}) AS c, localdatetime({datetime: z}) AS e, localdatetime({datetime: l}) AS f
+          RETURN [[a.year, a.month, a.day, a.hour, a.minute], [b.month, b.day, b.hour, b.minute, b.millisecond], [c.month, c.day, c.hour, c.second], [e.day, e.hour], [f.month, f.day, f.second]]
+        only: [neo4j, sql]
+        note: "A local moment takes its date from one value and its time from another, or both from a moment; with no time, midnight."
+        rows: [[[1984, 10, 11, 0, 0], [10, 11, 12, 31, 645], [3, 7, 12, 14], [11, 12], [3, 7, 14]]]
+      - cypher: |
+          WITH date('1984-10-11') AS d, localtime('12:31:14.645') AS lt, time('12:31:14+01:00') AS t, localdatetime('1984-03-07T12:31:14') AS l, datetime('1984-10-11T12:00-05:00') AS z
+          WITH datetime({date: d}) AS a, datetime({date: z}) AS b, datetime({date: d, time: t}) AS c, datetime({date: d, time: lt}) AS e, datetime({datetime: z}) AS f,
+               datetime({datetime: l}) AS g, datetime({date: l, time: z}) AS h
+          RETURN [[a.day, a.hour, a.timezone], [b.day, b.hour, b.timezone], [c.day, c.hour, c.minute, c.timezone], [e.hour, e.millisecond, e.timezone],
+                  [f.day, f.hour, f.timezone], [g.month, g.day, g.second, g.timezone], [h.month, h.day, h.hour, h.timezone]]
+        only: [neo4j, sql]
+        note: "A zoned moment keeps the offset of what gives its time, and is at UTC where that is local or nothing gives it: the offset of what gives the date alone is dropped."
+        rows: [[[11, 0, "Z"], [11, 0, "Z"], [11, 12, 31, "+01:00"], [12, 645, "Z"], [11, 12, "-05:00"], [3, 7, 14, "Z"], [3, 7, 12, "-05:00"]]]
+      - cypher: |
+          WITH date('1984-11-11') AS d
+          WITH date({date: d, year: 2023}) AS a, date({date: d, month: 2}) AS b, date({date: d, day: 28}) AS c, date({date: date('2024-03-15'), day: 30, month: 4}) AS e,
+               date({date: date('2024-01-31'), day: 15, month: 2}) AS f
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day], [e.year, e.month, e.day], [f.year, f.month, f.day]]
+        only: [neo4j, sql]
+        note: "A year, a month and a day given replace the value's, together: January 31st with the month 2 and the day 15 is February 15th."
+        rows: [[[2023, 11, 11], [1984, 2, 11], [1984, 11, 28], [2024, 4, 30], [2024, 2, 15]]]
+      - cypher: |
+          WITH date('1984-11-11') AS d
+          WITH date({date: d, week: 1}) AS a, date({date: d, dayOfWeek: 3}) AS b, date({date: d, ordinalDay: 28}) AS c, date({date: d, quarter: 3}) AS e, date({date: d, dayOfQuarter: 5}) AS f
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day], [e.year, e.month, e.day], [f.year, f.month, f.day]]
+        only: [neo4j, sql]
+        note: "A week keeps the day of the week, a day of the week the week, a quarter the month of the quarter and the day, a day of the quarter the quarter, and an ordinal day the year."
+        rows: [[[1984, 1, 8], [1984, 11, 7], [1984, 1, 28], [1984, 8, 11], [1984, 10, 5]]]
+      - cypher: |
+          WITH date({date: date('1816-12-30'), week: 2, dayOfWeek: 3}) AS a, date({date: date('1816-12-31'), week: 2}) AS b, date({date: date('1816-12-31'), year: 1817, week: 2}) AS c,
+               date({date: date('2020-12-30'), year: 2021, week: 2}) AS e, date({date: date('2020-12-30'), year: 2021}) AS f
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day], [e.year, e.month, e.day], [f.year, f.month, f.day]]
+        only: [neo4j, sql]
+        note: "Beside a week the year is the week-based year: 1816-12-31 is in the first week of 1817, and 2020-12-30 in the 53rd of 2020. Without one, it is the year."
+        rows: [[[1817, 1, 8], [1817, 1, 7], [1817, 1, 7], [2021, 1, 13], [2021, 12, 30]]]
+      - cypher: |
+          WITH date({date: date('2019-12-30'), week: 53}) AS a, date({date: date('2020-12-30'), year: 2019, week: 53}) AS b, date({date: date('2024-03-15'), dayOfQuarter: 92}) AS c,
+               date({date: date('2023-03-15'), dayOfQuarter: 92}) AS e, date({date: date('2024-03-31'), quarter: 2}) AS f, date({date: date('2024-01-31'), quarter: 2}) AS g,
+               date({date: date('2024-12-31'), ordinalDay: 366}) AS h
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.month, c.day], [e.month, e.day], [f.month, f.day], [g.month, g.day], [h.month, h.day]]
+        only: [neo4j, sql]
+        note: "As a map of them has it, week 53 of a year of 52 runs into the next, as does a day of the quarter past its last; a quarter moves to the month's last day where it has fewer."
+        rows: [[[2020, 12, 28], [2020, 1, 1], [4, 1], [4, 2], [6, 30], [4, 30], [12, 31]]]
+      - cypher: |
+          WITH date('2024-03-15') AS d, localtime('12:31:14.645') AS lt
+          WITH date({date: d, day: null}) AS a, date({date: d, month: null}) AS b, date({date: d, week: null}) AS c, date({date: d, ordinalDay: null}) AS e, date({date: d, quarter: null}) AS f,
+               localtime({time: lt, hour: null}) AS g, localtime({time: lt, millisecond: null}) AS h
+          RETURN [[a.month, a.day], [b.month, b.day], [c.month, c.day], [e.month, e.day], [f.month, f.day], [g.hour, g.minute, g.millisecond], [h.second, h.millisecond]]
+        only: [neo4j, sql]
+        note: "A field given as null is its least, not the value's: the first day, month, week or quarter, and no hour or fraction."
+        rows: [[[3, 1], [1, 15], [1, 5], [1, 1], [3, 15], [0, 31, 645], [14, 0]]]
+      - cypher: |
+          WITH localtime('12:31:14.645876') AS lt
+          WITH localtime({time: lt, second: 42}) AS a, localtime({time: lt, millisecond: 5}) AS b, localtime({time: lt, microsecond: 7}) AS c, localtime({time: lt, millisecond: 5, microsecond: 6}) AS e,
+               localtime({time: localtime('10:11:12'), hour: 3, minute: null}) AS f
+          RETURN [[a.second, a.microsecond], [b.second, b.microsecond], [c.microsecond], [e.microsecond], [f.hour, f.minute, f.second]]
+        only: [neo4j, sql]
+        note: "A second given keeps the fraction; a millisecond or a microsecond given makes the whole fraction."
+        rows: [[[42, 645876], [14, 5000], [7], [5006], [3, 0, 12]]]
+      - cypher: |
+          WITH time({time: time('12:31:14.645+01:00'), minute: 5}) AS a, localdatetime({datetime: localdatetime('2024-03-15T10:11:12.123456'), millisecond: 7}) AS b,
+               localdatetime({datetime: localdatetime('2024-03-15T10:11:12.123456'), minute: 7}) AS c, datetime({datetime: datetime('2024-03-15T10:00+03:00'), hour: null}) AS e
+          RETURN [[a.hour, a.minute, a.millisecond, a.timezone], [b.second, b.microsecond], [c.minute, c.microsecond], [e.day, e.hour, e.timezone]]
+        only: [neo4j, sql]
+        rows: [[[12, 5, 645, "+01:00"], [12, 7000], [7, 123456], [15, 0, "+03:00"]]]
+      - cypher: |
+          WITH date('1984-10-11') AS d, localtime('12:31:14.645') AS lt, time('12:31:14+01:00') AS t
+          WITH localdatetime({date: d, hour: 10, minute: 10, second: 10}) AS a, datetime({date: datetime('1984-10-11T12:00-05:00'), hour: 10}) AS b,
+               localdatetime({date: d, hour: 5, minute: 3, second: 2, nanosecond: 1000}) AS c, localdatetime({year: 1984, month: 10, day: 11, time: lt}) AS e,
+               datetime({year: 2024, week: 3, dayOfWeek: 2, time: t}) AS f, localdatetime({year: 2024, ordinalDay: 3, time: lt}) AS g,
+               localdatetime({year: 2024, quarter: 3, dayOfQuarter: 2, time: lt}) AS h
+          RETURN [[a.day, a.hour, a.minute, a.second], [b.day, b.hour, b.timezone], [c.second, c.microsecond], [e.month, e.day, e.minute, e.millisecond],
+                  [f.month, f.day, f.hour, f.timezone], [g.month, g.day, g.hour], [h.month, h.day, h.hour]]
+        only: [neo4j, sql]
+        note: "A value that gives the date beside fields of the time, and one that gives the time beside fields of the date."
+        rows: [[[11, 10, 10, 10], [11, 10, "Z"], [2, 1], [10, 11, 31, 645], [1, 16, 12, "+01:00"], [1, 3, 12], [7, 2, 12]]]
+      - cypher: |
+          WITH date('1984-10-11') AS d, localtime('12:31:14.645') AS lt
+          WITH localdatetime({date: d, time: lt, day: 28, second: 42}) AS a, localdatetime({date: date('2024-03-15'), time: localtime('10:11:12'), week: 1}) AS b,
+               datetime({date: date('2024-03-15'), hour: 10, timezone: '+01:00', week: 2}) AS c, localdatetime({date: date('2024-03-15'), time: localtime('10:11:12'), year: 2020, hour: 1}) AS e
+          RETURN [[a.day, a.second, a.millisecond], [b.month, b.day, b.hour], [c.month, c.day, c.hour, c.timezone], [e.year, e.hour, e.minute]]
+        only: [neo4j, sql]
+        rows: [[[28, 42, 645], [1, 5, 10], [1, 12, 10, "+01:00"], [2020, 1, 11]]]
+      - cypher: |
+          WITH date({date: date('2024-02-29'), year: 2023, dayOfWeek: 4}) AS a, date({date: date('2024-02-29'), year: 2020, dayOfWeek: 4}) AS b,
+               date({date: date('2021-01-02'), year: 2021, dayOfWeek: 1}) AS c, date({date: date('2020-12-31'), year: 2021, dayOfWeek: 7}) AS e,
+               date({date: date('2026-01-01'), year: 2019, dayOfWeek: 5}) AS f, datetime({datetime: datetime('2024-02-29T23:30+05:00'), year: 2023, dayOfWeek: 3, timezone: '-05:00'}) AS g
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day], [e.year, e.month, e.day], [f.year, f.month, f.day], [g.year, g.month, g.day, g.hour, g.timezone]]
+        only: [neo4j, sql]
+        note: "Beside a day of the week the year moves the date so many years, to February 28th from the 29th of a common year, where alone it fails; then the day of the week moves it within its week, which may be in another year."
+        rows: [[[2023, 3, 2], [2020, 2, 27], [2020, 12, 28], [2022, 1, 2], [2019, 1, 4], [2023, 3, 1, 13, "-05:00"]]]
+      - cypher: |
+          UNWIND [[date('2024-02-29'), 2023, 1], [date('2024-03-15'), 1999, 2]] AS p
+          WITH date({date: p[0], year: p[1], dayOfWeek: p[2]}) AS a
+          RETURN [a.year, a.month, a.day]
+        only: [neo4j, sql]
+        note: "The same, with the value, the year and the day of the week given by expressions."
+        rows: [[2023, 2, 27], [1999, 3, 16]]
+      - cypher: "RETURN [date({date: date('1984-11-11'), week: 1}), date({date: localdatetime('1984-11-11T12:31:14'), quarter: 3}), date({date: datetime('1984-11-11T23:30-05:00'), ordinalDay: 28})]"
+        only: [sql]
+        rows: [["1984-01-08", "1984-08-11", "1984-01-28"]]
+
+  - name: "Zoned times and moments from another temporal value"
+    description: "A time zone given beside a zoned value moves it there, the same moment; beside a local value, or none, it names the value's offset."
+    steps:
+      - cypher: |
+          WITH time({time: time('23:00+01:00'), timezone: '+05:00'}) AS a, time({time: time('01:00+01:00'), timezone: '-05:00'}) AS b, time({time: time('10:00Z'), timezone: '+05:30'}) AS c,
+               time({time: localtime('10:00'), timezone: '-02:00'}) AS e, time({time: datetime('2024-03-15T23:00+01:00'), timezone: '+05:00'}) AS f, time({time: localdatetime('2024-03-15T23:00')}) AS g,
+               time({time: time('10:00+01:00'), timezone: 'Z'}) AS h, time({time: time('12:31:14+01:00'), second: 42, timezone: '+05:00'}) AS i
+          RETURN [[a.hour, a.timezone], [b.hour, b.timezone], [c.hour, c.minute, c.timezone], [e.hour, e.timezone], [f.hour, f.timezone], [g.hour, g.timezone], [h.hour, h.timezone],
+                  [i.hour, i.minute, i.second, i.timezone]]
+        only: [neo4j, sql]
+        note: "A time of day moved past midnight wraps round; the fields given are laid over it before it moves."
+        rows: [[[3, "+05:00"], [19, "-05:00"], [15, 30, "+05:30"], [10, "-02:00"], [3, "+05:00"], [23, "Z"], [9, "Z"], [16, 31, 42, "+05:00"]]]
+      - cypher: |
+          WITH datetime({datetime: datetime('2024-03-15T23:00-05:00'), timezone: '+05:00'}) AS a, datetime({datetime: datetime('2024-03-15T23:00-05:00'), hour: 1, timezone: '+05:00'}) AS b,
+               datetime({datetime: localdatetime('1984-03-07T12:31:14'), timezone: '+05:00'}) AS c, datetime({datetime: datetime('2024-03-15T10:30:20.5+03:00'), minute: 0, timezone: 'Z'}) AS e,
+               datetime({datetime: datetime('2024-03-15T10:00+01:00'), timezone: '-12:00'}) AS f
+          RETURN [[a.day, a.hour, a.timezone], [b.day, b.hour, b.timezone], [c.day, c.hour, c.minute, c.timezone], [e.hour, e.minute, e.second, e.millisecond, e.timezone], [f.day, f.hour, f.timezone]]
+        only: [neo4j, sql]
+        note: "A moment moved to another offset may move to another day."
+        rows: [[[16, 9, "+05:00"], [15, 11, "+05:00"], [7, 12, 31, "+05:00"], [7, 0, 20, 500, "Z"], [14, 21, "-12:00"]]]
+      - cypher: |
+          WITH datetime({date: date('2024-03-15'), time: time('23:00-05:00'), timezone: '+05:00'}) AS a, datetime({date: date('2024-03-15'), time: time('23:11:12-05:00'), day: 31, timezone: '+05:00'}) AS b,
+               datetime({date: date('2024-03-15'), time: time('10:11:12+01:00'), hour: 22, timezone: '-01:00'}) AS c, datetime({date: date('2024-03-15'), time: localtime('10:11:12'), timezone: '+01:00', hour: 22}) AS e,
+               datetime({date: date('2024-03-15'), timezone: '+01:00'}) AS f, datetime({date: datetime('2024-03-15T10:00+03:00'), timezone: '+01:00'}) AS g,
+               datetime({date: date('2024-03-15'), time: datetime('2020-01-01T23:30+02:00'), timezone: '-03:00'}) AS h
+          RETURN [[a.month, a.day, a.hour, a.timezone], [b.month, b.day, b.hour, b.minute, b.timezone], [c.day, c.hour, c.timezone], [e.hour, e.minute, e.timezone], [f.day, f.hour, f.timezone],
+                  [g.day, g.hour, g.timezone], [h.year, h.day, h.hour, h.minute, h.timezone]]
+        only: [neo4j, sql]
+        note: "The date and the time are put together at the offset of what gives the time, then moved: March 31st 23:11:12-05:00 is April 1st at +05:00."
+        rows: [[[3, 16, 9, "+05:00"], [4, 1, 9, 11, "+05:00"], [15, 20, "-01:00"], [22, 11, "+01:00"], [15, 0, "+01:00"], [15, 0, "+01:00"], [2024, 15, 18, 30, "-03:00"]]]
+
+  - name: "Temporal values from another an expression gives"
+    description: "A value read from the store or unwound, its kind told by its text, gives a date, a time or a moment."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: date('1984-10-11')}), (:CyTemporal {id: 'b', at: localdatetime('1984-11-11T12:31:14')}), (:CyTemporal {id: 'c', at: datetime('1984-12-11T23:00-05:00')})"
+        only: [neo4j, sql]
+      - cypher: |
+          MATCH (n:CyTemporal) WITH n ORDER BY n.id
+          WITH date({date: n.at, day: 1}) AS d, datetime({date: n.at, hour: 10, timezone: '+01:00'}) AS z
+          RETURN [d.month, d.day, z.month, z.day, z.hour, z.timezone]
+        only: [neo4j, sql]
+        rows: [[10, 1, 10, 11, 10, "+01:00"], [11, 1, 11, 11, 10, "+01:00"], [12, 1, 12, 11, 10, "+01:00"]]
+      - cypher: |
+          MATCH (n:CyTemporal) WHERE n.id <> 'a' WITH n ORDER BY n.id
+          WITH localtime({time: n.at, minute: 1}) AS l, time({time: n.at, timezone: '+05:00'}) AS t, datetime({datetime: n.at, day: 2}) AS z
+          RETURN [l.hour, l.minute, t.hour, t.minute, t.timezone, z.month, z.day, z.hour, z.timezone]
+        only: [neo4j, sql]
+        note: "A local moment read is given the offset, and a zoned one moved to it."
+        rows: [[12, 1, 12, 31, "+05:00", 11, 2, 12, "Z"], [23, 1, 9, 0, "+05:00", 12, 2, 23, "-05:00"]]
+      - cypher: |
+          UNWIND [date('2024-03-15'), localdatetime('2023-07-01T10:00'), datetime('2022-05-04T23:00-05:00')] AS d
+          WITH date({date: d, day: 2}) AS a
+          RETURN [a.year, a.month, a.day]
+        only: [neo4j, sql]
+        rows: [[2024, 3, 2], [2023, 7, 2], [2022, 5, 2]]
+
+  - name: "Temporal values from another that make no date"
+    description: "Fields laid over another temporal value that make a day its month has none of fail, as the statement runs."
+    steps:
+      - cypher: "RETURN date({date: date('2024-01-31'), month: 2})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007: data exception - invalid date, time, or datetime format. February 31st: the month isn't moved to its last day."
+        error: true
+      - cypher: "RETURN date({date: date('2024-02-29'), year: 2023})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. February 29th of a common year."
+        error: true
+      - cypher: "RETURN date({date: date('2023-12-31'), ordinalDay: 366})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "RETURN date({date: date('2024-02-29'), year: 2023, quarter: 1})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. The year is laid over the date before the quarter moves it."
+        error: true
+      - cypher: "UNWIND [date('2024-01-31')] AS d RETURN date({date: d, month: 2})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "RETURN localdatetime({date: date('2024-01-31'), month: 2, hour: 1})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A moment's too, which Oracle reads as a JSON value's, null where it is no moment."
+        error: true
+      - cypher: "RETURN datetime({datetime: datetime('2024-01-31T10:00Z'), month: 2})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "UNWIND [datetime('2023-12-31T10:00Z')] AS d RETURN datetime({date: d, ordinalDay: 366, hour: 1})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "UNWIND [[date('2024-03-15'), 5]] AS p RETURN date({date: p[0], quarter: p[1]})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A field past its range that an expression gives."
+        error: true
+
+  - name: "Temporal values from another that an expression gives as none"
+    description: "Another temporal value or a time zone an expression gives that is null, or of a kind that hasn't what it is to give, fails as the statement runs, not given as null."
+    steps:
+      - cypher: "UNWIND [null] AS d RETURN date({date: d, day: 1})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "OPTIONAL MATCH (n:CyNothing) RETURN date({date: n.at})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A property of a node that isn't there."
+        error: true
+      - cypher: "UNWIND [null] AS t RETURN datetime({date: date('2024-03-15'), time: t})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "UNWIND [localtime('10:00')] AS d RETURN date({date: d})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G05. A time of day gives no date."
+        error: true
+      - cypher: "UNWIND [date('2024-03-15')] AS t RETURN time({time: t, timezone: '+01:00'})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G05. A date gives no time of day."
+        error: true
+      - cypher: "UNWIND ['hello'] AS t RETURN localtime({time: t})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A text that is no temporal value."
+        error: true
+      - cypher: "UNWIND [null] AS z RETURN datetime({datetime: datetime('2024-03-15T10:00Z'), timezone: z})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G06. A time zone that is null."
+        error: true
+      - cypher: "UNWIND [null] AS z RETURN time({time: localtime('10:00'), timezone: z})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G06."
+        error: true
+      - cypher: "UNWIND ['hello'] AS z RETURN datetime({date: date('2024-03-15'), timezone: z})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22000. A text that is no time zone."
+        error: true
+
   - name: "Converting between temporal kinds"
     description: "A temporal value of one kind is made from a value of another."
     steps:
