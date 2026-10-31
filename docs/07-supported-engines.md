@@ -303,6 +303,20 @@ const names = await pm.query<string>(
   map, still order the texts in them by the database's collation (`ORDER BY n.tags`).
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A path variable in
   CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
+- A value whose kind the statement fixes (a literal, a list or a map written, or a variable a `WITH` binds to one) is
+  refused where an operator or a function takes another kind, as Neo4j refuses it when it plans the statement:
+  `RETURN 123 AND true` fails with `AND takes a truth value, not an integer, as in Neo4j.`, and so do
+  `WITH 123 AS x RETURN x.num` and `RETURN 1 IN 'foo'`. A step of 0 in `range()`, written or given, a parameter given
+  as the index of a list or a map written that isn't indexed by its kind, and a map, or a list of maps or of lists,
+  written in `SET`, are refused too, though Neo4j fails on them only when a row reaches them. A value whose kind is
+  known only when the row is read, such as a property or a parameter, is compiled: where it is of the wrong kind, the
+  statement may give null where Neo4j fails. A variable used as two kinds is refused, as Neo4j refuses it:
+  `MATCH (a)-[a]->()` fails with `a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j.`
+  So is one a pattern makes where it is bound already: `MATCH (a) CREATE (a)`, a path variable bound before its
+  `MATCH`, or a relationship variable bound as something else.
+- `truncate` takes each unit Neo4j does, from `millennium` to `microsecond`, and a map of fields to set on the value
+  cut short (`date.truncate('month', d, {day: 2})`), but not yet a nanosecond, a week's or a quarter's field, or a
+  named zone.
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A zoned value the
   statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
   does a map that holds one. A list of them, or a list of lists of them, sorts item by item so in an `ORDER BY`, `min`

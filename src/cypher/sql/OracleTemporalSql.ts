@@ -1,8 +1,10 @@
 import { Temporal } from '@/cypher/sql/Temporal';
-import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
+import { Shared, TemporalSql, yearsOf } from '@/cypher/sql/TemporalSql';
 
+/** `TRUNC`'s format model of each unit: `IYYY` is the first day of the ISO week-based year. */
 const FORMATS: Record<string, string> = {
     year: 'YYYY',
+    weekYear: 'IYYY',
     quarter: 'Q',
     month: 'MM',
     week: 'IW',
@@ -133,6 +135,10 @@ export class OracleTemporalSql extends TemporalSql {
         });
     }
 
+    /**
+     * `TRUNC` of a date to a format model. A millennium, a century and a decade are the year less its years into the span
+     * (see {@link yearsOf}), as months before the year's first day.
+     */
     truncate(unit: string, timestamp: string): string | undefined {
         // Its own units alone: `constructor` is no unit.
         const format = Object.prototype.hasOwnProperty.call(FORMATS, unit) ? FORMATS[unit] : undefined;
@@ -144,6 +150,17 @@ export class OracleTemporalSql extends TemporalSql {
         }
         if (unit === 'millisecond') {
             return `TO_TIMESTAMP(TO_CHAR(${timestamp}, 'YYYY-MM-DD HH24:MI:SS.FF3'), 'YYYY-MM-DD HH24:MI:SS.FF3')`;
+        }
+        if (unit === 'microsecond') {
+            return timestamp;
+        }
+        const years = yearsOf(unit);
+        if (years !== undefined) {
+            return this.shared(
+                [timestamp],
+                ([t]) =>
+                    `CAST(ADD_MONTHS(TRUNC(CAST(${t} AS DATE), 'YYYY'), -12 * MOD(EXTRACT(YEAR FROM ${t}), ${years})) AS TIMESTAMP)`
+            );
         }
         return undefined;
     }

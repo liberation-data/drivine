@@ -953,6 +953,66 @@ cases:
       - cypher: "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL MATCH (p)-[:KNOWS]->(f) RETURN f }"
         rows: [1]
 
+  - name: "CALL imports only what it names"
+    description: "A CALL sees only what its brackets or its leading WITH import: any other name in it is a new variable."
+    steps:
+      - note: "No brackets and no leading WITH: nothing is imported, so p in the CALL is any movie."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) CALL { MATCH (p:Movie) RETURN p.title AS t } RETURN count(*) AS n, count(DISTINCT t) AS d"
+        rows: [[12, 3]]
+      - cypher: "MATCH (p:Person) CALL { MATCH (p:Movie) RETURN count(p) AS n } RETURN p.name, n ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 3], ["Hugo", 3], ["Keanu", 3], ["Laurence", 3]]
+      - note: "CALL () imports nothing."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) CALL () { MATCH (p:Movie) RETURN p.title AS t } RETURN p.name, t ORDER BY t"
+        rows: [["Keanu", "Johnny Mnemonic"], ["Keanu", "The Matrix"], ["Keanu", "The Matrix Reloaded"]]
+      - note: "CALL (a) imports a alone, and so does a leading WITH a: b in it is new."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) CALL (a) { MATCH (a)-[:ACTED_IN]->(b) RETURN b.title AS t } RETURN b.name, t ORDER BY t"
+        rows: [["Carrie", "Johnny Mnemonic"], ["Carrie", "The Matrix"], ["Carrie", "The Matrix Reloaded"]]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(b) RETURN b.title AS t } RETURN b.name, t ORDER BY t"
+        only: [neo4j, sql]
+        rows: [["Carrie", "Johnny Mnemonic"], ["Carrie", "The Matrix"], ["Carrie", "The Matrix Reloaded"]]
+      - note: "A node's name the CALL does not import may be a relationship's in it."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { MATCH ()-[a:KNOWS]->() RETURN count(a) AS n } RETURN a.name, n"
+        rows: [["Keanu", 2]]
+      - cypher: "MATCH (a:Person {name: 'Laurence'}) CALL () { MATCH ()-[a:KNOWS]->(b) RETURN b.name AS k } RETURN a.name, k ORDER BY k"
+        only: [neo4j, sql]
+        rows: [["Laurence", "Carrie"], ["Laurence", "Keanu"]]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Movie {title: 'The Matrix'}) CALL (a) { MATCH (a)-[b]->() RETURN count(b) AS n } RETURN b.title, n"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 4]]
+      - note: "What a leading WITH imports is gone after a WITH that does not pass it on."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a WITH 1 AS one MATCH (a:Movie) RETURN count(a) AS n } RETURN n"
+        rows: [3]
+      - note: "What brackets import is seen throughout the CALL, after a WITH that does not pass it on too."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) CALL (a, b) { WITH 1 AS one RETURN b.name AS n } RETURN n"
+        rows: ["Carrie"]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (a) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+        only: [neo4j, sql]
+        rows: [3]
+      - cypher: "MATCH (a:Person) CALL (a) { UNWIND [1, 2] AS i WITH i RETURN a.name AS n, sum(i) AS s } RETURN n, s ORDER BY n"
+        only: [neo4j, sql]
+        rows: [["Carrie", 3], ["Hugo", 3], ["Keanu", 3], ["Laurence", 3]]
+      - note: "CALL (*), and a leading WITH *, import every variable."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+        rows: [3]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+        only: [neo4j, sql]
+        rows: [3]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
+        only: [neo4j, sql]
+        rows: [3]
+      - note: "In a UNION, each query imports what its own leading WITH names."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n UNION ALL MATCH (a:Movie) RETURN count(a) AS n } RETURN a.name, n"
+        rows: [["Keanu", 3], ["Keanu", 3]]
+
   - name: "UNION inside subqueries"
     description: "A UNION works inside CALL, COUNT and EXISTS, evaluated per row."
     steps:
