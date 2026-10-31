@@ -1512,6 +1512,14 @@ cases:
         only: [neo4j, sql]
         parameters: {p: {a: null}, q: {}}
         rows: [null]
+      - note: "A UNION ALL in a CALL gives the one null where a later query gives it as a list's or a map's null and another as a missing key."
+        cypher: "CALL { RETURN {}.a AS v UNION ALL RETURN [null][0] AS v } RETURN DISTINCT v"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "CALL { RETURN 1 AS v UNION ALL RETURN [null][0] AS v UNION ALL RETURN {}.a AS v } RETURN v, count(*) AS c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, 1], [null, 2]]
       - note: "A null written is the same null as a property a node has not."
         cypher: "MATCH (p:Person) RETURN CASE WHEN p.born > 1960 THEN p.nickname ELSE null END AS v, count(*) AS c"
         only: [neo4j, sql]

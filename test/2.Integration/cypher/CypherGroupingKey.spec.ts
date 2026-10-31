@@ -129,4 +129,125 @@ describe.each(stores())('An aggregating item over a key that is a property on $t
             expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
         }
     });
+
+    it('should read any(y IN list WHERE y = e) as e IN list, and an order term as an item, grouping by the property', async () => {
+        // Two x share a = 1, so grouping by x gives a = 1 twice (#499, drivine4j#505).
+        const x = 'UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a';
+        const z = 'UNWIND [{b: 1}, {a: null, b: 2}, {a: 1, b: 1}, {a: 1, b: 3}] AS x RETURN x.a AS a';
+        const cases: [string, any[]][] = [
+            // Neo4j reads any(y IN list WHERE y = e) as e IN list, and none(…) as NOT e IN list; not all(…).
+            [
+                `${x}, any(y IN collect(x.b) WHERE y = x.a + 0) AS n ORDER BY a`,
+                [
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            [
+                'UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x ' +
+                    'WITH x.a AS a, any(y IN collect(x.b) WHERE y = x.a) AS n RETURN a, n ORDER BY a',
+                [
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            [
+                `${x}, any(y IN collect(x.b) WHERE y = x.a OR y = 5) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            // Nor single(…), y.p = e, y IN [e1, e2], or an e that reads y; e IN [y] is y = e. With a null in the list,
+            // as e IN list.
+            [
+                `${x}, single(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            [
+                `${x}, any(y IN collect(x) WHERE y.b = x.a) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            [
+                `${x}, none(y IN collect(x.b) WHERE y IN [x.a, 5]) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [1, true],
+                    [2, true]
+                ]
+            ],
+            [
+                `${x}, any(y IN collect(x.b) WHERE y = x.a + y) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [1, false],
+                    [2, false]
+                ]
+            ],
+            [
+                `${x}, any(y IN collect(x.b) WHERE x.a IN [y]) AS n ORDER BY a, n`,
+                [
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            [
+                `${x}, any(y IN collect(x.b) + [null] WHERE y = x.a) AS n ORDER BY a, n`,
+                [
+                    [1, true],
+                    [2, null]
+                ]
+            ],
+            [
+                `${x}, none(y IN collect(x.b) + [null] WHERE y = x.a + 1) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [2, null]
+                ]
+            ],
+            // A key that is a map's null and one that is missing are one null, read by its name in a body too (#497).
+            [
+                `${z}, any(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n`,
+                [
+                    [1, true],
+                    [null, null]
+                ]
+            ],
+            [
+                `${z}, size([t IN collect(x.b) WHERE any(u IN [t] WHERE u > coalesce(x.a, 0))]) AS n ORDER BY a, n`,
+                [
+                    [1, 1],
+                    [null, 2]
+                ]
+            ],
+            [
+                `${z}, count(*) + [y IN [1] | coalesce(x.a, 0)][0] AS n ORDER BY a, n`,
+                [
+                    [1, 3],
+                    [null, 2]
+                ]
+            ],
+            // An order term that aggregates reads the key as an item does; a reduce's step over an aggregate groups by x.
+            [
+                `${x}, count(*) AS n ORDER BY reduce(s = 0, y IN collect(x.b) | s + x.a), a`,
+                [
+                    [1, 1],
+                    [1, 1],
+                    [2, 1]
+                ]
+            ]
+        ];
+        for (const [cypher, rows] of cases) {
+            expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
+        }
+    });
 });

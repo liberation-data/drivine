@@ -4169,69 +4169,134 @@ export class CypherWriter {
                   }
                 : { kind: 'Variable', name: aggregate[1] };
         };
-        // Each key `term` reads, by its name, in a comprehension's, a quantifier's or a reduce's body too, where the body
-        // binds no variable the key reads.
-        const readingKeys = (term: Expression, bound: ReadonlySet<string>): Expression =>
+        // `term` with each key in it read as `key` reads it, in a comprehension's, a quantifier's or a reduce's body too,
+        // where the body binds no variable the key reads.
+        type Reading = (term: Expression) => Expression | undefined;
+        const readingKeys = (term: Expression, bound: ReadonlySet<string>, key: Reading): Expression =>
             replaced(term, (part) => {
-                if (keys.has(expressionKey(part)) && ![...variablesIn(part)].some((it) => bound.has(it))) {
-                    return kept(part);
+                if (![...variablesIn(part)].some((it) => bound.has(it))) {
+                    const read = key(part);
+                    if (read !== undefined) {
+                        return read;
+                    }
                 }
                 const within = (...names: string[]): ReadonlySet<string> => new Set([...bound, ...names]);
                 switch (part.kind) {
                     case 'ListComprehension':
                         return {
                             ...part,
-                            list: readingKeys(part.list, bound),
-                            where: part.where && readingKeys(part.where, within(part.variable)),
-                            projection: part.projection && readingKeys(part.projection, within(part.variable))
+                            list: readingKeys(part.list, bound, key),
+                            where: part.where && readingKeys(part.where, within(part.variable), key),
+                            projection: part.projection && readingKeys(part.projection, within(part.variable), key)
                         };
                     case 'Quantifier':
                         return {
                             ...part,
-                            list: readingKeys(part.list, bound),
-                            where: part.where && readingKeys(part.where, within(part.variable))
+                            list: readingKeys(part.list, bound, key),
+                            where: part.where && readingKeys(part.where, within(part.variable), key)
                         };
                     case 'Reduce':
                         return {
                             ...part,
-                            initial: readingKeys(part.initial, bound),
-                            list: readingKeys(part.list, bound),
-                            expression: readingKeys(part.expression, within(part.accumulator, part.variable))
+                            initial: readingKeys(part.initial, bound, key),
+                            list: readingKeys(part.list, bound, key),
+                            expression: readingKeys(part.expression, within(part.accumulator, part.variable), key)
                         };
                     default:
                         return undefined;
                 }
             });
+        // Neo4j reads `any(y IN list WHERE y = e)` as `e IN list`, and `none(…)` as `NOT e IN list`, where `e` reads no
+        // `y`; `y IN [e]` and `e IN [y]` are `y = e` to it. Not `all(…)` or `single(…)`, a WHERE that is more than the one
+        // comparison (`AND`, `OR`), `y.p = e`, or `y IN [e1, e2]`: those group by each variable `e` reads.
+        const readAsIn = (part: Quantifier): boolean => {
+            const where = part.where;
+            if (where?.kind !== 'Binary' || (part.of !== 'ANY' && part.of !== 'NONE')) {
+                return false;
+            }
+            const isVariable = (it: Expression): boolean => it.kind === 'Variable' && it.name === part.variable;
+            const comparedTo = (left: Expression, right: Expression): Expression | undefined =>
+                isVariable(left) ? right : isVariable(right) ? left : undefined;
+            const only =
+                where.right.kind === 'ListLiteral' && where.right.items.length === 1 ? where.right.items[0] : undefined;
+            const compared =
+                where.operator === 'EQUALS'
+                    ? comparedTo(where.left, where.right)
+                    : where.operator === 'IN' && only
+                    ? comparedTo(where.left, only)
+                    : undefined;
+            return compared !== undefined && !variablesIn(compared).has(part.variable);
+        };
         // As Neo4j reads a key in an item that aggregates: by its name in a part that holds no aggregate, and in a list
-        // comprehension's WHERE, all through. In the projection of a comprehension that holds one, or its quantifier's
-        // WHERE or reduce's step, Neo4j groups by each variable the key reads as well, so the body is kept as it is, and
-        // those variables beside: `[t IN collect(m.title) | r.role]` beside `r.role` gives a row for each `r`, where
-        // `[t IN collect(m.title) WHERE t STARTS WITH r.role]` and `count(*) + [y IN [1] | r.role][0]` give one for each
-        // role.
-        const rekeyed = (term: Expression): Expression =>
+        // comprehension's WHERE, all through. In the projection of a comprehension over an aggregate, or the WHERE of a
+        // quantifier or the step of a reduce over one, Neo4j groups by each variable the key reads as well, so the body is
+        // kept as it is, and those variables beside: `[t IN collect(m.title) | r.role]` beside `r.role` gives a row for
+        // each `r`, where `[t IN collect(m.title) WHERE t STARTS WITH r.role]` and `count(*) + [y IN [1] | r.role][0]`
+        // give one for each role, and so does `any(t IN collect(m.title) WHERE t = r.role)`, which Neo4j reads as
+        // `r.role IN collect(m.title)`. `read` reads a key or an aggregate, and `key` a key in a body.
+        const rekeyed = (term: Expression, read: Reading, key: Reading): Expression =>
             replaced(term, (part) => {
-                const read = kept(part);
-                if (read) {
-                    return read;
+                const given = read(part);
+                if (given) {
+                    return given;
                 }
                 if (!aggregating(part)) {
-                    return readingKeys(part, new Set());
+                    return readingKeys(part, new Set(), key);
                 }
-                return part.kind === 'ListComprehension' && part.where
-                    ? { ...part, list: rekeyed(part.list), where: readingKeys(part.where, new Set([part.variable])) }
-                    : undefined;
+                if (part.kind === 'ListComprehension' && part.where) {
+                    return {
+                        ...part,
+                        list: rekeyed(part.list, read, key),
+                        where: readingKeys(part.where, new Set([part.variable]), key)
+                    };
+                }
+                if (part.kind === 'Quantifier' && readAsIn(part)) {
+                    return {
+                        ...part,
+                        list: rekeyed(part.list, read, key),
+                        where: readingKeys(part.where!, new Set([part.variable]), key)
+                    };
+                }
+                return undefined;
             });
-        const rekeyedItems = items.map((it) => ({ ...it, expression: rekeyed(it.expression) }));
-        // An order term that aggregates may name a key too, by the variable the projection groups by.
+        const keyOf: Reading = (part) => (keys.has(expressionKey(part)) ? kept(part) : undefined);
+        const rekeyedItems = items.map((it) => ({ ...it, expression: rekeyed(it.expression, kept, keyOf) }));
+        // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
+        // can only be; a variable an item is named after is that item, not the variable of that name before it. In a
+        // body, as an item reads it.
+        const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
+        const asItem: Reading = (term) => {
+            if (term.kind === 'Variable' && byName.has(term.name)) {
+                return term;
+            }
+            const item = itemNames.get(expressionKey(term));
+            return item !== undefined ? { kind: 'Variable', name: item } : undefined;
+        };
+        const rekeyedOrder = projection.orderBy.map((sort) => ({
+            ...sort,
+            expression: rekeyed(
+                sort.expression,
+                (it) => asItem(it) ?? kept(it),
+                (it) => asItem(it) ?? keyOf(it)
+            )
+        }));
+        // An order term that aggregates may name a key too, by the variable the projection groups by; or, as an item
+        // does, the variable of a key that is a property, in a body that groups by it.
+        const keyedInOrder = [
+            ...keyed,
+            ...items
+                .filter((it) => properties.has(expressionKey(it.expression)))
+                .flatMap((it) => [...variablesIn(it.expression)])
+        ];
         const beside = [
             ...new Set([
                 ...rekeyedItems
                     .filter((_, i) => aggregating(items[i].expression))
                     .flatMap((it) => named(it.expression)),
-                ...projection.orderBy
-                    .filter((it) => aggregating(it.expression))
+                ...rekeyedOrder
+                    .filter((_, i) => aggregating(projection.orderBy[i].expression))
                     .flatMap((it) => named(it.expression))
-                    .filter((it) => keyed.includes(it))
+                    .filter((it) => keyedInOrder.includes(it))
             ])
         ].filter((it) => select.scope.has(it));
         const grouped: Projection = {
@@ -4252,24 +4317,7 @@ export class CypherWriter {
             ],
             orderBy: []
         };
-        // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
-        // can only be; a variable an item is named after is that item, not the variable of that name before it.
-        const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
-        const keptProjection: Projection = {
-            ...projection,
-            star: false,
-            items: rekeyedItems,
-            orderBy: projection.orderBy.map((sort) => ({
-                ...sort,
-                expression: replaced(sort.expression, (term) => {
-                    if (term.kind === 'Variable' && byName.has(term.name)) {
-                        return term;
-                    }
-                    const item = itemNames.get(expressionKey(term));
-                    return item !== undefined ? { kind: 'Variable', name: item } : kept(term);
-                })
-            }))
-        };
+        const keptProjection: Projection = { ...projection, star: false, items: rekeyedItems, orderBy: rekeyedOrder };
         return [this.with(select, { kind: 'With', projection: grouped }), keptProjection];
     }
 
