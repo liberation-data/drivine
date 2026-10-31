@@ -71,6 +71,7 @@ import {
     unsupported,
     variablesIn,
     variablesOfPattern,
+    variablesReadIn,
     variablesOutsideAggregates,
     writes
 } from '@/cypher/sql/CypherSyntax';
@@ -1116,7 +1117,9 @@ export class CypherWriter {
 
     /**
      * A reading clause over the rows `select` reads, and the rows the clauses after it read: a `WITH` is a query of its
-     * own. `outer` is what a subquery reads from the row it is in.
+     * own. `outer` is what a subquery reads from the row it is in. A `WITH *` alone where nothing is bound passes on
+     * nothing, as Neo4j has it, and is left out: SQL has no query of no column (#485). Its `WHERE` is met on the rows it
+     * reads, which hold what that reads; with `DISTINCT`, an order, `SKIP` or `LIMIT` it is refused, as it was.
      */
     private read(select: Select, clause: Clause, outer: Scope = new Map()): Select {
         switch (clause.kind) {
@@ -1128,6 +1131,14 @@ export class CypherWriter {
                 return rows;
             }
             case 'With':
+                if (
+                    clause.projection.star &&
+                    clause.projection.items.length === 0 &&
+                    plainWith({ ...clause, where: undefined }) &&
+                    [...select.bound.keys()].every((it) => this.madeAnew.has(it))
+                ) {
+                    return clause.where ? this.filteredRows(select, clause.where) : select;
+                }
                 return this.with(select, clause, outer);
             case 'Call':
                 return this.anewCall(select, clause);
@@ -1374,7 +1385,7 @@ export class CypherWriter {
      * where a `UNION` names them so, and kept distinct with `distinct`. It sees only the variables of the row it imports
      * ({@link calledScope}): any other name in it is a new variable, as in Cypher (#473). What its brackets import it
      * sees throughout, after a `WITH` that does not pass it on too, as Neo4j has it; what a leading `WITH` imports is gone
-     * after one.
+     * after one. A leading `WITH *` passes on what it imports ({@link starredImports}).
      */
     private calledPart(
         select: Select,
@@ -1391,10 +1402,37 @@ export class CypherWriter {
             apart.imports.forEach((value, variable) => inner.bind(variable, value));
         }
         const outer: Scope = bracketed(call) ? imported : new Map();
-        clauses.slice(0, -1).forEach((it) => (inner = this.read(inner, it, outer)));
+        const reading = bracketed(call)
+            ? clauses.slice(0, -1)
+            : this.starredImports(clauses.slice(0, -1), [...imported.keys()]);
+        reading.forEach((it) => (inner = this.read(inner, it, outer)));
         const projection = (clauses[clauses.length - 1] as Return).projection;
         const items = names ? names.map((name) => projection.items.find((it) => it.name === name)!) : projection.items;
         return this.project(inner, { ...projection, items, distinct: distinct || projection.distinct }, false);
+    }
+
+    /**
+     * The reading `clauses` of a `CALL { … }` without brackets, its leading `WITH *` naming each variable it `imports` in
+     * place of its star (#485): those are no variables its query binds, so the star gave none of them, and was refused
+     * where nothing else was bound. Not one the compiler made (see {@link anewCall}), which the statement never named.
+     * Where it imports none, the `WITH` is as it was, and passes on nothing ({@link read}). With brackets, Neo4j's star
+     * gives none of what they import, which the query sees throughout anyway, so their clauses are as they were.
+     */
+    private starredImports(clauses: Clause[], imports: string[]): Clause[] {
+        const leading = clauses.findIndex((it) => !(it.kind === 'Unwind' && this.madeAnew.has(it.variable)));
+        const clause = leading < 0 ? undefined : clauses[leading];
+        const named = imports.filter((it) => !this.madeAnew.has(it)).sort();
+        if (clause?.kind !== 'With' || !clause.projection.star || named.length === 0) {
+            return clauses;
+        }
+        const items = named
+            .filter((name) => !clause.projection.items.some((it) => it.name === name))
+            .map((name): ProjectionItem => ({ expression: { kind: 'Variable', name }, name }));
+        const starless: With = {
+            ...clause,
+            projection: { ...clause.projection, star: false, items: [...items, ...clause.projection.items] }
+        };
+        return [...clauses.slice(0, leading), starless, ...clauses.slice(leading + 1)];
     }
 
     /**
@@ -4228,10 +4266,27 @@ export class CypherWriter {
             inner.where.push(this.keeps(comprehension.where, inner.scope));
         }
         const projected = this.expression(comprehension.projection, inner.scope);
-        const gathered = (value: string): string =>
-            `(${[`SELECT ${this.sql.aggregateList(value)}`, ...inner.from(), ...optional(inner.whereClause())].join(
-                ' '
-            )})`;
+        // A body that reads no variable of the pattern's own, `[(p)-->() | p.name]`, is worked out for each of the
+        // pattern's rows in a derived table, and gathered from there: an aggregate that reads only the row's columns is an
+        // aggregate of the row's query, which Postgres refuses (#486). One that reads nothing of any row, a literal or a
+        // parameter, is the comprehension's aggregate as it is. Its path variable is its own even where the row holds
+        // that name, which it leaves to a new variable.
+        const own = [
+            ...[...variablesOfPattern(comprehension.pattern)].filter((it) => !scope.has(it)),
+            ...optional(comprehension.pattern.variable)
+        ];
+        const read = [...variablesReadIn(comprehension.projection)];
+        const apart =
+            !read.some((it) => own.includes(it)) && (read.length > 0 || holdsSubquery(comprehension.projection));
+        const gathered = (value: string): string => {
+            const rows = (select: string): string =>
+                [select, ...inner.from(), ...optional(inner.whereClause())].join(' ');
+            if (!apart) {
+                return `(${rows(`SELECT ${this.sql.aggregateList(value)}`)})`;
+            }
+            const each = this.alias('pc');
+            return `(SELECT ${this.sql.aggregateList(`${each}.v`)} FROM (${rows(`SELECT ${value} AS v`)}) ${each})`;
+        };
         // A comprehension of nodes or relationships is a list of them, so a write to an item of it reaches them.
         if (projected.kind === 'Node' || projected.kind === 'Relationship') {
             const id = projected.kind === 'Node' ? projected.nid : projected.eid;
