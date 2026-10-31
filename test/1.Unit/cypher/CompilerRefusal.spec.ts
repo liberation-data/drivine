@@ -576,13 +576,92 @@ describe('The Cypher compiler refuses', () => {
                 "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), count(*) AS c ORDER BY toUpper(x.a) + count(*)",
                 "UNWIND [{a: 'x'}] AS x RETURN toUpper( x.a ) AS u, count(*) AS c ORDER BY (toUpper(x . a))+count(*)",
                 "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), count(*) AS c ORDER BY TOUPPER(x.a) + count(*)",
-                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), size([y IN collect(x) WHERE ToUpper(y.a) = TOUPPER(x.a)]) AS n",
                 'UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + x]',
                 // A key an item renames, named by an order term's map projection, or by a pattern where no item renames it.
                 'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size(keys(p {.name})) + count(*)',
                 'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY p {.born}.born + count(*)',
                 'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) + count(*)',
                 'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY EXISTS { (p)-[:KNOWS]->() } AND count(*) > 1'
+            ].forEach((cypher) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+        });
+    });
+
+    it("an aggregating item reads a key that is a variable or a variable's property, and an order term a key written in any case", () => {
+        // drivine4j's #491 (#494 here): Neo4j reads `x.a` in `x.a + count(*)` as the key `x.a`, but no key of another shape
+        // there (its 42I18), in a body too, and in a pattern's parts only a key that is a variable. It names a function in
+        // any case. Beside the spec's "Implicit grouping key" and "Implicit grouping key in a body or an ORDER BY", those
+        // drivine4j holds of its own.
+        const item = (name: string, variable: string): string =>
+            `${name} aggregates, and names ${variable} outside its aggregates, which no other item is: ` +
+            `Cypher would group by it without being told. Aggregate in a WITH first, as in WITH ${variable}, collect(…) AS items RETURN { … }.`;
+        compilers.forEach(([store, compiler]) => {
+            [
+                ['UNWIND [{a: 1, b: 2}] AS x RETURN x.a AS a, x.b + count(*) AS c', item('c', 'x')],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN toUpper(p.name) AS u, toUpper(p.name) + count(*) AS c ORDER BY u',
+                    item('c', 'p')
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN toUpper(p.name) AS u, [t IN collect(m.title) | t + toUpper(p.name)] AS c ORDER BY u',
+                    item('c', 'p')
+                ],
+                // Matched whole however its function is named, but read in a body, a key of that shape is refused all the same.
+                [
+                    "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), size([y IN collect(x) WHERE ToUpper(y.a) = TOUPPER(x.a)]) AS n",
+                    item('n', 'x')
+                ],
+                [
+                    'UNWIND [{a: {b: 1}}, {a: {b: 1}}, {a: {b: 2}}] AS x RETURN x.a.b AS k, x.a.b + count(*) AS c ORDER BY k',
+                    item('c', 'x')
+                ],
+                [
+                    'UNWIND [{a: {b: 1}}, {a: {b: 1}}, {a: {b: 2}}] AS x RETURN x.a.b AS k, [y IN collect(x) | y.a.b + x.a.b] AS c ORDER BY k',
+                    item('c', 'x')
+                ],
+                [
+                    'UNWIND [{a: 1}, {a: 1}, {a: 2}] AS x RETURN x.a + 1 AS k, x.a + 1 + count(*) AS c ORDER BY k',
+                    item('c', 'x')
+                ],
+                [
+                    "UNWIND [{a: 1}, {a: 1}, {a: 2}] AS x RETURN x['a'] AS a, x['a'] + count(*) AS b ORDER BY a",
+                    item('b', 'x')
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS name, size([(q:Person)-[:KNOWS]->() WHERE q.name = p.name | q]) + count(*) AS c ORDER BY name',
+                    item('c', 'p')
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS name, [x IN collect(m) | size([(x)<-[:ACTED_IN]-(q) WHERE q.name = p.name | q])] AS c ORDER BY name',
+                    item('c', 'p')
+                ],
+                // Unnamed, the map projection is the item p, not the variable.
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p {.name}, count(*) + size(p.name) AS c ORDER BY p.name',
+                    item('c', 'p')
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p {.name} AS q, p {.name}.name + count(*) AS c',
+                    item('c', 'p')
+                ]
+            ].forEach(([cypher, message]) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, message])
+            );
+            [
+                'MATCH (x) RETURN x.a AS a, x.a + count(*) AS b',
+                'UNWIND [{a: 1}, {a: 1}, {a: 2}] AS x RETURN x.a, x.a + count(*) AS b ORDER BY x.a',
+                'UNWIND [{a: 1}, {a: 1}, {a: 2}] AS x RETURN x.a + count(*) AS b, x.a AS a ORDER BY a',
+                'UNWIND [{a: 1}, {a: 1}, {a: 2}] AS x RETURN x.a AS a, count(*) + x.a AS b, max(x.a) - x.a AS c ORDER BY a',
+                "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, CASE WHEN r.role STARTS WITH 'N' THEN count(*) ELSE 0 END AS n ORDER BY role",
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, reduce(s = p.name, t IN collect(m.title) | s + t) AS r ORDER BY p.name',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, p.name IN collect(m.title) AS r ORDER BY p.name',
+                'UNWIND [{a: {b: 1}}, {a: {b: 1}}, {a: {b: 2}}] AS x RETURN x.a AS k, [y IN collect(x) | x.a.b] AS c ORDER BY c',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, p.name + count(*) AS c ORDER BY c',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p {.name}, collect(m.title) AS ts ORDER BY p.name',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p {.name}, count(*) AS c RETURN p.name, c ORDER BY p.name',
+                "UNWIND [{a: 'x'}, {a: 'x'}, {a: 'y'}] AS x RETURN toUpper(x.a), count(*) ORDER BY TOUPPER(x.a) + count(*)",
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN toUpper(p.name) AS u, COUNT(m) AS c ORDER BY toUpper(p.name) + count(m) DESC'
             ].forEach((cypher) =>
                 expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
             );

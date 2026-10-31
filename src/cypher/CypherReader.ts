@@ -362,10 +362,17 @@ function projection(context: OC_ProjectionBodyContext): Projection {
     return {
         distinct: context.DISTINCT() !== null,
         star: items.children[0]?.getText() === '*',
-        items: items.oC_ProjectionItem().map((item) => ({
-            expression: expression(item.oC_Expression()!),
-            name: optionalName(item.oC_Variable()) ?? item.oC_Expression()!.getText()
-        })),
+        // As Neo4j names them: an item a map projection is, unnamed, after its variable, so `ORDER BY p.name` after
+        // `RETURN p {.name}, count(*)` reads the item.
+        items: items.oC_ProjectionItem().map((item) => {
+            const read = expression(item.oC_Expression()!);
+            return {
+                expression: read,
+                name:
+                    optionalName(item.oC_Variable()) ??
+                    (read.kind === 'MapProjection' ? read.variable : item.oC_Expression()!.getText())
+            };
+        }),
         orderBy: (context.oC_Order()?.oC_SortItem() ?? []).map((sort) => ({
             expression: expression(sort.oC_Expression()),
             descending: sort.DESC() !== null || sort.DESCENDING() !== null

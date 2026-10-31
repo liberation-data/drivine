@@ -1,6 +1,6 @@
 import { Integer, isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
-import { CypherFloat, Expression } from '@/cypher/ast/Expression';
+import { CypherFloat, Expression, expressionKey } from '@/cypher/ast/Expression';
 import { Pattern } from '@/cypher/ast/Pattern';
 import { Call, Clause, Projection, ProjectionItem, Query, With } from '@/cypher/ast/Query';
 
@@ -380,6 +380,42 @@ export function variablesOutsideAggregates(expression: Expression): Set<string> 
     }
     const inner = children(expression).flatMap((it) => [...variablesOutsideAggregates(it)]);
     return new Set(expression.kind === 'MapProjection' ? [expression.variable, ...inner] : inner);
+}
+
+/**
+ * Whether `expression`, an item that does not aggregate, is a key that an item that aggregates may read, as Neo4j takes
+ * one there: a variable, or a variable's property. Not `x.a.b`, `x['a']` or `toUpper(x.a)`.
+ */
+export function isPlainKey(expression: Expression): boolean {
+    return (
+        expression.kind === 'Variable' || (expression.kind === 'Property' && expression.subject.kind === 'Variable')
+    );
+}
+
+/**
+ * Whether `expression`, outside its aggregates, holds one of `parts` (by {@link expressionKey}), in a comprehension's, a
+ * quantifier's or a reduce's body too.
+ */
+export function readsOutsideAggregates(expression: Expression, parts: ReadonlySet<string>): boolean {
+    if (isAggregate(expression)) {
+        return false;
+    }
+    if (parts.has(expressionKey(expression))) {
+        return true;
+    }
+    const bodies = ((): (Expression | undefined)[] => {
+        switch (expression.kind) {
+            case 'ListComprehension':
+                return [expression.where, expression.projection];
+            case 'Quantifier':
+                return [expression.where];
+            case 'Reduce':
+                return [expression.expression];
+            default:
+                return [];
+        }
+    })();
+    return [...children(expression), ...bodies].some((it) => it !== undefined && readsOutsideAggregates(it, parts));
 }
 
 /**

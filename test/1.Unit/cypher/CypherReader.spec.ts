@@ -239,6 +239,13 @@ describe('CypherReader', () => {
         expect(ret.orderBy.map((it) => it.descending)).toEqual([true, false]);
         expect(ret.skip).toEqual(literal(2));
         expect(ret.limit).toEqual({ kind: 'Parameter', name: 'n' });
+        // As Neo4j names them (#494): an unnamed map projection after its variable, an alias before it, any other item as written.
+        const maps = CypherReader.read('MATCH (p) RETURN p {.name}, p {.name, .age} AS q, p {.name}.name').clauses;
+        expect((maps[maps.length - 1] as Return).projection.items.map((it) => it.name)).toEqual([
+            'p',
+            'q',
+            'p {.name}.name'
+        ]);
     });
 
     it('reads the writes as their clauses, in order, with or without a return', () => {

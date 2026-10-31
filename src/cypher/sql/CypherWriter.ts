@@ -57,6 +57,7 @@ import {
     isAggregate,
     isAnew,
     isGivenNumber,
+    isPlainKey,
     isSeeded,
     iterated,
     literal,
@@ -68,6 +69,7 @@ import {
     parametersIn,
     plainWith,
     queryHoldsAnew,
+    readsOutsideAggregates,
     replaced,
     seeded,
     TEXT_FUNCTIONS,
@@ -3549,8 +3551,11 @@ export class CypherWriter {
      * that aggregates, nothing is bound ({@link aggregating}), so `max(n.title) + ': ' + max(n.first) + ' ' + max(n.last)`
      * wrote each aggregate out again at every level, past the longest text JavaScript holds on Oracle, and
      * `head(collect(n.t)) CONTAINS $x` read the aggregate from the subquery Oracle's search of a long text binds
-     * (ORA-00937); over the aggregates' columns, the operation binds its values as any item does (#414). Undefined where
-     * the projection does none of these.
+     * (ORA-00937); over the aggregates' columns, the operation binds its values as any item does (#414). So too where an
+     * item that aggregates reads a key that is a property ({@link readsOutsideAggregates}), as `r.role + count(*)` beside
+     * `r.role`: grouped in place, it would be grouped by the variable `r` it names, a row for each relationship, where
+     * Neo4j gives one for each role (#494); over the keys' columns, it reads the key's. Undefined where the projection
+     * does none of these.
      */
     private aggregatesFirst(
         select: Select,
@@ -3564,10 +3569,18 @@ export class CypherWriter {
         const terms = [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)];
         // An order term reads an item by its name.
         const byName = new Map(items.map((it) => [it.name, it.expression]));
+        const aggregating = (expression: Expression): boolean => contains(expression, isAggregate);
+        // A key that is a property, read by an item that aggregates: grouped by as itself, not by its variable.
+        const properties = new Set(
+            items
+                .filter((it) => it.expression.kind === 'Property' && !aggregating(it.expression))
+                .map((it) => expressionKey(it.expression))
+        );
         if (
             !terms.some((it) => contains(it, collectsDistinct) || contains(it, iteratesAggregate)) &&
             !items.some((it) => this.bindsOverAggregates(it.expression, select)) &&
-            !projection.orderBy.some((it) => this.bindsOverAggregates(it.expression, select, byName))
+            !projection.orderBy.some((it) => this.bindsOverAggregates(it.expression, select, byName)) &&
+            !items.some((it) => aggregating(it.expression) && readsOutsideAggregates(it.expression, properties))
         ) {
             return undefined;
         }
@@ -3588,9 +3601,9 @@ export class CypherWriter {
         const keyed = [...keys.values()].flatMap(([expression]) =>
             expression.kind === 'Variable' ? [expression.name] : []
         );
-        // A comprehension's, a quantifier's or a reduce's body is kept as it is, so a variable it names outside its own is
-        // kept too, and so is a pattern's or a subquery's. A subquery may name any variable: each the projection groups by
-        // is kept.
+        // A variable a comprehension's, a quantifier's or a reduce's body names outside its own is kept, but where it is read
+        // only in a key that `rekeyed` reads by its name; so is a pattern's or a subquery's. A subquery may name any
+        // variable: each the projection groups by is kept.
         const own = (names: string[], ...bound: string[]): string[] => names.filter((it) => !bound.includes(it));
         const inner = (expression: Expression): string[] => {
             switch (expression.kind) {
@@ -3623,11 +3636,53 @@ export class CypherWriter {
                           ...children(expression).flatMap(named)
                       ])
                   ];
-        const aggregating = (expression: Expression): boolean => contains(expression, isAggregate);
+        const kept = (term: Expression): Expression | undefined => {
+            const key = keys.get(expressionKey(term));
+            if (key) {
+                return { kind: 'Variable', name: key[1] };
+            }
+            const aggregate = aggregates.get(expressionKey(term));
+            if (!aggregate) {
+                return undefined;
+            }
+            return collectsDistinct(term)
+                ? {
+                      kind: 'Function',
+                      name: DISTINCT_ITEMS,
+                      distinct: false,
+                      arguments: [{ kind: 'Variable', name: aggregate[1] }]
+                  }
+                : { kind: 'Variable', name: aggregate[1] };
+        };
+        // A list comprehension's WHERE reads a key by its name too, where it binds no variable the key reads. In its
+        // projection, a quantifier's WHERE or a reduce's step, Neo4j groups by each variable the key reads as well, so the
+        // body is kept as it is, and those variables beside: `[t IN collect(m.title) | r.role]` beside `r.role` gives a row
+        // for each `r`.
+        const rekeyed = (term: Expression, bound: ReadonlySet<string> = new Set()): Expression =>
+            replaced(term, (part) => {
+                const read =
+                    (bound.size === 0 || keys.has(expressionKey(part))) &&
+                    ![...variablesIn(part)].some((it) => bound.has(it))
+                        ? kept(part)
+                        : undefined;
+                if (read) {
+                    return read;
+                }
+                return part.kind === 'ListComprehension' && part.where
+                    ? {
+                          ...part,
+                          list: rekeyed(part.list, bound),
+                          where: rekeyed(part.where, new Set([...bound, part.variable]))
+                      }
+                    : undefined;
+            });
+        const rekeyedItems = items.map((it) => ({ ...it, expression: rekeyed(it.expression) }));
         // An order term that aggregates may name a key too, by the variable the projection groups by.
         const beside = [
             ...new Set([
-                ...items.filter((it) => aggregating(it.expression)).flatMap((it) => named(it.expression)),
+                ...rekeyedItems
+                    .filter((_, i) => aggregating(items[i].expression))
+                    .flatMap((it) => named(it.expression)),
                 ...projection.orderBy
                     .filter((it) => aggregating(it.expression))
                     .flatMap((it) => named(it.expression))
@@ -3652,31 +3707,13 @@ export class CypherWriter {
             ],
             orderBy: []
         };
-        const kept = (term: Expression): Expression | undefined => {
-            const key = keys.get(expressionKey(term));
-            if (key) {
-                return { kind: 'Variable', name: key[1] };
-            }
-            const aggregate = aggregates.get(expressionKey(term));
-            if (!aggregate) {
-                return undefined;
-            }
-            return collectsDistinct(term)
-                ? {
-                      kind: 'Function',
-                      name: DISTINCT_ITEMS,
-                      distinct: false,
-                      arguments: [{ kind: 'Variable', name: aggregate[1] }]
-                  }
-                : { kind: 'Variable', name: aggregate[1] };
-        };
         // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
         // can only be; a variable an item is named after is that item, not the variable of that name before it.
         const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
         const keptProjection: Projection = {
             ...projection,
             star: false,
-            items: items.map((it) => ({ ...it, expression: replaced(it.expression, kept) })),
+            items: rekeyedItems,
             orderBy: projection.orderBy.map((sort) => ({
                 ...sort,
                 expression: replaced(sort.expression, (term) => {
@@ -3708,27 +3745,27 @@ export class CypherWriter {
     }
 
     /**
-     * Refuses what Cypher refuses (Neo4j's 42I18): an item that aggregates and names a variable outside its aggregates
-     * that is not an item of its own, which a graph engine would have to group by without being told; in a
-     * comprehension's, a quantifier's, a reduce's or a pattern's body, a variable of `scope` outside an item that does not
-     * aggregate. So too a term of `orderBy` that aggregates, beside items that aggregate, and names a variable of `scope`
-     * outside an item's name and an item that does not aggregate, as Neo4j takes them.
+     * Refuses what Cypher refuses (Neo4j's 42I18): an item that aggregates and names a variable of `scope` outside its
+     * aggregates and each key it reads, in a comprehension's, a quantifier's, a reduce's or a pattern's body too, which a
+     * graph engine would have to group by without being told. A key is an item that does not aggregate, and Neo4j reads
+     * one there only where it is a variable or a variable's property ({@link isPlainKey}): `x.a + count(*)` beside `x.a`,
+     * but not `toUpper(p.name) + count(*)` beside `toUpper(p.name)`; in a pattern's parts, only where it is a variable.
+     * So too a term of `orderBy` that aggregates, beside items that aggregate, and names a variable of `scope` outside an
+     * item's name and an item that does not aggregate, whatever that item is, as Neo4j takes them.
      */
     private requireExplicitGrouping(items: ProjectionItem[], orderBy: SortItem[], scope: ReadonlySet<string>): void {
         const grouping = items.filter((it) => !contains(it.expression, isAggregate));
+        const groupKeys = new Map(grouping.map((it) => [expressionKey(it.expression), it.expression]));
+        const plainKeys = new Map([...groupKeys].filter(([, it]) => isPlainKey(it)));
         const keys = new Set(
             grouping.flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : []))
         );
-        const groupKeys = new Set(grouping.map((it) => expressionKey(it.expression)));
         items
             .filter((it) => contains(it.expression, isAggregate))
             .forEach((item) => {
-                const implicit = [
-                    ...new Set([
-                        ...variablesOutsideAggregates(item.expression),
-                        ...namedInBodies(item.expression, scope, groupKeys)
-                    ])
-                ].filter((it) => !keys.has(it));
+                const implicit = [...namedOutside(item.expression, new Set(), scope, plainKeys)].filter(
+                    (it) => !keys.has(it)
+                );
                 if (implicit.length > 0) {
                     throw new DrivineError(
                         `${item.name} aggregates, and names ${implicit.join(
@@ -6601,52 +6638,17 @@ function reversed(relationship: RelationshipPattern): RelationshipPattern {
 }
 
 /**
- * The variables of `scope` that `expression` names outside its aggregates and each part of it `keys` holds (by
- * {@link expressionKey}), in a comprehension's, a quantifier's, a reduce's or a pattern's body, which
- * `variablesOutsideAggregates` does not read.
- */
-function namedInBodies(expression: Expression, scope: ReadonlySet<string>, keys: ReadonlySet<string>): Set<string> {
-    if (isAggregate(expression) || keys.has(expressionKey(expression))) {
-        return new Set();
-    }
-    const inBodies = (part: Expression | undefined): string[] =>
-        part ? [...namedInBodies(part, scope, keys)] : [];
-    const outside = (part: Expression | undefined, local: string[]): string[] =>
-        part ? [...namedOutside(part, new Set(local), scope, keys)] : [];
-    switch (expression.kind) {
-        case 'ListComprehension':
-            return new Set([
-                ...inBodies(expression.list),
-                ...outside(expression.where, [expression.variable]),
-                ...outside(expression.projection, [expression.variable])
-            ]);
-        case 'Quantifier':
-            return new Set([...inBodies(expression.list), ...outside(expression.where, [expression.variable])]);
-        case 'Reduce':
-            return new Set([
-                ...inBodies(expression.initial),
-                ...inBodies(expression.list),
-                ...outside(expression.expression, [expression.accumulator, expression.variable])
-            ]);
-        case 'PatternComprehension':
-        case 'PatternPredicate':
-        case 'Exists':
-            return namedOutside(expression, new Set(), scope, keys);
-        default:
-            return new Set(children(expression).flatMap(inBodies));
-    }
-}
-
-/**
  * The variables of `scope` that `expression` names outside its aggregates, and outside each part of it `keys` holds (by
  * {@link expressionKey}), a comprehension's, a quantifier's, a reduce's or a pattern's body among them, but for those it
- * binds or `local` holds. A pattern binds each of its variables not of `scope`. A subquery's own query is read for none.
+ * binds or `local` holds. A pattern binds each of its variables not of `scope`, and in its parts, as Neo4j reads them,
+ * a key is only one that is a variable: `q.name = p.name` in a pattern comprehension's WHERE names `p`, though `p.name`
+ * is a key. A subquery's own query is read for none.
  */
 function namedOutside(
     expression: Expression,
     local: ReadonlySet<string>,
     scope: ReadonlySet<string>,
-    keys: ReadonlySet<string>
+    keys: ReadonlyMap<string, Expression>
 ): Set<string> {
     const outside = (part: Expression | undefined, inner: ReadonlySet<string> = local): string[] =>
         part ? [...namedOutside(part, inner, scope, keys)] : [];
@@ -6689,20 +6691,21 @@ function namedOutside(
 /**
  * What {@link namedOutside} gives of a pattern comprehension, a pattern predicate or `EXISTS { … }` of patterns: each
  * variable of `scope` its patterns name, and those its condition and projection name outside the variables its patterns
- * bind, each of its variables not of `scope`.
+ * bind, each of its variables not of `scope`; in those, of `keys`, only a variable is a key.
  */
 function namedInPatterns(
     expression: PatternComprehension | PatternPredicate | Exists,
     local: ReadonlySet<string>,
     scope: ReadonlySet<string>,
-    keys: ReadonlySet<string>
+    keys: ReadonlyMap<string, Expression>
 ): Set<string> {
+    const variables = new Map([...keys].filter(([, it]) => it.kind === 'Variable'));
     const patterned = (pattern: Pattern, parts: (Expression | undefined)[]): string[] => {
         const named = [...variablesOfPattern(pattern), ...(pattern.variable ? [pattern.variable] : [])];
         const bound = new Set([...local, ...named.filter((it) => !scope.has(it))]);
         return [
             ...named.filter((it) => scope.has(it) && !local.has(it)),
-            ...parts.flatMap((part) => (part ? [...namedOutside(part, bound, scope, keys)] : []))
+            ...parts.flatMap((part) => (part ? [...namedOutside(part, bound, scope, variables)] : []))
         ];
     };
     switch (expression.kind) {
