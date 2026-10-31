@@ -440,6 +440,155 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('an aggregate in a WHERE is refused, as Neo4j refuses it', () => {
+        // drivine4j's #489 (#487 here): Neo4j's 42I24, "invalid use of aggregate function". Each was compiled, its aggregate
+        // straight into the SQL WHERE. Beside the spec's "Aggregate in a WHERE", those drivine4j holds of its own.
+        const where = (aggregate: string): string =>
+            `${aggregate} aggregates, and a WHERE holds no aggregate, as in Neo4j: aggregate in a WITH first, ` +
+            "and filter what it gives in that WITH's WHERE, as in WITH x, count(*) AS c WHERE c > 1.";
+        compilers.forEach(([store, compiler]) => {
+            [
+                ['UNWIND [1, 2] AS i WITH i WHERE sum(i) > 1 RETURN i', 'sum()'],
+                ['UNWIND [1, 2] AS i WITH i WHERE i > 1 AND count(*) > 0 RETURN i', 'count(*)'],
+                ['MATCH (n) WHERE count(*) > 1 RETURN n', 'count(*)'],
+                ['MATCH (a) WHERE a.x IN collect(a.y) RETURN a', 'collect()'],
+                ['MATCH (n) RETURN [(n)-->(m) WHERE count(m) > 1 | m] AS ms', 'count()'],
+                ['UNWIND [[1, 2]] AS l RETURN all(x IN l WHERE sum(x) > 1) AS a', 'sum()'],
+                ['UNWIND [[1, 2]] AS l RETURN [x IN l WHERE count(x) > 1 | x] AS a', 'count()'],
+                ['MATCH (a) ((x)-[:R]->(y) WHERE count(x) > 1)+ (b) RETURN a', 'count()'],
+                ['MATCH (n) WHERE EXISTS { (n)-->(m) WHERE count(m) > 1 } RETURN n', 'count()'],
+                ['MATCH (n) WHERE COUNT { (n)-->(m) WHERE count(m) > 1 } > 0 RETURN n', 'count()'],
+                ['MATCH (n) RETURN COUNT { MATCH (n)-->(m) WHERE count(m) > 1 RETURN m } AS c', 'count()'],
+                ['MATCH (n) RETURN COUNT { MATCH (n)-->(m) WITH m WHERE count(m) > 1 RETURN m } AS c', 'count()'],
+                ['MATCH (n) CALL { WITH n MATCH (n)-->(m) WHERE count(m) > 1 RETURN m } RETURN m', 'count()'],
+                ['UNWIND [1, 2] AS i CALL (i) { WITH i WHERE sum(i) > 1 RETURN i AS j } RETURN j', 'sum()'],
+                ['UNWIND [1, 2] AS i CALL { WITH i MATCH (n) WHERE max(n.x) > i RETURN n } RETURN n', 'max()'],
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { CALL (i) { UNWIND [1, 2] AS x WITH x WHERE sum(x) > i RETURN x } RETURN x } RETURN x',
+                    'sum()'
+                ],
+                [
+                    'MATCH (p:Person) RETURN p.name AS n UNION MATCH (m:Movie) WHERE count(*) > 1 RETURN m.title AS n',
+                    'count(*)'
+                ],
+                ['UNWIND [x IN [1, 2] WHERE count(x) > 0 | x] AS y RETURN y', 'count()'],
+                ['MATCH (n) SET n.v = [x IN [1, 2] WHERE sum(x) > 0 | x]', 'sum()'],
+                ['MERGE (n:N) ON CREATE SET n.v = [x IN [1, 2] WHERE min(x) > 0 | x]', 'min()'],
+                ['CREATE (n:N {v: [x IN [1, 2] WHERE avg(x) > 0 | x]})', 'avg()'],
+                ['FOREACH (i IN [1] | CREATE (:N {v: [x IN [1, 2] WHERE max(x) > 0 | x]}))', 'max()'],
+                // Each other place a WHERE may be, as Neo4j 2026.10 refuses it.
+                ['MATCH (n) DELETE [x IN [n] WHERE count(x) > 0 | x][0]', 'count()'],
+                ['MERGE (n:N) ON MATCH SET n.v = [x IN [1, 2] WHERE min(x) > 0 | x]', 'min()'],
+                ['MATCH (n {v: [x IN [1, 2] WHERE sum(x) > 0 | x]}) RETURN n', 'sum()'],
+                ['UNWIND [1] AS i RETURN i ORDER BY size([x IN [1, 2] WHERE sum(x) > 0 | x])', 'sum()'],
+                ['UNWIND [1] AS i WITH i ORDER BY size([x IN [1, 2] WHERE sum(x) > 0 | x]) RETURN i', 'sum()'],
+                ['MATCH (n) WHERE reduce(s = 0, x IN [1] | s + count(x)) > 0 RETURN n', 'count()'],
+                ['MATCH (n) WHERE (n)-->({v: [x IN [1] WHERE sum(x) > 0 | x]}) RETURN n', 'sum()']
+            ].forEach(([cypher, aggregate]) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, where(aggregate)])
+            );
+            // A WHERE over what an aggregate gave, or in a subquery or a CALL that aggregates in its own query, is compiled, as Neo4j runs it.
+            [
+                'UNWIND [1, 2] AS i WITH count(*) AS c WHERE c > 1 RETURN c',
+                'UNWIND [1, 2] AS i WITH collect(i) AS l WHERE size(l) > 1 RETURN l',
+                'MATCH (n) RETURN COUNT { MATCH (n)-->(m) WITH count(m) AS c WHERE c > 0 RETURN c } AS k',
+                'MATCH (n) WHERE EXISTS { MATCH (n)-->(m) WITH count(m) AS c WHERE c > 0 RETURN c } RETURN n.x',
+                'MATCH (n) CALL (n) { MATCH (n)-->(m) WITH count(m) AS c WHERE c > 0 RETURN c } RETURN n.x, c',
+                'MATCH (n) WITH n, count { (n)-->() } AS c WHERE c > 0 RETURN n.x',
+                'UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a, count(*)',
+                'UNWIND [1, 2] AS x RETURN x, collect(x)'
+            ].forEach((cypher) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+        });
+    });
+
+    it("an aggregating item or order term that names a variable no item groups by, in a comprehension's or a pattern's body too, is refused", () => {
+        // drivine4j's #482 (#488 here): Neo4j's 42I18, "reference to non-grouping sub-expression". The body of a comprehension, a
+        // quantifier, a reduce() or a pattern was not read for the variables it names, nor an order term at all. Beside the spec's
+        // "Implicit grouping key in a body or an ORDER BY", those drivine4j holds of its own.
+        const item = (name: string, variable: string): string =>
+            `${name} aggregates, and names ${variable} outside its aggregates, which no other item is: ` +
+            `Cypher would group by it without being told. Aggregate in a WITH first, as in WITH ${variable}, collect(…) AS items RETURN { … }.`;
+        const sort = (variable: string): string =>
+            `A term of an ORDER BY aggregates, and names ${variable} outside its aggregates and the items: ` +
+            "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates.";
+        compilers.forEach(([store, compiler]) => {
+            [
+                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, [y IN collect(z) | y + z] AS l', item('l', 'z')],
+                [
+                    'UNWIND [1, 2] AS x UNWIND [3] AS z WITH x, [y IN collect(z) | y + z] AS l RETURN x, l',
+                    item('l', 'z')
+                ],
+                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, [y IN collect(x) WHERE y > z | y] AS l', item('l', 'z')],
+                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, any(y IN collect(x) WHERE y > z) AS l', item('l', 'z')],
+                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, reduce(s = 0, y IN collect(x) | s + z) AS l', item('l', 'z')],
+                ['UNWIND [{a: 1, b: 2}] AS x RETURN x.a, [y IN collect(x) | y.a + x.b] AS l', item('l', 'x')],
+                ['MATCH (n) RETURN size([(n)-->(m) | m]) + count(*) AS c', item('c', 'n')],
+                ['MATCH (n) RETURN n.x, size([(n)-->(m) | m.x]) + count(*) AS c', item('c', 'n')],
+                ['MATCH (n) RETURN EXISTS { (n)-->() } AND count(*) > 0 AS b', item('b', 'n')],
+                ['UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a AS a, count(*) AS c ORDER BY x.b + count(*)', sort('x')],
+                ['UNWIND [{a: 1, b: 2}] AS x WITH x.a AS a, count(*) AS c ORDER BY x.b + count(*) RETURN a', sort('x')],
+                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY z + count(*)', sort('z')],
+                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + z]', sort('z')],
+                [
+                    'MATCH (me:Person)--(you:Person) RETURN count(you.age) AS agg ORDER BY me.age + count(you.age)',
+                    sort('me')
+                ],
+                [
+                    'MATCH (me:Person)--(you:Person) WITH count(you.age) AS agg ORDER BY me.age + count(you.age) RETURN agg',
+                    sort('me')
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size(keys(m {.title})) + count(*)',
+                    sort('m')
+                ],
+                // Neo4j runs these, but reads p in the pattern as a new variable that matches any node, not as the key q is.
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) + count(*)',
+                    sort('p')
+                ],
+                [
+                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY EXISTS { (p)-[:KNOWS]->() } AND count(*) > 1',
+                    sort('p')
+                ]
+            ].forEach(([cypher, message]) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, message])
+            );
+            // A body or an order term that names only what the projection groups by, an item's name, or a variable of its own is
+            // compiled, as Neo4j runs it.
+            [
+                'UNWIND [1, 2] AS x RETURN x, [y IN collect(x) | y + x] AS l',
+                'UNWIND [1, 2] AS x RETURN x, collect(x) AS c',
+                'UNWIND [1, 2] AS x RETURN [x IN collect(x) | x + 1] AS l',
+                'UNWIND [1, 2] AS x RETURN x, reduce(s = 0, y IN collect(x) | s + y + x) AS l',
+                'UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a, count(*) AS c',
+                'UNWIND [{a: 1}] AS x RETURN x.a, [y IN collect(x) | y.a + x.a] AS l',
+                'MATCH (p:Person)-[r:ACTED_IN]->(m) RETURN p.name, size([x IN collect(r) WHERE x.role <> p.name]) AS n',
+                'MATCH (n) RETURN n, size([(n)-->(m) | m]) + count(*) AS c',
+                'MATCH (n) RETURN n, EXISTS { (n)-->() } AND count(*) > 0 AS b',
+                'UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a AS a, count(*) AS c ORDER BY x.a + count(*)',
+                'UNWIND [1, 2] AS x RETURN x AS y, count(*) AS c ORDER BY x + count(*)',
+                'UNWIND [1, 2] AS x RETURN x AS y, count(*) AS c ORDER BY y + count(*)',
+                'UNWIND [{a: 1, b: 2}] AS x RETURN x.a + x.b, count(*) AS cnt ORDER BY x.a + x.b + count(*)',
+                // A key matched whole however it is written: spaced, bracketed, or its function named in another case, as Neo4j
+                // names a function.
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), count(*) AS c ORDER BY toUpper(x.a) + count(*)",
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper( x.a ) AS u, count(*) AS c ORDER BY (toUpper(x . a))+count(*)",
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), count(*) AS c ORDER BY TOUPPER(x.a) + count(*)",
+                "UNWIND [{a: 'x'}] AS x RETURN toUpper(x.a), size([y IN collect(x) WHERE ToUpper(y.a) = TOUPPER(x.a)]) AS n",
+                'UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + x]',
+                // A key an item renames, named by an order term's map projection, or by a pattern where no item renames it.
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size(keys(p {.name})) + count(*)',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY p {.born}.born + count(*)',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) + count(*)',
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY EXISTS { (p)-[:KNOWS]->() } AND count(*) > 1'
+            ].forEach((cypher) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+        });
+    });
+
     it('a statement that is not Cypher, with where it goes wrong', () => {
         expect(() => new PostgresCypherCompiler('g').compile('MATCH (n RETURN n')).toThrow(
             "The statement is not Cypher, at line 1, column 10: no viable alternative at input 'MATCH (n RETURN'"

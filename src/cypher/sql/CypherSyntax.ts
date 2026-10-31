@@ -614,6 +614,7 @@ export function children(expression: Expression): Expression[] {
     return of ? of(expression) : [];
 }
 
-function present(...expressions: (Expression | undefined)[]): Expression[] {
+/** Each of `expressions` that is there. */
+export function present(...expressions: (Expression | undefined)[]): Expression[] {
     return expressions.filter((it): it is Expression => it !== undefined);
 }

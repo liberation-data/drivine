@@ -7,6 +7,7 @@ import {
     BinaryOperator,
     Case,
     CypherFloat,
+    Exists,
     Expression,
     expressionKey,
     FunctionCall,
@@ -16,6 +17,7 @@ import {
     ListLiteral,
     MapProjection,
     PatternComprehension,
+    PatternPredicate,
     Property,
     Quantifier,
     Reduce,
@@ -37,6 +39,7 @@ import {
     RemoveItem,
     Return,
     SetItem,
+    SortItem,
     Unwind,
     With
 } from '@/cypher/ast/Query';
@@ -2880,7 +2883,7 @@ export class CypherWriter {
             throw new DrivineError('A projection has at least one item.');
         }
         // Before aggregatesFirst, which names each variable it groups by as an item of its own.
-        this.requireExplicitGrouping(items);
+        this.requireExplicitGrouping(items, projection.orderBy, new Set(select.scope.keys()));
         const first = this.workedOutFirst(select, projection, items);
         if (first) {
             return this.project(first[0], first[1], final);
@@ -3705,19 +3708,27 @@ export class CypherWriter {
     }
 
     /**
-     * Refuses what Cypher refuses: an item that aggregates and names a variable outside its aggregates, where that
-     * variable is not an item of its own, which a graph engine would have to group by without being told.
+     * Refuses what Cypher refuses (Neo4j's 42I18): an item that aggregates and names a variable outside its aggregates
+     * that is not an item of its own, which a graph engine would have to group by without being told; in a
+     * comprehension's, a quantifier's, a reduce's or a pattern's body, a variable of `scope` outside an item that does not
+     * aggregate. So too a term of `orderBy` that aggregates, beside items that aggregate, and names a variable of `scope`
+     * outside an item's name and an item that does not aggregate, as Neo4j takes them.
      */
-    private requireExplicitGrouping(items: ProjectionItem[]): void {
+    private requireExplicitGrouping(items: ProjectionItem[], orderBy: SortItem[], scope: ReadonlySet<string>): void {
+        const grouping = items.filter((it) => !contains(it.expression, isAggregate));
         const keys = new Set(
-            items
-                .filter((it) => !contains(it.expression, isAggregate))
-                .flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : []))
+            grouping.flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : []))
         );
+        const groupKeys = new Set(grouping.map((it) => expressionKey(it.expression)));
         items
             .filter((it) => contains(it.expression, isAggregate))
             .forEach((item) => {
-                const implicit = [...variablesOutsideAggregates(item.expression)].filter((it) => !keys.has(it));
+                const implicit = [
+                    ...new Set([
+                        ...variablesOutsideAggregates(item.expression),
+                        ...namedInBodies(item.expression, scope, groupKeys)
+                    ])
+                ].filter((it) => !keys.has(it));
                 if (implicit.length > 0) {
                     throw new DrivineError(
                         `${item.name} aggregates, and names ${implicit.join(
@@ -3725,6 +3736,25 @@ export class CypherWriter {
                         )} outside its aggregates, which no other item is: ` +
                             'Cypher would group by it without being told. Aggregate in a WITH first, ' +
                             `as in WITH ${implicit.join(', ')}, collect(…) AS items RETURN { … }.`
+                    );
+                }
+            });
+        if (grouping.length === items.length) {
+            return;
+        }
+        const names = new Set(items.map((it) => it.name));
+        orderBy
+            .filter((it) => contains(it.expression, isAggregate))
+            .forEach((sort) => {
+                // Not less the variables an item is: one an item renames, named in an order term's pattern, is a new
+                // variable of the pattern's to Neo4j, which matches any node, so it is refused rather than read as the key.
+                const implicit = namedOutside(sort.expression, names, scope, groupKeys);
+                if (implicit.size > 0) {
+                    throw new DrivineError(
+                        `A term of an ORDER BY aggregates, and names ${[...implicit].join(
+                            ', '
+                        )} outside its aggregates and the items: ` +
+                            "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
                     );
                 }
             });
@@ -6568,4 +6598,119 @@ function grouped(terms: string[], operator: string): string {
 function reversed(relationship: RelationshipPattern): RelationshipPattern {
     const directions = { OUTGOING: 'INCOMING', INCOMING: 'OUTGOING', EITHER: 'EITHER' } as const;
     return { ...relationship, direction: directions[relationship.direction] };
+}
+
+/**
+ * The variables of `scope` that `expression` names outside its aggregates and each part of it `keys` holds (by
+ * {@link expressionKey}), in a comprehension's, a quantifier's, a reduce's or a pattern's body, which
+ * `variablesOutsideAggregates` does not read.
+ */
+function namedInBodies(expression: Expression, scope: ReadonlySet<string>, keys: ReadonlySet<string>): Set<string> {
+    if (isAggregate(expression) || keys.has(expressionKey(expression))) {
+        return new Set();
+    }
+    const inBodies = (part: Expression | undefined): string[] =>
+        part ? [...namedInBodies(part, scope, keys)] : [];
+    const outside = (part: Expression | undefined, local: string[]): string[] =>
+        part ? [...namedOutside(part, new Set(local), scope, keys)] : [];
+    switch (expression.kind) {
+        case 'ListComprehension':
+            return new Set([
+                ...inBodies(expression.list),
+                ...outside(expression.where, [expression.variable]),
+                ...outside(expression.projection, [expression.variable])
+            ]);
+        case 'Quantifier':
+            return new Set([...inBodies(expression.list), ...outside(expression.where, [expression.variable])]);
+        case 'Reduce':
+            return new Set([
+                ...inBodies(expression.initial),
+                ...inBodies(expression.list),
+                ...outside(expression.expression, [expression.accumulator, expression.variable])
+            ]);
+        case 'PatternComprehension':
+        case 'PatternPredicate':
+        case 'Exists':
+            return namedOutside(expression, new Set(), scope, keys);
+        default:
+            return new Set(children(expression).flatMap(inBodies));
+    }
+}
+
+/**
+ * The variables of `scope` that `expression` names outside its aggregates, and outside each part of it `keys` holds (by
+ * {@link expressionKey}), a comprehension's, a quantifier's, a reduce's or a pattern's body among them, but for those it
+ * binds or `local` holds. A pattern binds each of its variables not of `scope`. A subquery's own query is read for none.
+ */
+function namedOutside(
+    expression: Expression,
+    local: ReadonlySet<string>,
+    scope: ReadonlySet<string>,
+    keys: ReadonlySet<string>
+): Set<string> {
+    const outside = (part: Expression | undefined, inner: ReadonlySet<string> = local): string[] =>
+        part ? [...namedOutside(part, inner, scope, keys)] : [];
+    const within = (...names: string[]): Set<string> => new Set([...local, ...names]);
+    if (isAggregate(expression) || keys.has(expressionKey(expression))) {
+        return new Set();
+    }
+    switch (expression.kind) {
+        case 'Variable':
+            return new Set([expression.name].filter((it) => scope.has(it) && !local.has(it)));
+        case 'MapProjection':
+            // A map projection of a key reads the key, as Neo4j reads it.
+            return new Set([
+                ...outside({ kind: 'Variable', name: expression.variable }),
+                ...children(expression).flatMap((it) => outside(it))
+            ]);
+        case 'ListComprehension':
+            return new Set([
+                ...outside(expression.list),
+                ...outside(expression.where, within(expression.variable)),
+                ...outside(expression.projection, within(expression.variable))
+            ]);
+        case 'Quantifier':
+            return new Set([...outside(expression.list), ...outside(expression.where, within(expression.variable))]);
+        case 'Reduce':
+            return new Set([
+                ...outside(expression.initial),
+                ...outside(expression.list),
+                ...outside(expression.expression, within(expression.accumulator, expression.variable))
+            ]);
+        case 'PatternComprehension':
+        case 'PatternPredicate':
+        case 'Exists':
+            return namedInPatterns(expression, local, scope, keys);
+        default:
+            return new Set(children(expression).flatMap((it) => outside(it)));
+    }
+}
+
+/**
+ * What {@link namedOutside} gives of a pattern comprehension, a pattern predicate or `EXISTS { … }` of patterns: each
+ * variable of `scope` its patterns name, and those its condition and projection name outside the variables its patterns
+ * bind, each of its variables not of `scope`.
+ */
+function namedInPatterns(
+    expression: PatternComprehension | PatternPredicate | Exists,
+    local: ReadonlySet<string>,
+    scope: ReadonlySet<string>,
+    keys: ReadonlySet<string>
+): Set<string> {
+    const patterned = (pattern: Pattern, parts: (Expression | undefined)[]): string[] => {
+        const named = [...variablesOfPattern(pattern), ...(pattern.variable ? [pattern.variable] : [])];
+        const bound = new Set([...local, ...named.filter((it) => !scope.has(it))]);
+        return [
+            ...named.filter((it) => scope.has(it) && !local.has(it)),
+            ...parts.flatMap((part) => (part ? [...namedOutside(part, bound, scope, keys)] : []))
+        ];
+    };
+    switch (expression.kind) {
+        case 'PatternComprehension':
+            return new Set(patterned(expression.pattern, [expression.where, expression.projection]));
+        case 'PatternPredicate':
+            return new Set(patterned(expression.pattern, []));
+        default:
+            return new Set(expression.patterns.flatMap((it) => patterned(it, [expression.where])));
+    }
 }

@@ -1495,7 +1495,7 @@ cases:
         rows: [[9, 1], [8, 2]]
 
   - name: "Implicit grouping key"
-    description: "A RETURN item that mixes an aggregate with another variable is refused, as Neo4j refuses it."
+    description: "A RETURN item that mixes an aggregate with a variable no other item is is refused, as Neo4j refuses it; one that names only what the projection groups by, in a comprehension's body or an order term too, gives Neo4j's rows."
     steps:
       - note: Neo4j says "implicit grouping"; the compiler names the variable outside its aggregates.
         only: [graph]
@@ -1507,6 +1507,60 @@ cases:
       - note: With the variable an item of its own, it is grouped by.
         cypher: "MATCH (p:Person {name: 'Laurence'})-[:ACTED_IN]->(m:Movie) RETURN p, collect(m.title)"
         rows: [[{name: "Laurence", born: 1961}, ["The Matrix"]]]
+      - note: "A comprehension's body that names a grouping key, or a variable of its own. Refused where it names another (see refusals.yaml, \"Implicit grouping key in a body or an ORDER BY\")."
+        cypher: "UNWIND [1, 2] AS x RETURN x, [y IN collect(x) | y + x] AS l ORDER BY x"
+        rows: [[1, [2]], [2, [4]]]
+      - cypher: "UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, [y IN collect(z) | y + x] AS l ORDER BY x"
+        rows: [[1, [4]], [2, [5]]]
+      - cypher: "UNWIND [1, 2] AS x RETURN x, reduce(s = 0, y IN collect(x) | s + y + x) AS l ORDER BY x"
+        rows: [[1, 2], [2, 4]]
+      - note: "A property an item is is a grouping key too."
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, size([x IN collect(m.title) WHERE x <> p.name | x + p.name]) ORDER BY p.name"
+        rows: [["Carrie", 2], ["Keanu", 3], ["Laurence", 1]]
+      - cypher: "UNWIND [1, 2] AS x RETURN x, collect(x) AS c ORDER BY x"
+        rows: [[1, [1]], [2, [2]]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, count(*) ORDER BY p.name"
+        rows: [["Carrie", 2], ["Keanu", 3], ["Laurence", 1]]
+      - note: "An order term after items that aggregate, that names an item's name, or what an item that does not aggregate is."
+        cypher: "UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a AS a, count(*) AS c ORDER BY x.a + count(*) DESC"
+        rows: [[2, 1], [1, 1]]
+      - cypher: "UNWIND [1, 2] AS x RETURN x AS y, count(*) AS c ORDER BY x + count(*) DESC"
+        rows: [[2, 1], [1, 1]]
+      - cypher: "UNWIND [1, 2] AS x RETURN x AS y, count(*) AS c ORDER BY y + count(*) DESC"
+        rows: [[2, 1], [1, 1]]
+      - cypher: "UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + x][0] DESC"
+        rows: [[2, 1], [1, 1]]
+      - note: "A map projection of a variable an item renames reads the key; so does a pattern, where no item renames the variable."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size(keys(p {.name})) + count(*) DESC"
+        rows: [[{name: "Keanu", born: 1964}, 3], [{name: "Carrie", born: 1967}, 2], [{name: "Laurence", born: 1961}, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY p {.born}.born + count(*) DESC"
+        only: [neo4j, sql]
+        rows: [[{name: "Carrie", born: 1967}, 2], [{name: "Keanu", born: 1964}, 3], [{name: "Laurence", born: 1961}, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) * 10 - count(*) DESC"
+        only: [neo4j, sql]
+        rows: [[{name: "Laurence", born: 1961}, 1], [{name: "Keanu", born: 1964}, 3], [{name: "Carrie", born: 1967}, 2]]
+      - note: "Where an item renames it, Neo4j reads the variable in an order term's pattern as a new one that matches any node, not as the key; the compiler refuses it."
+        only: [neo4j]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) * 10 - count(*) DESC"
+        rows: [[{name: "Laurence", born: 1961}, 1], [{name: "Carrie", born: 1967}, 2], [{name: "Keanu", born: 1964}, 3]]
+      - only: [sql]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) * 10 - count(*) DESC"
+        error: "A term of an ORDER BY aggregates, and names p outside its aggregates and the items: Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
+
+  - name: "Aggregate beside a WHERE"
+    description: "A WHERE over what an aggregate gave, and one in a subquery's or a CALL's own query, which aggregates in its projection, filters as Neo4j does. An aggregate in a WHERE is refused (see refusals.yaml, \"Aggregate in a WHERE\")."
+    steps:
+      - cypher: "UNWIND [1, 2] AS i WITH count(*) AS c WHERE c > 1 RETURN c"
+        rows: [2]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, collect(m.title) AS ts WHERE size(ts) > 1 RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu"]
+      - cypher: "MATCH (p:Person) RETURN p.name, COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH count(m) AS c WHERE c > 1 RETURN c } AS k ORDER BY p.name"
+        rows: [["Carrie", 1], ["Hugo", 0], ["Keanu", 1], ["Laurence", 0]]
+      - cypher: "MATCH (p:Person) WHERE EXISTS { MATCH (p)-[:ACTED_IN]->(m) WITH count(m) AS c WHERE c > 1 RETURN c } RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu"]
+      - cypher: "MATCH (p:Person) CALL (p) { MATCH (p)-[:ACTED_IN]->(m) WITH count(m) AS c WHERE c > 1 RETURN c } RETURN p.name, c ORDER BY p.name"
+        rows: [["Carrie", 2], ["Keanu", 3]]
 
   - name: "Variable-length ranges"
     description: "A variable-length relationship matches each length in its range."
