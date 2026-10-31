@@ -3,36 +3,24 @@ import { Expression, FunctionCall } from '@/cypher/ast/Expression';
 import { Group, Pattern } from '@/cypher/ast/Pattern';
 import { Call, Clause, Projection, Query, SetItem } from '@/cypher/ast/Query';
 import { bracketed, imports } from '@/cypher/sql/CypherSyntax';
-import { knownOf } from '@/cypher/sql/Value';
+import { Known, knownOf, nounOf } from '@/cypher/sql/Value';
 
-/** A kind of variable: see {@link VariableKinds}. A value's kinds are named as {@link knownOf} names them; `ANY` is any kind at all. */
-type Kind =
-    | 'NODE'
-    | 'RELATIONSHIP'
-    | 'RELATIONSHIPS'
-    | 'PATH'
-    | 'INTEGER'
-    | 'FLOAT'
-    | 'TEXT'
-    | 'BOOLEAN'
-    | 'LIST'
-    | 'MAP'
-    | 'ANY';
+/** A kind of variable: see {@link VariableKinds}. A value's kinds are {@link Known}'s; `ANY` is any kind at all. */
+type Kind = 'NODE' | 'RELATIONSHIP' | 'RELATIONSHIPS' | 'PATH' | Known | 'ANY';
 
-/** A variable of each kind, as a message names it. */
-const NOUNS: Record<Kind, string> = {
+/** A variable of each kind that is no value's, as a message names it: a value's is {@link nounOf}'s. */
+const NOUNS: Record<Exclude<Kind, Known>, string> = {
     NODE: 'a node',
     RELATIONSHIP: 'a relationship',
     RELATIONSHIPS: 'a list of relationships',
     PATH: 'a path',
-    INTEGER: 'an integer',
-    FLOAT: 'a float',
-    TEXT: 'a text',
-    BOOLEAN: 'a truth value',
-    LIST: 'a list',
-    MAP: 'a map',
     ANY: 'a value'
 };
+
+/** A variable of `kind`, as a message names it. */
+function nounOfKind(kind: Kind): string {
+    return kind in NOUNS ? NOUNS[kind as Exclude<Kind, Known>] : nounOf(kind as Known);
+}
 
 /** The variables in scope, by name, each of its kind. */
 type Scope = Map<string, Kind>;
@@ -252,10 +240,10 @@ function fits(bound: Kind, kind: Kind): boolean {
     return bound === kind || bound === 'ANY' || (kind === 'RELATIONSHIPS' && bound === 'LIST');
 }
 
+/** The refusal of `variable`, bound as `bound`, where a pattern uses it as `used`. */
 function conflict(variable: string, bound: Kind, used: Kind): DrivineError {
-    return new DrivineError(
-        `${variable} is ${NOUNS[bound]}, and is used as ${NOUNS[used]}: a variable is of one kind, as in Neo4j.`
-    );
+    const [was, as] = [bound, used].map(nounOfKind);
+    return new DrivineError(`${variable} is ${was}, and is used as ${as}: a variable is of one kind, as in Neo4j.`);
 }
 
 /**
@@ -323,6 +311,7 @@ function madeOf(pattern: Pattern, scope: Scope, made: Set<string>, merging: bool
     }
 }
 
+/** A `SET` item, over `scope`: the patterns within the value it sets, which a label it sets has none of. */
 function set(item: SetItem, scope: Scope): void {
     if (item.kind !== 'Labels') {
         expression(item.value, scope);

@@ -6129,7 +6129,7 @@ export class CypherWriter {
     private truncationNumber(fn: FunctionCall, key: string, value: Expression, millis: boolean, scope: Scope): string {
         const least = TRUNCATION_LEAST[key] ?? 0;
         const literal = writtenNumber(value);
-        if (literal === null || (literal === undefined && value.kind === 'Literal')) {
+        if (literal === null) {
             return `${least}`;
         }
         if (literal === undefined) {
