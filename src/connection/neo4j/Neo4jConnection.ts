@@ -8,6 +8,7 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { Neo4jCursor } from '@/connection/neo4j/Neo4jCursor';
 import { DrivineLogger } from '@/logger';
 import { Neo4jSpecCompiler } from '@/connection/neo4j/Neo4jSpecCompiler';
+import { transientOverBolt } from '@/backend/CypherGrammar';
 
 export class Neo4jConnection implements Connection {
     private logger = new DrivineLogger(Neo4jConnection.name);
@@ -57,8 +58,16 @@ export class Neo4jConnection implements Connection {
         await this.transaction.rollback();
     }
 
+    /**
+     * Closes the session. A failure is logged, at debug when the engine turned the statement away for another
+     * session's (a deadlock or conflict): its caller runs it again, as a save and a schema statement are (see
+     * `whenNotContended`), and one that still fails is thrown there. Otherwise each manager of several starting at once
+     * would warn of each deadlock it got past making the store identity's constraint (#479).
+     */
     async release(err?: Error): Promise<void> {
-        if (err) {
+        if (err && transientOverBolt(err)) {
+            this.logger.debug(`Closing session with error: ${err}`);
+        } else if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }
         return this.session.close();

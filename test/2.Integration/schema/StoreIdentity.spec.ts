@@ -1,6 +1,5 @@
 import {
-    CypherBackend,
-    cypherGrammarFor,
+    backendFor,
     DatabaseType,
     ModelRegistry,
     PersistenceManager,
@@ -8,21 +7,31 @@ import {
     StatelessGraphObjectManager,
     uniquenessConstraint
 } from '@liberation-data/drivine';
-import { closeGraphEngines, graphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { sqlPersistenceManager, SqlStore } from '../support/SqlStores';
+import { DrivineLogger } from '@/logger';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
 jest.setTimeout(30_000);
 
-describe.each(graphEngines())('store identity on $type', (engine) => {
+/** How many rounds of managers racing to make the key's constraint each store runs: fewer on the SQL stores, as drivine4j. */
+const RACE_ROUNDS: Partial<Record<DatabaseType, number>> = {
+    [DatabaseType.ORACLE]: 2,
+    [DatabaseType.POSTGRES]: 3
+};
+
+describe.each(allStores())('store identity on $type', (engine) => {
     let pm: PersistenceManager;
     const manager = (): StatelessGraphObjectManager =>
-        new StatelessGraphObjectManager(pm, new CypherBackend(cypherGrammarFor(engine.type)), new ModelRegistry());
-    const wipe = async (): Promise<void> => {
-        await pm.execute(new QuerySpecification('MATCH (s:DrivineStore) DETACH DELETE s'));
-    };
+        new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
+    const wipe = async (): Promise<void> => clearLabels(pm, engine, 'DrivineStore');
+    const stamps = async (): Promise<unknown[]> => pm.query(backendFor(engine.type).storeStamps().spec());
 
     beforeAll(async () => {
-        pm = persistenceManagerFor(engine);
+        pm =
+            engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES
+                ? sqlPersistenceManager(engine as SqlStore)
+                : persistenceManagerFor(engine);
         await manager().constraints.drop(uniquenessConstraint('DrivineStore', 'key'));
         await wipe();
     });
@@ -44,8 +53,32 @@ describe.each(graphEngines())('store identity on $type', (engine) => {
         await wipe();
         const ids = await Promise.all([1, 2, 3, 4, 5].map(async () => (await manager().storeIdentity()).id));
         expect(new Set(ids).size).toEqual(1);
-        expect((await pm.query(new QuerySpecification('MATCH (s:DrivineStore) RETURN s.storeId'))).length).toEqual(1);
+        expect(await stamps()).toHaveLength(1);
     });
+
+    // #479, as drivine4j#473: on a store that has never had the key's constraint, the managers race to make it too. On
+    // Neo4j they can deadlock doing so; elsewhere a loser's statement is refused for what the winner made. Going on
+    // without the constraint, a loser's stamp was refused by the winner's, and thrown out of resolve(), or written before
+    // it was in force, leaving two stamps. Each manager must instead find the winner's constraint, and write under it.
+    it('should agree on one identity, under the key constraint, when many managers race to make it', async () => {
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn');
+        try {
+            for (let round = 0; round < (RACE_ROUNDS[engine.type] ?? 5); round++) {
+                await manager().constraints.drop(uniquenessConstraint('DrivineStore', 'key'));
+                await wipe();
+                const managers = Array.from({ length: 16 }, manager);
+                const ids = await Promise.all(managers.map(async (it) => (await it.storeIdentity()).id));
+                expect(new Set(ids).size).toEqual(1);
+                expect(await stamps()).toHaveLength(1);
+            }
+            const bestEffort = warn.mock.calls
+                .map(([message]) => String(message))
+                .filter((it) => /best-effort/.test(it));
+            expect(bestEffort).toEqual([]);
+        } finally {
+            warn.mockRestore();
+        }
+    }, 120_000);
 
     it("should replace a plain index on the key in the way of its constraint, the label being Drivine's", async () => {
         if (engine.type !== DatabaseType.NEO4J) {

@@ -15,7 +15,7 @@ export function contendedPause(attempt: number, random: () => number = Math.rand
 }
 
 /** Whether `failure`, or a cause under it, as deep as ten, is one `matches` takes. */
-function anyCause(failure: unknown, matches: (cause: any) => boolean): boolean {
+export function anyCause(failure: unknown, matches: (cause: any) => boolean): boolean {
     for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
         if (matches(cause)) {
             return true;
