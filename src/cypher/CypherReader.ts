@@ -45,6 +45,7 @@ import {
     OC_StandaloneCallContext,
     OC_StringListNullPredicateExpressionContext,
     OC_StringPredicateExpressionContext,
+    OC_SubqueryCallContext,
     OC_SubqueryReadingsContext,
     OC_SymbolicNameContext,
     OC_UnaryAddOrSubtractExpressionContext,
@@ -162,7 +163,9 @@ function inQuery(call: OC_InQueryCallContext): Clause {
             invocation.oC_Expression().map(expression),
             yields(items),
             condition ? expression(condition.oC_Expression()) : undefined
-        )
+        ),
+        // Its WHERE may read any variable of the row.
+        importsAll: true
     };
 }
 
@@ -260,7 +263,7 @@ function updating(context: OC_UpdatingClauseContext): Clause {
     }
     const call = context.oC_SubqueryCall();
     if (call) {
-        return { kind: 'Call', optional: call.OPTIONAL() !== null, query: regular(call.oC_RegularQuery()) };
+        return subquery(call);
     }
     const foreach = context.oC_Foreach();
     if (foreach) {
@@ -316,10 +319,22 @@ function labelsOf(context: OC_NodeLabelsContext): string[] {
     return context.oC_NodeLabel().map((it) => schemaName(it.oC_LabelName().oC_SchemaName()));
 }
 
+/** `CALL { … }`, with the variables its brackets import where it has them, `CALL (a, b) { … }` or `CALL (*) { … }`. */
+function subquery(call: OC_SubqueryCallContext): Clause {
+    const bracketed = call.children.some((it) => it.getText() === '(');
+    return {
+        kind: 'Call',
+        optional: call.OPTIONAL() !== null,
+        query: regular(call.oC_RegularQuery()),
+        ...(bracketed ? { imports: call.oC_Variable().map(name) } : {}),
+        ...(call.children.some((it) => it.getText() === '*') ? { importsAll: true } : {})
+    };
+}
+
 function reading(context: OC_ReadingClauseContext): Clause {
     const call = context.oC_SubqueryCall();
     if (call) {
-        return { kind: 'Call', optional: call.OPTIONAL() !== null, query: regular(call.oC_RegularQuery()) };
+        return subquery(call);
     }
     const match = context.oC_Match();
     if (match) {

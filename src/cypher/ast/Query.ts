@@ -103,12 +103,17 @@ export interface Delete {
 
 /**
  * `CALL { … }`: for each row, the rows `query` gives, read from the variables around it, with what it returns bound for
- * the clauses after; with `optional`, a row it gives none for is kept, with nulls.
+ * the clauses after; with `optional`, a row it gives none for is kept, with nulls. `imports` are the variables its
+ * brackets import, `CALL (a, b) { … }`, and with `importsAll` it imports each, `CALL (*) { … }`, as a procedure's call
+ * does, `CALL db.labels() YIELD label WHERE …`, whose `WHERE` reads each variable around it; with no brackets,
+ * undefined, its leading `WITH` imports them.
  */
 export interface Call {
     readonly kind: 'Call';
     readonly optional: boolean;
     readonly query: Query;
+    readonly imports?: string[];
+    readonly importsAll?: boolean;
 }
 
 /**
