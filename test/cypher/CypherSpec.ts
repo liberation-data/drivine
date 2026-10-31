@@ -101,16 +101,8 @@ const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
  */
 const HELD: Record<string, Record<string, Hold[]>> = {
     'queries.yaml': {
-        // v0.17.0, liberation-data/drivine-cypher-spec#42: JSON's null and a missing key group, de-duplicate and sort apart.
-        'A null in a map and a missing key are one null': [
-            { issue: 497, steps: [...range(1, 23), 25, 26], on: ['postgres'] },
-            { issue: 497, steps: [...range(1, 27), 29], on: ['oracle'] }
-        ],
         // v0.18.0, liberation-data/drivine-cypher-spec#43: a key in an order term's body, and any(y IN … WHERE y = e).
         'Implicit grouping key': [{ issue: 499, steps: [37, 38, 39, 40, 42, 43, 44], on: ['sql'] }]
-    },
-    'writes.yaml': {
-        'A null in a written row and a missing key are one null': [{ issue: 497, steps: [1, 2], on: ['sql'] }]
     },
     'temporal.yaml': {
         // v0.19.0, liberation-data/drivine-cypher-spec#44: a temporal value made from another.
@@ -128,11 +120,6 @@ interface Hold {
     issue: number;
     steps: number[] | 'all';
     on: string[];
-}
-
-/** The whole numbers from `from` to `to`. */
-function range(from: number, to: number): number[] {
-    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
 }
 
 /**

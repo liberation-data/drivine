@@ -356,7 +356,7 @@ function calendarZone(entries: [string, Expression][]): void {
     if (zone?.kind !== 'Literal' || typeof zone.value !== 'string') {
         return;
     }
-    if (offsetText(zone.value) === undefined && !/^[+-]/.test(zone.value) && namedZone(zone.value)) {
+    if (offsetText(zone.value) === undefined && namedZone(zone.value)) {
         unsupported(`The time zone '${zone.value}'`);
     }
 }
@@ -532,7 +532,7 @@ function truncationZone(fn: FunctionCall, value: Expression): string {
     if (offset !== undefined) {
         return offset;
     }
-    if (!/^[+-]/.test(zone) && namedZone(zone)) {
+    if (namedZone(zone)) {
         return unsupported(`The time zone '${zone}'`);
     }
     throw new DrivineError(`'${zone}' is no time zone.`);
@@ -554,8 +554,14 @@ function offsetText(zone: string): string | undefined {
     return hours === 0 && minutes === 0 ? "'Z'" : `'${zone}'`;
 }
 
-/** Whether `zone` names a time zone, as `Europe/Stockholm` does. */
+/**
+ * Whether `zone` names a time zone, as `Europe/Stockholm` does: not an offset, `+01:00`, which `Intl` takes as a zone
+ * too, nor one Java's ZoneOffset does not take, `+19:00`, which Neo4j fails on.
+ */
 function namedZone(zone: string): boolean {
+    if (/^[+-]/.test(zone)) {
+        return false;
+    }
     try {
         new Intl.DateTimeFormat('en', { timeZone: zone });
         return true;

@@ -193,8 +193,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
-     * A null in a map or a list and a missing key are one null, grouped, kept distinct and sorted as one (#497): the
-     * spec's cases of it at v0.17.0, and drivine4j's beside them, held in `one-null.yaml` until Drivine runs that spec.
+     * A null in a map or a list and a missing key are one null, grouped, kept distinct and sorted as one (#497):
+     * drivine4j's cases of it and Drivine's own, which the spec does not hold, in `one-null.yaml`.
      */
     describe('one-null.yaml', () => {
         const held: { queries: CypherCase[]; writes: CypherCase[] } = parse(
@@ -212,7 +212,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             }
             for (let i = 0; i < cypherCase.steps.length; i++) {
                 if (runsOn(cypherCase.steps[i], store.name)) {
-                    await check(cypherCase, i, store.name, async (step) => query(step.cypher, step.parameters ?? {}));
+                    await check('one-null.yaml', cypherCase, i, store.name, async (step) =>
+                        query(step.cypher, step.parameters ?? {})
+                    );
                 }
             }
         });
@@ -3949,6 +3951,21 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     [
                         [1, 2],
                         [2, 1]
+                    ]
+                ],
+                // What is made for the WHERE is no column of a star, in a bracketed CALL's WITH and beside a UUID made for each row.
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i] AS x WITH x, count(*) AS c WHERE sum(x) > 1 RETURN * } RETURN *',
+                    [
+                        [2, 1, 1],
+                        [2, 2, 2]
+                    ]
+                ],
+                [
+                    'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 AND randomUUID() IS NOT NULL RETURN *',
+                    [
+                        [2, 1],
+                        [1, 2]
                     ]
                 ]
             ];
