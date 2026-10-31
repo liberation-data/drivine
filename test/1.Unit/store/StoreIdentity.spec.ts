@@ -1,5 +1,6 @@
 import {
     backendFor,
+    CONTENDED_ATTEMPTS,
     Connection,
     ConnectionProvider,
     ConstraintManager,
@@ -95,12 +96,15 @@ interface Neo4jStore {
  * the constraint is run again as it would be, and whose stamp MERGE fails with the next of `mergeFailures`, if any. The
  * first `createFailures` CREATE CONSTRAINTs deadlock, or, given `madeMeanwhile`, are refused with it, another session
  * having made the constraint, unless `foundAfter` is false: then nothing made it, and the refusal is for something else.
+ * Given a list, the nth CREATE is refused with its nth, and deadlocks past its end. The stamp is written as on
+ * `stampedOn`, so a SQL store's refusal of it is judged by its code.
  */
 const neo4jStore = (
     createFailures: number,
     mergeFailures: Error[],
-    madeMeanwhile?: Error,
-    foundAfter: boolean = true
+    madeMeanwhile?: Error | Error[],
+    foundAfter: boolean = true,
+    stampedOn: DatabaseType = DatabaseType.NEO4J
 ): Neo4jStore => {
     let created = false;
     let creates = 0;
@@ -110,9 +114,10 @@ const neo4jStore = (
             const statement = spec.statement.text;
             if (statement.startsWith('CREATE CONSTRAINT')) {
                 if (++creates <= createFailures) {
-                    created = madeMeanwhile != null && foundAfter;
+                    const refusal = Array.isArray(madeMeanwhile) ? madeMeanwhile[creates - 1] : madeMeanwhile;
+                    created = refusal != null && foundAfter;
                     return Promise.reject(
-                        madeMeanwhile ??
+                        refusal ??
                             new Neo4jError(
                                 "ForsetiClient can't acquire EXCLUSIVE LABEL because holders of that lock are waiting for " +
                                     'ForsetiClient. Deadlock wait cycle.',
@@ -137,7 +142,7 @@ const neo4jStore = (
     } as unknown as ConnectionProvider;
     const persistenceManager = {
         database: 'neo4j',
-        type: DatabaseType.NEO4J,
+        type: stampedOn,
         execute: async () => {
             merges++;
             const failure = mergeFailures.shift();
@@ -225,9 +230,10 @@ describe('Managers making the store key constraint at once', () => {
     });
 
     it('should ensure the constraint again when Postgres refused its index for a name another session took in pg_class', async () => {
+        // As node-postgres gives it, racing CREATE UNIQUE INDEX IF NOT EXISTS on a real server.
         const raced = Object.assign(
             new Error('duplicate key value violates unique constraint "pg_class_relname_nsp_index"'),
-            { code: '23505', constraint: 'pg_class_relname_nsp_index' }
+            { code: '23505', schema: 'pg_catalog', table: 'pg_class', constraint: 'pg_class_relname_nsp_index' }
         );
         const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(raced));
 
@@ -246,6 +252,89 @@ describe('Managers making the store key constraint at once', () => {
         expect((await resolver.resolve()).id).toEqual('store-8');
         expect(creates()).toEqual(1);
         expect(warned()).toContain('best-effort');
+    });
+
+    it('should not ensure the constraint again for a unique violation in the rows of a graph whose name starts pg_', async () => {
+        // A graph named pg_store has unique indexes named pg_store_uq_...: the row's table is in public, not the catalog.
+        const violated = Object.assign(
+            new Error('duplicate key value violates unique constraint "pg_store_uq_drivinestore_key"'),
+            { code: '23505', schema: 'public', table: 'pg_store_nodes', constraint: 'pg_store_uq_drivinestore_key' }
+        );
+        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(violated));
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(1);
+        expect(warned()).toContain('best-effort');
+    });
+
+    it('should not ensure the constraint again for a deadlock the schema executor already gave up on', async () => {
+        // The executor ran it as many times as it runs one; ensuring again would run it as many times again, each.
+        const deadlock = new Neo4jError(
+            "ForsetiClient can't acquire EXCLUSIVE LABEL: the lock its index already exists under is held. Deadlock wait cycle.",
+            'Neo.TransientError.Transaction.DeadlockDetected'
+        );
+        const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], deadlock, false);
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        expect(warned()).toContain('best-effort');
+    });
+
+    it('should run the constraint at most twice refused at once and then as many times as the executor runs one', async () => {
+        // The worst case: ensured again for each refusal made meanwhile, until the last ensure, whose deadlocks the
+        // executor runs again in full. Not three ensures of CONTENDED_ATTEMPTS each.
+        const refusal = new Error('There already exists an index (:DrivineStore {key}).');
+        const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], [refusal, refusal], false);
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(2 + CONTENDED_ATTEMPTS);
+        expect(warned()).toContain('best-effort');
+    });
+
+    it.each([
+        [
+            'Postgres',
+            DatabaseType.POSTGRES,
+            Object.assign(new Error('relation "drivine_nodes" already exists'), { code: '42P07' })
+        ],
+        [
+            'Oracle',
+            DatabaseType.ORACLE,
+            Object.assign(new Error('ORA-02261: such unique or primary key already exists in the table'), {
+                errorNum: 2261
+            })
+        ]
+    ])(
+        'should not write again a stamp %s refused for something else that already exists',
+        async (_, store, refused) => {
+            // Judged by its code, not its words: a SQL store's other "already exists" fails the same way each time.
+            const { resolver, merges }: Neo4jStore = neo4jStore(0, [refused], undefined, true, store);
+
+            await expect(resolver.resolve()).rejects.toMatchObject({ rootCause: refused });
+            expect(merges()).toEqual(1);
+        }
+    );
+
+    it.each([
+        [
+            'Postgres',
+            DatabaseType.POSTGRES,
+            Object.assign(new Error('duplicate key value violates unique constraint "drivine_uq_drivinestore_key"'), {
+                code: '23505'
+            })
+        ],
+        [
+            'Oracle',
+            DatabaseType.ORACLE,
+            Object.assign(new Error('ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_DRIVINESTORE_KEY) violated'), {
+                errorNum: 1
+            })
+        ]
+    ])('should write again a stamp %s refused as a unique violation', async (_, store, refused) => {
+        const { resolver, merges }: Neo4jStore = neo4jStore(0, [refused], undefined, true, store);
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(merges()).toEqual(2);
     });
 
     it('should not write again a stamp refused by a constraint that is not a uniqueness one', async () => {

@@ -6,7 +6,7 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 import { GraphBackend } from '@/backend/GraphBackend';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { EnsureResult, uniquenessConstraint, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
-import { anyCause, contendedPause } from '@/manager/Contention';
+import { anyCause, contendedPause, gaveUpAsContended } from '@/manager/Contention';
 
 /**
  * The stable identity of the store behind a connection: who the graph is, not where it lives. An address can't answer
@@ -36,17 +36,22 @@ const ENSURE_ATTEMPTS = 3;
  * Whether a schema statement was refused for what another session made meanwhile: a constraint or index that already
  * exists (FalkorDB's "Constraint already exists", or its "Attribute 'key' is already indexed" for the index the
  * constraint needs), or the index's name already taken: on Oracle ORA-00955, and on Postgres a unique violation in its
- * catalog, `pg_class` (23505 on a `pg_` index), as two sessions running `CREATE ... IF NOT EXISTS` at once get, and not
- * one in a table of the user's, which nothing made meanwhile. The failure and each cause under it are looked at. A
- * refusal for something else that already exists is ensured again too, in vain: it is thrown after ENSURE_ATTEMPTS, and
- * `ensureUniqueKey` warns of it.
+ * catalog, `pg_class` (23505 whose `schema` is `pg_catalog`), as two sessions running `CREATE ... IF NOT EXISTS` at once
+ * get, and not one in a graph's rows or a table of the user's, which nothing made meanwhile, though its index be named
+ * `pg_...`, as a graph named `pg_...` names its own. The failure and each cause under it are looked at. A refusal for
+ * something else that already exists is ensured again too, in vain: it is thrown after ENSURE_ATTEMPTS, and
+ * `ensureUniqueKey` warns of it. A failure the schema executor ran again as turned away, and gave up on, is not ensured
+ * again, or the attempts would multiply.
  */
 function madeMeanwhile(failure: unknown): boolean {
-    return anyCause(
-        failure,
-        (it) =>
-            /already (exists|indexed)|ORA-00955\b/i.test(it.message ?? '') ||
-            (it.code === '23505' && String(it.constraint ?? '').startsWith('pg_'))
+    return (
+        !gaveUpAsContended(failure) &&
+        anyCause(
+            failure,
+            (it) =>
+                /already (exists|indexed)|ORA-00955\b/i.test(it.message ?? '') ||
+                (it.code === '23505' && it.schema === 'pg_catalog')
+        )
     );
 }
 
@@ -184,13 +189,25 @@ export class StoreIdentityResolver {
     }
 
     /**
-     * Whether a uniqueness constraint refused the stamp: Neo4j's "already exists with label", Memgraph's and FalkorDB's
-     * "unique constraint violation", Oracle's ORA-00001 "unique constraint violated", Postgres's "violates unique
-     * constraint". Not another constraint, such as a not-null one, which would refuse it each time it was written again.
-     * Only a manager with schema management can have made one.
+     * Whether a uniqueness constraint refused the stamp. A SQL store says so by its code alone: Postgres's SQLSTATE
+     * 23505, Oracle's ORA-00001, on the failure or a cause under it. Its words would also take in a refusal for something
+     * else that already exists, as Postgres's 42P07 for a relation or Oracle's ORA-02261 for a key. A graph engine says
+     * so in words: Neo4j's "already exists with label", Memgraph's and FalkorDB's "unique constraint violation". Not
+     * another constraint, such as a not-null one, which would refuse it each time it was written again. Only a manager
+     * with schema management can have made one.
      */
     private violatedTheKey(e: unknown): boolean {
-        return this.constraints != null && /unique constraint|already exists/i.test((e as Error)?.message ?? '');
+        if (this.constraints == null) {
+            return false;
+        }
+        switch (this.persistenceManager.type) {
+            case DatabaseType.POSTGRES:
+                return anyCause(e, (it) => it.code === '23505');
+            case DatabaseType.ORACLE:
+                return anyCause(e, (it) => it.errorNum === 1);
+            default:
+                return /unique constraint|already exists/i.test((e as Error)?.message ?? '');
+        }
     }
 
     /** Whether a peer's first boot won: a violation, or a write conflict (Memgraph's, FalkorDB's "another write"). */
