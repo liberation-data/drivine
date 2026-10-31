@@ -404,6 +404,62 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('a temporal map from another temporal value is refused where Neo4j fails on it, and compiled where it runs it', () => {
+        // drivine4j's #508 (#500 here). Beside the spec's "Temporal map from another temporal value Neo4j does not take",
+        // those drivine4j holds of its own, and the kinds of value and the fractions it refuses.
+        const zone = "The time zone 'Europe/Stockholm' is Cypher, and is not compiled to SQL yet.";
+        compilers.forEach(([store, compiler]) => {
+            [
+                // A zone by name in the constructor of the value given, which Postgres and Oracle gave as null.
+                [
+                    "WITH datetime({year: 1984, month: 10, day: 11, hour: 12, timezone: 'Europe/Stockholm'}) AS other RETURN time({time: other})",
+                    zone
+                ],
+                ["RETURN datetime({year: 1984, month: 10, day: 11, timezone: 'Europe/Stockholm'})", zone],
+                [
+                    'MATCH (n) RETURN date({date: n})',
+                    'date() takes a date, a localdatetime or a datetime for date, not a node, a relationship or a path.'
+                ],
+                [
+                    'RETURN date({date: 1 = 1})',
+                    'date() takes a date, a localdatetime or a datetime for date, not a truth value.'
+                ],
+                [
+                    "RETURN time({time: duration('PT1H')})",
+                    'time() takes a localtime, a time, a localdatetime or a datetime for time, not a duration.'
+                ],
+                [
+                    "RETURN localtime({time: localtime('10:00'), microsecond: 6, nanosecond: 1000})",
+                    'localtime() takes a nanosecond from 0 to 999 beside a microsecond, not 1000.'
+                ],
+                [
+                    "RETURN localtime({time: localtime('10:00'), millisecond: 5, nanosecond: 1000000})",
+                    'localtime() takes a nanosecond from 0 to 999999 beside a millisecond, not 1000000.'
+                ],
+                // -1 is written as much as 1; and the fields of a whole date written beside a value that gives the time
+                // are worked out as a map of them is, past Java's years refused.
+                ["RETURN date({date: date('2024-03-15'), month: -(2)})", 'date() takes a month from 1 to 12, not -2.'],
+                [
+                    "RETURN localdatetime({year: 4294969319, week: 1, dayOfWeek: 1, time: localtime('10:00')})",
+                    'localdatetime() takes no year 4294969319: Invalid value for Year (valid values -999999999 - 999999999): 4294969319'
+                ]
+            ].forEach(([cypher, message]) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, message])
+            );
+            // A day of the week or of the quarter alone, beside a value that gives the date, and a number, a value or a time
+            // zone an expression or a parameter gives, are the store's to check.
+            [
+                "RETURN date({date: date('2024-03-15'), dayOfWeek: 2}), date({date: date('2024-03-15'), dayOfQuarter: 92}), date({date: date('2024-03-15'), ordinalDay: 366})",
+                "WITH 13 AS m RETURN date({date: date('2024-03-15'), month: m}), localtime({time: $t, hour: 3}), datetime({datetime: $t, timezone: $z})",
+                "RETURN date({date: date('2024-03-15'), month: 2 - 4}), localtime({time: localtime('10:00'), microsecond: 6, nanosecond: 5})"
+            ].forEach((cypher) =>
+                expect(
+                    compiler().compile(cypher, { t: new Date('2024-03-15T10:00:00Z'), z: '+01:00' }).sql
+                ).toBeDefined()
+            );
+        });
+    });
+
     it('a CALL sees only the variables of the row it imports, and a bracketed name not of the row is refused', () => {
         // drivine4j's #410 (#473 here). A CALL saw every variable of its row, so a name it does not import joined the row's.
         const undefinedVariable = (name: string): string =>
@@ -589,7 +645,10 @@ describe('The Cypher compiler refuses', () => {
                 ],
                 ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, [y IN collect(x) WHERE y > z | y] AS l', item('l', 'z')],
                 ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, any(y IN collect(x) WHERE y > z) AS l', item('l', 'z')],
-                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, reduce(s = 0, y IN collect(x) | s + z) AS l', item('l', 'z')],
+                [
+                    'UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, reduce(s = 0, y IN collect(x) | s + z) AS l',
+                    item('l', 'z')
+                ],
                 ['UNWIND [{a: 1, b: 2}] AS x RETURN x.a, [y IN collect(x) | y.a + x.b] AS l', item('l', 'x')],
                 ['MATCH (n) RETURN size([(n)-->(m) | m]) + count(*) AS c', item('c', 'n')],
                 ['MATCH (n) RETURN n.x, size([(n)-->(m) | m.x]) + count(*) AS c', item('c', 'n')],
@@ -597,7 +656,10 @@ describe('The Cypher compiler refuses', () => {
                 ['UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a AS a, count(*) AS c ORDER BY x.b + count(*)', sort('x')],
                 ['UNWIND [{a: 1, b: 2}] AS x WITH x.a AS a, count(*) AS c ORDER BY x.b + count(*) RETURN a', sort('x')],
                 ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY z + count(*)', sort('z')],
-                ['UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + z]', sort('z')],
+                [
+                    'UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + z]',
+                    sort('z')
+                ],
                 [
                     'MATCH (me:Person)--(you:Person) RETURN count(you.age) AS agg ORDER BY me.age + count(you.age)',
                     sort('me')

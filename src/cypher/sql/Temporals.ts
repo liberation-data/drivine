@@ -52,6 +52,25 @@ const INSTANT_FIELDS = [
 /** The fields that give a date by the calendar's other fields, beside the year, in place of a month and a day: see {@link Temporals.ofCalendar}. */
 export const CALENDAR_FIELDS = ['week', 'dayOfWeek', 'ordinalDay', 'quarter', 'dayOfQuarter'];
 
+/** The fields of a map that give another temporal value to make one of: see {@link Temporals.over}. */
+export const SELECTORS = ['date', 'time', 'datetime'];
+
+/** The fields of a date by its month: see {@link Temporals.over}. */
+const DAY = ['year', 'month', 'day'];
+
+/** The fields of a fraction of a second, which make the whole fraction where any is given: see {@link Temporals.over}. */
+const FRACTION = ['millisecond', 'microsecond', 'nanosecond'];
+
+/**
+ * A temporal value that a map's `date`, `time` or `datetime` gives {@link Temporals.over}: its `text`, and the `kinds`
+ * it may be, one where the statement tells its kind, else those of the kind that give what it is to give (a date, a
+ * time of day, both), its text telling which, as a value read from the store does.
+ */
+export interface TemporalBase {
+    text: string;
+    kinds: Temporal[];
+}
+
 /** The fields of a zoned value that are of its zone. */
 const ZONE_FIELDS = ['timezone', 'offset', 'offsetMinutes', 'offsetSeconds'];
 
@@ -294,6 +313,73 @@ export class Temporals {
                 kind,
                 () => `${whole(y, q, n)} AND ${q} BETWEEN 1 AND 4 AND ${n} BETWEEN 1 AND 92`
             )
+        );
+    }
+
+    // ----- Values made from another -----
+
+    /**
+     * The text of `kind` made of the value `date` gives its date and the value `time` gives its time of day (one value
+     * where a map's `datetime` gives both), with the fields `fields` laid over theirs, SQL numbers each by Cypher's
+     * names, and the offset's text `timezone`, as Neo4j lays them:
+     * - A `week` is of the base's week-based year or the `year` given, and keeps its day of the week unless one is
+     *   given; an `ordinalDay` is of its year or the one given; a `dayOfQuarter` of its quarter or the one given. Each
+     *   is worked out as {@link ofCalendar} works it out.
+     * - Else a `year`, a `month` and a `day` given make a date with the base's others, which fails where it is none
+     *   (February 29th of another year); then a `quarter` alone moves it so many quarters, to the month's last day where
+     *   it has fewer, and a `dayOfWeek` alone to that day of its week. Beside a `dayOfWeek` the `year` moves the date so
+     *   many years, to the month's last day where it has fewer, and doesn't fail.
+     * - A millisecond, a microsecond or a nanosecond given makes the whole fraction of the second.
+     * - A time of day or a moment that gives the time keeps its offset, else UTC's; with a `timezone` it is moved there,
+     *   the same moment, where it has an offset, and given that offset where it has none.
+     *
+     * Without `date`, the fields give the date as a map's fields do; without `time`, the time. Fails as the statement
+     * runs where a value given is null, or of a kind that hasn't what it is to give, or the `timezone` is null or no
+     * offset, as Neo4j fails. As drivine4j's.
+     */
+    over(
+        date: TemporalBase | undefined,
+        time: TemporalBase | undefined,
+        fields: Record<string, string>,
+        timezone: string | undefined,
+        kind: Temporal
+    ): string {
+        const bases = [...new Set([date, time].filter((it): it is TemporalBase => it !== undefined))];
+        return this.shared(
+            bases.map((it) => it.text),
+            (texts) => {
+                const text = (base: TemporalBase): string => texts[bases.indexOf(base)];
+                const clocks = bases.map((it) => this.clock(text(it), it.kinds));
+                return this.shared(clocks, (bound) => {
+                    const day = date !== undefined ? bound[bases.indexOf(date)] : undefined;
+                    const clock = time !== undefined ? bound[bases.indexOf(time)] : undefined;
+                    const own = time !== undefined && kind.zoned ? this.ownOffset(text(time), time.kinds) : undefined;
+                    // Where what gives the time may be local, as its text tells.
+                    const open = own !== undefined && time!.kinds.some((it) => !it.zoned);
+                    let made: string;
+                    if (!kind.zoned) {
+                        made = this.overFields(day, clock, fields, undefined, kind);
+                    } else if (timezone === undefined) {
+                        made = this.overFields(day, clock, fields, open ? `COALESCE(${own}, 'Z')` : own, kind);
+                    } else if (own === undefined) {
+                        made = this.overFields(day, clock, fields, timezone, kind);
+                    } else {
+                        const offset = open ? `COALESCE(${own}, ${timezone})` : own;
+                        made = this.movedTo(this.overFields(day, clock, fields, offset, kind), kind, timezone);
+                    }
+                    // A value given that is null, or of a kind that hasn't what it is to give, or a time zone an
+                    // expression gives that is null or none, fails as on Neo4j: its date is the day 0, which every
+                    // store fails on, written of the condition so that a store can't fail on it where it isn't reached.
+                    return this.shared([made], ([value]) => {
+                        // The time zone too, which Oracle's `||` would drop where it is null, not make the text null.
+                        const given = [...bound, ...(timezone !== undefined ? [timezone] : []), value]
+                            .map((it) => `${it} IS NOT NULL`)
+                            .join(' AND ');
+                        const none = this.of({ day: `CASE WHEN ${given} THEN 1 ELSE 0 END` }, undefined, Temporal.DATE);
+                        return `CASE WHEN ${given} THEN ${value} ELSE ${none} END`;
+                    });
+                });
+            }
         );
     }
 
@@ -575,30 +661,219 @@ export class Temporals {
         kind: Temporal,
         valid: (day: string) => string
     ): string {
-        return this.shared([date], ([day]) => {
-            const fields = {
-                year: `EXTRACT(YEAR FROM ${day})`,
-                month: `EXTRACT(MONTH FROM ${day})`,
-                day: `CASE WHEN NOT (${valid(day)}) THEN 0 ELSE EXTRACT(DAY FROM ${day}) END`
-            };
-            if (kind === Temporal.DATE) {
-                return this.of(fields, undefined, kind);
-            }
-            return this.shared(
-                [this.sql.local(this.of(fields, undefined, Temporal.DATE), Temporal.DATE)],
-                ([checked]) =>
-                    this.of(
-                        {
-                            ...time,
-                            year: `EXTRACT(YEAR FROM ${checked})`,
-                            month: `EXTRACT(MONTH FROM ${checked})`,
-                            day: `EXTRACT(DAY FROM ${checked})`
-                        },
-                        timezone,
-                        kind
-                    )
+        return this.shared([date], ([day]) =>
+            this.dated(
+                {
+                    year: `EXTRACT(YEAR FROM ${day})`,
+                    month: `EXTRACT(MONTH FROM ${day})`,
+                    day: `CASE WHEN NOT (${valid(day)}) THEN 0 ELSE EXTRACT(DAY FROM ${day}) END`
+                },
+                time,
+                timezone,
+                kind
+            )
+        );
+    }
+
+    /**
+     * {@link of} the date of the fields `date` (`year`, `month`, `day`) and the fields of the time `time`, the date read
+     * as a date first where `kind` has a time too, so a store fails on a day its month has none of: see
+     * {@link calendarDate}.
+     */
+    private dated(
+        date: Record<string, string>,
+        time: Record<string, string>,
+        timezone: string | undefined,
+        kind: Temporal
+    ): string {
+        if (kind === Temporal.DATE) {
+            return this.of(date, undefined, kind);
+        }
+        return this.shared([this.sql.local(this.of(date, undefined, Temporal.DATE), Temporal.DATE)], ([checked]) =>
+            this.of({ ...time, ...this.dateOf(checked) }, timezone, kind)
+        );
+    }
+
+    /** The year, the month and the day of the month of the timestamp `timestamp`, as {@link of} takes them. */
+    private dateOf(timestamp: string): Record<string, string> {
+        return {
+            year: `EXTRACT(YEAR FROM ${timestamp})`,
+            month: `EXTRACT(MONTH FROM ${timestamp})`,
+            day: `EXTRACT(DAY FROM ${timestamp})`
+        };
+    }
+
+    /**
+     * The offset of the text `text` of one of `kinds`, which gives a value made {@link over} its time: undefined where
+     * none of them has one, and null where its text tells it is local.
+     */
+    private ownOffset(text: string, kinds: Temporal[]): string | undefined {
+        const zoned = kinds.filter((it) => it.zoned);
+        if (zoned.length === 0) {
+            return undefined;
+        }
+        if (zoned.length === kinds.length) {
+            return this.offset(text);
+        }
+        return `CASE WHEN ${zoned.map((it) => this.isKind(text, it)).join(' OR ')} THEN ${this.offset(text)} END`;
+    }
+
+    /** The wall clock the text `text` reads, of the one of `kinds` it is: null where it is none. */
+    private clock(text: string, kinds: Temporal[]): string {
+        if (kinds.length === 1) {
+            return this.sql.local(text, kinds[0]);
+        }
+        return `CASE ${Temporal.instants
+            .filter((it) => kinds.includes(it))
+            .map((it) => `WHEN ${this.isKind(text, it)} THEN ${this.sql.local(text, it)}`)
+            .join(' ')} END`;
+    }
+
+    /**
+     * {@link over}'s value of the wall clocks `day` and `clock` (undefined where none is given), laid over by `fields`,
+     * with the offset `offset`.
+     */
+    private overFields(
+        day: string | undefined,
+        clock: string | undefined,
+        fields: Record<string, string>,
+        offset: string | undefined,
+        kind: Temporal
+    ): string {
+        const time = this.overTime(clock, fields);
+        if (kind === Temporal.LOCAL_TIME || kind === Temporal.TIME) {
+            return this.of(time, offset, kind);
+        }
+        if (day === undefined) {
+            const calendar = Object.fromEntries(
+                Object.entries(fields).filter(([name]) => name === 'year' || CALENDAR_FIELDS.includes(name))
             );
+            if (Object.keys(calendar).some((it) => CALENDAR_FIELDS.includes(it))) {
+                return this.ofCalendar({ ...calendar, ...time }, offset, kind);
+            }
+            const date = Object.fromEntries(Object.entries(fields).filter(([name]) => DAY.includes(name)));
+            return this.of({ ...date, ...time }, offset, kind);
+        }
+        return this.overDay(day, fields, time, offset, kind);
+    }
+
+    /** {@link over}'s fields of the time of the wall clock `clock` (undefined where none is given), laid over by `fields`. */
+    private overTime(clock: string | undefined, fields: Record<string, string>): Record<string, string> {
+        const time: Record<string, string> = {};
+        const read: Record<string, (t: string) => string> = {
+            hour: (t) => `EXTRACT(HOUR FROM ${t})`,
+            minute: (t) => `EXTRACT(MINUTE FROM ${t})`,
+            second: (t) => `TRUNC(EXTRACT(SECOND FROM ${t}))`
+        };
+        Object.entries(read).forEach(([name, of]) => {
+            const value = fields[name] ?? (clock !== undefined ? of(clock) : undefined);
+            if (value !== undefined) {
+                time[name] = value;
+            }
         });
+        if (FRACTION.some((it) => fields[it] !== undefined)) {
+            FRACTION.filter((it) => fields[it] !== undefined).forEach((it) => (time[it] = fields[it]));
+        } else if (clock !== undefined) {
+            time.microsecond = this.sql.number(this.sql.micros(clock));
+        }
+        return time;
+    }
+
+    /** {@link over}'s value of the wall clock `day` that gives the date, laid over by `fields`, and the time `time`. */
+    private overDay(
+        day: string,
+        fields: Record<string, string>,
+        time: Record<string, string>,
+        offset: string | undefined,
+        kind: Temporal
+    ): string {
+        const own = (name: string): string => fields[name] ?? this.clockField(day, name);
+        if (fields.week !== undefined) {
+            return this.ofCalendar(
+                {
+                    year: fields.year ?? this.clockField(day, 'weekYear'),
+                    week: own('week'),
+                    dayOfWeek: own('dayOfWeek'),
+                    ...time
+                },
+                offset,
+                kind
+            );
+        }
+        if (fields.ordinalDay !== undefined) {
+            return this.ofCalendar({ year: own('year'), ordinalDay: own('ordinalDay'), ...time }, offset, kind);
+        }
+        if (fields.dayOfQuarter !== undefined) {
+            return this.ofCalendar(
+                { year: own('year'), quarter: own('quarter'), dayOfQuarter: own('dayOfQuarter'), ...time },
+                offset,
+                kind
+            );
+        }
+        if (!DAY.some((it) => fields[it] !== undefined)) {
+            return this.moveDay(day, fields, time, offset, kind);
+        }
+        if (fields.dayOfWeek !== undefined) {
+            // Beside a day of the week (no month or day can be), a year moves the date so many years, to February 28th
+            // from the 29th of a common year, as Neo4j moves it, where alone it fails there.
+            return this.moveDay(
+                this.sql.addMonths(day, `(${own('year')} - ${this.clockField(day, 'year')}) * 12`),
+                fields,
+                time,
+                offset,
+                kind
+            );
+        }
+        const date = Object.fromEntries(DAY.map((it) => [it, own(it)]));
+        return this.shared([this.sql.local(this.of(date, undefined, Temporal.DATE), Temporal.DATE)], ([checked]) =>
+            this.moveDay(checked, fields, time, offset, kind)
+        );
+    }
+
+    /** {@link over}'s value of the date `day`, moved by a `quarter` or a `dayOfWeek` among `fields` where one is. */
+    private moveDay(
+        day: string,
+        fields: Record<string, string>,
+        time: Record<string, string>,
+        offset: string | undefined,
+        kind: Temporal
+    ): string {
+        const whole = (value: string, last: number): string =>
+            `${value} = TRUNC(${value}) AND ${value} BETWEEN 1 AND ${last}`;
+        if (fields.quarter !== undefined) {
+            return this.shared([fields.quarter], ([q]) =>
+                this.calendarDate(
+                    this.sql.addMonths(day, `(${q} - ${this.clockField(day, 'quarter')}) * 3`),
+                    time,
+                    offset,
+                    kind,
+                    () => whole(q, 4)
+                )
+            );
+        }
+        if (fields.dayOfWeek !== undefined) {
+            return this.shared([fields.dayOfWeek], ([d]) =>
+                this.calendarDate(
+                    this.sql.addTime(day, `${d} - ${this.sql.dayOfWeek(day)}`, '0'),
+                    time,
+                    offset,
+                    kind,
+                    () => whole(d, 7)
+                )
+            );
+        }
+        return this.of({ ...this.dateOf(day), ...time }, offset, kind);
+    }
+
+    /** The text of `kind`, zoned, the same moment as the text `text` of it at the offset's text `timezone`. */
+    private movedTo(text: string, kind: Temporal, timezone: string): string {
+        return this.shared([text, timezone], ([t, z]) =>
+            this.format(
+                this.sql.addTime(this.sql.utc(t, kind), '0', this.zoneField(z, 'offsetSeconds').sql),
+                kind,
+                this.offset(z)
+            )
+        );
     }
 
     /** A field of the wall clock `t`, a timestamp, by Cypher's name for it. */
