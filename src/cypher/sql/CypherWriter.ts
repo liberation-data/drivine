@@ -629,9 +629,10 @@ function short(tree: unknown): boolean {
 export class CypherWriter {
     /**
      * Whether the query compiled is a part of a `UNION` without ALL, whose rows are compared as a whole: there a value that
-     * may be JSON's null ({@link JsonValue.jsonNull}) is given as SQL's, as Cypher has one null (#497).
+     * may be JSON's null ({@link JsonValue.jsonNull}) is given as SQL's, as Cypher has one null (#497). Set only for the work
+     * {@link comparingParts} does, so an exception leaves it as it was.
      */
-    distinctParts = false;
+    private distinctParts = false;
 
     private readonly logger = new DrivineLogger(CypherWriter.name);
     private counter = 0;
@@ -1082,6 +1083,17 @@ export class CypherWriter {
         this.queries.push(query);
     }
 
+    /** `work`, its parts of a `UNION` compared as a whole where `distinct` ({@link distinctParts}), as it was after. */
+    comparingParts<T>(distinct: boolean, work: () => T): T {
+        const was = this.distinctParts;
+        this.distinctParts = distinct;
+        try {
+            return work();
+        } finally {
+            this.distinctParts = was;
+        }
+    }
+
     /** The query `query` is, which reads and ends with a `RETURN`. */
     query(query: Query): string {
         this.give(query);
@@ -1353,17 +1365,6 @@ export class CypherWriter {
                 })
                 .join(distinct ? '\nUNION\n' : '\nUNION ALL\n')
         );
-    }
-
-    /** `work`, its parts of a `UNION` compared as a whole where `distinct` ({@link distinctParts}), as it was after. */
-    private comparingParts<T>(distinct: boolean, work: () => T): T {
-        const was = this.distinctParts;
-        this.distinctParts = distinct;
-        try {
-            return work();
-        } finally {
-            this.distinctParts = was;
-        }
     }
 
     /** `CALL { … }`: a lateral query for each row, what it returns bound as variables of the row. */

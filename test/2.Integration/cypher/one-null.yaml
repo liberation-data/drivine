@@ -1,5 +1,6 @@
 # The Cypher spec's cases of liberation-data/drivine-cypher-spec#42 (v0.17.0), copied unchanged, for drivine#497, and
-# drivine4j's own cases of the same (liberation-data/drivine4j#503) that the spec does not hold. Drivine runs the spec at
+# drivine4j's own cases of the same (liberation-data/drivine4j#503) that the spec does not hold, and Drivine's own beside
+# them, for what this port does its own way. Drivine runs the spec at
 # v0.14.0 until #495 and #496 are ported, which v0.15.0's and v0.16.0's cases need; this file goes when it moves to
 # v0.17.0 or later. Each case runs as the spec's do: the queries over queries.yaml's graph, the writes from an empty one.
 queries:
@@ -142,6 +143,29 @@ queries:
         rows: [{a: null, c: 2}]
       - cypher: "UNWIND [{a: null}, {a: null}] AS x WITH DISTINCT x.a AS a RETURN [a, a IS NULL] AS l"
         rows: [[null, true]]
+
+  - name: "A null in a map and a missing key are one null, in Drivine's own cases"
+    description: "Cases neither the spec nor drivine4j holds, for what this port does its own way. The rows are Neo4j's (2026.10)."
+    steps:
+      - note: "A CALL's UNION ALL gives a value that may be JSON's null where any query's may be, not only the first's."
+        cypher: "CALL { RETURN {}.a AS v UNION ALL RETURN [null][0] AS v } RETURN DISTINCT v"
+        rows: [null]
+      - cypher: "CALL { RETURN 1 AS v UNION ALL RETURN [null][0] AS v UNION ALL RETURN {}.a AS v } RETURN v, count(*) AS c ORDER BY v"
+        rows: [[1, 1], [null, 2]]
+      - cypher: "CALL { RETURN {}.a AS v UNION ALL RETURN [null][0] AS v } RETURN v UNION RETURN {}.a AS v"
+        rows: [null]
+      - note: "A subquery's UNION compares its queries' rows with the two nulls as one."
+        cypher: "UNWIND [{a: null}] AS x RETURN COUNT { RETURN x.a AS v UNION RETURN {}.a AS v } AS n"
+        rows: [1]
+      - note: "head(), last(), a parameter's entry by its key, and a parameter that is null."
+        cypher: "UNWIND [[null], []] AS l RETURN head(l) AS h, last(l) AS t, count(*) AS c"
+        rows: [[null, null, 2]]
+      - cypher: "RETURN $p['a'] AS a UNION RETURN $q.a AS a"
+        parameters: {p: {a: null}, q: {}}
+        rows: [null]
+      - cypher: "UNWIND [{b: 1}, {b: 2}] AS x RETURN CASE WHEN x.b = 1 THEN $p ELSE x.a END AS v, count(*) AS c"
+        parameters: {p: null}
+        rows: [[null, 2]]
 
 writes:
   - name: "A null in a written row and a missing key are one null"

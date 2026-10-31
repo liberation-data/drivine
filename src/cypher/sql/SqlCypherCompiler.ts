@@ -695,16 +695,17 @@ export abstract class SqlCypherCompiler {
         const writer = new CypherWriter(this, this.readParameters(parameters));
         // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
         writer.give(query);
-        // Its rows are compared, as a UNION without ALL compares them: see CypherWriter.distinctParts.
-        writer.distinctParts = !query.unions[0].all;
-        const rows = parts
-            .map(
-                (clauses, i) =>
-                    `SELECT ${i + 1} AS part, ${this.rowNumber} AS n, q.result FROM (\n${indent(
-                        writer.query({ clauses, unions: [] })
-                    )}\n) q`
-            )
-            .join('\nUNION ALL\n');
+        // Its rows are compared, as a UNION without ALL compares them: see CypherWriter.comparingParts.
+        const rows = writer.comparingParts(!query.unions[0].all, () =>
+            parts
+                .map(
+                    (clauses, i) =>
+                        `SELECT ${i + 1} AS part, ${this.rowNumber} AS n, q.result FROM (\n${indent(
+                            writer.query({ clauses, unions: [] })
+                        )}\n) q`
+                )
+                .join('\nUNION ALL\n')
+        );
         let sql: string;
         if (query.unions[0].all) {
             sql = `SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n`;
