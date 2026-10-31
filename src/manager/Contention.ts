@@ -58,7 +58,9 @@ export function ddlWillNotMake(failure: unknown): boolean {
 
 /**
  * The failures a run of {@link whenNotContended} threw: ran out of attempts on, or would not run again. Held weakly, by
- * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does.
+ * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does. Every
+ * failure a run throws is here, contended or not, for an outer run should run again neither; that it was run again as
+ * turned away is the narrower `runAgainAlready`.
  */
 const givenUp = new WeakSet();
 
@@ -70,10 +72,25 @@ function gaveUpOn(failure: unknown): boolean {
     return anyCause(failure, (it) => typeof it === 'object' && givenUp.has(it));
 }
 
-/** `failure`, marked as one a run gave up on (see {@link gaveUpOn}). */
-function givingUp(failure: unknown): unknown {
+/** Of the failures in `givenUp`, those a run had already run again as turned away: see {@link gaveUpAsContended}. */
+const runAgainAlready = new WeakSet();
+
+/**
+ * Whether `failure`, or a cause under it, is one a run of {@link whenNotContended} took as turned away, ran again, and
+ * then gave up on, so that a retry outside it, of its own, would multiply its attempts. A failure it threw at once, as
+ * not turned away, is not one.
+ */
+export function gaveUpAsContended(failure: unknown): boolean {
+    return anyCause(failure, (it) => typeof it === 'object' && runAgainAlready.has(it));
+}
+
+/** `failure`, marked as one a run gave up on (see {@link gaveUpOn}), and, when it was `runAgain`, as that too. */
+function givingUp(failure: unknown, runAgain: boolean): unknown {
     if (typeof failure === 'object' && failure) {
         givenUp.add(failure);
+        if (runAgain) {
+            runAgainAlready.add(failure);
+        }
     }
     return failure;
 }
@@ -97,7 +114,7 @@ export async function whenNotContended<T>(
             return await statement();
         } catch (failure) {
             if (gaveUpOn(failure) || !contended(failure)) {
-                throw givingUp(first ?? failure);
+                throw givingUp(first ?? failure, first !== undefined);
             }
             first = first ?? failure;
             if (attempt < CONTENDED_ATTEMPTS - 1) {
@@ -105,5 +122,5 @@ export async function whenNotContended<T>(
             }
         }
     }
-    throw givingUp(first);
+    throw givingUp(first, true);
 }
