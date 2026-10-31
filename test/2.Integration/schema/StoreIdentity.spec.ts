@@ -20,18 +20,29 @@ const RACE_ROUNDS: Partial<Record<DatabaseType, number>> = {
     [DatabaseType.POSTGRES]: 3
 };
 
+/**
+ * The graph the SQL stores keep their stamps in, of their own, as drivine4j's test's: each round builds the key's unique
+ * index over the graph's whole node table, and over the shared one, which the suites before this one fill, a round on
+ * Oracle took 32 s on 300,000 nodes, and over two minutes on CI.
+ */
+const GRAPH = 'store_identity';
+
 describe.each(allStores())('store identity on $type', (engine) => {
+    const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
     let pm: PersistenceManager;
     const manager = (): StatelessGraphObjectManager =>
-        new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
-    const wipe = async (): Promise<void> => clearLabels(pm, engine, 'DrivineStore');
-    const stamps = async (): Promise<unknown[]> => pm.query(backendFor(engine.type).storeStamps().spec());
+        new StatelessGraphObjectManager(pm, backendFor(engine.type, GRAPH), new ModelRegistry());
+    // clearLabels deletes from the shared graph's tables, so the SQL stores' own graph is cleared by Cypher.
+    const wipe = async (): Promise<void> =>
+        sql
+            ? void (await pm.execute(
+                  new QuerySpecification({ text: 'MATCH (n:DrivineStore) DETACH DELETE n', language: 'CYPHER' })
+              ))
+            : clearLabels(pm, engine, 'DrivineStore');
+    const stamps = async (): Promise<unknown[]> => pm.query(backendFor(engine.type, GRAPH).storeStamps().spec());
 
     beforeAll(async () => {
-        pm =
-            engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES
-                ? sqlPersistenceManager(engine as SqlStore)
-                : persistenceManagerFor(engine);
+        pm = sql ? sqlPersistenceManager(engine as SqlStore, GRAPH) : persistenceManagerFor(engine);
         await manager().constraints.drop(uniquenessConstraint('DrivineStore', 'key'));
         await wipe();
     });
