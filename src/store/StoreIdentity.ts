@@ -5,7 +5,8 @@ import { DrivineLogger } from '@/logger';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { GraphBackend } from '@/backend/GraphBackend';
 import { ConstraintManager } from '@/schema/ConstraintManager';
-import { uniquenessConstraint } from '@/schema/SchemaSpecs';
+import { EnsureResult, uniquenessConstraint, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
+import { anyCause, contendedPause } from '@/manager/Contention';
 
 /**
  * The stable identity of the store behind a connection: who the graph is, not where it lives. An address can't answer
@@ -29,6 +30,25 @@ const KEY_CONSTRAINT = uniquenessConstraint(LABEL, 'key');
 const ATTEMPTS = 3;
 const MERGE_ATTEMPTS = 5;
 const MERGE_BACKOFF_MILLIS = 50;
+const ENSURE_ATTEMPTS = 3;
+
+/**
+ * Whether a schema statement was refused for what another session made meanwhile: a constraint or index that already
+ * exists (FalkorDB's "Constraint already exists", or its "Attribute 'key' is already indexed" for the index the
+ * constraint needs), or the index's name already taken: on Oracle ORA-00955, and on Postgres a unique violation in its
+ * catalog, `pg_class` (23505 on a `pg_` index), as two sessions running `CREATE ... IF NOT EXISTS` at once get, and not
+ * one in a table of the user's, which nothing made meanwhile. The failure and each cause under it are looked at. A
+ * refusal for something else that already exists is ensured again too, in vain: it is thrown after ENSURE_ATTEMPTS, and
+ * `ensureUniqueKey` warns of it.
+ */
+function madeMeanwhile(failure: unknown): boolean {
+    return anyCause(
+        failure,
+        (it) =>
+            /already (exists|indexed)|ORA-00955\b/i.test(it.message ?? '') ||
+            (it.code === '23505' && String(it.constraint ?? '').startsWith('pg_'))
+    );
+}
 
 /**
  * Reads a store's identity, minting it on first sight, from a single `(:DrivineStore {key: 'singleton'})` node.
@@ -72,13 +92,23 @@ export class StoreIdentityResolver {
         );
     }
 
+    /**
+     * Ensures the uniqueness constraint on the key. Returns whether it is in force; false degrades `resolve` to
+     * best-effort convergence rather than failing boot over an identity that can still be read.
+     *
+     * Managers making the constraint at once get in each other's way. A deadlock (Neo4j's, on the label's lock) or a
+     * write turned away is already run again by the schema executor (see `whenNotContended`). One manager's statement can
+     * also be refused for what another's has just made: the constraint or the key's index already there (FalkorDB), or
+     * the index's name taken in the catalog (Postgres's `pg_class`, 23505). The constraint is then ensured
+     * again, which finds the other's. Going on without it would let a stamp be refused by the other's constraint, or two
+     * stamps be written before it is in force (#479, as drivine4j#473).
+     */
     private async ensureUniqueKey(): Promise<boolean> {
         if (!this.constraints) {
             return false;
         }
         try {
-            // The label is Drivine's, so a plain index on the key (Neo4j) is replaced by the constraint.
-            const result = await this.constraints.ensure(KEY_CONSTRAINT, undefined, true);
+            const result = await this.ensuredAgainWhenMadeMeanwhile(this.constraints);
             if (result.status === 'VIOLATION') {
                 this.logger.warn(
                     `${this.persistenceManager.database} already holds duplicate DrivineStore stamps, so their uniqueness can't ` +
@@ -103,6 +133,34 @@ export class StoreIdentityResolver {
         }
     }
 
+    /** `ensure`s the key's constraint, again when another manager made it, or what it needs, meanwhile. */
+    private async ensuredAgainWhenMadeMeanwhile(
+        constraints: ConstraintManager
+    ): Promise<EnsureResult<UniquenessConstraintSpec>> {
+        for (let attempt = 1; ; attempt++) {
+            try {
+                // The label is Drivine's, so a plain index on the key (Neo4j) is replaced by the constraint.
+                return await constraints.ensure(KEY_CONSTRAINT, undefined, true);
+            } catch (e) {
+                // Not a deadlock: the schema executor has run that again already, as many times as it runs one.
+                if (attempt >= ENSURE_ATTEMPTS || !madeMeanwhile(e)) {
+                    throw e;
+                }
+                await new Promise((resolve) => setTimeout(resolve, contendedPause(attempt - 1)));
+            }
+        }
+    }
+
+    /**
+     * `MERGE`s the stamp. Under the constraint, a concurrent first writer can make this one fail with a violation or a
+     * write conflict rather than block; merging again, after a pause, then matches the winner's node.
+     *
+     * A violation is merged again even when `ensureUniqueKey` could not confirm the constraint, for the violation itself
+     * proves one is in force: managers making it at once can be turned away making it (Neo4j deadlocks on the label's
+     * lock), and a loser's stamp is then refused by the winner's constraint (#479, as drivine4j#473). A conflict proves
+     * nothing, so it is merged again only under a constraint confirmed. A store without schema management (no
+     * `constraints`) has no constraint to have refused it, and throws at once.
+     */
     private async assignIfAbsent(guarded: boolean): Promise<void> {
         for (let attempt = 1; ; attempt++) {
             try {
@@ -117,15 +175,26 @@ export class StoreIdentityResolver {
                 return;
             } catch (e) {
                 // Lost the race to a peer's first boot: its stamp is there, or about to be. Back off and merge onto it.
-                if (
-                    !guarded ||
-                    attempt >= MERGE_ATTEMPTS ||
-                    !/constraint|already exists|conflict|another write/i.test((e as Error).message)
-                ) {
+                if (attempt >= MERGE_ATTEMPTS || !(guarded ? this.lostTheRace(e) : this.violatedTheKey(e))) {
                     throw e;
                 }
                 await new Promise((resolve) => setTimeout(resolve, MERGE_BACKOFF_MILLIS * 2 ** (attempt - 1)));
             }
         }
+    }
+
+    /**
+     * Whether a uniqueness constraint refused the stamp: Neo4j's "already exists with label", Memgraph's and FalkorDB's
+     * "unique constraint violation", Oracle's ORA-00001 "unique constraint violated", Postgres's "violates unique
+     * constraint". Not another constraint, such as a not-null one, which would refuse it each time it was written again.
+     * Only a manager with schema management can have made one.
+     */
+    private violatedTheKey(e: unknown): boolean {
+        return this.constraints != null && /unique constraint|already exists/i.test((e as Error)?.message ?? '');
+    }
+
+    /** Whether a peer's first boot won: a violation, or a write conflict (Memgraph's, FalkorDB's "another write"). */
+    private lostTheRace(e: unknown): boolean {
+        return this.violatedTheKey(e) || /conflict|another write/i.test((e as Error)?.message ?? '');
     }
 }
