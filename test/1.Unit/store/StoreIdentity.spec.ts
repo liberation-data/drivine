@@ -94,9 +94,14 @@ interface Neo4jStore {
  * A Neo4j store whose schema statements run through the real ConstraintManager and SchemaExecutor, so a deadlock making
  * the constraint is run again as it would be, and whose stamp MERGE fails with the next of `mergeFailures`, if any. The
  * first `createFailures` CREATE CONSTRAINTs deadlock, or, given `madeMeanwhile`, are refused with it, another session
- * having made the constraint.
+ * having made the constraint, unless `foundAfter` is false: then nothing made it, and the refusal is for something else.
  */
-const neo4jStore = (createFailures: number, mergeFailures: Error[], madeMeanwhile?: Error): Neo4jStore => {
+const neo4jStore = (
+    createFailures: number,
+    mergeFailures: Error[],
+    madeMeanwhile?: Error,
+    foundAfter: boolean = true
+): Neo4jStore => {
     let created = false;
     let creates = 0;
     let merges = 0;
@@ -105,7 +110,7 @@ const neo4jStore = (createFailures: number, mergeFailures: Error[], madeMeanwhil
             const statement = spec.statement.text;
             if (statement.startsWith('CREATE CONSTRAINT')) {
                 if (++creates <= createFailures) {
-                    created = madeMeanwhile != null;
+                    created = madeMeanwhile != null && foundAfter;
                     return Promise.reject(
                         madeMeanwhile ??
                             new Neo4jError(
@@ -201,5 +206,71 @@ describe('Managers making the store key constraint at once', () => {
 
         await expect(resolver.resolve()).rejects.toMatchObject({ rootCause: refused });
         expect(merges()).toEqual(1);
+    });
+
+    it('should warn that identity is best-effort when its making is refused as made meanwhile each time, though nothing made it', async () => {
+        // A real misconfiguration: Neo4j's index in the way that ensure couldn't find, so the constraint is never there.
+        const { resolver, creates, merges }: Neo4jStore = neo4jStore(
+            Number.MAX_SAFE_INTEGER,
+            [],
+            new Error('There already exists an index (:DrivineStore {key}).'),
+            false
+        );
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(3);
+        expect(merges()).toEqual(1);
+        expect(warned()).toContain('best-effort');
+        expect(warned()).toContain('There already exists an index');
+    });
+
+    it('should ensure the constraint again when Postgres refused its index for a name another session took in pg_class', async () => {
+        const raced = Object.assign(
+            new Error('duplicate key value violates unique constraint "pg_class_relname_nsp_index"'),
+            { code: '23505', constraint: 'pg_class_relname_nsp_index' }
+        );
+        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(raced));
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(1);
+        expect(warned()).not.toContain('best-effort');
+    });
+
+    it('should not ensure the constraint again for a unique violation outside the catalog, which nothing made meanwhile', async () => {
+        const violated = Object.assign(new Error('duplicate key value violates unique constraint "orders_pkey"'), {
+            code: '23505',
+            constraint: 'orders_pkey'
+        });
+        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(violated));
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(1);
+        expect(warned()).toContain('best-effort');
+    });
+
+    it('should not write again a stamp refused by a constraint that is not a uniqueness one', async () => {
+        // Only a uniqueness violation proves the key's constraint in force; a not-null one fails the same way each time.
+        const refused = new Error('null value in column "props" of relation "nodes" violates not-null constraint');
+        const { resolver, merges }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [refused]);
+
+        await expect(resolver.resolve()).rejects.toMatchObject({ rootCause: refused });
+        expect(merges()).toEqual(1);
+    });
+
+    it('should not write again a stamp a store without schema management refused, for no constraint of its can have', async () => {
+        const refused = new Error("Node(0) already exists with label `DrivineStore` and property `key` = 'singleton'");
+        let merges = 0;
+        const persistenceManager = {
+            database: 'neptune',
+            type: DatabaseType.NEPTUNE,
+            execute: async () => {
+                merges++;
+                return Promise.reject(refused);
+            }
+        } as unknown as PersistenceManager;
+        const resolver = new StoreIdentityResolver(persistenceManager, backendFor(DatabaseType.NEO4J));
+
+        await expect(resolver.resolve()).rejects.toBe(refused);
+        expect(merges).toEqual(1);
     });
 });
