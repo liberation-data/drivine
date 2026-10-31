@@ -3155,6 +3155,21 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     'UNWIND range(1, 100) AS i CALL (i) { CREATE (n:CyUuidCall {id: toUpper(randomUUID())}) RETURN n.id AS u } RETURN u',
                     100
                 ],
+                [
+                    'UNWIND range(1, 100) AS i CALL () { CREATE (n:CyUuidSet) SET n.id = toUpper(randomUUID()) RETURN n.id AS u } RETURN u',
+                    100
+                ],
+                // ... and one for each item of a list it writes.
+                [
+                    'UNWIND range(1, 100) AS i CREATE (n:CyUuidList {ids: [x IN [1, 2] | toUpper(randomUUID())]}) RETURN n.ids',
+                    200
+                ],
+                // A CALL in a CALL, and an item made again in a reduce's body.
+                [
+                    'UNWIND range(1, 100) AS i CALL () { CALL () { RETURN toUpper(randomUUID()) AS u } RETURN u } RETURN u',
+                    100
+                ],
+                ['UNWIND range(1, 100) AS i RETURN reduce(s = [], x IN [1, 2] | s + [toUpper(randomUUID())])', 200],
                 ['UNWIND range(1, 100) AS i WITH i, toUpper(randomUUID()) AS u RETURN u', 100],
                 // Two items written alike are a UUID each, as in Neo4j.
                 ['UNWIND range(1, 100) AS i RETURN toUpper(randomUUID()) AS a, toUpper(randomUUID()) AS b', 200],
@@ -3177,6 +3192,12 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             for (const [cypher, expected] of shapes) {
                 await failing(cypher, (rows) => distinct(rows) !== expected);
             }
+            // A FOREACH makes one for each node it makes.
+            await failing(
+                'UNWIND range(1, 50) AS i FOREACH (x IN [1, 2] | CREATE (:CyUuidEach {id: toUpper(randomUUID())}))',
+                () => false
+            );
+            await failing('MATCH (n:CyUuidEach) RETURN n.id', (rows) => distinct(rows) !== 100);
             // A condition that reads one keeps about half of 1,000 rows, not all of them or none.
             await clear();
             await query(loadSpec('queries.yaml').graph!);
@@ -3221,10 +3242,35 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             for (const [cypher, columns] of [
                 ["UNWIND range(1, 2) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE randomUUID() < 'z' RETURN *", 2],
                 ['UNWIND range(1, 2) AS i CALL { RETURN toUpper(randomUUID()) AS u } RETURN *', 2],
+                ['UNWIND range(1, 2) AS i CALL (*) { RETURN toUpper(randomUUID()) AS u } RETURN *', 2],
                 ["UNWIND range(1, 2) AS i WITH * WHERE left(randomUUID(), 1) < 'z' RETURN *, 1 AS one", 2],
                 ['UNWIND range(1, 2) AS i CALL { UNWIND [1] AS j RETURN *, toUpper(randomUUID()) AS u } RETURN *', 3]
             ] as const) {
                 await failing(cypher, (rows) => rows.length !== 2 || rows.some((it) => it.length !== columns));
+            }
+            // A variable quoted as the compiler names its own is the statement's: it was taken for the UUID's, so read as
+            // the UUID, and left out of a star.
+            for (const [cypher, expected] of [
+                ['UNWIND [1, 2] AS `#anew2` RETURN `#anew2` AS a, toUpper(randomUUID()) AS u ORDER BY a', [[1], [2]]],
+                [
+                    'UNWIND [1, 2] AS i WITH i, 1 AS `#anew1`, 2 AS `#anew2`, 3 AS `#anew3`, 4 AS `#anew4`, 5 AS `#anew5`, ' +
+                        '6 AS `#anew6` CALL { RETURN toUpper(randomUUID()) AS u } RETURN * ORDER BY i',
+                    [
+                        [1, 2, 3, 4, 5, 6, 1],
+                        [1, 2, 3, 4, 5, 6, 2]
+                    ]
+                ],
+                // A UNION's queries are compiled one by one: the name made in the first was a later one's variable.
+                [
+                    'UNWIND [1] AS i CALL (i) { RETURN toString(i) + randomUUID() AS u } RETURN 0 AS x, u ' +
+                        'UNION ALL WITH 2 AS `#anew2` WITH * RETURN `#anew2` AS x, 0 AS u',
+                    [[0], [2]]
+                ]
+            ] as const) {
+                await failing(
+                    cypher,
+                    (rows) => JSON.stringify(rows.map((it) => it.slice(0, -1))) !== JSON.stringify(expected)
+                );
             }
             // An OPTIONAL MATCH that finds nothing, or keeps nothing it finds, keeps the row, with nulls.
             for (const cypher of [

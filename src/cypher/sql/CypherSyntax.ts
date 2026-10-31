@@ -109,7 +109,7 @@ export function imports(call: Call, clauses: Clause[], names: Iterable<string>):
 }
 
 /** Whether `clause` has no `WHERE`, `DISTINCT`, `ORDER BY`, `SKIP` or `LIMIT`: a `WITH` that only names what it passes on. */
-function plainWith(clause: With): boolean {
+export function plainWith(clause: With): boolean {
     const projection = clause.projection;
     return (
         clause.where === undefined &&

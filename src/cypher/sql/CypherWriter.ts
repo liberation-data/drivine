@@ -63,6 +63,7 @@ import {
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
+    plainWith,
     queryHoldsAnew,
     replaced,
     seeded,
@@ -178,10 +179,10 @@ const TEMPORAL_NOW = TEMPORAL_KINDS.flatMap((kind) =>
     ['statement', 'transaction', 'realtime'].map((it) => `${kind}.${it}`)
 );
 
-/** What `round()` fails with, as Neo4j fails it, a precision below 0 or past `MAX_COUNT`. */
 /** A call of `randomUUID()`, as a statement writes one. */
 const RANDOM_UUID: Expression = { kind: 'Function', name: 'randomUUID', distinct: false, arguments: [] };
 
+/** What `round()` fails with, as Neo4j fails it, a precision below 0 or past `MAX_COUNT`. */
 const PRECISION_OUT_OF_RANGE = 'round() takes a precision from 0 to 2147483647, as in Neo4j.';
 
 /**
@@ -351,6 +352,21 @@ function optional<T>(value: T | undefined): T[] {
 }
 
 /**
+ * Each text `value`, a statement as read or any part of it, holds anywhere, as far as its first space: each of its
+ * variables' names, and more (a label, a key, a text it gives), which is as much as a name made for it, with no space,
+ * needs to keep clear of: see `CypherWriter.anewVariable`.
+ */
+function textsIn(value: unknown, texts: Set<string> = new Set()): Set<string> {
+    if (typeof value === 'string') {
+        const space = value.indexOf(' ');
+        texts.add(space < 0 ? value : value.slice(0, space));
+    } else if (value !== null && typeof value === 'object') {
+        Object.values(value).forEach((it) => textsIn(it, texts));
+    }
+    return texts;
+}
+
+/**
  * `value`, a parameter's, as the JSON text it is bound as reads (see `jsonText`): a list, or any other iterable but
  * bytes, as an array; a map as an object of its entries, those undefined left out; null and undefined as null, and so
  * a number JSON has no text for (`NaN`, `Infinity`). Any other value (a number, a text, a date, bytes) is itself.
@@ -484,9 +500,18 @@ export class CypherWriter {
 
     /**
      * The variables made here for a randomUUID() made first, for each row: no variable of the statement's, though one may
-     * be quoted as named alike.
+     * be quoted as named alike: see {@link anewVariable}.
      */
     private readonly madeAnew = new Set<string>();
+
+    /**
+     * The queries given to compile, {@link query} and {@link procedure}, whose names {@link anewVariable} keeps clear of,
+     * not yet in {@link queryTexts}.
+     */
+    private readonly queries: Query[] = [];
+
+    /** Each text of the queries given to compile, as far as its first space, gathered when {@link anewVariable} needs it. */
+    private readonly queryTexts = new Set<string>();
 
     /** How each kind of expression is compiled. */
     private readonly expressions: { [K in Expression['kind']]: (expression: any, scope: Scope) => Value } = {
@@ -840,8 +865,17 @@ export class CypherWriter {
         return this.sql.temporals;
     }
 
+    /**
+     * Holds `query` among the {@link queries}: as {@link query} and {@link procedure} do, or first, for the queries of a
+     * `UNION` compiled one by one, so a name made in one is named as no later one's variable is.
+     */
+    give(query: Query): void {
+        this.queries.push(query);
+    }
+
     /** The query `query` is, which reads and ends with a `RETURN`. */
     query(query: Query): string {
+        this.give(query);
         let select = new Select(new Map());
         for (const clause of query.clauses) {
             if (clause.kind === 'Return') {
@@ -854,6 +888,7 @@ export class CypherWriter {
 
     /** The statements of the procedure `query` is: its reads, a loop over its rows for each write, and what it returns. */
     procedure(query: Query): string[] {
+        this.give(query);
         let select = new Select(new Map());
         for (const clause of this.creates(query.clauses)) {
             if (clause.kind === 'Return') {
@@ -871,9 +906,16 @@ export class CypherWriter {
         return `${prefix}${++this.counter}`;
     }
 
-    /** A variable of {@link madeAnew}'s, new. */
+    /**
+     * A variable of {@link madeAnew}'s, new: named as no variable of the statement's is, nor begins, so one quoted alike,
+     * `` `#anew2` `` or `` `#anew2 row` ``, is not taken for it, hidden from a star or read as its UUID.
+     */
     private anewVariable(): string {
-        const name = this.alias(ANEW);
+        textsIn(this.queries.splice(0), this.queryTexts);
+        let name = this.alias(ANEW);
+        while (this.queryTexts.has(name)) {
+            name = this.alias(ANEW);
+        }
         this.madeAnew.add(name);
         return name;
     }
@@ -2256,11 +2298,7 @@ export class CypherWriter {
         }
         const projection = first.projection;
         const importing =
-            first.where === undefined &&
-            !projection.distinct &&
-            projection.orderBy.length === 0 &&
-            projection.skip === undefined &&
-            projection.limit === undefined &&
+            plainWith(first) &&
             projection.items.every((it) => it.expression.kind === 'Variable' && it.expression.name === it.name) &&
             (projection.star || projection.items.every((it) => imports.has(it.name)));
         return importing ? clauses.slice(1) : clauses;
