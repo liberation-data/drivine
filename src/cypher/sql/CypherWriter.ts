@@ -41,15 +41,20 @@ import {
     With
 } from '@/cypher/ast/Query';
 import {
+    ANEW,
+    bracketed,
     children,
     chunked,
     contains,
     DISTINCT_ITEMS,
+    holdsAnew,
     holdsSubquery,
+    imports,
     indent,
     isAggregate,
     isAnew,
     isGivenNumber,
+    isSeeded,
     iterated,
     literal,
     MADE_TEXT,
@@ -58,7 +63,10 @@ import {
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
+    plainWith,
+    queryHoldsAnew,
     replaced,
+    seeded,
     TEXT_FUNCTIONS,
     unsupported,
     variablesIn,
@@ -174,6 +182,9 @@ const TEMPORAL_KINDS = ['date', 'localtime', 'time', 'localdatetime', 'datetime'
 const TEMPORAL_NOW = TEMPORAL_KINDS.flatMap((kind) =>
     ['statement', 'transaction', 'realtime'].map((it) => `${kind}.${it}`)
 );
+
+/** A call of `randomUUID()`, as a statement writes one. */
+const RANDOM_UUID: Expression = { kind: 'Function', name: 'randomUUID', distinct: false, arguments: [] };
 
 /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past `MAX_COUNT`. */
 const PRECISION_OUT_OF_RANGE = 'round() takes a precision from 0 to 2147483647, as in Neo4j.';
@@ -345,6 +356,21 @@ function optional<T>(value: T | undefined): T[] {
 }
 
 /**
+ * Each text `value`, a statement as read or any part of it, holds anywhere, as far as its first space: each of its
+ * variables' names, and more (a label, a key, a text it gives), which is as much as a name made for it, with no space,
+ * needs to keep clear of: see `CypherWriter.anewVariable`.
+ */
+function textsIn(value: unknown, texts: Set<string> = new Set()): Set<string> {
+    if (typeof value === 'string') {
+        const space = value.indexOf(' ');
+        texts.add(space < 0 ? value : value.slice(0, space));
+    } else if (value !== null && typeof value === 'object') {
+        Object.values(value).forEach((it) => textsIn(it, texts));
+    }
+    return texts;
+}
+
+/**
  * `value`, a parameter's, as the JSON text it is bound as reads (see `jsonText`): a list, or any other iterable but
  * bytes, as an array; a map as an object of its entries, those undefined left out; null and undefined as null, and so
  * a number JSON has no text for (`NaN`, `Infinity`). Any other value (a number, a text, a date, bytes) is itself.
@@ -475,6 +501,21 @@ export class CypherWriter {
      * instead.
      */
     private identities = true;
+
+    /**
+     * The variables made here for a randomUUID() made first, for each row: no variable of the statement's, though one may
+     * be quoted as named alike: see {@link anewVariable}.
+     */
+    private readonly madeAnew = new Set<string>();
+
+    /**
+     * The queries given to compile, {@link query} and {@link procedure}, whose names {@link anewVariable} keeps clear of,
+     * not yet in {@link queryTexts}.
+     */
+    private readonly queries: Query[] = [];
+
+    /** Each text of the queries given to compile, as far as its first space, gathered when {@link anewVariable} needs it. */
+    private readonly queryTexts = new Set<string>();
 
     /** How each kind of expression is compiled. */
     private readonly expressions: { [K in Expression['kind']]: (expression: any, scope: Scope) => Value } = {
@@ -845,8 +886,17 @@ export class CypherWriter {
         return this.sql.temporals;
     }
 
+    /**
+     * Holds `query` among the {@link queries}: as {@link query} and {@link procedure} do, or first, for the queries of a
+     * `UNION` compiled one by one, so a name made in one is named as no later one's variable is.
+     */
+    give(query: Query): void {
+        this.queries.push(query);
+    }
+
     /** The query `query` is, which reads and ends with a `RETURN`. */
     query(query: Query): string {
+        this.give(query);
         let select = new Select(new Map());
         for (const clause of query.clauses) {
             if (clause.kind === 'Return') {
@@ -859,6 +909,7 @@ export class CypherWriter {
 
     /** The statements of the procedure `query` is: its reads, a loop over its rows for each write, and what it returns. */
     procedure(query: Query): string[] {
+        this.give(query);
         let select = new Select(new Map());
         for (const clause of this.creates(query.clauses)) {
             if (clause.kind === 'Return') {
@@ -876,6 +927,20 @@ export class CypherWriter {
         return `${prefix}${++this.counter}`;
     }
 
+    /**
+     * A variable of {@link madeAnew}'s, new: named as no variable of the statement's is, nor begins, so one quoted alike,
+     * `` `#anew2` `` or `` `#anew2 row` ``, is not taken for it, hidden from a star or read as its UUID.
+     */
+    private anewVariable(): string {
+        textsIn(this.queries.splice(0), this.queryTexts);
+        let name = this.alias(ANEW);
+        while (this.queryTexts.has(name)) {
+            name = this.alias(ANEW);
+        }
+        this.madeAnew.add(name);
+        return name;
+    }
+
     // ----- Clauses -----
 
     /**
@@ -885,16 +950,16 @@ export class CypherWriter {
     private read(select: Select, clause: Clause, outer: Scope = new Map()): Select {
         switch (clause.kind) {
             case 'Match':
-                this.match(select, clause);
-                return select;
-            case 'Unwind':
-                this.unwind(select, clause);
-                return select;
+                return this.match(select, clause);
+            case 'Unwind': {
+                const [rows, [list]] = this.anewBefore(select, [clause.list], true) ?? [select, [clause.list]];
+                this.unwind(rows, { ...clause, list });
+                return rows;
+            }
             case 'With':
                 return this.with(select, clause, outer);
             case 'Call':
-                this.call(select, clause);
-                return select;
+                return this.anewCall(select, clause);
             default:
                 throw new Error(`${clause.kind} reads nothing`);
         }
@@ -910,39 +975,127 @@ export class CypherWriter {
         const next = new Select(outer);
         next.walks = select.walks;
         // A value made anew for each row is one value however often the clauses after read it: see SqlCypherCompiler.once.
-        const anew = clause.projection.items.some((item) => contains(item.expression, isAnew));
+        const anew = clause.projection.items.some((item) => holdsAnew(item.expression));
         const sql = anew ? this.sql.once(projected.sql) : projected.sql;
         next.source(`(\n${indent(apart ? this.sql.called(sql) : sql)}\n) ${name}`);
         projected.scope.forEach((value, variable) => next.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => next.order.push([`${name}.${column}`, descending]));
-        if (clause.where) {
-            next.where.push(this.keeps(clause.where, next.scope));
-        }
-        return next;
+        return clause.where ? this.filteredRows(next, clause.where) : next;
     }
 
-    private match(select: Select, match: Match): void {
+    /**
+     * The rows `select` reads kept where `where` holds; each randomUUID() it reads (`anew` tells one) made first, for each
+     * row, as {@link anewBefore} makes it, then the condition over those rows.
+     */
+    private filteredRows(
+        select: Select,
+        where: Expression,
+        anew: (expression: Expression) => boolean = isAnew
+    ): Select {
+        const [rows, [read]] = this.anewBefore(select, [where], true, anew) ?? [select, [where]];
+        rows.where.push(this.keeps(read, rows.scope));
+        return rows;
+    }
+
+    /**
+     * The rows `select` reads with a UUID made for each, in a `WITH *` of its own, and its variable's name, which is no
+     * variable of the statement's: see {@link project}.
+     */
+    private seededRows(select: Select): [Select, string] {
+        const seed = this.anewVariable();
+        const made: Projection = {
+            distinct: false,
+            star: true,
+            items: [{ expression: RANDOM_UUID, name: seed }],
+            orderBy: []
+        };
+        return [this.with(select, { kind: 'With', projection: made }, this.around(select), true), seed];
+    }
+
+    /** What `select` reads from around it: the variables of its scope it does not bind itself. */
+    private around(select: Select): Scope {
+        return new Map([...select.scope].filter(([variable]) => !select.bound.has(variable)));
+    }
+
+    /**
+     * A `CALL { … }` over the rows `select` reads; one whose query holds a randomUUID() ({@link queryHoldsAnew}) first
+     * given a UUID made for each row, in a `WITH *` of its own, which its query unwinds before its own clauses. A query
+     * that reads nothing of the row it is joined to is worked out once for the statement, by each store, and every row
+     * was given the same UUID (drivine4j#412): so it reads the row. That UUID, and the variable its query unwinds it to,
+     * are no variables of the statement's: see {@link project}, and {@link calledScope}, which carries them into the query
+     * whatever it imports.
+     */
+    private anewCall(select: Select, call: Call): Select {
+        if (!queryHoldsAnew(call.query)) {
+            this.call(select, call);
+            return select;
+        }
+        const [rows, seed] = this.seededRows(select);
+        const row = `${seed} row`;
+        this.madeAnew.add(row);
+        const read = (clauses: Clause[]): Clause[] => [
+            { kind: 'Unwind', list: { kind: 'ListLiteral', items: [{ kind: 'Variable', name: seed }] }, variable: row },
+            ...clauses
+        ];
+        const query: Query = {
+            ...call.query,
+            clauses: read(call.query.clauses),
+            unions: call.query.unions.map((it) => ({ ...it, clauses: read(it.clauses) }))
+        };
+        this.call(rows, { ...call, query });
+        return rows;
+    }
+
+    /**
+     * A `MATCH` over the rows `select` reads. Each randomUUID() its condition reads is made for each row it finds, first
+     * ({@link filteredRows}). An `OPTIONAL MATCH` finds its rows in a lateral query, which reads nothing of the row where its
+     * pattern does not: Oracle worked it out once for the statement, and kept every row's match or none (drivine4j#412).
+     * There each is read beside a UUID made first for the row ({@link seededRows}, {@link seeded}), so the lateral query
+     * reads the row, then made for each row it finds. A shortest path's condition is met where its paths are found, in a
+     * lateral query too, which Postgres worked out once where each row joins the same two nodes: each is read beside the
+     * row's UUID there as well, and made in the condition.
+     */
+    private match(select: Select, match: Match): Select {
         // A shortest path is the shortest of the paths that meet the WHERE, as Cypher finds it: the WHERE is met where they are found.
         const shortestWhere =
             match.patterns[match.patterns.length - 1].shortest !== undefined ? match.where : undefined;
         const where = shortestWhere === undefined ? match.where : undefined;
+        const seededFirst =
+            match.where !== undefined && holdsAnew(match.where) && (match.optional || shortestWhere !== undefined);
+        const [row, seed] = seededFirst ? this.seededRows(select) : [select, undefined];
+        const metByPaths =
+            shortestWhere !== undefined && seed !== undefined ? seeded(shortestWhere, seed, true) : shortestWhere;
         if (!match.optional) {
-            this.patterns(select, match.patterns, shortestWhere);
-            if (where) {
-                select.where.push(this.keeps(where, select.scope));
-            }
-            return;
+            this.patterns(row, match.patterns, metByPaths);
+            return where ? this.filteredRows(row, where) : row;
         }
-        // What is found is read by a lateral query, joined to keep the row when it finds nothing.
-        const inner = new Select(select.scope);
-        this.patterns(inner, match.patterns, shortestWhere);
+        return this.optionalMatch(row, match.patterns, metByPaths, where, seed);
+    }
+
+    /**
+     * An `OPTIONAL MATCH` of `patterns` over the rows `row` reads, those of a shortest path's meeting `metByPaths` and
+     * all of them `where`: what it finds read by a lateral query, joined to keep the row when it finds nothing. With
+     * `seed`, the variable of a UUID made first for each row, each randomUUID() of `where` is read beside it.
+     */
+    private optionalMatch(
+        row: Select,
+        patterns: Pattern[],
+        metByPaths: Expression | undefined,
+        where: Expression | undefined,
+        seed: string | undefined
+    ): Select {
+        let inner = new Select(row.scope);
+        this.patterns(inner, patterns, metByPaths);
         if (where) {
-            inner.where.push(this.keeps(where, inner.scope));
+            inner =
+                seed === undefined
+                    ? this.filteredRows(inner, where)
+                    : this.filteredRows(inner, seeded(where, seed, true), isSeeded);
         }
-        const outer = select.scope;
-        const found = [...inner.bound].filter(([variable]) => !outer.has(variable));
+        const outer = row.scope;
+        const found = [...inner.bound].filter(([variable]) => !outer.has(variable) && !this.madeAnew.has(variable));
         if (found.length === 0 && inner.sources.length === 0) {
-            return;
+            return row;
         }
         const name = this.alias('o');
         // Each variable found under a name of its own: a variable may be called what SQL will not take.
@@ -953,8 +1106,9 @@ export class CypherWriter {
             ...inner.from(),
             ...optional(inner.whereClause())
         ];
-        select.join(this.sql.lateral(text.join('\n'), name, true));
-        named.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
+        row.join(this.sql.lateral(text.join('\n'), name, true));
+        named.forEach(([variable, value, column]) => row.bind(variable, columnsOf(value, name, column)));
+        return row;
     }
 
     /**
@@ -1009,8 +1163,8 @@ export class CypherWriter {
         const order = this.rowOrder;
         const projected =
             call.query.unions.length === 0
-                ? this.calledPart(select, clauses, undefined, false)
-                : this.calledUnion(select, call.query);
+                ? this.calledPart(select, call, clauses, undefined, false)
+                : this.calledUnion(select, call);
         this.rowOrder = order;
         this.redeclared([...projected.scope.keys()], [...select.bound.keys()]);
         const name = this.alias('c');
@@ -1041,20 +1195,49 @@ export class CypherWriter {
     }
 
     /**
-     * One query of a `CALL { … }`, for the row `select` reads: its returned items in the order `names` lists them,
-     * where a `UNION` names them so, and kept distinct with `distinct`.
+     * One query of `call`, `clauses`, for the row `select` reads: its returned items in the order `names` lists them,
+     * where a `UNION` names them so, and kept distinct with `distinct`. It sees only the variables of the row it imports
+     * ({@link calledScope}): any other name in it is a new variable, as in Cypher (#473). What its brackets import it
+     * sees throughout, after a `WITH` that does not pass it on too, as Neo4j has it; what a leading `WITH` imports is gone
+     * after one.
      */
-    private calledPart(select: Select, clauses: Clause[], names: string[] | undefined, distinct: boolean): Projected {
-        let inner = new Select(select.scope);
-        const apart = this.importsApart(select.scope, clauses);
+    private calledPart(
+        select: Select,
+        call: Call,
+        clauses: Clause[],
+        names: string[] | undefined,
+        distinct: boolean
+    ): Projected {
+        const imported = this.calledScope(call, clauses, select.scope);
+        let inner = new Select(imported);
+        const apart = this.importsApart(imported, clauses);
         if (apart) {
             inner.source(apart.source);
             apart.imports.forEach((value, variable) => inner.bind(variable, value));
         }
-        clauses.slice(0, -1).forEach((it) => (inner = this.read(inner, it, select.scope)));
+        const outer: Scope = bracketed(call) ? imported : new Map();
+        clauses.slice(0, -1).forEach((it) => (inner = this.read(inner, it, outer)));
         const projection = (clauses[clauses.length - 1] as Return).projection;
         const items = names ? names.map((name) => projection.items.find((it) => it.name === name)!) : projection.items;
         return this.project(inner, { ...projection, items, distinct: distinct || projection.distinct }, false);
+    }
+
+    /**
+     * The variables of the row, `scope`, that the query `clauses` of `call` sees: those it imports ({@link imports}), and
+     * each the compiler made for it, whatever it imports. Those are no variables of the statement's: the UUID made for
+     * each row that {@link anewCall} unwinds before the clauses, so a query holding a randomUUID() reads the row
+     * (drivine4j#412). Imports are read from the clauses after that `UNWIND`, as the statement wrote them, so a leading
+     * `WITH` imports still.
+     */
+    private calledScope(call: Call, clauses: Clause[], scope: Scope): Scope {
+        const first = clauses.findIndex((it) => !(it.kind === 'Unwind' && this.madeAnew.has(it.variable)));
+        const written = first < 0 ? [] : clauses.slice(first);
+        const imported = imports(
+            call,
+            written,
+            [...scope.keys()].filter((it) => !this.madeAnew.has(it))
+        );
+        return new Map([...scope].filter(([variable]) => imported.has(variable) || this.madeAnew.has(variable)));
     }
 
     /**
@@ -1069,7 +1252,9 @@ export class CypherWriter {
      * without them.
      */
     private importsApart(scope: Scope, clauses: Clause[]): { source: string; imports: Scope } | undefined {
-        const projections = clauses.flatMap((it) => (it.kind === 'With' || it.kind === 'Return' ? [it.projection] : []));
+        const projections = clauses.flatMap((it) =>
+            it.kind === 'With' || it.kind === 'Return' ? [it.projection] : []
+        );
         const aggregates = (p: Projection): boolean =>
             [...p.items.map((it) => it.expression), ...p.orderBy.map((it) => it.expression)].some((it) =>
                 contains(it, isAggregate)
@@ -1107,7 +1292,8 @@ export class CypherWriter {
     }
 
     /** A `UNION` in a `CALL { … }`: each query's rows, the same items of the same kinds, matched by name as Cypher matches them. */
-    private calledUnion(select: Select, query: Query): Projected {
+    private calledUnion(select: Select, call: Call): Projected {
+        const query = call.query;
         const parts = [query.clauses, ...query.unions.map((it) => it.clauses)];
         if (new Set(query.unions.map((it) => it.all)).size > 1) {
             throw new DrivineError('UNION and UNION ALL are not mixed in one statement, as in Cypher.');
@@ -1125,7 +1311,7 @@ export class CypherWriter {
             throw new DrivineError('Each query of a UNION returns the same names, as in Cypher.');
         }
         const distinct = !query.unions[0].all;
-        let projected = parts.map((it) => this.calledPart(select, it, names, distinct));
+        let projected = parts.map((it) => this.calledPart(select, call, it, names, distinct));
         if (new Set(projected.map((p) => JSON.stringify([...p.scope.values()].map((it) => it.kind)))).size > 1) {
             unsupported('A UNION in CALL { … } whose queries return values of different kinds');
         }
@@ -1138,7 +1324,7 @@ export class CypherWriter {
             const was = this.identities;
             this.identities = false;
             try {
-                projected = parts.map((it) => this.calledPart(select, it, names, distinct));
+                projected = parts.map((it) => this.calledPart(select, call, it, names, distinct));
             } finally {
                 this.identities = was;
             }
@@ -1860,10 +2046,18 @@ export class CypherWriter {
     /**
      * Binds into `select` each variable the row `row` holds, of `needed` where given: a node or a relationship is read
      * from its table, as it is now. With `written`, `row` is `ROW`, and a value and each property of it are read as
-     * {@link SqlCypherCompiler.rowValue} reads them, for a statement that works out what a write writes.
+     * {@link SqlCypherCompiler.rowValue} reads them, for a statement that works out what a write writes. Each is of its
+     * kind in `held`, and a value as it was carried in `values`: those of the rows now, but for a row held from before.
      */
-    private bindRow(select: Select, row: string, needed?: Set<string>, written: boolean = false): void {
-        this.kinds.forEach((kind, variable) => {
+    private bindRow(
+        select: Select,
+        row: string,
+        needed?: Set<string>,
+        written: boolean = false,
+        held: Map<string, Kind> = this.kinds,
+        values: Map<string, JsonValue> = this.carried
+    ): void {
+        held.forEach((kind, variable) => {
             if (needed && !needed.has(variable)) {
                 return;
             }
@@ -1877,7 +2071,7 @@ export class CypherWriter {
                 select.join(`LEFT JOIN ${this.sql.edges} ${e} ON ${e}.eid = ${this.sql.idOf(row, key)}`);
                 select.bind(variable, relationshipOf(e));
             } else if (kind === 'VALUE') {
-                const was = this.carried.get(variable);
+                const was = values.get(variable);
                 select.bind(
                     variable,
                     json(written ? this.sql.rowValue([key]) : this.sql.propertyOf(row, key), {
@@ -2025,16 +2219,33 @@ export class CypherWriter {
         if (returned) {
             this.assign(gathered, this.sql.literalJson([]));
         }
+        // Only what the call imports is seen in it: any other name in it is a new variable, as in Cypher (#473).
+        const imported = imports(call, call.query.clauses, before.keys());
+        const clauses = this.imported(call, imported);
+        // Read again after each WITH, where brackets import them: see below.
+        const rebound = bracketed(call) && clauses.some((it) => it.kind === 'With');
+        const importedOf = <T>(all: Map<string, T>): Map<string, T> =>
+            new Map([...all].filter(([variable]) => imported.has(variable)));
         this.eachRow(kept, () => {
-            if (returned) {
+            if (returned || rebound) {
                 this.emit(`${caller} := ${RECORD}.item;`);
             }
+            this.restore(importedOf(before), importedOf(carriedBefore));
             let select = this.rows();
-            for (const clause of this.imported(call.query.clauses)) {
-                select =
-                    clause.kind === 'Return'
-                        ? this.with(select, { kind: 'With', projection: clause.projection })
-                        : this.next(select, clause);
+            for (const clause of clauses) {
+                if (clause.kind === 'Return') {
+                    select = this.with(select, { kind: 'With', projection: clause.projection });
+                } else if (clause.kind === 'With' && rebound) {
+                    // What brackets import is seen throughout the call, as Neo4j has it, after a WITH that does not pass
+                    // it on too: read again from the row the call is written for, so `CALL (a) { WITH 1 AS one CREATE
+                    // (a)-[:R]->() }` joins the row's a, not a new node. Its WHERE reads them too, so it is met after.
+                    const w = this.with(select, { ...clause, where: undefined });
+                    const dropped = new Set([...imported].filter((it) => !w.scope.has(it)));
+                    this.bindRow(w, caller, dropped, false, before, carriedBefore);
+                    select = clause.where ? this.filteredRows(w, clause.where) : w;
+                } else {
+                    select = this.next(select, clause);
+                }
             }
             if (returned) {
                 // The rows this row gives, after those of the rows before it: each the row the call was written for,
@@ -2098,20 +2309,22 @@ export class CypherWriter {
         this.emit('END LOOP;');
     }
 
-    /** `clauses` without an importing `WITH` of variables alone that opens them: every variable of the row is seen. */
-    private imported(clauses: Clause[]): Clause[] {
+    /**
+     * The clauses of `call` without a `WITH` that opens them and passes on variables it `imports` alone, as they are:
+     * the row holds those already, and what brackets import is seen after it anyway, as Neo4j has it, so
+     * `CALL (a, b) { WITH a SET b.x = 1 }` sets b's.
+     */
+    private imported(call: Call, imports: Set<string>): Clause[] {
+        const clauses = call.query.clauses;
         const first = clauses[0];
         if (first?.kind !== 'With') {
             return clauses;
         }
         const projection = first.projection;
         const importing =
-            first.where === undefined &&
-            !projection.distinct &&
-            projection.orderBy.length === 0 &&
-            projection.skip === undefined &&
-            projection.limit === undefined &&
-            projection.items.every((it) => it.expression.kind === 'Variable' && it.expression.name === it.name);
+            plainWith(first) &&
+            projection.items.every((it) => it.expression.kind === 'Variable' && it.expression.name === it.name) &&
+            (projection.star || projection.items.every((it) => imports.has(it.name)));
         return importing ? clauses.slice(1) : clauses;
     }
 
@@ -2453,9 +2666,11 @@ export class CypherWriter {
      */
     private project(select: Select, projection: Projection, final: boolean): Projected {
         const items: ProjectionItem[] = [
-            // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
+            // As in Neo4j, a star gives the variables in the order of their names, before the items named after it: not
+            // a randomUUID() made first for a CALL or a condition (see anewCall), which the statement never named.
             ...(projection.star
                 ? [...select.bound.keys()]
+                      .filter((it) => !this.madeAnew.has(it))
                       .sort()
                       .map((it): ProjectionItem => ({ expression: { kind: 'Variable', name: it }, name: it }))
                 : []),
@@ -2545,7 +2760,7 @@ export class CypherWriter {
 
     /**
      * The rows `select` reads with what the projection reads of them worked out first, in a `WITH` of its own, and the
-     * projection over that: see {@link casesFirst}, {@link sharedFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
+     * projection over that: see {@link anewFirst}, {@link casesFirst}, {@link sharedFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
      * is.
      */
     private workedOutFirst(
@@ -2554,12 +2769,102 @@ export class CypherWriter {
         items: ProjectionItem[]
     ): [Select, Projection] | undefined {
         return (
+            this.anewFirst(select, projection, items) ??
             this.casesFirst(select, projection, items) ??
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
             this.sharedFirst(select, projection, items) ??
             this.aggregatesFirst(select, projection, items) ??
             this.heldFirst(select, projection, items)
         );
+    }
+
+    /**
+     * The rows `select` reads with each randomUUID() that a term of the projection reads inside a larger expression made
+     * first ({@link anewBefore}), and the projection with the term reading that UUID's column; undefined where there is
+     * none. A term that is a randomUUID() alone is a column of the projection already. Two items written alike are given
+     * a UUID each, as in Neo4j; an order term written as an item reads that item's, as Neo4j sorts by the item.
+     */
+    private anewFirst(
+        select: Select,
+        projection: Projection,
+        items: ProjectionItem[]
+    ): [Select, Projection] | undefined {
+        const itemTerms = items.map((it) => it.expression);
+        const orderTerms = new Map<string, Expression>();
+        projection.orderBy.forEach((sort) => {
+            if (!itemTerms.some((it) => sameExpression(it, sort.expression))) {
+                orderTerms.set(expressionKey(sort.expression), sort.expression);
+            }
+        });
+        const made = this.anewBefore(select, [...itemTerms, ...orderTerms.values()], false);
+        if (!made) {
+            return undefined;
+        }
+        const [rows, read] = made;
+        const reads = new Map<string, Expression>();
+        [...itemTerms, ...orderTerms.values()].forEach((term, i) => {
+            const key = expressionKey(term);
+            if (!reads.has(key)) {
+                reads.set(key, read[i]);
+            }
+        });
+        const kept: Projection = {
+            ...projection,
+            star: false,
+            items: items.map((item, i) => ({ ...item, expression: read[i] })),
+            orderBy: projection.orderBy.map((it) => ({ ...it, expression: reads.get(expressionKey(it.expression))! }))
+        };
+        return [rows, kept];
+    }
+
+    /**
+     * The rows `select` reads with each randomUUID() that `terms` read made first, for each row, in a `WITH *` of its own,
+     * and each term as it reads that UUID's column, in their order; undefined where there is none, or, where not `whole`,
+     * where each is a term alone. Worked out in the term, the UUID could be bound in a subquery that reads nothing of the
+     * row ({@link SqlCypherCompiler.shared}), or read in a comprehension's subquery that reads nothing of it either, and
+     * each store works such a subquery out once for the statement: every row was given the same UUID (drivine4j#412).
+     * Made first, it is a column of the row, as a `WITH`'s own randomUUID() is ({@link SqlCypherCompiler.once}). One in a
+     * comprehension's, a quantifier's, a reduce's or a pattern comprehension's own expressions is made again for each
+     * item there, as in Neo4j: it is read beside a UUID made first for the row ({@link seeded}), so that subquery reads
+     * the row. Each call is a UUID of its own, in two terms written alike too, as in Neo4j, where
+     * `randomUUID() = randomUUID()` is false. `anew` tells a call: see {@link match} for another.
+     */
+    private anewBefore(
+        select: Select,
+        terms: Expression[],
+        whole: boolean,
+        anew: (expression: Expression) => boolean = isAnew
+    ): [Select, Expression[]] | undefined {
+        // A call read beside a row's UUID already (isSeeded) reads the row: left as it is, as a call alone is.
+        const alone = (term: Expression): boolean => anew(term) || isSeeded(term);
+        const holds = (e: Expression): boolean => anew(e) || (!isSeeded(e) && children(e).some(holds));
+        const inBodies = terms.some((it) => !sameExpression(seeded(it, ANEW), it));
+        if (!inBodies && !terms.some((it) => (whole || !alone(it)) && holds(it))) {
+            return undefined;
+        }
+        const made: ProjectionItem[] = [];
+        let seed: string | undefined;
+        if (inBodies) {
+            seed = this.anewVariable();
+            made.push({ expression: RANDOM_UUID, name: seed });
+        }
+        const reads = terms.map((term) => {
+            if (!whole && alone(term)) {
+                return term;
+            }
+            const read = replaced(term, (e): Expression | undefined => {
+                if (anew(e)) {
+                    const name = this.anewVariable();
+                    made.push({ expression: e, name });
+                    return { kind: 'Variable', name };
+                }
+                return isSeeded(e) ? e : undefined;
+            });
+            return seed === undefined ? read : seeded(read, seed);
+        });
+        const projection: Projection = { distinct: false, star: true, items: made, orderBy: [] };
+        // Kept apart, as sharedFirst keeps its own, so no store merges it back into the query that reads it.
+        return [this.with(select, { kind: 'With', projection }, this.around(select), true), reads];
     }
 
     /** `value` as a projection carries it out: without its identity where none is carried (see {@link identities}). */
