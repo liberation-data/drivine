@@ -20,7 +20,7 @@ describe('The Cypher compiler refuses', () => {
         it.each(spec.cases.map((it) => [it.name, it] as const))('%s', async (_, cypherCase) => {
             for (let i = 0; i < cypherCase.steps.length; i++) {
                 if (runsOn(cypherCase.steps[i], store)) {
-                    await check(cypherCase, i, store, async (step) => {
+                    await check('refusals.yaml', cypherCase, i, store, async (step) => {
                         compiler().compile(trimIndent(step.cypher), valuesFor(step.parameters ?? {}, Number));
                         return Promise.resolve([]);
                     });
@@ -368,6 +368,42 @@ describe('The Cypher compiler refuses', () => {
         }
     };
 
+    it("a temporal map of the calendar's fields past Java's years is refused, and one Neo4j runs is compiled", () => {
+        // drivine4j's #495 (#495 here). Beside the spec's "Temporal map of calendar fields Neo4j does not take", those
+        // drivine4j holds of its own.
+        compilers.forEach(([store, compiler]) => {
+            [
+                [
+                    'RETURN date({year: 4294969319, week: 1})',
+                    'date() takes no year 4294969319: Invalid value for Year (valid values -999999999 - 999999999): 4294969319'
+                ],
+                [
+                    'RETURN date({year: -1000000000, quarter: 1})',
+                    'date() takes no year -1000000000: Invalid value for Year (valid values -999999999 - 999999999): -1000000000'
+                ],
+                // Week 53 of Java's last year runs on past it.
+                [
+                    'RETURN date({year: 999999999, week: 53, dayOfWeek: 7})',
+                    'date() takes no year 999999999: Invalid value for EpochDay (valid values -365243219162 - 365241780471): 365241780480'
+                ],
+                [
+                    'RETURN datetime({year: 2024, ordinalDay: 2.0})',
+                    'datetime() takes a whole number for ordinalDay, not 2.0.'
+                ],
+                ['RETURN date({year: 2024, week: true})', 'date() takes a whole number for week, not true.']
+            ].forEach(([cypher, message]) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, message])
+            );
+            // Week 53 of a year of 52 weeks and a day of the quarter past its last run on, -1 is written as much as 1, and
+            // what an expression or a parameter gives is the store's to check.
+            [
+                'RETURN date({year: 2019, week: 53}), date({year: 2023, quarter: 1, dayOfQuarter: 92}), date({year: 2024, ordinalDay: 366})',
+                'RETURN date({year: -1, ordinalDay: 1}), date({year: 999999999, week: 52}), date({year: -999999999, ordinalDay: 1})',
+                "WITH 54 AS w RETURN date({year: 2020, week: w}), datetime({year: $y, ordinalDay: 366, timezone: '+01:00'})"
+            ].forEach((cypher) => expect(compiler().compile(cypher, { y: 2023 }).sql).toBeDefined());
+        });
+    });
+
     it('a CALL sees only the variables of the row it imports, and a bracketed name not of the row is refused', () => {
         // drivine4j's #410 (#473 here). A CALL saw every variable of its row, so a name it does not import joined the row's.
         const undefinedVariable = (name: string): string =>
@@ -444,8 +480,10 @@ describe('The Cypher compiler refuses', () => {
         // drivine4j's #489 (#487 here): Neo4j's 42I24, "invalid use of aggregate function". Each was compiled, its aggregate
         // straight into the SQL WHERE. Beside the spec's "Aggregate in a WHERE", those drivine4j holds of its own.
         const where = (aggregate: string): string =>
-            `${aggregate} aggregates, and a WHERE holds no aggregate, as in Neo4j: aggregate in a WITH first, ` +
+            `${aggregate} aggregates, and a WHERE holds no aggregate unless its WITH aggregates, as in Neo4j: aggregate in a WITH first, ` +
             "and filter what it gives in that WITH's WHERE, as in WITH x, count(*) AS c WHERE c > 1.";
+        const undefinedVariable = (variable: string): string =>
+            `${variable} is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.`;
         compilers.forEach(([store, compiler]) => {
             [
                 ['UNWIND [1, 2] AS i WITH i WHERE sum(i) > 1 RETURN i', 'sum()'],
@@ -483,9 +521,31 @@ describe('The Cypher compiler refuses', () => {
                 ['UNWIND [1] AS i RETURN i ORDER BY size([x IN [1, 2] WHERE sum(x) > 0 | x])', 'sum()'],
                 ['UNWIND [1] AS i WITH i ORDER BY size([x IN [1, 2] WHERE sum(x) > 0 | x]) RETURN i', 'sum()'],
                 ['MATCH (n) WHERE reduce(s = 0, x IN [1] | s + count(x)) > 0 RETURN n', 'count()'],
-                ['MATCH (n) WHERE (n)-->({v: [x IN [1] WHERE sum(x) > 0 | x]}) RETURN n', 'sum()']
+                ['MATCH (n) WHERE (n)-->({v: [x IN [1] WHERE sum(x) > 0 | x]}) RETURN n', 'sum()'],
+                // drivine4j's #497 (#496 here): a WITH whose only aggregate is in its WHERE groups nothing; in the WHERE of one
+                // that groups, a comprehension's, a quantifier's, a reduce()'s or a pattern's own WHERE or body holds none either.
+                [
+                    'UNWIND [1, 1, 2] AS i WITH DISTINCT i WHERE reduce(s = 0, x IN [1] | s + count(*)) > 0 RETURN i',
+                    'count(*)'
+                ],
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i] AS x WITH x WHERE count(*) > 1 RETURN x } RETURN x',
+                    'count(*)'
+                ]
             ].forEach(([cypher, aggregate]) =>
                 expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, where(aggregate)])
+            );
+            // There, a variable from before the WITH is read only inside an aggregate, or where it is a key, written as its
+            // item is: beside the spec's "Variable before a WITH that groups, in its WHERE", those drivine4j holds of its own.
+            [
+                ['MATCH (p)-[:ACTED_IN]->(m) WITH p.name AS n, count(*) AS c WHERE p.born > 1965 RETURN n, c', 'p'],
+                ['MATCH (p)-[:ACTED_IN]->(m) WITH p, count(*) AS c WHERE m.released > 1996 RETURN p.name', 'm'],
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i] AS x WITH x % 2 AS k, count(*) AS c WHERE x > 1 RETURN c } RETURN c',
+                    'x'
+                ]
+            ].forEach(([cypher, variable]) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefinedVariable(variable)])
             );
             // A WHERE over what an aggregate gave, or in a subquery or a CALL that aggregates in its own query, is compiled, as Neo4j runs it.
             [
@@ -496,7 +556,14 @@ describe('The Cypher compiler refuses', () => {
                 'MATCH (n) CALL (n) { MATCH (n)-->(m) WITH count(m) AS c WHERE c > 0 RETURN c } RETURN n.x, c',
                 'MATCH (n) WITH n, count { (n)-->() } AS c WHERE c > 0 RETURN n.x',
                 'UNWIND [{a: 1}, {a: 2}] AS x RETURN x.a, count(*)',
-                'UNWIND [1, 2] AS x RETURN x, collect(x)'
+                'UNWIND [1, 2] AS x RETURN x, collect(x)',
+                // The WHERE of a WITH that aggregates, or is DISTINCT, filters its groups, an aggregate in it among them (#496).
+                'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(*) > 1 RETURN i',
+                'UNWIND [1, 1, 2] AS i WITH DISTINCT i WHERE count(*) > 1 RETURN i',
+                'UNWIND [1, 1, 2] AS i WITH i AS j, count(*) AS c WHERE i > 1 RETURN j, c',
+                'UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE all(x IN collect(i) WHERE x > 1) RETURN i, c',
+                'MATCH (n) WITH n, count(*) AS c WHERE EXISTS { MATCH (n)-->(m) WITH m, count(*) AS k WHERE count(*) > 0 RETURN m } RETURN n.x',
+                'UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i] AS x WITH x, count(*) AS c WHERE count(*) > 1 RETURN c } RETURN i, c'
             ].forEach((cypher) =>
                 expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
             );
