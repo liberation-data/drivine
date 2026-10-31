@@ -432,6 +432,16 @@ cases:
       - cypher: "MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyWrite) WITH c WHERE c.id = a.next SET c.prev = a.id RETURN c.prev AS p, c.id AS i } RETURN [p, i]"
         only: [neo4j, sql]
         rows: [[1, 5]]
+      - note: "A leading WITH * passes on what the CALL imports, and nothing where it imports nothing."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {id: 1}) CALL { WITH * SET a.starred = true RETURN a.starred AS s } RETURN s"
+        rows: [true]
+      - cypher: "UNWIND [6, 7] AS i CALL (i) { WITH * CREATE (x:CyWrite {id: i}) RETURN x.id AS made } RETURN made"
+        only: [neo4j, sql]
+        rows: [6, 7]
+      - cypher: "CALL { WITH * CREATE (x:CyWrite {id: 8}) RETURN x.id AS made } RETURN made"
+        only: [neo4j, sql]
+        rows: [8]
 
   - name: "Writing through lists"
     description: "A list of nodes or relationships refers to them, so writing to an item writes to the node."

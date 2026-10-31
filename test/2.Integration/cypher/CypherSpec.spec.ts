@@ -3527,6 +3527,209 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [2, 1]
             ]);
         });
+
+        it('a WITH star at the start of a CALL passes on what the CALL imports, and nothing where nothing is bound', async () => {
+            // drivine4j's own test of liberation-data/drivine4j#472, ported for #485, whole, as drivine4j keeps it beside
+            // the spec's steps of v0.11.0. The star expanded to the variables the CALL's first query bound, not those it
+            // imported, so it was refused with "A projection has at least one item"; and a WITH * where nothing was bound
+            // was refused so. The rows are Neo4j's (2026.10).
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            for (const [cypher, rows] of [
+                ['UNWIND [1, 2] AS i CALL { WITH * RETURN i AS x } RETURN x', [1, 2]],
+                ['UNWIND [1, 2] AS i CALL (*) { WITH * RETURN i AS x } RETURN x', [1, 2]],
+                ['UNWIND [1, 2] AS i CALL (i) { WITH * RETURN i AS x } RETURN x', [1, 2]],
+                ['UNWIND [1, 2] AS i CALL (i) { WITH * WITH * RETURN i * 10 AS x } RETURN x', [10, 20]],
+                ['UNWIND [1] AS i WITH i, 2 AS j CALL { WITH * RETURN i + j AS x } RETURN x', [3]],
+                ['UNWIND [1] AS i CALL { WITH * UNWIND [5] AS k WITH * RETURN i + k AS x } RETURN x', [6]],
+                [
+                    'MATCH (p:Person) CALL { WITH * RETURN p.name AS n } RETURN n ORDER BY n',
+                    ['Carrie', 'Hugo', 'Keanu', 'Laurence']
+                ],
+                [
+                    'UNWIND [1, 2] AS i CALL { WITH * RETURN i AS x UNION WITH * RETURN i * 10 AS x } RETURN x ORDER BY x',
+                    [1, 2, 10, 20]
+                ],
+                ['UNWIND [1] AS i CALL { WITH * CALL { WITH * RETURN i AS y } RETURN y AS x } RETURN x', [1]],
+                [
+                    'UNWIND [1, 2] AS i OPTIONAL CALL { WITH * WITH * WHERE i > 1 RETURN i AS x } RETURN i, x',
+                    [
+                        [1, null],
+                        [2, 2]
+                    ]
+                ],
+                // A star gives none of what brackets import, which the CALL sees throughout anyway.
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { WITH 1 AS one WITH * RETURN * } RETURN *',
+                    [
+                        [1, 1],
+                        [2, 1]
+                    ]
+                ],
+                [
+                    'UNWIND [1, 2] AS i CALL (i) { WITH *, 2 AS y RETURN * } RETURN *',
+                    [
+                        [1, 2],
+                        [2, 2]
+                    ]
+                ],
+                // Where nothing is bound, a WITH * passes on nothing.
+                ['CALL { WITH * RETURN 1 AS x } RETURN x', [1]],
+                ['CALL (*) { WITH * RETURN 1 AS x } RETURN x', [1]],
+                ['UNWIND [1] AS i CALL () { WITH * RETURN 1 AS x } RETURN i, x', [[1, 1]]],
+                [
+                    'UNWIND [1, 2] AS i CALL () { WITH * WITH * RETURN 3 AS x } RETURN i, x',
+                    [
+                        [1, 3],
+                        [2, 3]
+                    ]
+                ],
+                ['WITH * RETURN 1 AS x', [1]],
+                // Its WHERE is met still, on the rows it reads.
+                ['WITH * WHERE false RETURN 1 AS x', []],
+                ['WITH * WHERE true RETURN 1 AS x', [1]],
+                ['RETURN 1 AS x UNION ALL WITH * WHERE false RETURN 2 AS x', [1]],
+                ['UNWIND [1, 2] AS i CALL () { WITH * WHERE false RETURN 1 AS x } RETURN i, x', []],
+                ['UNWIND [1, 2] AS i CALL (i) { WITH * WHERE i > 1 RETURN i AS x } RETURN x', [2]],
+                // A randomUUID() in its WHERE is made for each row it reads, and once for each call of it.
+                ['WITH * WHERE randomUUID() = randomUUID() RETURN 1 AS x', []],
+                [
+                    "UNWIND range(1, 40) AS i CALL () { WITH * WHERE randomUUID() < '8' RETURN 1 AS x } RETURN count(*) > 0 AND count(*) < 40 AS mixed",
+                    [true]
+                ],
+                // A CALL without brackets that imports only the UUID the compiler made for it passes on nothing.
+                ['CALL { WITH * RETURN toUpper(randomUUID()) AS u } RETURN size(u) AS n', [36]],
+                // Made for each row, beside a randomUUID(): not the compiler's own variables (#412), which no star shows.
+                [
+                    'UNWIND [1, 2] AS i CALL { WITH * RETURN toString(i) + randomUUID() AS u } RETURN count(DISTINCT u) AS n',
+                    [2]
+                ],
+                [
+                    'UNWIND [1, 2] AS i CALL () { WITH * RETURN toUpper(randomUUID()) AS u } RETURN count(DISTINCT u) AS n',
+                    [2]
+                ]
+            ] as const) {
+                expect([cypher, await query(cypher)]).toEqual([cypher, rows]);
+            }
+            for (const cypher of [
+                'UNWIND [1] AS i CALL () { WITH * RETURN i AS x } RETURN x',
+                // A RETURN * of the CALL returns what it imports, which the row holds already.
+                'UNWIND [1, 2] AS i CALL { WITH * RETURN * } RETURN i'
+            ]) {
+                await expect(query(cypher)).rejects.toThrow();
+            }
+            // With DISTINCT, an order, SKIP or LIMIT it is refused, not left out: Neo4j gives [], [], [] and [1, 2].
+            if (store.type !== DatabaseType.NEO4J) {
+                for (const cypher of [
+                    'WITH * LIMIT 0 RETURN 1 AS x',
+                    'WITH * SKIP 1 RETURN 1 AS x',
+                    'UNWIND [1, 2] AS i CALL (i) { WITH * LIMIT 0 RETURN i AS x } RETURN x',
+                    'UNWIND [1, 2] AS i CALL (i) { WITH DISTINCT * RETURN i AS x } RETURN x'
+                ]) {
+                    await expect(query(cypher)).rejects.toThrow('A projection has at least one item.');
+                }
+            }
+            const uuids = await query('UNWIND [1, 2] AS i CALL { WITH * RETURN toUpper(randomUUID()) AS u } RETURN *');
+            expect(uuids.map((it) => it[0])).toEqual([1, 2]);
+            expect(uuids.every((it) => it.length === 2 && it[1].length === 36)).toBe(true);
+            const renamed = await query(
+                'UNWIND [1, 2] AS i CALL { WITH * WITH i AS j, toUpper(randomUUID()) AS u RETURN * } RETURN *'
+            );
+            expect(renamed.map((it) => it.slice(0, 2))).toEqual([
+                [1, 1],
+                [2, 2]
+            ]);
+            expect(renamed.every((it) => it.length === 3 && it[2].length === 36)).toBe(true);
+            const bracketed = await query(
+                'UNWIND [1, 2] AS i CALL (i) { WITH * RETURN i AS x, toUpper(randomUUID()) AS u } RETURN *'
+            );
+            expect(bracketed.map((it) => [it[0], it[2]])).toEqual([
+                [1, 1],
+                [2, 2]
+            ]);
+            expect(new Set(bracketed.map((it) => it[1])).size).toBe(2);
+        });
+    });
+
+    /**
+     * A pattern comprehension whose body reads none of its pattern's own variables, on every store: drivine4j's own test
+     * of liberation-data/drivine4j#467, ported for #486. Its aggregate read only the row's columns, so it was the row
+     * query's, which Postgres refused ("must appear in the GROUP BY clause").
+     */
+    describe("a pattern comprehension whose body reads none of its pattern's variables", () => {
+        it('gives an item for each match, on each row', async () => {
+            await clear();
+            await query(loadSpec('queries.yaml').graph!);
+            const sizes = [
+                ['Carrie', 2],
+                ['Hugo', 0],
+                ['Keanu', 4],
+                ['Laurence', 2]
+            ];
+            expect(await query('MATCH (p:Person) RETURN p.name, [(p)-->() | p.name] ORDER BY p.name')).toEqual([
+                ['Carrie', ['Carrie', 'Carrie']],
+                ['Hugo', []],
+                ['Keanu', ['Keanu', 'Keanu', 'Keanu', 'Keanu']],
+                ['Laurence', ['Laurence', 'Laurence']]
+            ]);
+            for (const cypher of [
+                'MATCH (p:Person) RETURN p.name, size([(p)-->(m) | p]) ORDER BY p.name',
+                'MATCH (p:Person) WITH p, 7 AS k RETURN p.name, size([(p)-->() | k]) ORDER BY p.name',
+                'MATCH (p:Person) RETURN p.name, size([(p)-->(m) | COUNT { (p)-->() }]) ORDER BY p.name',
+                'MATCH (p:Person) CALL (p) { RETURN [(p)-->() | p.name] AS names } RETURN p.name, size(names) ORDER BY p.name',
+                'MATCH (p:Person) CALL { WITH p RETURN [(p)-->(m) | p.name] AS names } RETURN p.name, size(names) ORDER BY p.name',
+                'OPTIONAL MATCH (p:Person) RETURN p.name, size([(p)-->() | p.name]) ORDER BY p.name',
+                // Its WHERE may read only the row too.
+                'MATCH (p:Person) RETURN p.name, size([(p)-->(m) WHERE p.born > 0 OR p.born IS NULL | p.name]) ORDER BY p.name',
+                // A name of the pattern's that the body binds again for its own, and reads only so, is not the pattern's.
+                'MATCH (p:Person) RETURN p.name, size([(p)-->(m) | [m IN [p.name] | m]]) ORDER BY p.name',
+                "MATCH (p:Person) RETURN p.name, size([(p)-->(m) | reduce(m = '', x IN [1] | m + p.name)]) ORDER BY p.name",
+                "MATCH (p:Person) RETURN p.name, size([(p)-->(m) | any(m IN [p.name] WHERE m = 'Keanu')]) ORDER BY p.name",
+                'MATCH (p:Person) RETURN p.name, size([(p)-[r]->() | p {.name, n: [r IN [1] | r]}]) ORDER BY p.name',
+                'MATCH (p:Person) RETURN p.name, size([(p)-->(m) | [(p)-->() | [m IN [p.name] | m]]]) ORDER BY p.name',
+                // Its path variable is its own, where the row holds that name too.
+                'MATCH (p:Person) WITH p, 1 AS q RETURN p.name, size([q = (p)-->() | length(q)]) ORDER BY p.name'
+            ]) {
+                expect([cypher, await query(cypher)]).toEqual([cypher, sizes]);
+            }
+            // One that reads no row, a parameter, is gathered as it was.
+            expect(
+                await query('MATCH (p:Person) RETURN p.name, size([(p)-->() | $x]) ORDER BY p.name', { x: 5 })
+            ).toEqual(sizes);
+            // Read by a relationship of the row, in another comprehension's body, or in a WHERE.
+            expect(
+                await query('MATCH (p:Person)-[r:KNOWS]->(q) RETURN p.name, [(q)-->() | type(r)] ORDER BY p.name')
+            ).toEqual([
+                ['Keanu', ['KNOWS', 'KNOWS']],
+                ['Laurence', ['KNOWS', 'KNOWS', 'KNOWS', 'KNOWS']]
+            ]);
+            expect(
+                await query('MATCH (p:Person)-[r:KNOWS]->(q) RETURN p.name, size([(q)-->() | r]) ORDER BY p.name')
+            ).toEqual([
+                ['Keanu', 2],
+                ['Laurence', 4]
+            ]);
+            expect(
+                await query(
+                    'MATCH (p:Person) UNWIND [(p)-->(m) | [(m)-->() | p.name]] AS l WITH p, l WHERE size(l) > 0 RETURN p.name, size(l) ORDER BY p.name'
+                )
+            ).toEqual([
+                ['Keanu', 2],
+                ['Laurence', 4]
+            ]);
+            expect(
+                await query('MATCH (p:Person) WHERE size([(p)-->() | p.name]) > 1 RETURN p.name ORDER BY p.name')
+            ).toEqual(['Carrie', 'Keanu', 'Laurence']);
+            // A UUID made for each match, as it was.
+            expect(
+                await query(
+                    'MATCH (p:Person) UNWIND [(p)-->(m) | p.name + randomUUID()] AS u RETURN count(u), count(DISTINCT u)'
+                )
+            ).toEqual([[8, 8]]);
+            // In a write, which Postgres refused.
+            await query('MATCH (p:Person) SET p.knows = size([(p)-->() | p.name])');
+            expect(await query('MATCH (p:Person) RETURN p.name, p.knows ORDER BY p.name')).toEqual(sizes);
+        });
     });
 
     /**

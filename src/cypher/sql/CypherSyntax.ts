@@ -418,6 +418,51 @@ export function variablesIn(expression: Expression): Set<string> {
     }
 }
 
+/**
+ * The variables `expression` reads of the scope it is in: those {@link variablesIn} gives, but for a name that a
+ * comprehension, a quantifier or a reduce binds of its own and reads only inside, so `[m IN [p.name] | m]` reads `p`
+ * alone. A pattern's new variables can't be named so in Cypher, nor a subquery's, so a pattern's are as
+ * {@link variablesOfPattern} gives them.
+ */
+export function variablesReadIn(expression: Expression): Set<string> {
+    const of = (...expressions: (Expression | undefined)[]): string[] =>
+        expressions.flatMap((it) => (it ? [...variablesReadIn(it)] : []));
+    const without = (names: string[], ...own: string[]): string[] => names.filter((it) => !own.includes(it));
+    switch (expression.kind) {
+        case 'Variable':
+            return new Set([expression.name]);
+        case 'MapProjection':
+            return new Set([
+                expression.variable,
+                ...expression.elements.flatMap((it) => (it.kind === 'Variable' ? [it.name] : [])),
+                ...of(...children(expression))
+            ]);
+        case 'ListComprehension':
+            return new Set([
+                ...of(expression.list),
+                ...without(of(expression.where, expression.projection), expression.variable)
+            ]);
+        case 'Quantifier':
+            return new Set([...of(expression.list), ...without(of(expression.where), expression.variable)]);
+        case 'Reduce':
+            return new Set([
+                ...of(expression.initial, expression.list),
+                ...without(of(expression.expression), expression.accumulator, expression.variable)
+            ]);
+        case 'PatternComprehension':
+            return new Set([...variablesOfPattern(expression.pattern), ...of(expression.where, expression.projection)]);
+        case 'PatternPredicate':
+            return variablesOfPattern(expression.pattern);
+        case 'Exists':
+            return new Set([
+                ...expression.patterns.flatMap((it) => [...variablesOfPattern(it)]),
+                ...of(expression.where)
+            ]);
+        default:
+            return new Set(of(...children(expression)));
+    }
+}
+
 /** Every parameter `expression` names, in any expression it holds. */
 export function parametersIn(expression: Expression): Set<string> {
     const of = (...expressions: (Expression | undefined)[]): string[] =>

@@ -166,6 +166,82 @@ cases:
       - cypher: "MATCH (p:Person {name: 'Hugo'}) RETURN [(p)-[:ACTED_IN]->(m) | m.title]"
         rows: [[]]
 
+  - name: "Pattern comprehension whose body reads only the row"
+    description: "A pattern comprehension whose body reads none of its pattern's own variables gives one item for each match of its pattern, for each row."
+    steps:
+      - note: "Its body reads only a variable of the row: the value again for each match."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) RETURN p.name, [(p)-->(m) | p.name] AS names ORDER BY p.name"
+        rows: [["Carrie", ["Carrie", "Carrie"]], ["Hugo", []], ["Keanu", ["Keanu", "Keanu", "Keanu", "Keanu"]], ["Laurence", ["Laurence", "Laurence"]]]
+      - cypher: "MATCH (p:Person) RETURN p.name, [(p)-[:ACTED_IN]->(:Movie) | p.born] AS l ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", [1967, 1967]], ["Hugo", []], ["Keanu", [1964, 1964, 1964]], ["Laurence", [1961]]]
+      - cypher: "MATCH (p:Person) RETURN p.name, size([(p)-->() | p]) AS l ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 2], ["Hugo", 0], ["Keanu", 4], ["Laurence", 2]]
+      - cypher: "MATCH (p:Person) WITH p, 7 AS k RETURN p.name, [(p)-->() | k] AS l ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", [7, 7]], ["Hugo", []], ["Keanu", [7, 7, 7, 7]], ["Laurence", [7, 7]]]
+      - cypher: "MATCH (p:Person) RETURN p.name, [(p)-->(m) | COUNT { (p)-->() }] AS l ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", [2, 2]], ["Hugo", []], ["Keanu", [4, 4, 4, 4]], ["Laurence", [2, 2]]]
+      - note: "Or a literal."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) RETURN p.name, [(p)-->(m) | 1] AS l ORDER BY p.name"
+        rows: [["Carrie", [1, 1]], ["Hugo", []], ["Keanu", [1, 1, 1, 1]], ["Laurence", [1, 1]]]
+      - note: "randomUUID() in it is made again for each match."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) UNWIND [(p)-->(m) | p.name + randomUUID()] AS u RETURN count(u) AS n, count(DISTINCT u) AS d"
+        rows: [[8, 8]]
+      - note: "Its WHERE reads only the row too."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) RETURN p.name, [(p)-->(m) WHERE p.born > 1962 | p.name] AS l ORDER BY p.name"
+        rows: [["Carrie", ["Carrie", "Carrie"]], ["Hugo", []], ["Keanu", ["Keanu", "Keanu", "Keanu", "Keanu"]], ["Laurence", []]]
+      - note: "Read by a WHERE, an ORDER BY, an UNWIND, an aggregate, or as a grouping key."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) WHERE size([(p)-->() | p.name]) > 1 RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) RETURN p.name ORDER BY size([(p)-->() | p.name]), p.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Laurence", "Keanu"]
+      - cypher: "MATCH (p:Person) UNWIND [(p)-->() | p.name] AS n RETURN n, count(*) AS c ORDER BY n"
+        only: [neo4j, sql]
+        rows: [["Carrie", 2], ["Keanu", 4], ["Laurence", 2]]
+      - cypher: "MATCH (p:Person) RETURN collect(size([(p)-->() | p.name])) AS l"
+        only: [neo4j, sql]
+        unorderedLists: true
+        rows: [[0, 2, 2, 4]]
+      - cypher: "MATCH (p:Person) RETURN [(p)-->() | p.name] AS names, count(*) AS c ORDER BY c, size(names), names[0]"
+        only: [neo4j, sql]
+        rows: [[[], 1], [["Carrie", "Carrie"], 1], [["Laurence", "Laurence"], 1], [["Keanu", "Keanu", "Keanu", "Keanu"], 1]]
+      - note: "In another pattern comprehension's body, reading the outer one's variable or the row's."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) UNWIND [(p)-->(m) | [(m)-->() | m.name]] AS l RETURN p.name, l ORDER BY p.name, size(l)"
+        rows: [["Carrie", []], ["Carrie", []], ["Keanu", []], ["Keanu", []], ["Keanu", []], ["Keanu", ["Carrie", "Carrie"]], ["Laurence", []], ["Laurence", ["Keanu", "Keanu", "Keanu", "Keanu"]]]
+      - cypher: "MATCH (p:Person) UNWIND [(p)-->(m) | [(m)-->() | p.name]] AS l RETURN p.name, l ORDER BY p.name, size(l)"
+        only: [neo4j, sql]
+        rows: [["Carrie", []], ["Carrie", []], ["Keanu", []], ["Keanu", []], ["Keanu", []], ["Keanu", ["Keanu", "Keanu"]], ["Laurence", []], ["Laurence", ["Laurence", "Laurence", "Laurence", "Laurence"]]]
+      - note: "Of a row an OPTIONAL MATCH found nothing for, an empty list."
+        only: [neo4j, sql]
+        cypher: "MATCH (m:Movie) OPTIONAL MATCH (m)<-[:ACTED_IN]-(p:Person {name: 'Carrie'}) RETURN m.title, [(p)-->(x) | p.name] AS l ORDER BY m.title"
+        rows: [["Johnny Mnemonic", []], ["The Matrix", ["Carrie", "Carrie"]], ["The Matrix Reloaded", ["Carrie", "Carrie"]]]
+      - cypher: "OPTIONAL MATCH (p:Person {name: 'Nobody'}) RETURN [(p)-->() | p.name] AS l"
+        only: [neo4j, sql]
+        rows: [[]]
+      - cypher: "OPTIONAL MATCH (p:Person) RETURN p.name, [(p)-->() | p.name] AS l ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", ["Carrie", "Carrie"]], ["Hugo", []], ["Keanu", ["Keanu", "Keanu", "Keanu", "Keanu"]], ["Laurence", ["Laurence", "Laurence"]]]
+      - note: "In a CALL, reading what it imports."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person) CALL (p) { RETURN [(p)-->() | p.name] AS names } RETURN p.name, names ORDER BY p.name"
+        rows: [["Carrie", ["Carrie", "Carrie"]], ["Hugo", []], ["Keanu", ["Keanu", "Keanu", "Keanu", "Keanu"]], ["Laurence", ["Laurence", "Laurence"]]]
+      - cypher: "MATCH (p:Person) CALL { WITH p RETURN [(p)-->(m) | p.name] AS names } RETURN p.name, names ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", ["Carrie", "Carrie"]], ["Hugo", []], ["Keanu", ["Keanu", "Keanu", "Keanu", "Keanu"]], ["Laurence", ["Laurence", "Laurence"]]]
+      - cypher: "MATCH (p:Person) CALL (p) { RETURN [(p)-->(m) WHERE p.born > 1962 | p.name] AS l } RETURN p.name, l ORDER BY p.name"
+        only: [neo4j, sql]
+        rows: [["Carrie", ["Carrie", "Carrie"]], ["Hugo", []], ["Keanu", ["Keanu", "Keanu", "Keanu", "Keanu"]], ["Laurence", []]]
+
   - name: "Patterns and labels as conditions"
     description: "Patterns, EXISTS, label tests and list comprehensions work as conditions and as values."
     steps:
@@ -1008,6 +1084,71 @@ cases:
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
+      - note: "A leading WITH * passes on what the CALL imports, with brackets or without."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN i AS x } RETURN x"
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i CALL (*) { WITH * RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH * RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH * WITH * RETURN i * 10 AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [10, 20]
+      - cypher: "UNWIND [1] AS i WITH i, 2 AS j CALL { WITH * RETURN i + j AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [3]
+      - cypher: "UNWIND [1] AS i CALL { WITH * UNWIND [5] AS k WITH * RETURN i + k AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [6]
+      - cypher: "MATCH (p:Person) CALL { WITH * RETURN p.name AS n } RETURN n ORDER BY n"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN i AS x UNION WITH * RETURN i * 10 AS x } RETURN x ORDER BY x"
+        only: [neo4j, sql]
+        rows: [1, 2, 10, 20]
+      - cypher: "UNWIND [1] AS i CALL { WITH * CALL { WITH * RETURN i AS y } RETURN y AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1, 2] AS i OPTIONAL CALL { WITH * WITH * WHERE i > 1 RETURN i AS x } RETURN i, x"
+        only: [neo4j, sql]
+        rows: [[1, null], [2, 2]]
+      - note: "A RETURN * after it returns what the CALL imports, which the row holds already."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN * } RETURN i"
+        error: true
+      - note: "A star gives none of what brackets import, which the CALL sees throughout anyway."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL (i) { WITH 1 AS one WITH * RETURN * } RETURN *"
+        rows: [[1, 1], [2, 1]]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH *, 2 AS y RETURN * } RETURN *"
+        only: [neo4j, sql]
+        rows: [[1, 2], [2, 2]]
+      - note: "Where the CALL imports nothing, a leading WITH * passes on nothing."
+        only: [neo4j, sql]
+        cypher: "CALL { WITH * RETURN 1 AS x } RETURN x"
+        rows: [1]
+      - cypher: "CALL (*) { WITH * RETURN 1 AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1] AS i CALL () { WITH * RETURN 1 AS x } RETURN i, x"
+        only: [neo4j, sql]
+        rows: [[1, 1]]
+      - cypher: "UNWIND [1] AS i CALL () { WITH * RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        error: true
+      - cypher: "UNWIND [1, 2] AS i CALL () { WITH * WITH * RETURN 3 AS x } RETURN i, x"
+        only: [neo4j, sql]
+        rows: [[1, 3], [2, 3]]
+      - note: "Its WHERE is met still, and reads what the brackets import."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL () { WITH * WHERE false RETURN 1 AS x } RETURN i, x"
+        rows: []
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH * WHERE i > 1 RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [2]
       - note: "In a UNION, each query imports what its own leading WITH names."
         only: [neo4j, sql]
         cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n UNION ALL MATCH (a:Movie) RETURN count(a) AS n } RETURN a.name, n"
@@ -1340,6 +1481,16 @@ cases:
         rows: [[2, 1, 0]]
       - cypher: "WITH 1 AS b, 2 AS a WITH * RETURN *"
         rows: [[2, 1]]
+      - note: "A WITH * where nothing is bound passes on nothing."
+        only: [neo4j, sql]
+        cypher: "WITH * RETURN 1 AS x"
+        rows: [1]
+      - cypher: "WITH * WHERE false RETURN 1 AS x"
+        only: [neo4j, sql]
+        rows: []
+      - cypher: "RETURN 1 AS x UNION ALL WITH * WHERE false RETURN 2 AS x"
+        only: [neo4j, sql]
+        rows: [1]
       - cypher: "UNWIND [2, 1] AS b WITH b, 10 - b AS a RETURN * ORDER BY b"
         rows: [[9, 1], [8, 2]]
 
