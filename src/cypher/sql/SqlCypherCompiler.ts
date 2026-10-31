@@ -21,6 +21,7 @@ import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
 import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
+import { VariableKinds } from '@/cypher/sql/VariableKinds';
 import { CypherFloat } from '@/cypher/ast/Expression';
 
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
@@ -147,6 +148,8 @@ export abstract class SqlCypherCompiler {
      * where it writes.
      */
     compileQuery(query: Query, parameters: Record<string, any>): CompiledCypher {
+        // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
+        VariableKinds.check(query);
         if (query.unions.length > 0) {
             return this.withFunctions(this.union(query, parameters));
         }

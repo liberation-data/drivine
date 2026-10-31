@@ -367,6 +367,23 @@ describe('CypherReader', () => {
         expect(ret.projection.items.map((it) => it.name)).toEqual(['t']);
     });
 
+    it('reads a call of a subquery with the variables its brackets import', () => {
+        // Each form: whether it is OPTIONAL, the variables its brackets name (none with no brackets), and whether it imports each, (*).
+        (
+            [
+                ['MATCH (a) CALL { WITH a RETURN a AS x } RETURN x', [false, undefined, undefined]],
+                ['MATCH (a) CALL () { RETURN 1 AS x } RETURN x', [false, [], undefined]],
+                ['MATCH (a), (b) CALL (a, b) { RETURN a AS x } RETURN x', [false, ['a', 'b'], undefined]],
+                ['MATCH (a), (b) CALL(a,b){ RETURN a AS x } RETURN x', [false, ['a', 'b'], undefined]],
+                ['MATCH (a) CALL (*) { RETURN a AS x } RETURN x', [false, [], true]],
+                ['MATCH (a) OPTIONAL CALL (a) { MATCH (a)-->(b) RETURN b } RETURN b', [true, ['a'], undefined]]
+            ] as const
+        ).forEach(([cypher, expected]) => {
+            const call = CypherReader.read(cypher).clauses.find((it): it is Call => it.kind === 'Call')!;
+            expect([cypher, call.optional, call.imports, call.importsAll]).toEqual([cypher, ...expected]);
+        });
+    });
+
     it('refuses Cypher the compiler does not take by name, and what is not Cypher with where', () => {
         expect(() => CypherReader.read('CALL db.indexes()')).toThrow(
             'A procedure call (CALL) is Cypher, and is not compiled to SQL yet.'
