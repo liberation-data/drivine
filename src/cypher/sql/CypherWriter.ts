@@ -87,7 +87,7 @@ import { Procedure, Walk, Walked } from '@/cypher/sql/Procedure';
 import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { TRUNCATION_UNITS } from '@/cypher/sql/TemporalSql';
-import { Overrides, Temporals } from '@/cypher/sql/Temporals';
+import { CALENDAR_FIELDS, Overrides, Temporals } from '@/cypher/sql/Temporals';
 import {
     bool,
     BoolValue,
@@ -331,6 +331,191 @@ function writtenNumber(value: Expression): unknown {
 }
 
 /**
+ * Refuses `keys`, the fields of a map that `name` makes a value of `kind` of, where it makes none of them: a time of day
+ * has no date to give, as Neo4j has it, and a field the stores have no SQL for yet is refused as not compiled yet.
+ */
+function mapFields(kind: Temporal, name: string, keys: string[]): void {
+    const dated = kind === Temporal.DATE || kind === Temporal.LOCAL_DATE_TIME || kind === Temporal.DATE_TIME;
+    if (kind.instant && !dated) {
+        const calendar = keys.find((it) => CALENDAR_FIELDS.includes(it));
+        if (calendar !== undefined) {
+            throw new DrivineError(`${name}() takes no field ${calendar}.`);
+        }
+    }
+    const known =
+        kind === Temporal.DURATION ? DURATION_MAP_FIELDS : [...INSTANT_MAP_FIELDS, ...(dated ? CALENDAR_FIELDS : [])];
+    const unknown = keys.find((it) => !known.includes(it));
+    if (unknown !== undefined) {
+        unsupported(`${name}() of a map with ${unknown}`);
+    }
+}
+
+/** Refuses the `timezone` of `entries`, a map of the calendar's fields, where it is a zone by name, which no store's text holds yet, rather than give null. */
+function calendarZone(entries: [string, Expression][]): void {
+    const zone = entries.find(([key]) => key === 'timezone')?.[1];
+    if (zone?.kind !== 'Literal' || typeof zone.value !== 'string') {
+        return;
+    }
+    if (offsetText(zone.value) === undefined && namedZone(zone.value)) {
+        unsupported(`The time zone '${zone.value}'`);
+    }
+}
+
+/** The least of the year and each field of a date by the calendar's other fields, which a field given as null is. */
+const CALENDAR_LEAST: Record<string, number> = {
+    year: 0,
+    week: 1,
+    dayOfWeek: 1,
+    ordinalDay: 1,
+    quarter: 1,
+    dayOfQuarter: 1
+};
+
+/** The calendars a map's fields may give a date by, beside a year, and the fields of each. */
+const CALENDARS: [string, string[]][] = [
+    ['a month', ['month', 'day']],
+    ['a week', ['week', 'dayOfWeek']],
+    ['an ordinal day', ['ordinalDay']],
+    ['a quarter', ['quarter', 'dayOfQuarter']]
+];
+
+/**
+ * The date, `[year, month, day]`, that `entries`, the fields of a map given the function `name`, give by the calendar's
+ * other fields beside the year (see `Temporals.ofCalendar`), where it writes the year and each of them as a whole number
+ * or null: undefined where an expression gives any of them, for the store to work out. As Neo4j has them, a field that
+ * is null is given as its least (the year 0, the first week, day or quarter), a week runs to 53 and a day of the quarter
+ * to 92 in any year, carried into the next where it has fewer, and an ordinal day runs to the year's last. Fails, as
+ * Neo4j does, on fields of two calendars (a month beside a week), a day of the week or of the quarter without its week
+ * or quarter, a week or a quarter without a year, and a number written that is not whole or is past its field's range,
+ * the year's among them (Java's, as Neo4j's: ±999,999,999). As drivine4j's.
+ */
+function calendarDate(name: string, entries: [string, Expression][]): [number, number, number] | undefined {
+    const keys = new Set(entries.map(([key]) => key));
+    const calendar = calendarOf(name, keys);
+    const numbers = calendarNumbers(name, entries);
+    if (numbers === undefined) {
+        return undefined;
+    }
+    const year = numbers.year;
+    // A year past Java's, as Neo4j's, fails here.
+    if (year < -999_999_999 || year > 999_999_999) {
+        throw new DrivineError(
+            `${name}() takes no year ${year}: Invalid value for Year (valid values -999999999 - 999999999): ${year}`
+        );
+    }
+    const field = (key: string, label: string, last: number, of: string = ''): number => {
+        const given = numbers[key] ?? 1;
+        if (given < 1 || given > last) {
+            throw new DrivineError(`${name}() takes ${label} from 1 to ${last}${of}, not ${given}.`);
+        }
+        return given;
+    };
+    const days: Record<string, () => number> = {
+        'a week': () => {
+            const january4 = daysFromCivil(year, 1, 4);
+            const monday = january4 - (isoDayOfWeek(january4) - 1);
+            return monday + (field('week', 'a week', 53) - 1) * 7 + field('dayOfWeek', 'a day of the week', 7) - 1;
+        },
+        'an ordinal day': () =>
+            daysFromCivil(year, 1, 1) +
+            field('ordinalDay', 'an ordinal day', leapYear(year) ? 366 : 365, ` in ${year}`) -
+            1,
+        'a quarter': () =>
+            daysFromCivil(year, (field('quarter', 'a quarter', 4) - 1) * 3 + 1, 1) +
+            field('dayOfQuarter', 'a day of the quarter', 92) -
+            1
+    };
+    const epochDay = days[calendar]();
+    // Java's least and greatest days, -999999999-01-01 and +999999999-12-31.
+    if (epochDay < -365_243_219_162 || epochDay > 365_241_780_471) {
+        throw new DrivineError(
+            `${name}() takes no year ${year}: Invalid value for EpochDay (valid values -365243219162 - 365241780471): ${epochDay}`
+        );
+    }
+    return civilFromDays(epochDay);
+}
+
+/**
+ * The calendar, beside the year, that `keys`, the fields of a map given `name`, give a date by: refused where they are
+ * of two, where a day of the week or of the quarter is without its week or quarter, or where they have no year.
+ */
+function calendarOf(name: string, keys: Set<string>): string {
+    const calendars = CALENDARS.filter(([, fields]) => fields.some((it) => keys.has(it)));
+    if (calendars.length > 1) {
+        throw new DrivineError(`${name}() takes ${calendars[0][0]} or ${calendars[1][0]}, not both.`);
+    }
+    if (keys.has('dayOfWeek') && !keys.has('week')) {
+        throw new DrivineError(`${name}() takes a day of the week beside a week.`);
+    }
+    if (keys.has('dayOfQuarter') && !keys.has('quarter')) {
+        throw new DrivineError(`${name}() takes a day of the quarter beside a quarter.`);
+    }
+    if (!keys.has('year')) {
+        // Neo4j makes an ordinal day of no year one of the year 0, which no store's date reaches.
+        if (keys.has('ordinalDay')) {
+            unsupported(`${name}() of an ordinal day without a year`);
+        }
+        throw new DrivineError(`${name}() takes a year beside ${calendars[0][0]}.`);
+    }
+    return calendars[0][0];
+}
+
+/**
+ * The year and the calendar's fields of `entries`, the fields of a map given `name`, where each is written as a whole
+ * number or null, its least: undefined where an expression gives any. A number that is not whole is refused.
+ */
+function calendarNumbers(name: string, entries: [string, Expression][]): Record<string, number> | undefined {
+    const numbers: Record<string, number> = {};
+    for (const [key, value] of entries.filter(([it]) => it === 'year' || CALENDAR_FIELDS.includes(it))) {
+        const literal = writtenNumber(value);
+        if (literal === undefined) {
+            return undefined;
+        }
+        if (literal !== null && (typeof literal !== 'number' || !Number.isInteger(literal))) {
+            const shown = typeof literal === 'string' ? `'${literal}'` : String(literal);
+            throw new DrivineError(`${name}() takes a whole number for ${key}, not ${shown}.`);
+        }
+        numbers[key] = literal ?? CALENDAR_LEAST[key];
+    }
+    return numbers;
+}
+
+/** Whether `year` of the proleptic Gregorian calendar is a leap year. */
+function leapYear(year: number): boolean {
+    return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/** The days from 1970-01-01 to the date `year`-`month`-`day` of the proleptic Gregorian calendar, at any year. */
+function daysFromCivil(year: number, month: number, day: number): number {
+    const y = month <= 2 ? year - 1 : year;
+    const era = Math.floor(y / 400);
+    const yearOfEra = y - era * 400;
+    const dayOfYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+    const dayOfEra = yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
+    return era * 146097 + dayOfEra - 719468;
+}
+
+/** The date, `[year, month, day]`, `days` after 1970-01-01, of the proleptic Gregorian calendar. */
+function civilFromDays(days: number): [number, number, number] {
+    const z = days + 719468;
+    const era = Math.floor(z / 146097);
+    const dayOfEra = z - era * 146097;
+    const yearOfEra = Math.floor(
+        (dayOfEra - Math.floor(dayOfEra / 1460) + Math.floor(dayOfEra / 36524) - Math.floor(dayOfEra / 146096)) / 365
+    );
+    const dayOfYear = dayOfEra - (365 * yearOfEra + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100));
+    const mp = Math.floor((5 * dayOfYear + 2) / 153);
+    const day = dayOfYear - Math.floor((153 * mp + 2) / 5) + 1;
+    const month = mp < 10 ? mp + 3 : mp - 9;
+    return [yearOfEra + era * 400 + (month <= 2 ? 1 : 0), month, day];
+}
+
+/** The ISO day of the week, from 1 for Monday to 7, of the day `days` after 1970-01-01, a Thursday. */
+function isoDayOfWeek(days: number): number {
+    return ((((days + 3) % 7) + 7) % 7) + 1;
+}
+
+/**
  * The offset a truncation's `timezone` field, `value`, gives `fn`, as SQL text. Neo4j takes an offset written as `Z` or
  * `+01:00` alone, as Java's ZoneOffset does (up to 18 hours, and 0 is UTC's, `Z`), and a zone by name, which no store's
  * text holds yet, so it is refused as not compiled yet.
@@ -347,7 +532,7 @@ function truncationZone(fn: FunctionCall, value: Expression): string {
     if (offset !== undefined) {
         return offset;
     }
-    if (!/^[+-]/.test(zone) && namedZone(zone)) {
+    if (namedZone(zone)) {
         return unsupported(`The time zone '${zone}'`);
     }
     throw new DrivineError(`'${zone}' is no time zone.`);
@@ -369,8 +554,14 @@ function offsetText(zone: string): string | undefined {
     return hours === 0 && minutes === 0 ? "'Z'" : `'${zone}'`;
 }
 
-/** Whether `zone` names a time zone, as `Europe/Stockholm` does. */
+/**
+ * Whether `zone` names a time zone, as `Europe/Stockholm` does: not an offset, `+01:00`, which `Intl` takes as a zone
+ * too, nor one Java's ZoneOffset does not take, `+19:00`, which Neo4j fails on.
+ */
 function namedZone(zone: string): boolean {
+    if (/^[+-]/.test(zone)) {
+        return false;
+    }
     try {
         new Intl.DateTimeFormat('en', { timeZone: zone });
         return true;
@@ -1132,12 +1323,21 @@ export class CypherWriter {
      * `` `#anew2` `` or `` `#anew2 row` ``, is not taken for it, hidden from a star or read as its UUID.
      */
     private anewVariable(): string {
-        textsIn(this.queries.splice(0), this.queryTexts);
-        let name = this.alias(ANEW);
-        while (this.queryTexts.has(name)) {
-            name = this.alias(ANEW);
-        }
+        const name = this.hidden(ANEW);
         this.madeAnew.add(name);
+        return name;
+    }
+
+    /**
+     * A name new to the statement, `prefix` and a number: named as no text of the queries given to compile is, nor
+     * begins, so a variable quoted alike, `` `#having2` ``, stays the statement's.
+     */
+    private hidden(prefix: string): string {
+        textsIn(this.queries.splice(0), this.queryTexts);
+        let name = this.alias(prefix);
+        while (this.queryTexts.has(name)) {
+            name = this.alias(prefix);
+        }
         return name;
     }
 
@@ -1180,6 +1380,72 @@ export class CypherWriter {
      * apart from the query that reads it, which must not have it merged in: see {@link casesFirst}.
      */
     private with(select: Select, clause: With, outer: Scope = new Map(), apart: boolean = false): Select {
+        const [read, hidden] = this.having(clause);
+        const next = this.withHaving(select, read, outer, apart);
+        hidden.forEach((it) => next.bound.delete(it));
+        return next;
+    }
+
+    /**
+     * A `WITH` that groups its rows, `clause`, as one that aggregates or is `DISTINCT` does, read as Neo4j reads its
+     * `WHERE`, which filters the groups, as SQL's HAVING does (#496), and the names of the items made for it. Each
+     * aggregate the `WHERE` holds, outside a comprehension's or a quantifier's own expressions, is made an item of the
+     * `WITH`, of its own where no item is that aggregate, named as no variable is, and the `WHERE` reads that item. A key
+     * the `WITH` groups by, written there as the item is, before its name, is read as that item, as in `WITH i AS j,
+     * count(*) AS c WHERE i > 1`; a variable an item is named after is that item, in a larger expression too. Keys and
+     * aggregates are compared as grouping compares them ({@link expressionKey}): `TOUPPER(x)` is the key `toUpper(x)`.
+     * The items made are no variables of the statement's: the `WITH` is read, then they are left out of what it binds.
+     * `clause` as it is where it groups nothing, or has no `WHERE`. As drivine4j's.
+     */
+    private having(clause: With): [With, string[]] {
+        const where = clause.where;
+        const items = clause.projection.items;
+        if (
+            where === undefined ||
+            (!clause.projection.distinct && !items.some((it) => contains(it.expression, isAggregate)))
+        ) {
+            return [clause, []];
+        }
+        const names = new Set(items.map((it) => it.name));
+        const keys = new Map(
+            items
+                .filter((it) => !contains(it.expression, isAggregate) && variablesIn(it.expression).size > 0)
+                .map((it) => [expressionKey(it.expression), it.name])
+        );
+        // An aggregate an item is already is read by that item's name.
+        const aggregates = new Map(
+            items.filter((it) => isAggregate(it.expression)).map((it) => [expressionKey(it.expression), it.name])
+        );
+        const lifted = new Map<string, ProjectionItem>();
+        const read = replaced(where, (part): Expression | undefined => {
+            const key = expressionKey(part);
+            if (isAggregate(part)) {
+                let name = aggregates.get(key) ?? lifted.get(key)?.name;
+                if (name === undefined) {
+                    name = this.hidden('#having');
+                    lifted.set(key, { expression: part, name });
+                }
+                return { kind: 'Variable', name };
+            }
+            // `WITH i + 10 AS i … WHERE i + 10 > 20` reads the item i, as Neo4j does: no key is read where an item is named.
+            if ([...variablesIn(part)].some((it) => names.has(it))) {
+                return part.kind === 'Variable' ? part : undefined;
+            }
+            const name = keys.get(key);
+            return name !== undefined ? { kind: 'Variable', name } : undefined;
+        });
+        if (sameExpression(read, where)) {
+            return [clause, []];
+        }
+        const made = [...lifted.values()];
+        return [
+            { ...clause, projection: { ...clause.projection, items: [...items, ...made] }, where: read },
+            made.map((it) => it.name)
+        ];
+    }
+
+    /** A `WITH` {@link having} has read: see {@link with}. */
+    private withHaving(select: Select, clause: With, outer: Scope = new Map(), apart: boolean = false): Select {
         const projected = this.project(select, clause.projection, false);
         const name = this.alias('w');
         const next = new Select(outer);
@@ -2488,11 +2754,14 @@ export class CypherWriter {
                 } else if (clause.kind === 'With' && rebound) {
                     // What brackets import is seen throughout the call, as Neo4j has it, after a WITH that does not pass
                     // it on too: read again from the row the call is written for, so `CALL (a) { WITH 1 AS one CREATE
-                    // (a)-[:R]->() }` joins the row's a, not a new node. Its WHERE reads them too, so it is met after.
-                    const w = this.with(select, { ...clause, where: undefined });
+                    // (a)-[:R]->() }` joins the row's a, not a new node. Its WHERE reads them too, so it is met after; one
+                    // that filters groups reads the aggregates `having` made items of the WITH.
+                    const [read, hidden] = this.having(clause);
+                    const w = this.withHaving(select, { ...read, where: undefined });
                     const dropped = new Set([...imported].filter((it) => !w.scope.has(it)));
                     this.bindRow(w, caller, dropped, false, before, carriedBefore);
-                    select = clause.where ? this.filteredRows(w, clause.where) : w;
+                    select = read.where ? this.filteredRows(w, read.where) : w;
+                    hidden.forEach((it) => select.bound.delete(it));
                 } else {
                     select = this.next(select, clause);
                 }
@@ -4942,16 +5211,16 @@ export class CypherWriter {
             : of(this.temporals.convertAny(text, kind));
     }
 
-    /** The text of a temporal value of `kind` made of the fields `entries` of a map the statement writes. */
+    /**
+     * The text of a temporal value of `kind` made of the fields `entries` of a map the statement writes. A date or a
+     * moment takes a week, an ordinal day or a quarter in place of a month and a day (see {@link calendarDate}); a time of
+     * day has no date to give, as Neo4j has it.
+     */
     private temporalOfFields(kind: Temporal, entries: [string, Expression][], call: Invocation): string {
         const fields = new Map(
             entries.map(([key, value]): [string, Value] => [key, this.expression(value, call.scope)])
         );
-        const known = kind === Temporal.DURATION ? DURATION_MAP_FIELDS : INSTANT_MAP_FIELDS;
-        const unknown = [...fields.keys()].find((it) => !known.includes(it));
-        if (unknown !== undefined) {
-            unsupported(`${call.fn.name}() of a map with ${unknown}`);
-        }
+        mapFields(kind, call.fn.name, [...fields.keys()]);
         const numbers: Record<string, string> = {};
         fields.forEach((value, key) => {
             if (key !== 'timezone') {
@@ -4961,8 +5230,21 @@ export class CypherWriter {
         if (kind === Temporal.DURATION) {
             return this.temporals.duration(numbers);
         }
-        const timezone = fields.get('timezone');
-        return this.temporals.of(numbers, timezone ? this.textOf(timezone) : undefined, kind);
+        const given = fields.get('timezone');
+        const timezone = given ? this.textOf(given) : undefined;
+        if (!entries.some(([key]) => CALENDAR_FIELDS.includes(key))) {
+            return this.temporals.of(numbers, timezone, kind);
+        }
+        calendarZone(entries);
+        const date = calendarDate(call.fn.name, entries);
+        if (date === undefined) {
+            return this.temporals.ofCalendar(numbers, timezone, kind);
+        }
+        const day: Record<string, string> = Object.fromEntries(
+            Object.entries(numbers).filter(([key]) => !CALENDAR_FIELDS.includes(key))
+        );
+        [day.year, day.month, day.day] = date.map(String);
+        return this.temporals.of(day, timezone, kind);
     }
 
     /** The canonical text of `kind` of the text `value` the statement writes, refused where it is none. */

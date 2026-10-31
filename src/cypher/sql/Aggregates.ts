@@ -1,7 +1,7 @@
 import { DrivineError } from '@/DrivineError';
 import { Expression } from '@/cypher/ast/Expression';
 import { Pattern } from '@/cypher/ast/Pattern';
-import { Clause, Projection, Query, SetItem } from '@/cypher/ast/Query';
+import { Clause, Projection, Query, SetItem, With } from '@/cypher/ast/Query';
 import { children, isAggregate, present } from '@/cypher/sql/CypherSyntax';
 
 /**
@@ -9,7 +9,8 @@ import { children, isAggregate, present } from '@/cypher/sql/CypherSyntax';
  * InvalidAggregation, 42I24), of a `MATCH`, a `WITH`, a comprehension, a quantifier, a pattern's or `EXISTS { … }`'s,
  * in a `CALL { … }` or a subquery too. Read from the statement alone, before it is compiled, so a statement that
  * compiles is compiled as it was. A subquery's own query, `COUNT { MATCH … RETURN count(*) }`, aggregates in its own
- * projections. As drivine4j's Aggregates.
+ * projections. The `WHERE` of a `WITH` that aggregates, or is `DISTINCT`, filters its groups, and holds an aggregate as
+ * Neo4j has it (#496). As drivine4j's Aggregates.
  */
 export const Aggregates = {
     /** Refuses `query` where it aggregates as Cypher does not. */
@@ -33,8 +34,7 @@ function ofClauses(clauses: Clause[]): void {
                 expression(clause.list);
                 break;
             case 'With':
-                ofProjection(clause.projection);
-                where(clause.where);
+                ofWith(clause);
                 break;
             case 'Create':
                 clause.patterns.forEach(ofPattern);
@@ -64,6 +64,16 @@ function ofClauses(clauses: Clause[]): void {
                 break;
         }
     });
+}
+
+function ofWith(clause: With): void {
+    ofProjection(clause.projection);
+    // One that is DISTINCT groups its rows by its items, as one that aggregates does by those that do not.
+    if (clause.projection.distinct || clause.projection.items.some((it) => grouped(it.expression))) {
+        having(clause.where);
+    } else {
+        where(clause.where);
+    }
 }
 
 function ofSetItem(item: SetItem): void {
@@ -97,12 +107,71 @@ function where(condition: Expression | undefined): void {
     }
     const aggregate = aggregateIn(condition);
     if (aggregate) {
-        throw new DrivineError(
-            `${named(aggregate)} aggregates, and a WHERE holds no aggregate, as in Neo4j: aggregate in a WITH first, ` +
-                "and filter what it gives in that WITH's WHERE, as in WITH x, count(*) AS c WHERE c > 1."
-        );
+        refuse(aggregate);
     }
     expression(condition);
+}
+
+/**
+ * The `WHERE`, `condition`, of a `WITH` that aggregates: it filters the groups, as SQL's HAVING does, so an aggregate is
+ * read in it as Neo4j reads it (#496), but not in a comprehension's, a quantifier's, a reduce's or a pattern's own
+ * expressions.
+ */
+function having(condition: Expression | undefined): void {
+    if (condition === undefined) {
+        return;
+    }
+    const aggregate = beyondGroups(condition);
+    if (aggregate) {
+        refuse(aggregate);
+    }
+    expression(condition);
+}
+
+function refuse(aggregate: Expression): never {
+    throw new DrivineError(
+        `${named(aggregate)} aggregates, and a WHERE holds no aggregate unless its WITH aggregates, as in Neo4j: ` +
+            "aggregate in a WITH first, and filter what it gives in that WITH's WHERE, as in WITH x, count(*) AS c WHERE c > 1."
+    );
+}
+
+/**
+ * The first aggregate `expression` holds outside a comprehension's, a quantifier's, a reduce's and a pattern's own
+ * expressions and a subquery's own query, where {@link children} finds its parts: one the compiler reads over a WITH's
+ * groups.
+ */
+function grouped(expression: Expression): Expression | undefined {
+    if (isAggregate(expression)) {
+        return expression;
+    }
+    for (const part of children(expression)) {
+        const found = grouped(part);
+        if (found) {
+            return found;
+        }
+    }
+    return undefined;
+}
+
+/** The first aggregate `expression` holds that {@link grouped} does not find, but {@link aggregateIn} does. */
+function beyondGroups(expression: Expression): Expression | undefined {
+    if (isAggregate(expression)) {
+        return undefined;
+    }
+    const near = children(expression);
+    for (const part of near) {
+        const found = beyondGroups(part);
+        if (found) {
+            return found;
+        }
+    }
+    for (const part of parts(expression).filter((it) => !near.includes(it))) {
+        const found = aggregateIn(part);
+        if (found) {
+            return found;
+        }
+    }
+    return undefined;
 }
 
 /** An aggregate's name as a message gives it. */
