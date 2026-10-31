@@ -87,7 +87,7 @@ import { Procedure, Walk, Walked } from '@/cypher/sql/Procedure';
 import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { TRUNCATION_UNITS } from '@/cypher/sql/TemporalSql';
-import { CALENDAR_FIELDS, Overrides, Temporals } from '@/cypher/sql/Temporals';
+import { CALENDAR_FIELDS, Overrides, SELECTORS, TemporalBase, Temporals } from '@/cypher/sql/Temporals';
 import {
     bool,
     BoolValue,
@@ -266,8 +266,51 @@ function knownNoMap(value: JsonValue): boolean {
     return value.known !== undefined && value.known !== 'MAP';
 }
 
-/** A truncation's fields as a message names them, where it is not `a <field>`. */
-const TRUNCATION_FIELD_NAMES: Partial<Record<string, string>> = { dayOfWeek: 'a day of the week', hour: 'an hour' };
+/** A temporal value's fields as a message names them, where it is not `a <field>`. */
+const FIELD_NOUNS: Partial<Record<string, string>> = {
+    dayOfWeek: 'a day of the week',
+    hour: 'an hour',
+    ordinalDay: 'an ordinal day',
+    dayOfQuarter: 'a day of the quarter'
+};
+
+/** The values each field a map laid over another temporal value gives may take, as Neo4j takes them, but for the year: see `fromTemporal`. */
+const OVER_RANGES: Partial<Record<string, [number, number]>> = {
+    ...TRUNCATION_RANGES,
+    week: [1, 53],
+    ordinalDay: [1, 366],
+    quarter: [1, 4],
+    dayOfQuarter: [1, 92],
+    nanosecond: [0, 999999999]
+};
+
+/** The least of each field a map laid over another temporal value gives that is not 0, which a field given as null is. */
+const OVER_LEAST: Partial<Record<string, number>> = {
+    month: 1,
+    day: 1,
+    week: 1,
+    dayOfWeek: 1,
+    ordinalDay: 1,
+    quarter: 1,
+    dayOfQuarter: 1
+};
+
+/** The date's fields that make a whole date by each calendar, where no value gives the date: see `fromTemporal`. */
+const WHOLE_DATES: Record<string, string[]> = {
+    'a month': ['year', 'month', 'day'],
+    'a week': ['year', 'week', 'dayOfWeek'],
+    'an ordinal day': ['year', 'ordinalDay'],
+    'a quarter': ['year', 'quarter', 'dayOfQuarter']
+};
+
+/** Each field of the time that a map without a value that gives the time takes only beside another: see `fromTemporal`. */
+const TIME_ABOVE: [string, string][] = [
+    ['minute', 'hour'],
+    ['second', 'minute'],
+    ['millisecond', 'second'],
+    ['microsecond', 'second'],
+    ['nanosecond', 'second']
+];
 
 /**
  * The keys of `entries`, a truncation's map of fields given `fn`, which truncates to `kind`: refused where Neo4j refuses
@@ -308,7 +351,7 @@ function truncationWhole(fn: FunctionCall, key: string, literal: unknown, millis
     const beside = key === 'microsecond' && millis;
     const range: [number, number] | undefined = beside ? [0, 999] : TRUNCATION_RANGES[key];
     if (range !== undefined && (literal < range[0] || literal > range[1])) {
-        const name = TRUNCATION_FIELD_NAMES[key] ?? `a ${key}`;
+        const name = FIELD_NOUNS[key] ?? `a ${key}`;
         throw new DrivineError(
             `${fn.name}() takes ${name} from ${range[0]} to ${range[1]}${
                 beside ? ' beside a millisecond' : ''
@@ -350,8 +393,8 @@ function mapFields(kind: Temporal, name: string, keys: string[]): void {
     }
 }
 
-/** Refuses the `timezone` of `entries`, a map of the calendar's fields, where it is a zone by name, which no store's text holds yet, rather than give null. */
-function calendarZone(entries: [string, Expression][]): void {
+/** Refuses the `timezone` of `entries`, a temporal map's fields, where it is a zone by name, which no store's text holds yet, rather than give null. */
+function mapZone(entries: [string, Expression][]): void {
     const zone = entries.find(([key]) => key === 'timezone')?.[1];
     if (zone?.kind !== 'Literal' || typeof zone.value !== 'string') {
         return;
@@ -440,10 +483,7 @@ function calendarDate(name: string, entries: [string, Expression][]): [number, n
  * of two, where a day of the week or of the quarter is without its week or quarter, or where they have no year.
  */
 function calendarOf(name: string, keys: Set<string>): string {
-    const calendars = CALENDARS.filter(([, fields]) => fields.some((it) => keys.has(it)));
-    if (calendars.length > 1) {
-        throw new DrivineError(`${name}() takes ${calendars[0][0]} or ${calendars[1][0]}, not both.`);
-    }
+    const calendars = calendarsOf(name, keys);
     if (keys.has('dayOfWeek') && !keys.has('week')) {
         throw new DrivineError(`${name}() takes a day of the week beside a week.`);
     }
@@ -458,6 +498,121 @@ function calendarOf(name: string, keys: Set<string>): string {
         throw new DrivineError(`${name}() takes a year beside ${calendars[0][0]}.`);
     }
     return calendars[0][0];
+}
+
+/**
+ * The calendars, each named and with its fields, that `keys`, the fields of a map given `name`, give a date by: a month,
+ * a week, an ordinal day or a quarter. Fails where it is more than one, as Neo4j does.
+ */
+function calendarsOf(name: string, keys: Set<string>): [string, string[]][] {
+    const calendars = CALENDARS.filter(([, fields]) => fields.some((it) => keys.has(it)));
+    if (calendars.length > 1) {
+        throw new DrivineError(`${name}() takes ${calendars[0][0]} or ${calendars[1][0]}, not both.`);
+    }
+    return calendars;
+}
+
+/**
+ * The calendar (see {@link CALENDARS}) that `keys`, the fields of a map that `name` makes a value of `kind` of with a
+ * `date`, a `time` or a `datetime`, give a date by, where they give one. Fails as Neo4j fails: on a field `kind` has
+ * none of, a `datetime` beside a `date` or a `time`, fields of two calendars, a date of its fields that is not whole
+ * (see {@link WHOLE_DATES}) where no value gives the date, and a field of the time without the one above it where no
+ * value gives the time.
+ */
+function overKeys(kind: Temporal, name: string, keys: Set<string>): string | undefined {
+    const dated = kind === Temporal.DATE || kind === Temporal.LOCAL_DATE_TIME || kind === Temporal.DATE_TIME;
+    const takes = overTakes(kind, dated);
+    const unknown = [...keys].find((it) => !takes.has(it));
+    if (unknown !== undefined) {
+        throw new DrivineError(`${name}() takes no field ${unknown}.`);
+    }
+    if (keys.has('datetime') && ['date', 'time'].some((it) => keys.has(it))) {
+        throw new DrivineError(`${name}() takes a datetime, or a date and a time, not both.`);
+    }
+    const calendars = calendarsOf(name, keys);
+    const calendar = calendars.length === 1 ? calendars[0][0] : undefined;
+    if (dated && !['date', 'datetime'].some((it) => keys.has(it))) {
+        overWholeDate(name, keys, calendar);
+    }
+    if (kind !== Temporal.DATE && !['time', 'datetime'].some((it) => keys.has(it))) {
+        overTimeAbove(name, keys);
+    }
+    return calendar;
+}
+
+/** Refuses `keys`, the fields of a map given `name` that no value gives the date of, where they give no whole date by `calendar`. */
+function overWholeDate(name: string, keys: Set<string>, calendar: string | undefined): void {
+    if (calendar === undefined || !WHOLE_DATES[calendar].every((it) => keys.has(it))) {
+        throw new DrivineError(
+            `${name}() takes a date beside a time: a date, or a year with a month and a day, a week and a day of the ` +
+                'week, an ordinal day, or a quarter and a day of the quarter.'
+        );
+    }
+}
+
+/** Refuses `keys`, the fields of a map given `name` that no value gives the time of, where a field of the time is without the one above it. */
+function overTimeAbove(name: string, keys: Set<string>): void {
+    TIME_ABOVE.forEach(([field, above]) => {
+        if (keys.has(field) && !keys.has(above)) {
+            throw new DrivineError(`${name}() takes a ${field} beside ${FIELD_NOUNS[above] ?? `a ${above}`}.`);
+        }
+    });
+}
+
+/**
+ * The fields of a map with a `date`, a `time` or a `datetime` that makes a value of `kind`, which is `dated` where it
+ * has a date: which of those it takes, the fields of its date and its time, and a zoned value's time zone.
+ */
+function overTakes(kind: Temporal, dated: boolean): Set<string> {
+    let selectors = SELECTORS;
+    if (kind === Temporal.DATE) {
+        selectors = ['date'];
+    } else if (!dated) {
+        selectors = ['time'];
+    }
+    return new Set([
+        ...selectors,
+        ...(dated ? ['year', 'month', 'day', ...CALENDAR_FIELDS] : []),
+        ...(kind !== Temporal.DATE ? TRUNCATION_TIME_FIELDS : []),
+        ...(kind.zoned ? ['timezone'] : [])
+    ]);
+}
+
+/**
+ * `literal`, written as the field `key` of a map given `name` that is laid over another temporal value, where it is a
+ * whole number in the field's range (see {@link OVER_RANGES}): beside a millisecond or a microsecond given, among
+ * `keys`, a microsecond or a nanosecond runs to the next one's.
+ */
+function overNumber(name: string, key: string, literal: unknown, keys: Set<string>): number {
+    if (typeof literal !== 'number' || !Number.isInteger(literal)) {
+        const shown = typeof literal === 'string' ? `'${literal}'` : String(literal);
+        throw new DrivineError(`${name}() takes a whole number for ${key}, not ${shown}.`);
+    }
+    const [range, beside] = overRange(key, keys);
+    if (range !== undefined && (literal < range[0] || literal > range[1])) {
+        const besides = beside !== undefined ? ` beside a ${beside}` : '';
+        throw new DrivineError(
+            `${name}() takes ${FIELD_NOUNS[key] ?? `a ${key}`} from ${range[0]} to ${
+                range[1]
+            }${besides}, not ${literal}.`
+        );
+    }
+    return literal;
+}
+
+/**
+ * The range of the field `key` of a map with the fields `keys` that is laid over another temporal value (see
+ * {@link OVER_RANGES}), and the field beside which it runs only to the next one's: a microsecond or a nanosecond beside
+ * a millisecond, a nanosecond beside a microsecond.
+ */
+function overRange(key: string, keys: Set<string>): [[number, number] | undefined, string | undefined] {
+    if (key === 'nanosecond' && keys.has('microsecond')) {
+        return [[0, 999], 'microsecond'];
+    }
+    if ((key === 'microsecond' || key === 'nanosecond') && keys.has('millisecond')) {
+        return [key === 'nanosecond' ? [0, 999999] : [0, 999], 'millisecond'];
+    }
+    return [OVER_RANGES[key], undefined];
 }
 
 /**
@@ -527,7 +682,14 @@ function truncationZone(fn: FunctionCall, value: Expression): string {
     if (value.kind !== 'Literal' || typeof value.value !== 'string') {
         return unsupported('A truncation to a time zone an expression gives');
     }
-    const zone = value.value;
+    return zoneText(value.value);
+}
+
+/**
+ * The offset's SQL text the time zone `zone` written gives a value, as Neo4j takes one: `Z`, or an offset written
+ * `+01:00` (see {@link offsetText}). A zone by name, which no store's text holds yet, is refused; any other text fails.
+ */
+function zoneText(zone: string): string {
     const offset = offsetText(zone);
     if (offset !== undefined) {
         return offset;
@@ -4129,9 +4291,7 @@ export class CypherWriter {
         const grouping = items.filter((it) => !contains(it.expression, isAggregate));
         const groupKeys = new Map(grouping.map((it) => [expressionKey(it.expression), it.expression]));
         const plainKeys = new Map([...groupKeys].filter(([, it]) => isPlainKey(it)));
-        const keys = new Set(
-            grouping.flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : []))
-        );
+        const keys = new Set(grouping.flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : [])));
         items
             .filter((it) => contains(it.expression, isAggregate))
             .forEach((item) => {
@@ -5196,6 +5356,9 @@ export class CypherWriter {
             return json(this.sql.literalJson(this.canonical(written.value, kind, name)), { temporal: kind });
         }
         if (written.kind === 'MapLiteral') {
+            if (kind !== Temporal.DURATION && written.entries.some(([key]) => SELECTORS.includes(key))) {
+                return of(this.fromTemporal(kind, written.entries, call));
+            }
             return of(this.temporalOfFields(kind, written.entries, call));
         }
         const given = call.arguments[0];
@@ -5232,10 +5395,12 @@ export class CypherWriter {
         }
         const given = fields.get('timezone');
         const timezone = given ? this.textOf(given) : undefined;
+        // A zone by name, which no store's text holds yet, is refused rather than given as null: so a value made from
+        // such a moment, `time({time: other})`, is refused too.
+        mapZone(entries);
         if (!entries.some(([key]) => CALENDAR_FIELDS.includes(key))) {
             return this.temporals.of(numbers, timezone, kind);
         }
-        calendarZone(entries);
         const date = calendarDate(call.fn.name, entries);
         if (date === undefined) {
             return this.temporals.ofCalendar(numbers, timezone, kind);
@@ -5245,6 +5410,121 @@ export class CypherWriter {
         );
         [day.year, day.month, day.day] = date.map(String);
         return this.temporals.of(day, timezone, kind);
+    }
+
+    /**
+     * The text of a temporal value of `kind` made of `entries`, a map the statement writes with a `date`, a `time` or a
+     * `datetime`, another temporal value whose fields it takes, with the map's others laid over them: see
+     * `Temporals.over`. Fails as Neo4j fails: on a field `kind` has none of, a `datetime` beside a `date` or a `time`, a
+     * value written that is no temporal value or is of a kind that hasn't what it is to give, fields of two calendars, a
+     * date of its fields that is not whole (a year, a month and a day; a week and a day of the week; an ordinal day; a
+     * quarter and a day of the quarter) beside a value that gives the time, a field of the time without the one above it
+     * where no value gives the time, and a number written that is not whole or past its field's range. A zone by name is
+     * refused. As drivine4j's.
+     */
+    private fromTemporal(kind: Temporal, entries: [string, Expression][], call: Invocation): string {
+        const name = call.fn.name;
+        const written = new Map(entries);
+        const keys = new Set(written.keys());
+        const calendar = overKeys(kind, name, keys);
+        const base = (key: string, kinds: Temporal[]): TemporalBase | undefined => {
+            const value = written.get(key);
+            return value === undefined ? undefined : this.overBase(name, key, kinds, value, call.scope);
+        };
+        const datetime = base('datetime', [Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME]);
+        const date = datetime ?? base('date', [Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.DATE]);
+        const time =
+            datetime ??
+            base('time', [Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.TIME, Temporal.LOCAL_TIME]);
+        let fields: Record<string, string> = {};
+        entries
+            .filter(([key]) => !SELECTORS.includes(key) && key !== 'timezone')
+            .forEach(([key, value]) => {
+                fields[key] = this.overField(name, key, value, keys, call.scope);
+            });
+        const zone = written.get('timezone');
+        const timezone = zone === undefined ? undefined : this.overZone(name, zone, call.scope);
+        // A date of fields written as numbers alone is worked out here, as a map of them is (see calendarDate).
+        if (date === undefined && calendar !== undefined && calendar !== 'a month') {
+            const day = calendarDate(
+                name,
+                entries.filter(([key]) => key === 'year' || CALENDAR_FIELDS.includes(key))
+            );
+            if (day !== undefined) {
+                fields = Object.fromEntries(Object.entries(fields).filter(([key]) => !CALENDAR_FIELDS.includes(key)));
+                [fields.year, fields.month, fields.day] = day.map(String);
+            }
+        }
+        return this.temporals.over(date, time, fields, timezone, kind);
+    }
+
+    /**
+     * The SQL number of the field `key` of a map given `name` that is laid over another temporal value, written as
+     * `value`: a field written as null is its least ({@link OVER_LEAST}), as is one an expression gives as null. A number
+     * written that is not whole, or past its field's range ({@link OVER_RANGES}; beside a millisecond or a microsecond
+     * given, a microsecond or a nanosecond runs to the next one's), fails. `keys` are the map's fields.
+     */
+    private overField(name: string, key: string, value: Expression, keys: Set<string>, scope: Scope): string {
+        const least = OVER_LEAST[key] ?? 0;
+        const literal = writtenNumber(value);
+        if (literal === null || literal === undefined) {
+            return value.kind === 'Literal'
+                ? `${least}`
+                : `COALESCE(${this.numberOf(this.expression(value, scope))}, ${least})`;
+        }
+        return `${overNumber(name, key, literal, keys)}`;
+    }
+
+    /**
+     * The value that `value`, written as the `date`, `time` or `datetime` field `key` of a map given `name`, gives
+     * `Temporals.over`, where it is of one of `kinds`. A value written that is no temporal value, or one whose kind the
+     * statement tells that is none of `kinds`, fails, as Neo4j fails on it.
+     */
+    private overBase(name: string, key: string, kinds: Temporal[], value: Expression, scope: Scope): TemporalBase {
+        const nouns = [...kinds].reverse().map((it) => `a ${it.function}`);
+        const refused = (given: string): never => {
+            throw new DrivineError(
+                `${name}() takes ${nouns.slice(0, -1).join(', ')} or ${
+                    nouns[nouns.length - 1]
+                } for ${key}, not ${given}.`
+            );
+        };
+        if (value.kind === 'Literal') {
+            const v = value.value;
+            refused(v === null ? 'null' : typeof v === 'string' ? `'${v}'` : String(v));
+        }
+        const given = this.expression(value, scope);
+        if (given.kind !== 'Json') {
+            return refused(given.kind === 'Bool' ? 'a truth value' : 'a node, a relationship or a path');
+        }
+        if (given.known !== undefined) {
+            refused(nounOf(given.known));
+        }
+        if (given.temporal !== undefined && !kinds.includes(given.temporal)) {
+            refused(`a ${given.temporal.function}`);
+        }
+        return {
+            text: this.sql.text(this.sql.comparable(given)),
+            kinds: given.temporal !== undefined ? [given.temporal] : kinds
+        };
+    }
+
+    /**
+     * The offset's SQL text of `zone`, the `timezone` of a map given `name` that is laid over another temporal value:
+     * one written is refused where it is null or no offset (see {@link zoneText}); one an expression gives is the
+     * store's to check.
+     */
+    private overZone(name: string, zone: Expression, scope: Scope): string {
+        if (isNullLiteral(zone)) {
+            throw new DrivineError(`${name}() takes a time zone, not null.`);
+        }
+        if (zone.kind !== 'Literal') {
+            return this.textOf(this.expression(zone, scope));
+        }
+        if (typeof zone.value !== 'string') {
+            throw new DrivineError(`${name}() takes a time zone, not ${String(zone.value)}.`);
+        }
+        return zoneText(zone.value);
     }
 
     /** The canonical text of `kind` of the text `value` the statement writes, refused where it is none. */

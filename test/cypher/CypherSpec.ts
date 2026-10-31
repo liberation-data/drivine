@@ -103,16 +103,6 @@ const HELD: Record<string, Record<string, Hold[]>> = {
     'queries.yaml': {
         // v0.18.0, liberation-data/drivine-cypher-spec#43: a key in an order term's body, and any(y IN … WHERE y = e).
         'Implicit grouping key': [{ issue: 499, steps: [37, 38, 39, 40, 42, 43, 44], on: ['sql'] }]
-    },
-    'temporal.yaml': {
-        // v0.19.0, liberation-data/drivine-cypher-spec#44: a temporal value made from another.
-        'Dates, times and moments from another temporal value': [{ issue: 500, steps: 'all', on: ['sql'] }],
-        'Zoned times and moments from another temporal value': [{ issue: 500, steps: 'all', on: ['sql'] }],
-        'Temporal values from another an expression gives': [{ issue: 500, steps: [2, 3, 4], on: ['sql'] }]
-    },
-    'refusals.yaml': {
-        'Temporal map not compiled yet': [{ issue: 500, steps: [1, 4], on: ['sql'] }],
-        'Temporal map from another temporal value Neo4j does not take': [{ issue: 500, steps: 'all', on: ['sql'] }]
     }
 };
 

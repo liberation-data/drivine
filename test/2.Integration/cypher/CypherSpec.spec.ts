@@ -266,9 +266,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 )
             ).toEqual([3, 1]);
             // Of a node with no name, a quantifier whose condition no item decides is null, so the WHERE drops it (#333).
-            expect(await query("MATCH (n:CyTest) WHERE all(x IN [1] WHERE n.name IN ['Keanu']) RETURN count(*)")).toEqual([
-                1
-            ]);
+            expect(
+                await query("MATCH (n:CyTest) WHERE all(x IN [1] WHERE n.name IN ['Keanu']) RETURN count(*)")
+            ).toEqual([1]);
             expect(
                 await query(
                     'RETURN [null IN [null], [null] IN [[null]], 1 IN [null], 1 IN [1, null], 2 IN [1, null], null IN [], [null] IN [[1, 2]], ' +
@@ -431,7 +431,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 const items = range(n).map(longItem);
                 const list = `[${items.map((it) => it[0]).join(', ')}]`;
                 const expected = items.map((it) => it[1]);
-                const lastWhole = range(n).filter((it) => it % 7 === 0).pop()!;
+                const lastWhole = range(n)
+                    .filter((it) => it % 7 === 0)
+                    .pop()!;
                 expect(await query(`RETURN ${list}`)).toEqual([expected]);
                 expect(await query(`WITH ${list} AS xs RETURN [size(xs), xs[-1], xs[${n - 2}]]`)).toEqual([
                     [n, expected[n - 1], expected[n - 2]]
@@ -446,7 +448,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 const numbers = `[${range(n)
                     .map((it) => (it % 7 === 2 ? 'null' : `${it}`))
                     .join(', ')}]`;
-                expect(await query(`RETURN [${lastWhole} IN ${numbers}, 999999 IN ${numbers}]`)).toEqual([[true, null]]);
+                expect(await query(`RETURN [${lastWhole} IN ${numbers}, 999999 IN ${numbers}]`)).toEqual([
+                    [true, null]
+                ]);
                 // A list of several kinds is compared item by item, in a few hundred characters of SQL each. Oracle runs out
                 // of memory reading the comparisons of 1001 (liberation-data/drivine4j#360, here #406), so isn't asked them.
                 if (n > 250 && store.type === DatabaseType.ORACLE) {
@@ -485,7 +489,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 expect(await query(`RETURN ${list} = $p`, { p: items.map((it) => it[2]) })).toEqual([true]);
                 expect(await query(`UNWIND ${list} AS x WITH collect(x) AS xs RETURN xs = ${list}`)).toEqual([true]);
                 const map = `{${items.map((it, i) => `k${i}: ${it[0]}`).join(', ')}}`;
-                expect(await query(`RETURN ${map}`)).toEqual([Object.fromEntries(items.map((it, i) => [`k${i}`, it[1]]))]);
+                expect(await query(`RETURN ${map}`)).toEqual([
+                    Object.fromEntries(items.map((it, i) => [`k${i}`, it[1]]))
+                ]);
                 const given = Object.fromEntries(items.map((it, i) => [`k${i}`, it[2]]));
                 expect(await query(`RETURN ${map} = $p`, { p: given })).toEqual([true]);
             }
@@ -523,10 +529,16 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 Object.fromEntries(range(n).map((i) => [`k${i}`, value(i)]));
             // Long ones first, last and either side of a run's edge, the 100th and 101st items.
             const long = (i: number): boolean => [0, 99, 100, 200].includes(i);
-            expect(await query(`RETURN [${range(201).map((i) => (long(i) ? list(150) : `${i}`)).join(', ')}]`)).toEqual([
-                range(201).map((i) => (long(i) ? range(150) : i))
-            ]);
-            const [returned] = await query(`RETURN ${map(60, (i) => (i % 25 === 0 ? map(60, (j) => `${j}`) : list(120)))}`);
+            expect(
+                await query(
+                    `RETURN [${range(201)
+                        .map((i) => (long(i) ? list(150) : `${i}`))
+                        .join(', ')}]`
+                )
+            ).toEqual([range(201).map((i) => (long(i) ? range(150) : i))]);
+            const [returned] = await query(
+                `RETURN ${map(60, (i) => (i % 25 === 0 ? map(60, (j) => `${j}`) : list(120)))}`
+            );
             const expected = entries(60, (i) => (i % 25 === 0 ? entries(60, (j) => j) : range(120)));
             expect(returned).toEqual(expected);
             // Its keys, and those of the maps it holds, in the order written, where the store keeps them so.
@@ -760,9 +772,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     'MATCH (n:QZ) SET n.e = any(x IN [n.c, null] WHERE x), n.f = all(x IN [n.c, null] WHERE x) RETURN [n.e, n.f]'
                 )
             ).toEqual([[true, null]]);
-            expect(await query('MATCH (n:QZ) WHERE none(x IN [1, null] WHERE x = 2) SET n.g = 1 RETURN count(*)')).toEqual([
-                0
-            ]);
+            expect(
+                await query('MATCH (n:QZ) WHERE none(x IN [1, null] WHERE x = 2) SET n.g = 1 RETURN count(*)')
+            ).toEqual([0]);
             expect(
                 await query(
                     "RETURN [any(x IN $m WHERE x = 'a'), all(x IN $m WHERE x IS NOT NULL), none(x IN $m WHERE x = true), " +
@@ -771,9 +783,12 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 )
             ).toEqual([[true, false, false, null, null, true]]);
             expect(
-                await query('RETURN [single(x IN range(0, 5000) + [null] WHERE x = 4999), single(x IN $xs WHERE x = 5)]', {
-                    xs: xs.slice(0, -1)
-                })
+                await query(
+                    'RETURN [single(x IN range(0, 5000) + [null] WHERE x = 4999), single(x IN $xs WHERE x = 5)]',
+                    {
+                        xs: xs.slice(0, -1)
+                    }
+                )
             ).toEqual([[null, true]]);
         });
 
@@ -1674,7 +1689,11 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 ['RETURN [toString($m.x), toString($m.y)]', { m: { x: 1e20, y: two } }, ['1.0E20', '2']],
                 ["RETURN toString($m['x'])", { m: { x: -1e20 } }, '-1.0E20'],
                 // Beside such a float, a text, a null and a missing key are read as they are.
-                ['RETURN [$m.s, $m.n, $m.z, $m.b]', { m: { x: 1e20, s: 's', n: null, b: true } }, ['s', null, null, true]],
+                [
+                    'RETURN [$m.s, $m.n, $m.z, $m.b]',
+                    { m: { x: 1e20, s: 's', n: null, b: true } },
+                    ['s', null, null, true]
+                ],
                 ['RETURN [toString($l[0]), toString($l[1])]', { l: [1e20, two] }, ['1.0E20', '2']],
                 [
                     'RETURN [toString($m.l[0]), toString($m.n.x)]',
@@ -1866,11 +1885,15 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [4, null]
             ]);
             expect(
-                await query('UNWIND [[{a: 1}, {b: 2, c: 3}], [{d: 4, e: 5, f: 6}]] AS l RETURN [x IN l | size(keys(x))]')
+                await query(
+                    'UNWIND [[{a: 1}, {b: 2, c: 3}], [{d: 4, e: 5, f: 6}]] AS l RETURN [x IN l | size(keys(x))]'
+                )
             ).toEqual([[1, 2], [3]]);
             // A nested map's paths are in its parent's data guide too, and only those one step from the top are keys.
             expect(
-                await query('UNWIND [{a: {x: 1}}, {b: {y: 2}, c: 3}] AS m RETURN size(keys(m)), keys(coalesce(m.a, m.b))')
+                await query(
+                    'UNWIND [{a: {x: 1}}, {b: {y: 2}, c: 3}] AS m RETURN size(keys(m)), keys(coalesce(m.a, m.b))'
+                )
             ).toEqual([
                 [1, ['x']],
                 [2, ['y']]
@@ -1892,115 +1915,109 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         ];
         const hours = [10, 8, 9];
 
-        it(
-            'a list of zoned values worked out with temporal arithmetic, by a comprehension or collect(), sorts as the moments they are',
-            async () => {
-                // Beside the spec's case since v0.6.17 (#199): its long list is worked out from one moment, not from a
-                // CASE, and it has no list collect() gathers of them. k = 0's start at 08:00 UTC.
-                const at = `CASE k WHEN 0 THEN ${a} ELSE ${b} END`;
-                expect(
-                    await query(
-                        `UNWIND [0, 1] AS k WITH k, [x IN range(1, 200) | ${at} + duration({minutes: x})] AS l RETURN k ORDER BY l`
-                    )
-                ).toEqual([0, 1]);
-                expect(
-                    await query(
-                        `UNWIND [0, 1] AS k UNWIND range(1, 3) AS x WITH k, ${at} + duration({minutes: x}) AS t WITH k, collect(t) AS l RETURN k ORDER BY l`
-                    )
-                ).toEqual([0, 1]);
-            }
-        );
-
-        it(
-            'a list of zoned values sorts as their moments however it was made, and an empty list or a null item sorts as Cypher puts it',
-            async () => {
-                // Beside the spec's case since v0.6.17 (#199). By moment 10:00+02:00, 08:30Z, 09:00Z; as text 08:30Z, 09:00Z, 10:00+02:00.
-                const sorted = async (by: string, list: string = '[[t]]'): Promise<any[]> =>
-                    query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t, ${list} AS l RETURN t.hour ORDER BY ${by}`);
-                // Taken from a list of lists, by an index, head(), last(), a slice, reverse(), tail() and a comprehension.
-                for (const by of [
-                    'l[0]',
-                    'head(l)',
-                    'last(l)',
-                    'l[0..1]',
-                    'reverse(l)',
-                    '[x IN l WHERE x IS NOT NULL]',
-                    '[x IN l | x]'
-                ]) {
-                    expect([by, await sorted(by)]).toEqual([by, hours]);
-                }
-                expect(await sorted('tail(l)', '[[t], [t]]')).toEqual(hours);
-                // Made by a CASE, collect(DISTINCT), a UNION, and a comprehension over nodes or a pattern.
-                expect(await sorted('CASE WHEN t IS NOT NULL THEN [t] END')).toEqual(hours);
-                expect(
-                    await query(
-                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect(DISTINCT [t]) AS l RETURN h ORDER BY l`
-                    )
-                ).toEqual(hours);
-                expect(
-                    await query(
-                        `CALL { UNWIND [${b}] AS t RETURN [[t]] AS l UNION UNWIND [${a}, ${c}] AS t RETURN [[t]] AS l } RETURN l[0][0].hour ORDER BY l`
-                    )
-                ).toEqual(hours);
-                await clear();
+        it('a list of zoned values worked out with temporal arithmetic, by a comprehension or collect(), sorts as the moments they are', async () => {
+            // Beside the spec's case since v0.6.17 (#199): its long list is worked out from one moment, not from a
+            // CASE, and it has no list collect() gathers of them. k = 0's start at 08:00 UTC.
+            const at = `CASE k WHEN 0 THEN ${a} ELSE ${b} END`;
+            expect(
                 await query(
-                    "CREATE (:CyZoned {h: 10})-[:AT]->(:CyZonedAt {at: '2024-03-15T10:00:00+02:00'}), " +
-                        "(:CyZoned {h: 9})-[:AT]->(:CyZonedAt {at: '2024-03-15T09:00:00Z'}), " +
-                        "(:CyZoned {h: 8})-[:AT]->(:CyZonedAt {at: '2024-03-15T08:30:00Z'})"
-                );
-                expect(
-                    await query('MATCH (z:CyZoned) RETURN z.h ORDER BY [(z)-[:AT]->(w) | [datetime(w.at)]]')
-                ).toEqual(hours);
-                expect(
-                    await query(
-                        'MATCH (z:CyZoned)-[:AT]->(w) WITH z, collect(w) AS ws RETURN z.h ORDER BY [n IN ws | [datetime(n.at)]]'
-                    )
-                ).toEqual(hours);
-                // The empty list first, then a list of a moment, then a null item or no list; as items of a list too.
-                const ordered = [2, 1, 3];
-                const empty = `[i IN [${a}] WHERE false]`;
-                const cased = `CASE k WHEN 1 THEN [${a}] WHEN 2 THEN ${empty} END`;
-                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, ${cased} AS l RETURN k ORDER BY l`)).toEqual(ordered);
-                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, ${cased} AS l RETURN k ORDER BY l DESC`)).toEqual(
-                    [...ordered].reverse()
-                );
-                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, [${cased}] AS l RETURN k ORDER BY l`)).toEqual(ordered);
-                expect(await query(`UNWIND [1, 2, 3] AS k WITH k, [${cased}] AS l RETURN k ORDER BY l DESC`)).toEqual(
-                    [...ordered].reverse()
-                );
-                // Two lists of lists of them put together, and min() or max() of lists of them, grouped.
-                expect(await sorted('l + l')).toEqual(hours);
-                expect(
-                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, min([t]) AS m RETURN h ORDER BY m`)
-                ).toEqual(hours);
-                expect(
-                    await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, max([[t]]) AS m RETURN h ORDER BY m`)
-                ).toEqual(hours);
-                // Carried past a write, as a list and as a list of lists.
-                expect(
-                    await query(
-                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [t] AS l CREATE (:CyZonedWrite) RETURN t.hour ORDER BY l`
-                    )
-                ).toEqual(hours);
-                expect(
-                    await query(
-                        `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [[t]] AS l CREATE (:CyZonedWrite) RETURN t.hour ORDER BY l`
-                    )
-                ).toEqual(hours);
-                // Read from the row a write works its value out of (rowKeys), in a subquery that sorts them.
-                expect(
-                    await query(
-                        `UNWIND [${b}, ${a}, ${c}] AS t WITH collect([t]) AS ls CREATE (n:CyZonedWrite) ` +
-                            'SET n.first = COUNT { UNWIND ls AS l WITH l ORDER BY l LIMIT 1 WITH l WHERE l[0].hour = 10 RETURN l } RETURN n.first'
-                    )
-                ).toEqual([1]);
-                // After a term whose kind is open, which sorts by its kind first (liberation-data/drivine4j#308): the text
-                // before the numbers, then by moment.
-                const open = `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [t] AS l, CASE t.hour WHEN 8 THEN 'x' ELSE 1 END AS o RETURN t.hour`;
-                expect(await query(`${open} ORDER BY o, l`)).toEqual([8, 10, 9]);
-                expect(await query(`${open} ORDER BY o DESC, l DESC`)).toEqual([9, 10, 8]);
+                    `UNWIND [0, 1] AS k WITH k, [x IN range(1, 200) | ${at} + duration({minutes: x})] AS l RETURN k ORDER BY l`
+                )
+            ).toEqual([0, 1]);
+            expect(
+                await query(
+                    `UNWIND [0, 1] AS k UNWIND range(1, 3) AS x WITH k, ${at} + duration({minutes: x}) AS t WITH k, collect(t) AS l RETURN k ORDER BY l`
+                )
+            ).toEqual([0, 1]);
+        });
+
+        it('a list of zoned values sorts as their moments however it was made, and an empty list or a null item sorts as Cypher puts it', async () => {
+            // Beside the spec's case since v0.6.17 (#199). By moment 10:00+02:00, 08:30Z, 09:00Z; as text 08:30Z, 09:00Z, 10:00+02:00.
+            const sorted = async (by: string, list: string = '[[t]]'): Promise<any[]> =>
+                query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t, ${list} AS l RETURN t.hour ORDER BY ${by}`);
+            // Taken from a list of lists, by an index, head(), last(), a slice, reverse(), tail() and a comprehension.
+            for (const by of [
+                'l[0]',
+                'head(l)',
+                'last(l)',
+                'l[0..1]',
+                'reverse(l)',
+                '[x IN l WHERE x IS NOT NULL]',
+                '[x IN l | x]'
+            ]) {
+                expect([by, await sorted(by)]).toEqual([by, hours]);
             }
-        );
+            expect(await sorted('tail(l)', '[[t], [t]]')).toEqual(hours);
+            // Made by a CASE, collect(DISTINCT), a UNION, and a comprehension over nodes or a pattern.
+            expect(await sorted('CASE WHEN t IS NOT NULL THEN [t] END')).toEqual(hours);
+            expect(
+                await query(
+                    `UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, collect(DISTINCT [t]) AS l RETURN h ORDER BY l`
+                )
+            ).toEqual(hours);
+            expect(
+                await query(
+                    `CALL { UNWIND [${b}] AS t RETURN [[t]] AS l UNION UNWIND [${a}, ${c}] AS t RETURN [[t]] AS l } RETURN l[0][0].hour ORDER BY l`
+                )
+            ).toEqual(hours);
+            await clear();
+            await query(
+                "CREATE (:CyZoned {h: 10})-[:AT]->(:CyZonedAt {at: '2024-03-15T10:00:00+02:00'}), " +
+                    "(:CyZoned {h: 9})-[:AT]->(:CyZonedAt {at: '2024-03-15T09:00:00Z'}), " +
+                    "(:CyZoned {h: 8})-[:AT]->(:CyZonedAt {at: '2024-03-15T08:30:00Z'})"
+            );
+            expect(await query('MATCH (z:CyZoned) RETURN z.h ORDER BY [(z)-[:AT]->(w) | [datetime(w.at)]]')).toEqual(
+                hours
+            );
+            expect(
+                await query(
+                    'MATCH (z:CyZoned)-[:AT]->(w) WITH z, collect(w) AS ws RETURN z.h ORDER BY [n IN ws | [datetime(n.at)]]'
+                )
+            ).toEqual(hours);
+            // The empty list first, then a list of a moment, then a null item or no list; as items of a list too.
+            const ordered = [2, 1, 3];
+            const empty = `[i IN [${a}] WHERE false]`;
+            const cased = `CASE k WHEN 1 THEN [${a}] WHEN 2 THEN ${empty} END`;
+            expect(await query(`UNWIND [1, 2, 3] AS k WITH k, ${cased} AS l RETURN k ORDER BY l`)).toEqual(ordered);
+            expect(await query(`UNWIND [1, 2, 3] AS k WITH k, ${cased} AS l RETURN k ORDER BY l DESC`)).toEqual(
+                [...ordered].reverse()
+            );
+            expect(await query(`UNWIND [1, 2, 3] AS k WITH k, [${cased}] AS l RETURN k ORDER BY l`)).toEqual(ordered);
+            expect(await query(`UNWIND [1, 2, 3] AS k WITH k, [${cased}] AS l RETURN k ORDER BY l DESC`)).toEqual(
+                [...ordered].reverse()
+            );
+            // Two lists of lists of them put together, and min() or max() of lists of them, grouped.
+            expect(await sorted('l + l')).toEqual(hours);
+            expect(
+                await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, min([t]) AS m RETURN h ORDER BY m`)
+            ).toEqual(hours);
+            expect(
+                await query(`UNWIND [${b}, ${a}, ${c}] AS t WITH t.hour AS h, max([[t]]) AS m RETURN h ORDER BY m`)
+            ).toEqual(hours);
+            // Carried past a write, as a list and as a list of lists.
+            expect(
+                await query(
+                    `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [t] AS l CREATE (:CyZonedWrite) RETURN t.hour ORDER BY l`
+                )
+            ).toEqual(hours);
+            expect(
+                await query(
+                    `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [[t]] AS l CREATE (:CyZonedWrite) RETURN t.hour ORDER BY l`
+                )
+            ).toEqual(hours);
+            // Read from the row a write works its value out of (rowKeys), in a subquery that sorts them.
+            expect(
+                await query(
+                    `UNWIND [${b}, ${a}, ${c}] AS t WITH collect([t]) AS ls CREATE (n:CyZonedWrite) ` +
+                        'SET n.first = COUNT { UNWIND ls AS l WITH l ORDER BY l LIMIT 1 WITH l WHERE l[0].hour = 10 RETURN l } RETURN n.first'
+                )
+            ).toEqual([1]);
+            // After a term whose kind is open, which sorts by its kind first (liberation-data/drivine4j#308): the text
+            // before the numbers, then by moment.
+            const open = `UNWIND [${b}, ${a}, ${c}] AS t WITH t, [t] AS l, CASE t.hour WHEN 8 THEN 'x' ELSE 1 END AS o RETURN t.hour`;
+            expect(await query(`${open} ORDER BY o, l`)).toEqual([8, 10, 9]);
+            expect(await query(`${open} ORDER BY o DESC, l DESC`)).toEqual([9, 10, 8]);
+        });
     });
 
     /**
@@ -2017,7 +2034,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             // A comprehension, an IN, the quantifiers, and the list read twice in one statement.
             expect(
                 await query(
-                    `${rows} RETURN k, [x IN l | x.minute], ${minute(1)} IN l, ${minute(2)} IN l, all(x IN l WHERE x.minute <= k), ` +
+                    `${rows} RETURN k, [x IN l | x.minute], ${minute(1)} IN l, ${minute(
+                        2
+                    )} IN l, all(x IN l WHERE x.minute <= k), ` +
                         'none(x IN l WHERE x.minute = k), single(x IN l WHERE x.minute = 1) ORDER BY k'
                 )
             ).toEqual([
@@ -2028,7 +2047,14 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             // A comprehension within one over the outer item and the row, in order.
             expect(
                 await query(`${rows} RETURN [x IN l | [y IN [x, x + duration({minutes: k})] | y.minute]] ORDER BY k`)
-            ).toEqual([[], [[1, 2]], [[1, 3], [2, 4]]]);
+            ).toEqual([
+                [],
+                [[1, 2]],
+                [
+                    [1, 3],
+                    [2, 4]
+                ]
+            ]);
             // An IN over another row's value: each pair whose minute is in the list.
             expect(
                 await query(
@@ -2059,7 +2085,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 [2, [null, 2], null]
             ]);
             // A slice, from either end, an UNWIND, and a CALL { … }.
-            expect(await query(`${rows} RETURN [x IN l[1..] | x.minute], [x IN l[-1..] | x.minute] ORDER BY k`)).toEqual([
+            expect(
+                await query(`${rows} RETURN [x IN l[1..] | x.minute], [x IN l[-1..] | x.minute] ORDER BY k`)
+            ).toEqual([
                 [[], []],
                 [[], [1]],
                 [[2], [2]]
@@ -2106,9 +2134,14 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             const zoned =
                 "UNWIND [0, 1, 2] AS k WITH k, [i IN range(1, 2) | datetime(CASE k WHEN 1 THEN '2024-03-15T10:00:00+02:00' " +
                 "ELSE '2024-03-15T08:00:00Z' END) + duration({minutes: i})] AS l";
-            expect(
-                await query(`${zoned} WITH collect(DISTINCT l) AS ls RETURN [x IN ls | [y IN x | y.hour]]`)
-            ).toEqual([[[8, 8], [10, 10]]]);
+            expect(await query(`${zoned} WITH collect(DISTINCT l) AS ls RETURN [x IN ls | [y IN x | y.hour]]`)).toEqual(
+                [
+                    [
+                        [8, 8],
+                        [10, 10]
+                    ]
+                ]
+            );
             expect(
                 await query(`${zoned} UNWIND l AS t WITH collect(DISTINCT t) AS ts RETURN [x IN ts | x.hour]`)
             ).toEqual([[8, 8, 10, 10]]);
@@ -2145,7 +2178,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             // collect(DISTINCT …) of lists of lists, and of lists of maps, that hold such a list, each once where first.
             const twice = `UNWIND [2, 1, 2] AS k WITH k, [i IN range(1, k) | ${at} + duration({minutes: i})] AS l`;
             expect(
-                await query(`${twice} WITH collect(DISTINCT [l, l]) AS ls RETURN [x IN ls | [y IN x | [z IN y | z.minute]]]`)
+                await query(
+                    `${twice} WITH collect(DISTINCT [l, l]) AS ls RETURN [x IN ls | [y IN x | [z IN y | z.minute]]]`
+                )
             ).toEqual([
                 [
                     [
@@ -2156,7 +2191,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 ]
             ]);
             expect(
-                await query(`${twice} WITH collect(DISTINCT [x IN l | [x]]) AS ls RETURN [x IN ls | [y IN x | y[0].minute]]`)
+                await query(
+                    `${twice} WITH collect(DISTINCT [x IN l | [x]]) AS ls RETURN [x IN ls | [y IN x | y[0].minute]]`
+                )
             ).toEqual([[[1, 2], [1]]]);
             expect(
                 await query(
@@ -2172,12 +2209,18 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 ]
             ]);
             expect(
-                await query(`${twice} WITH k, [l, l] AS ll WITH collect(DISTINCT ll) AS lls RETURN [x IN lls | size(x[0])]`)
+                await query(
+                    `${twice} WITH k, [l, l] AS ll WITH collect(DISTINCT ll) AS lls RETURN [x IN lls | size(x[0])]`
+                )
             ).toEqual([[2, 1]]);
             expect(
-                await query(`${twice} WITH collect(DISTINCT [x IN l | {t: x}]) AS ms RETURN [x IN ms | [y IN x | y.t.minute]]`)
+                await query(
+                    `${twice} WITH collect(DISTINCT [x IN l | {t: x}]) AS ms RETURN [x IN ms | [y IN x | y.t.minute]]`
+                )
             ).toEqual([[[1, 2], [1]]]);
-            expect(await query(`${rows} UNWIND [x IN l | {t: x}] AS m RETURN k, collect(m.t.minute) ORDER BY k`)).toEqual([
+            expect(
+                await query(`${rows} UNWIND [x IN l | {t: x}] AS m RETURN k, collect(m.t.minute) ORDER BY k`)
+            ).toEqual([
                 [1, [1]],
                 [2, [1, 2]]
             ]);
@@ -2203,7 +2246,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             // Such a list a reduce gives, one at a map's key a temporal value's field is named for, and the keys of a map that
             // holds one.
             expect(
-                await query(`${rows} WITH k, reduce(acc = [], x IN l | acc + [x]) AS m RETURN k, [x IN m | x.minute] ORDER BY k`)
+                await query(
+                    `${rows} WITH k, reduce(acc = [], x IN l | acc + [x]) AS m RETURN k, [x IN m | x.minute] ORDER BY k`
+                )
             ).toEqual(each);
             expect(
                 await query(`${rows} WITH k, {minute: l} AS m RETURN k, [x IN m.minute | x.minute] ORDER BY k`)
@@ -3280,7 +3325,10 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             // The UUID made first for the row is no variable of the statement's, nor is the variable a CALL's query
             // unwinds it to: a star in the query gives j alone, before u.
             for (const [cypher, columns] of [
-                ["UNWIND range(1, 2) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE randomUUID() < 'z' RETURN *", 2],
+                [
+                    "UNWIND range(1, 2) AS i OPTIONAL MATCH (p:Person {name: 'Keanu'}) WHERE randomUUID() < 'z' RETURN *",
+                    2
+                ],
                 ['UNWIND range(1, 2) AS i CALL { RETURN toUpper(randomUUID()) AS u } RETURN *', 2],
                 ['UNWIND range(1, 2) AS i CALL (*) { RETURN toUpper(randomUUID()) AS u } RETURN *', 2],
                 ["UNWIND range(1, 2) AS i WITH * WHERE left(randomUUID(), 1) < 'z' RETURN *, 1 AS one", 2],
@@ -3389,7 +3437,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 )
             ).toEqual([[12, 3]]);
             expect(
-                await query('MATCH (p:Person) CALL { MATCH (p:Movie) RETURN count(p) AS n } RETURN p.name, n ORDER BY p.name')
+                await query(
+                    'MATCH (p:Person) CALL { MATCH (p:Movie) RETURN count(p) AS n } RETURN p.name, n ORDER BY p.name'
+                )
             ).toEqual([
                 ['Carrie', 3],
                 ['Hugo', 3],
@@ -3521,7 +3571,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 )
             ).toEqual([true]);
             // ... and after any WITH: a CREATE of it joins the row's node, and a SET writes it.
-            await query('MATCH (a:CyWrite {id: 1}) CALL (a) { WITH 1 AS one CREATE (a)-[:S]->(:CyWrite {id: 5}) } RETURN 1');
+            await query(
+                'MATCH (a:CyWrite {id: 1}) CALL (a) { WITH 1 AS one CREATE (a)-[:S]->(:CyWrite {id: 5}) } RETURN 1'
+            );
             expect(await query('MATCH (a:CyWrite)-[:S]->(b) RETURN [a.id, b.id]')).toEqual([[1, 5]]);
             expect(
                 await query(
@@ -3798,7 +3850,10 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     `${match} WITH me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age) RETURN age, cnt`,
                     byBoth
                 ],
-                [`${match} RETURN DISTINCT me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)`, byBoth],
+                [
+                    `${match} RETURN DISTINCT me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)`,
+                    byBoth
+                ],
                 [`${match} RETURN me.age AS age, count(you.age) AS cnt ORDER BY age + count(you.age)`, byBoth],
                 // Sorted, skipped and limited before the WITH's WHERE, as Cypher reads it; a node keying the groups, read by
                 // property.
@@ -3806,7 +3861,10 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     `${match} WITH me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age) SKIP 1 LIMIT 2 WHERE cnt = 1 RETURN age`,
                     [20]
                 ],
-                [`${match} WITH me, count(you) AS cnt ORDER BY me.age * count(you) RETURN me.name`, ['B', 'C', 'D', 'A']],
+                [
+                    `${match} WITH me, count(you) AS cnt ORDER BY me.age * count(you) RETURN me.name`,
+                    ['B', 'C', 'D', 'A']
+                ],
                 // A subquery in a term made of items, which overItems leaves to be worked out in the query that groups.
                 [
                     `${match} WITH me, count(you) AS cnt ORDER BY COUNT { (me)--() } * count(you) * 100 - me.age RETURN me.name`,
@@ -4032,6 +4090,44 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ]);
         });
     });
+
+    /**
+     * A date, a time or a moment made from another temporal value: drivine4j's test of liberation-data/drivine4j#508,
+     * ported for #500, less the statements the spec holds since v0.19.0.
+     */
+    describe('a temporal value made from another', () => {
+        it('beside a day of the week, moves the date so many years, to February 28th from the 29th', async () => {
+            const rows = await query(
+                "WITH date({date: date('2024-02-29'), year: 2023, dayOfWeek: 3}) AS a, date({date: date('2021-01-02'), year: 2021, dayOfWeek: 1}) AS b, " +
+                    "date({date: date('2020-12-31'), year: 2021, dayOfWeek: 1}) AS c, localdatetime({date: date('2024-02-29'), year: 2023, dayOfWeek: 2, hour: 1}) AS e " +
+                    'RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day], [e.year, e.month, e.day, e.hour]]'
+            );
+            expect(rows).toEqual([
+                [
+                    [2023, 3, 1],
+                    [2020, 12, 28],
+                    [2021, 12, 27],
+                    [2023, 2, 28, 1]
+                ]
+            ]);
+        });
+
+        it('fails as the statement runs on a value that is null among others, or a time of day for a date', async () => {
+            const differing: string[] = [];
+            for (const cypher of [
+                "UNWIND [date('2024-03-15'), null] AS x RETURN date({date: x, day: 1})",
+                "UNWIND [date('2024-03-15'), localtime('10:00')] AS x RETURN date({date: x})",
+                "UNWIND [localdatetime('2024-03-15T10:00'), date('2024-03-15')] AS x RETURN time({time: x})"
+            ]) {
+                try {
+                    differing.push(`${cypher} gave ${JSON.stringify(await query(cypher))}`);
+                } catch {
+                    // Fails, as on Neo4j.
+                }
+            }
+            expect(differing).toEqual([]);
+        });
+    });
 });
 
 /**
@@ -4039,1137 +4135,1147 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
  * parameter of JavaScript's own date, a statement built in code, and a transaction rolled back on a connection of its
  * own.
  */
-describe.each(stores().filter((it) => it.type !== DatabaseType.NEO4J).map((it) => [it.name, it] as const))(
-    'Cypher compiled on %s',
-    (_, store) => {
-        let pm: PersistenceManager;
+describe.each(
+    stores()
+        .filter((it) => it.type !== DatabaseType.NEO4J)
+        .map((it) => [it.name, it] as const)
+)('Cypher compiled on %s', (_, store) => {
+    let pm: PersistenceManager;
 
-        const query = async (cypher: string, parameters: Record<string, any> = {}): Promise<any[]> =>
-            pm.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }).bind(parameters));
+    const query = async (cypher: string, parameters: Record<string, any> = {}): Promise<any[]> =>
+        pm.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }).bind(parameters));
 
-        beforeAll(async () => {
-            pm = await managerFor(store);
-        }, 300_000);
+    beforeAll(async () => {
+        pm = await managerFor(store);
+    }, 300_000);
 
-        beforeEach(async () => {
-            await pm.execute(new QuerySpecification(`DELETE FROM ${GRAPH}_node`));
-        });
+    beforeEach(async () => {
+        await pm.execute(new QuerySpecification(`DELETE FROM ${GRAPH}_node`));
+    });
 
-        afterAll(async () => {
-            await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
-            DatabaseRegistry.tearDown();
-        });
+    afterAll(async () => {
+        await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
+        DatabaseRegistry.tearDown();
+    });
 
-        it('toString of a float that is a whole number keeps its fraction, as in Cypher', async () => {
-            // Not in the spec, whose case binds the float as a parameter, which a JavaScript number cannot keep a float.
-            // Oracle writes a double of 2 as 2 (liberation-data/drivine#243).
-            const [row] = await query(
-                'RETURN [toString(2.0), toString(2.5), toString(1.5 * 2), toString(7), toString(-3.0)]'
-            );
-            expect(row).toEqual(['2.0', '2.5', '3.0', '7', '-3.0']);
-            expect(await query("RETURN toString('a')")).toEqual(['a']);
-            // A float too small for Oracle's NUMBER, which reads it as 0, a whole number.
-            expect(Number((await query('RETURN toString(1.0E-200)'))[0])).toEqual(1e-200);
-        });
+    it('toString of a float that is a whole number keeps its fraction, as in Cypher', async () => {
+        // Not in the spec, whose case binds the float as a parameter, which a JavaScript number cannot keep a float.
+        // Oracle writes a double of 2 as 2 (liberation-data/drivine#243).
+        const [row] = await query(
+            'RETURN [toString(2.0), toString(2.5), toString(1.5 * 2), toString(7), toString(-3.0)]'
+        );
+        expect(row).toEqual(['2.0', '2.5', '3.0', '7', '-3.0']);
+        expect(await query("RETURN toString('a')")).toEqual(['a']);
+        // A float too small for Oracle's NUMBER, which reads it as 0, a whole number.
+        expect(Number((await query('RETURN toString(1.0E-200)'))[0])).toEqual(1e-200);
+    });
 
-        it('round() reads a precision from data, or a whole float, as a whole number toward zero, and a null as null', async () => {
-            // Beyond the spec's round() cases: a float, -0.5 and a whole float read from data, and every rounding mode.
-            await query('CREATE (:Round {p: 1.7, q: -0.5, w: 2.0, r: -2, z: 0.0, b: 400})');
+    it('round() reads a precision from data, or a whole float, as a whole number toward zero, and a null as null', async () => {
+        // Beyond the spec's round() cases: a float, -0.5 and a whole float read from data, and every rounding mode.
+        await query('CREATE (:Round {p: 1.7, q: -0.5, w: 2.0, r: -2, z: 0.0, b: 400})');
+        expect(
+            await query(
+                "MATCH (n:Round) RETURN [round(2.555, n.p), round(2.55, n.p, 'UP'), round(2.5, n.q), round(2.5, n.q, 'HALF_UP'), round(2.555, n.w), round(2.555, 2.0, 'HALF_UP')]"
+            )
+        ).toEqual([[2.6, 2.6, 3.0, 3.0, 2.56, 2.56]]);
+        expect(
+            await query(
+                "RETURN [round(2.5, 0, 'HALF_UP'), round(-2.5, 0, 'HALF_EVEN'), round(2.5, 0, 'DOWN'), round(2.1, 0, 'CEILING'), round(2.9, 0, 'FLOOR'), round(-2.1, 0, 'UP')]"
+            )
+        ).toEqual([[3.0, -2.0, 2.0, 3.0, 2.0, -3.0]]);
+        expect(
+            await query("RETURN [round(null, 2), round(2.5, null), round(null, 2, 'UP'), round(2.5, null, 'UP')]")
+        ).toEqual([[null, null, null, null]]);
+        // A negative precision from data fails when the row is read, as on Neo4j, in both forms.
+        await expect(query("MATCH (n:Round) RETURN round(1234.5, n.r, 'HALF_UP')")).rejects.toThrow(
+            'round() takes a precision from 0 to 2147483647'
+        );
+        await expect(query('MATCH (n:Round) RETURN round(1234.5, n.r)')).rejects.toThrow(
+            'round() takes a precision from 0 to 2147483647'
+        );
+        // Places past a number's digits give it back, where Oracle's NUMBER would overflow (#324); short of them, it
+        // rounds.
+        expect(await query("RETURN [round(2.5, 400), round(2.5, 400, 'HALF_UP'), round(2.5, 400, 'CEILING')]")).toEqual(
+            [[2.5, 2.5, 2.5]]
+        );
+        // Read from data, and so far past the digits that writing them all out would not finish, where Postgres's
+        // numeric would overflow.
+        expect(await query("MATCH (n:Round) RETURN [round(2.5, n.b), round(2.5, n.b, 'FLOOR')]")).toEqual([[2.5, 2.5]]);
+        expect(await query("RETURN [round(2.5, 1000000000), round(2.5, 1000000000, 'HALF_UP')]")).toEqual([[2.5, 2.5]]);
+        expect(
+            await query(
+                "RETURN [round(1.0E-100, 120), round(123.456, 200, 'HALF_UP'), round(1.0E100, 30), round(1.0 / 3, 20), round(1.0E-100, 99), round(-2.5, 300, 'FLOOR')]"
+            )
+        ).toEqual([[1.0e-100, 123.456, 1.0e100, 0.3333333333333333, 0.0, -2.5]]);
+        // Zero, which has no digits to count, and a precision short of a tiny number's digits
+        // but past NUMBER's range.
+        expect(
+            await query(
+                "MATCH (n:Round) RETURN [round(0.0, 400), round(0, 400, 'HALF_UP'), round(n.z, 2), round(n.z, 400), round(n.z, 2, 'UP'), round(1.0E-120, 130), round(1.0E-120, 130, 'HALF_UP'), round(-1.0E-120, 136, 'CEILING')]"
+            )
+        ).toEqual([[0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-120, 1.0e-120, -1.0e-120]]);
+        // Near 10^17, whose digits all come before the point, and negatives past their digits.
+        expect(
+            await query(
+                "RETURN [round(123456789012345678, 2), round(99999999999999999.0, 1, 'UP'), round(12345678901234567.0, 1), round(-9.87654321E16, 3, 'FLOOR'), round(-1234.5678, 400), round(-1234.5678, 2)]"
+            )
+        ).toEqual([[1.2345678901234568e17, 1.0e17, 1.2345678901234568e16, -9.87654321e16, -1234.5678, -1234.57]]);
+        // A null number past its digits, and numbers near NUMBER's least, whose digits Oracle's LOG cannot count.
+        expect(
+            await query(
+                "MATCH (n:Round) RETURN [round(null, 400), round(n.none, 400, 'UP'), round(n.none, n.b), round(1.0E-129, 2), round(-1.0E-129, 2, 'FLOOR'), round(1.0E-130, 140), round(-1.0E-125, 141, 'HALF_EVEN'), round(1.2345678901234567E-130, 145), round(5.5E-128, 128, 'HALF_EVEN')]"
+            )
+        ).toEqual([[null, null, null, 0.0, -0.01, 1.0e-130, -1.0e-125, 1.234567890123457e-130, 6.0e-128]]);
+        // Over an aggregate, where no value is bound in a subquery, and so the number is written out where it is read.
+        expect(
+            await query(
+                "UNWIND [1.0, 2.0, 2.5] AS x RETURN [round(avg(x), 2), round(avg(x), 400), round(avg(x), 400, 'HALF_UP'), round(round(avg(x), 400), 1, 'DOWN')]"
+            )
+        ).toEqual([[1.83, 1.8333333333333333, 1.8333333333333333, 1.8]]);
+        // Zero too, whose places Oracle gives back without rounding.
+        await expect(query("MATCH (n:Round) RETURN round(n.z, n.r, 'HALF_UP')")).rejects.toThrow(
+            'round() takes a precision from 0 to 2147483647'
+        );
+        await expect(query('MATCH (n:Round) RETURN round(n.z, n.r)')).rejects.toThrow(
+            'round() takes a precision from 0 to 2147483647'
+        );
+        if (store.type !== DatabaseType.ORACLE) {
+            // The least doubles, whose last digits are short of the 400 places Postgres holds a precision to.
+            // Oracle's NUMBER holds none of them.
             expect(
                 await query(
-                    "MATCH (n:Round) RETURN [round(2.555, n.p), round(2.55, n.p, 'UP'), round(2.5, n.q), round(2.5, n.q, 'HALF_UP'), round(2.555, n.w), round(2.555, 2.0, 'HALF_UP')]"
+                    "RETURN [round(2.2250738585072014E-308, 323), round(2.2250738585072014E-308, 400), round(4.9E-324, 324, 'UP'), round(4.9E-324, 323, 'UP')]"
                 )
-            ).toEqual([[2.6, 2.6, 3.0, 3.0, 2.56, 2.56]]);
+            ).toEqual([[2.225073858507201e-308, 2.2250738585072014e-308, 4.9e-324, 9.9e-324]]);
+        }
+    });
+
+    it('round() to 0 places rounds as round(x) does, half toward +infinity, and to more half away from zero', async () => {
+        // Beyond the spec's steps for liberation-data/drivine#328: either side of 0, the first odd double past 2^52 and
+        // numbers near NUMBER's greatest, to 0 places written, picked when compiling, and from an expression, by the CASE.
+        for (const places of ['0', "toInteger('0')"]) {
             expect(
                 await query(
-                    "RETURN [round(2.5, 0, 'HALF_UP'), round(-2.5, 0, 'HALF_EVEN'), round(2.5, 0, 'DOWN'), round(2.1, 0, 'CEILING'), round(2.9, 0, 'FLOOR'), round(-2.1, 0, 'UP')]"
+                    `RETURN [round(-0.0, ${places}), round(-0.4, ${places}), round(-0.49999999999999994, ${places}), round(-4503599627370497.0, ${places}), round(9.0E125, ${places}), round(-9.0E125, ${places})]`
                 )
-            ).toEqual([[3.0, -2.0, 2.0, 3.0, 2.0, -3.0]]);
-            expect(
-                await query("RETURN [round(null, 2), round(2.5, null), round(null, 2, 'UP'), round(2.5, null, 'UP')]")
-            ).toEqual([[null, null, null, null]]);
-            // A negative precision from data fails when the row is read, as on Neo4j, in both forms.
-            await expect(query("MATCH (n:Round) RETURN round(1234.5, n.r, 'HALF_UP')")).rejects.toThrow(
+            ).toEqual([[0.0, 0.0, 0.0, -4.503599627370497e15, 9.0e125, -9.0e125]]);
+        }
+        // An integer as a float, a huge or tiny number, a precision from data, and the doubles that a binary sum with
+        // a half rounds up, the last below a half and the first odd past 2^52; round(x) likewise.
+        await query('CREATE (:Round {q: 0, z: 0.0})');
+        expect(
+            await query(
+                'MATCH (n:Round) RETURN [round(3, 0), round(-3, 0), round(1.0E20, 0), round(-1.0E100, 0), round(1.0E-120, 0), round(-1.0E-120, 0), round(-2.5, n.q), round(-2.5, n.z), ' +
+                    'round(0.49999999999999994, 0), round(4503599627370497.0, 0), round(0.49999999999999994), round(4503599627370497.0), round(-0.5), round(-2.5)]'
+            )
+        ).toEqual([
+            [
+                3.0, -3.0, 1.0e20, -1.0e100, 0.0, 0.0, -2.0, -2.0, 0.0, 4.503599627370497e15, 0.0, 4.503599627370497e15,
+                0.0, -2.0
+            ]
+        ]);
+        // Over an aggregate, where nothing is shared, with the precision written or read from a row; a negative one
+        // still fails there, on zero too, as the WHEN for 0 places reads it first.
+        expect(
+            await query(
+                'UNWIND [-1.0, -1.5] AS x WITH x, 0 AS p RETURN p, [round(sum(x), 0), round(sum(x), p), round(sum(x), 1), round(avg(x) * 2, p)]'
+            )
+        ).toEqual([[0, [-2.0, -2.0, -2.5, -2.0]]]);
+        await expect(query('UNWIND [0.0] AS x WITH x, -1 AS p RETURN p, round(sum(x), p)')).rejects.toThrow(
+            'round() takes a precision from 0 to 2147483647'
+        );
+        // In a WHERE, a grouping key and an ORDER BY, and nested.
+        expect(
+            await query('UNWIND [-2.5, -0.5, 0.5, 2.5] AS x WITH x WHERE round(x, 0) >= 0 RETURN collect(x)')
+        ).toEqual([[-0.5, 0.5, 2.5]]);
+        expect(
+            await query('UNWIND [-2.5, -0.5, 0.5, 2.5, 2.6] AS x RETURN round(x, 0) AS r, count(*) AS c ORDER BY r')
+        ).toEqual([
+            [-2.0, 1],
+            [0.0, 1],
+            [1.0, 1],
+            [3.0, 2]
+        ]);
+        expect(await query('UNWIND [-2.5, 2.4, -0.5] AS x RETURN x ORDER BY round(x, 0), x')).toEqual([
+            -2.5, -0.5, 2.4
+        ]);
+        expect(await query('MATCH (n:Round) RETURN round(round(-2.5, n.q) - 0.5, n.z)')).toEqual([-2.0]);
+        // Places a parameter or a parameter's key gives, picked when compiling: a fraction, -0.5, negated, or NaN is 0
+        // places, as Neo4j casts NaN to 0, and 1.0 is 1; a mode rounds by it alone, to 0 places for NaN, given,
+        // negated or a key (liberation-data/drivine#354). drivine-python's steps.
+        expect(
+            await query(
+                'RETURN [round(-2.5, $p), round(-2.5, $q), round(-2.5, -$r), round(-2.5, $z), round(-2.5, $n), ' +
+                    "round(-2.5, $o), round(-2.55, $o), round(-2.5, 0.9999), round(-2.5, 1.0), round(-2.5, $p, 'HALF_UP'), " +
+                    "round(-2.5, 0, 'HALF_UP'), round(-2.5, $m.z), round(-2.5, -0.5), round(-2.5, -0.9999), " +
+                    "round(-2.5, $n, 'HALF_UP'), round(-2.55, $n, 'UP'), round(-2.5, $n, 'HALF_DOWN'), " +
+                    "round(-2.5, -$n, 'HALF_UP'), round(-2.55, $m.n, 'UP')]",
+                { p: 0.7, q: -0.5, r: 0.5, z: 0, n: NaN, o: 1.0, m: { z: 0, n: NaN } }
+            )
+        ).toEqual([
+            [
+                -2.0, -2.0, -2.0, -2.0, -2.0, -2.5, -2.6, -2.0, -2.5, -3.0, -3.0, -2.0, -2.0, -2.0, -3.0, -3.0, -2.0,
+                -3.0, -3.0
+            ]
+        ]);
+        // NaN's 0 places by each other mode, over an aggregate, and of a null value, as Neo4j gives them.
+        expect(
+            await query(
+                "UNWIND [1.25, -2.5] AS x RETURN [round(sum(x), $n, 'UP'), round(-2.5, $n, 'CEILING'), " +
+                    "round(-2.5, $n, 'FLOOR'), round(-3.5, $n, 'HALF_EVEN'), round(-2.5, $n, 'DOWN'), round(null, $n, 'UP')]",
+                { n: NaN }
+            )
+        ).toEqual([[-2.0, -2.0, -3.0, -4.0, -2.0, null]]);
+        // Below 0 places, given or written, negated or not, fails on the row that rounds a number by it, as in Neo4j.
+        for (const [statement, parameters] of [
+            ['RETURN round(-2.5, $n)', { n: -1 }],
+            ['RETURN round(-2.5, -$n)', { n: 1 }],
+            ['RETURN round(-2.5, -1)', {}]
+        ] as [string, Record<string, any>][]) {
+            await expect(query(statement, parameters)).rejects.toThrow(
                 'round() takes a precision from 0 to 2147483647'
             );
-            await expect(query('MATCH (n:Round) RETURN round(1234.5, n.r)')).rejects.toThrow(
-                'round() takes a precision from 0 to 2147483647'
-            );
-            // Places past a number's digits give it back, where Oracle's NUMBER would overflow (#324); short of them, it
-            // rounds.
-            expect(
-                await query("RETURN [round(2.5, 400), round(2.5, 400, 'HALF_UP'), round(2.5, 400, 'CEILING')]")
-            ).toEqual([[2.5, 2.5, 2.5]]);
-            // Read from data, and so far past the digits that writing them all out would not finish, where Postgres's
-            // numeric would overflow.
-            expect(await query("MATCH (n:Round) RETURN [round(2.5, n.b), round(2.5, n.b, 'FLOOR')]")).toEqual([
-                [2.5, 2.5]
-            ]);
-            expect(await query("RETURN [round(2.5, 1000000000), round(2.5, 1000000000, 'HALF_UP')]")).toEqual([
-                [2.5, 2.5]
-            ]);
-            expect(
-                await query(
-                    "RETURN [round(1.0E-100, 120), round(123.456, 200, 'HALF_UP'), round(1.0E100, 30), round(1.0 / 3, 20), round(1.0E-100, 99), round(-2.5, 300, 'FLOOR')]"
-                )
-            ).toEqual([[1.0e-100, 123.456, 1.0e100, 0.3333333333333333, 0.0, -2.5]]);
-            // Zero, which has no digits to count, and a precision short of a tiny number's digits
-            // but past NUMBER's range.
-            expect(
-                await query(
-                    "MATCH (n:Round) RETURN [round(0.0, 400), round(0, 400, 'HALF_UP'), round(n.z, 2), round(n.z, 400), round(n.z, 2, 'UP'), round(1.0E-120, 130), round(1.0E-120, 130, 'HALF_UP'), round(-1.0E-120, 136, 'CEILING')]"
-                )
-            ).toEqual([[0.0, 0.0, 0.0, 0.0, 0.0, 1.0e-120, 1.0e-120, -1.0e-120]]);
-            // Near 10^17, whose digits all come before the point, and negatives past their digits.
-            expect(
-                await query(
-                    "RETURN [round(123456789012345678, 2), round(99999999999999999.0, 1, 'UP'), round(12345678901234567.0, 1), round(-9.87654321E16, 3, 'FLOOR'), round(-1234.5678, 400), round(-1234.5678, 2)]"
-                )
-            ).toEqual([[1.2345678901234568e17, 1.0e17, 1.2345678901234568e16, -9.87654321e16, -1234.5678, -1234.57]]);
-            // A null number past its digits, and numbers near NUMBER's least, whose digits Oracle's LOG cannot count.
-            expect(
-                await query(
-                    "MATCH (n:Round) RETURN [round(null, 400), round(n.none, 400, 'UP'), round(n.none, n.b), round(1.0E-129, 2), round(-1.0E-129, 2, 'FLOOR'), round(1.0E-130, 140), round(-1.0E-125, 141, 'HALF_EVEN'), round(1.2345678901234567E-130, 145), round(5.5E-128, 128, 'HALF_EVEN')]"
-                )
-            ).toEqual([[null, null, null, 0.0, -0.01, 1.0e-130, -1.0e-125, 1.234567890123457e-130, 6.0e-128]]);
-            // Over an aggregate, where no value is bound in a subquery, and so the number is written out where it is read.
-            expect(
-                await query(
-                    "UNWIND [1.0, 2.0, 2.5] AS x RETURN [round(avg(x), 2), round(avg(x), 400), round(avg(x), 400, 'HALF_UP'), round(round(avg(x), 400), 1, 'DOWN')]"
-                )
-            ).toEqual([[1.83, 1.8333333333333333, 1.8333333333333333, 1.8]]);
-            // Zero too, whose places Oracle gives back without rounding.
-            await expect(query("MATCH (n:Round) RETURN round(n.z, n.r, 'HALF_UP')")).rejects.toThrow(
-                'round() takes a precision from 0 to 2147483647'
-            );
-            await expect(query('MATCH (n:Round) RETURN round(n.z, n.r)')).rejects.toThrow(
-                'round() takes a precision from 0 to 2147483647'
-            );
-            if (store.type !== DatabaseType.ORACLE) {
-                // The least doubles, whose last digits are short of the 400 places Postgres holds a precision to.
-                // Oracle's NUMBER holds none of them.
-                expect(
-                    await query(
-                        "RETURN [round(2.2250738585072014E-308, 323), round(2.2250738585072014E-308, 400), round(4.9E-324, 324, 'UP'), round(4.9E-324, 323, 'UP')]"
-                    )
-                ).toEqual([[2.225073858507201e-308, 2.2250738585072014e-308, 4.9e-324, 9.9e-324]]);
-            }
-        });
+        }
+    });
 
-        it('round() to 0 places rounds as round(x) does, half toward +infinity, and to more half away from zero', async () => {
-            // Beyond the spec's steps for liberation-data/drivine#328: either side of 0, the first odd double past 2^52 and
-            // numbers near NUMBER's greatest, to 0 places written, picked when compiling, and from an expression, by the CASE.
-            for (const places of ['0', "toInteger('0')"]) {
-                expect(
-                    await query(
-                        `RETURN [round(-0.0, ${places}), round(-0.4, ${places}), round(-0.49999999999999994, ${places}), round(-4503599627370497.0, ${places}), round(9.0E125, ${places}), round(-9.0E125, ${places})]`
-                    )
-                ).toEqual([[0.0, 0.0, 0.0, -4.503599627370497e15, 9.0e125, -9.0e125]]);
-            }
-            // An integer as a float, a huge or tiny number, a precision from data, and the doubles that a binary sum with
-            // a half rounds up, the last below a half and the first odd past 2^52; round(x) likewise.
-            await query('CREATE (:Round {q: 0, z: 0.0})');
-            expect(
-                await query(
-                    'MATCH (n:Round) RETURN [round(3, 0), round(-3, 0), round(1.0E20, 0), round(-1.0E100, 0), round(1.0E-120, 0), round(-1.0E-120, 0), round(-2.5, n.q), round(-2.5, n.z), ' +
-                        'round(0.49999999999999994, 0), round(4503599627370497.0, 0), round(0.49999999999999994), round(4503599627370497.0), round(-0.5), round(-2.5)]'
-                )
-            ).toEqual([
-                [3.0, -3.0, 1.0e20, -1.0e100, 0.0, 0.0, -2.0, -2.0, 0.0, 4.503599627370497e15, 0.0, 4.503599627370497e15, 0.0, -2.0]
-            ]);
-            // Over an aggregate, where nothing is shared, with the precision written or read from a row; a negative one
-            // still fails there, on zero too, as the WHEN for 0 places reads it first.
-            expect(
-                await query(
-                    'UNWIND [-1.0, -1.5] AS x WITH x, 0 AS p RETURN p, [round(sum(x), 0), round(sum(x), p), round(sum(x), 1), round(avg(x) * 2, p)]'
-                )
-            ).toEqual([[0, [-2.0, -2.0, -2.5, -2.0]]]);
-            await expect(query('UNWIND [0.0] AS x WITH x, -1 AS p RETURN p, round(sum(x), p)')).rejects.toThrow(
-                'round() takes a precision from 0 to 2147483647'
-            );
-            // In a WHERE, a grouping key and an ORDER BY, and nested.
-            expect(
-                await query('UNWIND [-2.5, -0.5, 0.5, 2.5] AS x WITH x WHERE round(x, 0) >= 0 RETURN collect(x)')
-            ).toEqual([[-0.5, 0.5, 2.5]]);
-            expect(
-                await query('UNWIND [-2.5, -0.5, 0.5, 2.5, 2.6] AS x RETURN round(x, 0) AS r, count(*) AS c ORDER BY r')
-            ).toEqual([
-                [-2.0, 1],
-                [0.0, 1],
-                [1.0, 1],
-                [3.0, 2]
-            ]);
-            expect(await query('UNWIND [-2.5, 2.4, -0.5] AS x RETURN x ORDER BY round(x, 0), x')).toEqual([-2.5, -0.5, 2.4]);
-            expect(await query('MATCH (n:Round) RETURN round(round(-2.5, n.q) - 0.5, n.z)')).toEqual([-2.0]);
-            // Places a parameter or a parameter's key gives, picked when compiling: a fraction, -0.5, negated, or NaN is 0
-            // places, as Neo4j casts NaN to 0, and 1.0 is 1; a mode rounds by it alone, to 0 places for NaN, given,
-            // negated or a key (liberation-data/drivine#354). drivine-python's steps.
-            expect(
-                await query(
-                    'RETURN [round(-2.5, $p), round(-2.5, $q), round(-2.5, -$r), round(-2.5, $z), round(-2.5, $n), ' +
-                        "round(-2.5, $o), round(-2.55, $o), round(-2.5, 0.9999), round(-2.5, 1.0), round(-2.5, $p, 'HALF_UP'), " +
-                        "round(-2.5, 0, 'HALF_UP'), round(-2.5, $m.z), round(-2.5, -0.5), round(-2.5, -0.9999), " +
-                        "round(-2.5, $n, 'HALF_UP'), round(-2.55, $n, 'UP'), round(-2.5, $n, 'HALF_DOWN'), " +
-                        "round(-2.5, -$n, 'HALF_UP'), round(-2.55, $m.n, 'UP')]",
-                    { p: 0.7, q: -0.5, r: 0.5, z: 0, n: NaN, o: 1.0, m: { z: 0, n: NaN } }
-                )
-            ).toEqual([
-                [-2.0, -2.0, -2.0, -2.0, -2.0, -2.5, -2.6, -2.0, -2.5, -3.0, -3.0, -2.0, -2.0, -2.0, -3.0, -3.0, -2.0, -3.0, -3.0]
-            ]);
-            // NaN's 0 places by each other mode, over an aggregate, and of a null value, as Neo4j gives them.
-            expect(
-                await query(
-                    "UNWIND [1.25, -2.5] AS x RETURN [round(sum(x), $n, 'UP'), round(-2.5, $n, 'CEILING'), " +
-                        "round(-2.5, $n, 'FLOOR'), round(-3.5, $n, 'HALF_EVEN'), round(-2.5, $n, 'DOWN'), round(null, $n, 'UP')]",
-                    { n: NaN }
-                )
-            ).toEqual([[-2.0, -2.0, -3.0, -4.0, -2.0, null]]);
-            // Below 0 places, given or written, negated or not, fails on the row that rounds a number by it, as in Neo4j.
-            for (const [statement, parameters] of [
-                ['RETURN round(-2.5, $n)', { n: -1 }],
-                ['RETURN round(-2.5, -$n)', { n: 1 }],
-                ['RETURN round(-2.5, -1)', {}]
-            ] as [string, Record<string, any>][]) {
-                await expect(query(statement, parameters)).rejects.toThrow(
-                    'round() takes a precision from 0 to 2147483647'
-                );
-            }
-        });
+    it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
+        // Zero, on which LOG fails (ORA-01428) were Oracle to count its digits by it, gives zero wherever it is read,
+        // among rows that are not zero too.
+        await query('UNWIND [0.0, 1.25, 0.0, -2.5] AS x CREATE (:Round {x: x})');
+        expect(await query('MATCH (n:Round) WHERE round(n.x, 400) = 0 RETURN count(*)')).toEqual([2]);
+        expect(
+            await query("MATCH (n:Round) WHERE round(n.x, 2) = 0 AND round(n.x, 1, 'UP') = 0 RETURN count(*)")
+        ).toEqual([2]);
+        expect(await query('MATCH (n:Round) RETURN round(n.x, 1) AS r, count(*) AS c ORDER BY r')).toEqual([
+            [-2.5, 1],
+            [0.0, 2],
+            [1.3, 1]
+        ]);
+        expect(await query("MATCH (n:Round) RETURN n.x ORDER BY round(n.x, 1, 'UP') DESC")).toEqual([
+            1.25, 0.0, 0.0, -2.5
+        ]);
+        expect(
+            await query(
+                "UNWIND [0.0, 0.0] AS x RETURN [round(sum(x), 2), round(avg(x), 400), round(min(x), 2, 'HALF_UP'), round(sum(x), 1, 'CEILING')]"
+            )
+        ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
+        expect(
+            await query(
+                "MATCH (n:Round) WITH n.x AS x WHERE round(x, 2) = 0 RETURN [round(sum(x), 2), round(avg(x), 400), round(sum(x), 1, 'CEILING')]"
+            )
+        ).toEqual([[0.0, 0.0, 0.0]]);
+        expect(
+            await query(
+                "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x RETURN [sum(round(x, 400)), sum(round(x, 0)), sum(round(x, 0, 'UP')), count(*)]"
+            )
+        ).toEqual([[1500.0, 2000.0, 2000.0, 3000]]);
+        expect(
+            await query(
+                "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x WHERE round(x, 2) = 0 OR round(x, 400, 'UP') > 0 RETURN count(*)"
+            )
+        ).toEqual([3000]);
+        expect(await query('RETURN [x IN [0.0, 1.55, 0.0] | round(x, 1)]')).toEqual([[0.0, 1.6, 0.0]]);
+        expect(
+            await query("RETURN [round($z, 2), round($z, 400, 'FLOOR'), round(0, 2), round(0.0, 2, 'UP')]", {
+                z: 0.0
+            })
+        ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
+        // The precision is read before zero is given back: a null one gives null, and a negative one from data
+        // fails, under an aggregate too, where it is written out where it is read.
+        expect(
+            await query(
+                "MATCH (n:Round) WHERE n.x = 0 RETURN [round(0.0, null), round(0, null, 'HALF_UP'), round(n.x, n.none), round(n.x, n.none, 'UP')]"
+            )
+        ).toEqual([
+            [null, null, null, null],
+            [null, null, null, null]
+        ]);
+        await query('CREATE (:Round {x: 0.0, r: -2})');
+        for (const statement of [
+            'UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r)',
+            "UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r, 'UP')",
+            'MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(sum(x), r)',
+            "MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(min(x), r, 'HALF_UP')"
+        ]) {
+            await expect(query(statement)).rejects.toThrow('round() takes a precision from 0 to 2147483647');
+        }
+    });
 
-        it('round() of zero, which has no digits to count, gives zero, or null to a null precision, and fails on a negative one', async () => {
-            // Zero, on which LOG fails (ORA-01428) were Oracle to count its digits by it, gives zero wherever it is read,
-            // among rows that are not zero too.
-            await query('UNWIND [0.0, 1.25, 0.0, -2.5] AS x CREATE (:Round {x: x})');
-            expect(await query('MATCH (n:Round) WHERE round(n.x, 400) = 0 RETURN count(*)')).toEqual([2]);
-            expect(
-                await query("MATCH (n:Round) WHERE round(n.x, 2) = 0 AND round(n.x, 1, 'UP') = 0 RETURN count(*)")
-            ).toEqual([2]);
-            expect(
-                await query('MATCH (n:Round) RETURN round(n.x, 1) AS r, count(*) AS c ORDER BY r')
-            ).toEqual([[-2.5, 1], [0.0, 2], [1.3, 1]]);
-            expect(await query("MATCH (n:Round) RETURN n.x ORDER BY round(n.x, 1, 'UP') DESC")).toEqual([
-                1.25, 0.0, 0.0, -2.5
-            ]);
-            expect(
-                await query(
-                    "UNWIND [0.0, 0.0] AS x RETURN [round(sum(x), 2), round(avg(x), 400), round(min(x), 2, 'HALF_UP'), round(sum(x), 1, 'CEILING')]"
-                )
-            ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
-            expect(
-                await query(
-                    "MATCH (n:Round) WITH n.x AS x WHERE round(x, 2) = 0 RETURN [round(sum(x), 2), round(avg(x), 400), round(sum(x), 1, 'CEILING')]"
-                )
-            ).toEqual([[0.0, 0.0, 0.0]]);
-            expect(
-                await query(
-                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x RETURN [sum(round(x, 400)), sum(round(x, 0)), sum(round(x, 0, 'UP')), count(*)]"
-                )
-            ).toEqual([[1500.0, 2000.0, 2000.0, 3000]]);
-            expect(
-                await query(
-                    "UNWIND range(0, 2999) AS i WITH toFloat(i % 3) * 0.5 AS x WHERE round(x, 2) = 0 OR round(x, 400, 'UP') > 0 RETURN count(*)"
-                )
-            ).toEqual([3000]);
-            expect(await query('RETURN [x IN [0.0, 1.55, 0.0] | round(x, 1)]')).toEqual([[0.0, 1.6, 0.0]]);
-            expect(
-                await query("RETURN [round($z, 2), round($z, 400, 'FLOOR'), round(0, 2), round(0.0, 2, 'UP')]", {
-                    z: 0.0
-                })
-            ).toEqual([[0.0, 0.0, 0.0, 0.0]]);
-            // The precision is read before zero is given back: a null one gives null, and a negative one from data
-            // fails, under an aggregate too, where it is written out where it is read.
-            expect(
-                await query(
-                    "MATCH (n:Round) WHERE n.x = 0 RETURN [round(0.0, null), round(0, null, 'HALF_UP'), round(n.x, n.none), round(n.x, n.none, 'UP')]"
-                )
-            ).toEqual([
-                [null, null, null, null],
-                [null, null, null, null]
-            ]);
-            await query('CREATE (:Round {x: 0.0, r: -2})');
-            for (const statement of [
-                'UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r)',
-                "UNWIND [0.0, 0.0] AS x WITH x, -2 AS r RETURN r, round(sum(x), r, 'UP')",
-                'MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(sum(x), r)',
-                "MATCH (n:Round) WHERE n.r IS NOT NULL WITH n.x AS x, n.r AS r RETURN r, round(min(x), r, 'HALF_UP')"
-            ]) {
-                await expect(query(statement)).rejects.toThrow('round() takes a precision from 0 to 2147483647');
-            }
-        });
-
-        it("a negative precision from data fails only on a row that reads it, in a WHERE and an aggregate too, with the compiler's message", async () => {
-            // The spec reads a precision from data since v0.6.4; here, in a WHERE and an aggregate, and on rows filtered out.
-            await query('CREATE (:Round {r: -2, k: 1}), (:Round {r: 1, k: 2})');
-            for (const statement of [
-                'MATCH (n:Round) RETURN round(1234.5, n.r)',
-                'MATCH (n:Round) WHERE round(1234.5, n.r) > 0 RETURN n.k',
-                'MATCH (n:Round) RETURN sum(round(1234.5, n.r))',
-                "MATCH (n:Round) RETURN collect(round(1234.5, n.r, 'HALF_UP'))",
-                // A constant the compiler does not read as given is worked out by the store, as one from data.
-                'RETURN round(1234.5, 1 - 3)',
-                "RETURN round(1234.5, toInteger('-2'))"
-            ]) {
-                await expect(query(statement)).rejects.toThrow(
-                    'round() takes a precision from 0 to 2147483647, as in Neo4j.'
-                );
-            }
-            expect(await query('MATCH (n:Round) WHERE n.r >= 0 RETURN round(1234.5, n.r)')).toEqual([1234.5]);
-            expect(await query('MATCH (n:Nothing) RETURN round(1234.5, 1 - 3)')).toEqual([]);
-            expect(await query('UNWIND [] AS x RETURN round(1234.5, 1 - 3)')).toEqual([]);
-            expect(await query("MATCH (n:Round) WHERE n.k > 5 RETURN round(1234.5, toInteger('-2'))")).toEqual([]);
-            expect(await query('MATCH (n:Round) WHERE n.k = 2 RETURN sum(round(1234.5, n.r))')).toEqual([1234.5]);
-            expect(
-                await query(
-                    'MATCH (n:Round) RETURN CASE WHEN n.r < 0 THEN 0.0 ELSE round(1234.5, n.r) END ORDER BY n.k'
-                )
-            ).toEqual([0.0, 1234.5]);
-            expect(await query("RETURN [round(1234.5, 3 - 1), round(1234.5, toInteger('2'))]")).toEqual([
-                [1234.5, 1234.5]
-            ]);
-        });
-
-        it('a null rounds to null by a negative precision from data, in an aggregate too, as in Neo4j', async () => {
-            // liberation-data/drivine#336: Neo4j fails a negative precision only where there is a value to round.
-            await query('CREATE (:Round {r: -2, k: 1, x: 1234.5, i: 1234}), (:Round {r: -2, k: 2})');
-            expect(
-                await query("MATCH (n:Round) WHERE n.k = 1 RETURN [round(n.none, n.r), round(n.none, n.r, 'HALF_UP')]")
-            ).toEqual([[null, null]]);
-            expect(await query('MATCH (n:Round) RETURN round(round(n.none, n.r), n.r)')).toEqual([null, null]);
-            // Under an aggregate, where nothing is bound.
-            expect(
-                await query(
-                    "MATCH (n:Round) WITH n.none AS x, n.r AS r WITH r, [round(min(x), r), round(max(x), r, 'HALF_UP')] AS v RETURN v"
-                )
-            ).toEqual([[null, null]]);
-            expect(await query('MATCH (n:Round) RETURN collect(round(n.none, n.r))')).toEqual([[]]);
-            // A null written in the statement, or a parameter's.
-            expect(
-                await query(
-                    "MATCH (n:Round) WHERE n.k = 1 RETURN [round(null, n.r), round(null, n.r, 'UP'), round($v, n.r)]",
-                    { v: null }
-                )
-            ).toEqual([[null, null, null]]);
-            // A value there is still refused, -0.0 and a parameter's too.
-            await expect(query('MATCH (n:Round) WHERE n.k = 1 RETURN round($v, n.r)', { v: 1.5 })).rejects.toThrow(
+    it("a negative precision from data fails only on a row that reads it, in a WHERE and an aggregate too, with the compiler's message", async () => {
+        // The spec reads a precision from data since v0.6.4; here, in a WHERE and an aggregate, and on rows filtered out.
+        await query('CREATE (:Round {r: -2, k: 1}), (:Round {r: 1, k: 2})');
+        for (const statement of [
+            'MATCH (n:Round) RETURN round(1234.5, n.r)',
+            'MATCH (n:Round) WHERE round(1234.5, n.r) > 0 RETURN n.k',
+            'MATCH (n:Round) RETURN sum(round(1234.5, n.r))',
+            "MATCH (n:Round) RETURN collect(round(1234.5, n.r, 'HALF_UP'))",
+            // A constant the compiler does not read as given is worked out by the store, as one from data.
+            'RETURN round(1234.5, 1 - 3)',
+            "RETURN round(1234.5, toInteger('-2'))"
+        ]) {
+            await expect(query(statement)).rejects.toThrow(
                 'round() takes a precision from 0 to 2147483647, as in Neo4j.'
             );
-            for (const statement of [
-                'MATCH (n:Round) WHERE n.k = 1 RETURN round(-0.0, n.r)',
-                'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r)',
-                // An integer, which Oracle's JSON holds as a number of another kind than a float's.
-                'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.i, n.r)',
-                "MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r, 'HALF_UP')",
-                'MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(min(x), r)',
-                "MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(max(x), r, 'HALF_UP')",
-                'MATCH (n:Round) RETURN collect(round(n.x, n.r))'
-            ]) {
-                await expect(query(statement)).rejects.toThrow(
-                    'round() takes a precision from 0 to 2147483647, as in Neo4j.'
-                );
-            }
-        });
+        }
+        expect(await query('MATCH (n:Round) WHERE n.r >= 0 RETURN round(1234.5, n.r)')).toEqual([1234.5]);
+        expect(await query('MATCH (n:Nothing) RETURN round(1234.5, 1 - 3)')).toEqual([]);
+        expect(await query('UNWIND [] AS x RETURN round(1234.5, 1 - 3)')).toEqual([]);
+        expect(await query("MATCH (n:Round) WHERE n.k > 5 RETURN round(1234.5, toInteger('-2'))")).toEqual([]);
+        expect(await query('MATCH (n:Round) WHERE n.k = 2 RETURN sum(round(1234.5, n.r))')).toEqual([1234.5]);
+        expect(
+            await query('MATCH (n:Round) RETURN CASE WHEN n.r < 0 THEN 0.0 ELSE round(1234.5, n.r) END ORDER BY n.k')
+        ).toEqual([0.0, 1234.5]);
+        expect(await query("RETURN [round(1234.5, 3 - 1), round(1234.5, toInteger('2'))]")).toEqual([[1234.5, 1234.5]]);
+    });
 
-        it('a precision written below 0 or past 2147483647 fails only on a row that rounds a number by it, with the compiler\'s message', async () => {
-            // The spec's cases since liberation-data/drivine#364, here in a WHERE, an aggregate and a CASE, on rows filtered
-            // out, and by a parameter no YAML holds.
-            await query('CREATE (:Round {x: 1.5, k: 1}), (:Round {k: 2})');
-            for (const [statement, parameters] of [
-                ['MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, -2)', {}],
-                ["MATCH (n:Round) WHERE round(n.x, 2147483648, 'UP') > 0 RETURN n.k", {}],
-                ['MATCH (n:Round) RETURN sum(round(n.x, -$p))', { p: 2 }],
-                ["MATCH (n:Round) RETURN collect(round(n.x, $p, 'HALF_UP'))", { p: 1.0e20 }],
-                ['RETURN round(1.5, $p)', { p: Infinity }],
-                ["RETURN round(1.5, $p, 'UP')", { p: -Infinity }],
-                ['RETURN round(1.5, -9223372036854775808)', {}]
-            ] as [string, Record<string, any>][]) {
-                await expect(query(statement, parameters)).rejects.toThrow(
-                    'round() takes a precision from 0 to 2147483647, as in Neo4j.'
-                );
-            }
-            // A row that holds no number rounds to null, and a row the CASE does not round, or no row at all, fails nothing.
-            expect(
-                await query(
-                    "MATCH (n:Round) WHERE n.k = 2 RETURN [round(n.x, -2), round(n.x, 2147483648, 'UP'), round(n.x, $p)]",
-                    { p: 1.0e20 }
-                )
-            ).toEqual([[null, null, null]]);
-            expect(
-                await query("RETURN [round(null, $p), round(null, $p, 'FLOOR')]", { p: Infinity })
-            ).toEqual([[null, null]]);
-            expect(
-                await query(
-                    'MATCH (n:Round) RETURN CASE WHEN n.k > 0 THEN 0.0 ELSE round(1.5, -2) + round(n.x, 2147483648) END ORDER BY n.k'
-                )
-            ).toEqual([0.0, 0.0]);
-            expect(
-                await query(
-                    "MATCH (n:Round) WHERE n.k = 1 RETURN collect(CASE WHEN n.k = 2 THEN round(n.x, -2, 'UP') END)"
-                )
-            ).toEqual([[]]);
-            expect(
-                await query("MATCH (n:Round) WHERE n.k = 3 RETURN [round(1.5, -2), round(1.5, $p, 'UP')]", {
-                    p: 1.0e20
-                })
-            ).toEqual([]);
-            expect(await query('UNWIND [] AS x RETURN round(1.5, -2)')).toEqual([]);
-            // Nor in an ORDER BY whose round() reads nothing of the row. Not in a WHERE: Neo4j may test a condition that
-            // reads nothing of a row before the rows' own, and Postgres does.
-            expect(
-                await query(
-                    "MATCH (n:Round) WHERE n.k = 3 RETURN n.k ORDER BY round(1.5, -2), round(1.5, $p, 'UP')",
-                    { p: 1.0e20 }
-                )
-            ).toEqual([]);
-        });
+    it('a null rounds to null by a negative precision from data, in an aggregate too, as in Neo4j', async () => {
+        // liberation-data/drivine#336: Neo4j fails a negative precision only where there is a value to round.
+        await query('CREATE (:Round {r: -2, k: 1, x: 1234.5, i: 1234}), (:Round {r: -2, k: 2})');
+        expect(
+            await query("MATCH (n:Round) WHERE n.k = 1 RETURN [round(n.none, n.r), round(n.none, n.r, 'HALF_UP')]")
+        ).toEqual([[null, null]]);
+        expect(await query('MATCH (n:Round) RETURN round(round(n.none, n.r), n.r)')).toEqual([null, null]);
+        // Under an aggregate, where nothing is bound.
+        expect(
+            await query(
+                "MATCH (n:Round) WITH n.none AS x, n.r AS r WITH r, [round(min(x), r), round(max(x), r, 'HALF_UP')] AS v RETURN v"
+            )
+        ).toEqual([[null, null]]);
+        expect(await query('MATCH (n:Round) RETURN collect(round(n.none, n.r))')).toEqual([[]]);
+        // A null written in the statement, or a parameter's.
+        expect(
+            await query(
+                "MATCH (n:Round) WHERE n.k = 1 RETURN [round(null, n.r), round(null, n.r, 'UP'), round($v, n.r)]",
+                { v: null }
+            )
+        ).toEqual([[null, null, null]]);
+        // A value there is still refused, -0.0 and a parameter's too.
+        await expect(query('MATCH (n:Round) WHERE n.k = 1 RETURN round($v, n.r)', { v: 1.5 })).rejects.toThrow(
+            'round() takes a precision from 0 to 2147483647, as in Neo4j.'
+        );
+        for (const statement of [
+            'MATCH (n:Round) WHERE n.k = 1 RETURN round(-0.0, n.r)',
+            'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r)',
+            // An integer, which Oracle's JSON holds as a number of another kind than a float's.
+            'MATCH (n:Round) WHERE n.k = 1 RETURN round(n.i, n.r)',
+            "MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, n.r, 'HALF_UP')",
+            'MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(min(x), r)',
+            "MATCH (n:Round) WITH n.x AS x, n.r AS r RETURN r, round(max(x), r, 'HALF_UP')",
+            'MATCH (n:Round) RETURN collect(round(n.x, n.r))'
+        ]) {
+            await expect(query(statement)).rejects.toThrow(
+                'round() takes a precision from 0 to 2147483647, as in Neo4j.'
+            );
+        }
+    });
 
-        it("round() by a mode and sign() take the least positive numbers as positive, where Oracle's SIGN gives 0", async () => {
-            // Oracle's SIGN gives 0 for a positive number from 1.0E-130 to under 1.0E-128 (liberation-data/drivine#342);
-            // UP, DOWN and the HALF_ modes round by the sign.
-            expect(
-                await query(
-                    "RETURN [round(1.0E-129, 2, 'UP'), round(1.0E-129, 0, 'UP'), round(-1.0E-129, 2, 'UP'), round(1.0E-129, 2, 'DOWN'), round(-1.0E-129, 2, 'DOWN'), round(1.0E-130, 2, 'UP'), round(1.0E-129, 2, 'CEILING'), round(1.0E-129, 129, 'UP')]"
-                )
-            ).toEqual([[0.01, 1.0, -0.01, 0.0, 0.0, 0.01, 0.01, 1.0e-129]]);
-            expect(
-                await query(
-                    "RETURN [round(5.0E-130, 129, 'HALF_UP'), round(5.0E-130, 129, 'HALF_DOWN'), round(5.0E-130, 129, 'HALF_EVEN'), round(1.5E-129, 129, 'HALF_EVEN'), round(-5.0E-130, 129, 'HALF_UP'), round(9.0E-129, 128, 'HALF_UP')]"
-                )
-            ).toEqual([[1.0e-129, 0.0, 0.0, 2.0e-129, -1.0e-129, 1.0e-128]]);
-            expect(
-                await query(
-                    'RETURN [sign(1.0E-129), sign(-1.0E-129), sign(0.0), sign(null), sign(1.0E-130), sign(9.99E-129), sign($x)]',
-                    { x: 1.0e-129 }
-                )
-            ).toEqual([[1, -1, 0, null, 1, 1, 1]]);
-            // Read from a row, beside 0, -0.0 and null, whose sign the rounding does not ask, and under an aggregate.
-            expect(
-                await query(
-                    "UNWIND [1.0E-129, -1.0E-129, 0.0, -0.0, null] AS x RETURN [sign(x), round(x, 2, 'UP'), round(x, 129, 'HALF_EVEN'), round(x, 0, 'DOWN')]"
-                )
-            ).toEqual([
-                [1, 0.01, 1.0e-129, 0.0],
-                [-1, -0.01, -1.0e-129, 0.0],
-                [0, 0.0, 0.0, 0.0],
-                [0, 0.0, 0.0, 0.0],
-                [null, null, null, null]
-            ]);
-            expect(
-                await query(
-                    "UNWIND [1.0E-129, 5.0E-130] AS x RETURN [sign(sum(x)), sum(sign(x)), sign(min(x)), round(max(x), 2, 'UP'), sign(sign(sign(min(x))))]"
-                )
-            ).toEqual([[1, 2, 1, 0.01, 1]]);
-            // Numbers near NUMBER's greatest, which a sign told by a multiple of them would overflow.
-            expect(
-                await query('RETURN [sign(9.0E125), sign(-9.0E125), sign(7), sign(-0.5), sign(0.5)]')
-            ).toEqual([[1, -1, 1, -1, 1]]);
-        });
+    it("a precision written below 0 or past 2147483647 fails only on a row that rounds a number by it, with the compiler's message", async () => {
+        // The spec's cases since liberation-data/drivine#364, here in a WHERE, an aggregate and a CASE, on rows filtered
+        // out, and by a parameter no YAML holds.
+        await query('CREATE (:Round {x: 1.5, k: 1}), (:Round {k: 2})');
+        for (const [statement, parameters] of [
+            ['MATCH (n:Round) WHERE n.k = 1 RETURN round(n.x, -2)', {}],
+            ["MATCH (n:Round) WHERE round(n.x, 2147483648, 'UP') > 0 RETURN n.k", {}],
+            ['MATCH (n:Round) RETURN sum(round(n.x, -$p))', { p: 2 }],
+            ["MATCH (n:Round) RETURN collect(round(n.x, $p, 'HALF_UP'))", { p: 1.0e20 }],
+            ['RETURN round(1.5, $p)', { p: Infinity }],
+            ["RETURN round(1.5, $p, 'UP')", { p: -Infinity }],
+            ['RETURN round(1.5, -9223372036854775808)', {}]
+        ] as [string, Record<string, any>][]) {
+            await expect(query(statement, parameters)).rejects.toThrow(
+                'round() takes a precision from 0 to 2147483647, as in Neo4j.'
+            );
+        }
+        // A row that holds no number rounds to null, and a row the CASE does not round, or no row at all, fails nothing.
+        expect(
+            await query(
+                "MATCH (n:Round) WHERE n.k = 2 RETURN [round(n.x, -2), round(n.x, 2147483648, 'UP'), round(n.x, $p)]",
+                { p: 1.0e20 }
+            )
+        ).toEqual([[null, null, null]]);
+        expect(await query("RETURN [round(null, $p), round(null, $p, 'FLOOR')]", { p: Infinity })).toEqual([
+            [null, null]
+        ]);
+        expect(
+            await query(
+                'MATCH (n:Round) RETURN CASE WHEN n.k > 0 THEN 0.0 ELSE round(1.5, -2) + round(n.x, 2147483648) END ORDER BY n.k'
+            )
+        ).toEqual([0.0, 0.0]);
+        expect(
+            await query("MATCH (n:Round) WHERE n.k = 1 RETURN collect(CASE WHEN n.k = 2 THEN round(n.x, -2, 'UP') END)")
+        ).toEqual([[]]);
+        expect(
+            await query("MATCH (n:Round) WHERE n.k = 3 RETURN [round(1.5, -2), round(1.5, $p, 'UP')]", {
+                p: 1.0e20
+            })
+        ).toEqual([]);
+        expect(await query('UNWIND [] AS x RETURN round(1.5, -2)')).toEqual([]);
+        // Nor in an ORDER BY whose round() reads nothing of the row. Not in a WHERE: Neo4j may test a condition that
+        // reads nothing of a row before the rows' own, and Postgres does.
+        expect(
+            await query("MATCH (n:Round) WHERE n.k = 3 RETURN n.k ORDER BY round(1.5, -2), round(1.5, $p, 'UP')", {
+                p: 1.0e20
+            })
+        ).toEqual([]);
+    });
 
-        /** The empty text, which Oracle reads as null. */
-        const empty = store.type === DatabaseType.ORACLE ? null : '';
+    it("round() by a mode and sign() take the least positive numbers as positive, where Oracle's SIGN gives 0", async () => {
+        // Oracle's SIGN gives 0 for a positive number from 1.0E-130 to under 1.0E-128 (liberation-data/drivine#342);
+        // UP, DOWN and the HALF_ modes round by the sign.
+        expect(
+            await query(
+                "RETURN [round(1.0E-129, 2, 'UP'), round(1.0E-129, 0, 'UP'), round(-1.0E-129, 2, 'UP'), round(1.0E-129, 2, 'DOWN'), round(-1.0E-129, 2, 'DOWN'), round(1.0E-130, 2, 'UP'), round(1.0E-129, 2, 'CEILING'), round(1.0E-129, 129, 'UP')]"
+            )
+        ).toEqual([[0.01, 1.0, -0.01, 0.0, 0.0, 0.01, 0.01, 1.0e-129]]);
+        expect(
+            await query(
+                "RETURN [round(5.0E-130, 129, 'HALF_UP'), round(5.0E-130, 129, 'HALF_DOWN'), round(5.0E-130, 129, 'HALF_EVEN'), round(1.5E-129, 129, 'HALF_EVEN'), round(-5.0E-130, 129, 'HALF_UP'), round(9.0E-129, 128, 'HALF_UP')]"
+            )
+        ).toEqual([[1.0e-129, 0.0, 0.0, 2.0e-129, -1.0e-129, 1.0e-128]]);
+        expect(
+            await query(
+                'RETURN [sign(1.0E-129), sign(-1.0E-129), sign(0.0), sign(null), sign(1.0E-130), sign(9.99E-129), sign($x)]',
+                { x: 1.0e-129 }
+            )
+        ).toEqual([[1, -1, 0, null, 1, 1, 1]]);
+        // Read from a row, beside 0, -0.0 and null, whose sign the rounding does not ask, and under an aggregate.
+        expect(
+            await query(
+                "UNWIND [1.0E-129, -1.0E-129, 0.0, -0.0, null] AS x RETURN [sign(x), round(x, 2, 'UP'), round(x, 129, 'HALF_EVEN'), round(x, 0, 'DOWN')]"
+            )
+        ).toEqual([
+            [1, 0.01, 1.0e-129, 0.0],
+            [-1, -0.01, -1.0e-129, 0.0],
+            [0, 0.0, 0.0, 0.0],
+            [0, 0.0, 0.0, 0.0],
+            [null, null, null, null]
+        ]);
+        expect(
+            await query(
+                "UNWIND [1.0E-129, 5.0E-130] AS x RETURN [sign(sum(x)), sum(sign(x)), sign(min(x)), round(max(x), 2, 'UP'), sign(sign(sign(min(x))))]"
+            )
+        ).toEqual([[1, 2, 1, 0.01, 1]]);
+        // Numbers near NUMBER's greatest, which a sign told by a multiple of them would overflow.
+        expect(await query('RETURN [sign(9.0E125), sign(-9.0E125), sign(7), sign(-0.5), sign(0.5)]')).toEqual([
+            [1, -1, 1, -1, 1]
+        ]);
+    });
 
-        /** What the compiler refuses a written float start or length `what` of `fn` with. */
-        const float = (fn: string, what: string): string =>
-            `${fn}() takes an integer for its ${what}, not a float, as in Neo4j.`;
+    /** The empty text, which Oracle reads as null. */
+    const empty = store.type === DatabaseType.ORACLE ? null : '';
 
-        /** What the compiler refuses a start or length `what` of `fn` out of range with. */
-        const outOfRange = (fn: string, what: string): string =>
-            `${fn}() takes a ${what} from 0 to 2147483647, as in Neo4j.`;
+    /** What the compiler refuses a written float start or length `what` of `fn` with. */
+    const float = (fn: string, what: string): string =>
+        `${fn}() takes an integer for its ${what}, not a float, as in Neo4j.`;
 
-        it('substring(), left() and right() refuse a written float, even a whole one, and a given start or length out of range, as Neo4j does', async () => {
-            // Beyond the spec's steps for drivine4j's #263: a start or a length. Neo4j refuses a float it knows to be one
-            // whatever the text; a bound one it cuts toward zero. It refuses one out of range only where the text is not null.
-            for (const [statement, parameters, message] of [
-                ["RETURN left('hello', 2.0)", {}, float('left', 'length')],
-                ["RETURN right('hello', -0.5)", {}, float('right', 'length')],
-                ["RETURN substring('hello', 1.0)", {}, float('substring', 'start')],
-                ["RETURN right('hello', -1)", {}, outOfRange('right', 'length')],
-                ["RETURN substring('hello', 1, -1)", {}, outOfRange('substring', 'length')],
-                ["RETURN left('hello', 9223372036854775807)", {}, outOfRange('left', 'length')],
-                ['RETURN substring($t, $s)', { t: 'hello', s: -1 }, outOfRange('substring', 'start')],
-                // Bound, -1.5 is cut to -1, and 1.0E20 is past the greatest, as is an infinity.
-                ["RETURN left('hello', $n)", { n: -1.5 }, outOfRange('left', 'length')],
-                ["RETURN left('hello', $n)", { n: 1.0e20 }, outOfRange('left', 'length')],
-                ["RETURN left('hello', $n)", { n: Infinity }, outOfRange('left', 'length')],
-                ["RETURN left('hello', $n)", { n: -Infinity }, outOfRange('left', 'length')],
-                // Negated, a bound number is negated before it is cut: -2.7 is -2.
-                ["RETURN left('hello', -$n)", { n: 2.7 }, outOfRange('left', 'length')]
-            ] as const) {
-                await expect(query(statement, parameters)).rejects.toThrow(message);
-            }
-            expect(
-                await query(
-                    "RETURN [left('hello', 2), right('hello', 2), substring('hello', 1), substring('hello', 1, 2), left('hello', null), substring('hello', null), " +
-                        "substring('hello', 1, null), left(null, -1), right(null, -1), substring(null, 1, -1), left('hello', 10), left('hello', 0), substring('hello', 10)]"
-                )
-            ).toEqual([['he', 'lo', 'ello', 'el', null, null, null, null, null, null, 'hello', empty, empty]]);
-            expect(
-                await query(
-                    "RETURN [left($t, $m), left('hello', $i), left('hello', $f), substring('hello', $s, $l), left('hello', $q), right($t, $f), left('hello', $p.f), left($p.none, $m), left('hello', -$m), left('hello', -$q)]",
-                    { t: null, m: -1, i: 2, f: 2.7, s: 1.7, l: 2.6, q: -0.5, p: { f: 2.7 } }
-                )
-            ).toEqual([[null, 'he', 'he', 'el', empty, null, 'he', null, 'h', empty]]);
-            expect(await query("UNWIND $xs AS c RETURN left('hello', c)", { xs: [2.7, null] })).toEqual(['he', null]);
-            // A bound NaN is 0, as Java casts a double to a long; a bigint and the Neo4j driver's Integer are the numbers they are.
-            expect(
-                await query("RETURN [left('hello', $n), substring('hello', $n), left('hello', $b), substring('hello', $i)]", {
+    /** What the compiler refuses a start or length `what` of `fn` out of range with. */
+    const outOfRange = (fn: string, what: string): string =>
+        `${fn}() takes a ${what} from 0 to 2147483647, as in Neo4j.`;
+
+    it('substring(), left() and right() refuse a written float, even a whole one, and a given start or length out of range, as Neo4j does', async () => {
+        // Beyond the spec's steps for drivine4j's #263: a start or a length. Neo4j refuses a float it knows to be one
+        // whatever the text; a bound one it cuts toward zero. It refuses one out of range only where the text is not null.
+        for (const [statement, parameters, message] of [
+            ["RETURN left('hello', 2.0)", {}, float('left', 'length')],
+            ["RETURN right('hello', -0.5)", {}, float('right', 'length')],
+            ["RETURN substring('hello', 1.0)", {}, float('substring', 'start')],
+            ["RETURN right('hello', -1)", {}, outOfRange('right', 'length')],
+            ["RETURN substring('hello', 1, -1)", {}, outOfRange('substring', 'length')],
+            ["RETURN left('hello', 9223372036854775807)", {}, outOfRange('left', 'length')],
+            ['RETURN substring($t, $s)', { t: 'hello', s: -1 }, outOfRange('substring', 'start')],
+            // Bound, -1.5 is cut to -1, and 1.0E20 is past the greatest, as is an infinity.
+            ["RETURN left('hello', $n)", { n: -1.5 }, outOfRange('left', 'length')],
+            ["RETURN left('hello', $n)", { n: 1.0e20 }, outOfRange('left', 'length')],
+            ["RETURN left('hello', $n)", { n: Infinity }, outOfRange('left', 'length')],
+            ["RETURN left('hello', $n)", { n: -Infinity }, outOfRange('left', 'length')],
+            // Negated, a bound number is negated before it is cut: -2.7 is -2.
+            ["RETURN left('hello', -$n)", { n: 2.7 }, outOfRange('left', 'length')]
+        ] as const) {
+            await expect(query(statement, parameters)).rejects.toThrow(message);
+        }
+        expect(
+            await query(
+                "RETURN [left('hello', 2), right('hello', 2), substring('hello', 1), substring('hello', 1, 2), left('hello', null), substring('hello', null), " +
+                    "substring('hello', 1, null), left(null, -1), right(null, -1), substring(null, 1, -1), left('hello', 10), left('hello', 0), substring('hello', 10)]"
+            )
+        ).toEqual([['he', 'lo', 'ello', 'el', null, null, null, null, null, null, 'hello', empty, empty]]);
+        expect(
+            await query(
+                "RETURN [left($t, $m), left('hello', $i), left('hello', $f), substring('hello', $s, $l), left('hello', $q), right($t, $f), left('hello', $p.f), left($p.none, $m), left('hello', -$m), left('hello', -$q)]",
+                { t: null, m: -1, i: 2, f: 2.7, s: 1.7, l: 2.6, q: -0.5, p: { f: 2.7 } }
+            )
+        ).toEqual([[null, 'he', 'he', 'el', empty, null, 'he', null, 'h', empty]]);
+        expect(await query("UNWIND $xs AS c RETURN left('hello', c)", { xs: [2.7, null] })).toEqual(['he', null]);
+        // A bound NaN is 0, as Java casts a double to a long; a bigint and the Neo4j driver's Integer are the numbers they are.
+        expect(
+            await query(
+                "RETURN [left('hello', $n), substring('hello', $n), left('hello', $b), substring('hello', $i)]",
+                {
                     n: NaN,
                     b: BigInt(2),
                     i: neo4j.int(1)
-                })
-            ).toEqual([[empty, 'hello', 'he', 'ello']]);
-            // The greatest start or length is taken: a start past the text gives the empty text, written, bound or from a list.
-            expect(
-                await query(
-                    "RETURN [substring('hello', 2147483647), left('hello', 2147483647), right('hello', 2147483647), substring('hello', 1, 2147483647), substring('hello', $m), " +
-                        "substring('hello', 2147483647, 2147483647), substring('hello', $m, $m)]",
-                    { m: 2147483647 }
-                )
-            ).toEqual([[empty, 'hello', 'hello', 'ello', empty, empty, empty]]);
-            expect(await query("UNWIND $xs AS s RETURN substring('hello', s)", { xs: [2147483647] })).toEqual([empty]);
-        });
-
-        it('a start or length from data is cut toward zero, and one out of range fails only on a row that reads it, with the compiler\'s message', async () => {
-            // Not in the spec yet (#263): a start or a length read from data, in a WHERE and an aggregate too, and on rows
-            // filtered out.
+                }
+            )
+        ).toEqual([[empty, 'hello', 'he', 'ello']]);
+        // The greatest start or length is taken: a start past the text gives the empty text, written, bound or from a list.
+        expect(
             await query(
-                "CREATE (:Count {k: 1, f: 2.7, w: 2.0, q: -0.5, r: -1.5, m: -1, h: 2147483647.9, hp: 2147483648.5, t: 'hello'}), " +
-                    "(:Count {k: 2, m: 1, t: 'hello'}), (:Count {k: 3, m: -1, r: -1.5, hp: 2147483648.5})"
+                "RETURN [substring('hello', 2147483647), left('hello', 2147483647), right('hello', 2147483647), substring('hello', 1, 2147483647), substring('hello', $m), " +
+                    "substring('hello', 2147483647, 2147483647), substring('hello', $m, $m)]",
+                { m: 2147483647 }
+            )
+        ).toEqual([[empty, 'hello', 'hello', 'ello', empty, empty, empty]]);
+        expect(await query("UNWIND $xs AS s RETURN substring('hello', s)", { xs: [2147483647] })).toEqual([empty]);
+    });
+
+    it("a start or length from data is cut toward zero, and one out of range fails only on a row that reads it, with the compiler's message", async () => {
+        // Not in the spec yet (#263): a start or a length read from data, in a WHERE and an aggregate too, and on rows
+        // filtered out.
+        await query(
+            "CREATE (:Count {k: 1, f: 2.7, w: 2.0, q: -0.5, r: -1.5, m: -1, h: 2147483647.9, hp: 2147483648.5, t: 'hello'}), " +
+                "(:Count {k: 2, m: 1, t: 'hello'}), (:Count {k: 3, m: -1, r: -1.5, hp: 2147483648.5})"
+        );
+        for (const [statement, message] of [
+            ['MATCH (n:Count) RETURN left(n.t, n.m)', outOfRange('left', 'length')],
+            ["MATCH (n:Count) WHERE left(n.t, n.m) = 'h' RETURN n.k", outOfRange('left', 'length')],
+            ['MATCH (n:Count) RETURN collect(right(n.t, n.m))', outOfRange('right', 'length')],
+            ['MATCH (n:Count) RETURN substring(n.t, n.m)', outOfRange('substring', 'start')],
+            ['MATCH (n:Count) RETURN substring(n.t, 0, n.r)', outOfRange('substring', 'length')],
+            // -1.5 is cut to -1, and 2147483648.5 to past the greatest.
+            ['MATCH (n:Count) RETURN left(n.t, n.r)', outOfRange('left', 'length')],
+            ['MATCH (n:Count) RETURN left(n.t, n.hp)', outOfRange('left', 'length')],
+            // In an ORDER BY, and counted by an aggregate: three rows, less 5, is -2.
+            ['MATCH (n:Count) RETURN n.k ORDER BY left(n.t, n.m)', outOfRange('left', 'length')],
+            ['MATCH (n:Count) RETURN left(max(n.t), count(*) - 5)', outOfRange('left', 'length')],
+            // Written, below 0, beside a text from data: it fails on the row whose text is not null.
+            ['MATCH (n:Count) RETURN left(n.t, -1)', outOfRange('left', 'length')],
+            // A constant the compiler does not read as given is worked out by the store, as one from data.
+            ["RETURN left('hello', 1 - 3)", outOfRange('left', 'length')],
+            ["RETURN substring('hello', toInteger('-2'))", outOfRange('substring', 'start')]
+        ]) {
+            await expect(query(statement)).rejects.toThrow(message);
+        }
+        // Bound past what a long holds, beside a text from data: cut to the greatest long, as Java casts a double.
+        for (const n of [1.0e300, BigInt('1' + '0'.repeat(400)), -1.0e300]) {
+            await expect(query('MATCH (n:Count) RETURN left(n.t, $n)', { n })).rejects.toThrow(
+                outOfRange('left', 'length')
             );
-            for (const [statement, message] of [
-                ['MATCH (n:Count) RETURN left(n.t, n.m)', outOfRange('left', 'length')],
-                ["MATCH (n:Count) WHERE left(n.t, n.m) = 'h' RETURN n.k", outOfRange('left', 'length')],
-                ['MATCH (n:Count) RETURN collect(right(n.t, n.m))', outOfRange('right', 'length')],
-                ['MATCH (n:Count) RETURN substring(n.t, n.m)', outOfRange('substring', 'start')],
-                ['MATCH (n:Count) RETURN substring(n.t, 0, n.r)', outOfRange('substring', 'length')],
-                // -1.5 is cut to -1, and 2147483648.5 to past the greatest.
-                ['MATCH (n:Count) RETURN left(n.t, n.r)', outOfRange('left', 'length')],
-                ['MATCH (n:Count) RETURN left(n.t, n.hp)', outOfRange('left', 'length')],
-                // In an ORDER BY, and counted by an aggregate: three rows, less 5, is -2.
-                ['MATCH (n:Count) RETURN n.k ORDER BY left(n.t, n.m)', outOfRange('left', 'length')],
-                ['MATCH (n:Count) RETURN left(max(n.t), count(*) - 5)', outOfRange('left', 'length')],
-                // Written, below 0, beside a text from data: it fails on the row whose text is not null.
-                ['MATCH (n:Count) RETURN left(n.t, -1)', outOfRange('left', 'length')],
-                // A constant the compiler does not read as given is worked out by the store, as one from data.
-                ["RETURN left('hello', 1 - 3)", outOfRange('left', 'length')],
-                ["RETURN substring('hello', toInteger('-2'))", outOfRange('substring', 'start')]
-            ]) {
-                await expect(query(statement)).rejects.toThrow(message);
-            }
-            // Bound past what a long holds, beside a text from data: cut to the greatest long, as Java casts a double.
-            for (const n of [1.0e300, BigInt('1' + '0'.repeat(400)), -1.0e300]) {
-                await expect(query('MATCH (n:Count) RETURN left(n.t, $n)', { n })).rejects.toThrow(
-                    outOfRange('left', 'length')
+        }
+        expect(
+            await query(
+                'MATCH (n:Count) WHERE n.k = 1 RETURN [left(n.t, n.f), right(n.t, n.w), substring(n.t, n.f), substring(n.t, n.q, n.f), left(n.t, n.h), left(n.t, n.f * 1), left(n.none, n.f), left(n.t, n.q)]'
+            )
+        ).toEqual([['he', 'lo', 'llo', 'he', 'hello', 'he', null, empty]]);
+        expect(
+            await query('MATCH (n:Count) WHERE n.k = 1 RETURN [substring(n.t, n.h), substring(n.t, 0, n.h)]')
+        ).toEqual([[empty, 'hello']]);
+        expect(
+            await query(
+                'MATCH (n:Count) RETURN [left(max(n.t), count(*)), substring(max(n.t), count(*) - 2, count(*))]'
+            )
+        ).toEqual([['hel', 'ell']]);
+        // Grouped by, as a key beside an aggregate.
+        expect(await query('MATCH (n:Count) WHERE n.k = 2 RETURN substring(n.t, n.m), count(*)')).toEqual([
+            ['ello', 1]
+        ]);
+        // Out of range beside a null text is null, as in Neo4j, and so is a null start or length.
+        expect(
+            await query(
+                'MATCH (n:Count) WHERE n.k = 3 RETURN [left(n.t, n.m), substring(n.t, n.m), left(n.t, -1), right(n.t, n.r)]'
+            )
+        ).toEqual([[null, null, null, null]]);
+        // A constant out of range, which the compiler does not read as given, and one past SQL's integer: null beside a
+        // null text, and not refused for the row filtered out.
+        expect(
+            await query(
+                'MATCH (n:Count) WHERE n.k = 3 RETURN [left(n.t, 1 - 3), substring(n.t, 0, 1 - 3), left(n.t, n.hp), left(n.t, 2147483647 + 1)]'
+            )
+        ).toEqual([[null, null, null, null]]);
+        // Out of range beside a text of constants alone, on no row: the failure reads the text, so no store works it
+        // out before a row, given or not.
+        expect(
+            await query(
+                "MATCH (n:Count) WHERE n.k = 99 RETURN [left(toUpper('hello'), -1), left('hello', 1 - 3), substring(toUpper('hello'), 0, 1 - 3)]"
+            )
+        ).toEqual([]);
+        expect(
+            await query(
+                'MATCH (n:Count) WHERE n.k = 2 RETURN [left(n.t, n.none), substring(n.t, n.none), substring(n.t, 1, n.none)]'
+            )
+        ).toEqual([[null, null, null]]);
+        expect(
+            await query("MATCH (n:Count) RETURN CASE WHEN n.m < 0 THEN 'none' ELSE left(n.t, n.m) END ORDER BY n.k")
+        ).toEqual(['none', 'h', 'none']);
+    });
+
+    it('a sum of a text the statement makes and a text or a float gives the text Cypher writes', async () => {
+        // A side the statement makes a text is written as its own text on a SQL store (#326); a float beside it
+        // still as toString writes it.
+        expect(
+            await query(
+                "UNWIND [1, 2] AS i WITH 'x' + toString(i) AS t RETURN t + toUpper('b'), 'a' + toUpper(t), t + 2.5, split('p,q', ',')[0] + t ORDER BY t"
+            )
+        ).toEqual([
+            ['x1B', 'aX1', 'x12.5', 'px1'],
+            ['x2B', 'aX2', 'x22.5', 'px2']
+        ]);
+        expect(await query("WITH 1.0E7 AS f, 0.5 AS h RETURN 'x' + toString(1) + f, substring('abc', 1) + h")).toEqual([
+            ['x11.0E7', 'bc0.5']
+        ]);
+        expect(
+            await query(
+                "UNWIND ['a', 'b'] AS s WITH collect(toUpper(s)) AS ss, 1.5 AS f UNWIND ss AS u RETURN u + f ORDER BY u"
+            )
+        ).toEqual(['A1.5', 'B1.5']);
+        // A CASE, a coalesce, a list and a CALL's UNION that may give a float beside a text write the float as
+        // toString does.
+        expect(
+            await query(
+                "WITH 2.5 AS f RETURN CASE WHEN f > 1 THEN f ELSE 'a' END + 'x', coalesce(CASE WHEN f < 1 THEN 'a' END, f) + 'x', ['a', f][1] + 'x'"
+            )
+        ).toEqual([['2.5x', '2.5x', '2.5x']]);
+        expect(
+            await query("CALL { RETURN 2.5 AS v UNION RETURN toUpper('a') AS v } RETURN v + 'x' AS s ORDER BY s")
+        ).toEqual(['2.5x', 'Ax']);
+        // The least and the greatest of texts are a text, put together with a float as Cypher writes it.
+        expect(
+            await query("UNWIND ['b', 'a'] AS s WITH min(toUpper(s)) AS lo, max(s) AS hi RETURN lo + 2.5, hi + 2.5")
+        ).toEqual([['A2.5', 'b2.5']]);
+    });
+
+    /** Writes the graph of the spec's `queries.yaml`, which the tests that read it start from. */
+    const seed = async (): Promise<void> => {
+        await query(trimIndent(loadSpec('queries.yaml').graph!));
+    };
+
+    it('collect(DISTINCT) beside grouping keys, other aggregates, an order, a page and a variable outside its aggregates', async () => {
+        // Not in the spec: aggregatesFirst's grouping WITH, and the projection over it.
+        await seed();
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, count(*) + size(collect(DISTINCT m.title)) ORDER BY count(*) DESC, p.name SKIP 1 LIMIT 1'
+            )
+        ).toEqual([['Carrie', 4]]);
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, collect(DISTINCT m) AS ms WHERE size(ms) > 1 RETURN p.name, size(ms) ORDER BY p.name'
+            )
+        ).toEqual([
+            ['Carrie', 2],
+            ['Keanu', 3]
+        ]);
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, size(collect(DISTINCT m.title)) + p.born AS x RETURN p.name, x ORDER BY p.name'
+            )
+        ).toEqual([
+            ['Carrie', 1969],
+            ['Keanu', 1967],
+            ['Laurence', 1962]
+        ]);
+    });
+
+    it('collect(DISTINCT) in a DISTINCT projection ordered by a key property or an aggregate no item is', async () => {
+        // Not in the spec: the projection over aggregatesFirst's grouping WITH orders by what that WITH holds.
+        await seed();
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH DISTINCT p, size(collect(DISTINCT m.title)) AS n ORDER BY p.born DESC RETURN p.name, n'
+            )
+        ).toEqual([
+            ['Carrie', 2],
+            ['Keanu', 3],
+            ['Laurence', 1]
+        ]);
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name, size(collect(DISTINCT m.title)) ORDER BY count(*)'
+            )
+        ).toEqual([
+            ['Laurence', 1],
+            ['Carrie', 2],
+            ['Keanu', 3]
+        ]);
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS name, m.title AS t ' +
+                    "RETURN name AS nm, size(collect(DISTINCT t)) ORDER BY any(x IN collect(DISTINCT t) WHERE x STARTS WITH 'J' AND name = 'Keanu'), nm"
+            )
+        ).toEqual([
+            ['Carrie', 2],
+            ['Laurence', 1],
+            ['Keanu', 3]
+        ]);
+    });
+
+    it('collect(DISTINCT) beside an item named after a variable another item is, ordered by that name', async () => {
+        // Not in the spec: in an order term, an item's name is that item, not the variable it shadows.
+        await seed();
+        const rows = await query(
+            'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS person, p.name AS p, size(collect(DISTINCT m.title)) ORDER BY toLower(p)'
+        );
+        expect(rows.map((it) => it.slice(1))).toEqual([
+            ['Carrie', 2],
+            ['Keanu', 3],
+            ['Laurence', 1]
+        ]);
+    });
+
+    it('an item of the relationships collect gathers is read in the projection that gathers them', async () => {
+        // Not in the spec: Oracle reads no aggregate from a subquery, so the item is read from what collect gathered.
+        await seed();
+        expect(
+            await query(
+                "MATCH (p:Person)-[r:ACTED_IN]->() WHERE p.name <> 'Keanu' RETURN p.name, collect(r)[0].role ORDER BY p.name"
+            )
+        ).toEqual([
+            ['Carrie', 'Trinity'],
+            ['Laurence', 'Morpheus']
+        ]);
+        // An operation over it works the collection out first (#414), and reads the item by its id.
+        expect(
+            await query(
+                "MATCH (p:Person)-[r:ACTED_IN]->() WHERE p.name <> 'Keanu' RETURN p.name, toLower(toLower(collect(r)[0].role)) + '!' ORDER BY p.name"
+            )
+        ).toEqual([
+            ['Carrie', 'trinity!'],
+            ['Laurence', 'morpheus!']
+        ]);
+        expect(
+            await query(
+                "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() MATCH (:Person {name: 'Carrie'})-[s:ACTED_IN]->() " +
+                    'RETURN size(collect(r) + collect(s)), (collect(r) + collect(s))[0].role, (collect(r) + collect(s))[-1].role'
+            )
+        ).toEqual([[4, 'Morpheus', 'Trinity']]);
+        expect(
+            await query(
+                "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() WITH collect(r) AS rs RETURN rs[9] IS NULL, rs[-9] IS NULL"
+            )
+        ).toEqual([[true, true]]);
+    });
+
+    it('collect(DISTINCT) under a comprehension, a quantifier or a reduce that names a grouping key in its body', async () => {
+        // Not in the spec: aggregatesFirst's grouping WITH keeps each variable such a body names, outside the aggregate.
+        await seed();
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS name, m.title AS t ' +
+                    'RETURN name, size([x IN collect(DISTINCT t) WHERE x <> name]), any(x IN collect(DISTINCT t) WHERE x = name), ' +
+                    'reduce(n = 0, x IN collect(DISTINCT t) | n + size(name)) ORDER BY name'
+            )
+        ).toEqual([
+            ['Carrie', 2, false, 12],
+            ['Keanu', 3, false, 15],
+            ['Laurence', 1, false, 8]
+        ]);
+    });
+
+    it('collect(DISTINCT) beside a pattern or a subquery that names a grouping key', async () => {
+        // Not in the spec: aggregatesFirst's grouping WITH keeps each variable a pattern or a subquery names, outside the
+        // aggregate.
+        await seed();
+        expect(
+            await query(
+                'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, size(collect(DISTINCT m.title)) + COUNT { (p)-[:KNOWS]->() } AS x, ' +
+                    'size([(p)-[:KNOWS]->(f) | f.name] + collect(DISTINCT m.title)) AS y, ' +
+                    "size(collect(DISTINCT m.title)) > 2 OR EXISTS { (p)-[:KNOWS]->(:Person {name: 'Keanu'}) } AS z " +
+                    'RETURN p.name, x, y, z ORDER BY p.name'
+            )
+        ).toEqual([
+            ['Carrie', 2, 2, false],
+            ['Keanu', 4, 4, true],
+            ['Laurence', 2, 2, true]
+        ]);
+    });
+
+    it('collect(DISTINCT) of dates keeps each once, as dates', async () => {
+        // Not in the spec: what aggregatesFirst keeps of a collection is still of the kind collect gathered.
+        const dates = "UNWIND [date('2020-01-01'), date('2020-01-01'), date('2021-05-01')] AS d";
+        expect(await query(`${dates} WITH collect(DISTINCT d) AS ds RETURN [x IN ds | x.year]`)).toEqual([
+            [2020, 2021]
+        ]);
+        expect(await query(`${dates} RETURN collect(DISTINCT d)[1].month`)).toEqual([5]);
+    });
+
+    it('a float that is a whole number, collected once each, stays a float', async () => {
+        // The spec's case reads the floats back, which a JavaScript number does not tell from whole numbers, so toString
+        // tells them apart: what aggregatesFirst keeps of a collection is the items collect gathered, not their text.
+        expect(
+            await query('UNWIND [1.0, 2.5, 1.0] AS x WITH collect(DISTINCT x) AS xs RETURN [x IN xs | toString(x)]')
+        ).toEqual([['1.0', '2.5']]);
+    });
+
+    it('a walk read through a WITH, then sorted by toString in a second WITH, keeps that order', async () => {
+        // Not in the spec yet: the walk is a query inside the one the second WITH sorts, and its term, carried out, is
+        // bound in no subquery (liberation-data/drivine#252).
+        await seed();
+        expect(
+            await query(
+                "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b WITH b " +
+                    'ORDER BY toString(coalesce(b.name, b.title)) RETURN coalesce(b.name, b.title)'
+            )
+        ).toEqual([
+            'Carrie',
+            'Johnny Mnemonic',
+            'Keanu',
+            'The Matrix',
+            'The Matrix',
+            'The Matrix',
+            'The Matrix Reloaded',
+            'The Matrix Reloaded'
+        ]);
+    });
+
+    it("an item of a pattern comprehension's relationships is compared by its id", async () => {
+        // Not in the spec: a pattern comprehension gathers their properties beside their ids, as collect does, but in a
+        // subquery.
+        await seed();
+        expect(
+            await query(
+                "MATCH (a:Person {name: 'Keanu'}) WITH [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r] AS rs, a " +
+                    "RETURN [[(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][0] = [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][1], " +
+                    "[(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][1] IN rs, [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][0].role = 'Neo']"
+            )
+        ).toEqual([[false, true, true]]);
+    });
+
+    it('a list comprehension over nodes or relationships that keeps them gives a list of them, compared by id', async () => {
+        // Not in the spec: what entityComprehension keeps, with no projection or one of the item, is still a list of nodes
+        // or relationships.
+        await seed();
+        expect(
+            await query(
+                "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN {role: 'Neo'}]->() WITH collect(r) AS rs " +
+                    'RETURN [[x IN rs WHERE x <> rs[0]][0] = rs[1], [x IN rs | x][0] = rs[1], size([x IN rs WHERE x = rs[0] | x]), ' +
+                    'rs[0] IN [x IN rs WHERE x <> rs[0]], [x IN rs | x.role]]'
+            )
+        ).toEqual([[true, false, 1, false, ['Neo', 'Neo']]]);
+        expect(
+            await query(
+                "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*2]->(b) " +
+                    "RETURN [[n IN nodes(p) WHERE n.name <> 'Laurence'][0] = nodes(p)[1], b IN [n IN nodes(p) | n], [n IN nodes(p) WHERE n = b | n.name]]"
+            )
+        ).toEqual([[true, true, ['Carrie']]]);
+    });
+
+    it("a path's nodes or relationships added together are a list of them, and of no path, null", async () => {
+        // Not in the spec: lists of nodes no collect gathers, added, indexed and iterated by id; over a null list, null.
+        await seed();
+        expect(
+            await query(
+                "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*2]->() " +
+                    'RETURN [size(nodes(p) + nodes(p)), (nodes(p) + nodes(p))[3] = nodes(p)[0], (nodes(p) + nodes(p))[3] = nodes(p)[1], ' +
+                    '[n IN nodes(p) + nodes(p) | n.name], relationships(p)[1] IN relationships(p) + relationships(p), size(relationships(p) + relationships(p))]'
+            )
+        ).toEqual([[6, true, false, ['Laurence', 'Keanu', 'Carrie', 'Laurence', 'Keanu', 'Carrie'], true, 4]]);
+        expect(
+            await query(
+                'OPTIONAL MATCH p = (:Nope)-->() RETURN [[n IN nodes(p) | n.name], [n IN nodes(p) WHERE true], nodes(p)[0]]'
+            )
+        ).toEqual([[null, null, null]]);
+    });
+
+    it('CALLs that write, nested, give each row its own variables with the nodes they return', async () => {
+        // Not in the spec: a caller row at each depth, merged with a node returned from below it.
+        expect(
+            await query(
+                'UNWIND [1, 2] AS x CALL { WITH x CREATE (a:CyWrite {x: x}) WITH a, x ' +
+                    'CALL { WITH a, x CREATE (b:CyWrite {y: x * 10}) RETURN b } RETURN a, b } RETURN [x, a.x, b.y]'
+            )
+        ).toEqual([
+            [1, 1, 10],
+            [2, 2, 20]
+        ]);
+        expect(
+            await query(
+                'UNWIND [1, 2] AS i CALL { WITH i CREATE (n:CyWrite {i: i}) RETURN n } SET n.j = i * 10 RETURN [i, n.i, n.j] ORDER BY i'
+            )
+        ).toEqual([
+            [1, 1, 10],
+            [2, 2, 20]
+        ]);
+        expect(
+            await query(
+                "WITH date('2020-01-02') AS d CALL { CREATE (n:CyWrite) RETURN date('2021-03-04') AS e } RETURN [d.year, e.month]"
+            )
+        ).toEqual([[2020, 3]]);
+    });
+
+    it('a day and a moment are their ISO text', async () => {
+        const [[day, moment]] = await query('RETURN [date(), localdatetime()]');
+        expect(day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(moment).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3}|\.\d{6})?$/);
+    });
+
+    it("datetime's epoch milliseconds and timestamp are the moment the statement runs", async () => {
+        const before = Date.now() - 60_000;
+        const [[millis, stamp]] = await query(
+            'CREATE (n:CyWrite) SET n.at = datetime().epochMillis RETURN [n.at, timestamp()]'
+        );
+        const after = Date.now() + 60_000;
+        expect(millis).toBeGreaterThanOrEqual(before);
+        expect(millis).toBeLessThanOrEqual(after);
+        expect(stamp).toBeGreaterThanOrEqual(before);
+        expect(stamp).toBeLessThanOrEqual(after);
+    });
+
+    it('a parameter of a Date is a moment', async () => {
+        expect(
+            await query("RETURN {year: $at.year, later: $at > datetime('2024-01-01T00:00:00Z')}", {
+                at: new Date('2024-06-01T00:00:00Z')
+            })
+        ).toEqual([{ year: 2024, later: true }]);
+    });
+
+    it("a parameter of the Neo4j driver's Integer is the whole number it holds, as a value and as a count", async () => {
+        // An app binds a whole number so for Neo4j, whose driver sends a JavaScript number as a float.
+        expect(await query('CREATE (n:CyWrite {i: $i}) RETURN n.i', { i: neo4j.int(1) })).toEqual([1]);
+        await query('CREATE (:CyWrite {i: 2}), (:CyWrite {i: 3})');
+        expect(
+            await query('MATCH (n:CyWrite) WHERE n.i >= $from RETURN n.i ORDER BY n.i LIMIT $n', {
+                from: neo4j.int(2),
+                n: neo4j.int(1)
+            })
+        ).toEqual([2]);
+    });
+
+    it("a parameter of a Buffer or an Int8Array, the Neo4j driver's bytes, is its base64 text, as drivine4j writes a byte array", async () => {
+        expect(await query('RETURN $bytes', { bytes: Buffer.from([1, 2, 255]) })).toEqual(['AQL/']);
+        expect(await query('RETURN $bytes', { bytes: new Int8Array([1, 2, -1]) })).toEqual(['AQL/']);
+    });
+
+    it('a parameter of a Set is the list of its items, as the Neo4j driver sends it', async () => {
+        await query('CREATE (:CyWrite {i: 1}), (:CyWrite {i: 2})');
+        expect(await query('MATCH (n:CyWrite) WHERE n.i IN $ids RETURN n.i', { ids: new Set([2]) })).toEqual([2]);
+    });
+
+    it('a write whose text holds the dollar quote of its Postgres function writes it whole', async () => {
+        await query("CREATE (:CyWrite {s: 'a$cy$b', t: 'c$cy1$d'})");
+        expect(await query('MATCH (n:CyWrite) RETURN [n.s, n.t]')).toEqual([['a$cy$b', 'c$cy1$d']]);
+    });
+
+    it('a parameter named past ASCII is bound, to a statement that reads and to one that writes', async () => {
+        await query('CREATE (:CyWrite {größe: $größe, 名前: $名前})', { größe: 3, 名前: 'ada' });
+        expect(await query('MATCH (n:CyWrite) WHERE n.größe = $größe RETURN [n.größe, n.名前]', { größe: 3 })).toEqual([
+            [3, 'ada']
+        ]);
+    });
+
+    it('a statement of hundreds of creates, each naming nodes made before it, makes them all', async () => {
+        const clauses = Array.from({ length: 300 }, (__, i) => [
+            `CREATE (n${i}:CyWrite {i: ${i}})`,
+            ...(i > 0 ? [`CREATE (n${i - 1})-[:NEXT]->(n${i})`] : [])
+        ]).flat();
+        await query(clauses.join('\n'));
+        expect(
+            await query('MATCH (n:CyWrite) OPTIONAL MATCH (n)-[r:NEXT]->() RETURN [count(DISTINCT n), count(r)]')
+        ).toEqual([[300, 299]]);
+    });
+
+    it("Drivine's stamp is written as a node's property is, and read back as one", async () => {
+        const stamp = '`__drivine.stamp`';
+        await query(`CREATE (:CyWrite {id: 1, ${stamp}: 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb'})`);
+        expect(await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`)).toEqual([
+            'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb'
+        ]);
+        await query(`MATCH (n:CyWrite {id: 1}) SET ${Stamps.setClause('n')}`);
+        const [token, links] = ((await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`))[0] as string).split(':');
+        expect(token).toHaveLength(16);
+        expect(token).not.toEqual('aaaaaaaaaaaaaaaa');
+        expect(links).toEqual('bbbbbbbbbbbbbbbb');
+        expect(await query('MATCH (n:CyWrite {id: 1}) RETURN properties(n)')).toEqual([
+            { id: 1, [Stamps.PROPERTY]: `${token}:${links}` }
+        ]);
+        await query(`MATCH (n:CyWrite {id: 1}) REMOVE n.${stamp}`);
+        expect(await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`)).toEqual([null]);
+    });
+
+    it('a text longer than a VARCHAR2 holds is bound whole, to a statement that reads and to one that writes', async () => {
+        // 40,000 bytes in UTF-8, past the 32,767 a PL/SQL VARCHAR2 holds: drivine4j binds such a text as a CLOB.
+        const text = 'é'.repeat(20_000);
+        await query('CREATE (:CyWrite {id: 1, text: $text})', { text });
+        expect(await query('MATCH (n:CyWrite {id: 1}) RETURN n.text')).toEqual([text]);
+        expect(await query('RETURN $text', { text })).toEqual([text]);
+    });
+
+    it('a write in a transaction rolled back leaves nothing, and runs again after', async () => {
+        const connection = await DatabaseRegistry.getInstance().connectionProvider(store.connection)!.connect();
+        const run = async (cypher: string): Promise<any[]> =>
+            connection.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }));
+        await connection.startTransaction();
+        try {
+            await run("CREATE (:CyWrite {name: 'Ada'})");
+            expect(await run('MATCH (n:CyWrite) RETURN n.name')).toEqual(['Ada']);
+        } finally {
+            await connection.rollbackTransaction();
+            await connection.release();
+        }
+        expect(await query('MATCH (n:CyWrite) RETURN count(n)')).toEqual([0]);
+        // On Postgres, the function the write was compiled to went with the transaction, and is made again.
+        await query("CREATE (:CyWrite {name: 'Ada'})");
+        expect(await query('MATCH (n:CyWrite) RETURN count(n)')).toEqual([1]);
+    });
+
+    it("a list of a few thousand relationships is equal by identity to a map's or a list's", async () => {
+        // Not in the spec: their identity is larger than Oracle's = compares (ORA-40180), so Oracle compares it by
+        // JSON_EQUAL.
+        expect(
+            await query('CREATE (h:Hub) WITH h UNWIND range(1, 2500) AS i CREATE (h)-[:R]->(:Leaf) RETURN count(*)')
+        ).toEqual([2500]);
+        expect(
+            await query(
+                'MATCH (:Hub)-[r:R]->() WITH collect(r) AS rs RETURN [[rs][0] = rs, {x: rs}.x = rs, rs IN [rs], size(rs)]'
+            )
+        ).toEqual([[true, true, true, 2500]]);
+    }, 300_000);
+
+    it('collect(DISTINCT) keeps a few thousand lists or maps holding a relationship once each in seconds, not a minute', async () => {
+        // Not in the spec: each was compared with every one before it, which took 20 to 40 seconds on Oracle.
+        expect(
+            await query('CREATE (h:Hub) WITH h UNWIND range(1, 5000) AS i CREATE (h)-[:R]->(:Leaf) RETURN count(*)')
+        ).toEqual([5000]);
+        const started = Date.now();
+        expect(
+            await query(
+                'MATCH p = (:Hub)-[r:R]->() RETURN [size(collect(DISTINCT relationships(p))), size(collect(DISTINCT {x: r}))]'
+            )
+        ).toEqual([[5000, 5000]]);
+        // Under 8 seconds on a laptop, and up to 17 on CI's runners: 30 leaves CI room and still catches the minute.
+        expect(Date.now() - started).toBeLessThan(30_000);
+    }, 300_000);
+
+    it('a whole float past 2^53 written in the statement or given equals the same float worked out', async () => {
+        // Not in the spec: Postgres writes such a float out in full, by its shortest decimal, not the double's exact value.
+        expect(
+            await query("RETURN [toFloat('1e24') = 1e24, toFloat('1e300') = 1e300, toFloat('1e24') = $x]", { x: 1e24 })
+        ).toEqual([[true, true, true]]);
+    });
+
+    it('a number or a text the statement gives, added to a text, is written as toString writes it', async () => {
+        // Not in the spec: a side the statement gives is written out at compile time, and the other side as it is. A
+        // JavaScript number past a whole number's range is a float, as the Neo4j driver sends it.
+        expect(
+            await query(
+                "RETURN ['a' + 1e7, 1e7 + 'a', 'a' + 2.0, 'a' + $f, $i + 'b', 'a' + $s, $s + 1.5e-7, 'x' + 10, $m.n + 'y', $j + 'b', 'a' + $big]",
+                { f: 1.0e-4, i: 3, s: 's', m: { n: 0.5 }, j: neo4j.int(4), big: 1e21 }
+            )
+        ).toEqual([['a1.0E7', '1.0E7a', 'a2.0', 'a1.0E-4', '3b', 'as', 's1.5E-7', 'x10', '0.5y', '4b', 'a1.0E21']]);
+    });
+
+    it('a quotient of floats is written without the zeros its scale leaves', async () => {
+        // The spec's float arithmetic steps skip Postgres, which works a float out in exact decimal
+        // (liberation-data/drivine4j#188): these it gives as a double does.
+        expect(
+            await query('RETURN [4.0 / 2, 7 / 2.0, 10.0 / 4, toString(4.0 / 2), toString(10.0 / 4), toString(7 / 2.0)]')
+        ).toEqual([[2.0, 3.5, 2.5, '2.0', '2.5', '3.5']]);
+    });
+
+    it("toString of a double past Oracle's NUMBER range writes its shortest digits", async () => {
+        // Not in the spec: Oracle writes such a double from its own text, not from TO_CHAR's 15 digits.
+        expect(
+            await query(
+                'RETURN [toString(1.7976931348623157e308), toString(1.5e300), toString(1.0e-310), toString($a)]',
+                { a: -2.5e-320 }
+            )
+        ).toEqual([['1.7976931348623157E308', '1.5E300', '1.0E-310', '-2.5E-320']]);
+        expect(await query('RETURN toString(5e-324)')).toEqual(['4.9E-324']);
+    });
+
+    it('a UNION in CALL whose queries return a list with an identity beside one without compiles, as it did before identities', async () => {
+        // Not in the spec: the queries are compiled again without identities, so their columns match.
+        await seed();
+        expect(
+            await query(
+                "CALL { MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->() RETURN collect([r]) AS l UNION RETURN [] AS l } RETURN size(l) ORDER BY size(l)"
+            )
+        ).toEqual([0, 3]);
+        expect(
+            await query(
+                "CALL { MATCH (:Person {name: 'Keanu'})-[r:KNOWS]->() RETURN {x: r} AS m UNION RETURN {x: 1} AS m } RETURN count(*)"
+            )
+        ).toEqual([2]);
+    });
+
+    it('a CASE that gives a list of relationships or of texts is read, and gathered on every store but Oracle, which refuses it', async () => {
+        // Not in the spec: on Oracle the CASE's results are worked out first; gathered, it closes the session, so it is
+        // refused (liberation-data/drivine4j#224).
+        await seed();
+        expect(
+            await query(
+                "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(m) WITH r, m ORDER BY m.title RETURN CASE WHEN m.released > 2000 THEN [r] ELSE [m.title] END"
+            )
+        ).toEqual([['Johnny Mnemonic'], ['The Matrix'], [{ role: 'Neo' }]]);
+        // A CASE that reads an aggregate is worked out in the query that aggregates, where a subquery would group it again.
+        expect(
+            await query(
+                'MATCH (a:Person)-[r:ACTED_IN]->(m) RETURN a.name, size(CASE WHEN count(*) > 1 THEN collect(r) ELSE [] END) ORDER BY a.name'
+            )
+        ).toEqual([
+            ['Carrie', 2],
+            ['Keanu', 3],
+            ['Laurence', 0]
+        ]);
+        // Counted, by count() or the size() of its collect, it is read on Oracle too, as it was before.
+        expect(
+            await query(
+                'MATCH (a:Person)-[r:ACTED_IN]->(m) RETURN a.name, size(collect(CASE WHEN m.released > 2000 THEN [r] ELSE [] END)), ' +
+                    'count(CASE WHEN m.released > 2000 THEN [r] ELSE [] END) ORDER BY a.name'
+            )
+        ).toEqual([
+            ['Carrie', 2, 2],
+            ['Keanu', 3, 3],
+            ['Laurence', 1, 1]
+        ]);
+        const gathered =
+            'MATCH (a:Person)-[r:ACTED_IN]->(m) WITH a, r, m ORDER BY m.title ' +
+            'RETURN a.name, [x IN collect(CASE WHEN m.released > 2000 THEN [r] ELSE [m.title] END) | x[0]] ORDER BY a.name';
+        // With no ELSE, its null is the value of another kind.
+        const unmatched =
+            'MATCH (a:Person)-[r:ACTED_IN]->(m) WITH a, r, m ORDER BY m.title ' +
+            'RETURN a.name, [x IN collect(CASE WHEN m.released > 2000 THEN [r] END) | x[0].role] ORDER BY a.name';
+        if (store.type === DatabaseType.ORACLE) {
+            for (const statement of [gathered, unmatched]) {
+                await expect(query(statement)).rejects.toThrow(
+                    'On Oracle, an aggregate of a CASE that gives a list of nodes or relationships beside a value of another kind'
                 );
             }
-            expect(
-                await query(
-                    'MATCH (n:Count) WHERE n.k = 1 RETURN [left(n.t, n.f), right(n.t, n.w), substring(n.t, n.f), substring(n.t, n.q, n.f), left(n.t, n.h), left(n.t, n.f * 1), left(n.none, n.f), left(n.t, n.q)]'
-                )
-            ).toEqual([['he', 'lo', 'llo', 'he', 'hello', 'he', null, empty]]);
-            expect(
-                await query('MATCH (n:Count) WHERE n.k = 1 RETURN [substring(n.t, n.h), substring(n.t, 0, n.h)]')
-            ).toEqual([[empty, 'hello']]);
-            expect(
-                await query('MATCH (n:Count) RETURN [left(max(n.t), count(*)), substring(max(n.t), count(*) - 2, count(*))]')
-            ).toEqual([['hel', 'ell']]);
-            // Grouped by, as a key beside an aggregate.
-            expect(await query('MATCH (n:Count) WHERE n.k = 2 RETURN substring(n.t, n.m), count(*)')).toEqual([
-                ['ello', 1]
-            ]);
-            // Out of range beside a null text is null, as in Neo4j, and so is a null start or length.
-            expect(
-                await query(
-                    'MATCH (n:Count) WHERE n.k = 3 RETURN [left(n.t, n.m), substring(n.t, n.m), left(n.t, -1), right(n.t, n.r)]'
-                )
-            ).toEqual([[null, null, null, null]]);
-            // A constant out of range, which the compiler does not read as given, and one past SQL's integer: null beside a
-            // null text, and not refused for the row filtered out.
-            expect(
-                await query(
-                    'MATCH (n:Count) WHERE n.k = 3 RETURN [left(n.t, 1 - 3), substring(n.t, 0, 1 - 3), left(n.t, n.hp), left(n.t, 2147483647 + 1)]'
-                )
-            ).toEqual([[null, null, null, null]]);
-            // Out of range beside a text of constants alone, on no row: the failure reads the text, so no store works it
-            // out before a row, given or not.
-            expect(
-                await query(
-                    "MATCH (n:Count) WHERE n.k = 99 RETURN [left(toUpper('hello'), -1), left('hello', 1 - 3), substring(toUpper('hello'), 0, 1 - 3)]"
-                )
-            ).toEqual([]);
-            expect(
-                await query(
-                    'MATCH (n:Count) WHERE n.k = 2 RETURN [left(n.t, n.none), substring(n.t, n.none), substring(n.t, 1, n.none)]'
-                )
-            ).toEqual([[null, null, null]]);
-            expect(
-                await query(
-                    "MATCH (n:Count) RETURN CASE WHEN n.m < 0 THEN 'none' ELSE left(n.t, n.m) END ORDER BY n.k"
-                )
-            ).toEqual(['none', 'h', 'none']);
-        });
+            return;
+        }
+        expect(await query(unmatched)).toEqual([
+            ['Carrie', ['Trinity']],
+            ['Keanu', ['Neo']],
+            ['Laurence', []]
+        ]);
+        expect(await query(gathered)).toEqual([
+            ['Carrie', ['The Matrix', { role: 'Trinity' }]],
+            ['Keanu', ['Johnny Mnemonic', 'The Matrix', { role: 'Neo' }]],
+            ['Laurence', ['The Matrix']]
+        ]);
+    });
 
-        it('a sum of a text the statement makes and a text or a float gives the text Cypher writes', async () => {
-            // A side the statement makes a text is written as its own text on a SQL store (#326); a float beside it
-            // still as toString writes it.
-            expect(
-                await query(
-                    "UNWIND [1, 2] AS i WITH 'x' + toString(i) AS t RETURN t + toUpper('b'), 'a' + toUpper(t), t + 2.5, split('p,q', ',')[0] + t ORDER BY t"
-                )
-            ).toEqual([
-                ['x1B', 'aX1', 'x12.5', 'px1'],
-                ['x2B', 'aX2', 'x22.5', 'px2']
-            ]);
-            expect(
-                await query("WITH 1.0E7 AS f, 0.5 AS h RETURN 'x' + toString(1) + f, substring('abc', 1) + h")
-            ).toEqual([['x11.0E7', 'bc0.5']]);
-            expect(
-                await query(
-                    "UNWIND ['a', 'b'] AS s WITH collect(toUpper(s)) AS ss, 1.5 AS f UNWIND ss AS u RETURN u + f ORDER BY u"
-                )
-            ).toEqual(['A1.5', 'B1.5']);
-            // A CASE, a coalesce, a list and a CALL's UNION that may give a float beside a text write the float as
-            // toString does.
-            expect(
-                await query(
-                    "WITH 2.5 AS f RETURN CASE WHEN f > 1 THEN f ELSE 'a' END + 'x', coalesce(CASE WHEN f < 1 THEN 'a' END, f) + 'x', ['a', f][1] + 'x'"
-                )
-            ).toEqual([['2.5x', '2.5x', '2.5x']]);
-            expect(
-                await query("CALL { RETURN 2.5 AS v UNION RETURN toUpper('a') AS v } RETURN v + 'x' AS s ORDER BY s")
-            ).toEqual(['2.5x', 'Ax']);
-            // The least and the greatest of texts are a text, put together with a float as Cypher writes it.
-            expect(
-                await query("UNWIND ['b', 'a'] AS s WITH min(toUpper(s)) AS lo, max(s) AS hi RETURN lo + 2.5, hi + 2.5")
-            ).toEqual([['A2.5', 'b2.5']]);
-        });
-
-        /** Writes the graph of the spec's `queries.yaml`, which the tests that read it start from. */
-        const seed = async (): Promise<void> => {
-            await query(trimIndent(loadSpec('queries.yaml').graph!));
-        };
-
-        it('collect(DISTINCT) beside grouping keys, other aggregates, an order, a page and a variable outside its aggregates', async () => {
-            // Not in the spec: aggregatesFirst's grouping WITH, and the projection over it.
-            await seed();
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, count(*) + size(collect(DISTINCT m.title)) ORDER BY count(*) DESC, p.name SKIP 1 LIMIT 1'
-                )
-            ).toEqual([['Carrie', 4]]);
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, collect(DISTINCT m) AS ms WHERE size(ms) > 1 RETURN p.name, size(ms) ORDER BY p.name'
-                )
-            ).toEqual([
-                ['Carrie', 2],
-                ['Keanu', 3]
-            ]);
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, size(collect(DISTINCT m.title)) + p.born AS x RETURN p.name, x ORDER BY p.name'
-                )
-            ).toEqual([
-                ['Carrie', 1969],
-                ['Keanu', 1967],
-                ['Laurence', 1962]
-            ]);
-        });
-
-        it('collect(DISTINCT) in a DISTINCT projection ordered by a key property or an aggregate no item is', async () => {
-            // Not in the spec: the projection over aggregatesFirst's grouping WITH orders by what that WITH holds.
-            await seed();
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH DISTINCT p, size(collect(DISTINCT m.title)) AS n ORDER BY p.born DESC RETURN p.name, n'
-                )
-            ).toEqual([
-                ['Carrie', 2],
-                ['Keanu', 3],
-                ['Laurence', 1]
-            ]);
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name, size(collect(DISTINCT m.title)) ORDER BY count(*)'
-                )
-            ).toEqual([
-                ['Laurence', 1],
-                ['Carrie', 2],
-                ['Keanu', 3]
-            ]);
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS name, m.title AS t ' +
-                        "RETURN name AS nm, size(collect(DISTINCT t)) ORDER BY any(x IN collect(DISTINCT t) WHERE x STARTS WITH 'J' AND name = 'Keanu'), nm"
-                )
-            ).toEqual([
-                ['Carrie', 2],
-                ['Laurence', 1],
-                ['Keanu', 3]
-            ]);
-        });
-
-        it('collect(DISTINCT) beside an item named after a variable another item is, ordered by that name', async () => {
-            // Not in the spec: in an order term, an item's name is that item, not the variable it shadows.
-            await seed();
-            const rows = await query(
-                'MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS person, p.name AS p, size(collect(DISTINCT m.title)) ORDER BY toLower(p)'
-            );
-            expect(rows.map((it) => it.slice(1))).toEqual([
-                ['Carrie', 2],
-                ['Keanu', 3],
-                ['Laurence', 1]
-            ]);
-        });
-
-        it('an item of the relationships collect gathers is read in the projection that gathers them', async () => {
-            // Not in the spec: Oracle reads no aggregate from a subquery, so the item is read from what collect gathered.
-            await seed();
-            expect(
-                await query(
-                    "MATCH (p:Person)-[r:ACTED_IN]->() WHERE p.name <> 'Keanu' RETURN p.name, collect(r)[0].role ORDER BY p.name"
-                )
-            ).toEqual([
-                ['Carrie', 'Trinity'],
-                ['Laurence', 'Morpheus']
-            ]);
-            // An operation over it works the collection out first (#414), and reads the item by its id.
-            expect(
-                await query(
-                    "MATCH (p:Person)-[r:ACTED_IN]->() WHERE p.name <> 'Keanu' RETURN p.name, toLower(toLower(collect(r)[0].role)) + '!' ORDER BY p.name"
-                )
-            ).toEqual([
-                ['Carrie', 'trinity!'],
-                ['Laurence', 'morpheus!']
-            ]);
-            expect(
-                await query(
-                    "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() MATCH (:Person {name: 'Carrie'})-[s:ACTED_IN]->() " +
-                        'RETURN size(collect(r) + collect(s)), (collect(r) + collect(s))[0].role, (collect(r) + collect(s))[-1].role'
-                )
-            ).toEqual([[4, 'Morpheus', 'Trinity']]);
-            expect(
-                await query(
-                    "MATCH (:Person {name: 'Laurence'})-[r:ACTED_IN]->() WITH collect(r) AS rs RETURN rs[9] IS NULL, rs[-9] IS NULL"
-                )
-            ).toEqual([[true, true]]);
-        });
-
-        it('collect(DISTINCT) under a comprehension, a quantifier or a reduce that names a grouping key in its body', async () => {
-            // Not in the spec: aggregatesFirst's grouping WITH keeps each variable such a body names, outside the aggregate.
-            await seed();
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p.name AS name, m.title AS t ' +
-                        'RETURN name, size([x IN collect(DISTINCT t) WHERE x <> name]), any(x IN collect(DISTINCT t) WHERE x = name), ' +
-                        'reduce(n = 0, x IN collect(DISTINCT t) | n + size(name)) ORDER BY name'
-                )
-            ).toEqual([
-                ['Carrie', 2, false, 12],
-                ['Keanu', 3, false, 15],
-                ['Laurence', 1, false, 8]
-            ]);
-        });
-
-        it('collect(DISTINCT) beside a pattern or a subquery that names a grouping key', async () => {
-            // Not in the spec: aggregatesFirst's grouping WITH keeps each variable a pattern or a subquery names, outside the
-            // aggregate.
-            await seed();
-            expect(
-                await query(
-                    'MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, size(collect(DISTINCT m.title)) + COUNT { (p)-[:KNOWS]->() } AS x, ' +
-                        'size([(p)-[:KNOWS]->(f) | f.name] + collect(DISTINCT m.title)) AS y, ' +
-                        "size(collect(DISTINCT m.title)) > 2 OR EXISTS { (p)-[:KNOWS]->(:Person {name: 'Keanu'}) } AS z " +
-                        'RETURN p.name, x, y, z ORDER BY p.name'
-                )
-            ).toEqual([
-                ['Carrie', 2, 2, false],
-                ['Keanu', 4, 4, true],
-                ['Laurence', 2, 2, true]
-            ]);
-        });
-
-        it('collect(DISTINCT) of dates keeps each once, as dates', async () => {
-            // Not in the spec: what aggregatesFirst keeps of a collection is still of the kind collect gathered.
-            const dates = "UNWIND [date('2020-01-01'), date('2020-01-01'), date('2021-05-01')] AS d";
-            expect(await query(`${dates} WITH collect(DISTINCT d) AS ds RETURN [x IN ds | x.year]`)).toEqual([
-                [2020, 2021]
-            ]);
-            expect(await query(`${dates} RETURN collect(DISTINCT d)[1].month`)).toEqual([5]);
-        });
-
-        it('a float that is a whole number, collected once each, stays a float', async () => {
-            // The spec's case reads the floats back, which a JavaScript number does not tell from whole numbers, so toString
-            // tells them apart: what aggregatesFirst keeps of a collection is the items collect gathered, not their text.
-            expect(
-                await query('UNWIND [1.0, 2.5, 1.0] AS x WITH collect(DISTINCT x) AS xs RETURN [x IN xs | toString(x)]')
-            ).toEqual([['1.0', '2.5']]);
-        });
-
-        it('a walk read through a WITH, then sorted by toString in a second WITH, keeps that order', async () => {
-            // Not in the spec yet: the walk is a query inside the one the second WITH sorts, and its term, carried out, is
-            // bound in no subquery (liberation-data/drivine#252).
-            await seed();
-            expect(
-                await query(
-                    "MATCH (:Person {name: 'Laurence'})-[*]->(b) WITH b WITH b " +
-                        'ORDER BY toString(coalesce(b.name, b.title)) RETURN coalesce(b.name, b.title)'
-                )
-            ).toEqual([
-                'Carrie',
-                'Johnny Mnemonic',
-                'Keanu',
-                'The Matrix',
-                'The Matrix',
-                'The Matrix',
-                'The Matrix Reloaded',
-                'The Matrix Reloaded'
-            ]);
-        });
-
-        it("an item of a pattern comprehension's relationships is compared by its id", async () => {
-            // Not in the spec: a pattern comprehension gathers their properties beside their ids, as collect does, but in a
-            // subquery.
-            await seed();
-            expect(
-                await query(
-                    "MATCH (a:Person {name: 'Keanu'}) WITH [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r] AS rs, a " +
-                        "RETURN [[(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][0] = [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][1], " +
-                        "[(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][1] IN rs, [(a)-[r:ACTED_IN {role: 'Neo'}]->() | r][0].role = 'Neo']"
-                )
-            ).toEqual([[false, true, true]]);
-        });
-
-        it('a list comprehension over nodes or relationships that keeps them gives a list of them, compared by id', async () => {
-            // Not in the spec: what entityComprehension keeps, with no projection or one of the item, is still a list of nodes
-            // or relationships.
-            await seed();
-            expect(
-                await query(
-                    "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN {role: 'Neo'}]->() WITH collect(r) AS rs " +
-                        'RETURN [[x IN rs WHERE x <> rs[0]][0] = rs[1], [x IN rs | x][0] = rs[1], size([x IN rs WHERE x = rs[0] | x]), ' +
-                        'rs[0] IN [x IN rs WHERE x <> rs[0]], [x IN rs | x.role]]'
-                )
-            ).toEqual([[true, false, 1, false, ['Neo', 'Neo']]]);
-            expect(
-                await query(
-                    "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*2]->(b) " +
-                        "RETURN [[n IN nodes(p) WHERE n.name <> 'Laurence'][0] = nodes(p)[1], b IN [n IN nodes(p) | n], [n IN nodes(p) WHERE n = b | n.name]]"
-                )
-            ).toEqual([[true, true, ['Carrie']]]);
-        });
-
-        it("a path's nodes or relationships added together are a list of them, and of no path, null", async () => {
-            // Not in the spec: lists of nodes no collect gathers, added, indexed and iterated by id; over a null list, null.
-            await seed();
-            expect(
-                await query(
-                    "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS*2]->() " +
-                        'RETURN [size(nodes(p) + nodes(p)), (nodes(p) + nodes(p))[3] = nodes(p)[0], (nodes(p) + nodes(p))[3] = nodes(p)[1], ' +
-                        '[n IN nodes(p) + nodes(p) | n.name], relationships(p)[1] IN relationships(p) + relationships(p), size(relationships(p) + relationships(p))]'
-                )
-            ).toEqual([[6, true, false, ['Laurence', 'Keanu', 'Carrie', 'Laurence', 'Keanu', 'Carrie'], true, 4]]);
-            expect(
-                await query(
-                    'OPTIONAL MATCH p = (:Nope)-->() RETURN [[n IN nodes(p) | n.name], [n IN nodes(p) WHERE true], nodes(p)[0]]'
-                )
-            ).toEqual([[null, null, null]]);
-        });
-
-        it('CALLs that write, nested, give each row its own variables with the nodes they return', async () => {
-            // Not in the spec: a caller row at each depth, merged with a node returned from below it.
-            expect(
-                await query(
-                    'UNWIND [1, 2] AS x CALL { WITH x CREATE (a:CyWrite {x: x}) WITH a, x ' +
-                        'CALL { WITH a, x CREATE (b:CyWrite {y: x * 10}) RETURN b } RETURN a, b } RETURN [x, a.x, b.y]'
-                )
-            ).toEqual([
-                [1, 1, 10],
-                [2, 2, 20]
-            ]);
-            expect(
-                await query(
-                    'UNWIND [1, 2] AS i CALL { WITH i CREATE (n:CyWrite {i: i}) RETURN n } SET n.j = i * 10 RETURN [i, n.i, n.j] ORDER BY i'
-                )
-            ).toEqual([
-                [1, 1, 10],
-                [2, 2, 20]
-            ]);
-            expect(
-                await query(
-                    "WITH date('2020-01-02') AS d CALL { CREATE (n:CyWrite) RETURN date('2021-03-04') AS e } RETURN [d.year, e.month]"
-                )
-            ).toEqual([[2020, 3]]);
-        });
-
-        it('a day and a moment are their ISO text', async () => {
-            const [[day, moment]] = await query('RETURN [date(), localdatetime()]');
-            expect(day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-            expect(moment).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3}|\.\d{6})?$/);
-        });
-
-        it("datetime's epoch milliseconds and timestamp are the moment the statement runs", async () => {
-            const before = Date.now() - 60_000;
-            const [[millis, stamp]] = await query('CREATE (n:CyWrite) SET n.at = datetime().epochMillis RETURN [n.at, timestamp()]');
-            const after = Date.now() + 60_000;
-            expect(millis).toBeGreaterThanOrEqual(before);
-            expect(millis).toBeLessThanOrEqual(after);
-            expect(stamp).toBeGreaterThanOrEqual(before);
-            expect(stamp).toBeLessThanOrEqual(after);
-        });
-
-        it('a parameter of a Date is a moment', async () => {
-            expect(
-                await query("RETURN {year: $at.year, later: $at > datetime('2024-01-01T00:00:00Z')}", {
-                    at: new Date('2024-06-01T00:00:00Z')
-                })
-            ).toEqual([{ year: 2024, later: true }]);
-        });
-
-        it("a parameter of the Neo4j driver's Integer is the whole number it holds, as a value and as a count", async () => {
-            // An app binds a whole number so for Neo4j, whose driver sends a JavaScript number as a float.
-            expect(await query('CREATE (n:CyWrite {i: $i}) RETURN n.i', { i: neo4j.int(1) })).toEqual([1]);
-            await query('CREATE (:CyWrite {i: 2}), (:CyWrite {i: 3})');
-            expect(
-                await query('MATCH (n:CyWrite) WHERE n.i >= $from RETURN n.i ORDER BY n.i LIMIT $n', {
-                    from: neo4j.int(2),
-                    n: neo4j.int(1)
-                })
-            ).toEqual([2]);
-        });
-
-        it("a parameter of a Buffer or an Int8Array, the Neo4j driver's bytes, is its base64 text, as drivine4j writes a byte array", async () => {
-            expect(await query('RETURN $bytes', { bytes: Buffer.from([1, 2, 255]) })).toEqual(['AQL/']);
-            expect(await query('RETURN $bytes', { bytes: new Int8Array([1, 2, -1]) })).toEqual(['AQL/']);
-        });
-
-        it('a parameter of a Set is the list of its items, as the Neo4j driver sends it', async () => {
-            await query('CREATE (:CyWrite {i: 1}), (:CyWrite {i: 2})');
-            expect(await query('MATCH (n:CyWrite) WHERE n.i IN $ids RETURN n.i', { ids: new Set([2]) })).toEqual([2]);
-        });
-
-        it('a write whose text holds the dollar quote of its Postgres function writes it whole', async () => {
-            await query("CREATE (:CyWrite {s: 'a$cy$b', t: 'c$cy1$d'})");
-            expect(await query('MATCH (n:CyWrite) RETURN [n.s, n.t]')).toEqual([['a$cy$b', 'c$cy1$d']]);
-        });
-
-        it('a parameter named past ASCII is bound, to a statement that reads and to one that writes', async () => {
-            await query('CREATE (:CyWrite {größe: $größe, 名前: $名前})', { größe: 3, 名前: 'ada' });
-            expect(
-                await query('MATCH (n:CyWrite) WHERE n.größe = $größe RETURN [n.größe, n.名前]', { größe: 3 })
-            ).toEqual([[3, 'ada']]);
-        });
-
-        it('a statement of hundreds of creates, each naming nodes made before it, makes them all', async () => {
-            const clauses = Array.from({ length: 300 }, (__, i) => [
-                `CREATE (n${i}:CyWrite {i: ${i}})`,
-                ...(i > 0 ? [`CREATE (n${i - 1})-[:NEXT]->(n${i})`] : [])
-            ]).flat();
-            await query(clauses.join('\n'));
-            expect(
-                await query('MATCH (n:CyWrite) OPTIONAL MATCH (n)-[r:NEXT]->() RETURN [count(DISTINCT n), count(r)]')
-            ).toEqual([[300, 299]]);
-        });
-
-        it("Drivine's stamp is written as a node's property is, and read back as one", async () => {
-            const stamp = '`__drivine.stamp`';
-            await query(`CREATE (:CyWrite {id: 1, ${stamp}: 'aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb'})`);
-            expect(await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`)).toEqual(['aaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb']);
-            await query(`MATCH (n:CyWrite {id: 1}) SET ${Stamps.setClause('n')}`);
-            const [token, links] = ((await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`))[0] as string).split(':');
-            expect(token).toHaveLength(16);
-            expect(token).not.toEqual('aaaaaaaaaaaaaaaa');
-            expect(links).toEqual('bbbbbbbbbbbbbbbb');
-            expect(await query('MATCH (n:CyWrite {id: 1}) RETURN properties(n)')).toEqual([
-                { id: 1, [Stamps.PROPERTY]: `${token}:${links}` }
-            ]);
-            await query(`MATCH (n:CyWrite {id: 1}) REMOVE n.${stamp}`);
-            expect(await query(`MATCH (n:CyWrite {id: 1}) RETURN n.${stamp}`)).toEqual([null]);
-        });
-
-        it('a text longer than a VARCHAR2 holds is bound whole, to a statement that reads and to one that writes', async () => {
-            // 40,000 bytes in UTF-8, past the 32,767 a PL/SQL VARCHAR2 holds: drivine4j binds such a text as a CLOB.
-            const text = 'é'.repeat(20_000);
-            await query('CREATE (:CyWrite {id: 1, text: $text})', { text });
-            expect(await query('MATCH (n:CyWrite {id: 1}) RETURN n.text')).toEqual([text]);
-            expect(await query('RETURN $text', { text })).toEqual([text]);
-        });
-
-        it('a write in a transaction rolled back leaves nothing, and runs again after', async () => {
-            const connection = await DatabaseRegistry.getInstance().connectionProvider(store.connection)!.connect();
-            const run = async (cypher: string): Promise<any[]> =>
-                connection.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }));
-            await connection.startTransaction();
-            try {
-                await run("CREATE (:CyWrite {name: 'Ada'})");
-                expect(await run('MATCH (n:CyWrite) RETURN n.name')).toEqual(['Ada']);
-            } finally {
-                await connection.rollbackTransaction();
-                await connection.release();
-            }
-            expect(await query('MATCH (n:CyWrite) RETURN count(n)')).toEqual([0]);
-            // On Postgres, the function the write was compiled to went with the transaction, and is made again.
-            await query("CREATE (:CyWrite {name: 'Ada'})");
-            expect(await query('MATCH (n:CyWrite) RETURN count(n)')).toEqual([1]);
-        });
-
-        it("a list of a few thousand relationships is equal by identity to a map's or a list's", async () => {
-            // Not in the spec: their identity is larger than Oracle's = compares (ORA-40180), so Oracle compares it by
-            // JSON_EQUAL.
-            expect(
-                await query('CREATE (h:Hub) WITH h UNWIND range(1, 2500) AS i CREATE (h)-[:R]->(:Leaf) RETURN count(*)')
-            ).toEqual([2500]);
-            expect(
-                await query(
-                    'MATCH (:Hub)-[r:R]->() WITH collect(r) AS rs RETURN [[rs][0] = rs, {x: rs}.x = rs, rs IN [rs], size(rs)]'
-                )
-            ).toEqual([[true, true, true, 2500]]);
-        }, 300_000);
-
-        it('collect(DISTINCT) keeps a few thousand lists or maps holding a relationship once each in seconds, not a minute', async () => {
-            // Not in the spec: each was compared with every one before it, which took 20 to 40 seconds on Oracle.
-            expect(
-                await query('CREATE (h:Hub) WITH h UNWIND range(1, 5000) AS i CREATE (h)-[:R]->(:Leaf) RETURN count(*)')
-            ).toEqual([5000]);
-            const started = Date.now();
-            expect(
-                await query(
-                    'MATCH p = (:Hub)-[r:R]->() RETURN [size(collect(DISTINCT relationships(p))), size(collect(DISTINCT {x: r}))]'
-                )
-            ).toEqual([[5000, 5000]]);
-            // Under 8 seconds on a laptop, and up to 17 on CI's runners: 30 leaves CI room and still catches the minute.
-            expect(Date.now() - started).toBeLessThan(30_000);
-        }, 300_000);
-
-        it('a whole float past 2^53 written in the statement or given equals the same float worked out', async () => {
-            // Not in the spec: Postgres writes such a float out in full, by its shortest decimal, not the double's exact value.
-            expect(
-                await query("RETURN [toFloat('1e24') = 1e24, toFloat('1e300') = 1e300, toFloat('1e24') = $x]", { x: 1e24 })
-            ).toEqual([[true, true, true]]);
-        });
-
-        it('a number or a text the statement gives, added to a text, is written as toString writes it', async () => {
-            // Not in the spec: a side the statement gives is written out at compile time, and the other side as it is. A
-            // JavaScript number past a whole number's range is a float, as the Neo4j driver sends it.
-            expect(
-                await query(
-                    "RETURN ['a' + 1e7, 1e7 + 'a', 'a' + 2.0, 'a' + $f, $i + 'b', 'a' + $s, $s + 1.5e-7, 'x' + 10, $m.n + 'y', $j + 'b', 'a' + $big]",
-                    { f: 1.0e-4, i: 3, s: 's', m: { n: 0.5 }, j: neo4j.int(4), big: 1e21 }
-                )
-            ).toEqual([['a1.0E7', '1.0E7a', 'a2.0', 'a1.0E-4', '3b', 'as', 's1.5E-7', 'x10', '0.5y', '4b', 'a1.0E21']]);
-        });
-
-        it('a quotient of floats is written without the zeros its scale leaves', async () => {
-            // The spec's float arithmetic steps skip Postgres, which works a float out in exact decimal
-            // (liberation-data/drivine4j#188): these it gives as a double does.
-            expect(
-                await query('RETURN [4.0 / 2, 7 / 2.0, 10.0 / 4, toString(4.0 / 2), toString(10.0 / 4), toString(7 / 2.0)]')
-            ).toEqual([[2.0, 3.5, 2.5, '2.0', '2.5', '3.5']]);
-        });
-
-        it("toString of a double past Oracle's NUMBER range writes its shortest digits", async () => {
-            // Not in the spec: Oracle writes such a double from its own text, not from TO_CHAR's 15 digits.
-            expect(
-                await query(
-                    'RETURN [toString(1.7976931348623157e308), toString(1.5e300), toString(1.0e-310), toString($a)]',
-                    { a: -2.5e-320 }
-                )
-            ).toEqual([['1.7976931348623157E308', '1.5E300', '1.0E-310', '-2.5E-320']]);
-            expect(await query('RETURN toString(5e-324)')).toEqual(['4.9E-324']);
-        });
-
-        it('a UNION in CALL whose queries return a list with an identity beside one without compiles, as it did before identities', async () => {
-            // Not in the spec: the queries are compiled again without identities, so their columns match.
-            await seed();
-            expect(
-                await query(
-                    "CALL { MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->() RETURN collect([r]) AS l UNION RETURN [] AS l } RETURN size(l) ORDER BY size(l)"
-                )
-            ).toEqual([0, 3]);
-            expect(
-                await query(
-                    "CALL { MATCH (:Person {name: 'Keanu'})-[r:KNOWS]->() RETURN {x: r} AS m UNION RETURN {x: 1} AS m } RETURN count(*)"
-                )
-            ).toEqual([2]);
-        });
-
-        it('a CASE that gives a list of relationships or of texts is read, and gathered on every store but Oracle, which refuses it', async () => {
-            // Not in the spec: on Oracle the CASE's results are worked out first; gathered, it closes the session, so it is
-            // refused (liberation-data/drivine4j#224).
-            await seed();
-            expect(
-                await query(
-                    "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(m) WITH r, m ORDER BY m.title RETURN CASE WHEN m.released > 2000 THEN [r] ELSE [m.title] END"
-                )
-            ).toEqual([['Johnny Mnemonic'], ['The Matrix'], [{ role: 'Neo' }]]);
-            // A CASE that reads an aggregate is worked out in the query that aggregates, where a subquery would group it again.
-            expect(
-                await query(
-                    'MATCH (a:Person)-[r:ACTED_IN]->(m) RETURN a.name, size(CASE WHEN count(*) > 1 THEN collect(r) ELSE [] END) ORDER BY a.name'
-                )
-            ).toEqual([
-                ['Carrie', 2],
-                ['Keanu', 3],
-                ['Laurence', 0]
-            ]);
-            // Counted, by count() or the size() of its collect, it is read on Oracle too, as it was before.
-            expect(
-                await query(
-                    'MATCH (a:Person)-[r:ACTED_IN]->(m) RETURN a.name, size(collect(CASE WHEN m.released > 2000 THEN [r] ELSE [] END)), ' +
-                        'count(CASE WHEN m.released > 2000 THEN [r] ELSE [] END) ORDER BY a.name'
-                )
-            ).toEqual([
-                ['Carrie', 2, 2],
-                ['Keanu', 3, 3],
-                ['Laurence', 1, 1]
-            ]);
-            const gathered =
-                'MATCH (a:Person)-[r:ACTED_IN]->(m) WITH a, r, m ORDER BY m.title ' +
-                'RETURN a.name, [x IN collect(CASE WHEN m.released > 2000 THEN [r] ELSE [m.title] END) | x[0]] ORDER BY a.name';
-            // With no ELSE, its null is the value of another kind.
-            const unmatched =
-                'MATCH (a:Person)-[r:ACTED_IN]->(m) WITH a, r, m ORDER BY m.title ' +
-                'RETURN a.name, [x IN collect(CASE WHEN m.released > 2000 THEN [r] END) | x[0].role] ORDER BY a.name';
-            if (store.type === DatabaseType.ORACLE) {
-                for (const statement of [gathered, unmatched]) {
-                    await expect(query(statement)).rejects.toThrow(
-                        'On Oracle, an aggregate of a CASE that gives a list of nodes or relationships beside a value of another kind'
-                    );
-                }
-                return;
-            }
-            expect(await query(unmatched)).toEqual([
-                ['Carrie', ['Trinity']],
-                ['Keanu', ['Neo']],
-                ['Laurence', []]
-            ]);
-            expect(await query(gathered)).toEqual([
-                ['Carrie', ['The Matrix', { role: 'Trinity' }]],
-                ['Keanu', ['Johnny Mnemonic', 'The Matrix', { role: 'Neo' }]],
-                ['Laurence', ['The Matrix']]
-            ]);
-        });
-
-        it('min() and max() of lists the statement makes compare them item by item, whatever their lengths', async () => {
-            // Not in the spec yet: a nested list (liberation-data/drivine#287). The spec holds DISTINCT and the grouping WITH.
-            expect(await query('UNWIND [[[1, 2]], [[3]], [[1], [2]]] AS xs RETURN [min(xs), max(xs)]')).toEqual([
-                [[[1], [2]], [[3]]]
-            ]);
-            // The least and the greatest moment still, whatever their offsets.
-            expect(
-                await query(
-                    "UNWIND [datetime('2020-01-01T00:00+01:00'), datetime('2020-01-01T00:30+02:00')] AS x RETURN [toString(min(x)), toString(max(x))]"
-                )
-            ).toEqual([['2020-01-01T00:30:00+02:00', '2020-01-01T00:00:00+01:00']]);
-            // Oracle puts a null item first and a number before a text (liberation-data/drivine4j#205).
-            if (store.type === DatabaseType.ORACLE) {
-                return;
-            }
-            expect(await query("UNWIND [[1, 'a'], ['a', 1], [true]] AS xs RETURN [min(xs), max(xs)]")).toEqual([
-                [['a', 1], [1, 'a']]
-            ]);
-            expect(await query('UNWIND [[1, null], [1], [null], null] AS xs RETURN [min(xs), max(xs)]')).toEqual([
-                [[1], [null]]
-            ]);
-        });
-    }
-);
+    it('min() and max() of lists the statement makes compare them item by item, whatever their lengths', async () => {
+        // Not in the spec yet: a nested list (liberation-data/drivine#287). The spec holds DISTINCT and the grouping WITH.
+        expect(await query('UNWIND [[[1, 2]], [[3]], [[1], [2]]] AS xs RETURN [min(xs), max(xs)]')).toEqual([
+            [[[1], [2]], [[3]]]
+        ]);
+        // The least and the greatest moment still, whatever their offsets.
+        expect(
+            await query(
+                "UNWIND [datetime('2020-01-01T00:00+01:00'), datetime('2020-01-01T00:30+02:00')] AS x RETURN [toString(min(x)), toString(max(x))]"
+            )
+        ).toEqual([['2020-01-01T00:30:00+02:00', '2020-01-01T00:00:00+01:00']]);
+        // Oracle puts a null item first and a number before a text (liberation-data/drivine4j#205).
+        if (store.type === DatabaseType.ORACLE) {
+            return;
+        }
+        expect(await query("UNWIND [[1, 'a'], ['a', 1], [true]] AS xs RETURN [min(xs), max(xs)]")).toEqual([
+            [
+                ['a', 1],
+                [1, 'a']
+            ]
+        ]);
+        expect(await query('UNWIND [[1, null], [1], [null], null] AS xs RETURN [min(xs), max(xs)]')).toEqual([
+            [[1], [null]]
+        ]);
+    });
+});
