@@ -197,10 +197,14 @@ export function heldFor(file: string, cypherCase: CypherCase, index: number, sto
     )?.issue;
 }
 
+/** A step that gives rows, or fails with a message, not as the spec says. */
+class Mismatch extends Error {}
+
 /**
  * Runs the step at `index` of `cypherCase`, of the spec file `file`, on `store`, and checks what it gives or how it
- * fails; a step held there ({@link HELD}) is checked to fail as it does until its port lands. `run` gives a step's rows,
- * or fails as the store fails.
+ * fails; a step held there ({@link HELD}) is checked to fail as it does until its port lands, by rows or a message
+ * not as the spec says, or as the store fails, not as the runner crashes. `run` gives a step's rows, or fails as the
+ * store fails.
  */
 export async function check(
     file: string,
@@ -214,11 +218,23 @@ export async function check(
         await checkStep(cypherCase, index, store, run);
         return;
     }
+    let storeFailed = false;
     try {
-        await checkStep(cypherCase, index, store, run);
-    } catch {
-        // Held, as liberation-data/drivine#<issue> has it.
-        return;
+        await checkStep(cypherCase, index, store, async (step) => {
+            try {
+                return await run(step);
+            } catch (e) {
+                storeFailed = true;
+                throw e;
+            }
+        });
+    } catch (e) {
+        // Held, as liberation-data/drivine#<issue> has it, if it fails as the spec says it does not or as the store
+        // fails: anything else the runner throws is thrown on, so that a hold does not hide the runner's own crash.
+        if (e instanceof Mismatch || storeFailed) {
+            return;
+        }
+        throw e;
     }
     throw new Error(
         `${file}, ${cypherCase.name}, step ${index + 1} is held on ${store} for liberation-data/drivine#${issue}, ` +
@@ -245,7 +261,7 @@ async function checkStep(
     const expected = canonical(valuesFor(step.rows, Number), step, step.unordered ?? false);
     const actual = canonical(rows, step, step.unordered ?? false);
     if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-        throw new Error(`${where}\nExpected: ${JSON.stringify(expected)}\nReceived: ${JSON.stringify(actual)}`);
+        throw new Mismatch(`${where}\nExpected: ${JSON.stringify(expected)}\nReceived: ${JSON.stringify(actual)}`);
     }
 }
 
@@ -258,13 +274,13 @@ async function failure(step: CypherStep, where: string, run: (step: CypherStep) 
         failed = e as Error;
     }
     if (!failed) {
-        throw new Error(`Expected a failure: ${where}`);
+        throw new Mismatch(`Expected a failure: ${where}`);
     }
     if (typeof step.error === 'string' && failed.message !== step.error) {
-        throw new Error(`Expected <${step.error}>, but was <${failed.message}>: ${where}`);
+        throw new Mismatch(`Expected <${step.error}>, but was <${failed.message}>: ${where}`);
     }
     if (Array.isArray(step.error) && !step.error.includes(failed.message)) {
-        throw new Error(`Expected one of ${JSON.stringify(step.error)}, but was <${failed.message}>: ${where}`);
+        throw new Mismatch(`Expected one of ${JSON.stringify(step.error)}, but was <${failed.message}>: ${where}`);
     }
 }
 
