@@ -97,17 +97,20 @@ interface Neo4jStore {
  * first `createFailures` CREATE CONSTRAINTs deadlock, or, given `madeMeanwhile`, are refused with it, another session
  * having made the constraint, unless `foundAfter` is false: then nothing made it, and the refusal is for something else.
  * Given a list, the nth CREATE is refused with its nth, and deadlocks past its end. The stamp is written as on
- * `stampedOn`, so a SQL store's refusal of it is judged by its code.
+ * `stampedOn`, so a SQL store's refusal of it is judged by its code. Given `listedBy`, another manager's constraint is
+ * listed from the first SHOW CONSTRAINTS for which it answers true, told how many CREATEs and SHOWs there have been.
  */
 const neo4jStore = (
     createFailures: number,
     mergeFailures: Error[],
     madeMeanwhile?: Error | Error[],
     foundAfter: boolean = true,
-    stampedOn: DatabaseType = DatabaseType.NEO4J
+    stampedOn: DatabaseType = DatabaseType.NEO4J,
+    listedBy?: (creates: number, shows: number) => boolean
 ): Neo4jStore => {
     let created = false;
     let creates = 0;
+    let shows = 0;
     let merges = 0;
     const connection = {
         query: async (spec: QuerySpecification<unknown>) => {
@@ -126,6 +129,9 @@ const neo4jStore = (
                     );
                 }
                 created = true;
+            }
+            if (statement.startsWith('SHOW CONSTRAINTS')) {
+                created = created || (listedBy?.(creates, ++shows) ?? false);
             }
             return Promise.resolve(
                 statement.startsWith('SHOW CONSTRAINTS') && created
@@ -247,7 +253,7 @@ describe('Managers making the store key constraint at once', () => {
             code: '23505',
             constraint: 'orders_pkey'
         });
-        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(violated));
+        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(violated), false);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
         expect(creates()).toEqual(1);
@@ -260,7 +266,7 @@ describe('Managers making the store key constraint at once', () => {
             new Error('duplicate key value violates unique constraint "pg_store_uq_drivinestore_key"'),
             { code: '23505', schema: 'public', table: 'pg_store_nodes', constraint: 'pg_store_uq_drivinestore_key' }
         );
-        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(violated));
+        const { resolver, creates }: Neo4jStore = neo4jStore(1, [], DrivineError.withRootCause(violated), false);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
         expect(creates()).toEqual(1);
@@ -277,6 +283,57 @@ describe('Managers making the store key constraint at once', () => {
 
         expect((await resolver.resolve()).id).toEqual('store-8');
         expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        expect(warned()).toContain('best-effort');
+    });
+
+    it("should find the winner's constraint when its own making deadlocked as many times as the executor runs one", async () => {
+        // CI's 16 managers (run 41260212023): this one lost every round of the label's lock, while another made it.
+        const { resolver, creates, merges }: Neo4jStore = neo4jStore(
+            Number.MAX_SAFE_INTEGER,
+            [new Error('Cannot resolve conflicting transactions. You can retry this transaction.')],
+            undefined,
+            true,
+            DatabaseType.NEO4J,
+            (made) => made >= CONTENDED_ATTEMPTS
+        );
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        // Under the constraint found, a conflict is a lost race, and the stamp is written again.
+        expect(merges()).toEqual(2);
+        expect(warned()).not.toContain('best-effort');
+    });
+
+    it("should look again for the winner's constraint, after a pause, while the winner is still making it", async () => {
+        const { resolver, creates }: Neo4jStore = neo4jStore(
+            Number.MAX_SAFE_INTEGER,
+            [],
+            undefined,
+            true,
+            DatabaseType.NEO4J,
+            // The ensure's first look, then the first two looks after the deadlocks, find nothing.
+            (made, shows) => made >= CONTENDED_ATTEMPTS && shows > 3
+        );
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        expect(warned()).not.toContain('best-effort');
+    });
+
+    it("should look for the winner's constraint only so long after the deadlocks, and then warn", async () => {
+        let looks = 0;
+        const { resolver }: Neo4jStore = neo4jStore(
+            Number.MAX_SAFE_INTEGER,
+            [],
+            undefined,
+            true,
+            DatabaseType.NEO4J,
+            (_, shows) => (looks = shows) < 0
+        );
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        // The ensure's own look, then the resolver's eight (LOOKS_FOR_THE_WINNER) after it gave up.
+        expect(looks).toEqual(1 + 8);
         expect(warned()).toContain('best-effort');
     });
 

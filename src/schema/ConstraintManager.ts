@@ -97,6 +97,14 @@ export class ConstraintManager {
         return this.awaitBuilt(spec, sampleSize);
     }
 
+    /**
+     * Whether the constraint is there and built, so that the engine enforces it, as one another process made. One still
+     * being built is waited on; one whose build failed (FalkorDB) is not in force, and is left as it is.
+     */
+    async inForce(spec: UniquenessConstraintSpec): Promise<boolean> {
+        return (await this.awaitBuild(spec, false)) === 'BUILT';
+    }
+
     /** Drops the constraint, or one whose build FalkorDB marked FAILED, which `list` leaves out. */
     async drop(spec: UniquenessConstraintSpec): Promise<void> {
         if ((await this.exists(spec)) || (await this.failed(spec))) {
