@@ -13,6 +13,11 @@ export interface SchemaDeclaration {
     /** HNSW pins: portable, so they are the only tuning a decorator carries; engine options go in a catalog spec. */
     hnswM?: number;
     hnswEfConstruction?: number;
+    /**
+     * Whether a range index or uniqueness constraint is over the lowercased copy of each property, which a
+     * `@CaseInsensitive` field keeps, rather than over the property itself.
+     */
+    ignoreCase?: boolean;
 }
 
 const SCHEMA_KEY = Symbol('drivine:schema');
@@ -30,6 +35,7 @@ function declare(
         dimensions?: number;
         hnswM?: number;
         hnswEfConstruction?: number;
+        ignoreCase?: boolean;
     }
 ) {
     return (target: object, property?: string | symbol): void => {
@@ -40,7 +46,10 @@ function declare(
             const type = target as Function;
             Reflect.defineMetadata(
                 SCHEMA_KEY,
-                [...classSchemaDeclarations(type), { kind, fields: options.properties }],
+                [
+                    ...classSchemaDeclarations(type),
+                    { kind, fields: options.properties, ...(options.ignoreCase ? { ignoreCase: true } : {}) }
+                ],
                 type
             );
             return;
@@ -53,20 +62,32 @@ function declare(
                     similarity: options.similarity,
                     dimensions: options.dimensions,
                     hnswM: options.hnswM,
-                    hnswEfConstruction: options.hnswEfConstruction
+                    hnswEfConstruction: options.hnswEfConstruction,
+                    ...(options.ignoreCase ? { ignoreCase: true } : {})
                 }
             ]
         });
     };
 }
 
-/** A range index over the field, or on the class over the properties named. */
-export function RangeIndex(options: { properties?: string[] } = {}): ClassDecorator & PropertyDecorator {
+/**
+ * A range index over the field, or on the class over the properties named. With `ignoreCase`, it is over the lowercased
+ * copy each `@CaseInsensitive` field keeps, so that it serves `eqIgnoreCase`: see CaseInsensitive.
+ */
+export function RangeIndex(
+    options: { properties?: string[]; ignoreCase?: boolean } = {}
+): ClassDecorator & PropertyDecorator {
     return declare('RANGE', options) as ClassDecorator & PropertyDecorator;
 }
 
-/** A uniqueness constraint over the field, or on the class over the properties named. */
-export function Unique(options: { properties?: string[] } = {}): ClassDecorator & PropertyDecorator {
+/**
+ * A uniqueness constraint over the field, or on the class over the properties named. With `ignoreCase`, it is over the
+ * lowercased copy each `@CaseInsensitive` field keeps, so that it refuses `A@x.com` beside `a@x.com`: see
+ * CaseInsensitive.
+ */
+export function Unique(
+    options: { properties?: string[]; ignoreCase?: boolean } = {}
+): ClassDecorator & PropertyDecorator {
     return declare('UNIQUE', options) as ClassDecorator & PropertyDecorator;
 }
 

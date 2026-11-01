@@ -4,6 +4,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
+import { LowerCopies } from '@/model/LowerCopies';
 import { Stamps } from '@/model/Stamps';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { CypherGrammar } from '@/backend/CypherGrammar';
@@ -40,12 +41,14 @@ export class FragmentBatchStatement {
             const id = quoteName(idProperty(group.model));
             const vectors = vectorClauses(group.model, grammar, 'n', 'row.vectors');
             const changed = [changes('n', 'row.props'), ...vectors.changes].join(' OR ');
+            // The lowercased copies after the properties, from what the node then holds: see LowerCopies.
+            const writes = [...vectors.sets, ...LowerCopies.clauses('n', group.model.lowerCopied)];
             parts.push(
                 `FOREACH (row IN $rows${i} | MERGE (n${labelExpression(group.model.labels)} {${id}: row.id}) ` +
                     `SET n.${LOCK} = true REMOVE n.${LOCK} SET ${restamp(
                         'n',
                         changed
-                    )} SET n += row.props ${vectors.sets.join(' ')})`
+                    )} SET n += row.props ${writes.join(' ')})`
             );
         });
         groups.forEach((group, i) => {

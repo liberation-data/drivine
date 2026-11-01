@@ -75,6 +75,10 @@ export class PropositionNode {
 export class MessageNode { /* … */ }
 ```
 
+`@RangeIndex({ ignoreCase: true })` and `@Unique({ ignoreCase: true })` on a `@CaseInsensitive` field are made over the
+lowercased copy a save keeps of it, so they serve `eqIgnoreCase` and refuse two values that differ only in case.
+Ensuring one fills the copies in first. See [Lookups That Ignore Case](05-object-manager.md#lookups-that-ignore-case).
+
 ### Declarative: Catalogs, Enforced at Startup
 
 Give the module a schema, and it is enforced before the application starts, indexes before constraints:

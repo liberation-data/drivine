@@ -1,4 +1,5 @@
 export * from './Aggregate';
+export * from './CaseInsensitive';
 export * from './GraphPath';
 export * from './GraphProperty';
 export * from './GraphRelationship';

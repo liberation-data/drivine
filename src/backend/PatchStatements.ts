@@ -3,6 +3,7 @@ import { changes, LOCK, OFFERED, restamp, STAMP, twoTokensOf } from '@/backend/C
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
+import { LowerCopies } from '@/model/LowerCopies';
 import { Stamps } from '@/model/Stamps';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { vectorClauses } from '@/backend/VectorWrites';
@@ -58,12 +59,18 @@ export class PatchStatements {
         const kept = carry ? `${carry}, ` : '';
         const changed = [changes('n', props), ...vectorClauses(model, grammar, 'n', vectors).changes].join(' OR ');
         const sets = vectorClauses(model, grammar, 'x', vectors).sets.join(' ');
+        // The lowercased copies of a node the patch changed, from what it then holds, in a clause of their own: see
+        // LowerCopies.
+        const copies = LowerCopies.clauses('x', model.lowerCopied).map(
+            (it) => `FOREACH (x IN CASE WHEN changed THEN [n] ELSE [] END | ${it})`
+        );
         return [
             `WITH ${kept}f, n, CASE WHEN n IS NULL THEN false ELSE ${changed} END AS changed`,
             `FOREACH (x IN CASE WHEN changed THEN [n] ELSE [] END | SET ${restamp(
                 'x',
                 'true'
             )} SET x += ${props} ${sets})`,
+            ...copies,
             `FOREACH (x IN CASE WHEN f IS NOT NULL AND ${twoTokensOf(
                 'f'
             )} IS NULL THEN [f] ELSE [] END | SET x.${STAMP} = ${OFFERED})`

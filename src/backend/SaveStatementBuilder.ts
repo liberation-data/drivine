@@ -10,6 +10,7 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
+import { LowerCopies } from '@/model/LowerCopies';
 import { FORBIDDEN_KEYS, knownProperties, RESERVED_PREFIX } from '@/mapper/GraphObjectMapper';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 import { plainToInstance } from 'class-transformer';
@@ -209,7 +210,10 @@ export class SaveStatementBuilder {
             'SET n += $root.props',
             ...vectors.sets,
             ...bag.sets,
-            ...labelled.sets
+            ...labelled.sets,
+            // The lowercased copies, from the properties as now written, after the change was tested: in a SET of their
+            // own, since an engine may read every value of one SET before it writes any.
+            ...LowerCopies.clauses('n', model.lowerCopied)
         ];
         const expected = model.stampField ? object[model.stampField] : undefined;
         if (this.createOnly) {
@@ -458,6 +462,7 @@ export class SaveStatementBuilder {
                       )} SET ${t} += ${row}.props`,
                       ...rowVectors.sets,
                       ...subtypeLabels,
+                      ...LowerCopies.clauses(t, this.lowerCopied(root)),
                       `MERGE ${pattern(part.rel, parent, '', t)} ON CREATE SET ${relink(parent)}, ${relink(t)}`
                   ]
                 : [
@@ -597,6 +602,15 @@ export class SaveStatementBuilder {
             changed.push(value === null ? `${target} IS NOT NULL` : `(${target} IS NULL OR ${target} <> $${name})`);
         });
         return { sets, changes: changed };
+    }
+
+    /**
+     * The properties whose lowercased copies a related node of `target` is given: its own `@CaseInsensitive` fields', and
+     * those of each subclass the save holds, as a row of a subclass is written by the same clause. A copy of a property
+     * the node doesn't hold is none.
+     */
+    private lowerCopied(target: FragmentModel): string[] {
+        return [...new Set([target, ...(this.subtypes.get(target) ?? [])].flatMap((it) => it.lowerCopied))];
     }
 
     /** The model of the object's own class, where it is a subclass of the field's target. */

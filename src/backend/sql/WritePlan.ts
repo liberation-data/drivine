@@ -30,6 +30,11 @@ export interface NodeWrites {
      * drops those recorded and no longer held, keeping the `base` labels of the class.
      */
     owned?: { property: string; clear: boolean; base: string[] };
+    /**
+     * The properties whose lowercased copy the step writes, from what the node holds once the step's writes are done:
+     * see LowerCopies. The copies are no part of whether the step changed the node.
+     */
+    lower?: string[];
 }
 
 /** What a `node` step says about the save's root. */
@@ -122,6 +127,7 @@ export class WritePlan {
                     ? { prop: writes.owned.property, clear: true, base: writes.owned.base }
                     : { prop: writes.owned.property }
                 : undefined,
+            lower: nonEmpty(writes.lower),
             i: index,
             root: root ? true : undefined,
             carried: root?.carried,
@@ -198,16 +204,25 @@ export class WritePlan {
 
     /**
      * The step that writes `set` to the node of `shape` whose stored id is `storedId`, and removes `unset` from it, if
-     * the node is there. It makes no node. The node is returned under `index`, with whether the step changed it.
+     * the node is there. It makes no node. The node is returned under `index`, with whether the step changed it. It
+     * writes the lowercased copy of each of `lower` on a node it changed, as a `node` step does.
      */
-    patch(shape: number, storedId: string, index: string, set: Record<string, any>, unset: string[]): void {
+    patch(
+        shape: number,
+        storedId: string,
+        index: string,
+        set: Record<string, any>,
+        unset: string[],
+        lower: string[] = []
+    ): void {
         this.add('patch', {
             s: shape,
             k: storedId,
             i: index,
             fresh: Stamps.fresh(),
             set: nonEmpty(set),
-            unset: nonEmpty(unset)
+            unset: nonEmpty(unset),
+            lower: nonEmpty(lower)
         });
     }
 
