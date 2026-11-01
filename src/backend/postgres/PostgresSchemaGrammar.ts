@@ -3,6 +3,8 @@ import { embedding, holds, searchedText } from '@/backend/postgres/PostgresSearc
 import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { catalogEntries, LOWER_COPY_KIND, LowerCopyStatements } from '@/schema/LowerCopyCatalog';
+import { LowerCopies } from '@/model/LowerCopies';
 import {
     FullTextIndexSpec,
     IndexSpec,
@@ -34,6 +36,50 @@ export class PostgresSchemaGrammar implements SchemaGrammar {
     readonly engine = 'Postgres';
 
     constructor(private readonly graph: PostgresGraph) {}
+
+    /**
+     * The lowercased copies on Postgres, as drivine4j's `PostgresLowerCopies` writes them: a property of the node's
+     * JSON, filled in by an update of the label's nodes that Postgres lowercases with `lower`, and removed where the
+     * property has no value; recorded as a row of the graph's catalog, of kind `LOWER_COPY`.
+     */
+    get lowerCopies(): LowerCopyStatements {
+        const graph = this.graph;
+        return {
+            fill(label: string, property: string, batch: number): string {
+                const copyKey = sqlText(LowerCopies.of(property));
+                return [
+                    'WITH written AS (',
+                    `    UPDATE ${graph.nodes} n`,
+                    `    SET props = CASE WHEN n.props ->> ${sqlText(property)} IS NULL THEN n.props - ${copyKey}`,
+                    `                     ELSE n.props || jsonb_build_object(${copyKey}, lower(n.props ->> ${sqlText(
+                        property
+                    )})) END`,
+                    '    WHERE n.nid IN (',
+                    `        SELECT m.nid FROM ${graph.nodes} m`,
+                    `        WHERE ${hasLabels('m', [label])} AND ${textOf(
+                        'm',
+                        LowerCopies.of(property)
+                    )} IS DISTINCT FROM lower(${textOf('m', property)})`,
+                    `        LIMIT ${batch})`,
+                    '    RETURNING 1)',
+                    'SELECT count(*) AS "written" FROM written'
+                ].join('\n');
+            },
+            record(label: string, property: string) {
+                return {
+                    statement:
+                        `INSERT INTO ${graph.catalog} (kind, label, properties, name, object_name, details) ` +
+                        `VALUES (${sqlText(LOWER_COPY_KIND)}, ${sqlText(label)}, ${sqlText(
+                            catalogProperties([property])
+                        )}, NULL, NULL, '{}') ON CONFLICT (kind, label, properties) DO NOTHING`
+                };
+            },
+            read: `SELECT label AS "label", properties AS "properties" FROM ${graph.catalog} WHERE kind = ${sqlText(
+                LOWER_COPY_KIND
+            )}`,
+            entries: catalogEntries
+        };
+    }
 
     get listRanges(): { statement: string; read: (rows: any[]) => SchemaItem[] } {
         return this.listing('RANGE');

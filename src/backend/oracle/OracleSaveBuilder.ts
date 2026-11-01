@@ -19,6 +19,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
+import { LowerCopies } from '@/model/LowerCopies';
 import { Stamps } from '@/model/Stamps';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
@@ -39,6 +40,8 @@ export class OracleSaveBuilder {
     private readonly stamped: { model: FragmentModel; ids: any[] }[] = [];
     private count = 0;
     private options: SaveOptions<any> = {};
+    /** Whether the block writes lowercased copies, and so declares `lower_node`. */
+    private lowers = false;
 
     constructor(
         private readonly graph: OracleGraph,
@@ -130,6 +133,7 @@ export class OracleSaveBuilder {
             `        SELECT NVL(stamp, '${Stamps.NEVER_STAMPED}') INTO v_found FROM ${this.graph.nodes} WHERE nid = v_root FOR UPDATE;`,
             '    END IF;',
             `    restamp(v_root, apply_node(v_root, ${p.props}, ${p.add}, ${p.remove}, ${p.record}, ${p.replaceRecord}) OR v_made);`,
+            ...this.lowering(write, 'v_root').map((it) => `    ${it}`),
             'END IF;'
         );
         return expected;
@@ -160,7 +164,8 @@ export class OracleSaveBuilder {
                 const p = this.nodeParams(write);
                 const variable = this.variable();
                 out.push(
-                    `${variable} := write_node(${p.match}, ${p.id}, ${p.labels}, ${p.props}, ${p.add}, ${p.remove}, ${p.record}, ${p.replaceRecord});`
+                    `${variable} := write_node(${p.match}, ${p.id}, ${p.labels}, ${p.props}, ${p.add}, ${p.remove}, ${p.record}, ${p.replaceRecord});`,
+                    ...this.lowering(write, variable)
                 );
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
@@ -267,7 +272,7 @@ export class OracleSaveBuilder {
             `SELECT JSON_OBJECT('found' VALUE CASE WHEN v_made THEN NULL ELSE v_found END, ` +
             `'now' VALUE (SELECT stamp FROM ${this.graph.nodes} WHERE nid = v_root), 'related' VALUE ${related} RETURNING CLOB) ` +
             'AS "result:json" FROM dual';
-        const text = `${prelude(this.graph, this.declarations)}
+        const text = `${prelude(this.graph, this.declarations, this.lowers)}
 BEGIN
 ${this.body.map((it) => `    ${it}`).join('\n')}
     IF v_ok THEN
@@ -286,6 +291,18 @@ END;`;
             expected,
             this.stamped.map((it) => it.model)
         );
+    }
+
+    /**
+     * The call that writes the lowercased copies of the write's `@CaseInsensitive` properties on the node `variable`,
+     * from what it now holds, once its properties are written and its change told: none for a model with none.
+     */
+    private lowering(write: NodeWrite, variable: string): string[] {
+        if (!write.lower.length) {
+            return [];
+        }
+        this.lowers = true;
+        return [`lower_node(${variable}, ${this.bind(JSON.stringify(write.lower))});`];
     }
 
     private nodeParams(write: NodeWrite): Record<string, string> {
@@ -336,9 +353,10 @@ END;`;
 /**
  * The declarations every writing block holds: its state, and the procedures its body calls. The offered stamp is bound
  * as `$x_stamp`. A node's or relationship's properties are taken as a CLOB, as drivine4j holds them: a PL/SQL
- * `VARCHAR2` holds 32,767 bytes, and a long text is bound as a CLOB.
+ * `VARCHAR2` holds 32,767 bytes, and a long text is bound as a CLOB. With `lowers`, it declares `lower_node` too, for a
+ * block that writes lowercased copies.
  */
-export function prelude(graph: OracleGraph, declarations: string[]): string {
+export function prelude(graph: OracleGraph, declarations: string[], lowers: boolean = false): string {
     const nodes = graph.nodes;
     const edges = graph.edges;
     const T = Stamps.TOKEN;
@@ -508,6 +526,38 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
                 END IF;
             END LOOP;
         END IF;
+    END;${lowers ? `\n\n${lowerNode(nodes)}` : ''}`;
+}
+
+/**
+ * `lower_node`: writes on the node the lowercased copy of each property `p_keys`, a JSON array, names, from what it
+ * holds, and removes the copy of one that holds nothing, which an empty text is on Oracle. Oracle lowercases it, as it
+ * lowercases what a lookup compares the copy with: see LowerCopies. It is called once a write's change is told, so the
+ * copies are no part of it.
+ */
+function lowerNode(nodes: string): string {
+    return `    -- Writes the lowercased copy of each property p_keys names from what the node holds, and removes the copy of one
+    -- that holds nothing. Called once the write's change is told: the copies are no part of it.
+    PROCEDURE lower_node(p NUMBER, p_keys VARCHAR2) IS
+        held CLOB;
+        o JSON_OBJECT_T;
+        lowered JSON_ARRAY_T := JSON_ARRAY_T.parse(p_keys);
+        k VARCHAR2(4000);
+        v VARCHAR2(32767);
+    BEGIN
+        SELECT JSON_SERIALIZE(props RETURNING CLOB) INTO held FROM ${nodes} WHERE nid = p;
+        o := JSON_OBJECT_T.parse(held);
+        FOR i IN 0 .. lowered.get_size - 1 LOOP
+            k := lowered.get_string(i);
+            v := NULL;
+            IF o.has(k) AND NOT o.get(k).is_null THEN v := LOWER(o.get_string(k)); END IF;
+            -- Oracle keeps an empty text as null, so an empty property has no copy.
+            IF v IS NULL THEN o.remove('${LowerCopies.PREFIX}' || k);
+            ELSE o.put('${LowerCopies.PREFIX}' || k, v); END IF;
+        END LOOP;
+        -- An object type's methods are PL/SQL's: called in SQL, they are refused (ORA-40573).
+        held := o.to_clob();
+        UPDATE ${nodes} SET props = JSON(held) WHERE nid = p;
     END;`;
 }
 

@@ -162,6 +162,11 @@ export class PostgresQueryRenderer extends SqlQueryRenderer {
                 return this.matches(text, String(value));
             case 'CONTAINS_IGNORE_CASE':
                 return `strpos(lower(${text}), ${this.text(String(value).toLowerCase())}) > 0`;
+            // A lowercased copy, compared with the value as Postgres lowercases it: see LowerCopies.
+            case 'EQ_LOWERED':
+                return `${text} = lower(${this.text(value)})`;
+            case 'CONTAINS_LOWERED':
+                return `strpos(${text}, lower(${this.text(value)})) > 0`;
             default:
                 return `lower(${text}) = ${this.text(String(value).toLowerCase())}`;
         }

@@ -18,6 +18,8 @@ import { SaveOptions } from '@/manager/SaveOptions';
 export class OracleWrites {
     /** Bindings the helpers below name, taken by the next block. */
     private readonly pending: Record<string, any> = {};
+    /** Whether the next block writes lowercased copies, and so declares `lower_node`. */
+    private lowers = false;
 
     constructor(private readonly graph: OracleGraph) {}
 
@@ -40,6 +42,7 @@ export class OracleWrites {
                     'INTO v_patch FROM dual;',
                 "        v_changed := apply_node(v_root, v_patch, '[]', '[]', NULL, FALSE);",
                 '        restamp(v_root, v_changed);',
+                ...this.lowering(model, 'IF v_changed THEN ', ' END IF;').map((it) => `        ${it}`),
                 '    END IF;',
                 'END IF;',
                 "OPEN c FOR SELECT JSON_OBJECT('found' VALUE v_root IS NOT NULL, 'applied' VALUE NVL(v_meets, 0) > 0, " +
@@ -72,6 +75,7 @@ export class OracleWrites {
                 `        SELECT stamp INTO v_found FROM ${this.graph.nodes} WHERE nid = v_root FOR UPDATE;`,
                 "        v_changed := apply_node(v_root, v_patches(i), '[]', '[]', NULL, FALSE);",
                 '        restamp(v_root, v_changed);',
+                ...this.lowering(model, 'IF v_changed THEN ', ' END IF;').map((it) => `        ${it}`),
                 '    END IF;',
                 '    v_out.EXTEND;',
                 "    SELECT JSON_SERIALIZE(JSON_OBJECT('id' VALUE JSON(v_ids(i)), 'found' VALUE v_root IS NOT NULL, " +
@@ -123,7 +127,8 @@ export class OracleWrites {
                     )}, ` +
                         `${bind(JSON.stringify(group.model.labels))}, ${bind(
                             JSON.stringify(props, (_, value) => (value === undefined ? null : value))
-                        )}, '[]', '[]', NULL, FALSE);`
+                        )}, '[]', '[]', NULL, FALSE);`,
+                    ...this.lowering(group.model)
                 );
             }
         });
@@ -283,8 +288,30 @@ export class OracleWrites {
         return `${hasLabels('n', model.labels)} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1) AS "v")`;
     }
 
+    /**
+     * The call that writes the lowercased copies of the model's `@CaseInsensitive` properties on the node `v_root`, from
+     * what it now holds, once its change is told (see LowerCopies), between `before` and `after`: none for a model with
+     * none. The block it is in declares `lower_node`.
+     */
+    private lowering(model: FragmentModel, before: string = '', after: string = ''): string[] {
+        if (!model.lowerCopied.length) {
+            return [];
+        }
+        this.lowers = true;
+        return [`${before}lower_node(v_root, ${this.pend(JSON.stringify(model.lowerCopied))});${after}`];
+    }
+
+    /** Binds the value for the next block, under a name of its own. */
+    private pend(value: unknown): string {
+        const name = `x_lower${Object.keys(this.pending).length}`;
+        this.pending[name] = value;
+        return `$${name}`;
+    }
+
     private block(declarations: string[], body: string[], bindings: Record<string, any> = {}): GraphStatement {
-        const text = `${prelude(this.graph, declarations)}
+        const lowers = this.lowers;
+        this.lowers = false;
+        const text = `${prelude(this.graph, declarations, lowers)}
 BEGIN
 ${body.map((it) => `    ${it}`).join('\n')}
     DBMS_SQL.RETURN_RESULT(c);
