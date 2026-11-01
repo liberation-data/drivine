@@ -2021,7 +2021,9 @@ export class CypherWriter {
         // A value is of a temporal kind where each query makes it of that one. It is at keys of a write's row (`rowKeys`)
         // only where each query takes it from those: a property of it is read from the row there, which would read the
         // first query's value for every query's rows. It is read from an unwound item (`fromList`) only where each query
-        // reads it from one.
+        // reads it from one. It is a list (`list`), or a list of lists (`itemLists`), only where each query makes it one, so
+        // that an order sorts the others' numbers and maps by their kinds, not as lists; and it holds no null (`flat`) only
+        // where each query's holds none, so that `=` and `IN` of a later query's list with a null give null, not false (#505).
         const scope: Scope = new Map(
             [...projected[0].scope].map(([variable, value]): [string, Value] => {
                 if (value.kind !== 'Json') {
@@ -2046,6 +2048,9 @@ export class CypherWriter {
                         temporals: all.some((it) => it?.temporals === true),
                         text: all.every((it) => it?.text === true),
                         texts: all.every((it) => it?.texts === true),
+                        list: all.every((it) => it?.list === true),
+                        itemLists: all.every((it) => it?.itemLists === true),
+                        flat: all.every((it) => it?.flat === true),
                         // It may be JSON's null where any query's may be (#497).
                         jsonNull: all.some((it) => it?.jsonNull === true),
                         // Its kind is known only where each query writes it as a value of that one.
