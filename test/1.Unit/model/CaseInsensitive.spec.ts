@@ -162,6 +162,28 @@ describe('@CaseInsensitive', () => {
             );
         });
 
+        it("should write the copies of a subclass's own fields on a related node a view saves, on every store", () => {
+            @NodeFragment({ labels: ['CiVip'] })
+            class CiVip extends CiAccount {
+                @CaseInsensitive() nickname?: string;
+            }
+            const saved = Object.assign(new CiAccountView(), {
+                account: object,
+                friends: [Object.assign(new CiVip(), { id: 'a2', email: 'Bo@X.com', nickname: 'Bobby' })]
+            });
+            expect(registry.fragment(CiVip).lowerCopied).toEqual(['display_name', 'email', 'nickname']);
+            expect(cypher.save(view, saved, {}, false, registry).text).toContain(
+                't1.`__drivine.lower.nickname` = toLower(t1.nickname)'
+            );
+            const oracle = new OracleBackend(new OracleGraph()).save(view, saved, {}, false, registry);
+            expect(Object.values(oracle.bindings)).toContain('["display_name","email","nickname"]');
+            const postgres: any = new PostgresBackend(new PostgresGraph())
+                .save(view, saved, {}, false, registry)
+                .spec();
+            const plan: any[] = JSON.parse(postgres.parameters._plan);
+            expect(plan.map((it) => it.lower).filter(Boolean)).toContainEqual(['display_name', 'email', 'nickname']);
+        });
+
         it('should write no copy for a fragment with none', () => {
             @NodeFragment({ labels: ['CiPlain'] })
             class CiPlain {
@@ -403,6 +425,46 @@ describe('@CaseInsensitive', () => {
             await new Promise((resolve) => setImmediate(resolve));
             expect(await catalog.filledIn('Account', 'name')).toBe(true);
             expect(reads).toEqual(2);
+        });
+
+        it('should leave a property the store records as filled in alone, unless asked to fill it in again', async () => {
+            const fills: string[] = [];
+            const run = async (statement: string): Promise<any[]> => {
+                if (statement === CYPHER_LOWER_COPIES.read) {
+                    return Promise.resolve([{ e: '["Account","email"]' }]);
+                }
+                if (statement.includes('RETURN count(n)')) {
+                    fills.push(statement.includes('__drivine.lower.email') ? 'email' : 'name');
+                    return Promise.resolve([{ count: 0 }]);
+                }
+                return Promise.resolve([]);
+            };
+            const none = async (): Promise<void> => Promise.resolve();
+            const catalog = new LowerCopyCatalog(run, CYPHER_LOWER_COPIES, none);
+            await catalog.fillIn('Account', ['email', 'name'], false);
+            expect(fills).toEqual(['name']);
+            await catalog.fillIn('Account', ['email'], true);
+            expect(fills).toEqual(['name', 'email']);
+        });
+
+        it('should count a property as not filled in where the record cannot be read, and keep what was read last', async () => {
+            let now = 0;
+            let failing = true;
+            const run = async (): Promise<any[]> =>
+                failing ? Promise.reject(new Error('unreadable')) : Promise.resolve([{ e: '["Account","email"]' }]);
+            const none = async (): Promise<void> => Promise.resolve();
+            const catalog = new LowerCopyCatalog(run, CYPHER_LOWER_COPIES, none, 1000, () => now);
+            expect(await catalog.filledIn('Account', 'email')).toBe(false);
+            failing = false;
+            now = 1000;
+            await catalog.filledIn('Account', 'email');
+            await new Promise((resolve) => setImmediate(resolve));
+            expect(await catalog.filledIn('Account', 'email')).toBe(true);
+            failing = true;
+            now = 2000;
+            await catalog.filledIn('Account', 'email');
+            await new Promise((resolve) => setImmediate(resolve));
+            expect(await catalog.filledIn('Account', 'email')).toBe(true);
         });
 
         it("should keep a SQL store's record in its catalog, as drivine4j does", () => {

@@ -39,6 +39,8 @@ const run = Math.random().toString(36).slice(2, 8);
 const LATE = `CiLate${run}`;
 const MEMBER = `CiMember${run}`;
 const MARKED = `CiMarked${run}`;
+const ANEW = `CiAnew${run}`;
+const RACE = `CiRace${run}`;
 
 /** An account looked up by email whatever its case, its display name kept under another name, a flat bag beside them. */
 @NodeFragment({ labels: ['CiAccount'] })
@@ -77,6 +79,13 @@ class CiMember {
 class CiMarked {
     @NodeId() id: string;
     @CaseInsensitive() @RangeIndex({ ignoreCase: true }) email?: string;
+}
+
+/** Its items that ignore case are dropped and made anew. */
+@NodeFragment({ labels: [ANEW] })
+class CiAnew {
+    @NodeId() id: string;
+    @CaseInsensitive() email?: string;
 }
 
 @GraphView()
@@ -198,10 +207,12 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
     afterAll(async () => {
         if (!falkor) {
             await gom.constraints.drop(uniquenessConstraint(MEMBER, 'email', { ignoreCase: true }));
+            await gom.constraints.drop(uniquenessConstraint(ANEW, 'email', { ignoreCase: true }));
         }
+        await gom.indexes.drop(rangeIndex(ANEW, 'email', { ignoreCase: true }));
         await gom.indexes.drop(rangeIndex(LATE, 'email', { ignoreCase: true }));
         await gom.indexes.drop(rangeIndex(MARKED, 'email', { ignoreCase: true }));
-        await clearLabels(pm, engine, 'CiAccount', 'CiPlain', LATE, MEMBER, MARKED);
+        await clearLabels(pm, engine, 'CiAccount', 'CiPlain', LATE, MEMBER, MARKED, ANEW);
         // This run's marker, and no other suite's.
         await pm.execute(
             new QuerySpecification(
@@ -328,7 +339,9 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         expect((await gom.indexes.ensure(index)).status).toEqual('ALREADY_MATCHING');
         expect((await gom.indexes.list()).some((it) => it.properties.includes('__drivine.lower.email'))).toBe(true);
 
-        // With the copies: the same answers, from the copy.
+        // With the copies: the same answers, from the copy. A node written past Drivine afterwards has no copy, so a
+        // load, count, grouped read, patch and deleteAll that read the copy pass it by.
+        await bypassing(pm, engine, LATE, { id: 'l4', email: 'ann@X.com', rank: 4 });
         expect(await ann()).toEqual(['l1']);
         expect(
             (await gom.loadAll(CiLate, (q) => ({ where: q.email.containsIgnoreCase('ANN'), orderBy: q.id.asc() }))).map(
@@ -336,6 +349,7 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
             )
         ).toEqual(['l1', 'l3']);
         expect(await gom.count(CiLate, (q) => ({ where: q.email.eqIgnoreCase('BOB@X.COM') }))).toEqual(1);
+        expect(await gom.count(CiLate, (q) => ({ where: q.email.eqIgnoreCase('ANN@X.COM') }))).toEqual(1);
         expect(await gom.count(CiLate, (q) => ({ where: q.email.eqIgnoreCase('') }))).toEqual(0);
         const groups = await gom.groups.load(CiLate, (q: any) => ({
             where: q.email.containsIgnoreCase('ann'),
@@ -348,8 +362,50 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
             where: (q) => q.email.eqIgnoreCase('BOB@x.com')
         });
         expect(patched.applied).toBe(true);
+        expect(
+            (await gom.patch(CiLate, 'l4', { set: { rank: 40 }, where: (q) => q.email.eqIgnoreCase('ANN@x.com') }))
+                .applied
+        ).toBe(false);
         expect(await gom.deleteAll(CiLate, (q) => ({ where: q.email.eqIgnoreCase('Anna@X.com') }))).toEqual(1);
         expect(await ann()).toEqual(['l1']);
+        expect(await gom.deleteAll(CiLate, (q) => ({ where: q.email.eqIgnoreCase('ANN@x.com') }))).toEqual(1);
+        expect(await gom.count(CiLate)).toEqual(2);
+    });
+
+    it('should fill the copies in again where an item that ignores case is made anew, though they are recorded', async () => {
+        await gom.save(Object.assign(new CiAnew(), { id: 'n1', email: 'Ann@X.com' }));
+        const index = rangeIndex(ANEW, 'email', { ignoreCase: true });
+        await gom.indexes.ensure(index);
+        await gom.indexes.drop(index);
+        // Out of step while the index was gone, as a write made while the field was not @CaseInsensitive leaves it.
+        await withoutCopy(pm, engine, ANEW, 'n1');
+        expect((await gom.indexes.ensure(index)).status).toEqual('CREATED');
+        expect((await stored(pm, engine, ANEW, 'n1'))['__drivine.lower.email']).toEqual('ann@x.com');
+        if (falkor) {
+            return;
+        }
+        // The index aside, which Neo4j would take for one in the constraint's way.
+        await gom.indexes.drop(index);
+        await withoutCopy(pm, engine, ANEW, 'n1');
+        const constraint = uniquenessConstraint(ANEW, 'email', { ignoreCase: true });
+        expect((await gom.constraints.ensure(constraint)).status).toEqual('CREATED');
+        expect((await stored(pm, engine, ANEW, 'n1'))['__drivine.lower.email']).toEqual('ann@x.com');
+    });
+
+    it('should keep the record of each of managers recording at once, and record each once', async () => {
+        const properties = ['p1', 'p2', 'p3', 'p4'];
+        // Each property twice: two record the same copy at once, and others different ones beside them.
+        await Promise.all(
+            [...properties, ...properties].map((property) =>
+                (new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry()) as any)
+                    .lowerCopies()
+                    .fillIn(RACE, [property], true)
+            )
+        );
+        const recorded = (await recordOf(pm, engine, RACE)).map((it) =>
+            sql ? JSON.parse(it.properties)[0] : JSON.parse(it)[1]
+        );
+        expect(recorded.sort()).toEqual(properties);
     });
 
     it('should refuse two emails that differ only in case under a constraint that ignores case', async () => {
