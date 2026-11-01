@@ -774,3 +774,27 @@ cases:
       - cypher: "MATCH (m:CyWrite) WHERE m.l IS NOT NULL RETURN [m.l, m.small] ORDER BY m.l[0], size(m.l)"
         except: [memgraph, falkordb, neptune, oracle]
         rows: [[[1], true], [[1, 3], true], [[2], null]]
+
+  - name: "NaN and the infinities written"
+    description: "Neo4j and Oracle store NaN and the infinities as the floats they are, and SQLite an infinity. Postgres's JSON holds neither, and SQLite's no NaN, so they refuse a statement that writes and is given one, rather than store another value."
+    steps:
+      - only: [neo4j, oracle, sqlite]
+        cypher: "CREATE (n:CyWrite {b: $i, c: [$n]}) RETURN [n.b, n.c, n.b = n.b]"
+        parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
+        rows: [[{$float: "Infinity"}, [{$float: "-Infinity"}], true]]
+      - only: [neo4j, oracle, sqlite]
+        cypher: "MATCH (n:CyWrite) RETURN [n.b = $i, n.b > 1e308, n.c[0] < -1e308, n.b + 1, n.b - n.b]"
+        parameters: {i: {$float: "Infinity"}}
+        rows: [[true, true, true, {$float: "Infinity"}, {$float: "NaN"}]]
+      - only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) SET n.a = $p RETURN [n.a, n.a = n.a, n.a = $p, n.a + 1]"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, false, false, {$float: "NaN"}]]
+      - only: [postgres]
+        cypher: "CREATE (n:CyWrite {b: [$i]})"
+        parameters: {i: {$float: "Infinity"}}
+        error: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."
+      - only: [sqlite]
+        cypher: "CREATE (n:CyWrite {a: $p})"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."

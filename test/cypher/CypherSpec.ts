@@ -99,7 +99,23 @@ const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
  * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
  * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
  */
-const HELD: Record<string, Record<string, Hold[]>> = {};
+const HELD: Record<string, Record<string, Hold[]>> = {
+    'queries.yaml': {
+        // A NaN or infinite parameter is bound as null (step 6 gives null on every store, and step 11 runs on Postgres only).
+        'NaN and the infinities as parameters': [
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], on: ['postgres'] },
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['oracle'] }
+        ],
+        // Oracle holds NaN equal to NaN.
+        'NaN worked out': [{ issue: 512, steps: [2, 3], on: ['oracle'] }]
+    },
+    'writes.yaml': {
+        'NaN and the infinities written': [
+            { issue: 344, steps: [4], on: ['postgres'] },
+            { issue: 344, steps: [1, 2, 3], on: ['oracle'] }
+        ]
+    }
+};
 
 interface Hold {
     issue: number;
@@ -150,7 +166,10 @@ export function trimIndent(text: string): string {
     return lines.map((it) => it.substring(Math.min(indent, it.length))).join('\n');
 }
 
-/** `value` with each `{$repeat: text, times: n}` in it written out, and each whole number given by `whole`. */
+/**
+ * `value` with each `{$repeat: text, times: n}` in it written out, each `{$float: "NaN"}`, `{$float: "Infinity"}` and
+ * `{$float: "-Infinity"}` the number it names, and each whole number given by `whole`.
+ */
 export function valuesFor(value: any, whole: (value: bigint) => any): any {
     if (typeof value === 'bigint') {
         return whole(value);
@@ -162,6 +181,9 @@ export function valuesFor(value: any, whole: (value: bigint) => any): any {
         const keys = Object.keys(value);
         if (keys.length === 2 && keys.includes('$repeat') && keys.includes('times')) {
             return String(value.$repeat).repeat(Number(value.times));
+        }
+        if (keys.length === 1 && keys[0] === '$float') {
+            return Number(value.$float);
         }
         return Object.fromEntries(keys.map((key) => [key, valuesFor(value[key], whole)]));
     }
@@ -248,9 +270,13 @@ async function failure(step: CypherStep, where: string, run: (step: CypherStep) 
 
 /**
  * `value` in a form that compares as the step says: a map as its entries in order where key order counts, and by its
- * keys sorted where it does not; a list sorted where its order does not count.
+ * keys sorted where it does not; a list sorted where its order does not count. NaN and the infinities are their names,
+ * which JSON would otherwise write as null.
  */
 function canonical(value: any, step: CypherStep, sorted: boolean = step.unorderedLists ?? false): any {
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+        return { $float: String(value) };
+    }
     if (Array.isArray(value)) {
         const items = value.map((it) => canonical(it, step));
         return sorted ? items.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)) : items;
