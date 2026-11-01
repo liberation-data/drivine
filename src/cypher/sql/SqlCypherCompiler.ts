@@ -257,6 +257,11 @@ export abstract class SqlCypherCompiler {
         return this.shared([a, b], body);
     }
 
+    /** `body` over the sides `a` and `b` of a comparison, an `IN` among them, as {@link shared} binds them: see Oracle's. */
+    sharedCompared(a: string, b: string, body: (names: string[]) => string): string {
+        return this.shared([a, b], body);
+    }
+
     /** `body` over `values`, each bound in a subquery and read by name whatever its length: see {@link shared}. */
     bound(values: string[], body: (names: string[]) => string): string {
         const alias = `sh${++this.shares}`;
@@ -392,6 +397,21 @@ export abstract class SqlCypherCompiler {
     /** Whether the JSON values `x` and `y`, neither of them null, are equal as JSON. */
     jsonEquals(x: string, y: string): string {
         return `${x} = ${y}`;
+    }
+
+    /** Whether the JSON value `x` is equal to `y`, the JSON of `given`, a value the statement gives that is not null. */
+    givenEquals(x: string, y: string, _given: unknown): string {
+        return this.jsonEquals(x, y);
+    }
+
+    /**
+     * A test of the JSON value `value` alone, where an `IN` of it in a list whose items the statement writes or is given,
+     * `items`, each a text, a number, a truth value or null, compares each item with it as JSON only where the test
+     * holds, and finds it in none where it doesn't: undefined where each item is compared by {@link jsonEquals}. See
+     * Oracle's.
+     */
+    givenItemsTest(_value: string, _items: unknown[]): string | undefined {
+        return undefined;
     }
 
     /** Whether the JSON values `x` and `y`, of one kind, a number, a text or a truth value, stand as `operator` says (`<`, `>=`…). */

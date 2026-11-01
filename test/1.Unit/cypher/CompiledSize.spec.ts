@@ -323,10 +323,10 @@ describe('A compiled Cypher statement', () => {
                     })
                 )
             ).toBe(false);
-            // Nor of the list being null or holding a null, beside a value that holds none.
-            expect(
-                tested(compiled("MATCH (c:Claim) WHERE 'a' IN c.tags AND c.a IN $l RETURN c.id", { l: [1, null] }))
-            ).toBe(false);
+            // Nor of the list being null or holding a null, beside a value that holds none. On Oracle an item is
+            // compared with 'a' as a text, and is not equal to it where it is a text past 4,000 bytes (#469).
+            const nullable = compiled("MATCH (c:Claim) WHERE 'a' IN c.tags AND c.a IN $l RETURN c.id", { l: [1, null] });
+            expect(tested(nullable.replace(/[<]> 'string' THEN \S+ = \S+ ELSE FALSE/g, ''))).toBe(false);
             // Nor in a quantified path pattern's WHERE, which keeps a step where it is true.
             expect(tested(compiled('MATCH (a:Claim) ((x)-[:R]->(y) WHERE y.a IN [1, 2]){1,3} (b) RETURN b.id'))).toBe(
                 false

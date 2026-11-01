@@ -3,7 +3,14 @@ import { holdsLabel } from '@/backend/oracle/OracleGraph';
 import { nullsEqualFunction, nullsEqualName } from '@/backend/oracle/OracleStoredFunctions';
 import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
-import { DEGREES_TO_RADIANS, indent, literal, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
+import {
+    DEGREES_TO_RADIANS,
+    indent,
+    isGivenNumber,
+    literal,
+    RADIANS_TO_DEGREES,
+    RoundingMode
+} from '@/cypher/sql/CypherSyntax';
 import { extendedDoubles, jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
@@ -193,6 +200,75 @@ function kind(json: string): string {
     return `JSON_VALUE(${json}, '$.type()')`;
 }
 
+/** The JSON `json` as a `VARCHAR2`, where it is a text of at most 4,000 bytes, a number or a truth value; else null. */
+function short(json: string): string {
+    return `JSON_VALUE(${json}, '$')`;
+}
+
+/**
+ * Whether the JSON texts `x` and `y` stand as `operator` says, as CLOBs: see `textOrder`. Each is a
+ * CLOB by `TO_CLOB` too: `JSON_VALUE(JSON('null'), '$' RETURNING CLOB)`, of a null a list writes, is a null of no type to
+ * `DBMS_LOB.COMPARE`, which then matched more than one of its declarations (PLS-307).
+ */
+function clobOrder(x: string, operator: string, y: string): string {
+    const [cx, cy] = [`TO_CLOB(JSON_VALUE(${x}, '$' RETURNING CLOB))`, `TO_CLOB(JSON_VALUE(${y}, '$' RETURNING CLOB))`];
+    return `NVL(DBMS_LOB.COMPARE(${cx}, ${cy}), SIGN(NVL(LENGTH(${cx}), 0) - NVL(LENGTH(${cy}), 0))) ${operator} 0`;
+}
+
+/**
+ * Whether the JSON texts `x` and `y` stand as `operator` says, `=`, `<`, `>=`…: as `VARCHAR2`s where both are read so,
+ * which compare by their bytes, so by their code points; else as CLOBs, by `DBMS_LOB.COMPARE`, which compares the whole
+ * of each, a shorter one that starts the other first. An empty text, null as a CLOB, comes before any other. A CLOB is
+ * compared by its UTF-16 units, so between two texts, either past 4,000 bytes, that first differ where one has a
+ * character past U+FFFF and the other one from U+E000 to U+FFFF, the order is the other way round from Cypher's.
+ */
+function textOrder(x: string, operator: string, y: string): string {
+    return `CASE WHEN ${short(x)} IS NOT NULL AND ${short(y)} IS NOT NULL THEN ${short(x)} ${operator} ${short(
+        y
+    )} ELSE ${clobOrder(x, operator, y)} END`;
+}
+
+/**
+ * Whether the JSON value `a` is equal to `b`, which is no text or a text read as a `VARCHAR2`: as JSON where `a` is read
+ * as one too, or is no text, and else not, as `a` is then a longer text or an empty one; null where `a` is SQL's null.
+ */
+function oneSided(a: string, b: string): string {
+    return `CASE WHEN ${short(a)} IS NOT NULL OR NVL(${kind(a)}, 'null') <> 'string' THEN ${a} = ${b} ELSE FALSE END`;
+}
+
+/** Whether `given`, a value the statement gives, is a number, a truth value or a text of 1 to {@link SHORT_TEXT} bytes, which `JSON_VALUE` reads as a `VARCHAR2`. */
+function readShort(given: unknown): boolean {
+    return (
+        isGivenNumber(given) ||
+        typeof given === 'boolean' ||
+        (typeof given === 'string' && given.length > 0 && Buffer.byteLength(given, 'utf8') <= SHORT_TEXT)
+    );
+}
+
+/**
+ * Whether `json` is a value the statement writes that is no text, or a text of 1 to {@link SHORT_TEXT} bytes, which
+ * `JSON_VALUE` reads as a `VARCHAR2`: a literal, `JSON('5')`, a float, or a list or a map it makes. Beside it the other
+ * side alone is tested (see `OracleCypherCompiler.jsonEquals`), as beside a value the statement is given.
+ */
+function written(json: string): boolean {
+    const literal = /^JSON\('((?:[^']|'')*)'\)$/.exec(json);
+    if (literal) {
+        const value = JSON.parse(literal[1].replace(/''/g, "'"));
+        return value === null || typeof value !== 'string' || readShort(value);
+    }
+    // A float literal; and a list or a map, which its constructor makes whatever it holds, so never SQL's null.
+    return (
+        /^JSON_SCALAR\(TO_BINARY_DOUBLE\('[^']*'\)\)$/.test(json) ||
+        (/^JSON_(?:ARRAY|OBJECT)\(/.test(json) && enclosed(json))
+    );
+}
+
+/** Whether `sql` is one call whose parentheses, opened by its first, close only at its end. */
+function enclosed(sql: string): boolean {
+    const open = sql.indexOf('(');
+    return open > 0 && sql.endsWith(')') && balanced(sql.slice(open + 1, -1));
+}
+
 /** Whether `sql`'s parentheses outside its literals close each other: so it is the one argument, not two calls. */
 function balanced(sql: string): boolean {
     let depth = 0;
@@ -272,9 +348,10 @@ function direct(sql: string, json: string): string {
  * A value is Oracle's `JSON`, which compares, groups and orders as JSON and keeps a map's keys in the order written.
  * Oracle keeps a number as a number, so a stored `2.0` reads as `2`; a floating-point number the statement writes is a
  * `BINARY_DOUBLE`, and stays one. A text Oracle reads out of JSON is a `VARCHAR2` of at most 4,000 bytes, and one longer
- * is read as a CLOB where it is measured, cut, changed, searched or reversed (see {@link texts}). An empty text is null,
- * as Oracle's empty text is. `reduce` is a function the query declares, and does not run in a statement that writes,
- * in the step of a `reduce`, or where its step reads a path.
+ * is read as a CLOB where it is measured, cut, changed, searched or reversed (see {@link texts}), or compared (see
+ * {@link jsonEquals} and {@link ordered}). An empty text is null, as Oracle's empty text is. `reduce` is a function
+ * the query declares, and does not run in a statement that writes, in the step of a `reduce`, or where its step reads
+ * a path.
  *
  * A list of ids is text, each id between commas (`,1,2,`): Oracle has no array, and a recursive query takes no `JSON`
  * that changes from row to row. A recursive query reads no row outside it, so a walk starts from every node that meets
@@ -309,6 +386,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * {@link containsText}, {@link split}, {@link replaceText} and {@link reversedText}, which read them otherwise.
      */
     private long = false;
+
+    /**
+     * Whether a comparison reads a property by its own path (see {@link sharedCompared}): the statement is then not
+     * rewritten by Oracle's JSON table transformation (see {@link planned}), which read the reads of one node's properties
+     * together, and lost them where a quantifier's subquery, bound as a comparison's side, read them: `all(x IN [1] WHERE
+     * p.born > 1962) = true` was null for each person (the spec's "Quantifiers of null"), and right with the hint, or with
+     * the property taken out as JSON first.
+     */
+    private readsCompared = false;
 
     /**
      * @param graph the graph whose tables, and whose function {@link nullsEqualName}, a statement is compiled against
@@ -545,6 +631,111 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
                     body(bound.map((it) => it[0]))
                 );
         });
+    }
+
+    /**
+     * Whether two values are compared as JSON, as {@link jsonEquals} and {@link ordered} compared them before #469: in a
+     * statement that writes and in the step of a `reduce()`, which run as PL/SQL. There a CLOB read from an unwound row's
+     * JSON closed the session (ORA-03113), where the JSON was refused (ORA-40180) and the session stayed open: `UNWIND
+     * $items AS t MERGE (n {a: t.a})` with a text past 32 KB (liberation-data/drivine4j#389). So a text past 32 KB is
+     * refused there, as before.
+     */
+    private get asJson(): boolean {
+        return this.procedural || this.folding;
+    }
+
+    /**
+     * The sides of a comparison, an `IN` among them, bound as a sum's are (see {@link sharedSum}), and each property read
+     * by its own path where it is not bound (see `direct`): {@link jsonEquals} and {@link ordered} read a text as a
+     * `VARCHAR2` or a CLOB, and not as JSON, which Oracle refuses to compare past about 32 KB (ORA-40180, #469). Taken out
+     * as JSON and compared, a stored text past 32 KB, on two rows or more, closed the session on the first run or a later
+     * one (ORA-03113), as #320's did.
+     *
+     * Not in a statement that writes, nor in the step of a `reduce()`, where two values are compared as JSON, as before
+     * (see {@link asJson}).
+     */
+    sharedCompared(a: string, b: string, body: (names: string[]) => string): string {
+        if (this.asJson) {
+            return this.shared([a, b], body);
+        }
+        if (propertyRead(a) !== undefined || propertyRead(b) !== undefined) {
+            this.readsCompared = true;
+        }
+        return this.sharedSum(a, b, (sides) => sides.reduce((sql, side) => direct(sql, side), body(sides)));
+    }
+
+    /**
+     * As JSON, but where either is a text past 4,000 bytes, or empty, which a `VARCHAR2` doesn't hold: then two texts as
+     * `textOrder` compares them, and a text is equal to no value of another kind, and is compared with SQL's null, a
+     * property that isn't there, as null. `=` of JSON refuses a value past about 32 KB, a text among them, whatever the
+     * other is (ORA-40180, #469): `n.bio = 'abc'` failed where one node's bio was so long. Each is read as a `VARCHAR2`
+     * first, and its kind only where that is null. A list or a map that holds a long text is compared as JSON, and
+     * refused. Each side is read more than once, so a long one is bound, as {@link sharedCompared} binds it.
+     */
+    jsonEquals(x: string, y: string): string {
+        if (this.asJson || (written(x) && written(y))) {
+            return `${x} = ${y}`;
+        }
+        // Beside a value the statement writes, as beside one it is given, the other alone is tested: a list literal of
+        // a few hundred items, compared item by item, so stays as large as before, where Oracle ran out of memory (#406).
+        if (written(x) || written(y)) {
+            const [other, value] = written(y) ? [x, y] : [y, x];
+            return this.sharedCompared(other, value, ([a, b]) => oneSided(a, b));
+        }
+        return this.sharedCompared(
+            x,
+            y,
+            ([a, b]) =>
+                `CASE WHEN ${short(a)} IS NOT NULL AND ${short(b)} IS NOT NULL THEN ${a} = ${b} ` +
+                `WHEN ${kind(a)} = 'string' AND ${kind(b)} = 'string' THEN ${clobOrder(a, '=', b)} ` +
+                `WHEN ${kind(a)} IS NULL OR ${kind(b)} IS NULL THEN NULL WHEN ${kind(a)} = 'string' OR ${kind(
+                    b
+                )} = 'string' THEN FALSE ELSE ${a} = ${b} END`
+        );
+    }
+
+    /**
+     * {@link jsonEquals}, but where `given` is a number, a truth value, or a text of 1 to 4,000 bytes, which is read as a
+     * `VARCHAR2`: then only the other side is tested, and where it is a text that isn't, it is longer or empty, and not
+     * equal. A property read from the store is not null as JSON, and so needs no test of its own.
+     */
+    givenEquals(x: string, y: string, given: unknown): string {
+        if (this.asJson) {
+            return `${x} = ${y}`;
+        }
+        if (!readShort(given)) {
+            return this.jsonEquals(x, y);
+        }
+        if (written(x)) {
+            return `${x} = ${y}`;
+        }
+        return this.sharedCompared(x, y, ([a, b]) => oneSided(a, b));
+    }
+
+    /**
+     * Where each of `items` is null or read as a `VARCHAR2` (see {@link givenEquals}), whether `value` is read as one too,
+     * or is no text: then each item is compared with it as JSON, a plain equality, as before, and where it is a text that
+     * isn't, it is longer than any of them or empty, and in none. Tested once for the value, not once for each item:
+     * over 20,000 rows an `IN` of three items took 9 ms so, against 15 ms with the test in each item's comparison, as
+     * drivine4j writes it, and 7.5 ms before (#469).
+     */
+    givenItemsTest(value: string, items: unknown[]): string | undefined {
+        if (this.asJson || !items.every((it) => it === null || readShort(it))) {
+            return undefined;
+        }
+        return `(${short(value)} IS NOT NULL OR NVL(${kind(value)}, 'null') <> 'string')`;
+    }
+
+    /**
+     * Two texts, as `textOrder` orders them; any other two of one kind as JSON. JSON ordered a text past 32 KB, read from
+     * the store on two rows or more, and closed the session on the first run or a later one (ORA-03113, #469). Its sides
+     * are bound, and a property read by its own path, by {@link sharedCompared}.
+     */
+    ordered(x: string, operator: string, y: string): string {
+        if (this.asJson) {
+            return `${x} ${operator} ${y}`;
+        }
+        return `CASE WHEN ${kind(x)} = 'string' THEN ${textOrder(x, operator, y)} ELSE ${x} ${operator} ${y} END`;
     }
 
     boolOf(json: string): string {
@@ -1160,7 +1351,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * liberation-data/drivine4j#415): `MATCH (a:N1), (b:N2) RETURN a.n + b.n` gave a row for each two nodes, and so did
      * `a.n - a.m`, `toUpper(a.s), size(a.s)` and `a.l + b.l`. Seen on Oracle 23.26.3 (gvenzl/oracle-free 23). The hint
      * is the statement's, whichever query of it holds it, so the outermost one holds it. A query of one table reads as
-     * it did: none lost a test.
+     * it did, none lost a test, but where a comparison reads a property by its own path (see {@link readsCompared}).
      */
     planned(query: string): string {
         // A read of the graph's node or relationship table.
@@ -1168,7 +1359,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `\\b(?:${escapedForRegExp(this.nodes)}|${escapedForRegExp(this.edges)}) \\w`,
             'g'
         );
-        if ((query.match(graphTable) ?? []).length < 2) {
+        if ((query.match(graphTable) ?? []).length < 2 && !this.readsCompared) {
             return query;
         }
         const hinted = HINTED.exec(query);

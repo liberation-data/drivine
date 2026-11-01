@@ -274,6 +274,19 @@ const names = await pm.query<string>(
   aggregate's result too (`head(collect(n.t)) CONTAINS $x`), whose aggregates are worked out first
   ([#414](https://github.com/liberation-data/drivine/issues/414)). A property such a function reads is read from the
   properties by its own path, which costs about a quarter more on short texts, and a `+` that may put texts together costs about a tenth more, as drivine4j measured.
+- On Oracle, two texts are compared (`=`, `<>`, `<`, `>=`, `IN` …) as `VARCHAR2`s, and as CLOBs with `DBMS_LOB.COMPARE`
+  where either is past 4,000 bytes ([#469](https://github.com/liberation-data/drivine/issues/469)). As JSON, `=` of a
+  text past about 32 KB was refused (ORA-40180), even `n.bio = 'abc'` where one node's bio was that long, and `<` of
+  one read from the store over two rows or more crashed the session (ORA-03113), as the bug above did. A property
+  compared so is read by its own path, and such a query carries `NO_JSON_TABLE_TRANSFORM` (see below). Beside a
+  number, a truth value or a short text the statement gives or writes, a list or a map it writes, or an `IN` of such
+  items, only the other side is read for its kind (`n.name = $x`, `n.name = 'abc'`, `n.name IN $names`). A statement
+  that writes, and the step of a `reduce`, which run as PL/SQL, compare as JSON, as before, and refuse a text past
+  32 KB: there a CLOB read from an unwound row's JSON crashed the session. A list or a map that holds such a text is
+  compared as JSON anywhere, and refused. Between two texts, either past 4,000 bytes, that first differ where one has a
+  character past U+FFFF and the other one from U+E000 to U+FFFF, the order is the other way round from Cypher's, as a
+  CLOB compares by UTF-16 units. See "Two texts, compared" in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Oracle, an `OPTIONAL CALL` or an `OPTIONAL MATCH` is joined `ON 1 = 1`, where Postgres joins `ON TRUE`. This works
   around an Oracle bug, seen on 23.26.3: in a scalar subquery, as a `COUNT { … }` is compiled, a join `ON TRUE` is
   refused (ORA-00907) or crashes the session (ORA-03113, with ORA-07445 in the alert log)
@@ -285,7 +298,9 @@ const names = await pm.query<string>(
   Oracle's JSON table transformation reads several JSON values of one node's row by one `JSON_TABLE`, and so rewritten
   beside another node's table the query lost that node's label and property tests, giving rows its pattern doesn't
   have and values of the wrong node, or crashing the session (ORA-03113)
-  ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint.
+  ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint, but where it
+  compares a property as a text (see above): there the transformation lost the property's reads beside a quantifier's
+  subquery.
 - On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
   is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
   that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for

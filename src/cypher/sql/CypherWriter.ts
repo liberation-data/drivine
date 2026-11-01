@@ -153,6 +153,12 @@ interface Member {
     equals: (a: string, b: string) => string;
     matches: (item: string, value: string) => string;
     elements: (list: string, alias: string) => string;
+    /**
+     * A test of the value alone, which an item must also meet to match it: see `SqlCypherCompiler.givenItemsTest`. Where
+     * there is one, the list's items are `given`, each a text, a number, a truth value or null.
+     */
+    test?: (value: string) => string;
+    given?: unknown[];
 }
 
 /**
@@ -5754,8 +5760,9 @@ export class CypherWriter {
                 return bool(this.listCompared(left, a, right, b, comparison));
             }
             return bool(
-                sql.shared(
-                    [a, b],
+                sql.sharedCompared(
+                    a,
+                    b,
                     ([x, y]) =>
                         `CASE WHEN ${sql.typeOf(x)} = ${sql.typeOf(y)} AND ${sql.typeOf(
                             x
@@ -5967,10 +5974,11 @@ export class CypherWriter {
         const equal =
             given !== null && given !== undefined
                 ? stored
-                    ? this.sql.jsonEquals(a, b)
-                    : `CASE WHEN NOT ${this.sql.isJsonNull(a)} THEN ${this.sql.jsonEquals(a, b)} END`
-                : this.sql.shared(
-                      [a, b],
+                    ? this.sql.givenEquals(a, b, given)
+                    : `CASE WHEN NOT ${this.sql.isJsonNull(a)} THEN ${this.sql.givenEquals(a, b, given)} END`
+                : this.sql.sharedCompared(
+                      a,
+                      b,
                       ([x, y]) =>
                           `CASE WHEN NOT ${this.sql.isJsonNull(x)} AND NOT ${this.sql.isJsonNull(
                               y
@@ -6270,7 +6278,7 @@ export class CypherWriter {
      * is null, as before.
      */
     private membership(binary: Binary, left: Value, right: Value, scope: Scope, filter: boolean): string {
-        const member = this.member(left, right);
+        const member = this.member(left, right, binary.right);
         const within = this.isFlat(right);
         // A node, a relationship or a value of one kind holds no null; nor does an item of a list that holds none.
         const whole = member.id !== undefined || this.scalarValued(binary.left, scope) || this.isFlat(left);
@@ -6299,10 +6307,13 @@ export class CypherWriter {
     }
 
     /**
-     * What {@link membership} compares of `left IN right`: the list, the value, and how an item of the list `matches` the
-     * value, as `equals` compares two values that hold no null. A node or a relationship in a list of them is its `id`.
+     * What {@link membership} compares of `left IN right`, the list written as `listed`: the list, the value, and how an
+     * item of the list `matches` the value, as `equals` compares two values that hold no null. A node or a relationship
+     * in a list of them is its `id`. An item of a list whose items the statement writes or is given (see
+     * {@link givenItems}) matches the value as JSON where the value meets the store's `test`, if it has one: see
+     * `SqlCypherCompiler.givenItemsTest`.
      */
-    private member(left: Value, right: Value): Member {
+    private member(left: Value, right: Value, listed: Expression): Member {
         const sql = this.sql;
         // A node or a relationship is in a list of them where its id is.
         const id = this.memberId(left, right);
@@ -6322,11 +6333,20 @@ export class CypherWriter {
         if (identities) {
             return { list: this.identified(right), x: this.identified(left), equals, matches, elements };
         }
+        const x = sql.comparable(this.asJson(left));
+        const items = this.givenItems(listed);
+        const test =
+            items === undefined || sql.givenItemsTest(x, items) === undefined
+                ? undefined
+                : (value: string): string => sql.givenItemsTest(value, items)!;
         return {
             list: sql.comparable(this.asJson(right)),
-            x: sql.comparable(this.asJson(left)),
+            x,
             equals,
-            matches,
+            // Where the value meets the test, each item as JSON, a plain equality.
+            matches: test === undefined ? matches : (item: string, value: string): string => `${item} = ${value}`,
+            test,
+            given: test === undefined ? undefined : items,
             elements
         };
     }
@@ -6348,16 +6368,54 @@ export class CypherWriter {
 
     /**
      * Whether an item of `member`'s list matches its value, as a semi-join the store answers: `EXISTS`, or with `around`
-     * that test and the value, each read once.
+     * that test and the value, each read once. Where `member` has a `test`, the value meets it too, tested once beside the
+     * `EXISTS`, not in it.
      */
     private found(member: Member, around?: (found: string, value: string) => string): string {
         const i = this.alias('i');
         const exists = (list: string, value: string): string =>
             `EXISTS (SELECT 1 FROM ${member.elements(list, i)} WHERE ${member.matches(`${i}.item`, value)})`;
+        const test = member.test;
+        if (test !== undefined) {
+            return this.sql.sharedCompared(member.list, member.x, ([l, v]) => {
+                const tested = `(${test(v)} AND ${exists(l, v)})`;
+                return around === undefined ? tested : around(tested, v);
+            });
+        }
         if (around === undefined) {
             return exists(member.list, member.x);
         }
-        return this.sql.shared([member.list, member.x], ([l, v]) => around(exists(l, v), v));
+        return this.sql.sharedCompared(member.list, member.x, ([l, v]) => around(exists(l, v), v));
+    }
+
+    /**
+     * The items of the list `expression` where the statement writes or is given each, a list literal of literals and
+     * parameters, or a parameter: undefined where it is not so given, or holds a list or a map, whose items
+     * `SqlCypherCompiler.givenItemsTest` doesn't know.
+     */
+    private givenItems(expression: Expression): unknown[] | undefined {
+        let items: unknown[];
+        if (expression.kind === 'ListLiteral') {
+            items = [];
+            for (const item of expression.items) {
+                if (item.kind === 'Literal') {
+                    items.push(item.value);
+                } else if (item.kind === 'Parameter') {
+                    items.push(this.parameterTree(item.name));
+                } else {
+                    return undefined;
+                }
+            }
+        } else if (expression.kind === 'Parameter') {
+            const tree = this.parameterTree(expression.name);
+            if (!Array.isArray(tree)) {
+                return undefined;
+            }
+            items = tree;
+        } else {
+            return undefined;
+        }
+        return items.some(isContainer) ? undefined : items;
     }
 
     /** The id of `left`, a node or a relationship, where `right` is a list of such: undefined where they are not so. */
@@ -6394,7 +6452,7 @@ export class CypherWriter {
         const sql = this.sql;
         const matches = member.matches;
         const equals = member.equals;
-        return sql.shared([member.list, member.x], ([l, v]) => {
+        return sql.sharedCompared(member.list, member.x, ([l, v]) => {
             const i = this.alias('i');
             const cases: string[] = of.nullList ? [`WHEN ${sql.isJsonNull(l)} THEN NULL`] : [];
             // Null is compared with each item, and is in no empty list.
@@ -6402,6 +6460,19 @@ export class CypherWriter {
                 const j = this.alias('i');
                 const empty = `CASE WHEN EXISTS (SELECT 1 FROM ${member.elements(l, j)}) THEN NULL ELSE FALSE END`;
                 cases.push(`WHEN ${sql.isJsonNull(v)} THEN ${of.filled ? 'NULL' : empty}`);
+            }
+            // Items the statement gives, none a list or a map, are equal to no value that holds a null, and a comparison
+            // with one is null only where it is null: the value is not read for its nulls, a text past 32 KB taken out as
+            // JSON so closing Oracle's session (#469).
+            const given = member.given;
+            if (given !== undefined) {
+                cases.push(
+                    `WHEN ${member.test!(v)} AND EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(
+                        `${i}.item`,
+                        v
+                    )}) THEN TRUE`
+                );
+                return `CASE ${cases.join(' ')} ELSE ${given.includes(null) ? 'NULL' : 'FALSE'} END`;
             }
             // A value that holds a null is equal to no item.
             const held = of.whole ? '' : `NOT (${sql.holdsNull(v)}) AND `;
