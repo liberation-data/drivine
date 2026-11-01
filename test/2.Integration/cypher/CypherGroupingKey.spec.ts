@@ -193,6 +193,21 @@ describe.each(stores())('An aggregating item over a key that is a property on $t
                     [2, false]
                 ]
             ],
+            // An e that reads only a y it binds of its own reads no y of the quantifier's.
+            [
+                `${x}, any(y IN collect(x.b) WHERE y = [y IN [x.a] | y][0]) AS n ORDER BY a, n`,
+                [
+                    [1, true],
+                    [2, false]
+                ]
+            ],
+            [
+                `${x}, none(y IN collect(x.b) WHERE reduce(s = 0, y IN [x.a] | s + y) = y) AS n ORDER BY a, n`,
+                [
+                    [1, false],
+                    [2, true]
+                ]
+            ],
             [
                 `${x}, any(y IN collect(x.b) WHERE x.a IN [y]) AS n ORDER BY a, n`,
                 [

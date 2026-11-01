@@ -4225,7 +4225,8 @@ export class CypherWriter {
                     : where.operator === 'IN' && only
                     ? comparedTo(where.left, only)
                     : undefined;
-            return compared !== undefined && !variablesIn(compared).has(part.variable);
+            // A `y` that a comprehension or a reduce in `e` binds of its own is not the quantifier's.
+            return compared !== undefined && !variablesReadIn(compared).has(part.variable);
         };
         // As Neo4j reads a key in an item that aggregates: by its name in a part that holds no aggregate, and in a list
         // comprehension's WHERE, all through. In the projection of a comprehension over an aggregate, or the WHERE of a
