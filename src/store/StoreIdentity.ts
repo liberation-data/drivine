@@ -32,6 +32,21 @@ const MERGE_ATTEMPTS = 5;
 const MERGE_BACKOFF_MILLIS = 50;
 const ENSURE_ATTEMPTS = 3;
 
+/** How many times the winner's key constraint is looked for after this manager's making failed: see `winnersInForce`. */
+const LOOKS_FOR_THE_WINNER = 8;
+
+/** The least pause before the second look for the winner's constraint; each later one is as much longer. */
+const LOOK_PAUSE_MILLIS = 50;
+
+/**
+ * The pause before look `look` (from 1) for the winner's constraint: as many LOOK_PAUSE_MILLIS as looks so far, and up
+ * to as much again at random, so that losers looking together don't ask together. 2.8 s at most over all the looks.
+ */
+const lookPause = (look: number): number => {
+    const base = look * LOOK_PAUSE_MILLIS;
+    return base + Math.floor(Math.random() * base);
+};
+
 /**
  * Whether a schema statement was refused for what another session made meanwhile: a constraint or index that already
  * exists (FalkorDB's "Constraint already exists", or its "Attribute 'key' is already indexed" for the index the
@@ -65,10 +80,16 @@ function madeMeanwhile(failure: unknown): boolean {
 export class StoreIdentityResolver {
     private readonly logger = new DrivineLogger(StoreIdentityResolver.name);
 
+    /**
+     * `sleep` waits out the pauses between looks for the winner's constraint (see `winnersInForce`); a test gives one
+     * that doesn't wait, as `whenNotContended`'s are given.
+     */
     constructor(
         private readonly persistenceManager: PersistenceManager,
         private readonly backend: GraphBackend,
-        private readonly constraints?: ConstraintManager
+        private readonly constraints?: ConstraintManager,
+        private readonly sleep: (millis: number) => Promise<void> = async (millis) =>
+            new Promise((resolve) => setTimeout(resolve, millis))
     ) {}
 
     async resolve(): Promise<StoreIdentity> {
@@ -107,35 +128,84 @@ export class StoreIdentityResolver {
      * the index's name taken in the catalog (Postgres's `pg_class`, 23505). The constraint is then ensured
      * again, which finds the other's. Going on without it would let a stamp be refused by the other's constraint, or two
      * stamps be written before it is in force (#479, as drivine4j#473).
+     *
+     * A manager whose making still fails, as one that lost each round of Neo4j's label lock to the others does, looks
+     * for the winner's constraint before it goes on best-effort, as drivine4j does (see {@link winnersInForce}). Turned
+     * away for contention and finding none, it ensures the constraint once more, by then with fewer making it at once.
+     *
+     * That narrows the window for two stamps without closing it: a manager whose last ensure is turned away too writes
+     * its stamp unguarded, and so may another, while no constraint is in force yet. No store offers a lock to make the
+     * constraint under, and ensuring or looking for longer would only move the window. A stamp written unguarded is
+     * still written again when a constraint made meanwhile refuses it (see `assignIfAbsent`), and of two stamps each
+     * manager reads the oldest (see `resolve`).
      */
     private async ensureUniqueKey(): Promise<boolean> {
         if (!this.constraints) {
             return false;
         }
         try {
-            const result = await this.ensuredAgainWhenMadeMeanwhile(this.constraints);
-            if (result.status === 'VIOLATION') {
-                this.logger.warn(
-                    `${this.persistenceManager.database} already holds duplicate DrivineStore stamps, so their uniqueness can't ` +
-                        `be enforced. Identity is best-effort until they are removed.`
-                );
-                return false;
-            }
-            if (result.status === 'BLOCKED_BY_INDEX') {
-                const index = result.index?.name ? `The index ${result.index.name}` : 'An index';
-                this.logger.warn(
-                    `${index} on DrivineStore(key) on ${this.persistenceManager.database} is in the way of its ` +
-                        `uniqueness constraint. Identity is best-effort until it is dropped.`
-                );
-                return false;
-            }
-            return true;
+            return this.inForceAfter(await this.ensuredAgainWhenMadeMeanwhile(this.constraints));
         } catch (e) {
+            const contended = gaveUpAsContended(e) || this.backend.contended(e);
+            if (await this.winnersInForce(this.constraints, contended)) {
+                return true;
+            }
+            let failure = e;
+            if (contended) {
+                try {
+                    return this.inForceAfter(await this.ensuredAgainWhenMadeMeanwhile(this.constraints));
+                } catch (again) {
+                    failure = again;
+                }
+            }
             this.logger.warn(
-                `Could not ensure the DrivineStore key constraint: ${(e as Error).message}. Identity is best-effort.`
+                `Could not ensure the DrivineStore key constraint: ${(failure as Error).message}. Identity is best-effort.`
             );
             return false;
         }
+    }
+
+    /** Whether the key's constraint is in force after `result`; warns, and answers false, when it can't be. */
+    private inForceAfter(result: EnsureResult<UniquenessConstraintSpec>): boolean {
+        if (result.status === 'VIOLATION') {
+            this.logger.warn(
+                `${this.persistenceManager.database} already holds duplicate DrivineStore stamps, so their uniqueness can't ` +
+                    `be enforced. Identity is best-effort until they are removed.`
+            );
+            return false;
+        }
+        if (result.status === 'BLOCKED_BY_INDEX') {
+            const index = result.index?.name ? `The index ${result.index.name}` : 'An index';
+            this.logger.warn(
+                `${index} on DrivineStore(key) on ${this.persistenceManager.database} is in the way of its ` +
+                    `uniqueness constraint. Identity is best-effort until it is dropped.`
+            );
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Whether another manager's key constraint is in force, looked for after this one's making failed. Of managers
+     * making it at once on Neo4j, each round of the label's lock goes to one and turns the rest away as deadlocked; with
+     * many at once, the rounds can go on past the schema executor's attempts (as in CI run 41260212023). A loser turned
+     * away each time finds the winner's here, and, looking rather than making it again, leaves the lock to the others,
+     * so that one of them wins sooner. The winner may still be making it, so after `contended` making it is looked for
+     * up to LOOKS_FOR_THE_WINNER times, with longer pauses between (see {@link lookPause}), as drivine4j does. After a
+     * failure of another kind (no permission, an index in the way, refused as made meanwhile each time) it is looked
+     * for once: no winner is still making it, and the warning shouldn't wait. A look that fails finds nothing.
+     */
+    private async winnersInForce(constraints: ConstraintManager, contended: boolean): Promise<boolean> {
+        const looks = contended ? LOOKS_FOR_THE_WINNER : 1;
+        for (let look = 0; look < looks; look++) {
+            if (look > 0) {
+                await this.sleep(lookPause(look));
+            }
+            if (await constraints.inForce(KEY_CONSTRAINT).catch(() => false)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** `ensure`s the key's constraint, again when another manager made it, or what it needs, meanwhile. */
