@@ -99,12 +99,7 @@ const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
  * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
  * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
  */
-const HELD: Record<string, Record<string, Hold[]>> = {
-    'queries.yaml': {
-        // v0.18.0, liberation-data/drivine-cypher-spec#43: a key in an order term's body, and any(y IN … WHERE y = e).
-        'Implicit grouping key': [{ issue: 499, steps: [37, 38, 39, 40, 42, 43, 44], on: ['sql'] }]
-    }
-};
+const HELD: Record<string, Record<string, Hold[]>> = {};
 
 interface Hold {
     issue: number;
