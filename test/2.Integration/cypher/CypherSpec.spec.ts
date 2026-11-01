@@ -4034,6 +4034,87 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     });
 
     /**
+     * A CALL's UNION ALL merges its parts' values into one column, marked as each part's are, not as the first part's:
+     * drivine4j's tests of liberation-data/drivine4j#512, ported for #505. The rows are Neo4j's (2026.10), in any order
+     * where the statement gives none.
+     */
+    describe("a CALL's UNION ALL of values of several kinds", () => {
+        /** Rows as a multiset, a null row included, to compare those of a statement that gives no order. */
+        const unordered = (rows: any[]): string[] => rows.map((it) => JSON.stringify(it)).sort();
+
+        it("keeps a later part's null from a list one null with a missing key", async () => {
+            // The column may be JSON's null where any part's value may be, not only the first's.
+            expect(await query('CALL { RETURN {}.a AS v UNION ALL RETURN [null][0] AS v } RETURN DISTINCT v')).toEqual([
+                null
+            ]);
+            expect(
+                unordered(
+                    await query(
+                        'CALL { RETURN 1 AS v UNION ALL RETURN [null][0] AS v UNION ALL RETURN {}.a AS v } RETURN v, count(*) AS c'
+                    )
+                )
+            ).toEqual(
+                unordered([
+                    [1, 1],
+                    [null, 2]
+                ])
+            );
+            // In a part of an outer UNION, which compares rows by it.
+            expect(
+                unordered(
+                    await query(
+                        'CALL { RETURN {}.a AS v UNION ALL RETURN 1 AS v UNION ALL RETURN [null][0] AS v } RETURN v UNION RETURN 2 AS v'
+                    )
+                )
+            ).toEqual(unordered([null, 1, 2]));
+        });
+
+        // Postgres takes jsonb's order of kinds, a number before a list (liberation-data/drivine4j#307), and refuses a
+        // written list's json beside a number's jsonb in one UNION ALL.
+        (store.type !== DatabaseType.POSTGRES ? it : it.skip)(
+            'sorts a number or a map a later part gives by its kind, where the first part gives a list',
+            async () => {
+                // The column is a list only where every part's value is, so a number or a map a later part gives sorts by
+                // its kind, not as a list would.
+                expect(await query('CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v } RETURN v ORDER BY v')).toEqual([
+                    [10],
+                    10
+                ]);
+                expect(await query('CALL { RETURN [1, 2] AS v UNION ALL RETURN 10 AS v } RETURN v ORDER BY v')).toEqual([
+                    [1, 2],
+                    10
+                ]);
+                expect(await query('CALL { RETURN [10] AS v UNION ALL RETURN {a: 1} AS v } RETURN v ORDER BY v')).toEqual([
+                    { a: 1 },
+                    [10]
+                ]);
+                expect(
+                    await query(
+                        'CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v UNION ALL RETURN [9] AS v UNION ALL RETURN [2] AS v } RETURN v ORDER BY v'
+                    )
+                ).toEqual([[2], [9], [10], 10]);
+                // A later part's number compares as a number; a later part's null in a list makes `=` and IN null, not
+                // false; and a later part's list of numbers unwinds to numbers, which sort after the first part's list.
+                // The first three give no order.
+                expect(
+                    unordered(await query('CALL { RETURN [1] AS v UNION ALL RETURN 1 AS v } RETURN v < 2 AS r'))
+                ).toEqual(unordered([null, true]));
+                expect(
+                    unordered(await query('CALL { RETURN [1] AS v UNION ALL RETURN [null] AS v } RETURN v = [1] AS r'))
+                ).toEqual(unordered([true, null]));
+                expect(
+                    unordered(
+                        await query('CALL { RETURN [1] AS v UNION ALL RETURN [null] AS v } RETURN v IN [[1], 1] AS r')
+                    )
+                ).toEqual(unordered([true, null]));
+                expect(
+                    await query('CALL { RETURN [[1]] AS v UNION ALL RETURN [1] AS v } UNWIND v AS x RETURN x AS r ORDER BY r')
+                ).toEqual([[1], 1]);
+            }
+        );
+    });
+
+    /**
      * A date or a moment made from a week, an ordinal day or a quarter that an expression gives, worked out by the store:
      * drivine4j's test of liberation-data/drivine4j#495, ported for #495, less the statements the spec holds since
      * v0.15.0.
