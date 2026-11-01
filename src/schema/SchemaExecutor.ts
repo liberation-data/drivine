@@ -5,16 +5,18 @@ import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnec
 import { DrivineError } from '@/DrivineError';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { NativeOperation } from '@/schema/SchemaGrammar';
-import { ddlContended, whenNotContended } from '@/manager/Contention';
+import { ddlContended, ddlDeadlocked, whenNotContended } from '@/manager/Contention';
+import { waitsOutBusyLock } from '@/backend/oracle/OracleSchemaGrammar';
 import { transientOverBolt } from '@/backend/CypherGrammar';
 
 /**
  * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or a SQL store turning DDL
  * away because of another session's (see {@link ddlContended}), as when managers that start together each make the
- * indexes of the store's key.
+ * indexes of the store's key. A statement that `waitedOutBusy`, as an Oracle index's block does (see
+ * {@link waitsOutBusyLock}), is taken as turned away only for a deadlock (see {@link ddlDeadlocked}).
  */
-function contended(failure: unknown): boolean {
-    if (ddlContended(failure)) {
+function contended(failure: unknown, waitedOutBusy: boolean): boolean {
+    if (waitedOutBusy ? ddlDeadlocked(failure) : ddlContended(failure)) {
         return true;
     }
     for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
@@ -41,7 +43,11 @@ export class SchemaExecutor {
     /** Runs a statement, again after a pause when the engine turned it away because another write was in progress. */
     async run(statement: string | NativeOperation, bindings: Record<string, any> = {}): Promise<any[]> {
         await this.prepare?.();
-        return whenNotContended(async () => this.runOnce(statement, bindings), contended);
+        const waitedOutBusy = typeof statement === 'string' && waitsOutBusyLock(statement);
+        return whenNotContended(
+            async () => this.runOnce(statement, bindings),
+            (failure) => contended(failure, waitedOutBusy)
+        );
     }
 
     private async runOnce(statement: string | NativeOperation, bindings: Record<string, any>): Promise<any[]> {

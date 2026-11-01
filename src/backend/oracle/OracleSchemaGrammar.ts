@@ -36,15 +36,49 @@ const UNIQUE_THERE =
     `u.kind IN (${recordedAs('UNIQUE').map(sqlText).join(', ')}) ` +
     'AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name))';
 
-/** A block that runs `ddl`, an object another session made meanwhile (ORA-00955) taken as made. */
+/**
+ * How many times {@link made} runs an index's statement that another session's lock on the node table turned away
+ * (ORA-00054), a tenth of a second apart, before it throws: as drivine4j's `OracleGraph.BUSY_ATTEMPTS`.
+ */
+export const BUSY_ATTEMPTS = 300;
+
+/** What declares the busy lock {@link made} waits out: a block that holds it has waited before it fails for that lock. */
+const WAITS_OUT_BUSY = 'PRAGMA EXCEPTION_INIT(e_busy, -54);';
+
+/**
+ * Whether `statement` waited out another session's busy lock (ORA-00054) itself before it failed for it, as a block of
+ * {@link made} does for thirty seconds: the schema executor doesn't run it again for that lock, or each run would wait
+ * as long again.
+ */
+export function waitsOutBusyLock(statement: string): boolean {
+    return statement.includes(WAITS_OUT_BUSY);
+}
+
+/**
+ * A block that runs `ddl`, an index over the node table, an object another session made meanwhile (ORA-00955) taken as
+ * made. A statement turned away because another session holds the node table's lock (ORA-00054), as one making the same
+ * index, or writing a node, does, is run again a tenth of a second later, for up to {@link BUSY_ATTEMPTS} tries, and
+ * then finds what the other made: managers making the store key's constraint together otherwise ran out of attempts on
+ * the busy lock, and went on without the constraint. drivine4j's `OracleGraph.ensuring` waits out a busy lock so.
+ */
 function made(ddl: string): string {
     return `DECLARE
     e_exists EXCEPTION;
     PRAGMA EXCEPTION_INIT(e_exists, -955);
+    e_busy EXCEPTION;
+    ${WAITS_OUT_BUSY}
 BEGIN
-    EXECUTE IMMEDIATE ${sqlText(ddl)};
-EXCEPTION
-    WHEN e_exists THEN NULL;
+    FOR attempt IN 1 .. ${BUSY_ATTEMPTS} LOOP
+        BEGIN
+            EXECUTE IMMEDIATE ${sqlText(ddl)};
+            RETURN;
+        EXCEPTION
+            WHEN e_exists THEN RETURN;
+            WHEN e_busy THEN
+                IF attempt = ${BUSY_ATTEMPTS} THEN RAISE; END IF;
+                DBMS_SESSION.SLEEP(0.1);
+        END;
+    END LOOP;
 END;`;
 }
 

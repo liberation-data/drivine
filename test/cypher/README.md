@@ -43,7 +43,9 @@ On Neo4j a statement runs in the database's default language, Cypher 25 on Neo4j
 ## Values
 
 - A whole number and the same number written with a fraction are different values: `2` is not `2.0`.
-- `{$repeat: "x", times: 3000}` is the text `x` written 3000 times, in parameters and rows alike. Any other map is the map it is, even one keyed with `$`, such as `{$numberDouble: "1"}`.
+- `{$repeat: "x", times: 3000}` is the text `x` written 3000 times, in parameters and rows alike.
+- `{$float: "NaN"}`, `{$float: "Infinity"}` and `{$float: "-Infinity"}` are NaN and the infinities, in parameters and rows alike: not every YAML parser reads `.nan` and `.inf`. NaN in the rows is the same as NaN there.
+- Any other map is the map it is, even one keyed with `$`, such as `{$numberDouble: "1"}`.
 - Quote every string. A YAML 1.1 parser, such as SnakeYAML or PyYAML, reads a bare `y`, `yes`, `no` or `on` as a boolean.
 - `writes.yaml` binds and expects a whole number beyond 2^53. A library whose language reads YAML numbers as doubles skips those steps, named in its own runner. Otherwise a library skips nothing: a store that differs says so with `except` here.
 

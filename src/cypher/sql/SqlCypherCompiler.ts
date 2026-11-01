@@ -3,6 +3,7 @@ import { DrivineError } from '@/DrivineError';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
+import { Aggregates } from '@/cypher/sql/Aggregates';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
 import {
@@ -21,6 +22,7 @@ import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
 import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
+import { VariableKinds } from '@/cypher/sql/VariableKinds';
 import { CypherFloat } from '@/cypher/ast/Expression';
 
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
@@ -147,6 +149,10 @@ export abstract class SqlCypherCompiler {
      * where it writes.
      */
     compileQuery(query: Query, parameters: Record<string, any>): CompiledCypher {
+        // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
+        VariableKinds.check(query);
+        // An aggregate in a WHERE too.
+        Aggregates.check(query);
         if (query.unions.length > 0) {
             return this.withFunctions(this.union(query, parameters));
         }
@@ -431,6 +437,33 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * {@link openSortKey} of a value that may be JSON's null ({@link JsonValue.jsonNull}): JSON's null ties with SQL's, as
+     * Cypher has one null, so a term after it decides their order (#497). Where a store's {@link openSortKey} does not tie
+     * them already, it says so.
+     */
+    jsonNullSortKey(jsonSql: string): string[] {
+        return this.openSortKey(jsonSql);
+    }
+
+    /**
+     * The JSON value `json`, JSON's null read as SQL's, where rows are given by it to a `UNION` that compares them, and by
+     * default where they are grouped or kept distinct ({@link groupedNull}): as {@link nullIfJsonNull}, but where a store
+     * binds a long value in a subquery there, which no store groups by, written out where it is read.
+     */
+    comparedNull(jsonSql: string): string {
+        return this.nullIfJsonNull(jsonSql);
+    }
+
+    /**
+     * The JSON value `json` as rows are grouped or kept distinct by it, JSON's null and SQL's one: as {@link comparedNull},
+     * but where a store makes them one more cheaply in a value that each row reads alike, as SQL's null read as JSON's, it
+     * says so (#497).
+     */
+    groupedNull(jsonSql: string): string {
+        return this.comparedNull(jsonSql);
+    }
+
+    /**
      * What an order sorts the JSON value `json` by where the statement makes it a list ({@link JsonValue.list}): as
      * {@link sortKey} where the store orders lists as Cypher does.
      */
@@ -680,14 +713,19 @@ export abstract class SqlCypherCompiler {
             );
         }
         const writer = new CypherWriter(this, this.readParameters(parameters));
-        const rows = parts
-            .map(
-                (clauses, i) =>
-                    `SELECT ${i + 1} AS part, ${this.rowNumber} AS n, q.result FROM (\n${indent(
-                        writer.query({ clauses, unions: [] })
-                    )}\n) q`
-            )
-            .join('\nUNION ALL\n');
+        // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
+        writer.give(query);
+        // Its rows are compared, as a UNION without ALL compares them: see CypherWriter.comparingParts.
+        const rows = writer.comparingParts(!query.unions[0].all, () =>
+            parts
+                .map(
+                    (clauses, i) =>
+                        `SELECT ${i + 1} AS part, ${this.rowNumber} AS n, q.result FROM (\n${indent(
+                            writer.query({ clauses, unions: [] })
+                        )}\n) q`
+                )
+                .join('\nUNION ALL\n')
+        );
         let sql: string;
         if (query.unions[0].all) {
             sql = `SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n`;

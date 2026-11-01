@@ -1,4 +1,5 @@
 import {
+    ConnectionPropertiesFromEnv,
     DatabaseRegistry,
     DatabaseType,
     PersistenceManager,
@@ -30,11 +31,22 @@ export function sqlStores(): SqlStore[] {
     ];
 }
 
-/** A non-transactional persistence manager for the store. */
-export function sqlPersistenceManager(store: SqlStore): PersistenceManager {
-    DatabaseRegistry.buildOrResolveFromEnv(store.name);
+/**
+ * A non-transactional persistence manager for the store, on `graph` when one is given, by a connection of its own
+ * registered as `<store>_<graph>`, else on the store's default graph.
+ */
+export function sqlPersistenceManager(store: SqlStore, graph?: string): PersistenceManager {
+    const name = graph ? `${store.name}_${graph}` : store.name;
+    if (graph) {
+        DatabaseRegistry.getInstance()
+            .builder()
+            .withProperties({ ...ConnectionPropertiesFromEnv(store.name), defaultGraphPath: graph })
+            .register(name);
+    } else {
+        DatabaseRegistry.buildOrResolveFromEnv(store.name);
+    }
     return new PersistenceManagerFactory(DatabaseRegistry.getInstance(), TransactionContextHolder.getInstance()).get(
-        store.name,
+        name,
         'NON_TRANSACTIONAL'
     );
 }

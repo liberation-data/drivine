@@ -1,5 +1,5 @@
 import { Temporal } from '@/cypher/sql/Temporal';
-import { TemporalSql } from '@/cypher/sql/TemporalSql';
+import { TemporalSql, yearsOf } from '@/cypher/sql/TemporalSql';
 
 const TRUNCATED = ['year', 'quarter', 'month', 'week', 'day', 'hour', 'minute', 'second', 'millisecond'];
 
@@ -83,7 +83,32 @@ export class PostgresTemporalSql extends TemporalSql {
         return `EXTRACT(EPOCH FROM (${to} - ${from}))`;
     }
 
+    /**
+     * `date_trunc`, but for the units it counts otherwise than Neo4j: its millennium starts in 2001 and its century in
+     * 1901, so those and the decade are the year less its years into the span (see {@link yearsOf}). The week-based year
+     * is so many weeks before the timestamp's week, its ISO week less one.
+     */
     truncate(unit: string, timestamp: string): string | undefined {
-        return TRUNCATED.includes(unit) ? `date_trunc('${unit}', ${timestamp})` : undefined;
+        if (TRUNCATED.includes(unit)) {
+            return `date_trunc('${unit}', ${timestamp})`;
+        }
+        if (unit === 'microsecond') {
+            return `date_trunc('microseconds', ${timestamp})`;
+        }
+        const years = yearsOf(unit);
+        if (years !== undefined) {
+            return this.shared(
+                [timestamp],
+                ([t]) =>
+                    `(date_trunc('year', ${t}) - make_interval(years => MOD(CAST(EXTRACT(YEAR FROM ${t}) AS int), ${years})))`
+            );
+        }
+        if (unit === 'weekYear') {
+            return this.shared(
+                [timestamp],
+                ([t]) => `(date_trunc('week', ${t}) - make_interval(weeks => CAST(EXTRACT(WEEK FROM ${t}) AS int) - 1))`
+            );
+        }
+        return undefined;
     }
 }

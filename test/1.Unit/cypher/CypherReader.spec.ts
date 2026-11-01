@@ -239,6 +239,13 @@ describe('CypherReader', () => {
         expect(ret.orderBy.map((it) => it.descending)).toEqual([true, false]);
         expect(ret.skip).toEqual(literal(2));
         expect(ret.limit).toEqual({ kind: 'Parameter', name: 'n' });
+        // As Neo4j names them (#494): an unnamed map projection after its variable, an alias before it, any other item as written.
+        const maps = CypherReader.read('MATCH (p) RETURN p {.name}, p {.name, .age} AS q, p {.name}.name').clauses;
+        expect((maps[maps.length - 1] as Return).projection.items.map((it) => it.name)).toEqual([
+            'p',
+            'q',
+            'p {.name}.name'
+        ]);
     });
 
     it('reads the writes as their clauses, in order, with or without a return', () => {
@@ -365,6 +372,23 @@ describe('CypherReader', () => {
         ]);
         expect(withClause.where).toMatchObject({ left: { kind: 'Variable', name: 't' } });
         expect(ret.projection.items.map((it) => it.name)).toEqual(['t']);
+    });
+
+    it('reads a call of a subquery with the variables its brackets import', () => {
+        // Each form: whether it is OPTIONAL, the variables its brackets name (none with no brackets), and whether it imports each, (*).
+        (
+            [
+                ['MATCH (a) CALL { WITH a RETURN a AS x } RETURN x', [false, undefined, undefined]],
+                ['MATCH (a) CALL () { RETURN 1 AS x } RETURN x', [false, [], undefined]],
+                ['MATCH (a), (b) CALL (a, b) { RETURN a AS x } RETURN x', [false, ['a', 'b'], undefined]],
+                ['MATCH (a), (b) CALL(a,b){ RETURN a AS x } RETURN x', [false, ['a', 'b'], undefined]],
+                ['MATCH (a) CALL (*) { RETURN a AS x } RETURN x', [false, [], true]],
+                ['MATCH (a) OPTIONAL CALL (a) { MATCH (a)-->(b) RETURN b } RETURN b', [true, ['a'], undefined]]
+            ] as const
+        ).forEach(([cypher, expected]) => {
+            const call = CypherReader.read(cypher).clauses.find((it): it is Call => it.kind === 'Call')!;
+            expect([cypher, call.optional, call.imports, call.importsAll]).toEqual([cypher, ...expected]);
+        });
     });
 
     it('refuses Cypher the compiler does not take by name, and what is not Cypher with where', () => {

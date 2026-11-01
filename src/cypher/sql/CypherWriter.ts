@@ -7,6 +7,7 @@ import {
     BinaryOperator,
     Case,
     CypherFloat,
+    Exists,
     Expression,
     expressionKey,
     FunctionCall,
@@ -16,6 +17,7 @@ import {
     ListLiteral,
     MapProjection,
     PatternComprehension,
+    PatternPredicate,
     Property,
     Quantifier,
     Reduce,
@@ -37,19 +39,26 @@ import {
     RemoveItem,
     Return,
     SetItem,
+    SortItem,
     Unwind,
     With
 } from '@/cypher/ast/Query';
 import {
+    ANEW,
+    bracketed,
     children,
     chunked,
     contains,
     DISTINCT_ITEMS,
+    holdsAnew,
     holdsSubquery,
+    imports,
     indent,
     isAggregate,
     isAnew,
     isGivenNumber,
+    isPlainKey,
+    isSeeded,
     iterated,
     literal,
     MADE_TEXT,
@@ -58,11 +67,16 @@ import {
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
+    plainWith,
+    queryHoldsAnew,
+    readsOutsideAggregates,
     replaced,
+    seeded,
     TEXT_FUNCTIONS,
     unsupported,
     variablesIn,
     variablesOfPattern,
+    variablesReadIn,
     variablesOutsideAggregates,
     writes
 } from '@/cypher/sql/CypherSyntax';
@@ -72,15 +86,20 @@ import { Select } from '@/cypher/sql/Select';
 import { Procedure, Walk, Walked } from '@/cypher/sql/Procedure';
 import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Temporal } from '@/cypher/sql/Temporal';
-import { Temporals } from '@/cypher/sql/Temporals';
+import { TRUNCATION_UNITS } from '@/cypher/sql/TemporalSql';
+import { CALENDAR_FIELDS, Overrides, SELECTORS, TemporalBase, Temporals } from '@/cypher/sql/Temporals';
 import {
     bool,
     BoolValue,
+    capitalNounOf,
     EntitiesValue,
     json,
     JsonValue,
+    Known,
+    knownOf,
     NodeValue,
     nodeOf,
+    nounOf,
     relationshipOf,
     Value
 } from '@/cypher/sql/Value';
@@ -177,6 +196,9 @@ const TEMPORAL_NOW = TEMPORAL_KINDS.flatMap((kind) =>
     ['statement', 'transaction', 'realtime'].map((it) => `${kind}.${it}`)
 );
 
+/** A call of `randomUUID()`, as a statement writes one. */
+const RANDOM_UUID: Expression = { kind: 'Function', name: 'randomUUID', distinct: false, arguments: [] };
+
 /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past `MAX_COUNT`. */
 const PRECISION_OUT_OF_RANGE = 'round() takes a precision from 0 to 2147483647, as in Neo4j.';
 
@@ -192,6 +214,540 @@ const LONG_MIN = BigInt('-9223372036854775808');
 
 /** The functions of a temporal kind that truncate a value to a unit. */
 const TEMPORAL_TRUNCATE = TEMPORAL_KINDS.map((it) => `${it}.truncate`);
+
+/** The fields of a date a truncation's map may give, as Neo4j takes them. */
+const TRUNCATION_DATE_FIELDS = [
+    'year',
+    'month',
+    'day',
+    'dayOfWeek',
+    'week',
+    'weekYear',
+    'quarter',
+    'dayOfQuarter',
+    'ordinalDay'
+];
+
+/** The fields of a time of day a truncation's map may give, as Neo4j takes them. */
+const TRUNCATION_TIME_FIELDS = ['hour', 'minute', 'second', 'millisecond', 'microsecond', 'nanosecond'];
+
+/** The fields a truncation's map may give that the stores have no SQL for yet: nanoseconds, and the fields of a week or a quarter. */
+const TRUNCATION_FIELDS_NOT_COMPILED = ['nanosecond', 'week', 'weekYear', 'quarter', 'dayOfQuarter', 'ordinalDay'];
+
+/** The values each field a truncation's map gives may take, as Neo4j takes them, but for the year, which runs past what a store's text holds. */
+const TRUNCATION_RANGES: Partial<Record<string, [number, number]>> = {
+    month: [1, 12],
+    day: [1, 31],
+    dayOfWeek: [1, 7],
+    hour: [0, 23],
+    minute: [0, 59],
+    second: [0, 59],
+    millisecond: [0, 999],
+    microsecond: [0, 999999]
+};
+
+/** The least of each field a truncation's map gives that is not 0, which a field given as null is. */
+const TRUNCATION_LEAST: Partial<Record<string, number>> = { month: 1, day: 1, dayOfWeek: 1 };
+
+/**
+ * Refuses `written`, the value a `SET` gives a property, where it is a map written, or a list written that holds one or
+ * a list: no property, as Neo4j refuses it, and as drivine's saves do.
+ */
+function propertyOfKind(written: Expression): void {
+    if (
+        written.kind === 'MapLiteral' ||
+        (written.kind === 'ListLiteral' &&
+            written.items.some((it) => it.kind === 'MapLiteral' || it.kind === 'ListLiteral'))
+    ) {
+        throw new DrivineError(
+            `A property is a number, a text, a truth value, a temporal value or a list of them, not ${
+                written.kind === 'MapLiteral' ? 'a map' : 'a list of maps or lists'
+            }, as in Neo4j.`
+        );
+    }
+}
+
+/** Whether the statement writes `value` as a value of a kind other than a map ({@link JsonValue.known}), which has no properties. */
+function knownNoMap(value: JsonValue): boolean {
+    return value.known !== undefined && value.known !== 'MAP';
+}
+
+/** A temporal value's fields as a message names them, where it is not `a <field>`. */
+const FIELD_NOUNS: Partial<Record<string, string>> = {
+    dayOfWeek: 'a day of the week',
+    hour: 'an hour',
+    ordinalDay: 'an ordinal day',
+    dayOfQuarter: 'a day of the quarter'
+};
+
+/** The values each field a map laid over another temporal value gives may take, as Neo4j takes them, but for the year: see `fromTemporal`. */
+const OVER_RANGES: Partial<Record<string, [number, number]>> = {
+    ...TRUNCATION_RANGES,
+    week: [1, 53],
+    ordinalDay: [1, 366],
+    quarter: [1, 4],
+    dayOfQuarter: [1, 92],
+    nanosecond: [0, 999999999]
+};
+
+/** The least of each field a map laid over another temporal value gives that is not 0, which a field given as null is. */
+const OVER_LEAST: Partial<Record<string, number>> = {
+    month: 1,
+    day: 1,
+    week: 1,
+    dayOfWeek: 1,
+    ordinalDay: 1,
+    quarter: 1,
+    dayOfQuarter: 1
+};
+
+/** The date's fields that make a whole date by each calendar, where no value gives the date: see `fromTemporal`. */
+const WHOLE_DATES: Record<string, string[]> = {
+    'a month': ['year', 'month', 'day'],
+    'a week': ['year', 'week', 'dayOfWeek'],
+    'an ordinal day': ['year', 'ordinalDay'],
+    'a quarter': ['year', 'quarter', 'dayOfQuarter']
+};
+
+/** Each field of the time that a map without a value that gives the time takes only beside another: see `fromTemporal`. */
+const TIME_ABOVE: [string, string][] = [
+    ['minute', 'hour'],
+    ['second', 'minute'],
+    ['millisecond', 'second'],
+    ['microsecond', 'second'],
+    ['nanosecond', 'second']
+];
+
+/**
+ * The keys of `entries`, a truncation's map of fields given `fn`, which truncates to `kind`: refused where Neo4j refuses
+ * one, as a field of no such value or a day or a month beside a day of the week, or where no store has SQL for it yet.
+ */
+function truncationKeys(fn: FunctionCall, kind: Temporal, entries: [string, Expression][]): Set<string> {
+    const takes = new Set([
+        ...(kind !== Temporal.LOCAL_TIME && kind !== Temporal.TIME ? TRUNCATION_DATE_FIELDS : []),
+        ...(kind !== Temporal.DATE ? TRUNCATION_TIME_FIELDS : []),
+        ...(kind.zoned ? ['timezone'] : [])
+    ]);
+    entries.forEach(([key]) => {
+        if (!takes.has(key)) {
+            throw new DrivineError(`${fn.name}() takes no field ${key}.`);
+        }
+        if (TRUNCATION_FIELDS_NOT_COMPILED.includes(key)) {
+            unsupported(`${fn.name}() of a map with ${key}`);
+        }
+    });
+    const keys = new Set(entries.map(([key]) => key));
+    ['day', 'month'].forEach((it) => {
+        if (keys.has(it) && keys.has('dayOfWeek')) {
+            throw new DrivineError(`${fn.name}() takes a ${it} or a day of the week, not both.`);
+        }
+    });
+    return keys;
+}
+
+/**
+ * `literal`, written as the field `key` of a truncation of `fn`, where it is a whole number in the field's range (see
+ * {@link TRUNCATION_RANGES}); with `millis`, a millisecond is given or kept, beside which a microsecond runs to 999.
+ */
+function truncationWhole(fn: FunctionCall, key: string, literal: unknown, millis: boolean): number {
+    const beside = key === 'microsecond' && millis;
+    return wholeField(
+        fn.name,
+        key,
+        literal,
+        beside ? [0, 999] : TRUNCATION_RANGES[key],
+        beside ? 'millisecond' : undefined
+    );
+}
+
+/**
+ * `literal`, written as the field `key` of a temporal map given `name`, where it is a whole number in `range`, the
+ * range it has `beside` another field given where one is named, as Neo4j takes it: fails on any other.
+ */
+function wholeField(
+    name: string,
+    key: string,
+    literal: unknown,
+    range: [number, number] | undefined,
+    beside: string | undefined
+): number {
+    if (typeof literal !== 'number' || !Number.isInteger(literal)) {
+        throw new DrivineError(`${name}() takes a whole number for ${key}, not ${shownLiteral(literal)}.`);
+    }
+    if (range !== undefined && (literal < range[0] || literal > range[1])) {
+        const besides = beside !== undefined ? ` beside a ${beside}` : '';
+        throw new DrivineError(
+            `${name}() takes ${FIELD_NOUNS[key] ?? `a ${key}`} from ${range[0]} to ${
+                range[1]
+            }${besides}, not ${literal}.`
+        );
+    }
+    return literal;
+}
+
+/** The value `literal` that a statement writes, as a message shows it: a text in quotes, `'3'`, else as written. */
+function shownLiteral(literal: unknown): string {
+    return typeof literal === 'string' ? `'${literal}'` : String(literal);
+}
+
+/**
+ * The value `value` is written as, where it is a literal or a negated whole number, `-1`, which is written as much as
+ * `1` is: undefined for any other expression.
+ */
+function writtenNumber(value: Expression): unknown {
+    if (value.kind === 'Literal') {
+        return value.value;
+    }
+    const negated = value.kind === 'Unary' && value.operator === 'NEGATE' ? value.operand : undefined;
+    return negated?.kind === 'Literal' && typeof negated.value === 'number' ? -negated.value : undefined;
+}
+
+/**
+ * Refuses `keys`, the fields of a map that `name` makes a value of `kind` of, where it makes none of them: a time of day
+ * has no date to give, as Neo4j has it, and a field the stores have no SQL for yet is refused as not compiled yet.
+ */
+function mapFields(kind: Temporal, name: string, keys: string[]): void {
+    const dated = kind === Temporal.DATE || kind === Temporal.LOCAL_DATE_TIME || kind === Temporal.DATE_TIME;
+    if (kind.instant && !dated) {
+        const calendar = keys.find((it) => CALENDAR_FIELDS.includes(it));
+        if (calendar !== undefined) {
+            throw new DrivineError(`${name}() takes no field ${calendar}.`);
+        }
+    }
+    const known =
+        kind === Temporal.DURATION ? DURATION_MAP_FIELDS : [...INSTANT_MAP_FIELDS, ...(dated ? CALENDAR_FIELDS : [])];
+    const unknown = keys.find((it) => !known.includes(it));
+    if (unknown !== undefined) {
+        unsupported(`${name}() of a map with ${unknown}`);
+    }
+}
+
+/** Refuses the `timezone` of `entries`, a temporal map's fields, where it is a zone by name, which no store's text holds yet, rather than give null. */
+function mapZone(entries: [string, Expression][]): void {
+    const zone = entries.find(([key]) => key === 'timezone')?.[1];
+    if (zone?.kind !== 'Literal' || typeof zone.value !== 'string') {
+        return;
+    }
+    if (offsetText(zone.value) === undefined && namedZone(zone.value)) {
+        unsupported(`The time zone '${zone.value}'`);
+    }
+}
+
+/** The least of the year and each field of a date by the calendar's other fields, which a field given as null is. */
+const CALENDAR_LEAST: Record<string, number> = {
+    year: 0,
+    week: 1,
+    dayOfWeek: 1,
+    ordinalDay: 1,
+    quarter: 1,
+    dayOfQuarter: 1
+};
+
+/** The calendars a map's fields may give a date by, beside a year, and the fields of each. */
+const CALENDARS: [string, string[]][] = [
+    ['a month', ['month', 'day']],
+    ['a week', ['week', 'dayOfWeek']],
+    ['an ordinal day', ['ordinalDay']],
+    ['a quarter', ['quarter', 'dayOfQuarter']]
+];
+
+/**
+ * The date, `[year, month, day]`, that `entries`, the fields of a map given the function `name`, give by the calendar's
+ * other fields beside the year (see `Temporals.ofCalendar`), where it writes the year and each of them as a whole number
+ * or null: undefined where an expression gives any of them, for the store to work out. As Neo4j has them, a field that
+ * is null is given as its least (the year 0, the first week, day or quarter), a week runs to 53 and a day of the quarter
+ * to 92 in any year, carried into the next where it has fewer, and an ordinal day runs to the year's last. Fails, as
+ * Neo4j does, on fields of two calendars (a month beside a week), a day of the week or of the quarter without its week
+ * or quarter, a week or a quarter without a year, and a number written that is not whole or is past its field's range,
+ * the year's among them (Java's, as Neo4j's: ±999,999,999). As drivine4j's.
+ */
+function calendarDate(name: string, entries: [string, Expression][]): [number, number, number] | undefined {
+    const keys = new Set(entries.map(([key]) => key));
+    const calendar = calendarOf(name, keys);
+    const numbers = calendarNumbers(name, entries);
+    if (numbers === undefined) {
+        return undefined;
+    }
+    const year = numbers.year;
+    // A year past Java's, as Neo4j's, fails here.
+    if (year < -999_999_999 || year > 999_999_999) {
+        throw new DrivineError(
+            `${name}() takes no year ${year}: Invalid value for Year (valid values -999999999 - 999999999): ${year}`
+        );
+    }
+    const field = (key: string, label: string, last: number, of: string = ''): number => {
+        const given = numbers[key] ?? 1;
+        if (given < 1 || given > last) {
+            throw new DrivineError(`${name}() takes ${label} from 1 to ${last}${of}, not ${given}.`);
+        }
+        return given;
+    };
+    const days: Record<string, () => number> = {
+        'a week': () => {
+            const january4 = daysFromCivil(year, 1, 4);
+            const monday = january4 - (isoDayOfWeek(january4) - 1);
+            return monday + (field('week', 'a week', 53) - 1) * 7 + field('dayOfWeek', 'a day of the week', 7) - 1;
+        },
+        'an ordinal day': () =>
+            daysFromCivil(year, 1, 1) +
+            field('ordinalDay', 'an ordinal day', leapYear(year) ? 366 : 365, ` in ${year}`) -
+            1,
+        'a quarter': () =>
+            daysFromCivil(year, (field('quarter', 'a quarter', 4) - 1) * 3 + 1, 1) +
+            field('dayOfQuarter', 'a day of the quarter', 92) -
+            1
+    };
+    const epochDay = days[calendar]();
+    // Java's least and greatest days, -999999999-01-01 and +999999999-12-31.
+    if (epochDay < -365_243_219_162 || epochDay > 365_241_780_471) {
+        throw new DrivineError(
+            `${name}() takes no year ${year}: Invalid value for EpochDay (valid values -365243219162 - 365241780471): ${epochDay}`
+        );
+    }
+    return civilFromDays(epochDay);
+}
+
+/**
+ * The calendar, beside the year, that `keys`, the fields of a map given `name`, give a date by: refused where they are
+ * of two, where a day of the week or of the quarter is without its week or quarter, or where they have no year.
+ */
+function calendarOf(name: string, keys: Set<string>): string {
+    const calendars = calendarsOf(name, keys);
+    if (keys.has('dayOfWeek') && !keys.has('week')) {
+        throw new DrivineError(`${name}() takes a day of the week beside a week.`);
+    }
+    if (keys.has('dayOfQuarter') && !keys.has('quarter')) {
+        throw new DrivineError(`${name}() takes a day of the quarter beside a quarter.`);
+    }
+    if (!keys.has('year')) {
+        // Neo4j makes an ordinal day of no year one of the year 0, which no store's date reaches.
+        if (keys.has('ordinalDay')) {
+            unsupported(`${name}() of an ordinal day without a year`);
+        }
+        throw new DrivineError(`${name}() takes a year beside ${calendars[0][0]}.`);
+    }
+    return calendars[0][0];
+}
+
+/**
+ * The calendars, each named and with its fields, that `keys`, the fields of a map given `name`, give a date by: a month,
+ * a week, an ordinal day or a quarter. Fails where it is more than one, as Neo4j does.
+ */
+function calendarsOf(name: string, keys: Set<string>): [string, string[]][] {
+    const calendars = CALENDARS.filter(([, fields]) => fields.some((it) => keys.has(it)));
+    if (calendars.length > 1) {
+        throw new DrivineError(`${name}() takes ${calendars[0][0]} or ${calendars[1][0]}, not both.`);
+    }
+    return calendars;
+}
+
+/**
+ * The calendar (see {@link CALENDARS}) that `keys`, the fields of a map that `name` makes a value of `kind` of with a
+ * `date`, a `time` or a `datetime`, give a date by, where they give one. Fails as Neo4j fails: on a field `kind` has
+ * none of, a `datetime` beside a `date` or a `time`, fields of two calendars, a date of its fields that is not whole
+ * (see {@link WHOLE_DATES}) where no value gives the date, and a field of the time without the one above it where no
+ * value gives the time.
+ */
+function overKeys(kind: Temporal, name: string, keys: Set<string>): string | undefined {
+    const dated = kind === Temporal.DATE || kind === Temporal.LOCAL_DATE_TIME || kind === Temporal.DATE_TIME;
+    const takes = overTakes(kind, dated);
+    const unknown = [...keys].find((it) => !takes.has(it));
+    if (unknown !== undefined) {
+        throw new DrivineError(`${name}() takes no field ${unknown}.`);
+    }
+    if (keys.has('datetime') && ['date', 'time'].some((it) => keys.has(it))) {
+        throw new DrivineError(`${name}() takes a datetime, or a date and a time, not both.`);
+    }
+    const calendars = calendarsOf(name, keys);
+    const calendar = calendars.length === 1 ? calendars[0][0] : undefined;
+    if (dated && !['date', 'datetime'].some((it) => keys.has(it))) {
+        overWholeDate(name, keys, calendar);
+    }
+    if (kind !== Temporal.DATE && !['time', 'datetime'].some((it) => keys.has(it))) {
+        overTimeAbove(name, keys);
+    }
+    return calendar;
+}
+
+/** Refuses `keys`, the fields of a map given `name` that no value gives the date of, where they give no whole date by `calendar`. */
+function overWholeDate(name: string, keys: Set<string>, calendar: string | undefined): void {
+    if (calendar === undefined || !WHOLE_DATES[calendar].every((it) => keys.has(it))) {
+        throw new DrivineError(
+            `${name}() takes a date beside a time: a date, or a year with a month and a day, a week and a day of the ` +
+                'week, an ordinal day, or a quarter and a day of the quarter.'
+        );
+    }
+}
+
+/** Refuses `keys`, the fields of a map given `name` that no value gives the time of, where a field of the time is without the one above it. */
+function overTimeAbove(name: string, keys: Set<string>): void {
+    TIME_ABOVE.forEach(([field, above]) => {
+        if (keys.has(field) && !keys.has(above)) {
+            throw new DrivineError(`${name}() takes a ${field} beside ${FIELD_NOUNS[above] ?? `a ${above}`}.`);
+        }
+    });
+}
+
+/**
+ * The fields of a map with a `date`, a `time` or a `datetime` that makes a value of `kind`, which is `dated` where it
+ * has a date: which of those it takes, the fields of its date and its time, and a zoned value's time zone.
+ */
+function overTakes(kind: Temporal, dated: boolean): Set<string> {
+    let selectors = SELECTORS;
+    if (kind === Temporal.DATE) {
+        selectors = ['date'];
+    } else if (!dated) {
+        selectors = ['time'];
+    }
+    return new Set([
+        ...selectors,
+        ...(dated ? ['year', 'month', 'day', ...CALENDAR_FIELDS] : []),
+        ...(kind !== Temporal.DATE ? TRUNCATION_TIME_FIELDS : []),
+        ...(kind.zoned ? ['timezone'] : [])
+    ]);
+}
+
+/**
+ * `literal`, written as the field `key` of a map given `name` that is laid over another temporal value, where it is a
+ * whole number in the field's range (see {@link OVER_RANGES}): beside a millisecond or a microsecond given, among
+ * `keys`, a microsecond or a nanosecond runs to the next one's.
+ */
+function overNumber(name: string, key: string, literal: unknown, keys: Set<string>): number {
+    const [range, beside] = overRange(key, keys);
+    return wholeField(name, key, literal, range, beside);
+}
+
+/**
+ * The range of the field `key` of a map with the fields `keys` that is laid over another temporal value (see
+ * {@link OVER_RANGES}), and the field beside which it runs only to the next one's: a microsecond or a nanosecond beside
+ * a millisecond, a nanosecond beside a microsecond.
+ */
+function overRange(key: string, keys: Set<string>): [[number, number] | undefined, string | undefined] {
+    if (key === 'nanosecond' && keys.has('microsecond')) {
+        return [[0, 999], 'microsecond'];
+    }
+    if ((key === 'microsecond' || key === 'nanosecond') && keys.has('millisecond')) {
+        return [key === 'nanosecond' ? [0, 999999] : [0, 999], 'millisecond'];
+    }
+    return [OVER_RANGES[key], undefined];
+}
+
+/**
+ * The year and the calendar's fields of `entries`, the fields of a map given `name`, where each is written as a whole
+ * number or null, its least: undefined where an expression gives any. A number that is not whole is refused.
+ */
+function calendarNumbers(name: string, entries: [string, Expression][]): Record<string, number> | undefined {
+    const numbers: Record<string, number> = {};
+    for (const [key, value] of entries.filter(([it]) => it === 'year' || CALENDAR_FIELDS.includes(it))) {
+        const literal = writtenNumber(value);
+        if (literal === undefined) {
+            return undefined;
+        }
+        if (literal !== null && (typeof literal !== 'number' || !Number.isInteger(literal))) {
+            const shown = typeof literal === 'string' ? `'${literal}'` : String(literal);
+            throw new DrivineError(`${name}() takes a whole number for ${key}, not ${shown}.`);
+        }
+        numbers[key] = literal ?? CALENDAR_LEAST[key];
+    }
+    return numbers;
+}
+
+/** Whether `year` of the proleptic Gregorian calendar is a leap year. */
+function leapYear(year: number): boolean {
+    return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/** The days from 1970-01-01 to the date `year`-`month`-`day` of the proleptic Gregorian calendar, at any year. */
+function daysFromCivil(year: number, month: number, day: number): number {
+    const y = month <= 2 ? year - 1 : year;
+    const era = Math.floor(y / 400);
+    const yearOfEra = y - era * 400;
+    const dayOfYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+    const dayOfEra = yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
+    return era * 146097 + dayOfEra - 719468;
+}
+
+/** The date, `[year, month, day]`, `days` after 1970-01-01, of the proleptic Gregorian calendar. */
+function civilFromDays(days: number): [number, number, number] {
+    const z = days + 719468;
+    const era = Math.floor(z / 146097);
+    const dayOfEra = z - era * 146097;
+    const yearOfEra = Math.floor(
+        (dayOfEra - Math.floor(dayOfEra / 1460) + Math.floor(dayOfEra / 36524) - Math.floor(dayOfEra / 146096)) / 365
+    );
+    const dayOfYear = dayOfEra - (365 * yearOfEra + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100));
+    const mp = Math.floor((5 * dayOfYear + 2) / 153);
+    const day = dayOfYear - Math.floor((153 * mp + 2) / 5) + 1;
+    const month = mp < 10 ? mp + 3 : mp - 9;
+    return [yearOfEra + era * 400 + (month <= 2 ? 1 : 0), month, day];
+}
+
+/** The ISO day of the week, from 1 for Monday to 7, of the day `days` after 1970-01-01, a Thursday. */
+function isoDayOfWeek(days: number): number {
+    return ((((days + 3) % 7) + 7) % 7) + 1;
+}
+
+/**
+ * The offset a truncation's `timezone` field, `value`, gives `fn`, as SQL text. Neo4j takes an offset written as `Z` or
+ * `+01:00` alone, as Java's ZoneOffset does (up to 18 hours, and 0 is UTC's, `Z`), and a zone by name, which no store's
+ * text holds yet, so it is refused as not compiled yet.
+ */
+function truncationZone(fn: FunctionCall, value: Expression): string {
+    if (isNullLiteral(value)) {
+        throw new DrivineError(`${fn.name}() takes a time zone, not null.`);
+    }
+    if (value.kind !== 'Literal' || typeof value.value !== 'string') {
+        return unsupported('A truncation to a time zone an expression gives');
+    }
+    return zoneText(value.value);
+}
+
+/**
+ * The offset's SQL text the time zone `zone` written gives a value, as Neo4j takes one: `Z`, or an offset written
+ * `+01:00` (see {@link offsetText}). A zone by name, which no store's text holds yet, is refused; any other text fails.
+ */
+function zoneText(zone: string): string {
+    const offset = offsetText(zone);
+    if (offset !== undefined) {
+        return offset;
+    }
+    if (namedZone(zone)) {
+        return unsupported(`The time zone '${zone}'`);
+    }
+    throw new DrivineError(`'${zone}' is no time zone.`);
+}
+
+/** The SQL text of the offset `zone` writes, `Z` or `+01:00`, as Java's ZoneOffset takes it: undefined where it is none. */
+function offsetText(zone: string): string | undefined {
+    if (zone === 'Z') {
+        return "'Z'";
+    }
+    const offset = /^[+-]([0-9]{2}):([0-9]{2})$/.exec(zone);
+    if (!offset) {
+        return undefined;
+    }
+    const [hours, minutes] = [Number(offset[1]), Number(offset[2])];
+    if (minutes >= 60 || hours > 18 || (hours === 18 && minutes > 0)) {
+        return undefined;
+    }
+    return hours === 0 && minutes === 0 ? "'Z'" : `'${zone}'`;
+}
+
+/**
+ * Whether `zone` names a time zone, as `Europe/Stockholm` does: not an offset, `+01:00`, which `Intl` takes as a zone
+ * too, nor one Java's ZoneOffset does not take, `+19:00`, which Neo4j fails on.
+ */
+function namedZone(zone: string): boolean {
+    if (/^[+-]/.test(zone)) {
+        return false;
+    }
+    try {
+        new Intl.DateTimeFormat('en', { timeZone: zone });
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 /** The kinds of expression whose value, null aside, is a number, a text, a truth value or a temporal value: no list or map. */
 const SCALAR_KINDS: ReadonlySet<Expression['kind']> = new Set<Expression['kind']>([
@@ -347,6 +903,21 @@ function optional<T>(value: T | undefined): T[] {
 }
 
 /**
+ * Each text `value`, a statement as read or any part of it, holds anywhere, as far as its first space: each of its
+ * variables' names, and more (a label, a key, a text it gives), which is as much as a name made for it, with no space,
+ * needs to keep clear of: see `CypherWriter.anewVariable`.
+ */
+function textsIn(value: unknown, texts: Set<string> = new Set()): Set<string> {
+    if (typeof value === 'string') {
+        const space = value.indexOf(' ');
+        texts.add(space < 0 ? value : value.slice(0, space));
+    } else if (value !== null && typeof value === 'object') {
+        Object.values(value).forEach((it) => textsIn(it, texts));
+    }
+    return texts;
+}
+
+/**
  * `value`, a parameter's, as the JSON text it is bound as reads (see `jsonText`): a list, or any other iterable but
  * bytes, as an array; a map as an object of its entries, those undefined left out; null and undefined as null, and so
  * a number JSON has no text for (`NaN`, `Infinity`). Any other value (a number, a text, a date, bytes) is itself.
@@ -426,6 +997,13 @@ function short(tree: unknown): boolean {
  * columns. What is the same on each store is here; the store's own SQL is the compiler's.
  */
 export class CypherWriter {
+    /**
+     * Whether the query compiled is a part of a `UNION` without ALL, whose rows are compared as a whole: there a value that
+     * may be JSON's null ({@link JsonValue.jsonNull}) is given as SQL's, as Cypher has one null (#497). Set only for the work
+     * {@link comparingParts} does, so an exception leaves it as it was.
+     */
+    private distinctParts = false;
+
     private readonly logger = new DrivineLogger(CypherWriter.name);
     private counter = 0;
 
@@ -478,9 +1056,29 @@ export class CypherWriter {
      */
     private identities = true;
 
+    /**
+     * The variables made here for a randomUUID() made first, for each row: no variable of the statement's, though one may
+     * be quoted as named alike: see {@link anewVariable}.
+     */
+    private readonly madeAnew = new Set<string>();
+
+    /**
+     * The queries given to compile, {@link query} and {@link procedure}, whose names {@link anewVariable} keeps clear of,
+     * not yet in {@link queryTexts}.
+     */
+    private readonly queries: Query[] = [];
+
+    /** Each text of the queries given to compile, as far as its first space, gathered when {@link anewVariable} needs it. */
+    private readonly queryTexts = new Set<string>();
+
     /** How each kind of expression is compiled. */
     private readonly expressions: { [K in Expression['kind']]: (expression: any, scope: Scope) => Value } = {
-        Literal: (it) => json(this.sql.literalJson(it.value), { text: typeof it.value === 'string' }),
+        // A null written is JSON's null, as a map's is: see JsonValue.jsonNull.
+        Literal: (it) =>
+            json(this.sql.literalJson(it.value), {
+                text: typeof it.value === 'string',
+                jsonNull: it.value === null || it.value === undefined
+            }),
         Parameter: (it) =>
             this.givenParameters?.get(it.name) ??
             json(this.parameters.json(it.name), { temporal: Temporal.ofValue(this.parameters.value(it.name)) }),
@@ -488,7 +1086,7 @@ export class CypherWriter {
         Property: (it, scope) => {
             const inParameter = this.inParameter(it);
             return inParameter !== undefined
-                ? json(inParameter)
+                ? json(inParameter, { jsonNull: true })
                 : this.property(this.expression(it.subject, scope), it.key);
         },
         HasLabels: (it, scope) => {
@@ -588,7 +1186,15 @@ export class CypherWriter {
     private readonly functions: Record<string, (call: Invocation) => Value> = {
         properties: (call) => {
             const subject = call.one();
-            return subject.kind === 'Node' || subject.kind === 'Relationship' ? this.asJson(subject) : subject;
+            if (subject.kind === 'Node' || subject.kind === 'Relationship') {
+                return this.asJson(subject);
+            }
+            this.requireKind(
+                subject,
+                'MAP',
+                (kind) => `properties() takes a node, a relationship or a map, not ${kind}, as in Neo4j.`
+            );
+            return subject;
         },
         labels: (call) => {
             const subject = call.one();
@@ -637,6 +1243,15 @@ export class CypherWriter {
         range: (call) => {
             if (call.arguments.length < 2 || call.arguments.length > 3) {
                 throw new DrivineError('range() takes a start, an end and a step.');
+            }
+            call.arguments.forEach((it) =>
+                this.requireKind(it, 'INTEGER', (kind) => `range() takes integers, not ${kind}, as in Neo4j.`)
+            );
+            // A step written or given as 0 would never reach the end.
+            const written = call.fn.arguments[2];
+            const given = written !== undefined ? this.known(written) : undefined;
+            if (given === 0 || given === BigInt(0) || (isInt(given) && given.isZero())) {
+                throw new DrivineError('range() takes a step other than 0, as in Neo4j.');
             }
             const [from, to] = call.arguments.map((it) => this.numberOf(it));
             const step = call.arguments[2];
@@ -830,8 +1445,28 @@ export class CypherWriter {
         return this.sql.temporals;
     }
 
+    /**
+     * Holds `query` among the {@link queries}: as {@link query} and {@link procedure} do, or first, for the queries of a
+     * `UNION` compiled one by one, so a name made in one is named as no later one's variable is.
+     */
+    give(query: Query): void {
+        this.queries.push(query);
+    }
+
+    /** `work`, its parts of a `UNION` compared as a whole where `distinct` ({@link distinctParts}), as it was after. */
+    comparingParts<T>(distinct: boolean, work: () => T): T {
+        const was = this.distinctParts;
+        this.distinctParts = distinct;
+        try {
+            return work();
+        } finally {
+            this.distinctParts = was;
+        }
+    }
+
     /** The query `query` is, which reads and ends with a `RETURN`. */
     query(query: Query): string {
+        this.give(query);
         let select = new Select(new Map());
         for (const clause of query.clauses) {
             if (clause.kind === 'Return') {
@@ -844,6 +1479,7 @@ export class CypherWriter {
 
     /** The statements of the procedure `query` is: its reads, a loop over its rows for each write, and what it returns. */
     procedure(query: Query): string[] {
+        this.give(query);
         let select = new Select(new Map());
         for (const clause of this.creates(query.clauses)) {
             if (clause.kind === 'Return') {
@@ -861,25 +1497,58 @@ export class CypherWriter {
         return `${prefix}${++this.counter}`;
     }
 
+    /**
+     * A variable of {@link madeAnew}'s, new: named as no variable of the statement's is, nor begins, so one quoted alike,
+     * `` `#anew2` `` or `` `#anew2 row` ``, is not taken for it, hidden from a star or read as its UUID.
+     */
+    private anewVariable(): string {
+        const name = this.hidden(ANEW);
+        this.madeAnew.add(name);
+        return name;
+    }
+
+    /**
+     * A name new to the statement, `prefix` and a number: named as no text of the queries given to compile is, nor
+     * begins, so a variable quoted alike, `` `#having2` ``, stays the statement's.
+     */
+    private hidden(prefix: string): string {
+        textsIn(this.queries.splice(0), this.queryTexts);
+        let name = this.alias(prefix);
+        while (this.queryTexts.has(name)) {
+            name = this.alias(prefix);
+        }
+        return name;
+    }
+
     // ----- Clauses -----
 
     /**
      * A reading clause over the rows `select` reads, and the rows the clauses after it read: a `WITH` is a query of its
-     * own. `outer` is what a subquery reads from the row it is in.
+     * own. `outer` is what a subquery reads from the row it is in. A `WITH *` alone where nothing is bound passes on
+     * nothing, as Neo4j has it, and is left out: SQL has no query of no column (#485). Its `WHERE` is met on the rows it
+     * reads, which hold what that reads; with `DISTINCT`, an order, `SKIP` or `LIMIT` it is refused, as it was.
      */
     private read(select: Select, clause: Clause, outer: Scope = new Map()): Select {
         switch (clause.kind) {
             case 'Match':
-                this.match(select, clause);
-                return select;
-            case 'Unwind':
-                this.unwind(select, clause);
-                return select;
+                return this.match(select, clause);
+            case 'Unwind': {
+                const [rows, [list]] = this.anewBefore(select, [clause.list], true) ?? [select, [clause.list]];
+                this.unwind(rows, { ...clause, list });
+                return rows;
+            }
             case 'With':
+                if (
+                    clause.projection.star &&
+                    clause.projection.items.length === 0 &&
+                    plainWith({ ...clause, where: undefined }) &&
+                    [...select.bound.keys()].every((it) => this.madeAnew.has(it))
+                ) {
+                    return clause.where ? this.filteredRows(select, clause.where) : select;
+                }
                 return this.with(select, clause, outer);
             case 'Call':
-                this.call(select, clause);
-                return select;
+                return this.anewCall(select, clause);
             default:
                 throw new Error(`${clause.kind} reads nothing`);
         }
@@ -890,44 +1559,202 @@ export class CypherWriter {
      * apart from the query that reads it, which must not have it merged in: see {@link casesFirst}.
      */
     private with(select: Select, clause: With, outer: Scope = new Map(), apart: boolean = false): Select {
+        const [read, hidden] = this.having(clause);
+        const next = this.withHaving(select, read, outer, apart);
+        hidden.forEach((it) => next.bound.delete(it));
+        return next;
+    }
+
+    /**
+     * A `WITH` that groups its rows, `clause`, as one that aggregates or is `DISTINCT` does, read as Neo4j reads its
+     * `WHERE`, which filters the groups, as SQL's HAVING does (#496), and the names of the items made for it. Each
+     * aggregate the `WHERE` holds, outside a comprehension's or a quantifier's own expressions, is made an item of the
+     * `WITH`, of its own where no item is that aggregate, named as no variable is, and the `WHERE` reads that item. A key
+     * the `WITH` groups by, written there as the item is, before its name, is read as that item, as in `WITH i AS j,
+     * count(*) AS c WHERE i > 1`; a variable an item is named after is that item, in a larger expression too. Keys and
+     * aggregates are compared as grouping compares them ({@link expressionKey}): `TOUPPER(x)` is the key `toUpper(x)`.
+     * The items made are no variables of the statement's: the `WITH` is read, then they are left out of what it binds.
+     * `clause` as it is where it groups nothing, or has no `WHERE`. As drivine4j's.
+     */
+    private having(clause: With): [With, string[]] {
+        const where = clause.where;
+        const items = clause.projection.items;
+        if (
+            where === undefined ||
+            (!clause.projection.distinct && !items.some((it) => contains(it.expression, isAggregate)))
+        ) {
+            return [clause, []];
+        }
+        const names = new Set(items.map((it) => it.name));
+        const keys = new Map(
+            items
+                .filter((it) => !contains(it.expression, isAggregate) && variablesIn(it.expression).size > 0)
+                .map((it) => [expressionKey(it.expression), it.name])
+        );
+        // An aggregate an item is already is read by that item's name.
+        const aggregates = new Map(
+            items.filter((it) => isAggregate(it.expression)).map((it) => [expressionKey(it.expression), it.name])
+        );
+        const lifted = new Map<string, ProjectionItem>();
+        const read = replaced(where, (part): Expression | undefined => {
+            const key = expressionKey(part);
+            if (isAggregate(part)) {
+                let name = aggregates.get(key) ?? lifted.get(key)?.name;
+                if (name === undefined) {
+                    name = this.hidden('#having');
+                    lifted.set(key, { expression: part, name });
+                }
+                return { kind: 'Variable', name };
+            }
+            // `WITH i + 10 AS i … WHERE i + 10 > 20` reads the item i, as Neo4j does: no key is read where an item is named.
+            if ([...variablesIn(part)].some((it) => names.has(it))) {
+                return part.kind === 'Variable' ? part : undefined;
+            }
+            const name = keys.get(key);
+            return name !== undefined ? { kind: 'Variable', name } : undefined;
+        });
+        if (sameExpression(read, where)) {
+            return [clause, []];
+        }
+        const made = [...lifted.values()];
+        return [
+            { ...clause, projection: { ...clause.projection, items: [...items, ...made] }, where: read },
+            made.map((it) => it.name)
+        ];
+    }
+
+    /** A `WITH` {@link having} has read: see {@link with}. */
+    private withHaving(select: Select, clause: With, outer: Scope = new Map(), apart: boolean = false): Select {
         const projected = this.project(select, clause.projection, false);
         const name = this.alias('w');
         const next = new Select(outer);
         next.walks = select.walks;
         // A value made anew for each row is one value however often the clauses after read it: see SqlCypherCompiler.once.
-        const anew = clause.projection.items.some((item) => contains(item.expression, isAnew));
+        const anew = clause.projection.items.some((item) => holdsAnew(item.expression));
         const sql = anew ? this.sql.once(projected.sql) : projected.sql;
         next.source(`(\n${indent(apart ? this.sql.called(sql) : sql)}\n) ${name}`);
         projected.scope.forEach((value, variable) => next.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => next.order.push([`${name}.${column}`, descending]));
-        if (clause.where) {
-            next.where.push(this.keeps(clause.where, next.scope));
-        }
-        return next;
+        return clause.where ? this.filteredRows(next, clause.where) : next;
     }
 
-    private match(select: Select, match: Match): void {
+    /**
+     * The rows `select` reads kept where `where` holds; each randomUUID() it reads (`anew` tells one) made first, for each
+     * row, as {@link anewBefore} makes it, then the condition over those rows.
+     */
+    private filteredRows(
+        select: Select,
+        where: Expression,
+        anew: (expression: Expression) => boolean = isAnew
+    ): Select {
+        const [rows, [read]] = this.anewBefore(select, [where], true, anew) ?? [select, [where]];
+        rows.where.push(this.keeps(read, rows.scope));
+        return rows;
+    }
+
+    /**
+     * The rows `select` reads with a UUID made for each, in a `WITH *` of its own, and its variable's name, which is no
+     * variable of the statement's: see {@link project}.
+     */
+    private seededRows(select: Select): [Select, string] {
+        const seed = this.anewVariable();
+        const made: Projection = {
+            distinct: false,
+            star: true,
+            items: [{ expression: RANDOM_UUID, name: seed }],
+            orderBy: []
+        };
+        return [this.with(select, { kind: 'With', projection: made }, this.around(select), true), seed];
+    }
+
+    /** What `select` reads from around it: the variables of its scope it does not bind itself. */
+    private around(select: Select): Scope {
+        return new Map([...select.scope].filter(([variable]) => !select.bound.has(variable)));
+    }
+
+    /**
+     * A `CALL { … }` over the rows `select` reads; one whose query holds a randomUUID() ({@link queryHoldsAnew}) first
+     * given a UUID made for each row, in a `WITH *` of its own, which its query unwinds before its own clauses. A query
+     * that reads nothing of the row it is joined to is worked out once for the statement, by each store, and every row
+     * was given the same UUID (drivine4j#412): so it reads the row. That UUID, and the variable its query unwinds it to,
+     * are no variables of the statement's: see {@link project}, and {@link calledScope}, which carries them into the query
+     * whatever it imports.
+     */
+    private anewCall(select: Select, call: Call): Select {
+        if (!queryHoldsAnew(call.query)) {
+            this.call(select, call);
+            return select;
+        }
+        const [rows, seed] = this.seededRows(select);
+        const row = `${seed} row`;
+        this.madeAnew.add(row);
+        const read = (clauses: Clause[]): Clause[] => [
+            { kind: 'Unwind', list: { kind: 'ListLiteral', items: [{ kind: 'Variable', name: seed }] }, variable: row },
+            ...clauses
+        ];
+        const query: Query = {
+            ...call.query,
+            clauses: read(call.query.clauses),
+            unions: call.query.unions.map((it) => ({ ...it, clauses: read(it.clauses) }))
+        };
+        this.call(rows, { ...call, query });
+        return rows;
+    }
+
+    /**
+     * A `MATCH` over the rows `select` reads. Each randomUUID() its condition reads is made for each row it finds, first
+     * ({@link filteredRows}). An `OPTIONAL MATCH` finds its rows in a lateral query, which reads nothing of the row where its
+     * pattern does not: Oracle worked it out once for the statement, and kept every row's match or none (drivine4j#412).
+     * There each is read beside a UUID made first for the row ({@link seededRows}, {@link seeded}), so the lateral query
+     * reads the row, then made for each row it finds. A shortest path's condition is met where its paths are found, in a
+     * lateral query too, which Postgres worked out once where each row joins the same two nodes: each is read beside the
+     * row's UUID there as well, and made in the condition.
+     */
+    private match(select: Select, match: Match): Select {
         // A shortest path is the shortest of the paths that meet the WHERE, as Cypher finds it: the WHERE is met where they are found.
         const shortestWhere =
             match.patterns[match.patterns.length - 1].shortest !== undefined ? match.where : undefined;
         const where = shortestWhere === undefined ? match.where : undefined;
+        const seededFirst =
+            match.where !== undefined && holdsAnew(match.where) && (match.optional || shortestWhere !== undefined);
+        const [row, seed] = seededFirst ? this.seededRows(select) : [select, undefined];
+        const metByPaths =
+            shortestWhere !== undefined && seed !== undefined
+                ? seeded(shortestWhere, seed, this.madeAnew, true)
+                : shortestWhere;
         if (!match.optional) {
-            this.patterns(select, match.patterns, shortestWhere);
-            if (where) {
-                select.where.push(this.keeps(where, select.scope));
-            }
-            return;
+            this.patterns(row, match.patterns, metByPaths);
+            return where ? this.filteredRows(row, where) : row;
         }
-        // What is found is read by a lateral query, joined to keep the row when it finds nothing.
-        const inner = new Select(select.scope);
-        this.patterns(inner, match.patterns, shortestWhere);
+        return this.optionalMatch(row, match.patterns, metByPaths, where, seed);
+    }
+
+    /**
+     * An `OPTIONAL MATCH` of `patterns` over the rows `row` reads, those of a shortest path's meeting `metByPaths` and
+     * all of them `where`: what it finds read by a lateral query, joined to keep the row when it finds nothing. With
+     * `seed`, the variable of a UUID made first for each row, each randomUUID() of `where` is read beside it.
+     */
+    private optionalMatch(
+        row: Select,
+        patterns: Pattern[],
+        metByPaths: Expression | undefined,
+        where: Expression | undefined,
+        seed: string | undefined
+    ): Select {
+        let inner = new Select(row.scope);
+        this.patterns(inner, patterns, metByPaths);
         if (where) {
-            inner.where.push(this.keeps(where, inner.scope));
+            inner =
+                seed === undefined
+                    ? this.filteredRows(inner, where)
+                    : this.filteredRows(inner, seeded(where, seed, this.madeAnew, true), (it) =>
+                          isSeeded(it, this.madeAnew)
+                      );
         }
-        const outer = select.scope;
-        const found = [...inner.bound].filter(([variable]) => !outer.has(variable));
+        const outer = row.scope;
+        const found = [...inner.bound].filter(([variable]) => !outer.has(variable) && !this.madeAnew.has(variable));
         if (found.length === 0 && inner.sources.length === 0) {
-            return;
+            return row;
         }
         const name = this.alias('o');
         // Each variable found under a name of its own: a variable may be called what SQL will not take.
@@ -938,8 +1765,9 @@ export class CypherWriter {
             ...inner.from(),
             ...optional(inner.whereClause())
         ];
-        select.join(this.sql.lateral(text.join('\n'), name, true));
-        named.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
+        row.join(this.sql.lateral(text.join('\n'), name, true));
+        named.forEach(([variable, value, column]) => row.bind(variable, columnsOf(value, name, column)));
+        return row;
     }
 
     /**
@@ -971,15 +1799,17 @@ export class CypherWriter {
     /** Each query of a subquery's `UNION`, its rows as one value each, as a statement's are; without ALL, each once. */
     private correlatedUnion(query: Query, scope: Scope): string {
         const distinct = !query.unions[0].all;
-        return [query.clauses, ...query.unions.map((it) => it.clauses)]
-            .map((clauses) => {
-                let select = new Select(scope);
-                clauses.slice(0, -1).forEach((it) => (select = this.read(select, it, scope)));
-                const sql = this.project(select, (clauses[clauses.length - 1] as Return).projection, true).sql;
-                const result = distinct ? this.sql.comparable(json('q.result', { ordered: true })) : 'q.result';
-                return `SELECT ${result} AS result FROM (\n${indent(sql)}\n) q`;
-            })
-            .join(distinct ? '\nUNION\n' : '\nUNION ALL\n');
+        return this.comparingParts(distinct, () =>
+            [query.clauses, ...query.unions.map((it) => it.clauses)]
+                .map((clauses) => {
+                    let select = new Select(scope);
+                    clauses.slice(0, -1).forEach((it) => (select = this.read(select, it, scope)));
+                    const sql = this.project(select, (clauses[clauses.length - 1] as Return).projection, true).sql;
+                    const result = distinct ? this.sql.comparable(json('q.result', { ordered: true })) : 'q.result';
+                    return `SELECT ${result} AS result FROM (\n${indent(sql)}\n) q`;
+                })
+                .join(distinct ? '\nUNION\n' : '\nUNION ALL\n')
+        );
     }
 
     /** `CALL { … }`: a lateral query for each row, what it returns bound as variables of the row. */
@@ -994,8 +1824,8 @@ export class CypherWriter {
         const order = this.rowOrder;
         const projected =
             call.query.unions.length === 0
-                ? this.calledPart(select, clauses, undefined, false)
-                : this.calledUnion(select, call.query);
+                ? this.calledPart(select, call, clauses, undefined, false)
+                : this.calledUnion(select, call);
         this.rowOrder = order;
         this.redeclared([...projected.scope.keys()], [...select.bound.keys()]);
         const name = this.alias('c');
@@ -1026,20 +1856,76 @@ export class CypherWriter {
     }
 
     /**
-     * One query of a `CALL { … }`, for the row `select` reads: its returned items in the order `names` lists them,
-     * where a `UNION` names them so, and kept distinct with `distinct`.
+     * One query of `call`, `clauses`, for the row `select` reads: its returned items in the order `names` lists them,
+     * where a `UNION` names them so, and kept distinct with `distinct`. It sees only the variables of the row it imports
+     * ({@link calledScope}): any other name in it is a new variable, as in Cypher (#473). What its brackets import it
+     * sees throughout, after a `WITH` that does not pass it on too, as Neo4j has it; what a leading `WITH` imports is gone
+     * after one. A leading `WITH *` passes on what it imports ({@link starredImports}).
      */
-    private calledPart(select: Select, clauses: Clause[], names: string[] | undefined, distinct: boolean): Projected {
-        let inner = new Select(select.scope);
-        const apart = this.importsApart(select.scope, clauses);
+    private calledPart(
+        select: Select,
+        call: Call,
+        clauses: Clause[],
+        names: string[] | undefined,
+        distinct: boolean
+    ): Projected {
+        const imported = this.calledScope(call, clauses, select.scope);
+        let inner = new Select(imported);
+        const apart = this.importsApart(imported, clauses);
         if (apart) {
             inner.source(apart.source);
             apart.imports.forEach((value, variable) => inner.bind(variable, value));
         }
-        clauses.slice(0, -1).forEach((it) => (inner = this.read(inner, it, select.scope)));
+        const outer: Scope = bracketed(call) ? imported : new Map();
+        const reading = bracketed(call)
+            ? clauses.slice(0, -1)
+            : this.starredImports(clauses.slice(0, -1), [...imported.keys()]);
+        reading.forEach((it) => (inner = this.read(inner, it, outer)));
         const projection = (clauses[clauses.length - 1] as Return).projection;
         const items = names ? names.map((name) => projection.items.find((it) => it.name === name)!) : projection.items;
         return this.project(inner, { ...projection, items, distinct: distinct || projection.distinct }, false);
+    }
+
+    /**
+     * The reading `clauses` of a `CALL { … }` without brackets, its leading `WITH *` naming each variable it `imports` in
+     * place of its star (#485): those are no variables its query binds, so the star gave none of them, and was refused
+     * where nothing else was bound. Not one the compiler made (see {@link anewCall}), which the statement never named.
+     * Where it imports none, the `WITH` is as it was, and passes on nothing ({@link read}). With brackets, Neo4j's star
+     * gives none of what they import, which the query sees throughout anyway, so their clauses are as they were.
+     */
+    private starredImports(clauses: Clause[], imports: string[]): Clause[] {
+        const leading = clauses.findIndex((it) => !(it.kind === 'Unwind' && this.madeAnew.has(it.variable)));
+        const clause = leading < 0 ? undefined : clauses[leading];
+        const named = imports.filter((it) => !this.madeAnew.has(it)).sort();
+        if (clause?.kind !== 'With' || !clause.projection.star || named.length === 0) {
+            return clauses;
+        }
+        const items = named
+            .filter((name) => !clause.projection.items.some((it) => it.name === name))
+            .map((name): ProjectionItem => ({ expression: { kind: 'Variable', name }, name }));
+        const starless: With = {
+            ...clause,
+            projection: { ...clause.projection, star: false, items: [...items, ...clause.projection.items] }
+        };
+        return [...clauses.slice(0, leading), starless, ...clauses.slice(leading + 1)];
+    }
+
+    /**
+     * The variables of the row, `scope`, that the query `clauses` of `call` sees: those it imports ({@link imports}), and
+     * each the compiler made for it, whatever it imports. Those are no variables of the statement's: the UUID made for
+     * each row that {@link anewCall} unwinds before the clauses, so a query holding a randomUUID() reads the row
+     * (drivine4j#412). Imports are read from the clauses after that `UNWIND`, as the statement wrote them, so a leading
+     * `WITH` imports still.
+     */
+    private calledScope(call: Call, clauses: Clause[], scope: Scope): Scope {
+        const first = clauses.findIndex((it) => !(it.kind === 'Unwind' && this.madeAnew.has(it.variable)));
+        const written = first < 0 ? [] : clauses.slice(first);
+        const imported = imports(
+            call,
+            written,
+            [...scope.keys()].filter((it) => !this.madeAnew.has(it))
+        );
+        return new Map([...scope].filter(([variable]) => imported.has(variable) || this.madeAnew.has(variable)));
     }
 
     /**
@@ -1054,7 +1940,9 @@ export class CypherWriter {
      * without them.
      */
     private importsApart(scope: Scope, clauses: Clause[]): { source: string; imports: Scope } | undefined {
-        const projections = clauses.flatMap((it) => (it.kind === 'With' || it.kind === 'Return' ? [it.projection] : []));
+        const projections = clauses.flatMap((it) =>
+            it.kind === 'With' || it.kind === 'Return' ? [it.projection] : []
+        );
         const aggregates = (p: Projection): boolean =>
             [...p.items.map((it) => it.expression), ...p.orderBy.map((it) => it.expression)].some((it) =>
                 contains(it, isAggregate)
@@ -1092,7 +1980,8 @@ export class CypherWriter {
     }
 
     /** A `UNION` in a `CALL { … }`: each query's rows, the same items of the same kinds, matched by name as Cypher matches them. */
-    private calledUnion(select: Select, query: Query): Projected {
+    private calledUnion(select: Select, call: Call): Projected {
+        const query = call.query;
         const parts = [query.clauses, ...query.unions.map((it) => it.clauses)];
         if (new Set(query.unions.map((it) => it.all)).size > 1) {
             throw new DrivineError('UNION and UNION ALL are not mixed in one statement, as in Cypher.');
@@ -1110,7 +1999,9 @@ export class CypherWriter {
             throw new DrivineError('Each query of a UNION returns the same names, as in Cypher.');
         }
         const distinct = !query.unions[0].all;
-        let projected = parts.map((it) => this.calledPart(select, it, names, distinct));
+        let projected = this.comparingParts(distinct, () =>
+            parts.map((it) => this.calledPart(select, call, it, names, distinct))
+        );
         if (new Set(projected.map((p) => JSON.stringify([...p.scope.values()].map((it) => it.kind)))).size > 1) {
             unsupported('A UNION in CALL { … } whose queries return values of different kinds');
         }
@@ -1123,7 +2014,9 @@ export class CypherWriter {
             const was = this.identities;
             this.identities = false;
             try {
-                projected = parts.map((it) => this.calledPart(select, it, names, distinct));
+                projected = this.comparingParts(distinct, () =>
+                    parts.map((it) => this.calledPart(select, call, it, names, distinct))
+                );
             } finally {
                 this.identities = was;
             }
@@ -1134,7 +2027,9 @@ export class CypherWriter {
         // A value is of a temporal kind where each query makes it of that one. It is at keys of a write's row (`rowKeys`)
         // only where each query takes it from those: a property of it is read from the row there, which would read the
         // first query's value for every query's rows. It is read from an unwound item (`fromList`) only where each query
-        // reads it from one.
+        // reads it from one. It is a list (`list`), or a list of lists (`itemLists`), only where each query makes it one, so
+        // that an order sorts the others' numbers and maps by their kinds, not as lists; and it holds no null (`flat`) only
+        // where each query's holds none, so that `=` and `IN` of a later query's list with a null give null, not false (#505).
         const scope: Scope = new Map(
             [...projected[0].scope].map(([variable, value]): [string, Value] => {
                 if (value.kind !== 'Json') {
@@ -1158,7 +2053,14 @@ export class CypherWriter {
                         itemItems: single(all.map((it) => it?.itemItems)),
                         temporals: all.some((it) => it?.temporals === true),
                         text: all.every((it) => it?.text === true),
-                        texts: all.every((it) => it?.texts === true)
+                        texts: all.every((it) => it?.texts === true),
+                        list: all.every((it) => it?.list === true),
+                        itemLists: all.every((it) => it?.itemLists === true),
+                        flat: all.every((it) => it?.flat === true),
+                        // It may be JSON's null where any query's may be (#497).
+                        jsonNull: all.some((it) => it?.jsonNull === true),
+                        // Its kind is known only where each query writes it as a value of that one.
+                        known: single(all.map((it) => it?.known))
                     }
                 ];
             })
@@ -1191,7 +2093,7 @@ export class CypherWriter {
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
         select.source(this.listElements(list, items, name));
-        // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none.
+        // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none, nor is JSON's null.
         select.bind(
             unwind.variable,
             json(`${name}.item`, {
@@ -1201,7 +2103,8 @@ export class CypherWriter {
                 list: this.holdsLists(list),
                 text: this.holdsTexts(list) || this.isText(list),
                 flat: this.isFlat(list),
-                fromList: true
+                fromList: true,
+                jsonNull: !this.isFlat(list)
             })
         );
         select.order.push([`${name}.item_no`, false]);
@@ -1843,10 +2746,18 @@ export class CypherWriter {
     /**
      * Binds into `select` each variable the row `row` holds, of `needed` where given: a node or a relationship is read
      * from its table, as it is now. With `written`, `row` is `ROW`, and a value and each property of it are read as
-     * {@link SqlCypherCompiler.rowValue} reads them, for a statement that works out what a write writes.
+     * {@link SqlCypherCompiler.rowValue} reads them, for a statement that works out what a write writes. Each is of its
+     * kind in `held`, and a value as it was carried in `values`: those of the rows now, but for a row held from before.
      */
-    private bindRow(select: Select, row: string, needed?: Set<string>, written: boolean = false): void {
-        this.kinds.forEach((kind, variable) => {
+    private bindRow(
+        select: Select,
+        row: string,
+        needed?: Set<string>,
+        written: boolean = false,
+        held: Map<string, Kind> = this.kinds,
+        values: Map<string, JsonValue> = this.carried
+    ): void {
+        held.forEach((kind, variable) => {
             if (needed && !needed.has(variable)) {
                 return;
             }
@@ -1860,7 +2771,7 @@ export class CypherWriter {
                 select.join(`LEFT JOIN ${this.sql.edges} ${e} ON ${e}.eid = ${this.sql.idOf(row, key)}`);
                 select.bind(variable, relationshipOf(e));
             } else if (kind === 'VALUE') {
-                const was = this.carried.get(variable);
+                const was = values.get(variable);
                 select.bind(
                     variable,
                     json(written ? this.sql.rowValue([key]) : this.sql.propertyOf(row, key), {
@@ -1874,7 +2785,8 @@ export class CypherWriter {
                         texts: was?.texts,
                         flat: was?.flat,
                         rowKeys: written ? [key] : undefined,
-                        fromList: !written
+                        fromList: !written,
+                        known: was?.known
                     })
                 );
             } else if (kind === 'PATH') {
@@ -2007,16 +2919,36 @@ export class CypherWriter {
         if (returned) {
             this.assign(gathered, this.sql.literalJson([]));
         }
+        // Only what the call imports is seen in it: any other name in it is a new variable, as in Cypher (#473).
+        const imported = imports(call, call.query.clauses, before.keys());
+        const clauses = this.imported(call, imported);
+        // Read again after each WITH, where brackets import them: see below.
+        const rebound = bracketed(call) && clauses.some((it) => it.kind === 'With');
+        const importedOf = <T>(all: Map<string, T>): Map<string, T> =>
+            new Map([...all].filter(([variable]) => imported.has(variable)));
         this.eachRow(kept, () => {
-            if (returned) {
+            if (returned || rebound) {
                 this.emit(`${caller} := ${RECORD}.item;`);
             }
+            this.restore(importedOf(before), importedOf(carriedBefore));
             let select = this.rows();
-            for (const clause of this.imported(call.query.clauses)) {
-                select =
-                    clause.kind === 'Return'
-                        ? this.with(select, { kind: 'With', projection: clause.projection })
-                        : this.next(select, clause);
+            for (const clause of clauses) {
+                if (clause.kind === 'Return') {
+                    select = this.with(select, { kind: 'With', projection: clause.projection });
+                } else if (clause.kind === 'With' && rebound) {
+                    // What brackets import is seen throughout the call, as Neo4j has it, after a WITH that does not pass
+                    // it on too: read again from the row the call is written for, so `CALL (a) { WITH 1 AS one CREATE
+                    // (a)-[:R]->() }` joins the row's a, not a new node. Its WHERE reads them too, so it is met after; one
+                    // that filters groups reads the aggregates `having` made items of the WITH.
+                    const [read, hidden] = this.having(clause);
+                    const w = this.withHaving(select, { ...read, where: undefined });
+                    const dropped = new Set([...imported].filter((it) => !w.scope.has(it)));
+                    this.bindRow(w, caller, dropped, false, before, carriedBefore);
+                    select = read.where ? this.filteredRows(w, read.where) : w;
+                    hidden.forEach((it) => select.bound.delete(it));
+                } else {
+                    select = this.next(select, clause);
+                }
             }
             if (returned) {
                 // The rows this row gives, after those of the rows before it: each the row the call was written for,
@@ -2080,20 +3012,22 @@ export class CypherWriter {
         this.emit('END LOOP;');
     }
 
-    /** `clauses` without an importing `WITH` of variables alone that opens them: every variable of the row is seen. */
-    private imported(clauses: Clause[]): Clause[] {
+    /**
+     * The clauses of `call` without a `WITH` that opens them and passes on variables it `imports` alone, as they are:
+     * the row holds those already, and what brackets import is seen after it anyway, as Neo4j has it, so
+     * `CALL (a, b) { WITH a SET b.x = 1 }` sets b's.
+     */
+    private imported(call: Call, imports: Set<string>): Clause[] {
+        const clauses = call.query.clauses;
         const first = clauses[0];
         if (first?.kind !== 'With') {
             return clauses;
         }
         const projection = first.projection;
         const importing =
-            first.where === undefined &&
-            !projection.distinct &&
-            projection.orderBy.length === 0 &&
-            projection.skip === undefined &&
-            projection.limit === undefined &&
-            projection.items.every((it) => it.expression.kind === 'Variable' && it.expression.name === it.name);
+            plainWith(first) &&
+            projection.items.every((it) => it.expression.kind === 'Variable' && it.expression.name === it.name) &&
+            (projection.star || projection.items.every((it) => imports.has(it.name)));
         return importing ? clauses.slice(1) : clauses;
     }
 
@@ -2288,7 +3222,8 @@ export class CypherWriter {
         const [table, id, row] = this.target(item.variable, 'SET');
         const nodes = this.sql.nodes;
         switch (item.kind) {
-            case 'Property':
+            case 'Property': {
+                propertyOfKind(item.value);
                 this.evaluate(VALUE, [item.value], (scope) =>
                     this.sql.comparable(this.asJson(this.expression(item.value, scope)))
                 );
@@ -2299,6 +3234,7 @@ export class CypherWriter {
                     this.emit(`UPDATE ${table} SET props = ${this.sql.merged('props', map)} WHERE ${id} = ${row};`);
                 }
                 return;
+            }
             case 'Replace':
                 this.evaluate(VALUE, [item.value], (scope) => this.properties(this.expression(item.value, scope)));
                 if (table === nodes) {
@@ -2420,9 +3356,11 @@ export class CypherWriter {
      */
     private project(select: Select, projection: Projection, final: boolean): Projected {
         const items: ProjectionItem[] = [
-            // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
+            // As in Neo4j, a star gives the variables in the order of their names, before the items named after it: not
+            // a randomUUID() made first for a CALL or a condition (see anewCall), which the statement never named.
             ...(projection.star
                 ? [...select.bound.keys()]
+                      .filter((it) => !this.madeAnew.has(it))
                       .sort()
                       .map((it): ProjectionItem => ({ expression: { kind: 'Variable', name: it }, name: it }))
                 : []),
@@ -2432,7 +3370,7 @@ export class CypherWriter {
             throw new DrivineError('A projection has at least one item.');
         }
         // Before aggregatesFirst, which names each variable it groups by as an item of its own.
-        this.requireExplicitGrouping(items);
+        this.requireExplicitGrouping(items, projection.orderBy, new Set(select.scope.keys()));
         const first = this.workedOutFirst(select, projection, items);
         if (first) {
             return this.project(first[0], first[1], final);
@@ -2452,13 +3390,11 @@ export class CypherWriter {
             this.carriedOut(this.aggregating(item.expression, () => this.item(item.expression, select)))
         ]);
         const aggregating = items.some((it) => contains(it.expression, isAggregate));
-        // Where rows are compared (DISTINCT, GROUP BY), JSON is compared as what compares.
+        // Where rows are compared (DISTINCT, GROUP BY), each item is compared as rowCompared() has it.
         const compared = projection.distinct || aggregating;
         const itemColumns = compiled.map(([, value], i): [string, Value] => [
             `c${i + 1}`,
-            compared && value.kind === 'Json' && value.ordered
-                ? { ...value, sql: this.sql.comparable(value), ordered: false }
-                : value
+            compared ? this.rowCompared(value) : value
         ]);
         const selectList = itemColumns.flatMap(([column, value]) => columns(value, column));
         const name = this.alias('p');
@@ -2512,7 +3448,7 @@ export class CypherWriter {
 
     /**
      * The rows `select` reads with what the projection reads of them worked out first, in a `WITH` of its own, and the
-     * projection over that: see {@link casesFirst}, {@link sharedFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
+     * projection over that: see {@link anewFirst}, {@link casesFirst}, {@link sharedFirst}, {@link aggregatesFirst} and {@link heldFirst}. Undefined where none
      * is.
      */
     private workedOutFirst(
@@ -2521,12 +3457,130 @@ export class CypherWriter {
         items: ProjectionItem[]
     ): [Select, Projection] | undefined {
         return (
+            this.anewFirst(select, projection, items) ??
             this.casesFirst(select, projection, items) ??
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
             this.sharedFirst(select, projection, items) ??
             this.aggregatesFirst(select, projection, items) ??
             this.heldFirst(select, projection, items)
         );
+    }
+
+    /**
+     * The rows `select` reads with each randomUUID() that a term of the projection reads inside a larger expression made
+     * first ({@link anewBefore}), and the projection with the term reading that UUID's column; undefined where there is
+     * none. A term that is a randomUUID() alone is a column of the projection already. Two items written alike are given
+     * a UUID each, as in Neo4j; an order term written as an item reads that item's, as Neo4j sorts by the item.
+     */
+    private anewFirst(
+        select: Select,
+        projection: Projection,
+        items: ProjectionItem[]
+    ): [Select, Projection] | undefined {
+        const itemTerms = items.map((it) => it.expression);
+        const orderTerms = new Map<string, Expression>();
+        projection.orderBy.forEach((sort) => {
+            if (!itemTerms.some((it) => sameExpression(it, sort.expression))) {
+                orderTerms.set(expressionKey(sort.expression), sort.expression);
+            }
+        });
+        const made = this.anewBefore(select, [...itemTerms, ...orderTerms.values()], false);
+        if (!made) {
+            return undefined;
+        }
+        const [rows, read] = made;
+        const reads = new Map<string, Expression>();
+        [...itemTerms, ...orderTerms.values()].forEach((term, i) => {
+            const key = expressionKey(term);
+            if (!reads.has(key)) {
+                reads.set(key, read[i]);
+            }
+        });
+        const kept: Projection = {
+            ...projection,
+            star: false,
+            items: items.map((item, i) => ({ ...item, expression: read[i] })),
+            orderBy: projection.orderBy.map((it) => ({ ...it, expression: reads.get(expressionKey(it.expression))! }))
+        };
+        return [rows, kept];
+    }
+
+    /**
+     * The rows `select` reads with each randomUUID() that `terms` read made first, for each row, in a `WITH *` of its own,
+     * and each term as it reads that UUID's column, in their order; undefined where there is none, or, where not `whole`,
+     * where each is a term alone. Worked out in the term, the UUID could be bound in a subquery that reads nothing of the
+     * row ({@link SqlCypherCompiler.shared}), or read in a comprehension's subquery that reads nothing of it either, and
+     * each store works such a subquery out once for the statement: every row was given the same UUID (drivine4j#412).
+     * Made first, it is a column of the row, as a `WITH`'s own randomUUID() is ({@link SqlCypherCompiler.once}). One in a
+     * comprehension's, a quantifier's, a reduce's or a pattern comprehension's own expressions is made again for each
+     * item there, as in Neo4j: it is read beside a UUID made first for the row ({@link seeded}), so that subquery reads
+     * the row. Each call is a UUID of its own, in two terms written alike too, as in Neo4j, where
+     * `randomUUID() = randomUUID()` is false. `anew` tells a call: see {@link match} for another.
+     */
+    private anewBefore(
+        select: Select,
+        terms: Expression[],
+        whole: boolean,
+        anew: (expression: Expression) => boolean = isAnew
+    ): [Select, Expression[]] | undefined {
+        // A call read beside a row's UUID already (isSeeded) reads the row: left as it is, as a call alone is.
+        const isSeededHere = (e: Expression): boolean => isSeeded(e, this.madeAnew);
+        const alone = (term: Expression): boolean => anew(term) || isSeededHere(term);
+        const holds = (e: Expression): boolean => anew(e) || (!isSeededHere(e) && children(e).some(holds));
+        const inBodies = terms.some((it) => !sameExpression(seeded(it, ANEW, this.madeAnew), it));
+        if (!inBodies && !terms.some((it) => (whole || !alone(it)) && holds(it))) {
+            return undefined;
+        }
+        const made: ProjectionItem[] = [];
+        let seed: string | undefined;
+        if (inBodies) {
+            seed = this.anewVariable();
+            made.push({ expression: RANDOM_UUID, name: seed });
+        }
+        const reads = terms.map((term) => {
+            if (!whole && alone(term)) {
+                return term;
+            }
+            const read = replaced(term, (e): Expression | undefined => {
+                if (anew(e)) {
+                    const name = this.anewVariable();
+                    made.push({ expression: e, name });
+                    return { kind: 'Variable', name };
+                }
+                return isSeededHere(e) ? e : undefined;
+            });
+            return seed === undefined ? read : seeded(read, seed, this.madeAnew);
+        });
+        const projection: Projection = { distinct: false, star: true, items: made, orderBy: [] };
+        // Kept apart, as sharedFirst keeps its own, so no store merges it back into the query that reads it.
+        return [this.with(select, { kind: 'With', projection }, this.around(select), true), reads];
+    }
+
+    /**
+     * `value` as rows are compared by it, where they are grouped or kept distinct: JSON as what compares, and JSON's null,
+     * which a value read out of a map or a list may be ({@link JsonValue.jsonNull}), and SQL's as one, as Cypher has one
+     * null (#497). It may still be JSON's null, as Oracle's {@link SqlCypherCompiler.groupedNull} gives it, so it is still
+     * read as one that may be. In a part of a `UNION` that compares rows ({@link distinctParts}) it is SQL's, as another
+     * part's value that is never JSON's null gives it.
+     */
+    private rowCompared(value: Value): Value {
+        if (value.kind !== 'Json') {
+            return value;
+        }
+        if (value.jsonNull) {
+            const it = this.sql.comparable(value);
+            return {
+                ...value,
+                sql: this.distinctParts ? this.sql.comparedNull(it) : this.sql.groupedNull(it),
+                ordered: false
+            };
+        }
+        return value.ordered ? { ...value, sql: this.sql.comparable(value), ordered: false } : value;
+    }
+
+    /** Whether `value` may be JSON's null: see {@link JsonValue.jsonNull}. */
+    private mayBeJsonNull(value: Value): boolean {
+        return value.kind === 'Json' && value.jsonNull === true;
     }
 
     /** `value` as a projection carries it out: without its identity where none is carried (see {@link identities}). */
@@ -2549,7 +3603,15 @@ export class CypherWriter {
     ): string {
         if (final) {
             const values = itemColumns.map(([column, value]) => this.asJson(columnsOf(value, name, column)));
-            return `${values.length === 1 ? values[0].sql : this.sql.jsonArray(values.map((it) => it.sql))} AS result`;
+            // A value that may be JSON's null is given as SQL's where a UNION compares rows by it; in a row of several, a
+            // list's item, SQL's null is JSON's (#497).
+            const result =
+                values.length === 1
+                    ? this.distinctParts && values[0].jsonNull
+                        ? this.sql.comparedNull(values[0].sql)
+                        : values[0].sql
+                    : this.sql.jsonArray(values.map((it) => it.sql));
+            return `${result} AS result`;
         }
         return [
             ...itemColumns.flatMap(([column, value]) =>
@@ -2613,7 +3675,13 @@ export class CypherWriter {
                 after.set(column, this.sortable(this.expression(sort.expression, byName)));
                 anew = true;
             } else if (item >= 0) {
-                carried(column, () => compiled[item][1], sort.expression);
+                // One that may be JSON's null, where rows are compared, as its column is grouped by: see rowCompared().
+                carried(
+                    column,
+                    () =>
+                        compared && this.mayBeJsonNull(compiled[item][1]) ? itemColumns[item][1] : compiled[item][1],
+                    sort.expression
+                );
             } else if (
                 compared &&
                 !contains(
@@ -2966,7 +4034,9 @@ export class CypherWriter {
             (item) =>
                 !contains(item.expression, isAggregate) &&
                 (contains(item.expression, (it) => it.kind === 'Parameter') ||
-                    groupKeys(this.expression(item.expression, select.scope)).some((it) => /select/i.test(it)))
+                    groupKeys(this.rowCompared(this.expression(item.expression, select.scope))).some((it) =>
+                        /select/i.test(it)
+                    ))
         );
         if (held.length === 0) {
             return undefined;
@@ -3007,8 +4077,11 @@ export class CypherWriter {
      * that aggregates, nothing is bound ({@link aggregating}), so `max(n.title) + ': ' + max(n.first) + ' ' + max(n.last)`
      * wrote each aggregate out again at every level, past the longest text JavaScript holds on Oracle, and
      * `head(collect(n.t)) CONTAINS $x` read the aggregate from the subquery Oracle's search of a long text binds
-     * (ORA-00937); over the aggregates' columns, the operation binds its values as any item does (#414). Undefined where
-     * the projection does none of these.
+     * (ORA-00937); over the aggregates' columns, the operation binds its values as any item does (#414). So too where an
+     * item that aggregates reads a key that is a property ({@link readsOutsideAggregates}), as `r.role + count(*)` beside
+     * `r.role`: grouped in place, it would be grouped by the variable `r` it names, a row for each relationship, where
+     * Neo4j gives one for each role (#494); over the keys' columns, it reads the key's. Undefined where the projection
+     * does none of these.
      */
     private aggregatesFirst(
         select: Select,
@@ -3022,10 +4095,18 @@ export class CypherWriter {
         const terms = [...items.map((it) => it.expression), ...projection.orderBy.map((it) => it.expression)];
         // An order term reads an item by its name.
         const byName = new Map(items.map((it) => [it.name, it.expression]));
+        const aggregating = (expression: Expression): boolean => contains(expression, isAggregate);
+        // A key that is a property, read by an item that aggregates: grouped by as itself, not by its variable.
+        const properties = new Set(
+            items
+                .filter((it) => it.expression.kind === 'Property' && !aggregating(it.expression))
+                .map((it) => expressionKey(it.expression))
+        );
         if (
             !terms.some((it) => contains(it, collectsDistinct) || contains(it, iteratesAggregate)) &&
             !items.some((it) => this.bindsOverAggregates(it.expression, select)) &&
-            !projection.orderBy.some((it) => this.bindsOverAggregates(it.expression, select, byName))
+            !projection.orderBy.some((it) => this.bindsOverAggregates(it.expression, select, byName)) &&
+            !items.some((it) => aggregating(it.expression) && readsOutsideAggregates(it.expression, properties))
         ) {
             return undefined;
         }
@@ -3046,9 +4127,9 @@ export class CypherWriter {
         const keyed = [...keys.values()].flatMap(([expression]) =>
             expression.kind === 'Variable' ? [expression.name] : []
         );
-        // A comprehension's, a quantifier's or a reduce's body is kept as it is, so a variable it names outside its own is
-        // kept too, and so is a pattern's or a subquery's. A subquery may name any variable: each the projection groups by
-        // is kept.
+        // A variable a comprehension's, a quantifier's or a reduce's body names outside its own is kept, but where it is read
+        // only in a key that `rekeyed` reads by its name; so is a pattern's or a subquery's. A subquery may name any
+        // variable: each the projection groups by is kept.
         const own = (names: string[], ...bound: string[]): string[] => names.filter((it) => !bound.includes(it));
         const inner = (expression: Expression): string[] => {
             switch (expression.kind) {
@@ -3081,15 +4162,153 @@ export class CypherWriter {
                           ...children(expression).flatMap(named)
                       ])
                   ];
-        const aggregating = (expression: Expression): boolean => contains(expression, isAggregate);
-        // An order term that aggregates may name a key too, by the variable the projection groups by.
+        const kept = (term: Expression): Expression | undefined => {
+            const key = keys.get(expressionKey(term));
+            if (key) {
+                return { kind: 'Variable', name: key[1] };
+            }
+            const aggregate = aggregates.get(expressionKey(term));
+            if (!aggregate) {
+                return undefined;
+            }
+            return collectsDistinct(term)
+                ? {
+                      kind: 'Function',
+                      name: DISTINCT_ITEMS,
+                      distinct: false,
+                      arguments: [{ kind: 'Variable', name: aggregate[1] }]
+                  }
+                : { kind: 'Variable', name: aggregate[1] };
+        };
+        // `term` with each key in it read as `key` reads it, in a comprehension's, a quantifier's or a reduce's body too,
+        // where the body binds no variable the key reads.
+        type Reading = (term: Expression) => Expression | undefined;
+        const readingKeys = (term: Expression, bound: ReadonlySet<string>, key: Reading): Expression =>
+            replaced(term, (part) => {
+                if (![...variablesIn(part)].some((it) => bound.has(it))) {
+                    const read = key(part);
+                    if (read !== undefined) {
+                        return read;
+                    }
+                }
+                const within = (...names: string[]): ReadonlySet<string> => new Set([...bound, ...names]);
+                switch (part.kind) {
+                    case 'ListComprehension':
+                        return {
+                            ...part,
+                            list: readingKeys(part.list, bound, key),
+                            where: part.where && readingKeys(part.where, within(part.variable), key),
+                            projection: part.projection && readingKeys(part.projection, within(part.variable), key)
+                        };
+                    case 'Quantifier':
+                        return {
+                            ...part,
+                            list: readingKeys(part.list, bound, key),
+                            where: part.where && readingKeys(part.where, within(part.variable), key)
+                        };
+                    case 'Reduce':
+                        return {
+                            ...part,
+                            initial: readingKeys(part.initial, bound, key),
+                            list: readingKeys(part.list, bound, key),
+                            expression: readingKeys(part.expression, within(part.accumulator, part.variable), key)
+                        };
+                    default:
+                        return undefined;
+                }
+            });
+        // Neo4j reads `any(y IN list WHERE y = e)` as `e IN list`, and `none(…)` as `NOT e IN list`, where `e` reads no
+        // `y`; `y IN [e]` and `e IN [y]` are `y = e` to it. Not `all(…)` or `single(…)`, a WHERE that is more than the one
+        // comparison (`AND`, `OR`), `y.p = e`, or `y IN [e1, e2]`: those group by each variable `e` reads.
+        const readAsIn = (part: Quantifier): boolean => {
+            const where = part.where;
+            if (where?.kind !== 'Binary' || (part.of !== 'ANY' && part.of !== 'NONE')) {
+                return false;
+            }
+            const isVariable = (it: Expression): boolean => it.kind === 'Variable' && it.name === part.variable;
+            const comparedTo = (left: Expression, right: Expression): Expression | undefined =>
+                isVariable(left) ? right : isVariable(right) ? left : undefined;
+            const only =
+                where.right.kind === 'ListLiteral' && where.right.items.length === 1 ? where.right.items[0] : undefined;
+            const compared =
+                where.operator === 'EQUALS'
+                    ? comparedTo(where.left, where.right)
+                    : where.operator === 'IN' && only
+                    ? comparedTo(where.left, only)
+                    : undefined;
+            // A `y` that a comprehension or a reduce in `e` binds of its own is not the quantifier's.
+            return compared !== undefined && !variablesReadIn(compared).has(part.variable);
+        };
+        // As Neo4j reads a key in an item that aggregates: by its name in a part that holds no aggregate, and in a list
+        // comprehension's WHERE, all through. In the projection of a comprehension over an aggregate, or the WHERE of a
+        // quantifier or the step of a reduce over one, Neo4j groups by each variable the key reads as well, so the body is
+        // kept as it is, and those variables beside: `[t IN collect(m.title) | r.role]` beside `r.role` gives a row for
+        // each `r`, where `[t IN collect(m.title) WHERE t STARTS WITH r.role]` and `count(*) + [y IN [1] | r.role][0]`
+        // give one for each role, and so does `any(t IN collect(m.title) WHERE t = r.role)`, which Neo4j reads as
+        // `r.role IN collect(m.title)`. `read` reads a key or an aggregate, and `key` a key in a body.
+        const rekeyed = (term: Expression, read: Reading, key: Reading): Expression =>
+            replaced(term, (part) => {
+                const given = read(part);
+                if (given) {
+                    return given;
+                }
+                if (!aggregating(part)) {
+                    return readingKeys(part, new Set(), key);
+                }
+                if (part.kind === 'ListComprehension' && part.where) {
+                    return {
+                        ...part,
+                        list: rekeyed(part.list, read, key),
+                        where: readingKeys(part.where, new Set([part.variable]), key)
+                    };
+                }
+                if (part.kind === 'Quantifier' && readAsIn(part)) {
+                    return {
+                        ...part,
+                        list: rekeyed(part.list, read, key),
+                        where: readingKeys(part.where!, new Set([part.variable]), key)
+                    };
+                }
+                return undefined;
+            });
+        const keyOf: Reading = (part) => (keys.has(expressionKey(part)) ? kept(part) : undefined);
+        const rekeyedItems = items.map((it) => ({ ...it, expression: rekeyed(it.expression, kept, keyOf) }));
+        // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
+        // can only be; a variable an item is named after is that item, not the variable of that name before it. In a
+        // body, as an item reads it.
+        const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
+        const asItem: Reading = (term) => {
+            if (term.kind === 'Variable' && byName.has(term.name)) {
+                return term;
+            }
+            const item = itemNames.get(expressionKey(term));
+            return item !== undefined ? { kind: 'Variable', name: item } : undefined;
+        };
+        const rekeyedOrder = projection.orderBy.map((sort) => ({
+            ...sort,
+            expression: rekeyed(
+                sort.expression,
+                (it) => asItem(it) ?? kept(it),
+                (it) => asItem(it) ?? keyOf(it)
+            )
+        }));
+        // An order term that aggregates may name a key too, by the variable the projection groups by; or, as an item
+        // does, the variable of a key that is a property, in a body that groups by it.
+        const keyedInOrder = [
+            ...keyed,
+            ...items
+                .filter((it) => properties.has(expressionKey(it.expression)))
+                .flatMap((it) => [...variablesIn(it.expression)])
+        ];
         const beside = [
             ...new Set([
-                ...items.filter((it) => aggregating(it.expression)).flatMap((it) => named(it.expression)),
-                ...projection.orderBy
-                    .filter((it) => aggregating(it.expression))
+                ...rekeyedItems
+                    .filter((_, i) => aggregating(items[i].expression))
+                    .flatMap((it) => named(it.expression)),
+                ...rekeyedOrder
+                    .filter((_, i) => aggregating(projection.orderBy[i].expression))
                     .flatMap((it) => named(it.expression))
-                    .filter((it) => keyed.includes(it))
+                    .filter((it) => keyedInOrder.includes(it))
             ])
         ].filter((it) => select.scope.has(it));
         const grouped: Projection = {
@@ -3110,42 +4329,7 @@ export class CypherWriter {
             ],
             orderBy: []
         };
-        const kept = (term: Expression): Expression | undefined => {
-            const key = keys.get(expressionKey(term));
-            if (key) {
-                return { kind: 'Variable', name: key[1] };
-            }
-            const aggregate = aggregates.get(expressionKey(term));
-            if (!aggregate) {
-                return undefined;
-            }
-            return collectsDistinct(term)
-                ? {
-                      kind: 'Function',
-                      name: DISTINCT_ITEMS,
-                      distinct: false,
-                      arguments: [{ kind: 'Variable', name: aggregate[1] }]
-                  }
-                : { kind: 'Variable', name: aggregate[1] };
-        };
-        // An order term, or a part of one, that is an item is read by the item's name, as over a DISTINCT projection it
-        // can only be; a variable an item is named after is that item, not the variable of that name before it.
-        const itemNames = new Map(items.map((it) => [expressionKey(it.expression), it.name]));
-        const keptProjection: Projection = {
-            ...projection,
-            star: false,
-            items: items.map((it) => ({ ...it, expression: replaced(it.expression, kept) })),
-            orderBy: projection.orderBy.map((sort) => ({
-                ...sort,
-                expression: replaced(sort.expression, (term) => {
-                    if (term.kind === 'Variable' && byName.has(term.name)) {
-                        return term;
-                    }
-                    const item = itemNames.get(expressionKey(term));
-                    return item !== undefined ? { kind: 'Variable', name: item } : kept(term);
-                })
-            }))
-        };
+        const keptProjection: Projection = { ...projection, star: false, items: rekeyedItems, orderBy: rekeyedOrder };
         return [this.with(select, { kind: 'With', projection: grouped }), keptProjection];
     }
 
@@ -3166,19 +4350,25 @@ export class CypherWriter {
     }
 
     /**
-     * Refuses what Cypher refuses: an item that aggregates and names a variable outside its aggregates, where that
-     * variable is not an item of its own, which a graph engine would have to group by without being told.
+     * Refuses what Cypher refuses (Neo4j's 42I18): an item that aggregates and names a variable of `scope` outside its
+     * aggregates and each key it reads, in a comprehension's, a quantifier's, a reduce's or a pattern's body too, which a
+     * graph engine would have to group by without being told. A key is an item that does not aggregate, and Neo4j reads
+     * one there only where it is a variable or a variable's property ({@link isPlainKey}): `x.a + count(*)` beside `x.a`,
+     * but not `toUpper(p.name) + count(*)` beside `toUpper(p.name)`; in a pattern's parts, only where it is a variable.
+     * So too a term of `orderBy` that aggregates, beside items that aggregate, and names a variable of `scope` outside an
+     * item's name and an item that does not aggregate, whatever that item is, as Neo4j takes them.
      */
-    private requireExplicitGrouping(items: ProjectionItem[]): void {
-        const keys = new Set(
-            items
-                .filter((it) => !contains(it.expression, isAggregate))
-                .flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : []))
-        );
+    private requireExplicitGrouping(items: ProjectionItem[], orderBy: SortItem[], scope: ReadonlySet<string>): void {
+        const grouping = items.filter((it) => !contains(it.expression, isAggregate));
+        const groupKeys = new Map(grouping.map((it) => [expressionKey(it.expression), it.expression]));
+        const plainKeys = new Map([...groupKeys].filter(([, it]) => isPlainKey(it)));
+        const keys = new Set(grouping.flatMap((it) => (it.expression.kind === 'Variable' ? [it.expression.name] : [])));
         items
             .filter((it) => contains(it.expression, isAggregate))
             .forEach((item) => {
-                const implicit = [...variablesOutsideAggregates(item.expression)].filter((it) => !keys.has(it));
+                const implicit = [...namedOutside(item.expression, new Set(), scope, plainKeys)].filter(
+                    (it) => !keys.has(it)
+                );
                 if (implicit.length > 0) {
                     throw new DrivineError(
                         `${item.name} aggregates, and names ${implicit.join(
@@ -3186,6 +4376,25 @@ export class CypherWriter {
                         )} outside its aggregates, which no other item is: ` +
                             'Cypher would group by it without being told. Aggregate in a WITH first, ' +
                             `as in WITH ${implicit.join(', ')}, collect(…) AS items RETURN { … }.`
+                    );
+                }
+            });
+        if (grouping.length === items.length) {
+            return;
+        }
+        const names = new Set(items.map((it) => it.name));
+        orderBy
+            .filter((it) => contains(it.expression, isAggregate))
+            .forEach((sort) => {
+                // Not less the variables an item is: one an item renames, named in an order term's pattern, is a new
+                // variable of the pattern's to Neo4j, which matches any node, so it is refused rather than read as the key.
+                const implicit = namedOutside(sort.expression, names, scope, groupKeys);
+                if (implicit.size > 0) {
+                    throw new DrivineError(
+                        `A term of an ORDER BY aggregates, and names ${[...implicit].join(
+                            ', '
+                        )} outside its aggregates and the items: ` +
+                            "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
                     );
                 }
             });
@@ -3222,7 +4431,7 @@ export class CypherWriter {
 
     /**
      * The value `expression` gives in `scope`, marked {@link JsonValue.flat} where it is known to hold no null in a list
-     * or a map.
+     * or a map, and with its {@link JsonValue.known} kind where the statement writes it as a value of one.
      */
     private expression(expression: Expression, scope: Scope): Value {
         const outer = this.filtering;
@@ -3235,6 +4444,12 @@ export class CypherWriter {
             value = this.expressions[expression.kind](expression, scope);
         } finally {
             this.filtering = outer;
+        }
+        if (value.kind === 'Json' && value.known === undefined) {
+            const known = this.knownKind(expression, scope);
+            if (known !== undefined) {
+                value = { ...value, known };
+            }
         }
         if ((value.kind === 'Json' || value.kind === 'Entities') && !value.flat && this.flat(expression, scope)) {
             return { ...value, flat: true };
@@ -3284,6 +4499,7 @@ export class CypherWriter {
     }
 
     private index(index: Index, scope: Scope): Value {
+        this.indexOfKind(index, scope);
         let listedValue: Value | undefined;
         const listed = (): Value => (listedValue ??= this.expression(index.subject, scope));
         const subject = (): string => this.sql.comparable(this.asJson(listed()));
@@ -3293,7 +4509,7 @@ export class CypherWriter {
         if (typeof known === 'string') {
             const inParameter = this.inParameter(index);
             return inParameter !== undefined
-                ? json(inParameter)
+                ? json(inParameter, { jsonNull: true })
                 : this.property(this.expression(index.subject, scope), known);
         }
         // An item of a list of nodes or relationships is the node or the relationship, so it is compared by its id; of one
@@ -3312,7 +4528,8 @@ export class CypherWriter {
                 identity: this.identityTaken(value, item, true, (it) => this.sql.element(it, at)),
                 list: this.holdsLists(value),
                 text: this.holdsTexts(value),
-                temporals: this.itemTemporalsOf(value)
+                temporals: this.itemTemporalsOf(value),
+                jsonNull: !this.isFlat(value)
             });
         }
         const take = (list: string): string =>
@@ -3329,7 +4546,8 @@ export class CypherWriter {
             identity: this.identityTaken(value, taken, true, take),
             list: this.holdsLists(value),
             text: this.holdsTexts(value),
-            temporals: this.itemTemporalsOf(value)
+            temporals: this.itemTemporalsOf(value),
+            jsonNull: !this.isFlat(value)
         });
     }
 
@@ -3394,6 +4612,91 @@ export class CypherWriter {
             texts: this.holdsTexts(listed),
             temporals: this.holdsTemporals(listed)
         });
+    }
+
+    /**
+     * The kind of value `expression` is in `scope`, where the statement writes it as one ({@link JsonValue.known}): a
+     * literal, a negated number, a list or a map written, or a variable bound to one. Read from the statement alone,
+     * compiling nothing, so a check may run before its operand is compiled. Undefined where the kind is left open, as it is
+     * for a property, a parameter or a function's value: Neo4j checks those when the row is read.
+     */
+    private knownKind(expression: Expression, scope: Scope): Known | undefined {
+        switch (expression.kind) {
+            case 'Literal':
+                return knownOf(expression.value);
+            case 'Unary': {
+                const operand = this.knownKind(expression.operand, scope);
+                return expression.operator === 'NEGATE' && (operand === 'INTEGER' || operand === 'FLOAT')
+                    ? operand
+                    : undefined;
+            }
+            case 'ListLiteral':
+                return 'LIST';
+            case 'MapLiteral':
+                return 'MAP';
+            case 'Variable': {
+                const value = scope.get(expression.name);
+                return value?.kind === 'Json' ? value.known : undefined;
+            }
+            default:
+                return undefined;
+        }
+    }
+
+    /**
+     * Refuses `index`, `subject[index]`, where the statement writes its subject as a value that is no list or map, or its
+     * index as a value of a kind its subject is not indexed by ({@link knownKind}): a list by an integer, a map by a text.
+     * As Neo4j refuses it; where the subject's kind is left open, it is compiled as before. An index given as a parameter
+     * is of its value's kind: the statement is compiled for each call, and its SQL is already made by that value, a text
+     * read as a property and a number as an item, so one of the other kind would be read as neither.
+     */
+    private indexOfKind(index: Index, scope: Scope): void {
+        const subject = this.knownKind(index.subject, scope);
+        if (subject === undefined) {
+            return;
+        }
+        if (subject !== 'LIST' && subject !== 'MAP') {
+            throw new DrivineError(
+                `${capitalNounOf(subject)} is not a list or a map, and is indexed as one, as in Neo4j.`
+            );
+        }
+        const by: Known = subject === 'LIST' ? 'INTEGER' : 'TEXT';
+        const kind =
+            this.knownKind(index.index, scope) ??
+            (index.index.kind === 'Parameter' ? knownOf(this.known(index.index)) : undefined);
+        if (kind !== undefined && kind !== by) {
+            throw new DrivineError(
+                `${capitalNounOf(subject)} is indexed by ${nounOf(by)}, not ${nounOf(kind)}, as in Neo4j.`
+            );
+        }
+    }
+
+    /** Refuses `binary` where it is `IN` a value the statement writes as one of a kind other than a list ({@link knownKind}), as Neo4j refuses it. */
+    private inOfKind(binary: Binary, scope: Scope): void {
+        const kind = binary.operator === 'IN' ? this.knownKind(binary.right, scope) : undefined;
+        if (kind !== undefined && kind !== 'LIST') {
+            throw new DrivineError(`IN takes a list, not ${nounOf(kind)}, as in Neo4j.`);
+        }
+    }
+
+    /** Refuses `expression`, an operand of `operator`, where its kind is known ({@link knownKind}) to be other than a truth value, as Neo4j refuses it. */
+    private requireCondition(expression: Expression, scope: Scope, operator: string): void {
+        const kind = this.knownKind(expression, scope);
+        if (kind !== undefined && kind !== 'BOOLEAN') {
+            throw new DrivineError(`${operator} takes a truth value, not ${nounOf(kind)}, as in Neo4j.`);
+        }
+    }
+
+    /**
+     * Refuses `value`, an argument, where the statement writes it as a value of a kind ({@link JsonValue.known}) other than
+     * `allowed`, with the `message` of that kind's noun, as Neo4j refuses it when it plans the statement. A value whose kind
+     * the statement leaves open is compiled as before.
+     */
+    private requireKind(value: Value, allowed: Known, message: (noun: string) => string): void {
+        const kind = value.kind === 'Json' ? value.known : undefined;
+        if (kind !== undefined && kind !== allowed) {
+            throw new DrivineError(message(nounOf(kind)));
+        }
     }
 
     /** The value of an index, where the statement writes it or binds it to a parameter: `-1` is a negated number. */
@@ -3594,7 +4897,11 @@ export class CypherWriter {
                             const of = was?.kind === 'Json' ? was : undefined;
                             return [
                                 it,
-                                json(this.sql.propertyOf(map, it), { temporal: of?.temporal, items: of?.items })
+                                json(this.sql.propertyOf(map, it), {
+                                    temporal: of?.temporal,
+                                    items: of?.items,
+                                    known: of?.known
+                                })
                             ];
                         })
                     );
@@ -3619,7 +4926,9 @@ export class CypherWriter {
                 temporals:
                     this.hasTemporals(start) ||
                     this.hasTemporals(listed) ||
-                    read.some((it) => this.hasTemporals(scope.get(it)!))
+                    read.some((it) => this.hasTemporals(scope.get(it)!)),
+                // Its step may give JSON's null, as a null written or read from a map does.
+                jsonNull: true
             }
         );
     }
@@ -3631,10 +4940,27 @@ export class CypherWriter {
             inner.where.push(this.keeps(comprehension.where, inner.scope));
         }
         const projected = this.expression(comprehension.projection, inner.scope);
-        const gathered = (value: string): string =>
-            `(${[`SELECT ${this.sql.aggregateList(value)}`, ...inner.from(), ...optional(inner.whereClause())].join(
-                ' '
-            )})`;
+        // A body that reads no variable of the pattern's own, `[(p)-->() | p.name]`, is worked out for each of the
+        // pattern's rows in a derived table, and gathered from there: an aggregate that reads only the row's columns is an
+        // aggregate of the row's query, which Postgres refuses (#486). One that reads nothing of any row, a literal or a
+        // parameter, is the comprehension's aggregate as it is. Its path variable is its own even where the row holds
+        // that name, which it leaves to a new variable.
+        const own = [
+            ...[...variablesOfPattern(comprehension.pattern)].filter((it) => !scope.has(it)),
+            ...optional(comprehension.pattern.variable)
+        ];
+        const read = [...variablesReadIn(comprehension.projection)];
+        const apart =
+            !read.some((it) => own.includes(it)) && (read.length > 0 || holdsSubquery(comprehension.projection));
+        const gathered = (value: string): string => {
+            const rows = (select: string): string =>
+                [select, ...inner.from(), ...optional(inner.whereClause())].join(' ');
+            if (!apart) {
+                return `(${rows(`SELECT ${this.sql.aggregateList(value)}`)})`;
+            }
+            const each = this.alias('pc');
+            return `(SELECT ${this.sql.aggregateList(`${each}.v`)} FROM (${rows(`SELECT ${value} AS v`)}) ${each})`;
+        };
         // A comprehension of nodes or relationships is a list of them, so a write to an item of it reaches them.
         if (projected.kind === 'Node' || projected.kind === 'Relationship') {
             const id = projected.kind === 'Node' ? projected.nid : projected.eid;
@@ -3780,10 +5106,13 @@ export class CypherWriter {
                 subject.fromList &&
                 subject.temporal === undefined &&
                 subject.rowKeys === undefined &&
-                !this.temporals.fieldNames.includes(expression.key)
+                !this.temporals.fieldNames.includes(expression.key) &&
+                // One of a kind known other than a map is left to property(), which refuses it.
+                !knownNoMap(subject)
             ) {
                 return json(this.sql.itemValue(this.sql.comparable(subject), expression.key), {
-                    temporals: subject.temporals
+                    temporals: subject.temporals,
+                    jsonNull: !subject.flat
                 });
             }
         }
@@ -3801,18 +5130,23 @@ export class CypherWriter {
             case 'Relationship':
                 return json(this.sql.propertyOf(subject.props, key));
             case 'Json': {
+                // A value the statement writes as one of a kind other than a map has none, as Neo4j says when it plans the statement.
+                if (knownNoMap(subject)) {
+                    throw new DrivineError(`${capitalNounOf(subject.known!)} has no properties.`);
+                }
                 const field = this.temporalField(subject, key);
                 if (field) {
                     return field;
                 }
                 if (subject.rowKeys) {
                     const keys = [...subject.rowKeys, key];
-                    return json(this.sql.rowValue(keys), { rowKeys: keys });
+                    return json(this.sql.rowValue(keys), { rowKeys: keys, jsonNull: !subject.flat });
                 }
                 const taken = this.sql.propertyOf(this.sql.comparable(subject), key);
                 return json(taken, {
                     identity: this.identityTaken(subject, taken, true, (it) => this.sql.propertyOf(it, key)),
-                    temporals: subject.temporals
+                    temporals: subject.temporals,
+                    jsonNull: !subject.flat
                 });
             }
             case 'Bool':
@@ -4093,6 +5427,9 @@ export class CypherWriter {
             return json(this.sql.literalJson(this.canonical(written.value, kind, name)), { temporal: kind });
         }
         if (written.kind === 'MapLiteral') {
+            if (kind !== Temporal.DURATION && written.entries.some(([key]) => SELECTORS.includes(key))) {
+                return of(this.fromTemporal(kind, written.entries, call));
+            }
             return of(this.temporalOfFields(kind, written.entries, call));
         }
         const given = call.arguments[0];
@@ -4108,16 +5445,16 @@ export class CypherWriter {
             : of(this.temporals.convertAny(text, kind));
     }
 
-    /** The text of a temporal value of `kind` made of the fields `entries` of a map the statement writes. */
+    /**
+     * The text of a temporal value of `kind` made of the fields `entries` of a map the statement writes. A date or a
+     * moment takes a week, an ordinal day or a quarter in place of a month and a day (see {@link calendarDate}); a time of
+     * day has no date to give, as Neo4j has it.
+     */
     private temporalOfFields(kind: Temporal, entries: [string, Expression][], call: Invocation): string {
         const fields = new Map(
             entries.map(([key, value]): [string, Value] => [key, this.expression(value, call.scope)])
         );
-        const known = kind === Temporal.DURATION ? DURATION_MAP_FIELDS : INSTANT_MAP_FIELDS;
-        const unknown = [...fields.keys()].find((it) => !known.includes(it));
-        if (unknown !== undefined) {
-            unsupported(`${call.fn.name}() of a map with ${unknown}`);
-        }
+        mapFields(kind, call.fn.name, [...fields.keys()]);
         const numbers: Record<string, string> = {};
         fields.forEach((value, key) => {
             if (key !== 'timezone') {
@@ -4127,8 +5464,137 @@ export class CypherWriter {
         if (kind === Temporal.DURATION) {
             return this.temporals.duration(numbers);
         }
-        const timezone = fields.get('timezone');
-        return this.temporals.of(numbers, timezone ? this.textOf(timezone) : undefined, kind);
+        const given = fields.get('timezone');
+        const timezone = given ? this.textOf(given) : undefined;
+        // A zone by name, which no store's text holds yet, is refused rather than given as null: so a value made from
+        // such a moment, `time({time: other})`, is refused too.
+        mapZone(entries);
+        if (!entries.some(([key]) => CALENDAR_FIELDS.includes(key))) {
+            return this.temporals.of(numbers, timezone, kind);
+        }
+        const date = calendarDate(call.fn.name, entries);
+        if (date === undefined) {
+            return this.temporals.ofCalendar(numbers, timezone, kind);
+        }
+        const day: Record<string, string> = Object.fromEntries(
+            Object.entries(numbers).filter(([key]) => !CALENDAR_FIELDS.includes(key))
+        );
+        [day.year, day.month, day.day] = date.map(String);
+        return this.temporals.of(day, timezone, kind);
+    }
+
+    /**
+     * The text of a temporal value of `kind` made of `entries`, a map the statement writes with a `date`, a `time` or a
+     * `datetime`, another temporal value whose fields it takes, with the map's others laid over them: see
+     * `Temporals.over`. Fails as Neo4j fails: on a field `kind` has none of, a `datetime` beside a `date` or a `time`, a
+     * value written that is no temporal value or is of a kind that hasn't what it is to give, fields of two calendars, a
+     * date of its fields that is not whole (a year, a month and a day; a week and a day of the week; an ordinal day; a
+     * quarter and a day of the quarter) beside a value that gives the time, a field of the time without the one above it
+     * where no value gives the time, and a number written that is not whole or past its field's range. A zone by name is
+     * refused. As drivine4j's.
+     */
+    private fromTemporal(kind: Temporal, entries: [string, Expression][], call: Invocation): string {
+        const name = call.fn.name;
+        const written = new Map(entries);
+        const keys = new Set(written.keys());
+        const calendar = overKeys(kind, name, keys);
+        const base = (key: string, kinds: Temporal[]): TemporalBase | undefined => {
+            const value = written.get(key);
+            return value === undefined ? undefined : this.overBase(name, key, kinds, value, call.scope);
+        };
+        const datetime = base('datetime', [Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME]);
+        const date = datetime ?? base('date', [Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.DATE]);
+        const time =
+            datetime ??
+            base('time', [Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.TIME, Temporal.LOCAL_TIME]);
+        let fields: Record<string, string> = {};
+        entries
+            .filter(([key]) => !SELECTORS.includes(key) && key !== 'timezone')
+            .forEach(([key, value]) => {
+                fields[key] = this.overField(name, key, value, keys, call.scope);
+            });
+        const zone = written.get('timezone');
+        const timezone = zone === undefined ? undefined : this.overZone(name, zone, call.scope);
+        // A date of fields written as numbers alone is worked out here, as a map of them is (see calendarDate).
+        if (date === undefined && calendar !== undefined && calendar !== 'a month') {
+            const day = calendarDate(
+                name,
+                entries.filter(([key]) => key === 'year' || CALENDAR_FIELDS.includes(key))
+            );
+            if (day !== undefined) {
+                fields = Object.fromEntries(Object.entries(fields).filter(([key]) => !CALENDAR_FIELDS.includes(key)));
+                [fields.year, fields.month, fields.day] = day.map(String);
+            }
+        }
+        return this.temporals.over(date, time, fields, timezone, kind);
+    }
+
+    /**
+     * The SQL number of the field `key` of a map given `name` that is laid over another temporal value, written as
+     * `value`: a field written as null is its least ({@link OVER_LEAST}), as is one an expression gives as null. A number
+     * written that is not whole, or past its field's range ({@link OVER_RANGES}; beside a millisecond or a microsecond
+     * given, a microsecond or a nanosecond runs to the next one's), fails. `keys` are the map's fields.
+     */
+    private overField(name: string, key: string, value: Expression, keys: Set<string>, scope: Scope): string {
+        const least = OVER_LEAST[key] ?? 0;
+        const literal = writtenNumber(value);
+        if (literal === null || literal === undefined) {
+            return value.kind === 'Literal'
+                ? `${least}`
+                : `COALESCE(${this.numberOf(this.expression(value, scope))}, ${least})`;
+        }
+        return `${overNumber(name, key, literal, keys)}`;
+    }
+
+    /**
+     * The value that `value`, written as the `date`, `time` or `datetime` field `key` of a map given `name`, gives
+     * `Temporals.over`, where it is of one of `kinds`. A value written that is no temporal value, or one whose kind the
+     * statement tells that is none of `kinds`, fails, as Neo4j fails on it.
+     */
+    private overBase(name: string, key: string, kinds: Temporal[], value: Expression, scope: Scope): TemporalBase {
+        const nouns = [...kinds].reverse().map((it) => `a ${it.function}`);
+        const refused = (given: string): never => {
+            throw new DrivineError(
+                `${name}() takes ${nouns.slice(0, -1).join(', ')} or ${
+                    nouns[nouns.length - 1]
+                } for ${key}, not ${given}.`
+            );
+        };
+        if (value.kind === 'Literal') {
+            refused(shownLiteral(value.value));
+        }
+        const given = this.expression(value, scope);
+        if (given.kind !== 'Json') {
+            return refused(given.kind === 'Bool' ? 'a truth value' : 'a node, a relationship or a path');
+        }
+        if (given.known !== undefined) {
+            refused(nounOf(given.known));
+        }
+        if (given.temporal !== undefined && !kinds.includes(given.temporal)) {
+            refused(`a ${given.temporal.function}`);
+        }
+        return {
+            text: this.sql.text(this.sql.comparable(given)),
+            kinds: given.temporal !== undefined ? [given.temporal] : kinds
+        };
+    }
+
+    /**
+     * The offset's SQL text of `zone`, the `timezone` of a map given `name` that is laid over another temporal value:
+     * one written is refused where it is null or no offset (see {@link zoneText}); one an expression gives is the
+     * store's to check.
+     */
+    private overZone(name: string, zone: Expression, scope: Scope): string {
+        if (isNullLiteral(zone)) {
+            throw new DrivineError(`${name}() takes a time zone, not null.`);
+        }
+        if (zone.kind !== 'Literal') {
+            return this.textOf(this.expression(zone, scope));
+        }
+        if (typeof zone.value !== 'string') {
+            throw new DrivineError(`${name}() takes a time zone, not ${String(zone.value)}.`);
+        }
+        return zoneText(zone.value);
     }
 
     /** The canonical text of `kind` of the text `value` the statement writes, refused where it is none. */
@@ -4193,6 +5659,7 @@ export class CypherWriter {
     private binary(binary: Binary, scope: Scope): Value {
         const filter = this.filtered;
         if (binary.operator === 'AND' || binary.operator === 'OR' || binary.operator === 'XOR') {
+            [binary.left, binary.right].forEach((it) => this.requireCondition(it, scope, binary.operator));
             const left = this.condition(this.expression(binary.left, scope));
             const right = this.condition(this.expression(binary.right, scope));
             if (binary.operator === 'AND') {
@@ -4201,6 +5668,7 @@ export class CypherWriter {
             // Each side whole: a condition may be several, and `a = b <> c` is no SQL.
             return bool(binary.operator === 'OR' ? `(${left} OR ${right})` : `((${left}) <> (${right}))`);
         }
+        this.inOfKind(binary, scope);
         const itemwise = this.itemwise(binary, scope);
         if (itemwise !== undefined) {
             return bool(binary.operator === 'NOT_EQUALS' ? `(NOT ${itemwise})` : itemwise);
@@ -5139,6 +6607,9 @@ export class CypherWriter {
     }
 
     private unary(unary: Unary, scope: Scope): Value {
+        if (unary.operator === 'NOT') {
+            this.requireCondition(unary.operand, scope, 'NOT');
+        }
         const operand = this.expression(unary.operand, scope);
         switch (unary.operator) {
             case 'NOT':
@@ -5223,7 +6694,8 @@ export class CypherWriter {
             list: results.every(([, it]) => this.isList(it)),
             itemLists: results.every(([, it]) => this.holdsLists(it)),
             text: results.every(([, it]) => this.isText(it)),
-            texts: results.every(([, it]) => this.holdsTexts(it))
+            texts: results.every(([, it]) => this.holdsTexts(it)),
+            jsonNull: results.some(([, it]) => this.mayBeJsonNull(it))
         });
     }
 
@@ -5278,7 +6750,8 @@ export class CypherWriter {
                 ),
                 list: this.holdsLists(one),
                 text: this.holdsTexts(one),
-                temporals: this.itemTemporalsOf(one)
+                temporals: this.itemTemporalsOf(one),
+                jsonNull: !this.isFlat(one)
             });
         }
         return json(result, { text: TEXT_FUNCTIONS.includes(name) });
@@ -5509,8 +6982,11 @@ export class CypherWriter {
     private truncated(call: Invocation): Value {
         const fn = call.fn;
         const to = Temporal.ofFunction(call.name.substring(0, call.name.indexOf('.')))!;
-        if (call.arguments.length !== 2) {
+        if (call.arguments.length < 2) {
             throw new DrivineError(`${fn.name}() takes a unit and a value.`);
+        }
+        if (call.arguments.length > 3) {
+            throw new DrivineError(`${fn.name}() takes a unit, a value and a map of fields.`);
         }
         const written = fn.arguments[0];
         const unit =
@@ -5521,11 +6997,18 @@ export class CypherWriter {
         if (given.kind !== 'Json') {
             throw new DrivineError(`${fn.name}() takes a unit and a value.`);
         }
+        const fields =
+            fn.arguments[2] !== undefined
+                ? this.truncationFields(fn, unit, to, fn.arguments[2], call.scope)
+                : undefined;
         const cut = (text: string, from: Temporal): string => {
-            const truncated = this.temporals.truncate(unit, text, from, to);
+            const truncated = this.temporals.truncate(unit, text, from, to, fields);
             if (truncated === undefined) {
+                const units = TRUNCATION_UNITS.slice(0, -1).join(', ');
                 throw new DrivineError(
-                    `${fn.name}() truncates to year, quarter, month, week, day, hour, minute, second or millisecond, not ${unit}.`
+                    `${fn.name}() truncates to ${units} or ${
+                        TRUNCATION_UNITS[TRUNCATION_UNITS.length - 1]
+                    }, not ${unit}.`
                 );
             }
             return truncated;
@@ -5535,6 +7018,59 @@ export class CypherWriter {
         return json(this.sql.scalar(from ? cut(text, from) : this.temporals.byKind(text, (kind, t) => cut(t, kind))), {
             temporal: to
         });
+    }
+
+    /**
+     * The fields the map `written`, the third argument of `fn`, gives the value of `kind` it truncates, in place of its
+     * own, as Neo4j takes them. A field of no such value, a day or a month beside a day of the week, a number that is not
+     * whole, or a number written past its field's range (see {@link TRUNCATION_RANGES}; a microsecond beside a millisecond
+     * given or kept by a cut to `unit` runs to 999), fails, where a store would carry it into the next field or fail on it
+     * at its own time. A field that is null is given as its least, as a map that leaves it out makes a value: the year 0,
+     * the first month, day or day of the week, and no time; a time zone that is null fails. Fields the stores have no SQL
+     * for yet (nanoseconds, the fields of a week or a quarter, a time zone by name) are refused. As drivine4j's #468.
+     */
+    private truncationFields(
+        fn: FunctionCall,
+        unit: string,
+        kind: Temporal,
+        written: Expression,
+        scope: Scope
+    ): Overrides {
+        // Null gives no fields, as Neo4j has it.
+        if (isNullLiteral(written)) {
+            return { fields: {} };
+        }
+        if (written.kind !== 'MapLiteral') {
+            return unsupported("A truncation's fields that an expression gives");
+        }
+        const keys = truncationKeys(fn, kind, written.entries);
+        const millis = keys.has('millisecond') || unit === 'millisecond';
+        let timezone: string | undefined;
+        const fields: Record<string, string> = {};
+        for (const [key, value] of written.entries) {
+            if (key === 'timezone') {
+                timezone = truncationZone(fn, value);
+            } else {
+                fields[key] = this.truncationNumber(fn, key, value, millis, scope);
+            }
+        }
+        return { fields, timezone };
+    }
+
+    /**
+     * The SQL number of the field `key` of a truncation of `fn`, which `value` gives: see {@link truncationFields}. With
+     * `millis`, a millisecond is given or kept, beside which a microsecond runs to 999.
+     */
+    private truncationNumber(fn: FunctionCall, key: string, value: Expression, millis: boolean, scope: Scope): string {
+        const least = TRUNCATION_LEAST[key] ?? 0;
+        const literal = writtenNumber(value);
+        if (literal === null) {
+            return `${least}`;
+        }
+        if (literal === undefined) {
+            return `COALESCE(${this.numberOf(this.expression(value, scope))}, ${least})`;
+        }
+        return `${truncationWhole(fn, key, literal, millis)}`;
     }
 
     private between(call: Invocation): Value {
@@ -5763,12 +7299,19 @@ export class CypherWriter {
         }
     }
 
-    /** A value as a condition: a boolean as itself, JSON's `true` and `false` as theirs, anything else as null. */
+    /**
+     * A value as a condition: a boolean as itself, JSON's `true` and `false` as theirs, anything else as null. One the
+     * statement writes as a value of another kind ({@link JsonValue.known}) is refused, as Neo4j refuses it when it plans
+     * the statement.
+     */
     private condition(value: Value): string {
         if (value.kind === 'Bool') {
             return value.sql;
         }
         if (value.kind === 'Json') {
+            if (value.known !== undefined && value.known !== 'BOOLEAN') {
+                throw new DrivineError(`${capitalNounOf(value.known)} is not a condition, as in Neo4j.`);
+            }
             return this.sql.boolOf(this.sql.comparable(value));
         }
         throw new DrivineError('A node, a relationship or a path is not a condition.');
@@ -5808,6 +7351,10 @@ export class CypherWriter {
         }
         if (value.kind !== 'Json' || value.temporal !== undefined || this.isText(value)) {
             return [this.sql.comparable(this.asJson(value)), (it) => [this.sql.sortKey(it)]];
+        }
+        // One that may be JSON's null ties it with SQL's, so the next term decides between them (#497).
+        if (this.mayBeJsonNull(value)) {
+            return [this.sql.comparable(this.asJson(value)), (it) => this.sql.jsonNullSortKey(it)];
         }
         return [this.sql.comparable(this.asJson(value)), (it) => this.sql.openSortKey(it)];
     }
@@ -5900,4 +7447,85 @@ function grouped(terms: string[], operator: string): string {
 function reversed(relationship: RelationshipPattern): RelationshipPattern {
     const directions = { OUTGOING: 'INCOMING', INCOMING: 'OUTGOING', EITHER: 'EITHER' } as const;
     return { ...relationship, direction: directions[relationship.direction] };
+}
+
+/**
+ * The variables of `scope` that `expression` names outside its aggregates, and outside each part of it `keys` holds (by
+ * {@link expressionKey}), a comprehension's, a quantifier's, a reduce's or a pattern's body among them, but for those it
+ * binds or `local` holds. A pattern binds each of its variables not of `scope`, and in its parts, as Neo4j reads them,
+ * a key is only one that is a variable: `q.name = p.name` in a pattern comprehension's WHERE names `p`, though `p.name`
+ * is a key. A subquery's own query is read for none.
+ */
+function namedOutside(
+    expression: Expression,
+    local: ReadonlySet<string>,
+    scope: ReadonlySet<string>,
+    keys: ReadonlyMap<string, Expression>
+): Set<string> {
+    const outside = (part: Expression | undefined, inner: ReadonlySet<string> = local): string[] =>
+        part ? [...namedOutside(part, inner, scope, keys)] : [];
+    const within = (...names: string[]): Set<string> => new Set([...local, ...names]);
+    if (isAggregate(expression) || keys.has(expressionKey(expression))) {
+        return new Set();
+    }
+    switch (expression.kind) {
+        case 'Variable':
+            return new Set([expression.name].filter((it) => scope.has(it) && !local.has(it)));
+        case 'MapProjection':
+            // A map projection of a key reads the key, as Neo4j reads it.
+            return new Set([
+                ...outside({ kind: 'Variable', name: expression.variable }),
+                ...children(expression).flatMap((it) => outside(it))
+            ]);
+        case 'ListComprehension':
+            return new Set([
+                ...outside(expression.list),
+                ...outside(expression.where, within(expression.variable)),
+                ...outside(expression.projection, within(expression.variable))
+            ]);
+        case 'Quantifier':
+            return new Set([...outside(expression.list), ...outside(expression.where, within(expression.variable))]);
+        case 'Reduce':
+            return new Set([
+                ...outside(expression.initial),
+                ...outside(expression.list),
+                ...outside(expression.expression, within(expression.accumulator, expression.variable))
+            ]);
+        case 'PatternComprehension':
+        case 'PatternPredicate':
+        case 'Exists':
+            return namedInPatterns(expression, local, scope, keys);
+        default:
+            return new Set(children(expression).flatMap((it) => outside(it)));
+    }
+}
+
+/**
+ * What {@link namedOutside} gives of a pattern comprehension, a pattern predicate or `EXISTS { … }` of patterns: each
+ * variable of `scope` its patterns name, and those its condition and projection name outside the variables its patterns
+ * bind, each of its variables not of `scope`; in those, of `keys`, only a variable is a key.
+ */
+function namedInPatterns(
+    expression: PatternComprehension | PatternPredicate | Exists,
+    local: ReadonlySet<string>,
+    scope: ReadonlySet<string>,
+    keys: ReadonlyMap<string, Expression>
+): Set<string> {
+    const variables = new Map([...keys].filter(([, it]) => it.kind === 'Variable'));
+    const patterned = (pattern: Pattern, parts: (Expression | undefined)[]): string[] => {
+        const named = [...variablesOfPattern(pattern), ...(pattern.variable ? [pattern.variable] : [])];
+        const bound = new Set([...local, ...named.filter((it) => !scope.has(it))]);
+        return [
+            ...named.filter((it) => scope.has(it) && !local.has(it)),
+            ...parts.flatMap((part) => (part ? [...namedOutside(part, bound, scope, variables)] : []))
+        ];
+    };
+    switch (expression.kind) {
+        case 'PatternComprehension':
+            return new Set(patterned(expression.pattern, [expression.where, expression.projection]));
+        case 'PatternPredicate':
+            return new Set(patterned(expression.pattern, []));
+        default:
+            return new Set(expression.patterns.flatMap((it) => patterned(it, [expression.where])));
+    }
 }

@@ -9,10 +9,12 @@ export interface Temporal {
     readonly zoned: boolean;
     /** Whether a value of this kind is a moment or a time of day, which a duration is added to. */
     readonly instant: boolean;
+    /** The name of the function that makes a value of this kind: `date`, `localdatetime`… */
+    readonly function: string;
 }
 
 function kind(name: Temporal['name'], pattern: string, zoned: boolean = false): Temporal {
-    return { name, pattern, zoned, instant: name !== 'DURATION' };
+    return { name, pattern, zoned, instant: name !== 'DURATION', function: name.toLowerCase().replace(/_/g, '') };
 }
 
 const DATE = kind('DATE', '^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
