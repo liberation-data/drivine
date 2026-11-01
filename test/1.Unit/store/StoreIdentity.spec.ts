@@ -89,6 +89,8 @@ interface Neo4jStore {
     resolver: StoreIdentityResolver;
     creates: () => number;
     merges: () => number;
+    /** The pauses the resolver took between looks for the winner's constraint, given a sleep that doesn't wait. */
+    pauses: number[];
 }
 
 /**
@@ -112,6 +114,7 @@ const neo4jStore = (
     let creates = 0;
     let shows = 0;
     let merges = 0;
+    const pauses: number[] = [];
     const connection = {
         query: async (spec: QuerySpecification<unknown>) => {
             const statement = spec.statement.text;
@@ -158,9 +161,18 @@ const neo4jStore = (
     } as unknown as PersistenceManager;
     const constraints = new ConstraintManager(new SchemaExecutor(provider), schemaGrammarFor(DatabaseType.NEO4J));
     return {
-        resolver: new StoreIdentityResolver(persistenceManager, backendFor(DatabaseType.NEO4J), constraints),
+        resolver: new StoreIdentityResolver(
+            persistenceManager,
+            backendFor(DatabaseType.NEO4J),
+            constraints,
+            async (millis) => {
+                pauses.push(millis);
+                return Promise.resolve();
+            }
+        ),
         creates: () => creates,
-        merges: () => merges
+        merges: () => merges,
+        pauses
     };
 };
 
@@ -274,7 +286,8 @@ describe('Managers making the store key constraint at once', () => {
     });
 
     it('should not ensure the constraint again for a deadlock the schema executor already gave up on', async () => {
-        // The executor ran it as many times as it runs one; ensuring again would run it as many times again, each.
+        // The executor ran it as many times as it runs one; ensuring again would run it as many times again, each. It is
+        // ensured once more only after the looks for the winner's constraint, which find none.
         const deadlock = new Neo4jError(
             "ForsetiClient can't acquire EXCLUSIVE LABEL: the lock its index already exists under is held. Deadlock wait cycle.",
             'Neo.TransientError.Transaction.DeadlockDetected'
@@ -282,7 +295,7 @@ describe('Managers making the store key constraint at once', () => {
         const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], deadlock, false);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        expect(creates()).toEqual(2 * CONTENDED_ATTEMPTS);
         expect(warned()).toContain('best-effort');
     });
 
@@ -322,7 +335,7 @@ describe('Managers making the store key constraint at once', () => {
 
     it("should look for the winner's constraint only so long after the deadlocks, and then warn", async () => {
         let looks = 0;
-        const { resolver }: Neo4jStore = neo4jStore(
+        const { resolver, pauses }: Neo4jStore = neo4jStore(
             Number.MAX_SAFE_INTEGER,
             [],
             undefined,
@@ -332,19 +345,59 @@ describe('Managers making the store key constraint at once', () => {
         );
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        // The ensure's own look, then the resolver's eight (LOOKS_FOR_THE_WINNER) after it gave up.
-        expect(looks).toEqual(1 + 8);
+        // The ensure's own look, the resolver's eight (LOOKS_FOR_THE_WINNER) after it gave up, then the last ensure's.
+        expect(looks).toEqual(1 + 8 + 1);
+        // Before each look but the first, as many 50 ms as looks so far, and by chance up to as much again.
+        expect(pauses).toHaveLength(7);
+        pauses.forEach((pause, i) => {
+            expect(pause).toBeGreaterThanOrEqual((i + 1) * 50);
+            expect(pause).toBeLessThan((i + 1) * 100);
+        });
+        expect(warned()).toContain('best-effort');
+    });
+
+    it("should ensure the constraint once more when the looks for the winner's find none, and write the stamp under it", async () => {
+        // The other managers have stopped making it, or given up: the last ensure makes it, so no stamp goes unguarded.
+        const conflict = new Error('Cannot resolve conflicting transactions. You can retry this transaction.');
+        const { resolver, creates, merges, pauses }: Neo4jStore = neo4jStore(CONTENDED_ATTEMPTS, [conflict]);
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(CONTENDED_ATTEMPTS + 1);
+        expect(pauses).toHaveLength(7);
+        // Under the constraint made, a conflict is a lost race, and the stamp is written again.
+        expect(merges()).toEqual(2);
+        expect(warned()).not.toContain('best-effort');
+    });
+
+    it("should look for the winner's constraint once, without a pause, after a refusal that isn't contention", async () => {
+        // No permission to make it: no winner is still making it, so the warning doesn't wait out the looks.
+        let looks = 0;
+        const { resolver, creates, pauses }: Neo4jStore = neo4jStore(
+            Number.MAX_SAFE_INTEGER,
+            [],
+            new Neo4jError('Schema operation denied', 'Neo.ClientError.Security.Forbidden'),
+            false,
+            DatabaseType.NEO4J,
+            (_, shows) => (looks = shows) < 0
+        );
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(creates()).toEqual(1);
+        // The ensure's own look, then the resolver's one.
+        expect(looks).toEqual(1 + 1);
+        expect(pauses).toEqual([]);
         expect(warned()).toContain('best-effort');
     });
 
     it('should run the constraint at most twice refused at once and then as many times as the executor runs one', async () => {
         // The worst case: ensured again for each refusal made meanwhile, until the last ensure, whose deadlocks the
-        // executor runs again in full. Not three ensures of CONTENDED_ATTEMPTS each.
+        // executor runs again in full, and once more after the looks for the winner's constraint find none. Not three
+        // ensures of CONTENDED_ATTEMPTS each, then three more.
         const refusal = new Error('There already exists an index (:DrivineStore {key}).');
         const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], [refusal, refusal], false);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(2 + CONTENDED_ATTEMPTS);
+        expect(creates()).toEqual(2 + 2 * CONTENDED_ATTEMPTS);
         expect(warned()).toContain('best-effort');
     });
 
