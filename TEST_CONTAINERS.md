@@ -67,7 +67,10 @@ release that changes what Drivine reads or writes shows up at once. To hold an e
 CI holds FalkorDB at a release that passes, with `FALKORDB_TEST_IMAGE` in
 [`ci.yml`](.github/workflows/ci.yml): Docker Hub's `falkordb/falkordb:latest` is sometimes a 4.x patch release, which
 has no `=~` ([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)). CI's nightly run leaves the
-pin out and runs `latest`, so it shows when the pin can move or go.
+pin out, so it shows when the pin can move or go, and runs `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's
+`latest`: Docker Hub's is whichever release FalkorDB pushed last, and that can be an older line's backport, as `v4.22.3`
+took it after `6.0.3`, while ghcr.io's is FalkorDB's newest release. Once Docker Hub's `latest` follows FalkorDB's
+newest line again, the nightly can go back to it.
 
 ## The Cypher spec
 
