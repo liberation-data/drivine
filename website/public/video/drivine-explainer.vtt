@@ -1,0 +1,341 @@
+WEBVTT
+
+1
+00:00:01.000 --> 00:00:06.200
+Drivine is a graph database client, for
+Kotlin and Java, TypeScript and Python.
+
+2
+00:00:06.360 --> 00:00:11.640
+It works with graph databases like Neo4j,
+FalkorDB and Memgraph, and with relational
+
+3
+00:00:11.640 --> 00:00:14.920
+databases like Postgres,
+Oracle and SQLite.
+
+4
+00:00:15.160 --> 00:00:16.360
+It works at two levels.
+
+5
+00:00:16.855 --> 00:00:21.415
+The persistence manager runs your queries,
+written in Cypher, even on a relational
+
+6
+00:00:21.415 --> 00:00:22.415
+database.
+
+7
+00:00:22.535 --> 00:00:25.975
+And the stateless graph object manager
+maps your graph to objects.
+
+8
+00:00:27.640 --> 00:00:30.200
+But it's not a traditional
+object graph mapper.
+
+9
+00:00:30.360 --> 00:00:34.520
+Those start from one big model of your
+domain, and generate queries from it.
+
+10
+00:00:34.760 --> 00:00:39.240
+The model doesn't fit every use case, so you
+fetch too much, or too little, and
+
+11
+00:00:39.240 --> 00:00:40.240
+it's slow.
+
+12
+00:00:40.240 --> 00:00:45.265
+Drivine takes its cue from GraphQL, and
+from composition over inheritance.
+
+13
+00:00:45.505 --> 00:00:50.705
+You compose small, reusable fragments into a
+view for each use case, and Drivine
+
+14
+00:00:50.705 --> 00:00:52.465
+loads it in a single statement.
+
+15
+00:00:52.625 --> 00:00:53.665
+That's why it's fast.
+
+16
+00:00:55.193 --> 00:00:56.793
+So why a graph at all?
+
+17
+00:00:56.873 --> 00:01:00.953
+A graph lets you think in networks, and
+bring graph data science to them.
+
+18
+00:01:01.353 --> 00:01:03.353
+And it's a great fit for AI apps.
+
+19
+00:01:03.353 --> 00:01:06.313
+Take retrieval augmented
+generation, or RAG.
+
+20
+00:01:06.473 --> 00:01:10.158
+Before a language model answers, you search
+your own documents for the passages
+
+21
+00:01:10.158 --> 00:01:13.758
+closest to the question, and give
+them to the model as context.
+
+22
+00:01:14.238 --> 00:01:18.878
+Usually those passages are chunks in a vector
+store, each cut off from its document,
+
+23
+00:01:18.878 --> 00:01:21.278
+its neighbours, and the
+things it talks about.
+
+24
+00:01:21.678 --> 00:01:24.613
+So the model gets fragments,
+without their context.
+
+25
+00:01:25.013 --> 00:01:27.813
+In a graph, a match comes with
+what it's connected to.
+
+26
+00:01:27.973 --> 00:01:29.493
+That's graph RAG.
+
+27
+00:01:29.493 --> 00:01:33.594
+But it usually means picking a graph
+database first, and staying on it.
+
+28
+00:01:33.594 --> 00:01:37.914
+Drivine aims to give you the cutting-edge
+experience of working in the graph paradigm,
+
+29
+00:01:37.914 --> 00:01:40.474
+with whatever database you have, in
+the language you work in.
+
+30
+00:01:42.073 --> 00:01:45.913
+Here's graph RAG as Embabel does
+it, in its graph RAG module.
+
+31
+00:01:45.913 --> 00:01:48.873
+Embabel is an agent framework for the JVM.
+
+32
+00:01:48.873 --> 00:01:52.953
+A chunk is a fragment, with a vector index,
+and a view adds what it's connected
+
+33
+00:01:52.953 --> 00:01:53.953
+to.
+
+34
+00:01:53.953 --> 00:01:58.368
+The stateless graph object manager loads the
+nearest chunks by vector, with everything
+
+35
+00:01:58.368 --> 00:02:00.128
+the view names, in one statement.
+
+36
+00:02:00.608 --> 00:02:04.768
+Essentially the whole of Embabel's graph RAG
+uses the graph object manager, and
+
+37
+00:02:04.768 --> 00:02:07.488
+Drivine takes care of writing the
+queries and statements:
+
+38
+00:02:07.648 --> 00:02:12.528
+in each platform's flavour of Cypher, or
+in SQL or SQL/PGQ, as needed.
+
+39
+00:02:14.140 --> 00:02:16.060
+The database is configuration.
+
+40
+00:02:16.540 --> 00:02:22.860
+The same code runs on Neo4j, FalkorDB and
+Memgraph, and on Postgres, Oracle and
+
+41
+00:02:22.860 --> 00:02:25.820
+SQLite, which don't run Cypher themselves.
+
+42
+00:02:26.300 --> 00:02:30.533
+There, Drivine keeps the graph in
+two tables and writes SQL.
+
+43
+00:02:30.933 --> 00:02:34.053
+Move from one to another, and
+nothing in your code changes.
+
+44
+00:02:35.593 --> 00:02:39.993
+You can write plain openCypher on any of
+these stores, even the relational ones:
+
+45
+00:02:40.233 --> 00:02:45.673
+on Postgres, Oracle and SQLite, Drivine
+compiles it to SQL, and gives back the
+
+46
+00:02:45.673 --> 00:02:47.273
+same rows as a graph engine.
+
+47
+00:02:47.673 --> 00:02:49.833
+But the object manager saves you time:
+
+48
+00:02:49.993 --> 00:02:54.084
+it uses your types, writes the
+queries, and maps the results.
+
+49
+00:02:54.324 --> 00:02:58.164
+So use it wherever it makes your life
+easier, and fall back to Cypher for your
+
+50
+00:02:58.164 --> 00:02:59.164
+custom queries.
+
+51
+00:03:00.540 --> 00:03:01.820
+Here it is running.
+
+52
+00:03:01.820 --> 00:03:06.140
+Guide is an Embabel agent that answers
+questions from Embabel's own documentation.
+
+53
+00:03:06.460 --> 00:03:10.940
+Its store is built on Drivine's stateless
+graph object manager, and runs on any
+
+54
+00:03:10.940 --> 00:03:12.060
+of the supported databases.
+
+55
+00:03:12.867 --> 00:03:16.227
+Could you show me what, an
+agent looks like?
+
+56
+00:03:16.227 --> 00:03:19.907
+Show me some code in Kotlin for
+a simple Embabel agent.
+
+57
+00:03:19.907 --> 00:03:22.867
+Here's a simple Embabel agent
+written in Kotlin.
+
+58
+00:03:22.867 --> 00:03:24.307
+Jasper for a horoscope.
+
+59
+00:03:24.307 --> 00:03:28.047
+The agent Graph RAG is one way
+graphs help an AI app.
+
+60
+00:03:28.207 --> 00:03:32.127
+You can also build an agent's memory and
+conversation history, knowledge graphs
+
+61
+00:03:32.127 --> 00:03:34.767
+it can reason over, and the
+domain model it works in.
+
+62
+00:03:35.087 --> 00:03:39.712
+For example, Embabel's chat store keeps an
+agent's conversations, with a vector
+
+63
+00:03:39.712 --> 00:03:44.272
+for every message, on any of the
+supported databases, through Drivine.
+
+64
+00:03:44.272 --> 00:03:48.352
+And DICE builds knowledge graphs of
+propositions an agent reasons over, on any
+
+65
+00:03:48.352 --> 00:03:49.952
+of Drivine's supported databases.
+
+66
+00:03:51.700 --> 00:03:56.580
+Drivine also ships with Studio, an optional tool
+that comes in handy during development.
+
+67
+00:03:57.060 --> 00:04:02.100
+Run ad hoc Cypher, or load your Drivine models
+and see what each view brings back.
+
+68
+00:04:02.100 --> 00:04:06.340
+Drivine is open source, for Kotlin and
+Java, TypeScript and Python.
+
+69
+00:04:06.955 --> 00:04:10.875
+Build AI apps on the database you already
+run, and keep the freedom to move.
+
+70
+00:04:10.875 --> 00:04:15.851
+Drivine is the database integration layer
+for Embabel, the AI agent framework
+
+71
+00:04:15.851 --> 00:04:20.651
+for the JVM, created by Rod Johnson, who
+also created the Spring Framework.
+
+72
+00:04:20.651 --> 00:04:23.131
+Drivine was created by Jasper Blues.
+
