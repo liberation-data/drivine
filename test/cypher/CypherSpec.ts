@@ -95,10 +95,11 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
         // The greatest whole number and the least, written as literals.
         'Integer bounds': [[[1], BEYOND_2_53]],
         // A sum past a long's range, which Postgres and Oracle sum exactly as yet (#472), and one that reaches the
-        // greatest whole number and the least, which Neo4j gives as an integer.
+        // greatest whole number and the least, which Neo4j gives as an integer; and on SQLite, a sum past the greatest,
+        // which SQLite's sum() refuses as an integer overflow, where the compiler here reads the literal as a float.
         'Aggregates of floats': [
             [[13, 14, 15, 16], BEYOND_2_53_ON_SQL],
-            [[17, 18], BEYOND_2_53]
+            [[17, 18, 19], BEYOND_2_53]
         ],
         // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, toString($seven) of
         // seven = 1.0e+7, and toString($f * 2).
