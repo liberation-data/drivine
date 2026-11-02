@@ -31,11 +31,11 @@ export class SqlitePatterns {
         if (!found) {
             // A leading `(?i)` ignores case, as Cypher's `=~` reads it, and `\z` is the end of the text, as Java writes it.
             const ignoreCase = expression.startsWith('(?i)');
-            const source = POSIX.reduce(
+            const java = POSIX.reduce(
                 (text, [posix, js]) => text.split(posix).join(js),
-                scopedFlags((ignoreCase ? expression.slice(4) : expression).replace(/\\z/g, '$'))
+                (ignoreCase ? expression.slice(4) : expression).replace(/\\z/g, '$')
             );
-            found = new RegExp(source, `u${flags}${ignoreCase ? 'i' : ''}`);
+            found = compiled(java, `u${flags}${ignoreCase ? 'i' : ''}`);
             if (this.compiled.size >= SqlitePatterns.MAX) {
                 this.compiled.delete(this.compiled.keys().next().value!);
             }
@@ -43,6 +43,25 @@ export class SqlitePatterns {
         }
         found.lastIndex = 0;
         return found;
+    }
+}
+
+/**
+ * `java` as JavaScript reads it, with `flags`. A flag group within it is a group of its own (see {@link scopedFlags}),
+ * which Node 22's JavaScript does not read: there, where each flag group only turns flags on, they are turned on for the
+ * whole expression, which is the same where the group runs to its end but for anchors, as in the `^(?:(?i)abc)\z`
+ * compiled Cypher's `=~ '(?i)abc'` gives.
+ */
+function compiled(java: string, flags: string): RegExp {
+    try {
+        return new RegExp(scopedFlags(java), flags);
+    } catch (e) {
+        const groups = [...java.matchAll(new RegExp(FLAGS.source.slice(1), 'g'))].map((it) => it[1]);
+        if (groups.length === 0 || groups.some((it) => it.includes('-'))) {
+            throw e;
+        }
+        const on = [...new Set(groups.join(''))].filter((it) => !flags.includes(it)).join('');
+        return new RegExp(java.replace(new RegExp(FLAGS.source.slice(1), 'g'), ''), `${flags}${on}`);
     }
 }
 
