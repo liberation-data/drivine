@@ -1219,8 +1219,8 @@ export class CypherWriter {
         coalesce: (call) => {
             const written = call.fn.arguments.map((it, i): [Expression, Value] => [it, call.arguments[i]]);
             return json(
-                `COALESCE(${call.arguments
-                    .map((it) => this.sql.nullIfJsonNull(this.sql.comparable(this.asJson(it))))
+                `COALESCE(${written
+                    .map(([argument, value]) => this.coalesced(argument, value, call.scope))
                     .join(', ')})`,
                 {
                     temporal: this.kindOf(written),
@@ -5080,6 +5080,24 @@ export class CypherWriter {
             return undefined;
         }
         return this.parameters.jsonAt(subject.name, keys);
+    }
+
+    /**
+     * An argument of `coalesce()`, `value` as compiled from `argument`, null where it is JSON's null: a property of a
+     * node or a relationship a variable names as {@link SqlCypherCompiler.coalescedProperty} reads it, which on Oracle
+     * reads a long text through its text (liberation-data/drivine4j#459).
+     */
+    private coalesced(argument: Expression, value: Value, scope: Scope): string {
+        if (argument.kind === 'Property' && argument.subject.kind === 'Variable') {
+            const subject = scope.get(argument.subject.name);
+            if (subject?.kind === 'Node' && argument.key !== Stamps.PROPERTY) {
+                return this.sql.coalescedProperty(subject.props, argument.key);
+            }
+            if (subject?.kind === 'Relationship') {
+                return this.sql.coalescedProperty(subject.props, argument.key);
+            }
+        }
+        return this.sql.nullIfJsonNull(this.sql.comparable(this.asJson(value)));
     }
 
     /**
