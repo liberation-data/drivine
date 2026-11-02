@@ -1331,6 +1331,236 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
+        it('a text past 32 KB compares as equal, unequal, in a list and in order, stored, given and beside a long value, on several rows', async () => {
+            // On Oracle two values were compared as JSON: = and IN with a text past 32 KB on either side were refused
+            // (ORA-40180, #469), and <, >, <= and >= of one read from the store on two rows or more closed the session
+            // on the first run or a later one (ORA-03113). A node of another label holds the same text, and is not
+            // read. drivine4j's test of liberation-data/drivine4j#389.
+            await clear();
+            const long = `${'a'.repeat(40_000)}x`;
+            type Compared = string | bigint | null;
+            // Equal, equal again, differing in the last character either way, short, null, and a number.
+            const values: Compared[] = [
+                long,
+                long,
+                `${long.slice(0, -1)}y`,
+                `${long.slice(0, -1)}w`,
+                'abc',
+                null,
+                BigInt(5)
+            ];
+            // And a short text of each, to compare the long ones with through a long value.
+            const shorts = ['abc', 'zzz', 'a', null, 'abc', 'b', 'q'];
+            for (const i of values.keys()) {
+                await query('CREATE (:CyCompare {i: $i, t: $t, s: $s})', { i: BigInt(i), t: values[i], s: shorts[i] });
+            }
+            await query('CREATE (:CyCompareOther {i: 0, t: $t})', { t: long });
+            // As Cypher compares two values: null beside null, a text and a number are not equal and are not ordered.
+            const compared = (a: Compared, operator: string, b: Compared): boolean | null => {
+                if (a === null || b === null) {
+                    return null;
+                }
+                if (typeof a !== typeof b) {
+                    return operator === '=' ? false : operator === '<>' ? true : null;
+                }
+                const order = a < b ? -1 : a > b ? 1 : 0;
+                const orders: Record<string, boolean> = {
+                    '=': order === 0,
+                    '<>': order !== 0,
+                    '<': order < 0,
+                    '>': order > 0,
+                    '<=': order <= 0,
+                    '>=': order >= 0
+                };
+                return orders[operator];
+            };
+            // An empty text, which Oracle reads as null, as a VARCHAR2 and as a CLOB, comes before any other.
+            const given: Record<string, Compared> = {
+                same: long,
+                last: `${long.slice(0, -1)}y`,
+                short: 'abc',
+                empty: '',
+                none: null,
+                number: BigInt(5)
+            };
+            const list: Compared[] = [long, 'abc', BigInt(5)];
+            // A value too long to write as SQL, so bound beside the property: the issue's own form, of a node's short
+            // text, and of a long text a parameter gives.
+            const bound = 'toLower(trim(coalesce($p.q, m.s)))';
+            const boundLong = 'toLower(trim(coalesce($p.q, $same)))';
+            const pairs = values.flatMap((_a, i) => values.map((_b, j): [number, number] => [i, j]));
+            const count = (of: (boolean | null)[]): number[] => [of.filter((it) => it === true).length];
+            // Texts of an unwound parameter's items, two of them long, compared in a read.
+            const rows = [long, `${long.slice(0, -1)}y`, 'abc'];
+            const parameters = {
+                ...given,
+                p: { q: null },
+                list,
+                shortList: ['abc', BigInt(5), null],
+                prefix: long.substring(0, 32_768),
+                rows: rows.map((a) => ({ a }))
+            };
+            const statements: [string, unknown[]][] = [];
+            for (const operator of ['=', '<>', '<', '>', '<=', '>=']) {
+                const stored = pairs.map(([i, j]) => compared(values[i], operator, values[j]));
+                const beside = pairs.map(([i, j]) => compared(values[i], operator, shorts[j]));
+                const unwound = rows.flatMap((row) => values.map((it) => compared(it, operator, row)));
+                statements.push(
+                    [`MATCH (n:CyCompare), (m:CyCompare) RETURN n.t ${operator} m.t ORDER BY n.i, m.i`, stored],
+                    [`MATCH (n:CyCompare), (m:CyCompare) WHERE n.t ${operator} m.t RETURN count(*)`, count(stored)],
+                    [`MATCH (n:CyCompare), (m:CyCompare) RETURN n.t ${operator} ${bound} ORDER BY n.i, m.i`, beside],
+                    [
+                        `MATCH (n:CyCompare), (m:CyCompare) WHERE n.t ${operator} ${bound} RETURN count(*)`,
+                        count(beside)
+                    ],
+                    [
+                        `MATCH (n:CyCompare) RETURN n.t ${operator} ${boundLong} ORDER BY n.i`,
+                        values.map((it) => compared(it, operator, long))
+                    ],
+                    [`UNWIND $rows AS r MATCH (n:CyCompare) WHERE n.t ${operator} r.a RETURN count(*)`, count(unwound)]
+                );
+                for (const [name, value] of Object.entries(given)) {
+                    statements.push(
+                        [
+                            `MATCH (n:CyCompare) RETURN n.t ${operator} $${name} ORDER BY n.i`,
+                            values.map((it) => compared(it, operator, value))
+                        ],
+                        // A value a WITH passes on, which may be JSON's null, rather than a property read from the store.
+                        [
+                            `MATCH (n:CyCompare) WITH n.i AS i, n.t AS t RETURN t ${operator} $${name} ORDER BY i`,
+                            values.map((it) => compared(it, operator, value))
+                        ]
+                    );
+                    for (const [other, otherValue] of Object.entries(given)) {
+                        statements.push([
+                            `WITH $${name} AS a, $${other} AS b RETURN a ${operator} b`,
+                            [compared(value, operator, otherValue)]
+                        ]);
+                    }
+                }
+            }
+            // IN, of a list the statement writes, of one a parameter gives, and of a bound value's.
+            const inLists = pairs.map(([i, j]) =>
+                values[i] === null || values[j] === null ? null : values[i] === values[j]
+            );
+            const inBound = pairs.map(([i, j]) =>
+                values[i] === null || shorts[j] === null ? null : values[i] === shorts[j]
+            );
+            const inGiven = values.map((it) => (it === null ? null : list.includes(it)));
+            const inShort = values.map((it) => (it === null ? null : ['abc', BigInt(5)].includes(it)));
+            statements.push(
+                ['MATCH (n:CyCompare), (m:CyCompare) RETURN n.t IN [m.t] ORDER BY n.i, m.i', inLists],
+                ['MATCH (n:CyCompare), (m:CyCompare) WHERE n.t IN [m.t] RETURN count(*)', count(inLists)],
+                [`MATCH (n:CyCompare), (m:CyCompare) RETURN n.t IN [${bound}] ORDER BY n.i, m.i`, inBound],
+                [`MATCH (n:CyCompare), (m:CyCompare) WHERE n.t IN [${bound}] RETURN count(*)`, count(inBound)],
+                [
+                    `MATCH (n:CyCompare) RETURN n.t IN [${boundLong}, 'x'] ORDER BY n.i`,
+                    values.map((it) => (it === null ? null : it === long))
+                ],
+                ['MATCH (n:CyCompare) RETURN n.t IN $list ORDER BY n.i', inGiven],
+                ['MATCH (n:CyCompare) WHERE n.t IN $list RETURN count(*)', count(inGiven)],
+                // Of short items only, written or given, which on Oracle test only the property: null where it is a
+                // longer text, so not in. A given list that holds a null makes each miss null.
+                ["MATCH (n:CyCompare) RETURN n.t IN ['abc', 5] ORDER BY n.i", inShort],
+                ["MATCH (n:CyCompare) WHERE n.t IN ['abc', 5] RETURN count(*)", count(inShort)],
+                [
+                    'MATCH (n:CyCompare) RETURN n.t IN $shortList ORDER BY n.i',
+                    inShort.map((it) => (it === true ? true : null))
+                ],
+                ['MATCH (n:CyCompare) WHERE n.t IN $shortList RETURN count(*)', count(inShort)],
+                // The same of a value a WITH passes on, and of a long one bound beside the list, which on Oracle is
+                // tested beside the EXISTS that compares it with each item as JSON, and must not be so compared. (The
+                // bound value is a parameter's: one made so of a stored text past 32 KB closes the session on main too,
+                // liberation-data/drivine4j#459.)
+                [
+                    'MATCH (n:CyCompare) WITH n.i AS i, n.t AS t RETURN t IN $shortList ORDER BY i',
+                    inShort.map((it) => (it === true ? true : null))
+                ],
+                ['MATCH (n:CyCompare) WITH n.t AS t WHERE t IN $shortList RETURN count(*)', count(inShort)],
+                [
+                    `MATCH (n:CyCompare) RETURN [${boundLong} IN ['abc', 5], toLower(trim(coalesce($p.q, $short))) IN ['abc', 5]] ORDER BY n.i`,
+                    values.map(() => [false, true])
+                ],
+                [`MATCH (n:CyCompare) WHERE ${boundLong} IN ['abc', 5] RETURN count(*)`, [0]],
+                // A long text the statement makes, beside no property and no long value.
+                ['WITH $same AS t, $prefix AS x RETURN substring(t, 0, 32768) = x', [true]],
+                [
+                    'WITH $same AS t RETURN [substring(t, 0, 40001) = t, substring(t, 0, 40000) = t, substring(t, 0, 40000) < t]',
+                    [[true, false, true]]
+                ]
+            );
+            await onOneSession(async (run) => {
+                // Oracle closed the session on the first run or a later one.
+                for (let i = 1; i <= 3; i++) {
+                    for (const [cypher, expected] of statements) {
+                        expect([cypher, i, await run(cypher)]).toEqual([cypher, i, expected]);
+                    }
+                }
+            }, parameters);
+            await clear();
+        }, 1_800_000);
+
+        it('a text past 32 KB is in no list of short items, null where one is null, on several rows', async () => {
+            // On Oracle, n.t IN $l with a null and an empty item or one past 4,000 bytes in $l closed the session
+            // (ORA-03113): where no item was equal, the property was taken out as JSON over two rows to tell null from
+            // false. drivine4j's test of liberation-data/drivine4j#475.
+            await clear();
+            const long = 'a'.repeat(40_000);
+            for (const i of [0, 1]) {
+                await query('CREATE (:CyInNull {i: $i, t: $t})', { i: BigInt(i), t: `${long}${i}` });
+            }
+            // Short items, and an empty one and one past 4,000 bytes, which are compared with the text as texts.
+            const lists: [unknown[], boolean | null][] = [
+                [['abc', BigInt(5), null], null],
+                [['abc', null], null],
+                [[null], null],
+                [['abc', BigInt(5)], false],
+                [['', null], null],
+                [['x'.repeat(5_000), null], null],
+                [['', 'abc'], false]
+            ];
+            const parameters = Object.fromEntries(lists.map(([items], i) => [`l${i}`, items]));
+            await onOneSession(async (run) => {
+                for (let r = 1; r <= 3; r++) {
+                    for (const [i, [items, found]] of lists.entries()) {
+                        const returned = `MATCH (n:CyInNull) RETURN n.t IN $l${i} ORDER BY n.i`;
+                        const filtered = `MATCH (n:CyInNull) WHERE n.t IN $l${i} RETURN count(*)`;
+                        expect([items, r, await run(returned)]).toEqual([items, r, [found, found]]);
+                        expect([items, r, await run(filtered)]).toEqual([items, r, [0]]);
+                    }
+                    // And written out, which is compared item by item.
+                    expect([r, await run("MATCH (n:CyInNull) RETURN n.t IN ['abc', 5, null] ORDER BY n.i")]).toEqual([
+                        r,
+                        [null, null]
+                    ]);
+                }
+            }, parameters);
+            await clear();
+        }, 600_000);
+
+        it('a text of 4,000 bytes compares as a short one, and one past 4,000 bytes but not 4,000 characters as a long one', async () => {
+            // On Oracle a text is compared as a VARCHAR2 up to 4,000 bytes, and as a CLOB past them (#469): counted in
+            // bytes, so '€', three bytes, makes a text of 1,335 characters past them.
+            await clear();
+            const at = `${'€'.repeat(1_333)}a`;
+            const past = `${at}b`;
+            for (const [i, t] of [at, past].entries()) {
+                await query('CREATE (:CyBytes {i: $i, t: $t})', { i: BigInt(i), t });
+            }
+            const parameters = { at, past, l: [past, null] };
+            expect(
+                await query(
+                    "MATCH (n:CyBytes) RETURN [n.t = $at, n.t = $past, n.t IN [$at, 'x'], n.t IN $l, n.t < $past] ORDER BY n.i",
+                    parameters
+                )
+            ).toEqual([
+                [true, false, true, null, true],
+                [false, true, false, true, false]
+            ]);
+            expect(await query("MATCH (n:CyBytes) WHERE n.t IN [$at, 'x'] RETURN n.i", parameters)).toEqual([0]);
+            await clear();
+        });
+
         it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
             // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
             // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its

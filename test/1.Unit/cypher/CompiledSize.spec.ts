@@ -23,6 +23,25 @@ describe('A compiled Cypher statement', () => {
     });
 
     it.each(compilers)(
+        'of two list literals of a hundred items, a null among them, compared item by item, is a few hundred characters an item on %s',
+        (_, compilerFor) => {
+            // Each pair of literal items tested on both sides for a text past 4,000 bytes made 80,907 characters on
+            // Oracle in drivine4j, about four times the 20,879 before (liberation-data/drivine4j#476).
+            const kinds = (i: number): string[] => [
+                `${i}`,
+                `'s${i}'`,
+                'null',
+                `${i}.5`,
+                'true',
+                `[${i}, 'n']`,
+                `{k: ${i}}`
+            ];
+            const items = `[${Array.from({ length: 100 }, (_item, i) => kinds(i)[i % 7]).join(', ')}]`;
+            expect(compilerFor().compile(`RETURN ${items} = ${items}`).sql.length).toBeLessThan(25_000);
+        }
+    );
+
+    it.each(compilers)(
         'grows with each duration added to a stored value, not exponentially, on %s',
         (_, compilerFor) => {
             const compiler = compilerFor();
@@ -323,10 +342,13 @@ describe('A compiled Cypher statement', () => {
                     })
                 )
             ).toBe(false);
-            // Nor of the list being null or holding a null, beside a value that holds none.
-            expect(
-                tested(compiled("MATCH (c:Claim) WHERE 'a' IN c.tags AND c.a IN $l RETURN c.id", { l: [1, null] }))
-            ).toBe(false);
+            // Nor of the list being null or holding a null, beside a value that holds none. On Oracle an item is
+            // compared with 'a' as JSON where it is read as a VARCHAR2 or is no text, nor a list or a map; else it is
+            // not equal (#469, drivine4j#476).
+            const nullable = compiled("MATCH (c:Claim) WHERE 'a' IN c.tags AND c.a IN $l RETURN c.id", {
+                l: [1, null]
+            });
+            expect(tested(nullable.replace(/ = JSON\('"a"'\) ELSE FALSE END/g, ''))).toBe(false);
             // Nor in a quantified path pattern's WHERE, which keeps a step where it is true.
             expect(tested(compiled('MATCH (a:Claim) ((x)-[:R]->(y) WHERE y.a IN [1, 2]){1,3} (b) RETURN b.id'))).toBe(
                 false
