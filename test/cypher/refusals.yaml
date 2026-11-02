@@ -418,6 +418,16 @@ cases:
       - cypher: "RETURN -9223372036854775809"
         error: "-9223372036854775809 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807."
 
+  - name: "Float too large"
+    description: "A float written past the greatest 64-bit float, either way, is refused, and not read as an infinity."
+    steps:
+      - cypher: "RETURN 1.34E999"
+        error: "1.34E999 is past the range of a float, from -1.7976931348623157E308 to 1.7976931348623157E308."
+      - cypher: "RETURN -1.34E999"
+        error: "-1.34E999 is past the range of a float, from -1.7976931348623157E308 to 1.7976931348623157E308."
+      - cypher: "RETURN 1.0E400 * 0"
+        error: "1.0E400 is past the range of a float, from -1.7976931348623157E308 to 1.7976931348623157E308."
+
   - name: "Write to a non-entity"
     description: "A write to an undefined variable, or to something that isn't a node or relationship, is refused."
     steps:

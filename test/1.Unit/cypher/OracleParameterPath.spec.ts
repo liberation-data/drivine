@@ -79,7 +79,6 @@ describe('A value in a map parameter in compiled Cypher', () => {
         };
         const sql = new OracleCypherCompiler('g').compile('RETURN [$p.l.x, $d.year, $b.text, $i.text]', given).sql;
         expect(sql).toContain(`JSON_QUERY(JSON_QUERY($_cy_p, '$.l' RETURNING JSON), '$.x' RETURNING JSON)`);
-        expect(sql).toContain('EXTRACT(YEAR FROM');
         expect(sql).toContain('JSON($_cy_d)');
         expect(sql).toContain(`JSON_QUERY(JSON($_cy_b), '$.text' RETURNING JSON)`);
         expect(sql).toContain(`JSON_QUERY(JSON($_cy_i), '$.text' RETURNING JSON)`);

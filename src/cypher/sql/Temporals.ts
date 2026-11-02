@@ -1,5 +1,5 @@
 import { Temporal } from '@/cypher/sql/Temporal';
-import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
+import { GUARDED_UP_TO, Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { canonicalTemporal } from '@/cypher/sql/TemporalText';
 import { literal } from '@/cypher/sql/CypherSyntax';
 
@@ -28,6 +28,9 @@ export interface Field {
 
 /** The kinds of a time of day, which no months are between. */
 const TIMES = [Temporal.TIME, Temporal.LOCAL_TIME];
+
+/** The {@link INSTANT_FIELDS} that read the timestamp once, on every store: see {@link TemporalSql.year}. */
+const READ_ONCE = ['year', 'quarter', 'month', 'week', 'day', 'ordinalDay', 'hour', 'minute'];
 
 /** The fields of a moment or a time of day read off its wall clock. */
 const INSTANT_FIELDS = [
@@ -131,7 +134,8 @@ const DURATION_FIELDS: Record<string, (m: string, d: string, s: string) => strin
  * text, as a store keeps a moment: `2024-03-01`, `10:30:00`, `10:30:00+02:00`, `2024-03-01T10:30:00`,
  * `2024-03-01T10:30:00.500Z`, `P1Y2M3DT4H`. A zoned value keeps the offset it was written with, its fields read on its
  * wall clock and compared as the moment it is. A duration is months, days and seconds, as Cypher's is, and as a
- * Postgres interval is.
+ * Postgres interval is. A year is numbered as Neo4j writes it, astronomically: `0000` is 1 BC and `-0044` is 45 BC, and
+ * each store's {@link TemporalSql} reads and writes a year BC as the store keeps one.
  *
  * Every argument and result is SQL: a text, a number, or with `shared` a value written once where it is read more than
  * once.
@@ -150,7 +154,9 @@ export class Temporals {
 
     constructor(
         private readonly sql: TemporalSql,
-        private readonly shared: Shared
+        private readonly shared: Shared,
+        /** Whether `shared` binds a long value in a subquery where the SQL is being written, rather than writing it out. */
+        private readonly binding: () => boolean = () => true
     ) {}
 
     // ----- Kinds -----
@@ -169,10 +175,7 @@ export class Temporals {
         body: (kind: Temporal, text: string) => string,
         kinds: Temporal[] = Temporal.instants
     ): string {
-        return this.shared(
-            [text],
-            ([t]) => `CASE ${kinds.map((it) => `WHEN ${this.isKind(t, it)} THEN ${body(it, t)}`).join(' ')} END`
-        );
+        return this.shared([text], ([t]) => this.ofKinds([t], kinds, (kind) => body(kind, t)));
     }
 
     // ----- Moments and times of day -----
@@ -183,22 +186,24 @@ export class Temporals {
      * null joins a text as the empty text.
      */
     format(timestamp: string, kind: Temporal, offset?: string): string {
-        return this.shared([timestamp], ([t]) => {
-            const time = `to_char(${t}, 'HH24:MI:SS') || ${this.fraction(t)}`;
-            const zone = offset ?? "'Z'";
-            const texts: Partial<Record<Temporal['name'], string>> = {
-                DATE: `to_char(${t}, 'YYYY-MM-DD')`,
-                LOCAL_DATE_TIME: `to_char(${t}, 'YYYY-MM-DD"T"') || ${time}`,
-                DATE_TIME: `to_char(${t}, 'YYYY-MM-DD"T"') || ${time} || ${zone}`,
-                LOCAL_TIME: time,
-                TIME: `${time} || ${zone}`
-            };
-            const text = texts[kind.name];
-            if (text === undefined) {
-                throw new Error('a duration is no moment');
-            }
-            return kind === Temporal.DATE ? text : `CASE WHEN ${t} IS NOT NULL THEN ${text} END`;
-        });
+        return this.shared([timestamp], ([t]) =>
+            this.sql.asAd(timestamp, [t], () => {
+                const time = `to_char(${t}, 'HH24:MI:SS') || ${this.fraction(t)}`;
+                const zone = offset ?? "'Z'";
+                const texts: Partial<Record<Temporal['name'], () => string>> = {
+                    DATE: () => this.sql.date(t),
+                    LOCAL_DATE_TIME: () => `${this.sql.date(t, '"T"')} || ${time}`,
+                    DATE_TIME: () => `${this.sql.date(t, '"T"')} || ${time} || ${zone}`,
+                    LOCAL_TIME: () => time,
+                    TIME: () => `${time} || ${zone}`
+                };
+                const text = texts[kind.name]?.();
+                if (text === undefined) {
+                    throw new Error('a duration is no moment');
+                }
+                return kind === Temporal.DATE ? text : `CASE WHEN ${t} IS NOT NULL THEN ${text} END`;
+            })
+        );
     }
 
     /**
@@ -213,7 +218,11 @@ export class Temporals {
 
     /** The text of `to` the text `text` of `from` is: a moment's date, a date's midnight, a local value's in UTC. */
     convert(text: string, from: Temporal, to: Temporal): string {
-        return this.shared([text], ([t]) => this.format(this.sql.local(t, from), to, this.offsetOf(t, from, to)));
+        return this.shared([text], ([t]) => {
+            // The wall clock kept is of the text's year, so is written as one from 1000 on where the text's is.
+            const clock = this.sql.local(t, from);
+            return this.sql.asAd(t, [clock], () => this.format(clock, to, this.offsetOf(t, from, to)));
+        });
     }
 
     /** The text of `to` the text `text` is, whatever kind its shape tells: null where it is none. */
@@ -301,7 +310,7 @@ export class Temporals {
                     time,
                     timezone,
                     kind,
-                    (day) => `${whole(y, n)} AND ${n} >= 1 AND EXTRACT(YEAR FROM ${day}) = ${y}`
+                    (day) => `${whole(y, n)} AND ${n} >= 1 AND ${this.sql.year(day)} = ${y}`
                 )
             );
         }
@@ -407,7 +416,20 @@ export class Temporals {
         if (!INSTANT_FIELDS.includes(name)) {
             return undefined;
         }
-        return { sql: this.shared([this.sql.local(text, kind)], ([t]) => this.clockField(t, name)), text: false };
+        if (name === 'year') {
+            const year = this.sql.textYear(text, kind);
+            if (year !== undefined) {
+                return { sql: year, text: false };
+            }
+        }
+        // A field read from the timestamp once is read where it is: bound, a stored date's year was a subquery for each row.
+        const local = this.sql.local(text, kind);
+        return {
+            sql: READ_ONCE.includes(name)
+                ? this.clockField(local, name)
+                : this.shared([local], ([t]) => this.clockField(t, name)),
+            text: false
+        };
     }
 
     /** The text of `kind` the duration text `duration` after the text `text` of it, or with `sign` -1 before: a zoned value keeps its offset. */
@@ -427,11 +449,8 @@ export class Temporals {
      */
     addToAny(text: string, duration: string, sign: number): string {
         return this.shared([text, duration], ([t, d]) => {
-            const clock = `CASE ${Temporal.instants
-                .map((it) => `WHEN ${this.isKind(t, it)} THEN ${this.sql.local(t, it)}`)
-                .join(' ')} END`;
             return this.shared(
-                [this.moved(clock, d, sign, this.isKind(t, Temporal.DATE))],
+                [this.moved(this.clock(t, Temporal.instants), d, sign, this.isKind(t, Temporal.DATE))],
                 ([moved]) =>
                     `CASE ${Temporal.instants
                         .map(
@@ -455,9 +474,11 @@ export class Temporals {
             overrides === undefined ||
             (Object.keys(overrides.fields).length === 0 && overrides.timezone === undefined)
         ) {
-            return this.shared([text], ([t]) =>
-                this.format(this.sql.truncate(unit, this.sql.local(t, from))!, to, this.offsetOf(t, from, to))
-            );
+            // A truncation of a year from 1000 on is of one too, so is written as such.
+            return this.shared([text], ([t]) => {
+                const cut = this.sql.truncate(unit, this.sql.local(t, from))!;
+                return this.sql.asAd(t, [cut], () => this.format(cut, to, this.offsetOf(t, from, to)));
+            });
         }
         return this.shared([text], ([t]) =>
             this.shared([this.sql.truncate(unit, this.sql.local(t, from))!], ([cut]) =>
@@ -473,28 +494,7 @@ export class Temporals {
 
     /** Whether the text `a` stands to the text `b`, both of `kind`, as `operator` says: null where either is no such text. */
     compare(a: string, b: string, kind: Temporal, operator: string): string {
-        return this.shared([a, b], ([x, y]) => {
-            let test: string;
-            if (kind === Temporal.DURATION) {
-                // A duration is equal to another of the same parts, and is in no order.
-                if (operator !== '=' && operator !== '<>') {
-                    test = 'NULL';
-                } else {
-                    const [p, q] = [this.parts(x), this.parts(y)];
-                    const equal = `(${p.months} = ${q.months} AND ${p.days} = ${q.days} AND ${p.seconds} = ${q.seconds})`;
-                    test = operator === '=' ? equal : `NOT ${equal}`;
-                }
-            } else if (kind.zoned && (operator === '=' || operator === '<>')) {
-                // Two zoned values are equal where they are the same moment at the same offset, as Neo4j has them.
-                const equal = `(${this.sql.utc(x, kind)} = ${this.sql.utc(y, kind)} AND ${this.offset(
-                    x
-                )} = ${this.offset(y)})`;
-                test = operator === '=' ? equal : `NOT ${equal}`;
-            } else {
-                test = `${this.sql.utc(x, kind)} ${operator} ${this.sql.utc(y, kind)}`;
-            }
-            return `CASE WHEN ${this.isKind(x, kind)} AND ${this.isKind(y, kind)} THEN ${test} END`;
-        });
+        return this.shared([a, b], ([x, y]) => this.ofKinds([x, y], [kind], () => this.compared(x, y, kind, operator)));
     }
 
     // ----- Durations -----
@@ -559,6 +559,54 @@ export class Temporals {
             TIMES.includes(kind) || TIMES.includes(toKind),
             unit
         );
+    }
+
+    /**
+     * A `CASE` that gives `body` of the kind among `kinds` that each of `texts` is: null where they are of none. On a
+     * store that reads a year BC otherwise than ISO 8601 writes it, a kind with a date has a `WHEN` first, where each is a
+     * text of a year from 1000 on ({@link Temporal.adPattern}), and `body` there reads them as they are
+     * ({@link TemporalSql.knownAd}); the kinds' own `WHEN`s follow those. So an ordinary date costs the tests of the kinds
+     * before its own, as before years BC were read, and only a text the first `WHEN`s leave pays to be read as one. A
+     * `body` that reads none of them as a store reads a year BC, as a year read off the text, has its kind's `WHEN` alone,
+     * as has a long one where the compiler binds nothing (`binding`), as in an aggregate's argument: a value made of
+     * another is written out wherever it is read there, and a long `body` written twice would double it again at each
+     * (see `TemporalSql.bcOnly`).
+     */
+    private ofKinds(texts: string[], kinds: Temporal[], body: (kind: Temporal) => string): string {
+        const whens = (test: (text: string) => string, sql: string): string =>
+            `WHEN ${texts.map(test).join(' AND ')} THEN ${sql}`;
+        const first: string[] = [];
+        const own: string[] = [];
+        for (const kind of kinds) {
+            const ad = this.sql.numbersBcFromOne ? kind.adPattern : undefined;
+            const [plain, read] = ad === undefined ? [body(kind), false] : this.sql.knownAd(texts, () => body(kind));
+            if (read && ad !== undefined && (this.binding() || plain.length <= GUARDED_UP_TO)) {
+                first.push(whens((it) => this.sql.matches(it, literal(ad)), plain));
+            }
+            own.push(whens((it) => this.isKind(it, kind), read ? body(kind) : plain));
+        }
+        return `CASE ${[...first, ...own].join(' ')} END`;
+    }
+
+    /** {@link compare}'s test of the texts `x` and `y`, both of `kind`. */
+    private compared(x: string, y: string, kind: Temporal, operator: string): string {
+        if (kind === Temporal.DURATION) {
+            // A duration is equal to another of the same parts, and is in no order.
+            if (operator !== '=' && operator !== '<>') {
+                return 'NULL';
+            }
+            const [p, q] = [this.parts(x), this.parts(y)];
+            const equal = `(${p.months} = ${q.months} AND ${p.days} = ${q.days} AND ${p.seconds} = ${q.seconds})`;
+            return operator === '=' ? equal : `NOT ${equal}`;
+        }
+        if (kind.zoned && (operator === '=' || operator === '<>')) {
+            // Two zoned values are equal where they are the same moment at the same offset, as Neo4j has them.
+            const equal = `(${this.sql.utc(x, kind)} = ${this.sql.utc(y, kind)} AND ${this.offset(x)} = ${this.offset(
+                y
+            )})`;
+            return operator === '=' ? equal : `NOT ${equal}`;
+        }
+        return `${this.sql.utc(x, kind)} ${operator} ${this.sql.utc(y, kind)}`;
     }
 
     /**
@@ -664,7 +712,7 @@ export class Temporals {
         return this.shared([date], ([day]) =>
             this.dated(
                 {
-                    year: `EXTRACT(YEAR FROM ${day})`,
+                    year: this.sql.year(day),
                     month: `EXTRACT(MONTH FROM ${day})`,
                     day: `CASE WHEN NOT (${valid(day)}) THEN 0 ELSE EXTRACT(DAY FROM ${day}) END`
                 },
@@ -697,7 +745,7 @@ export class Temporals {
     /** The year, the month and the day of the month of the timestamp `timestamp`, as {@link of} takes them. */
     private dateOf(timestamp: string): Record<string, string> {
         return {
-            year: `EXTRACT(YEAR FROM ${timestamp})`,
+            year: this.sql.year(timestamp),
             month: `EXTRACT(MONTH FROM ${timestamp})`,
             day: `EXTRACT(DAY FROM ${timestamp})`
         };
@@ -723,10 +771,11 @@ export class Temporals {
         if (kinds.length === 1) {
             return this.sql.local(text, kinds[0]);
         }
-        return `CASE ${Temporal.instants
-            .filter((it) => kinds.includes(it))
-            .map((it) => `WHEN ${this.isKind(text, it)} THEN ${this.sql.local(text, it)}`)
-            .join(' ')} END`;
+        return this.ofKinds(
+            [text],
+            Temporal.instants.filter((it) => kinds.includes(it)),
+            (kind) => this.sql.local(text, kind)
+        );
     }
 
     /**
@@ -880,11 +929,11 @@ export class Temporals {
     private clockField(t: string, name: string): string {
         const second = `EXTRACT(SECOND FROM ${t})`;
         const fields: Record<string, () => string> = {
-            year: () => `EXTRACT(YEAR FROM ${t})`,
+            year: () => this.sql.year(t),
             quarter: () => `TRUNC((EXTRACT(MONTH FROM ${t}) + 2) / 3)`,
             month: () => `EXTRACT(MONTH FROM ${t})`,
             week: () => this.sql.number(`to_char(${t}, 'IW')`),
-            weekYear: () => this.sql.number(`to_char(${t}, 'IYYY')`),
+            weekYear: () => this.sql.weekYear(t),
             day: () => `EXTRACT(DAY FROM ${t})`,
             ordinalDay: () => this.sql.number(`to_char(${t}, 'DDD')`),
             dayOfQuarter: () =>

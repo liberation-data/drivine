@@ -114,6 +114,13 @@ export abstract class SqlCypherCompiler {
     /** How many times {@link shared} has bound its values, which an aggregate's argument it would bind in is worked out first for: see {@link binds}. */
     private sharedBindings = 0;
 
+    /**
+     * Whether SQL is written only to be searched for a subquery of the statement's own, not run: {@link sharedBound} then
+     * writes its values beside its body, read there by names of no subquery, so neither adds a `SELECT` (see
+     * {@link probed}).
+     */
+    private probing = false;
+
     private temporalsOf?: Temporals;
 
     /** The store's SQL for temporal values, which {@link temporals} works openCypher's out of. */
@@ -135,7 +142,7 @@ export abstract class SqlCypherCompiler {
 
     /** openCypher's temporal values: see {@link Temporals}. */
     get temporals(): Temporals {
-        this.temporalsOf ??= new Temporals(this.temporalSql, this.sharedList);
+        this.temporalsOf ??= new Temporals(this.temporalSql, this.sharedList, () => this.sharing);
         return this.temporalsOf;
     }
 
@@ -229,6 +236,21 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * What `work` gives, its SQL only searched for a subquery of the statement's own: see {@link probing}. Compiled
+     * {@link toSee}, so the names it takes and the functions it declares are given back: a `reduce`'s step written so
+     * would declare a function that reads no value it names.
+     */
+    probed<T>(work: () => T): T {
+        const was = this.probing;
+        this.probing = true;
+        try {
+            return this.toSee(work);
+        } finally {
+            this.probing = was;
+        }
+    }
+
+    /**
      * `body` over `values`, each read by name where one is long: bound once in a subquery, so a body that reads a value
      * more than once (to test its kind, then to read it) does not write it out again, and operations nested in one
      * another do not grow the statement exponentially. Short values are written where they are read. Oracle groups by
@@ -243,6 +265,9 @@ export abstract class SqlCypherCompiler {
 
     /** `body` over `values` {@link bound} as {@link shared} binds them, and counted so: see {@link binds}. */
     sharedBound(values: string[], body: (names: string[]) => string): string {
+        if (this.probing) {
+            return [...values, body(values.map((_, i) => `probed.v${i + 1}`))].join(' ');
+        }
         this.sharedBindings++;
         return this.bound(values, body);
     }

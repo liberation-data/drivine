@@ -408,8 +408,18 @@ const names = await pm.query<string>(
 - `truncate` takes each unit Neo4j does, from `millennium` to `microsecond`, and a map of fields to set on the value
   cut short (`date.truncate('month', d, {day: 2})`), but not yet a nanosecond, a week's or a quarter's field, or a
   named zone.
-- A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A zoned value the
-  statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
+- A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A year is numbered as
+  Neo4j and ISO 8601 number it, where Oracle and Postgres keep no year 0: `0000` is 1 BC and `-0044` is 45 BC, made,
+  read, worked out, truncated, written and read back ([#511](https://github.com/liberation-data/drivine/issues/511)). A
+  stored value whose year is 1000 or later is read as before; one of an earlier year is read by its era, so a statement
+  that reads a stored date or moment compiles to SQL one to three times as long (a filter on a stored date, 979
+  characters on Oracle and 703 on Postgres before, is 2,805 and 2,211), and in drivine4j, which compiles the same SQL, an
+  aggregate of temporal arithmetic runs 8 to 10% slower (a `truncate` on Postgres, about 16%). Oracle counts days before
+  1582-10-15 by the Julian calendar, so the day of the week, the ISO week, the day of the year and a leap day of such a
+  date are not Neo4j's. Two stored values BC compare by their text, which orders them backwards
+  ([#415](https://github.com/liberation-data/drivine/issues/415)). A JavaScript `Date` BC given as a parameter is
+  written with six digits of its year, as `toISOString` writes it (`-000044-03-15T…`), which the stores don't read as
+  that year: give its ISO text, `-0044-03-15T…`, to `datetime()`. A zoned value the statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
   does a map that holds one. A list of them, or a list of lists of them, sorts item by item so in an `ORDER BY`, `min`
   and `max`. Oracle reads by their places, not with `JSON_TABLE`, the items of a list that holds temporal values the
   statement makes, at any depth: a list of them, a list of lists or of maps of them (`collect(DISTINCT [l, l])`), one a

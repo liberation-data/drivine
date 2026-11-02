@@ -65,6 +65,13 @@ const BEYOND_2_53: Skip = {
  * float. Neo4j's driver sends a number as a float, so Neo4j runs them. The spec reads a whole number as a `bigint`, so a
  * parameter that is a `number` and whole was written as a float.
  */
+/**
+ * {@link BEYOND_2_53} on the SQL stores alone: these steps expect a float past a long's range, which a JavaScript number
+ * can't tell from the whole number past it that a SQL store sums exactly, so a store that sums so would pass them all the
+ * same. Neo4j, which gives the float, runs them.
+ */
+const BEYOND_2_53_ON_SQL: Skip = { ...BEYOND_2_53, on: ['sql'] };
+
 const WHOLE_FLOAT_PARAMETER: Skip = {
     why: 'a float parameter that is a whole number',
     on: ['sql'],
@@ -83,15 +90,21 @@ function wholeFloat(value: any): boolean {
  * differs says so with `except` in the spec. The spec's README names the steps beyond 2^53 as those such a library
  * skips; the whole float parameter's is skipped for the same cause, what a JavaScript number cannot hold.
  */
-const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
+const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
     'queries.yaml': {
         // The greatest whole number and the least, written as literals.
-        'Integer bounds': [[1], BEYOND_2_53],
+        'Integer bounds': [[[1], BEYOND_2_53]],
+        // A sum past a long's range, which Postgres and Oracle sum exactly as yet (#472), and one that reaches the
+        // greatest whole number and the least, which Neo4j gives as an integer.
+        'Aggregates of floats': [
+            [[13, 14, 15, 16], BEYOND_2_53_ON_SQL],
+            [[17, 18], BEYOND_2_53]
+        ],
         // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, toString($seven) of
         // seven = 1.0e+7, and toString($f * 2).
-        'A float parameter with no fraction': [[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]
+        'A float parameter with no fraction': [[[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]]
     },
-    'writes.yaml': { 'Typical app round trip': [[19, 20, 21], BEYOND_2_53] }
+    'writes.yaml': { 'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]] }
 };
 
 /**
@@ -107,13 +120,21 @@ const HELD: Record<string, Record<string, Hold[]>> = {
             { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['oracle'] }
         ],
         // Oracle holds NaN equal to NaN.
-        'NaN worked out': [{ issue: 512, steps: [2, 3], on: ['oracle'] }]
+        'NaN worked out': [{ issue: 512, steps: [2, 3], on: ['oracle'] }],
+        // A float literal past a double's range is read as an infinity, not refused. Postgres fails on each step of its
+        // own, reading the infinity as JSON (`CAST('Infinity' AS jsonb)`), which is all the spec asks of it. Step 4, too
+        // small to tell from 0, passes.
+        'Float bounds': [{ issue: 508, steps: [1, 2, 3], on: ['oracle'] }]
     },
     'writes.yaml': {
         'NaN and the infinities written': [
             { issue: 344, steps: [4], on: ['postgres'] },
             { issue: 344, steps: [1, 2, 3], on: ['oracle'] }
         ]
+    },
+    'refusals.yaml': {
+        // A float literal past a double's range is read as an infinity, not refused.
+        'Float too large': [{ issue: 508, steps: 'all', on: ['sql'] }]
     }
 };
 
@@ -143,8 +164,8 @@ function named(names: string[], store: string): boolean {
 
 /** Whether the step at `index` (from 0) of `case` in `file` is skipped on `store`: see {@link SKIPPED}. */
 export function skipped(file: string, cypherCase: CypherCase, index: number, store: string): boolean {
-    const [steps, skip] = SKIPPED[file]?.[cypherCase.name] ?? [[], undefined];
-    if (!skip || !steps.includes(index + 1)) {
+    const [, skip] = (SKIPPED[file]?.[cypherCase.name] ?? []).find(([steps]) => steps.includes(index + 1)) ?? [];
+    if (!skip) {
         return false;
     }
     if (!skip.holds(cypherCase.steps[index])) {
