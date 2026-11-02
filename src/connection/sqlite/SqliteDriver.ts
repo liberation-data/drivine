@@ -9,6 +9,10 @@ export interface SqliteStatement {
     get(...values: any[]): Record<string, SqliteValue> | undefined;
     run(...values: any[]): { changes: number | bigint; lastInsertRowid: number | bigint };
     iterate(...values: any[]): IterableIterator<Record<string, SqliteValue>>;
+    /** Whether an integer is read as a bigint, so one past 2^53 keeps its digits and stays an integer. */
+    setReadBigInts(enabled: boolean): void;
+    /** Whether a row is read as an array of its columns, so two of one name are both read. */
+    setReturnArrays(enabled: boolean): void;
 }
 
 /** What node:sqlite's DatabaseSync offers that Drivine uses. */
@@ -18,7 +22,7 @@ export interface SqliteDatabase {
     close(): void;
     function(
         name: string,
-        options: { deterministic?: boolean; directOnly?: boolean; varargs?: boolean },
+        options: { deterministic?: boolean; directOnly?: boolean; varargs?: boolean; useBigIntArguments?: boolean },
         fn: (...args: SqliteValue[]) => SqliteValue | boolean | undefined
     ): void;
 }

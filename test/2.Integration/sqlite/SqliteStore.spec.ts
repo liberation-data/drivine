@@ -229,9 +229,28 @@ describe('a SQLite store', () => {
             );
         });
 
-        it('should refuse Cypher, whose compiler for SQLite comes later', async () => {
+        it('should run Cypher, compiled to its SQL over the graph', async () => {
+            expect(
+                await pm.query(
+                    new QuerySpecification({
+                        text: 'UNWIND [1, 2, 3] AS x RETURN sum(x) + $y',
+                        language: 'CYPHER'
+                    }).bind({ y: 4 })
+                )
+            ).toEqual([10]);
+        });
+
+        it('should refuse a cursor over Cypher, which a query compiles', async () => {
             await expect(
-                pm.query(new QuerySpecification({ text: 'MATCH (n) RETURN n', language: 'CYPHER' }))
+                connection('main').then(async (it) => {
+                    try {
+                        return await it.openCursor(
+                            new CursorSpecification({ text: 'MATCH (n) RETURN n', language: 'CYPHER' })
+                        );
+                    } finally {
+                        await it.release();
+                    }
+                })
             ).rejects.toThrow(/CYPHER is not run on SQLite/);
         });
     });
@@ -713,6 +732,42 @@ describe('a SQLite store', () => {
                 `SELECT props ->> 'id' AS id FROM drivine_node WHERE instr(labels, '"SqliteStore"') > 0 ORDER BY 1`
             );
             expect(ids).toEqual([{ id: 'kept' }]);
+        });
+
+        it("should keep compiled Cypher's writes in a transaction, undo one that fails alone, and roll back with it", async () => {
+            const tpm = new PersistenceManagerFactory(
+                DatabaseRegistry.getInstance(),
+                TransactionContextHolder.getInstance()
+            ).get('main', 'TRANSACTIONAL');
+            const cypher = async (text: string, id: string): Promise<void> =>
+                tpm.execute(new QuerySpecification({ text, language: 'CYPHER' }).bind({ id }));
+            const create = 'CREATE (:SqliteStore {id: $id})';
+            // Deleting a node that still has a relationship fails after the create: drivine_cypher's savepoint undoes both.
+            const failing = 'CREATE (a:SqliteStore {id: $id})-[:NEXT]->(:SqliteStore) WITH a DELETE a';
+            await inDrivineContext()
+                .withTransaction()
+                .run(async () => {
+                    await cypher(create, 'k1');
+                    await expect(cypher(failing, 'undone')).rejects.toThrow(/still has relationships/);
+                    await cypher(create, 'k2');
+                });
+            await inDrivineContext()
+                .withTransaction({ rollback: true })
+                .run(async () => cypher(create, 'marked'));
+            await expect(
+                inDrivineContext()
+                    .withTransaction()
+                    .run(async () => {
+                        await cypher(create, 'thrown');
+                        throw new Error('Changed our minds');
+                    })
+            ).rejects.toThrow('Changed our minds');
+            const ids = await rows(
+                pm,
+                `SELECT props ->> 'id' AS id FROM drivine_node WHERE instr(labels, '"SqliteStore"') > 0 ORDER BY 1`
+            );
+            expect(ids).toEqual([{ id: 'k1' }, { id: 'k2' }]);
+            expect(await rows(pm, `SELECT COUNT(*) AS n FROM drivine_edge WHERE type = 'NEXT'`)).toEqual([{ n: 0 }]);
         });
 
         it('should give the failure of a commit SQLite refuses, write nothing, and give the lock back', async () => {

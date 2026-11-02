@@ -17,7 +17,7 @@ import {
 } from '@/cypher/sql/CypherSyntax';
 import { javaDouble, jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
-import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
@@ -300,9 +300,52 @@ export abstract class SqlCypherCompiler {
      * The join of the lateral query `query`, named `name`, to the row: an `OPTIONAL CALL`'s or an `OPTIONAL MATCH`'s
      * keeps the row it finds nothing for, and a `CALL`'s does not.
      */
-    lateral(query: string, name: string, optional: boolean): string {
+    lateral(query: string, name: string, optional: boolean, _columns: [string, boolean][]): string {
         const text = `(\n${indent(query)}\n) ${name}`;
         return optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`;
+    }
+
+    /**
+     * The column `column` of the rows a {@link lateral} join named `name` gives, which holds JSON where `json`: on a
+     * store that joins no lateral query, read back out of the row it was gathered in.
+     */
+    lateralColumn(name: string, column: string, _json: boolean): string {
+        return `${name}.${column}`;
+    }
+
+    /** The item of the row `alias` of {@link elements}, as JSON. */
+    item(alias: string): string {
+        return `${alias}.item`;
+    }
+
+    /** The place of the item of the row `alias` of {@link elements} in its list, counted from 1. */
+    itemNo(alias: string): string {
+        return `${alias}.item_no`;
+    }
+
+    /** The id of the row `alias` of {@link idRows}. */
+    rowId(alias: string): string {
+        return `${alias}.id`;
+    }
+
+    /** The place of the id of the row `alias` of {@link idRows} in its list, counted from 1. */
+    rowOrd(alias: string): string {
+        return `${alias}.ord`;
+    }
+
+    /** The SQL truth value `sql` as JSON's: null where it is null. */
+    boolJson(sql: string): string {
+        return this.scalar(sql);
+    }
+
+    /** The term `term` of an `ORDER BY`, descending where `descending`, its nulls where Cypher puts them. */
+    orderTerm(term: string, descending: boolean): string {
+        return descending ? `${term} DESC` : term;
+    }
+
+    /** The whole number `a` divided by the whole number `b`, toward zero, as Cypher divides two whole numbers. */
+    wholeQuotient(a: string, b: string): string {
+        return `trunc(${a} / ${b})`;
     }
 
     /**
@@ -391,7 +434,7 @@ export abstract class SqlCypherCompiler {
      * thousand relationships' tokens is larger than Oracle's `=` compares, so Oracle compares them otherwise.
      */
     identityEquals(x: string, y: string): string {
-        return `${x} = ${y}`;
+        return this.jsonEquals(x, y);
     }
 
     /** Whether the JSON values `x` and `y`, neither of them null, are equal as JSON. */
@@ -497,14 +540,14 @@ export abstract class SqlCypherCompiler {
         return this.shared([list], ([x]) => {
             const key = (of: string, at: number): string => {
                 const alias = `mk${at}`;
-                const item = `${alias}.item`;
+                const item = this.item(alias);
                 const itemKey =
                     at === 1
                         ? this.temporalSql.sortable(this.temporals.moment(this.text(item), kind))
                         : key(item, at - 1);
                 const joined = this.joinedTexts(
                     `CASE WHEN ${this.isJsonNull(item)} THEN '~' ELSE ${itemKey} END`,
-                    `${alias}.item_no`
+                    this.itemNo(alias)
                 );
                 return `(SELECT COALESCE(${joined}, '') || '!' FROM ${this.temporalElements(of, alias)})`;
             };
@@ -692,6 +735,61 @@ export abstract class SqlCypherCompiler {
         return `REPLACE(${text}, ${search}, ${replacement})`;
     }
 
+    /**
+     * The steps `program` as the statements of a procedural language, each ending in `;`, indented by how deep in loops
+     * and conditions it is, from `depth`: a loop over a query's rows is `FOR … IN (…) LOOP`, a value set into a variable
+     * `SELECT … INTO …` or `… := …`, and the rows returned and a failure the store's own, {@link returnRows} and
+     * {@link raise}.
+     */
+    statements(program: ProcedureStep[], depth: number = 0): string[] {
+        const prefix = '    '.repeat(depth);
+        const line = (text: string): string =>
+            text
+                .split('\n')
+                .map((it) => prefix + it)
+                .join('\n');
+        return program.flatMap((step): string[] => {
+            switch (step.kind) {
+                case 'Select':
+                    return [line(`${step.planned};`)];
+                case 'Let':
+                    return [line(`${step.variable} := ${step.expression};`)];
+                case 'Loop':
+                    return [
+                        line(
+                            step.multiline
+                                ? `FOR ${step.record} IN (\n${indent(step.query)}\n) LOOP`
+                                : `FOR ${step.record} IN (${step.query}) LOOP`
+                        ),
+                        ...this.statements(step.body, depth + 1),
+                        line('END LOOP;')
+                    ];
+                case 'If':
+                    return [
+                        line(`IF ${step.condition} THEN`),
+                        ...this.statements(step.body, depth + 1),
+                        line('END IF;')
+                    ];
+                case 'Raise':
+                    return [line(this.raise(step.message))];
+                case 'Execute':
+                    return [line(`${step.statement}${step.into !== undefined ? ` INTO ${step.into}` : ''};`)];
+                default:
+                    return this.returnRows(step.query).map(line);
+            }
+        });
+    }
+
+    /** The statements of a procedural language that return the rows of the query `query`, whose one column is `result`: see {@link statements}. */
+    returnRows(_query: string): string[] {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
+
+    /** The statement of a procedural language that fails the procedure with `message`: see {@link statements}. */
+    raise(_message: string): string {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
+
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(
@@ -845,9 +943,10 @@ export abstract class SqlCypherCompiler {
 
     /**
      * Whether the JSON value `jsonSql`, not null, holds a null in a list or a map, at any depth: exactly, as an `IN` takes
-     * a value that holds one to be equal to no item.
+     * a value that holds one to be equal to no item. Undefined where the store's {@link jsonEquals} is already null for a
+     * value that holds one, as Cypher's comparison is, so no test is needed.
      */
-    abstract holdsNull(jsonSql: string): string;
+    abstract holdsNull(jsonSql: string): string | undefined;
 
     /**
      * Whether the JSON values `x` and `y`, neither of them null, are equal, as Cypher compares values that may hold a
@@ -1004,17 +1103,11 @@ export abstract class SqlCypherCompiler {
     // ----- A store's procedure, for a statement that writes -----
 
     /**
-     * The statement that runs the procedure whose statements are `body`, each ending in `;`, and gives the rows it
-     * returns, of one column, {@link returnRows}. The procedure declares the variables {@link Procedure} names and sets
-     * its parameters from the object bound at {@link PARAMETERS_OBJECT}.
+     * The statement that runs the procedure whose steps are `program`, and gives the rows it returns, of one column. Its
+     * variables are those {@link Procedure} names, its parameters set from the object bound at
+     * {@link PARAMETERS_OBJECT}. A store with a procedural language writes the steps in it: see {@link statements}.
      */
-    abstract procedure(body: string[]): ProcedureCall;
-
-    /** The statements that return the rows of the query `query`, whose one column is `result`. */
-    abstract returnRows(query: string): string[];
-
-    /** The statement that fails the procedure with `message`. */
-    abstract raise(message: string): string;
+    abstract procedure(program: ProcedureStep[]): ProcedureCall;
 
     /**
      * A whole number that fails the statement when it is worked out, with `message` and the SQL value `value` it names:

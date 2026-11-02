@@ -387,9 +387,7 @@ export function variablesOutsideAggregates(expression: Expression): Set<string> 
  * one there: a variable, or a variable's property. Not `x.a.b`, `x['a']` or `toUpper(x.a)`.
  */
 export function isPlainKey(expression: Expression): boolean {
-    return (
-        expression.kind === 'Variable' || (expression.kind === 'Property' && expression.subject.kind === 'Variable')
-    );
+    return expression.kind === 'Variable' || (expression.kind === 'Property' && expression.subject.kind === 'Variable');
 }
 
 /**
@@ -653,4 +651,9 @@ export function children(expression: Expression): Expression[] {
 /** Each of `expressions` that is there. */
 export function present(...expressions: (Expression | undefined)[]): Expression[] {
     return expressions.filter((it): it is Expression => it !== undefined);
+}
+
+/** The select-list entry of `sql` as the column `name`: `sql` itself where it is a column of that name already. */
+export function namedColumn(sql: string, name: string): string {
+    return sql.endsWith(`.${name}`) ? sql : `${sql} AS ${name}`;
 }

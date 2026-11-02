@@ -9,7 +9,10 @@ export class SqliteStatements {
     private static readonly MAX = 256;
     private readonly prepared = new Map<string, SqliteStatement>();
 
-    constructor(private readonly db: SqliteDatabase) {}
+    constructor(
+        private readonly db: SqliteDatabase,
+        private readonly exact: boolean = false
+    ) {}
 
     statement(sql: string): SqliteStatement {
         let found = this.prepared.get(sql);
@@ -17,6 +20,10 @@ export class SqliteStatements {
             this.prepared.delete(sql);
         } else {
             found = this.db.prepare(sql);
+            if (this.exact) {
+                found.setReadBigInts(true);
+                found.setReturnArrays(true);
+            }
             if (this.prepared.size >= SqliteStatements.MAX) {
                 this.prepared.delete(this.prepared.keys().next().value!);
             }
