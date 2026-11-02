@@ -22,7 +22,7 @@ export class SqliteSpecCompiler extends QuerySpecificationCompiler {
         super(spec);
         if (this.spec.statement.language !== 'SQL') {
             throw new DrivineError(
-                `${this.spec.statement.language} is not run on SQLite: Cypher on SQLite comes with its compiler.`
+                `${this.spec.statement.language} is not run on SQLite by a cursor: a Cypher statement is compiled for a query.`
             );
         }
     }

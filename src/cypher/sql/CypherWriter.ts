@@ -2665,7 +2665,7 @@ export class CypherWriter {
      * `body` for each row of the query `query`, whose `item` is `record.item`, with what the store's planner is told of
      * the query: see {@link ProcedureStep}.
      */
-    private loop(record: string, query: string, body: () => void, multiline = false): void {
+    private loop(record: string, query: string, body: () => void, multiline: boolean = false): void {
         const planned = this.sql.planned(query);
         this.step({ kind: 'Loop', record, query: planned, multiline, body: this.block(body) });
     }
@@ -2676,7 +2676,7 @@ export class CypherWriter {
     }
 
     /** `variable` set to the value of `expression` in the first row of `SELECT expression` and `from`. */
-    private selectInto(variable: string, expression: string, from = ''): void {
+    private selectInto(variable: string, expression: string, from: string = ''): void {
         this.step({
             kind: 'Select',
             variable,
@@ -6125,8 +6125,14 @@ export class CypherWriter {
      */
     private nullableEquals(x: string, y: string, equals: (x: string, y: string) => string): string {
         return this.sql.shared([x, y], ([a, b]) => {
-            const held = `${this.sql.holdsNull(a)} OR ${this.sql.holdsNull(b)}`;
-            const equal = `CASE WHEN ${held} THEN ${this.sql.nullsEqual(a, b, equals)} ELSE ${equals(a, b)} END`;
+            const held = [this.sql.holdsNull(a), this.sql.holdsNull(b)].filter((it) => it !== undefined);
+            const equal =
+                held.length === 0
+                    ? equals(a, b)
+                    : `CASE WHEN ${held.join(' OR ')} THEN ${this.sql.nullsEqual(a, b, equals)} ELSE ${equals(
+                          a,
+                          b
+                      )} END`;
             return `CASE WHEN NOT ${this.sql.isJsonNull(a)} AND NOT ${this.sql.isJsonNull(b)} THEN ${equal} END`;
         });
     }
@@ -6316,6 +6322,10 @@ export class CypherWriter {
         rightWritten: Expression,
         right: Value
     ): string | undefined {
+        // The store's own comparison compares a null as Cypher does.
+        if (this.sql.holdsNull('x') === undefined) {
+            return undefined;
+        }
         const given = (expression: Expression): unknown[] | undefined => {
             if (expression.kind !== 'Parameter') {
                 return undefined;
@@ -6460,7 +6470,13 @@ export class CypherWriter {
      * JSON's null.
      */
     private filteredMembership(value: Expression, member: Member, within: boolean, scope: Scope): string {
-        if (within || member.id !== undefined || this.present(value) || this.stored(value, scope)) {
+        if (
+            within ||
+            member.id !== undefined ||
+            this.present(value) ||
+            this.stored(value, scope) ||
+            this.sql.holdsNull('x') === undefined
+        ) {
             return this.found(member);
         }
         return this.found(member, (found, v) => `(${found} AND NOT ${this.sql.isJsonNull(v)})`);
@@ -6571,7 +6587,8 @@ export class CypherWriter {
                 return `CASE ${cases.join(' ')} ELSE ${given.includes(null) ? 'NULL' : 'FALSE'} END`;
             }
             // A value that holds a null is equal to no item.
-            const held = of.whole ? '' : `NOT (${sql.holdsNull(v)}) AND `;
+            const holds = of.whole ? undefined : sql.holdsNull(v);
+            const held = holds === undefined ? '' : `NOT (${holds}) AND `;
             cases.push(`WHEN ${held}${found} THEN TRUE`);
             if (!of.within || !of.whole) {
                 const k = this.alias('i');
@@ -7232,7 +7249,7 @@ export class CypherWriter {
         // Read only beside a text that is not null, so a number past SQL's integer beside a null text is null, and a
         // constant out of range is not worked out before any row.
         return this.sql.shared(
-            [`CASE WHEN ${text} IS NOT NULL THEN TRUNC(${this.numberOf(call.arguments[index])}) END`],
+            [`CASE WHEN ${text} IS NOT NULL THEN ${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[index])}) END`],
             ([n]) =>
                 `CASE WHEN ${n} < 0 OR ${n} > ${MAX_COUNT} THEN ${this.sql.failure(outOfRange, n)} ` +
                 `ELSE CAST(${n} AS INTEGER) END`
@@ -7241,7 +7258,7 @@ export class CypherWriter {
 
     /** A value as a SQL whole number with its fraction cut off, toward zero, as Neo4j reads `round()`'s precision. */
     private truncatedWhole(value: Value): string {
-        return `CAST(TRUNC(${this.numberOf(value)}) AS INTEGER)`;
+        return `CAST(${this.sql.temporalSql.trunc}(${this.numberOf(value)}) AS INTEGER)`;
     }
 
     /**
@@ -7294,7 +7311,7 @@ export class CypherWriter {
                 : places(number, Number.isNaN(given) ? '0' : this.truncatedWhole(call.arguments[1]));
         }
         const value = this.sql.comparable(this.asJson(call.arguments[0]));
-        return this.sql.shared([value, `TRUNC(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
+        return this.sql.shared([value, `${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
             // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
             const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
             return (

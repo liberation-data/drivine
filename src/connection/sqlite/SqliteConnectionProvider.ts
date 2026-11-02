@@ -81,13 +81,19 @@ export class SqliteConnectionProvider implements ConnectionProvider {
     }
 
     private connection(db: SqliteDatabase): SqliteConnection {
-        return new SqliteConnection(db, new PostgresResultMapper(), this.busyTimeoutMillis, (it, failed) => {
-            if (failed || this.ended || this.idle.length >= (this.options.poolMax ?? 10)) {
-                it.close();
-            } else {
-                this.idle.push(it);
-            }
-        });
+        return new SqliteConnection(
+            db,
+            new PostgresResultMapper(),
+            this.busyTimeoutMillis,
+            (it, failed) => {
+                if (failed || this.ended || this.idle.length >= (this.options.poolMax ?? 10)) {
+                    it.close();
+                } else {
+                    this.idle.push(it);
+                }
+            },
+            this.graphName
+        );
     }
 
     /** A connection to the file, opened as Drivine's statements want it, waiting for the file where it is locked. */

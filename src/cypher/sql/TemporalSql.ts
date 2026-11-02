@@ -46,6 +46,37 @@ export abstract class TemporalSql {
     /** The moment the statement runs, in UTC. */
     abstract get now(): string;
 
+    /**
+     * The name of the function that writes a timestamp or a number as text in a pattern (`'YYYY-MM-DD'`, `'FM0000'`), as
+     * Postgres's and Oracle's `to_char` does.
+     */
+    get toChar(): string {
+        return 'to_char';
+    }
+
+    /** The name of the function that cuts a number's fraction off, as `TRUNC` does. */
+    get trunc(): string {
+        return 'TRUNC';
+    }
+
+    /** The timestamp of the epoch, 1970-01-01 at midnight. */
+    get epoch(): string {
+        return "TIMESTAMP '1970-01-01 00:00:00'";
+    }
+
+    /** `dividend` divided by `divisor`, numbers each, with its fraction kept where both are whole numbers. */
+    quotient(dividend: string, divisor: string): string {
+        return `${dividend} / ${divisor}`;
+    }
+
+    /**
+     * The field `field` (`YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND` with its fraction) of the timestamp
+     * `timestamp`, a number.
+     */
+    extract(field: string, timestamp: string): string {
+        return `EXTRACT(${field} FROM ${timestamp})`;
+    }
+
     /** The text `text` with every match of `pattern`, a SQL text, replaced by `replacement`. */
     replace(text: string, pattern: string, replacement: string): string {
         return `REGEXP_REPLACE(${text}, ${pattern}, ${replacement})`;
@@ -97,35 +128,4 @@ export abstract class TemporalSql {
 
     /** `timestamp` truncated to `unit`, one of {@link TRUNCATION_UNITS}, as Neo4j truncates: undefined for another unit. */
     abstract truncate(unit: string, timestamp: string): string | undefined;
-
-    /**
-     * The name of the function that writes a timestamp or a number as text in a pattern (`'YYYY-MM-DD'`, `'FM0000'`), as
-     * Postgres's and Oracle's `to_char` does.
-     */
-    get toChar(): string {
-        return 'to_char';
-    }
-
-    /** The name of the function that cuts a number's fraction off, as `TRUNC` does. */
-    get trunc(): string {
-        return 'TRUNC';
-    }
-
-    /** The timestamp of the epoch, 1970-01-01 at midnight. */
-    get epoch(): string {
-        return "TIMESTAMP '1970-01-01 00:00:00'";
-    }
-
-    /** `dividend` divided by `divisor`, numbers each, with its fraction kept where both are whole numbers. */
-    quotient(dividend: string, divisor: string): string {
-        return `${dividend} / ${divisor}`;
-    }
-
-    /**
-     * The field `field` (`YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND` with its fraction) of the timestamp
-     * `timestamp`, a number.
-     */
-    extract(field: string, timestamp: string): string {
-        return `EXTRACT(${field} FROM ${timestamp})`;
-    }
 }
