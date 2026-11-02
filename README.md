@@ -25,7 +25,10 @@ A Cypher statement runs on every store: on Postgres, Oracle and SQLite, Drivine 
 drivine-python read. A transaction there gives one writer at a time: it takes the file's write lock as it begins, so even
 one that only reads waits for the lock, up to the busy timeout. Reads outside a transaction don't wait for a writer; saves
 and deletes outside one are retried when contended; each statement Drivine writes applies whole or not at all; and a
-connection you open on the file yourself has none of this. See
+connection you open on the file yourself has none of this. Use a Node whose SQLite writes a computed float to 17
+significant digits, as Node 22.23.4, 24.22.2 and 26.13 were measured to, for example: one that writes 15 rounds a float
+it computes in compiled Cypher. Drivine detects it at run time and warns once, as a process warning that
+`node --disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` silences. See
 [SQLite](docs/07-supported-engines.md#sqlite).
 
 > **On Python or the JVM?** [drivine-python](https://github.com/liberation-data/drivine-python) (`pip install drivine`)
