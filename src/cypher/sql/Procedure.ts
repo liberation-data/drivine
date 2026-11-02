@@ -99,3 +99,29 @@ export interface ProcedureCall {
     setup: string[];
     sql: string;
 }
+
+/**
+ * A step of the procedure a statement that writes compiles to: see {@link SqlCypherCompiler}. Its SQL names the
+ * procedure's variables ({@link Procedure.ROWS}, {@link Procedure.ROW} …) as values it reads. A store with a procedural
+ * language writes the steps in it, as Postgres's PL/pgSQL and Oracle's PL/SQL; one without carries them out one by one,
+ * as SQLite's `drivine_cypher` does.
+ *
+ * - `Select`: `variable` set to the value of `expression` in the first row of the query `SELECT expression` and `from`,
+ *   or to null where it gives none. `planned` is the step as a procedural language writes it, `SELECT … INTO …`, with
+ *   what the store's planner is told of it.
+ * - `Let`: `variable` set to the value of `expression`, which reads no table.
+ * - `Loop`: `body` for each row of `query`, in its order, with the row's `item` column the value `record.item`: the rows
+ *   are the query's as it starts, whatever the body writes. A query written over lines is `multiline`.
+ * - `If`: `body`, where the SQL truth value `condition` holds.
+ * - `Raise`: the procedure failed, with `message`: what it wrote is undone.
+ * - `Execute`: the statement `statement`, which writes; with `into`, the value of the column it returns set to that variable.
+ * - `Return`: the rows of `query`, whose one column is `result`, returned as the statement's rows.
+ */
+export type ProcedureStep =
+    | { kind: 'Select'; variable: string; expression: string; from: string; planned: string }
+    | { kind: 'Let'; variable: string; expression: string }
+    | { kind: 'Loop'; record: string; query: string; multiline: boolean; body: ProcedureStep[] }
+    | { kind: 'If'; condition: string; body: ProcedureStep[] }
+    | { kind: 'Raise'; message: string }
+    | { kind: 'Execute'; statement: string; into?: string }
+    | { kind: 'Return'; query: string };

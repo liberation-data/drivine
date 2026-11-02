@@ -106,27 +106,27 @@ const FIELD_NAMES = [
 ];
 
 /** A field of a duration of the parts `[m, d, s]`, by Cypher's name for it. */
-const DURATION_FIELDS: Record<string, (m: string, d: string, s: string) => string> = {
-    years: (m) => `TRUNC(${m} / 12)`,
-    quarters: (m) => `TRUNC(${m} / 3)`,
+const DURATION_FIELDS: Record<string, (m: string, d: string, s: string, trunc: string) => string> = {
+    years: (m, __, ___, trunc) => `${trunc}(${m} / 12)`,
+    quarters: (m, __, ___, trunc) => `${trunc}(${m} / 3)`,
     months: (m) => m,
-    weeks: (_, d) => `TRUNC(${d} / 7)`,
+    weeks: (_, d, ___, trunc) => `${trunc}(${d} / 7)`,
     days: (_, d) => d,
-    hours: (_, __, s) => `TRUNC(${s} / 3600)`,
-    minutes: (_, __, s) => `TRUNC(${s} / 60)`,
-    seconds: (_, __, s) => `TRUNC(${s})`,
-    milliseconds: (_, __, s) => `TRUNC(${s} * 1000)`,
-    microseconds: (_, __, s) => `TRUNC(${s} * 1000000)`,
-    nanoseconds: (_, __, s) => `TRUNC(${s} * 1000000000)`,
-    quartersOfYear: (m) => `(TRUNC(${m} / 3) - TRUNC(${m} / 12) * 4)`,
-    monthsOfQuarter: (m) => `(${m} - TRUNC(${m} / 3) * 3)`,
-    monthsOfYear: (m) => `(${m} - TRUNC(${m} / 12) * 12)`,
-    daysOfWeek: (_, d) => `(${d} - TRUNC(${d} / 7) * 7)`,
-    minutesOfHour: (_, __, s) => `(TRUNC(${s} / 60) - TRUNC(${s} / 3600) * 60)`,
-    secondsOfMinute: (_, __, s) => `(TRUNC(${s}) - TRUNC(${s} / 60) * 60)`,
-    millisecondsOfSecond: (_, __, s) => `(TRUNC(${s} * 1000) - TRUNC(${s}) * 1000)`,
-    microsecondsOfSecond: (_, __, s) => `(TRUNC(${s} * 1000000) - TRUNC(${s}) * 1000000)`,
-    nanosecondsOfSecond: (_, __, s) => `(TRUNC(${s} * 1000000000) - TRUNC(${s}) * 1000000000)`
+    hours: (_, __, s, trunc) => `${trunc}(${s} / 3600)`,
+    minutes: (_, __, s, trunc) => `${trunc}(${s} / 60)`,
+    seconds: (_, __, s, trunc) => `${trunc}(${s})`,
+    milliseconds: (_, __, s, trunc) => `${trunc}(${s} * 1000)`,
+    microseconds: (_, __, s, trunc) => `${trunc}(${s} * 1000000)`,
+    nanoseconds: (_, __, s, trunc) => `${trunc}(${s} * 1000000000)`,
+    quartersOfYear: (m, __, ___, trunc) => `(${trunc}(${m} / 3) - ${trunc}(${m} / 12) * 4)`,
+    monthsOfQuarter: (m, __, ___, trunc) => `(${m} - ${trunc}(${m} / 3) * 3)`,
+    monthsOfYear: (m, __, ___, trunc) => `(${m} - ${trunc}(${m} / 12) * 12)`,
+    daysOfWeek: (_, d, ___, trunc) => `(${d} - ${trunc}(${d} / 7) * 7)`,
+    minutesOfHour: (_, __, s, trunc) => `(${trunc}(${s} / 60) - ${trunc}(${s} / 3600) * 60)`,
+    secondsOfMinute: (_, __, s, trunc) => `(${trunc}(${s}) - ${trunc}(${s} / 60) * 60)`,
+    millisecondsOfSecond: (_, __, s, trunc) => `(${trunc}(${s} * 1000) - ${trunc}(${s}) * 1000)`,
+    microsecondsOfSecond: (_, __, s, trunc) => `(${trunc}(${s} * 1000000) - ${trunc}(${s}) * 1000000)`,
+    nanosecondsOfSecond: (_, __, s, trunc) => `(${trunc}(${s} * 1000000000) - ${trunc}(${s}) * 1000000000)`
 };
 
 /**
@@ -188,7 +188,7 @@ export class Temporals {
     format(timestamp: string, kind: Temporal, offset?: string): string {
         return this.shared([timestamp], ([t]) =>
             this.sql.asAd(timestamp, [t], () => {
-                const time = `to_char(${t}, 'HH24:MI:SS') || ${this.fraction(t)}`;
+                const time = `${this.sql.toChar}(${t}, 'HH24:MI:SS') || ${this.fraction(t)}`;
                 const zone = offset ?? "'Z'";
                 const texts: Partial<Record<Temporal['name'], () => string>> = {
                     DATE: () => this.sql.date(t),
@@ -241,8 +241,8 @@ export class Temporals {
      */
     of(fields: Record<string, string>, timezone: string | undefined, kind: Temporal): string {
         const field = (name: string, otherwise: string, digits: number): string =>
-            `to_char(${fields[name] ?? otherwise}, 'FM${'0'.repeat(digits)}')`;
-        const micros = `TRUNC(${fields.millisecond ?? '0'} * 1000 + ${fields.microsecond ?? '0'} + ${
+            `${this.sql.toChar}(${fields[name] ?? otherwise}, 'FM${'0'.repeat(digits)}')`;
+        const micros = `${this.sql.trunc}(${fields.millisecond ?? '0'} * 1000 + ${fields.microsecond ?? '0'} + ${
             fields.nanosecond ?? '0'
         } / 1000)`;
         const date = `${field('year', '1970', 4)} || '-' || ${field('month', '1', 2)} || '-' || ${field(
@@ -255,7 +255,7 @@ export class Temporals {
                 'second',
                 '0',
                 2
-            )} || '.' || ` + `to_char(${micros}, 'FM000000')`;
+            )} || '.' || ` + `${this.sql.toChar}(${micros}, 'FM000000')`;
         const zone = timezone ?? "'Z'";
         const texts: Partial<Record<Temporal['name'], string>> = {
             DATE: date,
@@ -287,8 +287,9 @@ export class Temporals {
         const given = (name: string, least: number): string =>
             fields[name] !== undefined ? `COALESCE(${fields[name]}, ${least})` : `${least}`;
         const january = (y: string, day: number): string =>
-            this.sql.local(`to_char(${y}, 'FM0000') || '-01-0${day}'`, Temporal.DATE);
-        const whole = (...values: string[]): string => values.map((it) => `${it} = TRUNC(${it})`).join(' AND ');
+            this.sql.local(`${this.sql.toChar}(${y}, 'FM0000') || '-01-0${day}'`, Temporal.DATE);
+        const whole = (...values: string[]): string =>
+            values.map((it) => `${it} = ${this.sql.trunc}(${it})`).join(' AND ');
         const year = given('year', 0);
         if (fields.week !== undefined) {
             return this.shared([year, given('week', 1), given('dayOfWeek', 1)], ([y, w, d]) =>
@@ -406,12 +407,18 @@ export class Temporals {
         if (kind.zoned && ZONE_FIELDS.includes(name)) {
             return this.zoneField(text, name);
         }
-        const epoch = "TIMESTAMP '1970-01-01 00:00:00'";
+        const epoch = this.sql.epoch;
         if (name === 'epochSeconds') {
-            return { sql: `TRUNC(${this.sql.secondsBetween(epoch, this.sql.utc(text, kind))})`, text: false };
+            return {
+                sql: `${this.sql.trunc}(${this.sql.secondsBetween(epoch, this.sql.utc(text, kind))})`,
+                text: false
+            };
         }
         if (name === 'epochMillis') {
-            return { sql: `TRUNC(${this.sql.secondsBetween(epoch, this.sql.utc(text, kind))} * 1000)`, text: false };
+            return {
+                sql: `${this.sql.trunc}(${this.sql.secondsBetween(epoch, this.sql.utc(text, kind))} * 1000)`,
+                text: false
+            };
         }
         if (!INSTANT_FIELDS.includes(name)) {
             return undefined;
@@ -506,8 +513,14 @@ export class Temporals {
             months: `(${f('years')} * 12 + ${f('quarters')} * 3 + ${f('months')})`,
             days: `(${f('weeks')} * 7 + ${f('days')})`,
             seconds:
-                `(${f('hours')} * 3600 + ${f('minutes')} * 60 + ${f('seconds')} + ${f('milliseconds')} / 1000 + ` +
-                `${f('microseconds')} / 1000000 + ${f('nanoseconds')} / 1000000000)`
+                `(${f('hours')} * 3600 + ${f('minutes')} * 60 + ${f('seconds')} + ${this.sql.quotient(
+                    f('milliseconds'),
+                    '1000'
+                )} + ` +
+                `${this.sql.quotient(f('microseconds'), '1000000')} + ${this.sql.quotient(
+                    f('nanoseconds'),
+                    '1000000000'
+                )})`
         });
     }
 
@@ -661,7 +674,7 @@ export class Temporals {
             if (unit === 'days') {
                 return this.text({
                     months: '0',
-                    days: `TRUNC(${this.sql.secondsBetween(a, b)} / 86400)`,
+                    days: `${this.sql.trunc}(${this.sql.secondsBetween(a, b)} / 86400)`,
                     seconds: '0'
                 });
             }
@@ -672,8 +685,8 @@ export class Temporals {
                 this.shared([this.sql.secondsBetween(this.sql.addMonths(a, m), b)], ([rest]) =>
                     this.text({
                         months: m,
-                        days: `TRUNC(${rest} / 86400)`,
-                        seconds: `(${rest} - TRUNC(${rest} / 86400) * 86400)`
+                        days: `${this.sql.trunc}(${rest} / 86400)`,
+                        seconds: `(${rest} - ${this.sql.trunc}(${rest} / 86400) * 86400)`
                     })
                 )
             );
@@ -713,8 +726,8 @@ export class Temporals {
             this.dated(
                 {
                     year: this.sql.year(day),
-                    month: `EXTRACT(MONTH FROM ${day})`,
-                    day: `CASE WHEN NOT (${valid(day)}) THEN 0 ELSE EXTRACT(DAY FROM ${day}) END`
+                    month: `${this.sql.extract('MONTH', day)}`,
+                    day: `CASE WHEN NOT (${valid(day)}) THEN 0 ELSE ${this.sql.extract('DAY', day)} END`
                 },
                 time,
                 timezone,
@@ -746,8 +759,8 @@ export class Temporals {
     private dateOf(timestamp: string): Record<string, string> {
         return {
             year: this.sql.year(timestamp),
-            month: `EXTRACT(MONTH FROM ${timestamp})`,
-            day: `EXTRACT(DAY FROM ${timestamp})`
+            month: `${this.sql.extract('MONTH', timestamp)}`,
+            day: `${this.sql.extract('DAY', timestamp)}`
         };
     }
 
@@ -810,9 +823,9 @@ export class Temporals {
     private overTime(clock: string | undefined, fields: Record<string, string>): Record<string, string> {
         const time: Record<string, string> = {};
         const read: Record<string, (t: string) => string> = {
-            hour: (t) => `EXTRACT(HOUR FROM ${t})`,
-            minute: (t) => `EXTRACT(MINUTE FROM ${t})`,
-            second: (t) => `TRUNC(EXTRACT(SECOND FROM ${t}))`
+            hour: (t) => `${this.sql.extract('HOUR', t)}`,
+            minute: (t) => `${this.sql.extract('MINUTE', t)}`,
+            second: (t) => `${this.sql.trunc}(${this.sql.extract('SECOND', t)})`
         };
         Object.entries(read).forEach(([name, of]) => {
             const value = fields[name] ?? (clock !== undefined ? of(clock) : undefined);
@@ -888,7 +901,7 @@ export class Temporals {
         kind: Temporal
     ): string {
         const whole = (value: string, last: number): string =>
-            `${value} = TRUNC(${value}) AND ${value} BETWEEN 1 AND ${last}`;
+            `${value} = ${this.sql.trunc}(${value}) AND ${value} BETWEEN 1 AND ${last}`;
         if (fields.quarter !== undefined) {
             return this.shared([fields.quarter], ([q]) =>
                 this.calendarDate(
@@ -927,28 +940,31 @@ export class Temporals {
 
     /** A field of the wall clock `t`, a timestamp, by Cypher's name for it. */
     private clockField(t: string, name: string): string {
-        const second = `EXTRACT(SECOND FROM ${t})`;
+        const second = `${this.sql.extract('SECOND', t)}`;
         const fields: Record<string, () => string> = {
             year: () => this.sql.year(t),
-            quarter: () => `TRUNC((EXTRACT(MONTH FROM ${t}) + 2) / 3)`,
-            month: () => `EXTRACT(MONTH FROM ${t})`,
-            week: () => this.sql.number(`to_char(${t}, 'IW')`),
+            quarter: () => `${this.sql.trunc}((${this.sql.extract('MONTH', t)} + 2) / 3)`,
+            month: () => `${this.sql.extract('MONTH', t)}`,
+            week: () => this.sql.number(`${this.sql.toChar}(${t}, 'IW')`),
             weekYear: () => this.sql.weekYear(t),
-            day: () => `EXTRACT(DAY FROM ${t})`,
-            ordinalDay: () => this.sql.number(`to_char(${t}, 'DDD')`),
+            day: () => `${this.sql.extract('DAY', t)}`,
+            ordinalDay: () => this.sql.number(`${this.sql.toChar}(${t}, 'DDD')`),
             dayOfQuarter: () =>
-                `(${this.sql.number(`to_char(${t}, 'DDD')`)} - ${this.sql.number(
-                    `to_char(${this.sql.truncate('quarter', t)!}, 'DDD')`
+                `(${this.sql.number(`${this.sql.toChar}(${t}, 'DDD')`)} - ${this.sql.number(
+                    `${this.sql.toChar}(${this.sql.truncate('quarter', t)!}, 'DDD')`
                 )} + 1)`,
             dayOfWeek: () => this.sql.dayOfWeek(t),
             weekDay: () => this.sql.dayOfWeek(t),
-            hour: () => `EXTRACT(HOUR FROM ${t})`,
-            minute: () => `EXTRACT(MINUTE FROM ${t})`,
-            second: () => `TRUNC(${second})`,
-            millisecond: () => `(TRUNC(${second} * 1000) - TRUNC(${second}) * 1000)`,
-            microsecond: () => `(TRUNC(${second} * 1000000) - TRUNC(${second}) * 1000000)`
+            hour: () => `${this.sql.extract('HOUR', t)}`,
+            minute: () => `${this.sql.extract('MINUTE', t)}`,
+            second: () => `${this.sql.trunc}(${second})`,
+            millisecond: () => `(${this.sql.trunc}(${second} * 1000) - ${this.sql.trunc}(${second}) * 1000)`,
+            microsecond: () => `(${this.sql.trunc}(${second} * 1000000) - ${this.sql.trunc}(${second}) * 1000000)`
         };
-        return (fields[name] ?? (() => `((TRUNC(${second} * 1000000) - TRUNC(${second}) * 1000000) * 1000)`))();
+        return (
+            fields[name] ??
+            (() => `((${this.sql.trunc}(${second} * 1000000) - ${this.sql.trunc}(${second}) * 1000000) * 1000)`)
+        )();
     }
 
     private zoneField(text: string, name: string): Field {
@@ -978,7 +994,7 @@ export class Temporals {
                 ? parts.seconds
                 : this.shared(
                       [parts.seconds],
-                      ([sec]) => `CASE WHEN ${date} THEN TRUNC(${sec} / 86400) * 86400 ELSE ${sec} END`
+                      ([sec]) => `CASE WHEN ${date} THEN ${this.sql.trunc}(${sec} / 86400) * 86400 ELSE ${sec} END`
                   );
         return this.sql.addTime(
             this.sql.addMonths(timestamp, `${s}(${parts.months})`),
@@ -1013,16 +1029,16 @@ export class Temporals {
      */
     private text(parts: Parts): string {
         return this.shared([parts.months, parts.days, parts.seconds], ([m0, d0, s0]) => {
-            const m = `TRUNC(${m0})`;
-            const d = `TRUNC(${d0} + (${m0} - TRUNC(${m0})) * 30.436875)`;
-            const s = `(${s0} + (${d0} + (${m0} - TRUNC(${m0})) * 30.436875 - ${d}) * 86400)`;
+            const m = `${this.sql.trunc}(${m0})`;
+            const d = `${this.sql.trunc}(${d0} + (${m0} - ${this.sql.trunc}(${m0})) * 30.436875)`;
+            const s = `(${s0} + (${d0} + (${m0} - ${this.sql.trunc}(${m0})) * 30.436875 - ${d}) * 86400)`;
             return this.shared([m, d, s], ([months, days, seconds]) => {
-                const years = `TRUNC(${months} / 12)`;
-                const hours = `TRUNC(${seconds} / 3600)`;
-                const minutes = `(TRUNC(${seconds} / 60) - ${hours} * 60)`;
-                const secs = `(${seconds} - TRUNC(${seconds} / 60) * 60)`;
+                const years = `${this.sql.trunc}(${months} / 12)`;
+                const hours = `${this.sql.trunc}(${seconds} / 3600)`;
+                const minutes = `(${this.sql.trunc}(${seconds} / 60) - ${hours} * 60)`;
+                const secs = `(${seconds} - ${this.sql.trunc}(${seconds} / 60) * 60)`;
                 const unit = (value: string, letter: string): string =>
-                    `CASE WHEN ${value} <> 0 THEN ${durationNumber(value)} || '${letter}' ELSE '' END`;
+                    `CASE WHEN ${value} <> 0 THEN ${durationNumber(value, this.sql.toChar)} || '${letter}' ELSE '' END`;
                 return (
                     `CASE WHEN ${months} = 0 AND ${days} = 0 AND ${seconds} = 0 THEN 'PT0S' WHEN ${seconds} IS NOT NULL THEN 'P' || ` +
                     `${unit(years, 'Y')} || ${unit(`(${months} - ${years} * 12)`, 'M')} || ${unit(days, 'D')} || ` +
@@ -1037,11 +1053,11 @@ export class Temporals {
 
     /** A field of a duration of the parts `parts`, by Cypher's name for it. */
     private durationField(parts: Parts, name: string): string {
-        return DURATION_FIELDS[name](parts.months, parts.days, parts.seconds);
+        return DURATION_FIELDS[name](parts.months, parts.days, parts.seconds, this.sql.trunc);
     }
 }
 
 /** A number as Neo4j writes one in a duration: no zeros after the point, nor the point where there is no fraction. */
-function durationNumber(value: string): string {
-    return `RTRIM(to_char(${value}, 'FM9999999999990.999999999'), '.')`;
+function durationNumber(value: string, toChar: string): string {
+    return `RTRIM(${toChar}(${value}, 'FM9999999999990.999999999'), '.')`;
 }

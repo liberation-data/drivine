@@ -1,9 +1,9 @@
 ## Cypher on a relational database
 
 Write a Cypher statement once, and run it on whichever store you connect to. Neo4j, Memgraph, FalkorDB and Neptune run
-it as written. On **Postgres** and **Oracle**, the SQL stores Drivine for TypeScript supports, Drivine compiles it to
-SQL over the graph's two tables, one of nodes and one of relationships, and gives back the rows a graph engine gives.
-SQLite is [drivine4j](https://github.com/liberation-data/drivine4j)'s for now.
+it as written. On **Postgres**, **Oracle** and **SQLite**, the SQL stores Drivine for TypeScript supports, Drivine
+compiles it to SQL over the graph's two tables, one of nodes and one of relationships, and gives back the rows a graph
+engine gives.
 
 ### Connect
 
@@ -20,8 +20,10 @@ DATABASE_PASSWORD=secret
 ```
 
 For Oracle 23.9 or later, set `DATABASE_TYPE=ORACLE`, `DATABASE_PORT=1521` and `DATABASE_NAME` to the service, such as
-`FREEPDB1`. On either, `DATABASE_DEFAULT_GRAPH_PATH` names the graph's tables, `drivine` unless given. The
-[Postgres](07-supported-engines.md#postgres) and [Oracle](07-supported-engines.md#oracle) sections have the rest.
+`FREEPDB1`. For SQLite, with no server, set `DATABASE_TYPE=SQLITE` and `DATABASE_NAME` to the file's path. On any of
+them, `DATABASE_DEFAULT_GRAPH_PATH` names the graph's tables, `drivine` unless given. The
+[Postgres](07-supported-engines.md#postgres), [Oracle](07-supported-engines.md#oracle) and
+[SQLite](07-supported-engines.md#sqlite) sections have the rest.
 
 ### Write and read
 
@@ -68,7 +70,7 @@ A statement that writes runs as one statement, applied whole or not at all. Each
 
 What each statement gives on each store, compiled to SQL or not, is the shared
 [Cypher spec](https://github.com/liberation-data/drivine-cypher-spec). This repository runs version
-[v0.10.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.10.0) of it on Neo4j, Postgres and Oracle, and
+[v0.21.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.21.0) of it on Neo4j, Postgres, Oracle and SQLite, and
 drivine-python and drivine4j run the same spec. Reads and writes compile, with variable-length relationships and
 quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
 anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`

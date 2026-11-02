@@ -195,8 +195,11 @@ SQLite keeps a graph in a file, with no server: the same tables as Oracle and Po
 drivine-python wrote is read and written here, and the other way round. Drivine opens it through Node's own driver,
 `node:sqlite`, in Node 22.13 or later, which brings SQLite 3.45 or later; nothing else is installed. Node 22 and 24 print
 an `ExperimentalWarning` the first time `node:sqlite` is loaded. Models, the DSL and the object manager are the same as on
-the graph engines; `PersistenceManager` runs plain SQL, with cursors and transactions. Cypher comes later, with the
-compiler's SQLite target.
+the graph engines; `PersistenceManager` runs plain SQL, with cursors and transactions, and Cypher, compiled to SQLite's
+SQL as drivine4j compiles it (a cursor runs SQL alone). What Cypher does that SQLite's JSON functions don't, Drivine's
+functions registered on each connection do. A float is given back to its last digit by the SQLite of a current Node
+(3.53, in Node 22.23, 24.22 and 26): SQLite 3.50, in Node 24.13 and earlier, writes a float in JSON to 15 digits,
+`0.333333333333333`.
 
 ```bash
 DATABASE_TYPE=SQLITE

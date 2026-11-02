@@ -10,13 +10,17 @@ import { ensuringStatements, JSON_ROWS } from '@/backend/sqlite/SqliteGraph';
 import { SqliteSpecCompiler } from '@/connection/sqlite/SqliteSpecCompiler';
 import { SqliteCursor } from '@/connection/sqlite/SqliteCursor';
 import { SqliteDatabase, SqliteValue, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
+import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
+import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 
 /** How long a transaction may hold the file's write lock before its end is warned of: drivine4j's five seconds. */
 export const LONG_LOCK_MILLIS = 5_000;
 
 /**
- * A connection to a SQLite file, through Node's own synchronous driver. It runs SQL only: Cypher on SQLite comes with
- * the compiler that targets it.
+ * A connection to a SQLite file, through Node's own synchronous driver. A Cypher statement is compiled to SQL over the
+ * graph's tables (see SqliteCypherCompiler), so a statement written for a graph engine runs here and gives the same rows:
+ * one value a row, from the compiled statement's one column, read as JSON.
  *
  * - A transaction takes the file's write lock as it begins (`BEGIN IMMEDIATE`), so one that reads and then writes is
  *   never turned away for what another wrote in between: two such transactions wait their turn. One that holds the lock
@@ -39,12 +43,14 @@ export class SqliteConnection implements Connection {
     /**
      * @param busyTimeoutMillis how long a statement waits for a locked file before it is turned away
      * @param handBack gives the connection back to its provider, or closes it when it failed
+     * @param graph the graph a Cypher statement is compiled against: its tables are `<graph>_node` and `<graph>_edge`
      */
     constructor(
         readonly db: SqliteDatabase,
         readonly resultMapper: ResultMapper,
         private readonly busyTimeoutMillis: number,
-        private readonly handBack: (db: SqliteDatabase, failed: boolean) => void
+        private readonly handBack: (db: SqliteDatabase, failed: boolean) => void,
+        private readonly graph: string = DEFAULT_GRAPH
     ) {}
 
     sessionId(): string {
@@ -57,7 +63,9 @@ export class SqliteConnection implements Connection {
     }
 
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
-        const finalizedSpec = spec.finalizedCopy('SQL');
+        const given = spec.finalizedCopy('SQL');
+        const cypher = given.statement.language === 'CYPHER' ? this.compiled(given) : undefined;
+        const finalizedSpec = cypher ?? given;
         const ensuring = ensuringStatements(finalizedSpec.statement.text);
         if (ensuring) {
             await this.waitingOutLocks(() => ensure(this.db, ensuring, this.inTransaction));
@@ -69,8 +77,9 @@ export class SqliteConnection implements Connection {
             this.db.prepare(compiled.statement).all(...bound(compiled.parameters))
         );
         new StatementLogger(this.sessionId()).log(spec, hrStart);
-        const read = compiled.statement.startsWith(JSON_ROWS) ? rows.map(jsonRow) : rows.map((it) => ({ ...it }));
-        return this.resultMapper.mapQueryResults<T>(read, finalizedSpec);
+        // Read into arrays of this realm: the driver's are its own, which a test's deep equality tells apart.
+        const read = Array.from(rows, compiled.statement.startsWith(JSON_ROWS) ? jsonRow : (it) => ({ ...it }));
+        return this.resultMapper.mapQueryResults<T>(cypher ? read.map((it) => it.result) : read, finalizedSpec);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<SqliteCursor<T>> {
@@ -138,6 +147,22 @@ export class SqliteConnection implements Connection {
         }
         this.handBack(this.db, failed);
         return Promise.resolve();
+    }
+
+    /**
+     * The Cypher statement of `spec` compiled to SQL over the graph's tables, as a specification of that SQL, which opens
+     * with `/* drivine:json *\/`: each of its text values is JSON.
+     */
+    private compiled<T>(spec: QuerySpecification<T>): QuerySpecification<T> {
+        const compiled = compiledSpecification(spec, new SqliteCypherCompiler(this.graph)).spec;
+        return Object.freeze(
+            new QuerySpecification<T>()
+                .withStatement({ text: `${JSON_ROWS}\n${compiled.statement.text}`, language: 'SQL' })
+                .skip(compiled._skip)
+                .limit(compiled._limit)
+                .bind(compiled.parameters)
+                .addPostProcessors(...compiled.postProcessors)
+        );
     }
 
     /**

@@ -4,7 +4,7 @@ import { chunked, indent, literal, MOST_ARGUMENTS, RADIANS_TO_DEGREES, RoundingM
 import { jsonText } from '@/cypher/sql/JsonText';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { PostgresTemporalSql } from '@/cypher/sql/PostgresTemporalSql';
-import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { PLAIN_FLOAT, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
@@ -596,7 +596,7 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
      * It is made before the statement that calls it, which binds the parameters: Postgres's driver binds a statement of
      * one command.
      */
-    procedure(body: string[]): ProcedureCall {
+    procedure(program: ProcedureStep[]): ProcedureCall {
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} jsonb;`,
             `    ${GATHERED}${i + 1} jsonb;`,
@@ -617,7 +617,7 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             `    ${MATCHED} record;`,
             ...saved.flat(),
             'BEGIN',
-            indent(body.join('\n')),
+            indent(this.statements(program).join('\n')),
             'END'
         ].join('\n');
         const digest = createHash('sha256').update(text).digest('hex');

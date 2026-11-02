@@ -2,6 +2,7 @@ import { int } from 'neo4j-driver';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
 import { check, loadSpec, runsOn, trimIndent, valuesFor } from '../../cypher/CypherSpec';
 
 /**
@@ -13,7 +14,8 @@ describe('The Cypher compiler refuses', () => {
     const spec = loadSpec('refusals.yaml');
     const compilers: [string, () => SqlCypherCompiler][] = [
         ['postgres', () => new PostgresCypherCompiler('g')],
-        ['oracle', () => new OracleCypherCompiler('g')]
+        ['oracle', () => new OracleCypherCompiler('g')],
+        ['sqlite', () => new SqliteCypherCompiler('g')]
     ];
 
     describe.each(compilers)('on %s', (store, compiler) => {

@@ -35,12 +35,9 @@ export function sqlStores(): SqlStore[] {
     ];
 }
 
-/**
- * The SQL stores that run Cypher, compiling it to their SQL: each of sqlStores but SQLite, whose compiler comes later
- * (liberation-data/drivine#266).
- */
+/** The SQL stores that run Cypher, compiling it to their SQL: each of sqlStores. */
 export function cypherSqlStores(): SqlStore[] {
-    return sqlStores().filter((it) => it.type !== DatabaseType.SQLITE);
+    return sqlStores();
 }
 
 /** Whether the store keeps a graph in SQL tables: Oracle, Postgres or SQLite. */

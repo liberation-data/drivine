@@ -33,14 +33,9 @@ describe.each(allStores())('store identity on $type', (engine) => {
     let pm: PersistenceManager;
     const manager = (): StatelessGraphObjectManager =>
         new StatelessGraphObjectManager(pm, backendFor(engine.type, GRAPH), new ModelRegistry());
-    // clearLabels deletes from the shared graph's tables, so the SQL stores' own graph is cleared by Cypher, and on
-    // SQLite, whose Cypher comes later (liberation-data/drivine#266), by SQL.
+    // clearLabels deletes from the shared graph's tables, so the SQL stores' own graph is cleared by Cypher.
     const wipe = async (): Promise<void> =>
-        engine.type === DatabaseType.SQLITE
-            ? void (await pm.execute(
-                  new QuerySpecification(`DELETE FROM ${GRAPH}_node WHERE instr(labels, '"DrivineStore"') > 0`)
-              ))
-            : sql
+        sql
             ? void (await pm.execute(
                   new QuerySpecification({ text: 'MATCH (n:DrivineStore) DETACH DELETE n', language: 'CYPHER' })
               ))

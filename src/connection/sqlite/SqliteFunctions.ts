@@ -5,6 +5,8 @@ import { SqliteStatements } from '@/backend/sqlite/SqliteStatements';
 import { WriteReturns } from '@/backend/sql/WritePlan';
 import { LowerCopies } from '@/model/LowerCopies';
 import type { SqliteDatabase, SqliteValue } from '@/connection/sqlite/SqliteDriver';
+import { SqlitePatterns } from '@/connection/sqlite/SqlitePatterns';
+import { registerCypherFunctions, SqliteCypherFunctionNames } from '@/connection/sqlite/SqliteCypherFunctions';
 
 /**
  * The functions Drivine registers on each connection to a SQLite store, which its statements call, by drivine4j's
@@ -18,8 +20,11 @@ import type { SqliteDatabase, SqliteValue } from '@/connection/sqlite/SqliteDriv
  * - `drivine_lower(text)` lowers text as Unicode does: SQLite's own `lower` lowers only ASCII;
  * - `drivine_epoch(text)` reads a moment as nanoseconds since the epoch, so moments compare exactly.
  *
+ * Compiled Cypher calls the rest, by the names {@link SqliteCypherFunctionNames} gives (`EQUAL`, `CYPHER` …): see
+ * registerCypherFunctions.
+ *
  * A function that reads only its arguments is registered as deterministic, so SQLite may index an expression over it.
- * The ones Cypher compiled to SQLite's SQL calls come with that compiler.
+ * One that gives a count or a truth value gives an integer, as drivine4j's do: a JavaScript number SQLite holds as real.
  */
 export const SqliteFunctions = {
     WRITE: 'drivine_write',
@@ -30,11 +35,12 @@ export const SqliteFunctions = {
     LOWER: 'drivine_lower',
     EPOCH: 'drivine_epoch',
     REGEXP: 'regexp',
+    ...SqliteCypherFunctionNames,
 
     /** Registers every function on `db`, for the statements run on it. */
     register(db: SqliteDatabase): void {
         const statements = new SqliteStatements(db);
-        const patterns = new Patterns();
+        const patterns = new SqlitePatterns();
         // A function's arity is the number of parameters its JavaScript function declares.
         db.function(SqliteFunctions.WRITE, {}, (graph, plan, shapes, mark, returns, patchedIf) =>
             write(statements, [graph, plan, shapes, mark, returns, patchedIf])
@@ -64,15 +70,15 @@ export const SqliteFunctions = {
         );
         db.function(SqliteFunctions.REGEXP_COUNT, { deterministic: true }, (text, expression) => {
             if (text == null || expression == null) {
-                return 0;
+                return BigInt(0);
             }
-            return String(text).match(patterns.of(String(expression), 'g'))?.length ?? 0;
+            return BigInt(String(text).match(patterns.of(String(expression), 'g'))?.length ?? 0);
         });
         db.function(SqliteFunctions.REGEXP, { deterministic: true }, (expression, text) => {
             if (expression == null || text == null) {
                 return null;
             }
-            return patterns.of(String(expression), '').test(String(text)) ? 1 : 0;
+            return BigInt(patterns.of(String(expression), '').test(String(text)) ? 1 : 0);
         });
         db.function(SqliteFunctions.LOWER, { deterministic: true }, (text) =>
             text == null ? null : String(text).toLowerCase()
@@ -80,6 +86,7 @@ export const SqliteFunctions = {
         db.function(SqliteFunctions.EPOCH, { deterministic: true }, (text) =>
             text == null ? null : epoch(String(text).trim())
         );
+        registerCypherFunctions(db, patterns);
     }
 };
 
@@ -278,48 +285,4 @@ function offsetSeconds(zone: string | undefined): number | null {
         return null;
     }
     return zone.startsWith('-') ? -seconds : seconds;
-}
-
-/**
- * The POSIX classes a bracket expression may name, as JavaScript's Unicode expressions name them: the same classes as
- * drivine4j's, Java's with UNICODE_CHARACTER_CLASS, so a letter is any alphabetic character, a vowel sign among them.
- */
-const POSIX: [string, string][] = [
-    ['[:alnum:]', '\\p{Alphabetic}\\p{Nd}'],
-    ['[:alpha:]', '\\p{Alphabetic}'],
-    ['[:digit:]', '\\p{Nd}'],
-    ['[:space:]', '\\p{White_Space}'],
-    ['[:upper:]', '\\p{Uppercase}'],
-    ['[:lower:]', '\\p{Lowercase}'],
-    ['[:punct:]', '\\p{P}']
-];
-
-/**
- * The regular expressions the functions of one connection have read, compiled once each: a search asks the same few of
- * every node it reads. A class written as POSIX names it, `[:alnum:]`, is the same class, of letters and digits in any
- * script, as on a Postgres database whose text is Unicode, so a full-text search written for Postgres reads alike here.
- */
-class Patterns {
-    private static readonly MAX = 256;
-    private readonly compiled = new Map<string, RegExp>();
-
-    of(expression: string, flags: string): RegExp {
-        const key = `${flags}/${expression}`;
-        let found = this.compiled.get(key);
-        if (!found) {
-            // A leading `(?i)` ignores case, as Cypher's `=~` reads it, and `\z` is the end of the text, as Java writes it.
-            const ignoreCase = expression.startsWith('(?i)');
-            const source = POSIX.reduce(
-                (text, [posix, js]) => text.split(posix).join(js),
-                (ignoreCase ? expression.slice(4) : expression).replace(/\\z/g, '$')
-            );
-            found = new RegExp(source, `u${flags}${ignoreCase ? 'i' : ''}`);
-            if (this.compiled.size >= Patterns.MAX) {
-                this.compiled.delete(this.compiled.keys().next().value!);
-            }
-            this.compiled.set(key, found);
-        }
-        found.lastIndex = 0;
-        return found;
-    }
 }

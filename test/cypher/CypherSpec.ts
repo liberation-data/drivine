@@ -117,7 +117,9 @@ const HELD: Record<string, Record<string, Hold[]>> = {
         // A NaN or infinite parameter is bound as null (step 6 gives null on every store, and step 11 runs on Postgres only).
         'NaN and the infinities as parameters': [
             { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], on: ['postgres'] },
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['oracle'] }
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['oracle'] },
+            // drivine4j holds the case on SQLite too, for liberation-data/drivine4j#295.
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['sqlite'] }
         ],
         // Oracle holds NaN equal to NaN.
         'NaN worked out': [{ issue: 512, steps: [2, 3], on: ['oracle'] }],
@@ -129,7 +131,8 @@ const HELD: Record<string, Record<string, Hold[]>> = {
     'writes.yaml': {
         'NaN and the infinities written': [
             { issue: 344, steps: [4], on: ['postgres'] },
-            { issue: 344, steps: [1, 2, 3], on: ['oracle'] }
+            { issue: 344, steps: [1, 2, 3], on: ['oracle'] },
+            { issue: 344, steps: [1, 2, 5], on: ['sqlite'] }
         ]
     },
     'refusals.yaml': {

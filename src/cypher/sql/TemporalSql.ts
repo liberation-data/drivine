@@ -66,6 +66,37 @@ export abstract class TemporalSql {
     abstract get now(): string;
 
     /**
+     * The name of the function that writes a timestamp or a number as text in a pattern (`'YYYY-MM-DD'`, `'FM0000'`), as
+     * Postgres's and Oracle's `to_char` does.
+     */
+    get toChar(): string {
+        return 'to_char';
+    }
+
+    /** The name of the function that cuts a number's fraction off, as `TRUNC` does. */
+    get trunc(): string {
+        return 'TRUNC';
+    }
+
+    /** The timestamp of the epoch, 1970-01-01 at midnight. */
+    get epoch(): string {
+        return "TIMESTAMP '1970-01-01 00:00:00'";
+    }
+
+    /** `dividend` divided by `divisor`, numbers each, with its fraction kept where both are whole numbers. */
+    quotient(dividend: string, divisor: string): string {
+        return `${dividend} / ${divisor}`;
+    }
+
+    /**
+     * The field `field` (`YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, `SECOND` with its fraction) of the timestamp
+     * `timestamp`, a number.
+     */
+    extract(field: string, timestamp: string): string {
+        return `EXTRACT(${field} FROM ${timestamp})`;
+    }
+
+    /**
      * Whether the store numbers a year BC from -1, with no year 0, as Postgres and Oracle do, where Cypher numbers years
      * astronomically: 0 for 1 BC and -44 for 45 BC. Where it does, a year before 1 is one more than the store's.
      */
@@ -75,7 +106,7 @@ export abstract class TemporalSql {
 
     /** The year of `timestamp`, a number, as Cypher numbers it: see {@link numbersBcFromOne}. */
     year(timestamp: string): string {
-        const year = `EXTRACT(YEAR FROM ${timestamp})`;
+        const year = this.extract('YEAR', timestamp);
         if (!this.numbersBcFromOne) {
             return year;
         }
@@ -94,13 +125,13 @@ export abstract class TemporalSql {
 
     /** The year of the ISO week of `timestamp`, a number, as Cypher numbers a year: `to_char` writes one BC unsigned. */
     weekYear(timestamp: string): string {
-        const week = (t: string): string => this.number(`to_char(${t}, 'IYYY')`);
+        const week = (t: string): string => this.number(`${this.toChar}(${t}, 'IYYY')`);
         if (!this.numbersBcFromOne) {
             return week(timestamp);
         }
         return this.shared(
             [timestamp],
-            ([t]) => `CASE WHEN EXTRACT(YEAR FROM ${t}) < 0 THEN 1 - ${week(t)} ELSE ${week(t)} END`
+            ([t]) => `CASE WHEN ${this.extract('YEAR', t)} < 0 THEN 1 - ${week(t)} ELSE ${week(t)} END`
         );
     }
 
@@ -110,7 +141,7 @@ export abstract class TemporalSql {
      * twice at most: a value an aggregate's argument reads is bound nowhere, and is written out again wherever it is read.
      */
     date(timestamp: string, then: string = ''): string {
-        return `to_char(${timestamp}, 'YYYY-MM-DD${then}')`;
+        return `${this.toChar}(${timestamp}, 'YYYY-MM-DD${then}')`;
     }
 
     /**

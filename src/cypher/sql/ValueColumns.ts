@@ -75,7 +75,67 @@ export function columnsOf(value: Value, alias: string, name?: string): Value {
 
 /** `value` with {@link PENDING} read as `alias`. */
 function withAlias(value: Value, alias: string): Value {
-    const named = (sql: string): string => sql.split(PENDING).join(alias);
+    return mapSql(value, (sql) => sql.split(PENDING).join(alias));
+}
+
+/** A column of the query {@link PENDING} stands for. */
+const PENDING_COLUMN = new RegExp(`${PENDING}\\.(\\w+)`, 'g');
+
+/**
+ * `value`, whose columns are named for a query not yet named ({@link PENDING}), read from the rows named `name` that a
+ * lateral join gives, of the columns `kinds`, each read by `column` (see `SqlCypherCompiler.lateralColumn`).
+ */
+export function laterally(
+    value: Value,
+    name: string,
+    kinds: [string, boolean][],
+    column: (name: string, column: string, json: boolean) => string
+): Value {
+    const json = new Map(kinds);
+    return mapSql(value, (sql) =>
+        sql.replace(PENDING_COLUMN, (_, c: string) => {
+            if (!json.has(c)) {
+                throw new Error(`${c} is no column of the lateral query ${name}.`);
+            }
+            return column(name, c, json.get(c)!);
+        })
+    );
+}
+
+/** The columns {@link columns} gives `value` under `name`, each named and whether it holds JSON, in the same order. */
+export function columnKinds(value: Value, name: string): [string, boolean][] {
+    switch (value.kind) {
+        case 'Json':
+            return [[name, true], ...(value.identity ? [[`${name}_identity`, true] as [string, boolean]] : [])];
+        case 'Bool':
+            return [[name, false]];
+        case 'Entities':
+            return [[name, true]];
+        case 'Node':
+            return [
+                [`${name}_nid`, false],
+                [`${name}_labels`, true],
+                [`${name}_props`, true],
+                [`${name}_stamp`, false]
+            ];
+        case 'Relationship':
+            return [
+                [`${name}_eid`, false],
+                [`${name}_src`, false],
+                [`${name}_dst`, false],
+                [`${name}_type`, false],
+                [`${name}_props`, true]
+            ];
+        default:
+            return [
+                [`${name}_nids`, false],
+                [`${name}_eids`, false]
+            ];
+    }
+}
+
+/** `value` with each piece of its SQL transformed by `named`. */
+function mapSql(value: Value, named: (sql: string) => string): Value {
     switch (value.kind) {
         case 'Json':
             return { ...value, sql: named(value.sql), identity: value.identity && named(value.identity) };
