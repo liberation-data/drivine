@@ -17,7 +17,7 @@ import {
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { allStores, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
-import { SqlSeed } from '../support/SqlStores';
+import { isSqlStore, SqlSeed, SqlStore } from '../support/SqlStores';
 
 // Neo4j plans each cascade statement the first time it sees it, and a cascade through a view nested in itself is a dozen
 // pattern comprehensions, one for each position at each level: the plan takes most of a test's time, ten times its run,
@@ -242,6 +242,8 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
                   `WHERE JSON_EXISTS(n.labels, '$?(@ == "RecursiveCascade")')`
                 : engine.type === DatabaseType.POSTGRES
                 ? `SELECT n.props ->> 'id' AS "id" FROM drivine_node n WHERE n.labels @> '["RecursiveCascade"]'`
+                : engine.type === DatabaseType.SQLITE
+                ? `SELECT n.props ->> 'id' AS "id" FROM drivine_node n WHERE instr(n.labels, '"RecursiveCascade"') > 0`
                 : 'MATCH (n:RecursiveCascade) RETURN n.id AS id';
         const rows = await pm.query<any>(new QuerySpecification(statement));
         return sorted(rows.map((it) => (typeof it === 'object' && it !== null ? it.id : it)));
@@ -282,8 +284,8 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
     beforeAll(async () => {
         pm = persistenceManagerFor(engine);
         gom = new StatelessGraphObjectManager(pm, backendFor(engine.type), new ModelRegistry());
-        if (engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES) {
-            sql = new SqlSeed(pm, { name: engine.type, type: engine.type }, 'RecursiveCascade');
+        if (isSqlStore(engine.type)) {
+            sql = new SqlSeed(pm, engine as SqlStore, 'RecursiveCascade');
             await sql.prepare();
         }
     });

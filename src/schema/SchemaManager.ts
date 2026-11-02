@@ -44,7 +44,8 @@ const GRAPH_TYPES = [
     DatabaseType.MEMGRAPH,
     DatabaseType.FALKORDB,
     DatabaseType.ORACLE,
-    DatabaseType.POSTGRES
+    DatabaseType.POSTGRES,
+    DatabaseType.SQLITE
 ];
 
 /** What makes two declarations the same item: kind, label and the properties it is made over (see `madeAs`). */

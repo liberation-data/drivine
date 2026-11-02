@@ -6,7 +6,7 @@ import {
     graphEngines,
     persistenceManagerFor
 } from '../support/GraphEngines';
-import { sqlStores } from '../support/SqlStores';
+import { cypherSqlStores } from '../support/SqlStores';
 
 jest.setTimeout(120_000);
 
@@ -14,7 +14,7 @@ const LABELS = ['CyBesideN1', 'CyBesideN2', 'CyBesideN3'];
 
 /** Neo4j, the default connection, where it is configured, and the SQL stores, on which each statement is compiled to SQL. */
 function stores(): GraphEngine[] {
-    return [...graphEngines().filter((it) => it.type === DatabaseType.NEO4J), ...sqlStores()];
+    return [...graphEngines().filter((it) => it.type === DatabaseType.NEO4J), ...cypherSqlStores()];
 }
 
 /**

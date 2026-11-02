@@ -90,7 +90,10 @@ export class Transaction {
     }
 
     async popContextWithError(e: Error, isRoot: boolean): Promise<void> {
-        this.callStack.pop();
+        // A commit that failed in popContext has popped the root's context already: it is rolled back here.
+        if (!this.callStack.isEmpty()) {
+            this.callStack.pop();
+        }
         if (isRoot) {
             this.logger.verbose(`Rolling back transaction: ${this.description} due to error: ${e.message}.`);
             await Promise.all(this.connections.map(async (it) => it.rollbackTransaction()));

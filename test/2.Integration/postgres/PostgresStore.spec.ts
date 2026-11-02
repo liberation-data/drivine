@@ -12,6 +12,7 @@ import {
     GraphRelationship,
     GraphObjectManagerFactory,
     GraphView,
+    inDrivineContext,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -167,6 +168,42 @@ describe.each(postgres)('a store on $name', (store) => {
         expect(await exists(`${name}_node`)).toBe(true);
         expect(await rolled.count(Ticket)).toBe(0);
         await pm.execute(new QuerySpecification(drop));
+    });
+
+    it('should give the failure of a commit refused under a nested transaction, roll it back, and end it', async () => {
+        const table = 'pgstore_deferred';
+        await pm.execute(new QuerySpecification(`DROP TABLE IF EXISTS ${table}`));
+        await pm.execute(
+            new QuerySpecification(
+                `CREATE TABLE ${table} (id int PRIMARY KEY, ref int REFERENCES ${table} (id) DEFERRABLE INITIALLY DEFERRED)`
+            )
+        );
+        const tpm = new PersistenceManagerFactory(
+            DatabaseRegistry.getInstance(),
+            TransactionContextHolder.getInstance()
+        ).get(store.name);
+        class Rows {
+            @Transactional()
+            async insert(id: number, ref: number): Promise<void> {
+                await tpm.execute(new QuerySpecification(`INSERT INTO ${table} VALUES ($1, $2)`).bind([id, ref]));
+            }
+        }
+        class Outer {
+            constructor(private readonly rows: Rows = new Rows()) {}
+
+            @Transactional()
+            async insert(id: number, ref: number): Promise<void> {
+                await this.rows.insert(id, ref);
+            }
+        }
+        await inDrivineContext().run(async () => {
+            // The inner method returns; the root's commit is refused, as the deferred key is checked only then.
+            await expect(new Outer().insert(1, 99)).rejects.toThrow(/foreign key/);
+            expect(TransactionContextHolder.getInstance().currentTransaction).toBeUndefined();
+            await new Outer().insert(2, 2);
+        });
+        expect(await pm.query<any>(new QuerySpecification(`SELECT id FROM ${table}`))).toEqual([{ id: 2 }]);
+        await pm.execute(new QuerySpecification(`DROP TABLE ${table}`));
     });
 
     it("should make a graph's tables when its manager's first statement is a schema statement", async () => {

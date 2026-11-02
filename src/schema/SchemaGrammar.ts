@@ -4,6 +4,8 @@ import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { PostgresSchemaGrammar } from '@/backend/postgres/PostgresSchemaGrammar';
+import { SqliteGraph } from '@/backend/sqlite/SqliteGraph';
+import { SqliteSchemaGrammar } from '@/backend/sqlite/SqliteSchemaGrammar';
 import { SqlGraph } from '@/backend/sql/SqlGraph';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import type { LowerCopyStatements } from '@/schema/LowerCopyCatalog';
@@ -426,7 +428,7 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     }
 };
 
-/** The schema grammar of an engine; on Oracle and Postgres, over `graph` (the default graph unless given). */
+/** The schema grammar of an engine; on Oracle, Postgres and SQLite, over `graph` (the default graph unless given). */
 export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGrammar {
     switch (type) {
         case DatabaseType.NEO4J:
@@ -439,6 +441,8 @@ export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGr
             return new OracleSchemaGrammar(graph instanceof OracleGraph ? graph : new OracleGraph(graph?.name));
         case DatabaseType.POSTGRES:
             return new PostgresSchemaGrammar(graph instanceof PostgresGraph ? graph : new PostgresGraph(graph?.name));
+        case DatabaseType.SQLITE:
+            return new SqliteSchemaGrammar(graph instanceof SqliteGraph ? graph : new SqliteGraph(graph?.name));
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }

@@ -21,6 +21,7 @@ import {
     vectorIndex
 } from '@liberation-data/drivine';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
+import { isSqlStore } from '../support/SqlStores';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
 jest.setTimeout(30_000);
@@ -133,7 +134,7 @@ describe.each(allStores())('loadNearest on $type', (engine) => {
             where:
                 engine.type === DatabaseType.ORACLE
                     ? "JSON_VALUE(n.props, '$.contextId') = $context"
-                    : engine.type === DatabaseType.POSTGRES
+                    : engine.type === DatabaseType.POSTGRES || engine.type === DatabaseType.SQLITE
                     ? "(n.props ->> 'contextId') = $context"
                     : 'n.contextId = $context',
             bindings: { context: 'b' }
@@ -211,12 +212,7 @@ const SIZED_WIDE = 10;
 const sizedStores = allStores().flatMap((engine) =>
     engine.type === DatabaseType.MEMGRAPH
         ? []
-        : [
-              { ...engine, indexed: true },
-              ...(engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES
-                  ? [{ ...engine, indexed: false }]
-                  : [])
-          ]
+        : [{ ...engine, indexed: true }, ...(isSqlStore(engine.type) ? [{ ...engine, indexed: false }] : [])]
 );
 
 /**
@@ -230,7 +226,7 @@ describe.each(sizedStores)('loadNearest with an embedding of another size on $ty
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
     const spec = vectorIndex('SizedTest', 'embedding', 4);
-    const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
+    const sql = isSqlStore(engine.type);
 
     const ids = (hits: { value: SizedDoc }[]): string[] => hits.map((it) => it.value.id);
 

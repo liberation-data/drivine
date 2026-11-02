@@ -29,7 +29,7 @@ import {
     uniquenessConstraint
 } from '@liberation-data/drivine';
 import { allStores, clearLabels, closeGraphEngines, GraphEngine, persistenceManagerFor } from '../support/GraphEngines';
-import { SqlSeed, SqlStore } from '../support/SqlStores';
+import { isSqlStore, SqlSeed, SqlStore } from '../support/SqlStores';
 
 // Each test makes and fills in indexes, which wait on the schema locks other suites hold as they run in parallel.
 jest.setTimeout(60_000);
@@ -105,7 +105,7 @@ async function bypassing(
     props: Record<string, any>,
     stamp?: string
 ): Promise<void> {
-    if (engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES) {
+    if (isSqlStore(engine.type)) {
         await new SqlSeed(pm, engine as SqlStore, label).node([], props, stamp);
         return;
     }
@@ -124,6 +124,15 @@ async function stored(pm: PersistenceManager, engine: GraphEngine, label: string
             new QuerySpecification(
                 `SELECT JSON_TRANSFORM(n.props, KEEP '$') AS "props" FROM drivine_node n ` +
                     `WHERE JSON_EXISTS(n.labels, '$?(@ == "${label}")') AND JSON_VALUE(n.props, '$.id') = $id`
+            ).bind({ id })
+        );
+        return row.props ?? row;
+    }
+    if (engine.type === DatabaseType.SQLITE) {
+        const row = await pm.getOne<any>(
+            new QuerySpecification(
+                `/* drivine:json */ SELECT n.props AS "props" FROM drivine_node n WHERE instr(n.labels, '"${label}"') > 0 ` +
+                    `AND n.props ->> 'id' = $id`
             ).bind({ id })
         );
         return row.props ?? row;
@@ -149,16 +158,21 @@ async function withoutCopy(pm: PersistenceManager, engine: GraphEngine, label: s
             : engine.type === DatabaseType.POSTGRES
             ? `UPDATE drivine_node SET props = props - '__drivine.lower.email' WHERE labels @> '["${label}"]' ` +
               `AND props ->> 'id' = CAST($id AS text)`
+            : engine.type === DatabaseType.SQLITE
+            ? `UPDATE drivine_node SET props = json_remove(props, '$."__drivine.lower.email"') ` +
+              `WHERE instr(labels, '"${label}"') > 0 AND props ->> 'id' = $id`
             : `MATCH (n:${label} {id: $id}) REMOVE n.\`__drivine.lower.email\``;
     await pm.execute(new QuerySpecification(statement).bind({ id }));
 }
 
 /** The node's stamp: a column of its own on the SQL stores. */
 async function stampOf(pm: PersistenceManager, engine: GraphEngine, label: string, id: string): Promise<string> {
-    if (engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES) {
+    if (isSqlStore(engine.type)) {
         const at =
             engine.type === DatabaseType.ORACLE
                 ? `JSON_EXISTS(n.labels, '$?(@ == "${label}")') AND JSON_VALUE(n.props, '$.id') = $id`
+                : engine.type === DatabaseType.SQLITE
+                ? `instr(n.labels, '"${label}"') > 0 AND n.props ->> 'id' = $id`
                 : `n.labels @> '["${label}"]' AND n.props ->> 'id' = CAST($id AS text)`;
         const row = await pm.getOne<any>(
             new QuerySpecification(`SELECT n.stamp AS "stamp" FROM drivine_node n WHERE ${at}`).bind({ id })
@@ -170,7 +184,7 @@ async function stampOf(pm: PersistenceManager, engine: GraphEngine, label: strin
 
 /** The record that every node of `label` has its copy of email, as the store keeps it: drivine4j's layout. */
 async function recordOf(pm: PersistenceManager, engine: GraphEngine, label: string): Promise<any[]> {
-    if (engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES) {
+    if (isSqlStore(engine.type)) {
         const details = engine.type === DatabaseType.ORACLE ? 'JSON_SERIALIZE(details)' : 'CAST(details AS text)';
         return pm.query(
             new QuerySpecification(
@@ -190,7 +204,7 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
     const falkor = engine.type === DatabaseType.FALKORDB;
-    const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
+    const sql = isSqlStore(engine.type);
 
     beforeAll(async () => {
         pm = persistenceManagerFor(engine);
@@ -220,6 +234,8 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
                     ? `DELETE FROM drivine_node n WHERE JSON_EXISTS(n.labels, '$?(@ == "_DrivineSchema")') AND JSON_VALUE(n.props, '$.scope') = 'ci${run}'`
                     : engine.type === DatabaseType.POSTGRES
                     ? `DELETE FROM drivine_node n WHERE n.labels @> '["_DrivineSchema"]' AND n.props ->> 'scope' = 'ci${run}'`
+                    : engine.type === DatabaseType.SQLITE
+                    ? `DELETE FROM drivine_node WHERE instr(labels, '"_DrivineSchema"') > 0 AND props ->> 'scope' = 'ci${run}'`
                     : `MATCH (m:_DrivineSchema {scope: 'ci${run}'}) DETACH DELETE m`
             )
         );

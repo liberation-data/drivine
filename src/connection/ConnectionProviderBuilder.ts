@@ -11,6 +11,7 @@ import { NeptuneConnectionProvider } from '@/connection/neptune/NeptuneConnectio
 import { TransactionMode } from '@/connection/TransactionMode';
 import { FalkorDbConnectionProvider } from '@/connection/falkordb/FalkorDbConnectionProvider';
 import { OracleConnectionProvider } from '@/connection/oracle/OracleConnectionProvider';
+import { SqliteConnectionProvider } from '@/connection/sqlite/SqliteConnectionProvider';
 
 /**
  * Engines without multi-statement transactions, which honour {@link TransactionMode}.
@@ -18,7 +19,7 @@ import { OracleConnectionProvider } from '@/connection/oracle/OracleConnectionPr
 const AUTO_COMMIT_ENGINES: DatabaseType[] = [DatabaseType.FALKORDB];
 
 /** The stores that keep a graph of a name in tables of its own: `defaultGraphPath` names it. */
-const GRAPH_STORES = [DatabaseType.ORACLE, DatabaseType.POSTGRES];
+const GRAPH_STORES = [DatabaseType.ORACLE, DatabaseType.POSTGRES, DatabaseType.SQLITE];
 
 export class ConnectionProviderBuilder {
     private logger = new DrivineLogger(ConnectionProviderBuilder.name);
@@ -37,6 +38,8 @@ export class ConnectionProviderBuilder {
     // Postgres properties
     private _idleTimeout?: number;
     private _connectionTimeout?: number;
+    /** On SQLite, how long a statement waits for a locked file: the connection timeout, where one is given. */
+    private _busyTimeout?: number;
     private _name?: string;
 
     private registry: DatabaseRegistry;
@@ -53,6 +56,7 @@ export class ConnectionProviderBuilder {
         this._password = properties.password;
         this._idleTimeout = properties.idleTimeout;
         this._connectionTimeout = properties.connectionTimeout ?? 5000;
+        this._busyTimeout = properties.connectionTimeout;
         this._name = properties.databaseName;
         this._protocol = properties.protocol;
         this._poolMax = properties.poolMax ?? 40;
@@ -124,7 +128,10 @@ export class ConnectionProviderBuilder {
             return retained;
         }
 
-        assert(this._host, `host config is required`);
+        // A file has no host: SQLite is built from its path alone.
+        if (this._type !== DatabaseType.SQLITE) {
+            assert(this._host, `host config is required`);
+        }
         if (this._defaultGraphPath && !GRAPH_STORES.includes(this._type)) {
             this.logger.warn(`defaultGraphPath is ignored by ${this._type}, which names no graph`);
         }
@@ -132,21 +139,20 @@ export class ConnectionProviderBuilder {
             this.logger.warn(`transactionMode is ignored by ${this._type}, which supports transactions`);
         }
 
-        if (this._type === DatabaseType.POSTGRES) {
-            this.registry.register(this.buildPostgresProvider(name));
-        } else if (this._type === DatabaseType.NEO4J) {
-            this.registry.register(this.buildNeo4jProvider(name));
-        } else if (this._type === DatabaseType.NEPTUNE) {
-            this.registry.register(this.buildNeptuneProvider(name));
-        } else if (this._type === DatabaseType.FALKORDB) {
-            this.registry.register(this.buildFalkorDbProvider(name));
-        } else if (this._type === DatabaseType.MEMGRAPH) {
-            this.registry.register(this.buildMemgraphProvider(name));
-        } else if (this._type === DatabaseType.ORACLE) {
-            this.registry.register(this.buildOracleProvider(name));
-        } else {
+        const build: Partial<Record<DatabaseType, (name: string) => ConnectionProvider>> = {
+            [DatabaseType.POSTGRES]: (it) => this.buildPostgresProvider(it),
+            [DatabaseType.NEO4J]: (it) => this.buildNeo4jProvider(it),
+            [DatabaseType.NEPTUNE]: (it) => this.buildNeptuneProvider(it),
+            [DatabaseType.FALKORDB]: (it) => this.buildFalkorDbProvider(it),
+            [DatabaseType.MEMGRAPH]: (it) => this.buildMemgraphProvider(it),
+            [DatabaseType.ORACLE]: (it) => this.buildOracleProvider(it),
+            [DatabaseType.SQLITE]: (it) => this.buildSqliteProvider(it)
+        };
+        const builder = build[this._type];
+        if (!builder) {
             throw new DrivineError(`Type ${this._type} is not supported by ConnectionProviderBuilder`);
         }
+        this.registry.register(builder(name));
         return this.registry.connectionProvider(name)!;
     }
 
@@ -192,6 +198,34 @@ export class ConnectionProviderBuilder {
             poolMax: this._poolMax,
             connectTimeout: this._connectionTimeout ? Math.ceil(this._connectionTimeout / 1000) : undefined,
             graph: this._defaultGraphPath
+        });
+    }
+
+    /**
+     * SQLite: the database name is the path of the file, made if it is not there, and the default graph path names the
+     * graph's tables. A file has no host or protocol: each is warned of where it is set. The connection timeout is how
+     * long a statement waits for a locked file; a port, a user and a password are not read.
+     */
+    private buildSqliteProvider(name: string): ConnectionProvider {
+        assert(this._name, `SQLite requires a database name: the path of the database file`);
+        if (/:memory:|mode=memory/.test(this._name!)) {
+            throw new DrivineError(
+                `SQLite's path '${this._name}' names no file: each pooled connection would open a database of its ` +
+                    `own. Give the path of a file.`
+            );
+        }
+        if (this._host) {
+            this.logger.warn(`SQLite is a file; the host '${this._host}' set for datasource '${name}' is ignored`);
+        }
+        if (this._protocol) {
+            this.logger.warn(
+                `SQLite is a file; the protocol '${this._protocol}' set for datasource '${name}' is ignored`
+            );
+        }
+        return new SqliteConnectionProvider(name, this._type, this._name!, {
+            graph: this._defaultGraphPath,
+            busyTimeoutMillis: this._busyTimeout,
+            poolMax: this._poolMax
         });
     }
 

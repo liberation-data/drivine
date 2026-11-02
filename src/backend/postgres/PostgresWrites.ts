@@ -3,9 +3,8 @@ import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
-import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { absent, present, storedKey, withoutKey } from '@/backend/postgres/PostgresSaveBuilder';
-import { PostgresWriteStatement } from '@/backend/postgres/PostgresWriteStatement';
+import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { WritePlan } from '@/backend/sql/WritePlan';
@@ -21,12 +20,12 @@ const CHANGED = '1';
 const UNMET = '-';
 
 /**
- * The writes beside a save, each a plan for drivine4j's write function, so stamps are kept as a save keeps them: patch
+ * The writes beside a save, each a plan for drivine4j's write function (Postgres's, or SQLite's: see WriteFunction), so stamps are kept as a save keeps them: patch
  * and patchAll, a batch of fragments, and relationships written on their own. A patch's values, and the condition it
  * holds to, are bound by the manager when it runs the statement, so its plan is made then.
  */
 export class PostgresWrites {
-    constructor(private readonly graph: PostgresGraph) {}
+    constructor(private readonly graph: WriteFunction) {}
 
     /**
      * Writes `$set` (a merge patch, `$vectors` beside it) to the node with id `$id`, if it meets `where`, a condition

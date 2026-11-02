@@ -147,7 +147,7 @@ describe.each(allStores())('loadMatching on $type', (engine) => {
             where:
                 engine.type === DatabaseType.ORACLE
                     ? "JSON_VALUE(n.props, '$.sectionId') = $s"
-                    : engine.type === DatabaseType.POSTGRES
+                    : engine.type === DatabaseType.POSTGRES || engine.type === DatabaseType.SQLITE
                     ? "(n.props ->> 'sectionId') = $s"
                     : 'n.sectionId = $s',
             bindings: { s: 's2' }
