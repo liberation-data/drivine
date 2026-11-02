@@ -37,19 +37,23 @@ const VIDEO = `${base}video/drivine-explainer.mp4`;
 const VIDEO_CAPTIONS = `${base}video/drivine-explainer.vtt`;
 const VIDEO_ID = 'uETP0EN_04E';
 
-import { REPOS, TRAIN_LIBRARIES, formatStars, releasedTrain, repoUrl, stars, trainUrl } from '../lib/github';
+import { REPOS, TRAIN_LIBRARIES, type Topic, formatStars, releasedTrain, repoUrl, stars, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
 const starLabel = (count: number | undefined) => (count === undefined ? '' : formatStars(count));
 // The newest released train, shown under the installs and versioning the Gradle line: without one, neither.
 const train = await releasedTrain();
+const order = (topic: Topic | undefined) => (topic ? Object.keys(REPOS).indexOf(topic) : Infinity);
 const trainLibraries = train
     ? Object.entries(train.libraries)
-          .map(([library, version]) => ({ topic: TRAIN_LIBRARIES[library], library, version }))
-          .sort((a, b) => Object.keys(REPOS).indexOf(a.topic) - Object.keys(REPOS).indexOf(b.topic))
+          .map(([library, version]) => ({ topic: Object.hasOwn(TRAIN_LIBRARIES, library) ? TRAIN_LIBRARIES[library] : undefined, library, version }))
+          // In REPOS' order, with a library the site doesn't know after the three, under its manifest name.
+          .sort((a, b) => order(a.topic) - order(b.topic))
     : [];
 const drivine4jVersion = train?.libraries.drivine4j ?? '<version>';
+// The hero's copy button gives the coordinate with the train's version, so it pastes into Gradle as the card's line does.
+const drivine4jCoordinate = train?.libraries.drivine4j ? `org.drivine:drivine4j:${train.libraries.drivine4j}` : 'org.drivine:drivine4j';
 
 // The same view in each language, highlighted by hand: the panel switches between them.
 const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s">'Person'</span>] })
@@ -382,7 +386,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     </a>
                 )}
                 <div class="installs" style={`margin-top: ${VIDEO ? 28 : 44}px`}>
-                    {['npm install @liberation-data/drivine', 'pip install drivine', 'org.drivine:drivine4j'].map((line) => (
+                    {['npm install @liberation-data/drivine', 'pip install drivine', drivine4jCoordinate].map((line) => (
                         <button type="button" class="copy" data-copy={line} aria-label={`Copy ${line}`}>
                             <code>{line}</code>
                             <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9z" fill="currentColor" /></svg>

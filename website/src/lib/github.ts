@@ -95,7 +95,11 @@ async function fetchReleasedTrain(): Promise<Train | undefined> {
             .filter((entry) => entry.type === 'file' && TRAIN_FILE.test(entry.name))
             .map(async (entry) => {
                 const file = await githubJson(`repos/${RELEASE_REPO}/contents/trains/${entry.name}`);
-                return JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+                try {
+                    return JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+                } catch {
+                    return undefined; // a manifest that isn't JSON is no released train
+                }
             })
     );
     return manifests.filter(isReleased).sort((a, b) => compareTrains(b.train, a.train))[0];
