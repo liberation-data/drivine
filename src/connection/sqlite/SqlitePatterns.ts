@@ -48,26 +48,46 @@ export class SqlitePatterns {
 
 /**
  * `java` as JavaScript reads it, with `flags`. A flag group within it is a group of its own (see {@link scopedFlags}),
- * which Node 22's JavaScript does not read: there, where each flag group only turns flags on, they are turned on for the
- * whole expression, which is the same where the group runs to its end but for the text's start and end, as in the `^(?:(?i)abc)\z`
- * compiled Cypher's `=~ '(?i)abc'` gives.
+ * which Node 22's JavaScript does not read: there, where each flag group only turns flags on and is in force over the whole
+ * expression but its start and end, as in the `^(?:(?i)abc)\z` compiled Cypher's `=~ '(?i)abc'` gives, they are turned on for
+ * the whole expression. Any other flag group fails there, as `x(?i)abc` does: turned on for the whole, it would match `XABC`.
  */
 function compiled(java: string, flags: string): RegExp {
     try {
-        return new RegExp(scopedFlags(java).replace(/\\z/g, '$'), flags);
+        return new RegExp(endOfText(scopedFlags(java), '$'), flags);
     } catch (e) {
-        const groups = [...java.matchAll(new RegExp(FLAGS.source.slice(1), 'g'))].map((it) => it[1]);
+        const found = [...java.matchAll(FLAG_GROUPS)];
+        const groups = found.map((it) => it[1]);
         if (groups.length === 0 || groups.some((it) => it.includes('-'))) {
             throw e;
         }
         const on = [...new Set(groups.join(''))].filter((it) => !flags.includes(it)).join('');
+        if (found.some((it) => !inForceOverAll(java, it, on.includes('m')))) {
+            throw e;
+        }
         // The text's start and end, which `m` turned on for the whole expression would move to each line's.
-        const anchored = java
-            .replace(/^\^/, '(?<![\\s\\S])')
-            .replace(/\\z/g, '(?![\\s\\S])')
-            .replace(new RegExp(FLAGS.source.slice(1), 'g'), '');
+        const anchored = endOfText(java.replace(/^\^/, '(?<![\\s\\S])'), '(?![\\s\\S])').replace(FLAG_GROUPS, '');
         return new RegExp(anchored, `${flags}${on}`);
     }
+}
+
+/** `source` with each `\z`, the text's end as Java writes it, written `end`: an escaped backslash before a `z` left as it is. */
+function endOfText(source: string, end: string): string {
+    return source.replace(/\\([\s\S])/g, (escape, c) => (c === 'z' ? end : escape));
+}
+
+/** A flag group anywhere in an expression. */
+const FLAG_GROUPS = new RegExp(FLAGS.source.slice(1), 'g');
+
+/**
+ * Whether the flag group `found` is in force over the whole of `java` but its start and end: only `^` and the openings of
+ * groups (and other flag groups) before it, and after the group it is in only the ends of groups, then `\z`, or `$` where
+ * the flags do not turn on `m`, which would make it each line's end.
+ */
+function inForceOverAll(java: string, found: RegExpMatchArray, multiline: boolean): boolean {
+    const before = java.substring(0, found.index).replace(FLAG_GROUPS, '');
+    const after = java.substring(groupEnd(java, found.index! + found[0].length));
+    return /^\^?(?:\(\?:)*$/.test(before) && (multiline ? /^\)*(?:\\z)?$/ : /^\)*(?:\\z|\$)?$/).test(after);
 }
 
 /**

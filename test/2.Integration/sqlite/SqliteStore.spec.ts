@@ -734,6 +734,42 @@ describe('a SQLite store', () => {
             expect(ids).toEqual([{ id: 'kept' }]);
         });
 
+        it("should keep compiled Cypher's writes in a transaction, undo one that fails alone, and roll back with it", async () => {
+            const tpm = new PersistenceManagerFactory(
+                DatabaseRegistry.getInstance(),
+                TransactionContextHolder.getInstance()
+            ).get('main', 'TRANSACTIONAL');
+            const cypher = async (text: string, id: string): Promise<void> =>
+                tpm.execute(new QuerySpecification({ text, language: 'CYPHER' }).bind({ id }));
+            const create = 'CREATE (:SqliteStore {id: $id})';
+            // Deleting a node that still has a relationship fails after the create: drivine_cypher's savepoint undoes both.
+            const failing = 'CREATE (a:SqliteStore {id: $id})-[:NEXT]->(:SqliteStore) WITH a DELETE a';
+            await inDrivineContext()
+                .withTransaction()
+                .run(async () => {
+                    await cypher(create, 'k1');
+                    await expect(cypher(failing, 'undone')).rejects.toThrow(/still has relationships/);
+                    await cypher(create, 'k2');
+                });
+            await inDrivineContext()
+                .withTransaction({ rollback: true })
+                .run(async () => cypher(create, 'marked'));
+            await expect(
+                inDrivineContext()
+                    .withTransaction()
+                    .run(async () => {
+                        await cypher(create, 'thrown');
+                        throw new Error('Changed our minds');
+                    })
+            ).rejects.toThrow('Changed our minds');
+            const ids = await rows(
+                pm,
+                `SELECT props ->> 'id' AS id FROM drivine_node WHERE instr(labels, '"SqliteStore"') > 0 ORDER BY 1`
+            );
+            expect(ids).toEqual([{ id: 'k1' }, { id: 'k2' }]);
+            expect(await rows(pm, `SELECT COUNT(*) AS n FROM drivine_edge WHERE type = 'NEXT'`)).toEqual([{ n: 0 }]);
+        });
+
         it('should give the failure of a commit SQLite refuses, write nothing, and give the lock back', async () => {
             const tpm = new PersistenceManagerFactory(
                 DatabaseRegistry.getInstance(),

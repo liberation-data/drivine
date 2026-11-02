@@ -192,6 +192,12 @@ describe('SqliteCypherFunctions', () => {
             ).toEqual([n(1), n(0), n(1), n(0), n(1)]);
         });
 
+        it('read \\z as the text end, and an escaped backslash before a z as itself', () => {
+            expect(
+                row(`SELECT 'a\\z' REGEXP '^(?:a\\\\z)\\z', 'a' REGEXP '^(?:a)\\z', 'ab' REGEXP '^(?:a)\\z'`)
+            ).toEqual([n(1), n(1), n(0)]);
+        });
+
         it('count matches as an integer', () => {
             expect(row(`SELECT drivine_regexp_count('aXa', 'a'), drivine_regexp_count(NULL, 'a')`)).toEqual([
                 n(2),
