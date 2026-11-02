@@ -8,8 +8,12 @@ The site at [drivine.org](https://drivine.org/), built with
   it at 240p in some browsers). `drivine-explainer.mp4` is re-encoded from the master in the private
   `liberation-data/drivine-explainer-video` repository (`video/final/drivine-graph-rag-master.mp4`): H.264 1080p30 with
   AAC sound, its index at the front (`-movflags +faststart`) so it starts before it has all downloaded, and well under
-  GitHub Pages' 100 MB a file. `drivine-explainer.vtt` is that repository's `video/final/captions.srt` as WebVTT (a
-  `WEBVTT` header, and `.` for `,` in the times). A new cut replaces both, and the length
+  GitHub Pages' 100 MB a file. `drivine-explainer.vtt` is that repository's `video/final/captions.srt`, rejoined into
+  sentences and split again into captions of two lines of 42 characters at most:
+  `node scripts/captions.mjs <captions.srt> public/video/drivine-explainer.vtt`. When the video ends, which it does by
+  fading to black, the page shows its end card, `src/assets/video-end.jpg` (the frame at 4:25), with a Watch again
+  button. A new cut replaces all three (the end card with
+  `ffmpeg -ss <a second before the end> -i <the video> -frames:v 1 -q:v 4 src/assets/video-end.jpg`), and the length
   on the page: `4:26` in the hero's tip and on the play button, and in words in the button's `aria-label` and the line
   under the player.
 - The docs are generated, not written here: `scripts/import-readmes.mjs` turns this repository's `docs/` into the
