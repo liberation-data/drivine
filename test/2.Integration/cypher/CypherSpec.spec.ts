@@ -1500,6 +1500,67 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         }, 1_800_000);
 
+        it('a text past 32 KB is in no list of short items, null where one is null, on several rows', async () => {
+            // On Oracle, n.t IN $l with a null and an empty item or one past 4,000 bytes in $l closed the session
+            // (ORA-03113): where no item was equal, the property was taken out as JSON over two rows to tell null from
+            // false. drivine4j's test of liberation-data/drivine4j#475.
+            await clear();
+            const long = 'a'.repeat(40_000);
+            for (const i of [0, 1]) {
+                await query('CREATE (:CyInNull {i: $i, t: $t})', { i: BigInt(i), t: `${long}${i}` });
+            }
+            // Short items, and an empty one and one past 4,000 bytes, which are compared with the text as texts.
+            const lists: [unknown[], boolean | null][] = [
+                [['abc', BigInt(5), null], null],
+                [['abc', null], null],
+                [[null], null],
+                [['abc', BigInt(5)], false],
+                [['', null], null],
+                [['x'.repeat(5_000), null], null],
+                [['', 'abc'], false]
+            ];
+            const parameters = Object.fromEntries(lists.map(([items], i) => [`l${i}`, items]));
+            await onOneSession(async (run) => {
+                for (let r = 1; r <= 3; r++) {
+                    for (const [i, [items, found]] of lists.entries()) {
+                        const returned = `MATCH (n:CyInNull) RETURN n.t IN $l${i} ORDER BY n.i`;
+                        const filtered = `MATCH (n:CyInNull) WHERE n.t IN $l${i} RETURN count(*)`;
+                        expect([items, r, await run(returned)]).toEqual([items, r, [found, found]]);
+                        expect([items, r, await run(filtered)]).toEqual([items, r, [0]]);
+                    }
+                    // And written out, which is compared item by item.
+                    expect([r, await run("MATCH (n:CyInNull) RETURN n.t IN ['abc', 5, null] ORDER BY n.i")]).toEqual([
+                        r,
+                        [null, null]
+                    ]);
+                }
+            }, parameters);
+            await clear();
+        }, 600_000);
+
+        it('a text of 4,000 bytes compares as a short one, and one past 4,000 bytes but not 4,000 characters as a long one', async () => {
+            // On Oracle a text is compared as a VARCHAR2 up to 4,000 bytes, and as a CLOB past them (#469): counted in
+            // bytes, so '€', three bytes, makes a text of 1,335 characters past them.
+            await clear();
+            const at = `${'€'.repeat(1_333)}a`;
+            const past = `${at}b`;
+            for (const [i, t] of [at, past].entries()) {
+                await query('CREATE (:CyBytes {i: $i, t: $t})', { i: BigInt(i), t });
+            }
+            const parameters = { at, past, l: [past, null] };
+            expect(
+                await query(
+                    "MATCH (n:CyBytes) RETURN [n.t = $at, n.t = $past, n.t IN [$at, 'x'], n.t IN $l, n.t < $past] ORDER BY n.i",
+                    parameters
+                )
+            ).toEqual([
+                [true, false, true, null, true],
+                [false, true, false, true, false]
+            ]);
+            expect(await query("MATCH (n:CyBytes) WHERE n.t IN [$at, 'x'] RETURN n.i", parameters)).toEqual([0]);
+            await clear();
+        });
+
         it('a text past 4,000 bytes is reversed whole, as a short one is', async () => {
             // Oracle reversed a text with LISTAGG, which gives a VARCHAR2 of 4,000 bytes, and read a longer one from JSON
             // as null (#363). Given, stored and read in one row, and made by the statement, as above; reversed by its

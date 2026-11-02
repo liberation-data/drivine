@@ -153,11 +153,12 @@ interface Member {
     equals: (a: string, b: string) => string;
     matches: (item: string, value: string) => string;
     elements: (list: string, alias: string) => string;
-    /**
-     * A test of the value alone, which an item must also meet to match it: see `SqlCypherCompiler.givenItemsTest`. Where
-     * there is one, the list's items are `given`, each a text, a number, a truth value or null.
-     */
+    /** A test of the value alone, which an item must also meet to match it: see `SqlCypherCompiler.givenItemsTest`. */
     test?: (value: string) => string;
+    /**
+     * The list's items, each a text, a number, a truth value or null, where the statement writes or is given them and
+     * the store decides an `IN` of them without reading the value for its nulls: see `SqlCypherCompiler.givenItemsDecided`.
+     */
     given?: unknown[];
 }
 
@@ -6346,7 +6347,7 @@ export class CypherWriter {
             // Where the value meets the test, each item as JSON, a plain equality.
             matches: test === undefined ? matches : (item: string, value: string): string => `${item} = ${value}`,
             test,
-            given: test === undefined ? undefined : items,
+            given: sql.givenItemsDecided ? items : undefined,
             elements
         };
     }
@@ -6464,21 +6465,15 @@ export class CypherWriter {
             // Items the statement gives, none a list or a map, are equal to no value that holds a null, and a comparison
             // with one is null only where it is null: the value is not read for its nulls, a text past 32 KB taken out as
             // JSON so closing Oracle's session (#469).
+            const found = `EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(`${i}.item`, v)})`;
             const given = member.given;
             if (given !== undefined) {
-                cases.push(
-                    `WHEN ${member.test!(v)} AND EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(
-                        `${i}.item`,
-                        v
-                    )}) THEN TRUE`
-                );
+                cases.push(`WHEN ${member.test === undefined ? '' : `${member.test(v)} AND `}${found} THEN TRUE`);
                 return `CASE ${cases.join(' ')} ELSE ${given.includes(null) ? 'NULL' : 'FALSE'} END`;
             }
             // A value that holds a null is equal to no item.
             const held = of.whole ? '' : `NOT (${sql.holdsNull(v)}) AND `;
-            cases.push(
-                `WHEN ${held}EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(`${i}.item`, v)}) THEN TRUE`
-            );
+            cases.push(`WHEN ${held}${found} THEN TRUE`);
             if (!of.within || !of.whole) {
                 const k = this.alias('i');
                 const undecided =

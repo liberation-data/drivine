@@ -414,6 +414,16 @@ export abstract class SqlCypherCompiler {
         return undefined;
     }
 
+    /**
+     * Whether an `IN` of such items, where none is equal to the value, is null where they hold a null and else false, as
+     * the statement is compiled, and the value is not read for its nulls: such items are equal to no value that holds
+     * one, and a comparison with one of them is null only where the item is null. Else the value is read for its nulls,
+     * and compared with each item again where none is equal, as with any list. See Oracle's.
+     */
+    get givenItemsDecided(): boolean {
+        return false;
+    }
+
     /** Whether the JSON values `x` and `y`, of one kind, a number, a text or a truth value, stand as `operator` says (`<`, `>=`…). */
     ordered(x: string, operator: string, y: string): string {
         return `${x} ${operator} ${y}`;

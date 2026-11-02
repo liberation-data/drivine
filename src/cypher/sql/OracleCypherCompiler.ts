@@ -231,9 +231,21 @@ function textOrder(x: string, operator: string, y: string): string {
 /**
  * Whether the JSON value `a` is equal to `b`, which is no text or a text read as a `VARCHAR2`: as JSON where `a` is read
  * as one too, or is no text, and else not, as `a` is then a longer text or an empty one; null where `a` is SQL's null.
+ * Where not `containers`, `b` being a value of one kind, a list or a map is not equal either, and isn't compared as
+ * JSON, which refuses one that holds a text past 32 KB (ORA-40180).
  */
-function oneSided(a: string, b: string): string {
-    return `CASE WHEN ${short(a)} IS NOT NULL OR NVL(${kind(a)}, 'null') <> 'string' THEN ${a} = ${b} ELSE FALSE END`;
+function oneSided(a: string, b: string, containers: boolean = true): string {
+    return `CASE WHEN ${shortOrNoText(a, containers)} THEN ${a} = ${b} ELSE FALSE END`;
+}
+
+/**
+ * Whether the JSON value `json` is read as a `VARCHAR2`, a text of 1 to {@link SHORT_TEXT} bytes, or is no text; SQL's
+ * null is no text. Where not `containers`, a list or a map doesn't pass either.
+ */
+function shortOrNoText(json: string, containers: boolean = true): string {
+    return `${short(json)} IS NOT NULL OR NVL(${kind(json)}, 'null') ${
+        containers ? "<> 'string'" : "NOT IN ('string', 'array', 'object')"
+    }`;
 }
 
 /** Whether `given`, a value the statement gives, is a number, a truth value or a text of 1 to {@link SHORT_TEXT} bytes, which `JSON_VALUE` reads as a `VARCHAR2`. */
@@ -251,16 +263,24 @@ function readShort(given: unknown): boolean {
  * side alone is tested (see `OracleCypherCompiler.jsonEquals`), as beside a value the statement is given.
  */
 function written(json: string): boolean {
+    return writtenScalar(json) !== undefined;
+}
+
+/** Whether `json`, where it is {@link written}, is a value of one kind (true) or a list or a map (false); undefined where it isn't written. */
+function writtenScalar(json: string): boolean | undefined {
     const literal = /^JSON\('((?:[^']|'')*)'\)$/.exec(json);
     if (literal) {
         const value = JSON.parse(literal[1].replace(/''/g, "'"));
-        return value === null || typeof value !== 'string' || readShort(value);
+        if (value !== null && typeof value === 'object') {
+            return false;
+        }
+        return typeof value !== 'string' || readShort(value) ? true : undefined;
     }
     // A float literal; and a list or a map, which its constructor makes whatever it holds, so never SQL's null.
-    return (
-        /^JSON_SCALAR\(TO_BINARY_DOUBLE\('[^']*'\)\)$/.test(json) ||
-        (/^JSON_(?:ARRAY|OBJECT)\(/.test(json) && enclosed(json))
-    );
+    if (/^JSON_SCALAR\(TO_BINARY_DOUBLE\('[^']*'\)\)$/.test(json)) {
+        return true;
+    }
+    return /^JSON_(?:ARRAY|OBJECT)\(/.test(json) && enclosed(json) ? false : undefined;
 }
 
 /** Whether `sql` is one call whose parentheses, opened by its first, close only at its end. */
@@ -680,7 +700,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         // a few hundred items, compared item by item, so stays as large as before, where Oracle ran out of memory (#406).
         if (written(x) || written(y)) {
             const [other, value] = written(y) ? [x, y] : [y, x];
-            return this.sharedCompared(other, value, ([a, b]) => oneSided(a, b));
+            // Beside a value of one kind, a list or a map is not equal, and isn't compared as JSON (drivine4j#476).
+            const containers = writtenScalar(value) === false;
+            return this.sharedCompared(other, value, ([a, b]) => oneSided(a, b, containers));
         }
         return this.sharedCompared(
             x,
@@ -723,7 +745,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         if (this.asJson || !items.every((it) => it === null || readShort(it))) {
             return undefined;
         }
-        return `(${short(value)} IS NOT NULL OR NVL(${kind(value)}, 'null') <> 'string')`;
+        return `(${shortOrNoText(value)})`;
+    }
+
+    /**
+     * Not in a statement that writes, nor in the step of a `reduce()`, which compare as before (see {@link asJson}): a
+     * stored text past 32 KB, taken out as JSON to read its nulls, closed the session (liberation-data/drivine4j#475).
+     */
+    get givenItemsDecided(): boolean {
+        return !this.asJson;
     }
 
     /**

@@ -156,9 +156,13 @@ describe('Comparison of texts on Oracle in compiled Cypher', () => {
             /JSON_SERIALIZE\(w\d+\.c1/.test(sql('MATCH (n:Doc) WITH n.t AS t RETURN t IN $xs', { xs: ['a', null] }))
         ).toBe(false);
         // A list written out that holds a null is compared item by item, each item as equality compares it: the
-        // written ones, the null among them, as a given text or number is.
+        // written ones, the null among them, as a given text or number is; beside the null, which is no list or map,
+        // a list or a map is not equal either.
         const itemwise = sql("MATCH (n:Doc) RETURN n.t IN ['a', 5, null, $x]");
-        expect(count(itemwise, "NVL(JSON_VALUE(n1.props, '$.t.type()'), 'null') <> 'string' THEN")).toBe(4);
+        expect(count(itemwise, "NVL(JSON_VALUE(n1.props, '$.t.type()'), 'null') <> 'string' THEN")).toBe(3);
+        expect(
+            count(itemwise, "NVL(JSON_VALUE(n1.props, '$.t.type()'), 'null') NOT IN ('string', 'array', 'object') THEN")
+        ).toBe(1);
         expect(itemwise).not.toContain('DBMS_LOB');
         // An empty item, or one past 4,000 bytes, isn't, and both sides are compared as texts.
         for (const xs of [
@@ -207,6 +211,38 @@ describe('Comparison of texts on Oracle in compiled Cypher', () => {
         expect(passedIn).toContain(`AND NOT NVL(JSON_VALUE(${w}, '$.type()'), 'null') = 'null')`);
     });
 
+    it('should decide an IN of given items, an empty one or one past 4,000 bytes among them, as null or false, and not read the value for its nulls', () => {
+        // drivine4j#475: where no item was equal, the value was read for its nulls and compared with each item again, a
+        // stored text past 32 KB taken out as JSON over two rows, which closed the session (ORA-03113). An empty item, or
+        // one past 4,000 bytes, is compared with the value as a text, and decides as the others do.
+        // Items that hold no null are decided beside a value that may hold one, as in drivine4j's test: beside a property,
+        // which holds none, they are searched as before.
+        for (const [cypher, parameters, decided] of [
+            ['MATCH (n:Doc) RETURN n.t IN $xs', { xs: ['', null] }, ' THEN TRUE ELSE NULL END'],
+            ['MATCH (n:Doc) RETURN n.t IN $xs', { xs: ['x'.repeat(5_000), null] }, ' THEN TRUE ELSE NULL END'],
+            ['RETURN $v IN $xs', { v: [1, null], xs: ['', 'abc'] }, ' THEN TRUE ELSE FALSE END']
+        ] as [string, Record<string, unknown[]>, string][]) {
+            const listed = sql(cypher, parameters);
+            expect([
+                parameters.xs[0],
+                listed.includes(`${decided} AS c1`),
+                listed.includes('DBMS_LOB.COMPARE('),
+                /JSON_SERIALIZE|nulls_equal|JSON_VALUE\(JSON_QUERY\(/.test(listed)
+            ]).toEqual([parameters.xs[0], true, true, false]);
+        }
+    });
+
+    it('should not compare a stored list or map as JSON beside a single value the statement writes', () => {
+        // drivine4j#476's fix: beside a written value of one kind, a list or a map is not equal, and isn't compared as
+        // JSON, which refuses one that holds a text past 32 KB (ORA-40180).
+        const tags = sql("MATCH (n:Doc) WHERE 'a' IN n.tags RETURN n");
+        expect(tags).toMatch(/NOT IN \('string', 'array', 'object'\) THEN i\d+\.item = JSON\('"a"'\) ELSE FALSE END/);
+        // Beside a written list or map, a stored one is compared as JSON, as before.
+        expect(sql('MATCH (n:Doc) RETURN n.tags = [1, null]')).toContain(
+            "NVL(JSON_VALUE(n1.props, '$.tags.type()'), 'null') <> 'string' THEN JSON_QUERY(n1.props, '$.tags' RETURNING JSON) = JSON_ARRAY("
+        );
+    });
+
     it('should compare a stored text as a text with each item of a list a subquery works out for each row', () => {
         // The list worked out in a derived table inside a lateral view (#466), and the property read by its own path.
         const filtered = sql('MATCH (n:Doc) WHERE n.t IN [(n)-->(q) | q.t] RETURN n');
@@ -243,18 +279,21 @@ describe('Comparison of texts on Oracle in compiled Cypher', () => {
         expect(literals).not.toContain('DBMS_LOB');
         expect(literals).not.toContain("<> 'string'");
         expect(literals).toContain(`JSON('7') = JSON_SCALAR(TO_BINARY_DOUBLE('3.5'))`);
-        // Beside a written value that is no text or a short text, the other side alone is tested; beside an empty text,
-        // which Oracle reads as null, or one past 4,000 bytes, both are, as texts.
-        const one =
-            "CASE WHEN JSON_VALUE(n1.props, '$.t') IS NOT NULL OR NVL(JSON_VALUE(n1.props, '$.t.type()'), 'null') <> 'string' THEN JSON_QUERY(n1.props, '$.t' RETURNING JSON) = ";
-        for (const [written, value] of [
-            ["'a'", `JSON('"a"')`],
-            ['[1, 2]', 'JSON_ARRAY('],
-            ['{k: 1}', 'JSON_OBJECT('],
-            ['1.5', 'JSON_SCALAR(TO_BINARY_DOUBLE(']
+        // Beside a written value that is no text or a short text, the other side alone is tested, and beside one of one
+        // kind a list or a map is not equal (drivine4j#476); beside an empty text, which Oracle reads as null, or one past
+        // 4,000 bytes, both are, as texts.
+        const tested = (kinds: string): string =>
+            `CASE WHEN JSON_VALUE(n1.props, '$.t') IS NOT NULL OR NVL(JSON_VALUE(n1.props, '$.t.type()'), 'null') ${kinds} THEN JSON_QUERY(n1.props, '$.t' RETURNING JSON) = `;
+        const one = tested("<> 'string'");
+        const scalar = tested("NOT IN ('string', 'array', 'object')");
+        for (const [written, value, test] of [
+            ["'a'", `JSON('"a"')`, scalar],
+            ['[1, 2]', 'JSON_ARRAY(', one],
+            ['{k: 1}', 'JSON_OBJECT(', one],
+            ['1.5', 'JSON_SCALAR(TO_BINARY_DOUBLE(', scalar]
         ]) {
             const compared = sql(`MATCH (n:Doc), (m:Doc) RETURN m.t = n.t, ${written} = n.t`);
-            expect([written, compared.includes(one + value), compared.includes('DBMS_LOB')]).toEqual([
+            expect([written, compared.includes(test + value), compared.includes('DBMS_LOB')]).toEqual([
                 written,
                 true,
                 true
