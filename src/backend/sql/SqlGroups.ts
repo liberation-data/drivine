@@ -80,27 +80,29 @@ export abstract class SqlGroups {
                 `$_having${i}`
             )}`;
         });
-        const keyOf = (i: number): string => {
+        const keyOf = (i: number): string[] => {
             const key = keys[i][1];
             if (key.kind === 'property') {
                 return this.keyOrder(`g.k${i}`);
             }
             const target = pathTargets.get(keys[i][0])!;
-            return `(SELECT ${this.idValue(target.nodeIdProperty!)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`;
+            return [`(SELECT ${this.idValue(target.nodeIdProperty!)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`];
         };
-        const columnOrder = (column: string): string =>
-            column.startsWith('k') ? keyOf(Number(column.slice(1))) : `g.${column}`;
+        const columnOrder = (column: string, direction: 'ASC' | 'DESC'): string =>
+            (column.startsWith('k') ? keyOf(Number(column.slice(1))) : [`g.${column}`])
+                .map((it) => this.orderTerm(it, direction))
+                .join(', ');
         const ordered = (query.orderBy ?? []).map(([name, direction]: [string, string]) => {
             const column = names.get(name);
             if (!column) {
                 throw new DrivineError(`orderBy names ${name}, which is not a key or aggregate of the read.`);
             }
-            return { column, text: `${columnOrder(column)} ${direction === 'desc' ? 'DESC' : 'ASC'}` };
+            return { column, text: columnOrder(column, direction === 'desc' ? 'DESC' : 'ASC') };
         });
         const ties = keys
             .map((_, i) => `k${i}`)
             .filter((column) => !ordered.some((it) => it.column === column))
-            .map((column) => `${columnOrder(column)} ASC`);
+            .map((column) => columnOrder(column, 'ASC'));
         const projected: [string, string][] = [
             ...keys.map(([, key], i): [string, string] =>
                 key.kind === 'property'
@@ -130,9 +132,14 @@ export abstract class SqlGroups {
         return new GraphStatement(text, bindings);
     }
 
-    /** A property key's column as the groups are ordered by it: as its value is, unless the store says otherwise. */
-    protected keyOrder(column: string): string {
-        return this.keyValue(column);
+    /** What a property key's column is ordered by, in turn: its value, unless the store says otherwise. */
+    protected keyOrder(column: string): string[] {
+        return [this.keyValue(column)];
+    }
+
+    /** One term of the groups' order. A null is greatest, as Postgres and Oracle place it: last ascending. */
+    protected orderTerm(expression: string, direction: 'ASC' | 'DESC'): string {
+        return `${expression} ${direction}`;
     }
 
     /** The clauses that skip `skip` groups and read `limit` after them, where either is given. */

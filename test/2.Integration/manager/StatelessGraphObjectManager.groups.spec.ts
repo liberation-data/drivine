@@ -234,6 +234,21 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
         expect(second).toEqual([{ helpful: true, votes: 3 }]);
     });
 
+    it('should order a missing key or aggregate last ascending and first descending', async () => {
+        const read = async (orderBy: ['page' | 'mean', 'asc' | 'desc']): Promise<any[]> =>
+            gom.groups.load(Feedback, {
+                keys: { page: key('page') },
+                aggregates: { mean: avg('score') },
+                orderBy: [orderBy]
+            });
+        const pages = (rows: any[]): (string | undefined)[] => rows.map((it) => it.page);
+        expect(pages(await read(['page', 'asc']))).toEqual(['/agents', '/install', undefined]);
+        expect(pages(await read(['page', 'desc']))).toEqual([undefined, '/install', '/agents']);
+        // The group with no page has no score either: f6.
+        expect(pages(await read(['mean', 'asc']))).toEqual(['/agents', '/install', undefined]);
+        expect(pages(await read(['mean', 'desc']))).toEqual([undefined, '/install', '/agents']);
+    });
+
     it('should take a query over the references: typed keys, aggregates and conditions', async () => {
         const march = await gom.groups.load(Feedback, (q) => ({
             where: [q.page.isNotNull(), q.month.gte(3)],

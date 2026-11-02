@@ -74,6 +74,17 @@ describe('SqliteSpecCompiler', () => {
         });
     });
 
+    it('should bind a number a statement reads only as text as JSON writes it, not as the real node:sqlite binds', () => {
+        const spec = new QuerySpecification(
+            'SELECT CAST($id AS TEXT), CAST($both AS TEXT), $both, CAST($big AS TEXT)'
+        ).bind({
+            id: 7,
+            both: 7,
+            big: 1e21
+        });
+        expect(compiled(spec).parameters).toEqual({ id: '7', both: 7, big: '1e+21' });
+    });
+
     it('should page with LIMIT and OFFSET, an offset with no limit reading the rest', () => {
         expect(compiled(new QuerySpecification('SELECT 1').skip(5)).statement).toEqual('SELECT 1 LIMIT -1 OFFSET 5');
         expect(compiled(new QuerySpecification('SELECT 1').limit(3)).statement).toEqual('SELECT 1 LIMIT 3');

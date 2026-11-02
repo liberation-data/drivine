@@ -35,10 +35,12 @@ export interface SqliteOptions {
  *   a power cut, and the file is never left corrupt.
  *
  * The graph's tables are made on the first connection when they are not there, as on Postgres (see FirstConnection).
- * Idle connections are kept for reuse; a connection given back after it failed is closed.
+ * Idle connections are kept for reuse; a connection given back after it failed, or after the provider ended, is closed.
  */
 export class SqliteConnectionProvider implements ConnectionProvider {
     private readonly idle: SqliteDatabase[] = [];
+    /** Whether the provider has ended since it last connected: a connection given back then is closed. */
+    private ended = false;
     private readonly firstConnection = new FirstConnection(
         () => `graph '${this.graphName}' on ${this.type} file '${this.path}'`
     );
@@ -63,6 +65,7 @@ export class SqliteConnectionProvider implements ConnectionProvider {
     }
 
     async connect(): Promise<Connection> {
+        this.ended = false;
         return this.firstConnection.ensured(
             this.connection(this.idle.pop() ?? (await this.open())),
             async (it) => it.query(new QuerySpecification(new SqliteGraph(this.graphName).ensuring)),
@@ -70,14 +73,16 @@ export class SqliteConnectionProvider implements ConnectionProvider {
         );
     }
 
+    /** Closes the idle connections, and each in use as it is given back. */
     async end(): Promise<void> {
+        this.ended = true;
         this.idle.splice(0).forEach((it) => it.close());
         return Promise.resolve();
     }
 
     private connection(db: SqliteDatabase): SqliteConnection {
         return new SqliteConnection(db, new PostgresResultMapper(), this.busyTimeoutMillis, (it, failed) => {
-            if (failed || this.idle.length >= (this.options.poolMax ?? 10)) {
+            if (failed || this.ended || this.idle.length >= (this.options.poolMax ?? 10)) {
                 it.close();
             } else {
                 this.idle.push(it);

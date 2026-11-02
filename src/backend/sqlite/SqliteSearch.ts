@@ -4,7 +4,6 @@ import {
     hasLabels,
     jsonType,
     jsonValue,
-    JSON_ROWS,
     nodeDocument,
     path,
     SqliteGraph,
@@ -89,7 +88,6 @@ export class SqliteSearch {
         const value = target.kind === 'GRAPH_VIEW' ? views.document(target.model, 'n') : nodeDocument('n');
         return new GraphStatement(
             [
-                JSON_ROWS,
                 `SELECT json_object('value', json(${value}), 'score', s.score) AS "result"`,
                 `FROM (${candidates}) s JOIN ${this.graph.nodes} n ON n.nid = s.nid`,
                 `WHERE ${filters.join(' AND ')}`,

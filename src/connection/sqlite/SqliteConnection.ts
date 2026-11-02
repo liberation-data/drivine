@@ -33,6 +33,8 @@ export class SqliteConnection implements Connection {
     private readonly id = randomBytes(4).toString('hex');
     /** When the open transaction took the write lock, or undefined outside one. */
     private lockedAt?: number;
+    /** The cursors opened on the connection, closed as it is given back. */
+    private readonly cursors: SqliteCursor<any>[] = [];
 
     /**
      * @param busyTimeoutMillis how long a statement waits for a locked file before it is turned away
@@ -76,15 +78,15 @@ export class SqliteConnection implements Connection {
         const compiled = new SqliteSpecCompiler(finalizedSpec).compile();
         const rows = this.db.prepare(compiled.statement).iterate(...bound(compiled.parameters));
         const json = compiled.statement.startsWith(JSON_ROWS);
-        return Promise.resolve(
-            new SqliteCursor<T>(
-                this.sessionId(),
-                finalizedSpec,
-                rows,
-                json ? jsonRow : (it) => ({ ...it }),
-                this.resultMapper
-            )
+        const cursor = new SqliteCursor<T>(
+            this.sessionId(),
+            finalizedSpec,
+            rows,
+            json ? jsonRow : (it) => ({ ...it }),
+            this.resultMapper
         );
+        this.cursors.push(cursor);
+        return Promise.resolve(cursor);
     }
 
     /** Takes the file's write lock, waiting for it where another connection holds it. */
@@ -99,20 +101,32 @@ export class SqliteConnection implements Connection {
         return Promise.resolve();
     }
 
+    /**
+     * Rolls the transaction back. One SQLite already rolled back, as it does on a full disk or an I/O error, is over:
+     * the failure that ended it is the one to give, and the connection is still given back.
+     */
     async rollbackTransaction(): Promise<void> {
         this.warnOfLongLock('rolled back');
-        this.db.exec('ROLLBACK');
+        try {
+            this.db.exec('ROLLBACK');
+        } catch (e) {
+            if (!/no transaction is active/.test((e as Error).message ?? '')) {
+                throw e;
+            }
+        }
         return Promise.resolve();
     }
 
     /**
      * Gives the connection back. A transaction still open, as one whose work failed may leave it, is rolled back first,
-     * so the file's lock goes with it.
+     * so the file's lock goes with it. A cursor still open is closed: a statement not read to its end keeps the file as
+     * it was when the statement began, and the connection's next user would read that.
      */
     async release(err?: Error): Promise<void> {
         if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }
+        await Promise.all(this.cursors.splice(0).map(async (it) => it.close()));
         let failed = !!err;
         if (this.lockedAt !== undefined) {
             this.warnOfLongLock('released');

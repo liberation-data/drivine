@@ -218,8 +218,12 @@ function vector(text: string): number[] | undefined {
     }
 }
 
-/** A moment with an offset, `Z` or `±hh:mm`, ending its text. */
-const ZONED = /^(\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2}(?::\d{2})?)?$/;
+/**
+ * A moment as Java's ISO parsers read one: `T` and `Z` in either case, a fraction after a point alone, and an offset,
+ * if any, of hours alone or with minutes and seconds, ending its text.
+ */
+const ZONED =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{0,9}))?)?(Z|[+-]\d{2}(?::\d{2}(?::\d{2})?)?)?$/i;
 
 /**
  * `drivine_epoch(text)`: the moment the text names, as nanoseconds since the epoch, an integer; null for text that names
@@ -232,31 +236,61 @@ function epoch(text: string): bigint | null {
         return null;
     }
     const [, year, month, day, hour, minute, second = '0', fraction = '', zone] = match;
-    const millis = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
-    if (Number.isNaN(millis)) {
+    const [y, mo, d, h, mi, s] = [year, month, day, hour, minute, second].map(Number);
+    // Set field by field, not by Date.UTC, which reads a year below 100 as one of the 1900s, which an integer holds.
+    const date = new Date(0);
+    date.setUTCFullYear(y, mo - 1, d);
+    // A day or a time that is not on the clock, as 30 February or 24:00, names no moment, as in Java's reading.
+    if (date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d || h > 23 || mi > 59 || s > 59) {
         return null;
     }
-    const seconds = BigInt(Math.floor(millis / 1000)) - BigInt(offsetSeconds(zone));
-    return seconds * BigInt(1_000_000_000) + BigInt(fraction.padEnd(9, '0'));
+    const offset = offsetSeconds(zone);
+    if (offset === null) {
+        return null;
+    }
+    date.setUTCHours(h, mi, s, 0);
+    const seconds = BigInt(date.getTime() / 1000) - BigInt(offset);
+    const whole = seconds * BigInt(1_000_000_000);
+    const nanos = whole + BigInt(fraction.padEnd(9, '0'));
+    // An integer of nanoseconds holds the moments from 1677 to 2262, as drivine4j's: none outside them. Its whole
+    // seconds must fit before the fraction is added, as in Java's multiplyExact: none before 1677-09-21T00:12:44Z.
+    return whole >= MIN_INTEGER && nanos <= MAX_INTEGER ? nanos : null;
 }
 
-/** The seconds a moment's offset, `Z` or `±hh:mm[:ss]`, is ahead of UTC: none where it gives none. */
-function offsetSeconds(zone: string | undefined): number {
-    if (!zone || zone === 'Z') {
+/** The least and the greatest integer SQLite holds. */
+const MIN_INTEGER = BigInt('-9223372036854775808');
+const MAX_INTEGER = BigInt('9223372036854775807');
+
+/** The largest offset Java takes, ±18:00. */
+const MAX_OFFSET_SECONDS = 18 * 3600;
+
+/**
+ * The seconds a moment's offset, `Z` or `±hh[:mm[:ss]]`, is ahead of UTC: none where it gives none, and null for one
+ * Java refuses, past ±18:00 or with minutes or seconds over 59.
+ */
+function offsetSeconds(zone: string | undefined): number | null {
+    if (!zone || zone.toUpperCase() === 'Z') {
         return 0;
     }
-    const [h, m, s = '0'] = zone.slice(1).split(':');
-    return (Number(h) * 3600 + Number(m) * 60 + Number(s)) * (zone.startsWith('-') ? -1 : 1);
+    const [h, m = 0, sec = 0] = zone.slice(1).split(':').map(Number);
+    const seconds = h * 3600 + m * 60 + sec;
+    if (m > 59 || sec > 59 || seconds > MAX_OFFSET_SECONDS) {
+        return null;
+    }
+    return zone.startsWith('-') ? -seconds : seconds;
 }
 
-/** The POSIX classes a bracket expression may name, as JavaScript's Unicode expressions name them. */
+/**
+ * The POSIX classes a bracket expression may name, as JavaScript's Unicode expressions name them: the same classes as
+ * drivine4j's, Java's with UNICODE_CHARACTER_CLASS, so a letter is any alphabetic character, a vowel sign among them.
+ */
 const POSIX: [string, string][] = [
-    ['[:alnum:]', '\\p{L}\\p{N}'],
-    ['[:alpha:]', '\\p{L}'],
+    ['[:alnum:]', '\\p{Alphabetic}\\p{Nd}'],
+    ['[:alpha:]', '\\p{Alphabetic}'],
     ['[:digit:]', '\\p{Nd}'],
-    ['[:space:]', '\\s'],
-    ['[:upper:]', '\\p{Lu}'],
-    ['[:lower:]', '\\p{Ll}'],
+    ['[:space:]', '\\p{White_Space}'],
+    ['[:upper:]', '\\p{Uppercase}'],
+    ['[:lower:]', '\\p{Lowercase}'],
     ['[:punct:]', '\\p{P}']
 ];
 

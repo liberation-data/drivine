@@ -47,7 +47,13 @@ export function openSqlite(path: string): SqliteDatabase {
             );
         }
     }
-    const db = new driver!.DatabaseSync(path, { enableForeignKeyConstraints: true });
+    let db: SqliteDatabase;
+    try {
+        db = new driver!.DatabaseSync(path, { enableForeignKeyConstraints: true });
+    } catch (e) {
+        // SQLite's message, as for a folder that is not there, does not name the file.
+        throw new DrivineError(`Could not open the SQLite file '${path}': ${(e as Error).message}.`, e as Error);
+    }
     const version = String(db.prepare('SELECT sqlite_version() AS v').get()!.v);
     const [major, minor] = version.split('.').map(Number);
     if (major < MINIMUM_SQLITE[0] || (major === MINIMUM_SQLITE[0] && minor < MINIMUM_SQLITE[1])) {

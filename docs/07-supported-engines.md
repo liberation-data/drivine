@@ -243,7 +243,11 @@ Notes:
 - A range index or a uniqueness constraint is a partial index over the property's text, for the nodes of the label.
   A vector or a full-text index is recorded and not made: `loadNearest` measures every node of the label that holds an
   embedding of the vector's size, and `loadMatching` reads every node of the label.
-- `matches` takes a JavaScript regular expression, matched against the whole value.
+- `matches` takes a JavaScript regular expression, matched against the whole value: `\w`, `\d` and `\b` are ASCII, as
+  JavaScript reads them, where drivine4j reads them as Unicode
+  ([#560](https://github.com/liberation-data/drivine/issues/560)).
+- Text compares and sorts by SQLite's `BINARY` collation, the order of its code points, so a page of mixed-case text is
+  in the order Neo4j gives (`B, a, b`), not by a collation as on Postgres.
 - A whole number past 2^53 that a statement gives back is refused by Node's driver; one a save leaves alone keeps its
   digits.
 

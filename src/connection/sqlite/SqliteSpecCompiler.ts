@@ -9,6 +9,9 @@ import type { SqliteValue } from '@/connection/sqlite/SqliteDriver';
  */
 const PARAMETER = /\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*)/gu;
 
+/** A named parameter read as text, as a node's id is: `CAST($id AS TEXT)`. */
+const TEXT_PARAMETER = /CAST\(\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*) AS TEXT\)/gu;
+
 /**
  * A statement for SQLite, which reads `$name` parameters as they are written: only the names the statement uses are
  * bound, as SQLite refuses a value for a name it does not hold. A value is bound as SQLite holds one: a boolean as 1 or
@@ -32,12 +35,13 @@ export class SqliteSpecCompiler extends QuerySpecificationCompiler {
         if (Array.isArray(this.spec.parameters)) {
             return this.spec.parameters.map(sqliteValue);
         }
-        const used = new Set([...this.spec.statement.text.matchAll(PARAMETER)].map((it) => it[1]));
+        const text = this.spec.statement.text;
+        const used = new Set([...text.matchAll(PARAMETER)].map((it) => it[1]));
         const parameters = this.spec.parameters as Record<string, any>;
         return Object.fromEntries(
             Object.keys(parameters)
                 .filter((key) => used.has(key))
-                .map((key) => [key, sqliteValue(parameters[key])])
+                .map((key) => [key, readAsText(text, key) ? textValue(parameters[key]) : sqliteValue(parameters[key])])
         );
     }
 
@@ -48,6 +52,20 @@ export class SqliteSpecCompiler extends QuerySpecificationCompiler {
         const paging = skip ? `LIMIT ${limit || -1} OFFSET ${skip}` : limit ? `LIMIT ${limit}` : '';
         return `${this.spec.statement.text} ${paging}`;
     }
+}
+
+/** Whether the statement reads the parameter only as text, `CAST($name AS TEXT)`. */
+function readAsText(text: string, name: string): boolean {
+    const count = (pattern: RegExp): number => [...text.matchAll(pattern)].filter((it) => it[1] === name).length;
+    return count(TEXT_PARAMETER) === count(PARAMETER);
+}
+
+/**
+ * A value a statement reads as text: a number as the text JSON writes it, as a node's property holds it. node:sqlite
+ * binds every number as a real, which SQLite writes as text with a fraction: 7 as `7.0`, which no id 7 is.
+ */
+function textValue(value: unknown): SqliteValue {
+    return typeof value === 'number' && Number.isFinite(value) ? JSON.stringify(value) : sqliteValue(value);
 }
 
 /** A value as SQLite binds it. */
