@@ -6,7 +6,8 @@ import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
  * crashed the session where a statement took a text past 32 KB from the properties as JSON for each of two rows
  * (liberation-data/drivine#320). So is a text a write takes from the row it is writing, to work out what it writes
  * (liberation-data/drivine#356), an unwound item's value a `RETURN` or a `WITH` gives (liberation-data/drivine#366),
- * and an item of a list read by its place (liberation-data/drivine#455). Elsewhere a property is read as it was.
+ * an item of a list read by its place (liberation-data/drivine#455), and a property that is an argument of `coalesce()`
+ * (liberation-data/drivine4j#459). Elsewhere a property is read as it was.
  * drivine4j's `OracleItemPropertyTest`.
  */
 describe('A property an item of a RETURN or a WITH gives in compiled Cypher', () => {
@@ -392,6 +393,49 @@ describe('A property an item of a RETURN or a WITH gives in compiled Cypher', ()
         );
         expect(count(sql, 'JSON_SERIALIZE')).toBe(2);
         expect(sql).not.toContain("JSON_VALUE(n1.props, '$.age");
+    });
+
+    it('should read a property coalesce() reads on Oracle through its text, its kind by its own path, and anything else as it was', () => {
+        // Taken out as JSON, a text past 32 KB closed the session over two rows or more (liberation-data/drivine4j#459).
+        const parameters = { p: { q: null } };
+        const sql = new OracleCypherCompiler('g').compile(
+            "MATCH (n:Doc)-[r:R]->() RETURN [coalesce($p.q, n.a), coalesce(r.a, 'z')]",
+            parameters
+        ).sql;
+        // A text of at most 4,000 bytes as a VARCHAR2, a longer one through its text, anything else as JSON, as it was.
+        expect(sql).toContain(
+            `CASE JSON_VALUE(n1.props, '$.a.type()') WHEN 'string' THEN COALESCE(JSON_SCALAR(JSON_VALUE(n1.props, '$.a')), ${long}) ` +
+                "WHEN 'null' THEN NULL ELSE JSON_QUERY(n1.props, '$.a' RETURNING JSON) END"
+        );
+        // The relationship's too: read by its own path for its kind, its VARCHAR2 and, in the ELSE, its JSON, and kept
+        // whole for its text.
+        const relationships = [...sql.matchAll(/CASE JSON_VALUE\((\w+)\.props, '\$\.a\.type\(\)'\)/g)]
+            .map((it) => it[1])
+            .filter((it) => it !== 'n1');
+        expect(relationships).toHaveLength(1);
+        const [relationship] = relationships;
+        expect(count(sql, `${relationship}.props, '$.a`)).toBe(3);
+        expect(sql).toContain(long.replace('n1.props', `${relationship}.props`));
+        expect(sql).toContain(`ELSE JSON_QUERY(${relationship}.props, '$.a' RETURNING JSON) END`);
+        // The parameter's key, and a property of a map, are read as they were.
+        expect(sql).toContain("<> 'null' THEN JSON_QUERY(");
+        expect(oracle("WITH {a: 'x'} AS m RETURN coalesce(m.a, 'z')")).not.toContain('KEEP');
+        // Elsewhere a property coalesce() reads is read as it was.
+        const postgres = new PostgresCypherCompiler('g').compile(
+            'MATCH (n:Doc) RETURN coalesce($p.q, n.a)',
+            parameters
+        ).sql;
+        expect(postgres).toContain("(n1.props -> 'a')");
+        expect(postgres).not.toContain('KEEP');
+    });
+
+    it("should read a node's stamp coalesce() reads on Oracle from its column", () => {
+        // The stamp is a column of the node's row, not a property in its JSON, so it is not read as coalesce()'s other
+        // properties are (liberation-data/drivine4j#459).
+        const sql = oracle('MATCH (n:Doc) RETURN coalesce(n.`__drivine.stamp`, 0)');
+        expect(sql).toContain('JSON_SCALAR(n1.stamp)');
+        expect(sql).not.toContain('KEEP');
+        expect(sql).not.toContain('__drivine.stamp');
     });
 
     it('should be read on Postgres as elsewhere', () => {

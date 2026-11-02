@@ -266,6 +266,13 @@ const names = await pm.query<string>(
   as before, and so is an unwound item. A list made of a long property (`[n.bio, 'y']`) still takes the property out as
   JSON, as above. See "An item of a list, read by its place" in drivine4j's
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
+- On Oracle, so are reads of an argument of `coalesce()` that is a property of a node or a relationship
+  ([#475](https://github.com/liberation-data/drivine/issues/475)), wherever the `coalesce()` is (`coalesce($p.q,
+  n.bio)`, `size(trim(coalesce(n.bio, '')))`, `SET n.a = coalesce(n.bio, '')`): a text of at most 4,000 bytes is read
+  as a `VARCHAR2`, at no cost drivine4j measured (20,000 rows take 72 ms either way), and a longer one through its text.
+  Any other value is read as before, and so is a value of a map (`coalesce(m.a, 'z')`). See "An argument of
+  `coalesce()`" in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Oracle, a text past 4,000 bytes is measured, cut, changed, searched, reversed and added to whole (`size()`,
   `toUpper()`, `substring()`, `replace()`, `split()`, `reverse()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads
   a text out of JSON as a `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one

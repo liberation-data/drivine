@@ -639,6 +639,15 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The property `key` of the node or relationship whose properties are `props`, where it is an argument of
+     * `coalesce()`: as {@link propertyOf} reads it, null where it is JSON's null, but on a store that must read such an
+     * argument apart.
+     */
+    coalescedProperty(props: string, key: string): string {
+        return this.nullIfJsonNull(this.propertyOf(props, key));
+    }
+
+    /**
      * The value at `keys`, each of a map in the one before, in the row a write is making (`Procedure.ROW`), where a
      * statement of the write reads it to work out what it writes: as {@link propertyOf} reads each key, but on a store
      * that must read it apart.

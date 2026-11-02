@@ -1331,6 +1331,86 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
+        it('a text past 32 KB that coalesce() gives from a property, on two rows, is read whole', async () => {
+            // On Oracle an argument of coalesce() that is a property was taken out as JSON, JSON_QUERY(props, '$.a'
+            // RETURNING JSON): a text past 32 KB so closed the session over two rows or more (ORA-03113), as
+            // liberation-data/drivine#320's did, on the first run of the statement or a later one, and in a write. A
+            // node of another label holds the same values, and is not read. drivine4j's test of
+            // liberation-data/drivine4j#459.
+            await clear();
+            const bio = `${'a'.repeat(40_000)}x`;
+            const props = "{name: 'x', bio: $bio, e: '', f: 1.0, n: 5, l: ['a'], m: $m, m2: $m2}";
+            await query(
+                `CREATE (a:CyCo ${props})-[:CY_CO {bio: $bio}]->(b:CyCo ${props})-[:CY_CO {bio: $bio}]->(a), ` +
+                    `(:CyCoOther ${props})-[:CY_CO {bio: $bio}]->(b)`,
+                // Of two bytes a letter: m is 4,000 bytes, a VARCHAR2's most, and m2 one letter past it.
+                { bio, m: 'é'.repeat(2_000), m2: 'é'.repeat(2_001) }
+            );
+            const all = 'MATCH (n:CyCo)';
+            const each = (value: unknown): unknown[] => [value, value];
+            const statements: [string, unknown[]][] = [
+                // The issue's, and the shapes that closed the session with it.
+                [`${all} RETURN size(toLower(trim(coalesce($p.q, n.bio))))`, each(40_001)],
+                [`${all} RETURN size(trim(coalesce($p.q, n.bio)))`, each(40_001)],
+                [`${all} RETURN size(coalesce($p.q, n.bio))`, each(40_001)],
+                [`${all} RETURN size(coalesce(n.bio, 'z'))`, each(40_001)],
+                [`${all} RETURN coalesce($p.q, n.bio)`, each(bio)],
+                [`${all} RETURN toLower(coalesce($p.q, n.bio))`, each(bio)],
+                [`${all} RETURN size(toLower(coalesce($p.q, n.bio)) + 'z')`, each(40_002)],
+                [`${all} RETURN coalesce(n.bio, 'z') ENDS WITH 'x'`, each(true)],
+                [`${all} RETURN size(toUpper(coalesce(n.nope, $p.q, n.bio)))`, each(40_001)],
+                [`${all} WITH coalesce($p.q, n.bio) AS b RETURN size(toLower(b))`, each(40_001)],
+                [`${all} RETURN [size(coalesce($p.q, n.bio)), coalesce(n.nope, n.name)]`, each([40_001, 'x'])],
+                // Of a relationship, and beside a variable-length walk.
+                ['MATCH (:CyCo)-[r:CY_CO]->(:CyCo) RETURN size(toLower(trim(coalesce($p.q, r.bio))))', each(40_001)],
+                [
+                    'MATCH (n:CyCo)-[:CY_CO*1..2]->(o:CyCo) RETURN size(coalesce($p.q, o.bio))',
+                    [40_001, 40_001, 40_001, 40_001]
+                ],
+                [
+                    'MATCH (n:CyCo)-[:CY_CO*1..2]->(o:CyCo) RETURN size(toLower(coalesce($p.q, n.bio)))',
+                    [40_001, 40_001, 40_001, 40_001]
+                ],
+                // In a WHERE, and of two nodes' tables side by side: the CASE on the property's kind keeps each label
+                // test.
+                [`${all} WHERE coalesce($p.q, n.bio) ENDS WITH 'x' RETURN size(coalesce(n.bio, 'z'))`, each(40_001)],
+                [
+                    'MATCH (n:CyCo), (o:CyCo) RETURN size(coalesce($p.q, n.bio)) + size(coalesce($p.q, o.bio))',
+                    [80_002, 80_002, 80_002, 80_002]
+                ],
+                // Of a node in a list, as a comprehension reads it, of an optional match that found none, and as a
+                // grouping key.
+                [`${all} WITH collect(n) AS ns RETURN [x IN ns | size(coalesce($p.q, x.bio))]`, [[40_001, 40_001]]],
+                [`${all} OPTIONAL MATCH (n)-[:CY_NONE]->(o) RETURN coalesce(o.bio, n.name)`, each('x')],
+                [`${all} RETURN coalesce($p.q, n.name) AS k, count(*) AS c`, [['x', 2]]],
+                // A text of multibyte letters, at a VARCHAR2's most and past it.
+                [
+                    `${all} RETURN [size(coalesce($p.q, n.m)), size(coalesce($p.q, n.m2)), coalesce($p.q, n.m) = n.m, coalesce($p.q, n.m2) = n.m2]`,
+                    each([2_000, 2_001, true, true])
+                ],
+                // In a write.
+                [`${all} SET n.copy = coalesce($p.q, n.bio) RETURN size(n.copy)`, each(40_001)]
+            ];
+            await onOneSession(
+                async (run) => {
+                    // Oracle closed the session on the first run, or from the second on.
+                    for (let i = 1; i <= 3; i++) {
+                        for (const [cypher, expected] of statements) {
+                            expect([cypher, i, await run(cypher)]).toEqual([cypher, i, expected]);
+                        }
+                    }
+                    // A property of every other kind, and one that isn't there, is read as it was.
+                    expect(
+                        await run(
+                            `${all} RETURN [coalesce(n.e, 'z'), coalesce($p.q, n.f), coalesce(n.n, 0), coalesce(n.l, []), coalesce(n.nope, 'z'), coalesce(n.nope, $p.q)]`
+                        )
+                    ).toEqual(each(['', 1, 5, ['a'], 'z', null]));
+                },
+                { p: { q: null } }
+            );
+            await clear();
+        }, 1_800_000);
+
         it('a text past 32 KB compares as equal, unequal, in a list and in order, stored, given and beside a long value, on several rows', async () => {
             // On Oracle two values were compared as JSON: = and IN with a text past 32 KB on either side were refused
             // (ORA-40180, #469), and <, >, <= and >= of one read from the store on two rows or more closed the session
