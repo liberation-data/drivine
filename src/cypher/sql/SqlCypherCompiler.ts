@@ -300,9 +300,52 @@ export abstract class SqlCypherCompiler {
      * The join of the lateral query `query`, named `name`, to the row: an `OPTIONAL CALL`'s or an `OPTIONAL MATCH`'s
      * keeps the row it finds nothing for, and a `CALL`'s does not.
      */
-    lateral(query: string, name: string, optional: boolean): string {
+    lateral(query: string, name: string, optional: boolean, _columns: [string, boolean][]): string {
         const text = `(\n${indent(query)}\n) ${name}`;
         return optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`;
+    }
+
+    /**
+     * The column `column` of the rows a {@link lateral} join named `name` gives, which holds JSON where `json`: on a
+     * store that joins no lateral query, read back out of the row it was gathered in.
+     */
+    lateralColumn(name: string, column: string, _json: boolean): string {
+        return `${name}.${column}`;
+    }
+
+    /** The item of the row `alias` of {@link elements}, as JSON. */
+    item(alias: string): string {
+        return `${alias}.item`;
+    }
+
+    /** The place of the item of the row `alias` of {@link elements} in its list, counted from 1. */
+    itemNo(alias: string): string {
+        return `${alias}.item_no`;
+    }
+
+    /** The id of the row `alias` of {@link idRows}. */
+    rowId(alias: string): string {
+        return `${alias}.id`;
+    }
+
+    /** The place of the id of the row `alias` of {@link idRows} in its list, counted from 1. */
+    rowOrd(alias: string): string {
+        return `${alias}.ord`;
+    }
+
+    /** The SQL truth value `sql` as JSON's: null where it is null. */
+    boolJson(sql: string): string {
+        return this.scalar(sql);
+    }
+
+    /** The term `term` of an `ORDER BY`, descending where `descending`, its nulls where Cypher puts them. */
+    orderTerm(term: string, descending: boolean): string {
+        return descending ? `${term} DESC` : term;
+    }
+
+    /** The whole number `a` divided by the whole number `b`, toward zero, as Cypher divides two whole numbers. */
+    wholeQuotient(a: string, b: string): string {
+        return `trunc(${a} / ${b})`;
     }
 
     /**
@@ -497,14 +540,14 @@ export abstract class SqlCypherCompiler {
         return this.shared([list], ([x]) => {
             const key = (of: string, at: number): string => {
                 const alias = `mk${at}`;
-                const item = `${alias}.item`;
+                const item = this.item(alias);
                 const itemKey =
                     at === 1
                         ? this.temporalSql.sortable(this.temporals.moment(this.text(item), kind))
                         : key(item, at - 1);
                 const joined = this.joinedTexts(
                     `CASE WHEN ${this.isJsonNull(item)} THEN '~' ELSE ${itemKey} END`,
-                    `${alias}.item_no`
+                    this.itemNo(alias)
                 );
                 return `(SELECT COALESCE(${joined}, '') || '!' FROM ${this.temporalElements(of, alias)})`;
             };

@@ -64,6 +64,7 @@ import {
     MADE_TEXT,
     MATH_FUNCTIONS,
     MOST_ARGUMENTS,
+    namedColumn,
     ROUNDING_MODES,
     RoundingMode,
     parametersIn,
@@ -103,7 +104,7 @@ import {
     relationshipOf,
     Value
 } from '@/cypher/sql/Value';
-import { columns, columnsOf, groupKeys, PENDING } from '@/cypher/sql/ValueColumns';
+import { columnKinds, columns, columnsOf, groupKeys, laterally, PENDING } from '@/cypher/sql/ValueColumns';
 
 const {
     ROWS,
@@ -170,6 +171,8 @@ interface Projected {
     sql: string;
     scope: Scope;
     order: [string, boolean][];
+    /** The columns of its query, each named and whether it holds JSON, as a lateral join of it reads them. */
+    columns: [string, boolean][];
 }
 
 /**
@@ -1272,7 +1275,7 @@ export class CypherWriter {
                 this.sql.shared([this.sql.comparable(this.asJson(call.one()))], ([x]) => {
                     const e = this.alias('e');
                     const reversed = this.sql.comparable(
-                        json(this.sql.aggregateList(`${e}.item`, `${e}.item_no DESC`), { ordered: true })
+                        json(this.sql.aggregateList(this.sql.item(e), `${this.sql.itemNo(e)} DESC`), { ordered: true })
                     );
                     return (
                         `CASE ${this.sql.typeOf(x)} WHEN 'string' THEN ${this.sql.texts([x], ([t]) =>
@@ -1295,13 +1298,13 @@ export class CypherWriter {
                 this.sql.shared([this.sql.comparable(this.asJson(call.one()))], ([x]) => {
                     const e = this.alias('e');
                     const rest = this.sql.comparable(
-                        json(this.sql.aggregateList(`${e}.item`, `${e}.item_no`), { ordered: true })
+                        json(this.sql.aggregateList(this.sql.item(e), this.sql.itemNo(e)), { ordered: true })
                     );
                     return `CASE WHEN ${this.sql.typeOf(x)} = 'array' THEN (SELECT ${rest} FROM ${this.listElements(
                         call.one(),
                         x,
                         e
-                    )} WHERE ${e}.item_no > 1) END`;
+                    )} WHERE ${this.sql.itemNo(e)} > 1) END`;
                 }),
                 {
                     items: this.itemsOf(call.one()),
@@ -1331,9 +1334,11 @@ export class CypherWriter {
             json(
                 this.sql.shared([this.sql.comparable(this.asJson(call.one()))], ([x]) => {
                     const size = this.sql.function('size', x)!;
-                    return this.sql.scalar(
-                        `CASE WHEN ${this.sql.typeOf(x)} = 'object' THEN ${x} = ${this.sql.literalJson({})} ` +
-                            `WHEN ${this.sql.typeOf(x)} IN ('array', 'string') THEN ${this.sql.number(size)} = 0 END`
+                    return this.sql.boolJson(
+                        `CASE WHEN ${this.sql.typeOf(x)} = 'object' THEN ${this.sql.jsonEquals(
+                            x,
+                            this.sql.literalJson({})
+                        )} ` + `WHEN ${this.sql.typeOf(x)} IN ('array', 'string') THEN ${this.sql.number(size)} = 0 END`
                     );
                 })
             ),
@@ -1764,8 +1769,11 @@ export class CypherWriter {
             ...inner.from(),
             ...optional(inner.whereClause())
         ];
-        row.join(this.sql.lateral(text.join('\n'), name, true));
-        named.forEach(([variable, value, column]) => row.bind(variable, columnsOf(value, name, column)));
+        const kinds = named.flatMap(([, value, column]) => columnKinds(value, column));
+        row.join(this.sql.lateral(text.join('\n'), name, true, kinds.length > 0 ? kinds : [['one', false]]));
+        named.forEach(([variable, value, column]) =>
+            row.bind(variable, this.laterally(columnsOf(value, PENDING, column), name, kinds))
+        );
         return row;
     }
 
@@ -1828,15 +1836,18 @@ export class CypherWriter {
         this.rowOrder = order;
         this.redeclared([...projected.scope.keys()], [...select.bound.keys()]);
         const name = this.alias('c');
-        select.join(this.sql.lateral(this.sql.called(projected.sql), name, call.optional));
-        projected.scope.forEach((value, variable) =>
+        select.join(this.sql.lateral(this.sql.called(projected.sql), name, call.optional, projected.columns));
+        projected.scope.forEach((value, variable) => {
+            const returned = this.laterally(value, name, projected.columns);
             // A value taken from a write's row is null here where the call finds nothing: it is read as returned.
             select.bind(
                 variable,
-                columnsOf(call.optional && value.kind === 'Json' ? { ...value, rowKeys: undefined } : value, name)
-            )
+                call.optional && returned.kind === 'Json' ? { ...returned, rowKeys: undefined } : returned
+            );
+        });
+        projected.order.forEach(([column, descending]) =>
+            select.order.push([this.sql.lateralColumn(name, column, false), descending])
         );
-        projected.order.forEach(([column, descending]) => select.order.push([`${name}.${column}`, descending]));
     }
 
     /**
@@ -2064,7 +2075,7 @@ export class CypherWriter {
                 ];
             })
         );
-        return { sql, scope, order: [] };
+        return { sql, scope, order: [], columns: projected[0].columns };
     }
 
     private unwind(select: Select, unwind: Unwind): void {
@@ -2075,13 +2086,13 @@ export class CypherWriter {
             select.source(this.sql.elements(list.ids, name));
             const row = this.alias(list.relationships ? 'e' : 'n');
             if (list.relationships) {
-                select.join(`LEFT JOIN ${this.sql.edges} ${row} ON ${row}.eid = ${this.sql.idOf(`${name}.item`)}`);
+                select.join(`LEFT JOIN ${this.sql.edges} ${row} ON ${row}.eid = ${this.sql.idOf(this.sql.item(name))}`);
                 select.bind(unwind.variable, relationshipOf(row));
             } else {
-                select.join(`LEFT JOIN ${this.sql.nodes} ${row} ON ${row}.nid = ${this.sql.idOf(`${name}.item`)}`);
+                select.join(`LEFT JOIN ${this.sql.nodes} ${row} ON ${row}.nid = ${this.sql.idOf(this.sql.item(name))}`);
                 select.bind(unwind.variable, nodeOf(row));
             }
-            select.order.push([`${name}.item_no`, false]);
+            select.order.push([this.sql.itemNo(name), false]);
             return;
         }
         // A value that is no list is one row, and null no rows, as in Cypher.
@@ -2095,7 +2106,7 @@ export class CypherWriter {
         // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none, nor is JSON's null.
         select.bind(
             unwind.variable,
-            json(`${name}.item`, {
+            json(this.sql.item(name), {
                 temporal: this.itemsOf(list),
                 items: this.itemItemsOf(list),
                 temporals: this.itemTemporalsOf(list),
@@ -2106,7 +2117,7 @@ export class CypherWriter {
                 jsonNull: !this.isFlat(list)
             })
         );
-        select.order.push([`${name}.item_no`, false]);
+        select.order.push([this.sql.itemNo(name), false]);
     }
 
     /** That no relationship of the hop `a` is one of `b`'s. */
@@ -2310,8 +2321,16 @@ export class CypherWriter {
             )}\n) ${s}`;
             text = `SELECT * FROM (\n${indent(least)}\n) ${this.alias('s')}\nWHERE len = least`;
         }
-        select.join(this.sql.lateral(text, name, false));
-        found.forEach(([variable, value, column]) => select.bind(variable, columnsOf(value, name, column)));
+        const kinds: [string, boolean][] = [
+            ...found.flatMap(([, value, column]) => columnKinds(value, column)),
+            ['len', false],
+            ['from_nid', false],
+            ['to_nid', false]
+        ];
+        select.join(this.sql.lateral(text, name, false, kinds));
+        found.forEach(([variable, value, column]) =>
+            select.bind(variable, this.laterally(columnsOf(value, PENDING, column), name, kinds))
+        );
     }
 
     /** That the relationship type `type` is one of `types`; undefined when any will do. */
@@ -2521,10 +2540,10 @@ export class CypherWriter {
             json(this.sql.aggregateList(this.sql.scalar(`${v}.id`), `${v}.ord`), { ordered: true })
         );
         return (
-            `(SELECT ${listed} FROM (SELECT ${u}.id, ${u}.ord, COUNT(*) OVER () AS cnt FROM ${this.sql.idRows(
-                list,
-                u
-            )}) ${v} ` +
+            `(SELECT ${listed} FROM (SELECT ${namedColumn(this.sql.rowId(u), 'id')}, ${namedColumn(
+                this.sql.rowOrd(u),
+                'ord'
+            )}, COUNT(*) OVER () AS cnt FROM ${this.sql.idRows(list, u)}) ${v} ` +
             `WHERE ${v}.ord > ${first} AND MOD(${v}.ord - ${
                 first + 1
             }, ${stride}) = 0 AND ${v}.ord <= ${v}.cnt - ${leave})`
@@ -2555,7 +2574,7 @@ export class CypherWriter {
     private idList(list: string): string {
         const u = this.alias('u');
         const listed = this.sql.comparable(
-            json(this.sql.aggregateList(this.sql.scalar(`${u}.id`), `${u}.ord`), { ordered: true })
+            json(this.sql.aggregateList(this.sql.scalar(this.sql.rowId(u)), this.sql.rowOrd(u)), { ordered: true })
         );
         return `CASE WHEN ${list} IS NOT NULL THEN (SELECT ${listed} FROM ${this.sql.idRows(list, u)}) END`;
     }
@@ -2574,9 +2593,9 @@ export class CypherWriter {
             return (
                 `CASE WHEN ${ids} IS NOT NULL THEN (SELECT ${this.sql.aggregateList(
                     value,
-                    `${u}.item_no`
+                    this.sql.itemNo(u)
                 )} FROM ${this.sql.elements(ids, u)} ` +
-                `LEFT JOIN ${table} ${row} ON ${row}.${id} = ${this.sql.idOf(`${u}.item`)}) END`
+                `LEFT JOIN ${table} ${row} ON ${row}.${id} = ${this.sql.idOf(this.sql.item(u))}) END`
             );
         });
     }
@@ -2743,8 +2762,13 @@ export class CypherWriter {
 
     /** The order `select` reads its rows in, as an `ORDER BY` lists it: undefined where it has none. */
     private orderOf(select: Select): string | undefined {
-        const terms = select.order.map(([term, descending]) => (descending ? `${term} DESC` : term));
+        const terms = select.order.map(([term, descending]) => this.sql.orderTerm(term, descending));
         return terms.length > 0 ? terms.join(', ') : undefined;
+    }
+
+    /** `value`, whose columns are named for a query not yet named, read from the lateral join `name` of the columns `kinds`. */
+    private laterally(value: Value, name: string, kinds: [string, boolean][]): Value {
+        return laterally(value, name, kinds, (n, column, json) => this.sql.lateralColumn(n, column, json));
     }
 
     /** The rows in `ROWS`, as a query reads them. */
@@ -2752,8 +2776,8 @@ export class CypherWriter {
         const select = new Select(new Map());
         const r = this.alias('r');
         select.source(this.sql.elements(ROWS, r));
-        select.order.push([`${r}.item_no`, false]);
-        this.bindRow(select, `${r}.item`);
+        select.order.push([this.sql.itemNo(r), false]);
+        this.bindRow(select, this.sql.item(r));
         this.unread = [select, select.size()];
         return select;
     }
@@ -2860,15 +2884,22 @@ export class CypherWriter {
             this.assign(DOOMED, this.sql.literalJson([]));
         }
         const r = this.alias('r');
-        this.loop(RECORD, `SELECT ${r}.item FROM ${this.sql.elements(ROWS, r)} ORDER BY ${r}.item_no`, () => {
-            this.let(ROW, `${RECORD}.item`);
-            this.writeRow(clause);
-        });
+        this.loop(
+            RECORD,
+            `SELECT ${namedColumn(this.sql.item(r), 'item')} FROM ${this.sql.elements(
+                ROWS,
+                r
+            )} ORDER BY ${this.sql.itemNo(r)}`,
+            () => {
+                this.let(ROW, `${RECORD}.item`);
+                this.writeRow(clause);
+            }
+        );
         this.let(ROWS, OUT);
         if (deleting) {
             // A node is deleted when the clause has deleted the relationships it deletes: one it does not delete must not be there.
             const d = this.alias('d');
-            const doomed = `SELECT ${this.sql.idOf(`${d}.item`)} FROM ${this.sql.elements(DOOMED, d)}`;
+            const doomed = `SELECT ${this.sql.idOf(this.sql.item(d))} FROM ${this.sql.elements(DOOMED, d)}`;
             this.selectInto(
                 COUNT,
                 'count(*)',
@@ -3001,15 +3032,21 @@ export class CypherWriter {
                             ]),
                             ...names.map((it): [string, string] => [
                                 this.key(it),
-                                this.sql.propertyOf(`${b}.item`, this.key(it))
+                                this.sql.propertyOf(this.sql.item(b), this.key(it))
                             ])
                         ]),
                         { ordered: true }
                     )
                 );
                 const both =
-                    `SELECT 1 AS part, ${a}.item_no, ${a}.item FROM ${this.sql.elements(gathered, a)} UNION ALL ` +
-                    `SELECT 2 AS part, ${b}.item_no, ${row} AS item FROM ${this.sql.elements(ROWS, b)}`;
+                    `SELECT 1 AS part, ${namedColumn(this.sql.itemNo(a), 'item_no')}, ${namedColumn(
+                        this.sql.item(a),
+                        'item'
+                    )} FROM ${this.sql.elements(gathered, a)} UNION ALL ` +
+                    `SELECT 2 AS part, ${namedColumn(
+                        this.sql.itemNo(b),
+                        'item_no'
+                    )}, ${row} AS item FROM ${this.sql.elements(ROWS, b)}`;
                 const all = this.sql.comparable(
                     json(this.sql.aggregateList(`${g}.item`, `${g}.part, ${g}.item_no`), { ordered: true })
                 );
@@ -3033,11 +3070,18 @@ export class CypherWriter {
      */
     private eachRow(rows: string, body: () => void): void {
         const r = this.alias('r');
-        this.loop(RECORD, `SELECT ${r}.item FROM ${this.sql.elements(rows, r)} ORDER BY ${r}.item_no`, () => {
-            this.assign(ROWS, this.sql.appended(this.sql.literalJson([]), `${RECORD}.item`));
-            this.unread = undefined;
-            body();
-        });
+        this.loop(
+            RECORD,
+            `SELECT ${namedColumn(this.sql.item(r), 'item')} FROM ${this.sql.elements(
+                rows,
+                r
+            )} ORDER BY ${this.sql.itemNo(r)}`,
+            () => {
+                this.assign(ROWS, this.sql.appended(this.sql.literalJson([]), `${RECORD}.item`));
+                this.unread = undefined;
+                body();
+            }
+        );
     }
 
     /**
@@ -3464,7 +3508,7 @@ export class CypherWriter {
         );
         const outerColumns = this.outerColumns(final, itemColumns, name, sorts, sortedBy);
         const ordered = sorts.flatMap(([column, descending]) =>
-            sortedBy(column).map(([, term]) => `${term}${descending ? ' DESC' : ''}`)
+            sortedBy(column).map(([, term]) => this.sql.orderTerm(term, descending))
         );
         const outer = [
             `SELECT ${outerColumns}`,
@@ -3476,7 +3520,11 @@ export class CypherWriter {
         const scope: Scope = new Map(
             items.map((item, i) => [item.name, columnsOf(itemColumns[i][1], PENDING, itemColumns[i][0])])
         );
-        return { sql: outer, scope, order };
+        const kinds: [string, boolean][] = [
+            ...itemColumns.flatMap(([column, value]) => columnKinds(value, column)),
+            ...order.map(([column]): [string, boolean] => [column, false])
+        ];
+        return { sql: outer, scope, order, columns: kinds };
     }
 
     /**
@@ -4612,11 +4660,9 @@ export class CypherWriter {
                     ...(from !== undefined ? [`${v}.item_no > ${bound(from)}`] : []),
                     ...(to !== undefined ? [`${v}.item_no <= ${bound(to)}`] : [])
                 ];
-                const items = `SELECT ${e}.item AS item, ${e}.item_no AS item_no, COUNT(*) OVER () AS cnt FROM ${this.listElements(
-                    listed,
-                    x,
+                const items = `SELECT ${this.sql.item(e)} AS item, ${this.sql.itemNo(
                     e
-                )}`;
+                )} AS item_no, COUNT(*) OVER () AS cnt FROM ${this.listElements(listed, x, e)}`;
                 const listedItems = this.sql.comparable(
                     json(this.sql.aggregateList(`${v}.item`, `${v}.item_no`), { ordered: true })
                 );
@@ -4786,7 +4832,7 @@ export class CypherWriter {
             : [this.sql.nodes, 'nid', nodeOf(row)];
         return [
             `FROM ${this.sql.elements(ids, name)} LEFT JOIN ${table} ${row} ON ${row}.${key} = ${this.sql.idOf(
-                `${name}.item`
+                this.sql.item(name)
             )}`,
             item
         ];
@@ -4821,7 +4867,7 @@ export class CypherWriter {
             // Of null, null, as in Cypher, and not an empty list.
             return `CASE WHEN ${ids} IS NOT NULL THEN (SELECT ${this.sql.aggregateList(
                 value,
-                `${name}.item_no`
+                this.sql.itemNo(name)
             )} ${from}${filter}) END`;
         });
         const projected = kind as Value | undefined;
@@ -4850,7 +4896,7 @@ export class CypherWriter {
             ...scope,
             [
                 comprehension.variable,
-                json(`${name}.item`, {
+                json(this.sql.item(name), {
                     temporal: this.itemsOf(listed),
                     items: this.itemItemsOf(listed),
                     temporals: this.itemTemporalsOf(listed),
@@ -4859,7 +4905,7 @@ export class CypherWriter {
             ]
         ]);
         const projected = comprehension.projection ? this.expression(comprehension.projection, inner) : undefined;
-        const projection = projected ? this.asJson(projected).sql : `${name}.item`;
+        const projection = projected ? this.asJson(projected).sql : this.sql.item(name);
         const filter = comprehension.where ? ` WHERE ${this.keeps(comprehension.where, inner)}` : '';
         // Of null, null, as in Cypher, and not an empty list.
         return json(
@@ -4868,7 +4914,7 @@ export class CypherWriter {
                 ([items]) =>
                     `CASE WHEN NOT ${this.sql.isJsonNull(items)} THEN (SELECT ${this.sql.aggregateList(
                         projection,
-                        `${name}.item_no`
+                        this.sql.itemNo(name)
                     )} ` + `FROM ${this.listElements(listed, items, name)}${filter}) END`
             ),
             {
@@ -5071,7 +5117,10 @@ export class CypherWriter {
             this.sql.shared([this.sql.comparable(this.asJson(listed))], ([items]) =>
                 quantified(
                     `FROM ${this.listElements(listed, items, name)}`,
-                    json(`${name}.item`, { temporal: this.itemsOf(listed), temporals: this.itemTemporalsOf(listed) }),
+                    json(this.sql.item(name), {
+                        temporal: this.itemsOf(listed),
+                        temporals: this.itemTemporalsOf(listed)
+                    }),
                     this.sql.isJsonNull(items)
                 )
             )
@@ -5867,7 +5916,7 @@ export class CypherWriter {
                         [a, b],
                         ([x, y]) =>
                             `CASE WHEN ${sql.integral(x)} AND ${sql.integral(y)} THEN ${sql.scalar(
-                                `trunc(${sql.number(x)} / ${sql.number(y)})`
+                                sql.wholeQuotient(sql.number(x), sql.number(y))
                             )} ` + `ELSE ${sql.arithmetic(x, y, '/')} END`
                     )
                 ),
@@ -5972,14 +6021,14 @@ export class CypherWriter {
         return sql.shared([jsonSql], ([x]) => {
             const over = (list: string, at: number): string => {
                 const e = this.alias('lc');
-                const item = `${e}.item`;
+                const item = this.sql.item(e);
                 const mapped =
                     at === 1
                         ? each(item)
                         : `CASE WHEN ${sql.typeOf(item)} = 'array' THEN ${over(item, at - 1)} ELSE ${item} END`;
                 const items = sql.aggregateList(
                     `CASE WHEN ${sql.isJsonNull(item)} THEN ${sql.literalJson(null)} ELSE ${mapped} END`,
-                    `${e}.item_no`
+                    this.sql.itemNo(e)
                 );
                 return sql.comparable(
                     json(`(SELECT ${items} FROM ${sql.temporalElements(list, e)})`, { ordered: true })
@@ -6425,7 +6474,7 @@ export class CypherWriter {
     private found(member: Member, around?: (found: string, value: string) => string): string {
         const i = this.alias('i');
         const exists = (list: string, value: string): string =>
-            `EXISTS (SELECT 1 FROM ${member.elements(list, i)} WHERE ${member.matches(`${i}.item`, value)})`;
+            `EXISTS (SELECT 1 FROM ${member.elements(list, i)} WHERE ${member.matches(this.sql.item(i), value)})`;
         const test = member.test;
         if (test !== undefined) {
             return this.sql.sharedCompared(member.list, member.x, ([l, v]) => {
@@ -6515,7 +6564,7 @@ export class CypherWriter {
             // Items the statement gives, none a list or a map, are equal to no value that holds a null, and a comparison
             // with one is null only where it is null: the value is not read for its nulls, a text past 32 KB taken out as
             // JSON so closing Oracle's session (#469).
-            const found = `EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(`${i}.item`, v)})`;
+            const found = `EXISTS (SELECT 1 FROM ${member.elements(l, i)} WHERE ${matches(this.sql.item(i), v)})`;
             const given = member.given;
             if (given !== undefined) {
                 cases.push(`WHEN ${member.test === undefined ? '' : `${member.test(v)} AND `}${found} THEN TRUE`);
@@ -6528,8 +6577,8 @@ export class CypherWriter {
                 const k = this.alias('i');
                 const undecided =
                     member.id !== undefined
-                        ? sql.isJsonNull(`${k}.item`)
-                        : `(${this.nullableEquals(`${k}.item`, v, equals)}) IS NULL`;
+                        ? sql.isJsonNull(this.sql.item(k))
+                        : `(${this.nullableEquals(this.sql.item(k), v, equals)}) IS NULL`;
                 cases.push(`WHEN EXISTS (SELECT 1 FROM ${member.elements(l, k)} WHERE ${undecided}) THEN NULL`);
             }
             return `CASE ${cases.join(' ')} ELSE FALSE END`;
@@ -7329,7 +7378,7 @@ export class CypherWriter {
             case 'Json':
                 return value;
             case 'Bool':
-                return json(this.sql.scalar(value.sql));
+                return json(this.sql.boolJson(value.sql));
             case 'Node':
                 return json(this.sql.nodeJson(value));
             case 'Relationship':

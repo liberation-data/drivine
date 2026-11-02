@@ -1439,10 +1439,10 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * on `TRUE` followed by a `WHERE … AND …` (ORA-00907), and crashes the session on one without (ORA-07445 in
      * `qcsjccqb`, ORA-03113 to the client) (#377). See drivine4j's docs/oracle-on-true-in-scalar-subquery-crash.md.
      */
-    lateral(query: string, name: string, optional: boolean): string {
+    lateral(query: string, name: string, optional: boolean, columns: [string, boolean][]): string {
         return optional
             ? `LEFT JOIN LATERAL (\n${indent(query)}\n) ${name} ON 1 = 1`
-            : super.lateral(query, name, false);
+            : super.lateral(query, name, false, columns);
     }
 
     /**
