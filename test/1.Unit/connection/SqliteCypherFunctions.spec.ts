@@ -227,7 +227,16 @@ describe('SqliteCypherFunctions', () => {
             ['a(?i)b(?-i)c|d', 'd', 1],
             ['a(?i)b(?-i)c|d', 'aBc', 1],
             ['x|(?i)a|b', 'B', 1],
-            ['x|(?i)a|b', 'X', 0]
+            ['x|(?i)a|b', 'X', 0],
+            ['a(?i)|b', 'B', 1],
+            ['(?:a(?i)b|c)+', 'aBC', 1],
+            ['(?:a(?i)b|c)+', 'AB', 0],
+            ['(a)(?i)\\1', 'aA', 1],
+            ['a(?i)(?:[(|]|x)b|c', 'a(B', 1],
+            ['a(?i)(?:[(|]|x)b|c', 'C', 1],
+            ['x(?:a(?i)b|c(?-i)d|e)y', 'xCdy', 1],
+            ['x(?:a(?i)b|c(?-i)d|e)y', 'xCDy', 0],
+            ['x(?:a(?i)b|c(?-i)d|e)y', 'xEy', 0]
         ])(
             'read a flag group before a | as Java does, to the group end with each alternative its own: %s on %s',
             (pattern, text, expected) => {
