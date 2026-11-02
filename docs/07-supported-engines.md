@@ -10,6 +10,7 @@ The same models, queries and DSL run on each graph store. Switch the engine with
 | Oracle 23.9 or later | `ORACLE` | yes | full | vector, Oracle Text |
 | Amazon Neptune | `NEPTUNE` | no: `PersistenceManager` only | full | no |
 | Postgres 14 or later | `POSTGRES` | yes | full | vector (pgvector), full-text |
+| SQLite 3.45 or later | `SQLITE` | yes | one writer at a time | vector and full-text, by reading every node |
 
 ### Neo4j
 
@@ -187,6 +188,64 @@ Notes:
   approximate through it, and exact with no index made. A full-text index is a trigram index over the text a search
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
   `"phrase"`, `+must`, `-not` and a `prefix*`.
+
+### SQLite
+
+SQLite keeps a graph in a file, with no server: the same tables as Oracle and Postgres, so a file drivine4j or
+drivine-python wrote is read and written here, and the other way round. Drivine opens it through Node's own driver,
+`node:sqlite`, in Node 22.13 or later, which brings SQLite 3.45 or later; nothing else is installed. Node 22 and 24 print
+an `ExperimentalWarning` the first time `node:sqlite` is loaded. Models, the DSL and the object manager are the same as on
+the graph engines; `PersistenceManager` runs plain SQL, with cursors and transactions. Cypher comes later, with the
+compiler's SQLite target.
+
+```bash
+DATABASE_TYPE=SQLITE
+DATABASE_NAME=./data/graph.db          # the path of the file, made if it is not there; the folder must be
+DATABASE_DEFAULT_GRAPH_PATH=drivine    # names the graph's tables; this is the default
+DATABASE_CONNECTION_TIMEOUT=30000      # how long a statement waits for the file's lock, in ms; this is the default
+```
+
+A SQLite store has no host, port, user or password. `:memory:` is refused: each pooled connection would open a database
+of its own. The tables are made on the first connection, when they are not there, as on Postgres.
+
+**How a graph is stored.** drivine4j's layout, so the three libraries read one file:
+`<graph>_node (nid INTEGER PRIMARY KEY, labels TEXT, props TEXT, stamp TEXT)`,
+`<graph>_edge (eid INTEGER PRIMARY KEY, src, dst REFERENCES node ON DELETE CASCADE, type, props TEXT)`, and
+`<graph>_schema`. Labels and properties are JSON text, not SQLite's binary `jsonb`. Labels are written sorted, with no
+character escaped that JSON does not require, because a label is found by its text, `"Label"`, within `labels`. The stamp
+is a column. A moment is ISO 8601 text.
+
+**What a transaction gives.**
+
+- One writer at a time. A transaction takes the file's write lock as it begins (`BEGIN IMMEDIATE`), so even one that only
+  reads waits for the lock, up to the connection timeout. One that holds the lock longer than five seconds is warned of
+  when it ends, committed, rolled back or released.
+- A read outside a transaction doesn't wait for a writer: the journal is a write-ahead log, and a read sees what was
+  committed.
+- A save or a delete outside a transaction that finds the file locked is run again, as one turned away as contended is
+  on the other stores.
+- Each statement Drivine writes applies whole or not at all: a save is a call of `drivine_write`, a function each
+  connection registers, which carries out the save's steps under a savepoint.
+- Node's driver is synchronous, so a connection that finds the file locked waits for it by trying again after a pause,
+  which leaves the rest of the process running. A connection you open yourself on the file has none of this, nor the
+  functions Drivine's statements call.
+
+Notes:
+
+- A statement you write yourself is SQL; parameters are named `$name`, and a statement is bound only the ones it names.
+  A statement Drivine writes whose text values are each JSON opens with `/* drivine:json */`, and is read as JSON.
+- A predicate you write yourself is SQL over the root's row: its `props`, `labels` and `stamp`, e.g.
+  `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name`, and is read
+  as that property, as text, as on Postgres. SQLite's own `->>` reads `true` as `1` and a number as a number.
+- Each connection registers the functions Drivine's statements call, by drivine4j's names: `drivine_write`,
+  `drivine_delete`, `drivine_lower_copies`, `drivine_similarity`, `drivine_epoch` (a moment as nanoseconds since the
+  epoch), `drivine_lower` (a Unicode `lower`), `drivine_regexp_count`, and `regexp`, which SQLite's `REGEXP` calls.
+- A range index or a uniqueness constraint is a partial index over the property's text, for the nodes of the label.
+  A vector or a full-text index is recorded and not made: `loadNearest` measures every node of the label that holds an
+  embedding of the vector's size, and `loadMatching` reads every node of the label.
+- `matches` takes a JavaScript regular expression, matched against the whole value.
+- A whole number past 2^53 that a statement gives back is refused by Node's driver; one a save leaves alone keeps its
+  digits.
 
 ### Cypher on Oracle and Postgres
 

@@ -159,7 +159,9 @@ export class StoreIdentityResolver {
                 }
             }
             this.logger.warn(
-                `Could not ensure the DrivineStore key constraint: ${(failure as Error).message}. Identity is best-effort.`
+                `Could not ensure the DrivineStore key constraint: ${
+                    (failure as Error).message
+                }. Identity is best-effort.`
             );
             return false;
         }
@@ -275,6 +277,9 @@ export class StoreIdentityResolver {
                 return anyCause(e, (it) => it.code === '23505');
             case DatabaseType.ORACLE:
                 return anyCause(e, (it) => it.errorNum === 1);
+            case DatabaseType.SQLITE:
+                // SQLITE_CONSTRAINT_UNIQUE (2067), or a primary key's (1555).
+                return anyCause(e, (it) => it.errcode === 2067 || it.errcode === 1555);
             default:
                 return /unique constraint|already exists/i.test((e as Error)?.message ?? '');
         }

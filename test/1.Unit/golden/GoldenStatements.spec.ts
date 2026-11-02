@@ -39,6 +39,8 @@ import {
     PostgresBackend,
     PostgresGraph,
     schemaGrammarFor,
+    SqliteBackend,
+    SqliteGraph,
     Direction,
     CypherGrammar,
     FALKORDB_GRAMMAR,
@@ -89,6 +91,7 @@ const GOLDEN = path.join(__dirname, 'statements.json');
 const CYPHER_WHERE = 'n.name = $name';
 const SQL_WHERE = "JSON_VALUE(n.props, '$.name') = $name";
 const POSTGRES_WHERE = "(n.props ->> 'name') = $name";
+const SQLITE_WHERE = "(n.props ->> '$.name') = $name";
 
 function statements(grammar: CypherGrammar): Record<string, string> {
     return written(new CypherBackend(grammar), CYPHER_WHERE, !grammar.orphanDeleteLimit);
@@ -232,6 +235,55 @@ function postgresStatements(): Record<string, string> {
     const registry = new ModelRegistry();
     const person: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Person) };
     const cases = writtenCases(backend, POSTGRES_WHERE, true);
+    return {
+        ...withPlans(cases),
+        'Person.nearest.indexed': backend.nearest(person, {
+            label: 'Person',
+            property: 'embedding',
+            similarity: 'EUCLIDEAN',
+            k: 20,
+            limit: 5,
+            table: '3',
+            dimensions: 3
+        }).text,
+        'Person.matching.indexed': backend.matching(person, {
+            label: 'Person',
+            properties: ['name', 'bio'],
+            text: 'graph -relational',
+            limit: 10,
+            table: 'drivine_t_Personnamebio_4d5e6f'
+        }).text,
+        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text
+    };
+}
+
+/**
+ * SQLite's statements: the same cases, a filter in SQL, and a search by a vector of a size, which measures only the
+ * embeddings of that size. SQLite makes no search index, so there is no search through one. A write is a call of
+ * `drivine_write`, which carries out the plan Postgres's function does, so its plan is written too: drivine-python
+ * makes the same plan for the same object.
+ */
+function sqliteStatements(): Record<string, string> {
+    const backend = new SqliteBackend(new SqliteGraph());
+    const registry = new ModelRegistry();
+    const person: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Person) };
+    return {
+        ...withPlans(writtenCases(backend, SQLITE_WHERE, true)),
+        'Person.nearest.sized': backend.nearest(person, {
+            label: 'Person',
+            property: 'embedding',
+            similarity: 'COSINE',
+            k: 5,
+            dimensions: 3
+        }).text
+    };
+}
+
+/**
+ * Each case's text, and for a write through drivine4j's write function the plan it binds, its fresh stamps written as
+ * `<stamp>`, under `<case>.plan`.
+ */
+function withPlans(cases: Record<string, GraphStatement>): Record<string, string> {
     // What the manager binds when it runs a patch, which its plan is made from.
     const bound: Record<string, Record<string, any>> = {
         'Person.patch': { id: 'p1', set: { name: 'Ada', bio: null }, vectors: {} },
@@ -258,24 +310,7 @@ function postgresStatements(): Record<string, string> {
         });
     return {
         ...Object.fromEntries(Object.entries(cases).map(([name, it]) => [name, it.text])),
-        ...Object.fromEntries(plans),
-        'Person.nearest.indexed': backend.nearest(person, {
-            label: 'Person',
-            property: 'embedding',
-            similarity: 'EUCLIDEAN',
-            k: 20,
-            limit: 5,
-            table: '3',
-            dimensions: 3
-        }).text,
-        'Person.matching.indexed': backend.matching(person, {
-            label: 'Person',
-            properties: ['name', 'bio'],
-            text: 'graph -relational',
-            limit: 10,
-            table: 'drivine_t_Personnamebio_4d5e6f'
-        }).text,
-        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text
+        ...Object.fromEntries(plans)
     };
 }
 
@@ -668,7 +703,8 @@ describe('Golden statements', () => {
         MEMGRAPH: { ...statements(MEMGRAPH_GRAMMAR), ...schema(MEMGRAPH_SCHEMA) },
         FALKORDB: { ...statements(FALKORDB_GRAMMAR), ...schema(FALKORDB_SCHEMA) },
         ORACLE: { ...oracleStatements(), ...schema(schemaGrammarFor(DatabaseType.ORACLE, new OracleGraph())) },
-        POSTGRES: { ...postgresStatements(), ...schema(schemaGrammarFor(DatabaseType.POSTGRES, new PostgresGraph())) }
+        POSTGRES: { ...postgresStatements(), ...schema(schemaGrammarFor(DatabaseType.POSTGRES, new PostgresGraph())) },
+        SQLITE: { ...sqliteStatements(), ...schema(schemaGrammarFor(DatabaseType.SQLITE, new SqliteGraph())) }
     };
 
     it('should match the statements drivine-python checks against', () => {

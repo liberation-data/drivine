@@ -4,5 +4,6 @@ export enum DatabaseType {
     NEPTUNE = 'NEPTUNE',
     FALKORDB = 'FALKORDB',
     MEMGRAPH = 'MEMGRAPH',
-    ORACLE = 'ORACLE'
+    ORACLE = 'ORACLE',
+    SQLITE = 'SQLITE'
 }

@@ -86,7 +86,8 @@ export class DrivineModuleBuilder {
             DatabaseType.MEMGRAPH,
             DatabaseType.FALKORDB,
             DatabaseType.ORACLE,
-            DatabaseType.POSTGRES
+            DatabaseType.POSTGRES,
+            DatabaseType.SQLITE
         ];
         const registry = DatabaseRegistry.getInstance();
         const names = registry.providers.filter((it) => graphTypes.includes(it.type)).map((it) => it.name);

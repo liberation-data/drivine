@@ -54,7 +54,7 @@ export async function closeGraphEngines(): Promise<void> {
 
 /**
  * Every store a suite that holds to the object manager's contract runs on: the graph engines, Postgres when
- * POSTGRES_DATABASE_* configures it, and Oracle when ORACLE_DATABASE_* does.
+ * POSTGRES_DATABASE_* configures it, SQLite when SQLITE_DATABASE_* does, and Oracle when ORACLE_DATABASE_* does.
  */
 export function allStores(): GraphEngine[] {
     return [...graphEngines(), ...sqlStores()];
@@ -69,6 +69,8 @@ export async function clearLabels(pm: PersistenceManager, engine: GraphEngine, .
                   .join(' OR ')}`
             : engine.type === DatabaseType.POSTGRES
             ? `DELETE FROM drivine_node n WHERE ${labels.map((it) => `n.labels @> '["${it}"]'`).join(' OR ')}`
+            : engine.type === DatabaseType.SQLITE
+            ? `DELETE FROM drivine_node WHERE ${labels.map((it) => `instr(labels, '"${it}"') > 0`).join(' OR ')}`
             : `MATCH (n) WHERE ${labels.map((it) => `n:${it}`).join(' OR ')} DETACH DELETE n`;
     await pm.execute(new QuerySpecification(statement));
 }

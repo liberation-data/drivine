@@ -49,7 +49,9 @@ class User {
 
 describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) => {
     const oracle = engine.type === DatabaseType.ORACLE;
-    const postgres = engine.type === DatabaseType.POSTGRES;
+    const sqlite = engine.type === DatabaseType.SQLITE;
+    // SQLite reads Postgres's `->` and `->>` alike, and so these filters, but for a cast to jsonb.
+    const postgres = engine.type === DatabaseType.POSTGRES || sqlite;
     /** A raw filter in the store's own language: Cypher over n, or SQL over the row n on Oracle and on Postgres. */
     const raw = (cypher: string, oracleSql: string, postgresSql: string): string =>
         oracle ? oracleSql : postgres ? postgresSql : cypher;
@@ -58,7 +60,7 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
     const helpful = raw(
         'n.helpful = true',
         "JSON_EXISTS(n.props, '$?(@.helpful == true)')",
-        "(n.props -> 'helpful') = 'true'::jsonb"
+        sqlite ? "(n.props -> 'helpful') = 'true'" : "(n.props -> 'helpful') = 'true'::jsonb"
     );
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;

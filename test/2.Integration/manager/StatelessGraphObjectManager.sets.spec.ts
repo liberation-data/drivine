@@ -20,7 +20,7 @@ import {
     TargetNode
 } from '@liberation-data/drivine';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
-import { rawProps, SqlStore } from '../support/SqlStores';
+import { isSqlStore, rawProps, SqlStore } from '../support/SqlStores';
 
 // Neo4j plans each statement the first time it sees it, a few hundred milliseconds for one of the object manager's, and
 // the tests here send statements of their own shapes. On fresh containers, beside the suites running in parallel, a
@@ -68,7 +68,7 @@ describe.each(allStores())('Set fields on $type', (engine) => {
     let gom: StatelessGraphObjectManager;
 
     const stored = async (id: string): Promise<Record<string, any>> => {
-        const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
+        const sql = isSqlStore(engine.type);
         const rows = await pm.query<any>(
             new QuerySpecification(
                 sql ? rawProps(engine as SqlStore, 'PlainSet') : 'MATCH (n:PlainSet) RETURN properties(n)'
@@ -129,7 +129,7 @@ describe.each(allStores())('Set fields on $type', (engine) => {
     });
 
     it('should save a Set loaded from a list holding an item twice from the loaded copy', async () => {
-        if (engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES) {
+        if (isSqlStore(engine.type)) {
             return;
         }
         await gom.save(coded('d1', { codes: new Set(['a']) }));
@@ -144,7 +144,7 @@ describe.each(allStores())('Set fields on $type', (engine) => {
 
     it('should update a Set loaded from a list out of order and holding an item twice, changed in place', async () => {
         await gom.save(coded('d2', { codes: new Set(['a']) }));
-        if (engine.type !== DatabaseType.ORACLE && engine.type !== DatabaseType.POSTGRES) {
+        if (!isSqlStore(engine.type)) {
             // Another writer stored the list out of order with an item twice, leaving the stamp as it was.
             await pm.execute(new QuerySpecification(`MATCH (n:PlainSet {id: 'd2'}) SET n.code_set = ['b', 'a', 'b']`));
         }

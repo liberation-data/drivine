@@ -11,3 +11,4 @@ export * from './neo4j';
 export * from './neptune';
 export * from './postgres';
 export * from './oracle';
+export * from './sqlite';

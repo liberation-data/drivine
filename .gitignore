@@ -16,6 +16,9 @@ logs
 .nyc_output
 coverage
 
+# The SQLite file the tests write
+.sqlite
+
 # Env
 .env
 .env.test.local

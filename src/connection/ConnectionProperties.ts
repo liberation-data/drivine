@@ -4,6 +4,7 @@ import { TransactionMode } from '@/connection/TransactionMode';
 
 export interface ConnectionProperties {
     databaseType: DatabaseType;
+    /** The server's host. A SQLite store, a file, has none. */
     host: string;
     port?: number;
     userName?: string;
@@ -11,6 +12,7 @@ export interface ConnectionProperties {
     idleTimeout?: number;
     connectionTimeout?: number;
     poolMax?: number;
+    /** The database: on Oracle the service, on Postgres the database, and on SQLite the path of the file. */
     databaseName?: string;
     protocol?: string;
     /**
@@ -18,7 +20,7 @@ export interface ConnectionProperties {
      */
     transactionMode?: TransactionMode;
     /**
-     * On Oracle and Postgres, the graph to work on: it names its tables (`<name>_node`, `<name>_edge`, `<name>_schema`),
+     * On Oracle, Postgres and SQLite, the graph to work on: it names its tables (`<name>_node`, `<name>_edge`, `<name>_schema`),
      * and on Oracle the property graph. Letters, digits and underscores, beginning with a letter, at most 114 on Oracle
      * and 49 on Postgres. Defaults to `drivine`. drivine4j's `default-graph-path`.
      */
@@ -62,13 +64,20 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
     const defaultGraphPath = stringFromEnv('DATABASE_DEFAULT_GRAPH_PATH');
 
     assert(databaseType, `${prefix}DATABASE_TYPE for named connection is required.`);
-    assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
+    // A SQLite store is a file, named by DATABASE_NAME: it has no host.
+    if (databaseType !== DatabaseType.SQLITE) {
+        assert(host, `${prefix}DATABASE_HOST for named connection is required.`);
+    }
     assert(
         transactionMode === undefined || Object.values(TransactionMode).includes(transactionMode),
         `${prefix}DATABASE_TRANSACTION_MODE must be one of: ${Object.values(TransactionMode).join(', ')}.`
     );
 
-    if (databaseType === DatabaseType.POSTGRES || databaseType === DatabaseType.ORACLE) {
+    if (
+        databaseType === DatabaseType.POSTGRES ||
+        databaseType === DatabaseType.ORACLE ||
+        databaseType === DatabaseType.SQLITE
+    ) {
         assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
     }
 

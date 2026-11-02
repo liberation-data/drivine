@@ -15,4 +15,5 @@ export * from './SaveStatement';
 export * from './SaveStatementBuilder';
 export * from './oracle';
 export * from './postgres';
+export * from './sqlite';
 export { SqlGraph } from './sql';

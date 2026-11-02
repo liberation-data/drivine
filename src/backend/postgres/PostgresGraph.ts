@@ -6,6 +6,8 @@ import {
 } from '@/backend/postgres/PostgresStoreText';
 import { DrivineError } from '@/DrivineError';
 import { Stamps } from '@/model/Stamps';
+import { WriteReturns } from '@/backend/sql/WritePlan';
+import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
 
 /** Postgres names are at most 63 characters: past that, it cuts them short without a word. */
 const MAX_OBJECT_NAME = 63;
@@ -18,7 +20,7 @@ const MAX_OBJECT_NAME = 63;
  * Names are written bare, so Postgres folds them to lower case: a graph called `Contracts` keeps its nodes in
  * `contracts_node`, and is the same graph as one called `contracts`.
  */
-export class PostgresGraph extends SqlGraph {
+export class PostgresGraph extends SqlGraph implements WriteFunction {
     /** What the node table's comment says of a store this version made. */
     static readonly VERSION = POSTGRES_STORE_VERSION;
 
@@ -36,6 +38,11 @@ export class PostgresGraph extends SqlGraph {
      */
     get ensuring(): string {
         return POSTGRES_STORE_ENSURING.split(GRAPH_PLACEHOLDER).join(this.name);
+    }
+
+    /** The call of the graph's write function, `<graph>_write`, which the store keeps. */
+    writeCall(returns: WriteReturns): string {
+        return PostgresWriteStatement.call(this.name, returns);
     }
 }
 

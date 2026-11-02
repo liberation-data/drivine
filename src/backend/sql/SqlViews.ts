@@ -132,6 +132,11 @@ export abstract class SqlViews {
         return walk.cascade;
     }
 
+    /** What ends a query that reads its first row only. */
+    protected firstRow(): string {
+        return 'FETCH FIRST 1 ROW ONLY';
+    }
+
     private reachedFrom(
         model: GraphViewModel,
         from: string,
@@ -214,7 +219,7 @@ export abstract class SqlViews {
         const where = [step.x, ...required].join(' AND ');
         return rel.isCollection
             ? `(SELECT ${this.arrayOf(item)} ${step.from} AND ${where})`
-            : `(SELECT ${item} ${step.from} AND ${where} FETCH FIRST 1 ROW ONLY)`;
+            : `(SELECT ${item} ${step.from} AND ${where} ${this.firstRow()})`;
     }
 
     /** A list of fragments read over 1 to `depth` hops, each node once. */
@@ -225,7 +230,7 @@ export abstract class SqlViews {
         const where = `WHERE ${this.hasLabels(x, labelsOf(target(rel)))}`;
         return rel.isCollection
             ? `(${this.select(hint)}${this.arrayOf(this.nodeDocument(x))} ${nodes} ${where})`
-            : `(${this.select(hint)}${this.nodeDocument(x)} ${nodes} ${where} FETCH FIRST 1 ROW ONLY)`;
+            : `(${this.select(hint)}${this.nodeDocument(x)} ${nodes} ${where} ${this.firstRow()})`;
     }
 
     /** The nodes at the far end of a path, each once: in the order one of its hops names, where one does. */
@@ -236,7 +241,7 @@ export abstract class SqlViews {
             const { from: nodes, hint }: NodesOf = this.nodesOf(this.pathIds(path, from), x);
             return path.isCollection
                 ? `(${this.select(hint)}${this.arrayOf(this.nodeDocument(x))} ${nodes})`
-                : `(${this.select(hint)}${this.nodeDocument(x)} ${nodes} FETCH FIRST 1 ROW ONLY)`;
+                : `(${this.select(hint)}${this.nodeDocument(x)} ${nodes} ${this.firstRow()})`;
         }
         const o = this.nextAlias('o');
         const direction = ordered.ascending ? 'ASC' : 'DESC';
@@ -250,7 +255,7 @@ export abstract class SqlViews {
             `${o}.order_text ${direction} NULLS ${ordered.ascending ? 'FIRST' : 'LAST'}, ${x}.nid`;
         return path.isCollection
             ? `(SELECT ${this.arrayOf(this.nodeDocument(x), order)} ${nodes})`
-            : `(SELECT ${this.nodeDocument(x)} ${nodes} ORDER BY ${order} FETCH FIRST 1 ROW ONLY)`;
+            : `(SELECT ${this.nodeDocument(x)} ${nodes} ORDER BY ${order} ${this.firstRow()})`;
     }
 
     /**

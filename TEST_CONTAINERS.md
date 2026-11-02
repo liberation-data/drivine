@@ -4,7 +4,8 @@
 
 By default, Drivine's tests start a [Testcontainer](https://node.testcontainers.org) for each datasource in
 [`.env.test`](.env.test): Neo4j, Memgraph, FalkorDB and Postgres, and Oracle when asked for (see [Oracle](#oracle)).
-No setup is needed beyond Docker running on the host.
+No setup is needed beyond Docker running on the host. SQLite needs no container: its datasource, `SQLITE_DATABASE_*`, is
+a file under `.sqlite`, made where the tests are run from.
 
 ```bash
 npm test

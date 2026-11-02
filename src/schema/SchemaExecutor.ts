@@ -58,7 +58,9 @@ export class SchemaExecutor {
         try {
             const rows = await connection.query(new QuerySpecification(statement).bind(bindings));
             await connection.release();
-            return this.provider.type === DatabaseType.POSTGRES ? rows.map(columnValue) : rows;
+            return this.provider.type === DatabaseType.POSTGRES || this.provider.type === DatabaseType.SQLITE
+                ? rows.map(columnValue)
+                : rows;
         } catch (e) {
             await connection.release(e as Error);
             throw DrivineError.withRootCause(e as Error);

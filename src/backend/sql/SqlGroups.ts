@@ -83,7 +83,7 @@ export abstract class SqlGroups {
         const keyOf = (i: number): string => {
             const key = keys[i][1];
             if (key.kind === 'property') {
-                return this.keyValue(`g.k${i}`);
+                return this.keyOrder(`g.k${i}`);
             }
             const target = pathTargets.get(keys[i][0])!;
             return `(SELECT ${this.idValue(target.nodeIdProperty!)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`;
@@ -122,10 +122,25 @@ export abstract class SqlGroups {
             ...(having.length ? [`    HAVING ${having.join(' AND ')}`] : []),
             `) g`,
             `ORDER BY ${[...ordered.map((it) => it.text), ...ties].join(', ')}`,
-            ...(query.skip ? [`OFFSET ${integer(query.skip, 'skip')} ROWS`] : []),
-            ...(query.limit != null ? [`FETCH NEXT ${integer(query.limit, 'limit')} ROWS ONLY`] : [])
+            ...this.paging(
+                query.skip ? integer(query.skip, 'skip') : undefined,
+                query.limit != null ? integer(query.limit, 'limit') : undefined
+            )
         ].join('\n');
         return new GraphStatement(text, bindings);
+    }
+
+    /** A property key's column as the groups are ordered by it: as its value is, unless the store says otherwise. */
+    protected keyOrder(column: string): string {
+        return this.keyValue(column);
+    }
+
+    /** The clauses that skip `skip` groups and read `limit` after them, where either is given. */
+    protected paging(skip?: number, limit?: number): string[] {
+        return [
+            ...(skip !== undefined ? [`OFFSET ${skip} ROWS`] : []),
+            ...(limit !== undefined ? [`FETCH NEXT ${limit} ROWS ONLY`] : [])
+        ];
     }
 
     /** The bound value `having` compares an aggregate with, as the store reads a number bound without a type. */

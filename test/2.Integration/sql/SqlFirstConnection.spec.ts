@@ -81,7 +81,13 @@ const names = async (pm: PersistenceManager): Promise<string[]> =>
  * The graph's tables are made on the connection provider's first connection, on every SQL store, so Cypher sent through a
  * persistence manager alone works on a new store, whichever manager comes first (liberation-data/drivine#343).
  */
-describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's first connection (%s)", (_, store) => {
+/**
+ * The stores that run Cypher: not yet SQLite, whose Cypher compiler comes later (liberation-data/drivine#266). Its first
+ * connection is tested with SQL in SqliteStore.spec.ts.
+ */
+const cypherStores = sqlStores().filter((it) => it.type !== DatabaseType.SQLITE);
+
+describe.each(cypherStores.map((it) => [it.name, it] as const))("a SQL store's first connection (%s)", (_, store) => {
     const registry = DatabaseRegistry.getInstance();
     const graphs: string[] = [];
     /** The connections of the user who may only read, ended before that user is dropped. */

@@ -8,7 +8,7 @@ import {
     uniquenessConstraint
 } from '@liberation-data/drivine';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
-import { sqlPersistenceManager, SqlStore } from '../support/SqlStores';
+import { isSqlStore, sqlPersistenceManager, SqlStore } from '../support/SqlStores';
 import { DrivineLogger } from '@/logger';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
@@ -17,7 +17,8 @@ jest.setTimeout(30_000);
 /** How many rounds of managers racing to make the key's constraint each store runs: fewer on the SQL stores, as drivine4j. */
 const RACE_ROUNDS: Partial<Record<DatabaseType, number>> = {
     [DatabaseType.ORACLE]: 2,
-    [DatabaseType.POSTGRES]: 3
+    [DatabaseType.POSTGRES]: 3,
+    [DatabaseType.SQLITE]: 3
 };
 
 /**
@@ -28,13 +29,18 @@ const RACE_ROUNDS: Partial<Record<DatabaseType, number>> = {
 const GRAPH = 'store_identity';
 
 describe.each(allStores())('store identity on $type', (engine) => {
-    const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
+    const sql = isSqlStore(engine.type);
     let pm: PersistenceManager;
     const manager = (): StatelessGraphObjectManager =>
         new StatelessGraphObjectManager(pm, backendFor(engine.type, GRAPH), new ModelRegistry());
-    // clearLabels deletes from the shared graph's tables, so the SQL stores' own graph is cleared by Cypher.
+    // clearLabels deletes from the shared graph's tables, so the SQL stores' own graph is cleared by Cypher, and on
+    // SQLite, whose Cypher comes later (liberation-data/drivine#266), by SQL.
     const wipe = async (): Promise<void> =>
-        sql
+        engine.type === DatabaseType.SQLITE
+            ? void (await pm.execute(
+                  new QuerySpecification(`DELETE FROM ${GRAPH}_node WHERE instr(labels, '"DrivineStore"') > 0`)
+              ))
+            : sql
             ? void (await pm.execute(
                   new QuerySpecification({ text: 'MATCH (n:DrivineStore) DETACH DELETE n', language: 'CYPHER' })
               ))
