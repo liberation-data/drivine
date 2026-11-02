@@ -1,5 +1,4 @@
 import { DrivineError } from '@/DrivineError';
-import { DrivineLogger } from '@/logger/DrivineLogger';
 
 /** A value SQLite binds or gives back. */
 export type SqliteValue = null | number | bigint | string | Uint8Array;
@@ -32,10 +31,14 @@ export interface SqliteDatabase {
 const MINIMUM_SQLITE = [3, 45, 0];
 
 /**
- * The oldest SQLite that writes a float it computes in JSON as the shortest text that reads back as it. One before it
- * writes 15 significant digits, so `json_quote(1.0/3)` is `0.333333333333333`.
+ * What a SQLite that writes a float it computes in JSON to 17 significant digits, which read back as it, gives for
+ * `json_quote(0.1 + 0.2)`. One that writes 15 gives `0.3`. SQLite 3.53 writes 17 by default, but a build may keep 15,
+ * as 3.53.1 does in one Python's, so it is asked, not told by its version.
  */
-export const FULL_FLOATS_SQLITE = [3, 53, 0];
+export const FULL_FLOATS_PROBE = '0.30000000000000004';
+
+/** The statement that asks a SQLite how it writes a float it computes in JSON. */
+const FLOATS_PROBE_SQL = 'SELECT json_quote(0.1 + 0.2) AS q';
 
 /** The numbers of a SQLite version, as `sqlite_version()` gives it: `3.50.4` is `[3, 50, 4]`, a missing part 0. */
 export function sqliteVersion(text: string): number[] {
@@ -57,31 +60,51 @@ export function sqliteOlderThan(text: string, minimum: number[]): boolean {
     return false;
 }
 
+/** The code of the warning `RoundedFloats` gives, to filter it on. */
+export const ROUNDED_FLOATS_WARNING = 'DRIVINE_SQLITE_ROUNDED_FLOATS';
+
+/** Gives a warning as `process.emitWarning` does. */
+export type EmitWarning = (message: string, options: { code: string }) => void;
+
 /**
- * Warns, once, where the SQLite Node bundles writes a float it computes in JSON to 15 significant digits, as before
- * 3.53: compiled Cypher gives each value as JSON, so a float it computes comes back rounded, and one it writes is
- * stored rounded. Values bound or read from the store keep their digits. The SQLite comes with Node, so the warning
- * names the Nodes that bring a later one.
+ * Warns, once, where the SQLite Node bundles writes a float it computes in JSON to fewer than 17 significant digits, as
+ * SQLite before 3.53 writes 15: compiled Cypher gives each value as JSON, so a float it computes comes back rounded, and
+ * one it writes is stored rounded. Values bound or read from the store keep their digits. It is told by how SQLite
+ * writes `0.1 + 0.2` (see FULL_FLOATS_PROBE), not by its version, which is only named. The SQLite comes with Node, so
+ * the warning names Nodes measured to bring one that writes 17. It is a Node process warning, shown whatever Drivine's
+ * log level, and silenced by `--disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` or `--no-warnings`.
  */
 export class RoundedFloats {
     private warned = false;
 
-    constructor(private readonly logger: DrivineLogger = new DrivineLogger('SqliteDriver')) {}
+    constructor(private readonly emit: EmitWarning = (message, options) => process.emitWarning(message, options)) {}
 
-    /** Warns of `version`, the SQLite of this process, if it rounds floats and none was warned of before. */
-    warnOnce(version: string, node: string = process.versions.node): void {
-        if (this.warned || !sqliteOlderThan(version, FULL_FLOATS_SQLITE)) {
+    /**
+     * Warns of `version`, the SQLite of this process, if `probe`, what it gave for `json_quote(0.1 + 0.2)`, is rounded,
+     * and none was warned of before. `probe` is a function, so SQLite is asked only until it has been warned of. A probe
+     * that fails says nothing, and never stops a file opening.
+     */
+    warnOnce(version: string, probe: () => string, node: string = process.versions.node): void {
+        if (this.warned) {
+            return;
+        }
+        let answer: string;
+        try {
+            answer = probe();
+        } catch {
+            return;
+        }
+        if (answer === FULL_FLOATS_PROBE) {
             return;
         }
         this.warned = true;
-        this.logger.warn(
-            `SQLite ${version}, which Node ${node} bundles, writes a float it computes in JSON to 15 significant ` +
-                'digits: compiled Cypher gives such a float rounded (1.0/3 as 0.333333333333333), and a computed ' +
-                'float a statement writes is stored rounded. Parameters and stored values keep their digits. SQLite ' +
-                `${FULL_FLOATS_SQLITE.slice(0, 2).join(
-                    '.'
-                )} or later, in Node 22.23 or later, 24.22 or later, or 26, ` +
-                'gives a float to its last digit.'
+        this.emit(
+            `SQLite ${version}, which Node ${node} bundles, writes a float it computes in JSON to fewer than 17 ` +
+                'significant digits: compiled Cypher gives such a float rounded (0.1 + 0.2 as 0.3), and a computed ' +
+                'float a statement writes is stored rounded. Parameters and stored values keep their digits. A Node ' +
+                'whose SQLite writes 17 digits, as Node 22.23.4, 24.22.2 and 26.13 were measured to, gives a float to ' +
+                'its last digit.',
+            { code: ROUNDED_FLOATS_WARNING }
         );
     }
 }
@@ -124,7 +147,7 @@ export function openSqlite(path: string): SqliteDatabase {
             `A SQLite store needs SQLite ${MINIMUM_SQLITE.slice(0, 2).join('.')} or later; this Node's is ${version}.`
         );
     }
-    roundedFloats.warnOnce(version);
+    roundedFloats.warnOnce(version, () => String(db.prepare(FLOATS_PROBE_SQL).get()!.q));
     return db;
 }
 

@@ -199,21 +199,25 @@ the graph engines; `PersistenceManager` runs plain SQL, with cursors and transac
 SQL as drivine4j compiles it (a cursor runs SQL alone). What Cypher does that SQLite's JSON functions don't, Drivine's
 functions registered on each connection do.
 
-**Which Node.** The SQLite comes with Node, so Node 22.23 or later, or 24.22 or later, is recommended; 26 is fine too.
-Their SQLite, 3.53 or later, writes a float it computes in JSON as the shortest text that reads back as it:
-`json_quote(1.0/3)` is `0.33333333333333332`. SQLite before 3.53 writes 15 significant digits, and every value compiled
-Cypher gives is JSON, so a float SQLite computes comes back rounded: `1.0/3` as `0.333333333333333`, `pi()` as
-`3.14159265358979`, a value passed through `WITH` and multiplied back as `0.999999999999999` where `1.0` is wanted, and
-a computed float a statement `SET`s is stored rounded. Parameters and stored values keep their digits. Drivine warns
-once, when it first opens a file, where Node's SQLite is older than 3.53 (logged at `WARN`); it runs all the same.
+**Which Node.** The SQLite comes with Node, so use a Node whose SQLite writes a float it computes in JSON to 17
+significant digits, which read back as it: `json_quote(0.1 + 0.2)` is `0.30000000000000004`. SQLite 3.53 does so by
+default, but a build may still write 15 (one Python's 3.53.1 does), so Drivine asks SQLite rather than reading its
+version. Node 22.23.4, 24.22.2 and 26.13, for example, were measured to write 17. A SQLite that writes 15 significant
+digits, as every one before 3.53 does, rounds what it computes, and every value compiled Cypher gives is JSON: `0.1 +
+0.2` comes back as `0.3`, `1.0/3` as `0.333333333333333`, a value passed through `WITH` and multiplied back as
+`0.999999999999999` where `1.0` is wanted, and a computed float a statement `SET`s is stored rounded. Parameters,
+stored values and Drivine's own functions, such as `pi()`, keep their digits. Drivine detects this at run time: when it
+first opens a file, it asks SQLite for `json_quote(0.1 + 0.2)`, and warns once where the answer is rounded; it runs all
+the same. The warning is a Node process warning, so it shows whatever `DRIVINE_LOG_LEVEL` is, and its code is
+`DRIVINE_SQLITE_ROUNDED_FLOATS`. `node --disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` (or the same in
+`NODE_OPTIONS`) silences it alone, and `node --no-warnings` with every other process warning.
 
-| Node | SQLite | Floats SQLite computes |
+| Node, measured | SQLite | `json_quote(0.1 + 0.2)` |
 | --- | --- | --- |
-| 22.13 to 22.22 | 3.50 or earlier | 15 significant digits, warned of |
-| 22.23 or later | 3.53 or later | to their last digit |
-| 24.0 to 24.13 | 3.50 | 15 significant digits, warned of |
-| 24.22 or later | 3.53 or later | to their last digit |
-| 26 | 3.54 | to their last digit |
+| 24.7.0 | 3.50.4 | `0.3`, warned of |
+| 22.23.4 | 3.53.4 | `0.30000000000000004` |
+| 24.22.2 | 3.53.4 | `0.30000000000000004` |
+| 26.13.0 | 3.54.0 | `0.30000000000000004` |
 
 ```bash
 DATABASE_TYPE=SQLITE
