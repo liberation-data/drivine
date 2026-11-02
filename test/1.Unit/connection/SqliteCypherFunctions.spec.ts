@@ -25,6 +25,14 @@ describe('SqliteCypherFunctions', () => {
     };
     const one = (sql: string): SqliteValue => row(`SELECT ${sql}`)[0];
     const n = BigInt;
+    /** A test of a flag group within the expression, which JavaScript reads only as a group of its own: Node 22's does not. */
+    const withScopedFlags = (() => {
+        try {
+            return new RegExp('(?i:a)') && it;
+        } catch {
+            return it.skip;
+        }
+    })();
 
     it('exports each function by drivine4j SQL name', () => {
         expect(SqliteFunctions).toMatchObject({
@@ -183,7 +191,7 @@ describe('SqliteCypherFunctions', () => {
             expect(() => one(`drivine_regexp_replace('abc', 'b', '\\2')`)).toThrow('No group 2');
         });
 
-        it('read a flag group anywhere in the expression, as Java does', () => {
+        withScopedFlags('read a flag group anywhere in the expression, as Java does', () => {
             expect(
                 row(
                     `SELECT 'ABC' REGEXP '^(?:(?i)abc)\\z', 'ABC' REGEXP '^(?:abc)\\z', 'xABC' REGEXP '^(?:x(?i)abc)$', ` +
@@ -191,6 +199,50 @@ describe('SqliteCypherFunctions', () => {
                 )
             ).toEqual([n(1), n(0), n(1), n(0), n(1)]);
         });
+
+        // Each result as Java gives it, `Pattern.compile("^(?:" + pattern + ")\\z").matcher(text).find()`. Node 22 reads
+        // none of these: see SqlitePatterns.spec.ts for what it reads.
+        withScopedFlags.each([
+            ['a(?i)b|c', 'C', 1],
+            ['a(?i)b|c', 'ac', 0],
+            ['a(?i)b|c', 'aB', 1],
+            ['a(?i)b|c', 'xC', 0],
+            ['a(?i)b|c|d', 'D', 1],
+            ['a(?i)b|c|d', 'aC', 0],
+            ['(?:x|y(?i)z|w)', 'W', 1],
+            ['(?:x|y(?i)z|w)', 'yZ', 1],
+            ['(?:x|y(?i)z|w)', 'x', 1],
+            ['(?:x|y(?i)z|w)', 'X', 0],
+            ['a(?i)(?:b|c)d|e', 'aCD', 1],
+            ['a(?i)(?:b|c)d|e', 'E', 1],
+            ['a(?i)(?:b|c)d|e', 'aE', 0],
+            ['a(?i)[b|c]', 'A|', 0],
+            ['a(?i)[b|c]', 'a|', 1],
+            ['a(?i)[b|c]', 'aC', 1],
+            ['a(?i)[b|c]', 'C', 0],
+            ['a(?i)b\\|c', 'aB|C', 1],
+            ['a(?i)b\\|c', 'C', 0],
+            ['a(?i)b\\|c', 'aB', 0],
+            ['a(?i)b(?-i)c|d', 'D', 0],
+            ['a(?i)b(?-i)c|d', 'd', 1],
+            ['a(?i)b(?-i)c|d', 'aBc', 1],
+            ['x|(?i)a|b', 'B', 1],
+            ['x|(?i)a|b', 'X', 0],
+            ['a(?i)|b', 'B', 1],
+            ['(?:a(?i)b|c)+', 'aBC', 1],
+            ['(?:a(?i)b|c)+', 'AB', 0],
+            ['(a)(?i)\\1', 'aA', 1],
+            ['a(?i)(?:[(|]|x)b|c', 'a(B', 1],
+            ['a(?i)(?:[(|]|x)b|c', 'C', 1],
+            ['x(?:a(?i)b|c(?-i)d|e)y', 'xCdy', 1],
+            ['x(?:a(?i)b|c(?-i)d|e)y', 'xCDy', 0],
+            ['x(?:a(?i)b|c(?-i)d|e)y', 'xEy', 0]
+        ])(
+            'read a flag group before a | as Java does, to the group end with each alternative its own: %s on %s',
+            (pattern, text, expected) => {
+                expect(one(`'${text}' REGEXP '^(?:${pattern})\\z'`)).toEqual(n(expected));
+            }
+        );
 
         it('read \\z as the text end, and an escaped backslash before a z as itself', () => {
             expect(

@@ -93,7 +93,9 @@ function inForceOverAll(java: string, found: RegExpMatchArray, multiline: boolea
 /**
  * `source` with each flag group that is not at its start, `(?i)`, written as JavaScript writes one, a group of its own
  * around the rest of the group it is in, `(?i:…)`: Java reads a flag group anywhere, as in the `^(?:(?i)abc)\z` compiled
- * Cypher's `=~ '(?i)abc'` gives, and JavaScript only as a group around what it is for.
+ * Cypher's `=~ '(?i)abc'` gives, and JavaScript only as a group around what it is for. The rest runs past a `|` of that
+ * group, and each alternative stays one, so the group is closed and opened again around it: `a(?i)b|c` is
+ * `a(?i:b)|(?i:c)`.
  */
 function scopedFlags(source: string): string {
     let written = '';
@@ -122,11 +124,39 @@ function scopedFlags(source: string): string {
         }
         const from = at + flags[0].length;
         const end = groupEnd(source, from);
-        return `${written}(?${flags[1]}:${scopedFlags(source.substring(from, end))})${scopedFlags(
+        const alternatives = splitAlternatives(scopedFlags(source.substring(from, end)));
+        return `${written}${alternatives.map((it) => `(?${flags[1]}:${it})`).join('|')}${scopedFlags(
             source.substring(end)
         )}`;
     }
     return written;
+}
+
+/** `source` split at each `|` outside its groups and classes: its alternatives. */
+function splitAlternatives(source: string): string[] {
+    const alternatives: string[] = [];
+    let depth = 0;
+    let inClass = false;
+    let start = 0;
+    for (let at = 0; at < source.length; at++) {
+        const c = source[at];
+        if (c === '\\') {
+            at++;
+        } else if (inClass) {
+            inClass = c !== ']';
+        } else if (c === '[') {
+            inClass = true;
+        } else if (c === '(') {
+            depth++;
+        } else if (c === ')') {
+            depth--;
+        } else if (c === '|' && depth === 0) {
+            alternatives.push(source.substring(start, at));
+            start = at + 1;
+        }
+    }
+    alternatives.push(source.substring(start));
+    return alternatives;
 }
 
 /** Where the group `source` is in at `from` ends: at its closing parenthesis, or at the end of the text. */
