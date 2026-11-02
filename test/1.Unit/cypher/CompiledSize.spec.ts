@@ -784,4 +784,65 @@ describe('A compiled Cypher statement', () => {
             expect(sql).toContain('THEN NULL ELSE (cy_nulls_equal(');
         }
     });
+
+    it.each(compilers)(
+        'of a truncation with fields of a truncation with fields writes the text of its fields once on %s',
+        (_, compilerFor) => {
+            // #511: the text a truncation makes of its fields is read twice to number its year as the store does. Written
+            // out twice, four nested compiled to about 18,000 characters in drivine4j; bound once, to about 9,000.
+            const truncated = (times: number) =>
+                'RETURN ' +
+                "datetime.truncate('second', ".repeat(times) +
+                "datetime('2017-10-11T12:31:14+01:00')" +
+                ', {hour: 3})'.repeat(times) +
+                '.hour';
+            const [two, four] = [2, 4].map((it) => compilerFor().compile(truncated(it)).sql.length);
+            expect(four).toBeLessThan(12_000);
+            expect(four).toBeLessThan(3 * two);
+        }
+    );
+
+    it.each(compilers)(
+        'of an aggregate of a CASE that tests a field of a moment added to twice is a few kilobytes on %s',
+        (_, compilerFor) => {
+            // #511: Oracle's search of an aggregate's CASE for a subquery wrote each long value out wherever it was read:
+            // past the longest string JavaScript holds on master, before the years before 1 were read at all.
+            const cypher =
+                "MATCH (c:Claim) RETURN count(CASE WHEN (datetime(c.at) + duration('PT1H') + duration('PT1H')).minute > 0 THEN 1 END)";
+            expect(compilerFor().compile(cypher).sql.length).toBeLessThan(40_000);
+        }
+    );
+
+    it('of an aggregate of a CASE beside a moment added to twice aggregates no subquery on Oracle, and declares only the functions it calls', () => {
+        // #511: the search of the CASE for a subquery writes each long value beside what reads it, under names of no
+        // subquery: a subquery of the CASE's own, in such a value or beside it, is still found, and the aggregate reads it
+        // worked out first. What the search declares is given back: a reduce()'s step searched so declared a function
+        // reading those names.
+        const moment = "(datetime(n.at) + duration('PT1H') + duration('PT1H')).minute";
+        for (const statement of [
+            `MATCH (n:C) RETURN count(CASE WHEN EXISTS { MATCH (n)-->(m) WHERE m.x > 0 } AND ${moment} > 0 THEN 1 END)`,
+            `MATCH (n:C) RETURN count(CASE WHEN COUNT { (n)-->() } > ${moment} THEN 1 END)`,
+            `MATCH (n:C) RETURN collect(CASE WHEN ${moment} > 0 THEN [(n)-->(m) | m.id] END)`,
+            "MATCH (n:C) RETURN collect(CASE WHEN (datetime([(n)-->(m) | m.at][0]) + duration('PT1H') + duration('PT1H')).minute > 0 THEN 1 END)",
+            `MATCH (n:C) RETURN count(CASE WHEN reduce(a = 0, x IN n.l | a + ${moment}) > 0 THEN 1 END)`
+        ]) {
+            const sql = new OracleCypherCompiler('g').compile(statement).sql;
+            expect([statement, sql.length < 60_000]).toEqual([statement, true]);
+            expect(sql).not.toContain('probed.');
+            // The statement's own aggregate, its first after the functions it declares.
+            const lines = sql.split('\n');
+            const aggregate = lines
+                .slice(lines.findIndex((it) => it.startsWith('SELECT')))
+                .find((it) => /\b(count|JSON_ARRAYAGG)\(/.test(it))!;
+            expect([statement, aggregate.substring(aggregate.indexOf('SELECT') + 6).includes('SELECT')]).toEqual([
+                statement,
+                false
+            ]);
+            const declared = [...sql.matchAll(/FUNCTION (cy_\w+)\(/g)].map((it) => it[1]);
+            expect(declared).toEqual([...new Set(declared)]);
+            for (const name of declared) {
+                expect(sql.match(new RegExp(`\\b${name}\\(`, 'g'))!.length).toBeGreaterThan(1);
+            }
+        }
+    });
 });

@@ -1,5 +1,5 @@
 import { Temporal } from '@/cypher/sql/Temporal';
-import { Shared, TemporalSql, yearsOf } from '@/cypher/sql/TemporalSql';
+import { BC_BELOW, Shared, TemporalSql, yearsOf } from '@/cypher/sql/TemporalSql';
 
 /** `TRUNC`'s format model of each unit: `IYYY` is the first day of the ISO week-based year. */
 const FORMATS: Record<string, string> = {
@@ -44,11 +44,11 @@ export class OracleTemporalSql extends TemporalSql {
     local(text: string, kind: Temporal): string {
         switch (kind) {
             case Temporal.DATE:
-                return `TO_TIMESTAMP(${text}, 'YYYY-MM-DD')`;
+                return `TO_TIMESTAMP(${this.eraOf(text)}, 'SYYYY-MM-DD')`;
             case Temporal.LOCAL_DATE_TIME:
-                return iso(text, 'TIMESTAMP');
+                return iso(this.eraOf(text), 'TIMESTAMP');
             case Temporal.DATE_TIME:
-                return iso(this.unzoned(text), 'TIMESTAMP');
+                return iso(this.eraOf(text, true), 'TIMESTAMP');
             case Temporal.LOCAL_TIME:
                 return iso(`'1970-01-01T' || ${text}`, 'TIMESTAMP');
             case Temporal.TIME:
@@ -60,12 +60,51 @@ export class OracleTemporalSql extends TemporalSql {
 
     utc(text: string, kind: Temporal): string {
         if (kind === Temporal.DATE_TIME) {
-            return `CAST(SYS_EXTRACT_UTC(${iso(text, 'TIMESTAMP WITH TIME ZONE')}) AS TIMESTAMP)`;
+            return `CAST(SYS_EXTRACT_UTC(${iso(this.eraOf(text), 'TIMESTAMP WITH TIME ZONE')}) AS TIMESTAMP)`;
         }
         if (kind === Temporal.TIME) {
             return `CAST(SYS_EXTRACT_UTC(${iso(`'1970-01-01T' || ${text}`, 'TIMESTAMP WITH TIME ZONE')}) AS TIMESTAMP)`;
         }
         return this.local(text, kind);
+    }
+
+    /**
+     * Oracle numbers a year BC from -1, with no year 0, in ISO text as in its own: so 1 BC, the year `0000`, is `-0001`,
+     * and 45 BC, the year `-0044`, is `-0045`. See {@link bcOnly}.
+     */
+    era(text: string): string {
+        return this.shared([text], ([t]) =>
+            this.bcOnly(
+                t,
+                `ASCII(${t}) < ${BC_BELOW}`,
+                `REGEXP_REPLACE(${t}, '^(-[0-9]{4}|0000)', TO_CHAR(TO_NUMBER(REGEXP_SUBSTR(${t}, '^-?[0-9]{4}')) - 1, 'FM0000'))`
+            )
+        );
+    }
+
+    /**
+     * The digits the text opens with, and their sign; but the year of the timestamp where the text is
+     * {@link knownAd}, whose year Oracle numbers so too, as reading the timestamp's is quicker on Oracle than a regular
+     * expression.
+     */
+    textYear(text: string, kind: Temporal): string | undefined {
+        if (kind !== Temporal.DATE && kind !== Temporal.LOCAL_DATE_TIME && kind !== Temporal.DATE_TIME) {
+            return undefined;
+        }
+        if (this.readsAd(text)) {
+            return `EXTRACT(YEAR FROM ${this.local(text, kind)})`;
+        }
+        return `TO_NUMBER(REGEXP_SUBSTR(${text}, '^-?[0-9]+'))`;
+    }
+
+    /** Where it may be BC ({@link bcOnly}), `SYYYY` writes a year with its sign, as Oracle numbers it. */
+    date(timestamp: string, then: string = ''): string {
+        return this.bcOnly(
+            timestamp,
+            `${timestamp} < TIMESTAMP '0001-01-01 00:00:00'`,
+            `REGEXP_REPLACE(LTRIM(TO_CHAR(${timestamp}, 'SYYYY-MM-DD${then}')), '^-[0-9]{4}', TO_CHAR(EXTRACT(YEAR FROM ${timestamp}) + 1, 'FM0000'))`,
+            super.date(timestamp, then)
+        );
     }
 
     matches(text: string, pattern: string): string {
@@ -116,9 +155,7 @@ export class OracleTemporalSql extends TemporalSql {
         return this.shared([from, to], ([f, t]) => {
             const [since, until] = [f, t].map((it) => `TO_CHAR(${it}, 'DDHH24MISSFF6')`);
             return this.shared(
-                [
-                    `((EXTRACT(YEAR FROM ${t}) - EXTRACT(YEAR FROM ${f})) * 12 + EXTRACT(MONTH FROM ${t}) - EXTRACT(MONTH FROM ${f}))`
-                ],
+                [`((${this.year(t)} - ${this.year(f)}) * 12 + EXTRACT(MONTH FROM ${t}) - EXTRACT(MONTH FROM ${f}))`],
                 ([m]) =>
                     `(${m} - CASE WHEN ${m} > 0 AND ${until} < ${since} THEN 1 WHEN ${m} < 0 AND ${until} > ${since} THEN -1 ELSE 0 END)`
             );
@@ -149,7 +186,7 @@ export class OracleTemporalSql extends TemporalSql {
             return `CAST(CAST(${timestamp} AS DATE) AS TIMESTAMP)`;
         }
         if (unit === 'millisecond') {
-            return `TO_TIMESTAMP(TO_CHAR(${timestamp}, 'YYYY-MM-DD HH24:MI:SS.FF3'), 'YYYY-MM-DD HH24:MI:SS.FF3')`;
+            return `TO_TIMESTAMP(TO_CHAR(${timestamp}, 'SYYYY-MM-DD HH24:MI:SS.FF3'), 'SYYYY-MM-DD HH24:MI:SS.FF3')`;
         }
         if (unit === 'microsecond') {
             return timestamp;
@@ -159,7 +196,9 @@ export class OracleTemporalSql extends TemporalSql {
             return this.shared(
                 [timestamp],
                 ([t]) =>
-                    `CAST(ADD_MONTHS(TRUNC(CAST(${t} AS DATE), 'YYYY'), -12 * MOD(EXTRACT(YEAR FROM ${t}), ${years})) AS TIMESTAMP)`
+                    `CAST(ADD_MONTHS(TRUNC(CAST(${t} AS DATE), 'YYYY'), -12 * MOD(${this.year(
+                        t
+                    )}, ${years})) AS TIMESTAMP)`
             );
         }
         return undefined;

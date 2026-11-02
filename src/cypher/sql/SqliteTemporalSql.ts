@@ -98,6 +98,11 @@ export class SqliteTemporalSql extends TemporalSql {
     extract(field: string, timestamp: string): string {
         return temporal('extract', timestamp, `'${field}'`);
     }
+
+    /** The calendar of `drivine_temporal` numbers years as Cypher does, and its `to_char` writes one before 0 signed. */
+    get numbersBcFromOne(): boolean {
+        return false;
+    }
 }
 
 /** The temporal function's `operation` of `args`. */

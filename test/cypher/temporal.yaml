@@ -959,3 +959,50 @@ cases:
       - cypher: "RETURN [[date('2024-01-01')] < ['2024-01-02'], ['2024-01-02'] > [date('2024-01-01')], [duration('P1D')] < ['P2D'], [localdatetime('2024-01-01T10:00')] <= ['2024-01-01T10:00']]"
         except: [memgraph, falkordb, neptune]
         rows: [[null, null, null, null]]
+
+  - name: "Years before 1"
+    description: "A year is numbered astronomically, as ISO 8601 numbers it: 0000 is 1 BC and -0044 is 45 BC, read, made, worked out, truncated, written and read back."
+    steps:
+      - cypher: |
+          RETURN [toString(date('0000-06-01')), toString(date('-0001-12-31')), toString(date('-1234-06-01')),
+                  toString(localdatetime('-0044-03-15T12:00:00.123')), toString(datetime('-0044-03-15T12:00:00+0200')),
+                  date('-1234-06-01').year, date('0000-06-01').year, date('-0044-03-15').month, date('-0044-03-15').day]
+        only: [neo4j, sql]
+        note: "Neo4j's answers. Memgraph, FalkorDB and Neptune aren't pinned for a year before 1."
+        rows: [["0000-06-01", "-0001-12-31", "-1234-06-01", "-0044-03-15T12:00:00.123", "-0044-03-15T12:00:00+02:00", -1234, 0, 3, 15]]
+      - cypher: |
+          RETURN [toString(date({year: 0})), toString(date({year: -1})), toString(date({year: -44, month: 3, day: 15})),
+                  toString(datetime({year: -44, month: 3, day: 15, hour: 12, timezone: '+01:00'})), toString(localdatetime({year: 0, month: 1, day: 1}))]
+        only: [neo4j, sql]
+        rows: [["0000-01-01", "-0001-01-01", "-0044-03-15", "-0044-03-15T12:00:00+01:00", "0000-01-01T00:00:00"]]
+      - cypher: |
+          RETURN [toString(date('0001-01-01') - duration('P1D')), toString(date('0000-01-01') - duration('P1D')), toString(date('-0001-12-31') + duration('P1D')),
+                  toString(duration.between(date('0000-01-01'), date('0001-01-01'))), toString(duration.between(date('-0001-01-01'), date('0001-01-01'))),
+                  date('-0044-03-15') < date('0001-01-01'), datetime('-0044-03-15T12:00:00+02:00') < datetime('-0044-03-15T10:00:01Z')]
+        only: [neo4j, sql]
+        note: "Across the year 0, which Postgres and Oracle have no year of."
+        rows: [["0000-12-31", "-0001-12-31", "0000-01-01", "P1Y", "P2Y", true, true]]
+      - cypher: |
+          RETURN [toString(date.truncate('millennium', date('0999-12-31'))), toString(date.truncate('century', date('0050-06-01'))),
+                  toString(date.truncate('decade', date('0005-06-01'))), toString(date.truncate('millennium', date('-1234-06-01'))),
+                  toString(date.truncate('year', date('-0044-03-15'))), toString(datetime.truncate('millennium', datetime('0999-12-31T10:00:00Z'))),
+                  toString(localdatetime.truncate('century', localdatetime('0050-06-01T10:00:00')))]
+        only: [neo4j, sql]
+        note: "Memgraph and FalkorDB have no date.truncate()."
+        rows: [["0000-01-01", "0000-01-01", "0000-01-01", "-1000-01-01", "-0044-01-01", "0000-01-01T00:00:00Z", "0000-01-01T00:00:00"]]
+      - cypher: |
+          RETURN [toString(date.truncate('millennium', date('-0001-06-01'))), toString(date.truncate('century', date('-0001-06-01'))),
+                  toString(date.truncate('decade', date('-0001-06-01'))), toString(date.truncate('millennium', date('-0999-06-01'))),
+                  toString(date.truncate('century', date('-0150-06-01'))), toString(date.truncate('decade', date('-0015-06-01')))]
+        only: [neo4j, sql]
+        note: "A year before 1 is truncated toward 0."
+        rows: [["0000-01-01", "0000-01-01", "0000-01-01", "0000-01-01", "-0100-01-01", "-0010-01-01"]]
+      - cypher: "CREATE (:CyTemporal {id: 'a', day: date('-0044-03-15'), at: datetime('-0044-03-15T12:00:00Z'), clock: localdatetime('0000-01-01T00:00:00')}), (:CyTemporal {id: 'b', day: date('0001-01-01') - duration('P1D')})"
+        only: [neo4j, sql]
+      - note: "Read from the store, their kind told by their text."
+        cypher: "MATCH (n:CyTemporal) RETURN [n.id, toString(n.day), n.day.year, toString(n.day + duration('P1D')), toString(n.at + duration('P1Y')), n.clock.year] ORDER BY n.id"
+        only: [neo4j, sql]
+        rows: [["a", "-0044-03-15", -44, "-0044-03-16", "-0043-03-15T12:00:00Z", 0], ["b", "0000-12-31", 0, "0001-01-01", null, null]]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.day < date('0001-01-01') RETURN n.id ORDER BY n.id"
+        only: [neo4j, sql]
+        rows: ["a", "b"]

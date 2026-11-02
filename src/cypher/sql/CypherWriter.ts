@@ -3911,11 +3911,15 @@ export class CypherWriter {
                 if (isAggregate(e) && e.kind === 'Function') {
                     e.arguments
                         .filter(
+                            // Every subquery is written `SELECT`, so the argument's SQL is searched for one as it is,
+                            // case and all. Its long values are written once, as bound ones are (`probed`): written
+                            // out wherever each was read, as an aggregate's argument writes them, a temporal CASE's SQL
+                            // ran past the longest string JavaScript holds.
                             (argument) =>
                                 contains(argument, (it) => it.kind === 'Case') &&
-                                /select/i.test(
-                                    this.unshared(() => this.asJson(this.expression(argument, select.scope)).sql)
-                                )
+                                this.sql
+                                    .probed(() => this.asJson(this.expression(argument, select.scope)).sql)
+                                    .includes('SELECT')
                         )
                         .forEach((argument) => {
                             argumentsOf.set(expressionKey(argument), argument);
