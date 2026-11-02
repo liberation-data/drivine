@@ -1,8 +1,16 @@
 import { DrivineError } from '@/DrivineError';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
-import { EnsureResult, rangeIndex, UniquenessConstraintSpec, ViolatingKey } from '@/schema/SchemaSpecs';
+import {
+    EnsureResult,
+    lowercased,
+    madeAs,
+    rangeIndex,
+    UniquenessConstraintSpec,
+    ViolatingKey
+} from '@/schema/SchemaSpecs';
 import { IndexManager } from '@/schema/IndexManager';
+import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
 import { DrivineLogger } from '@/logger';
 
 /** How many conflicting values a constraint violation reports. */
@@ -23,11 +31,16 @@ const sameInOrder = (a: string[], b: string[]): boolean => a.length === b.length
 export class ConstraintManager {
     private readonly logger = new DrivineLogger(ConstraintManager.name);
 
-    /** @param changed told once this has made or dropped a constraint, as the object manager's list is then stale. */
+    /**
+     * @param changed told once this has made or dropped a constraint, as the object manager's list is then stale.
+     * @param copies fills in the lowercased copies a constraint that ignores case is made over; without it, such a
+     * constraint is refused.
+     */
     constructor(
         private readonly executor: SchemaExecutor,
         private readonly grammar: SchemaGrammar,
-        private readonly changed: () => void = () => undefined
+        private readonly changed: () => void = () => undefined,
+        private readonly copies?: LowerCopyFiller
     ) {}
 
     async list(): Promise<SchemaItem[]> {
@@ -49,11 +62,48 @@ export class ConstraintManager {
      * keeps the index and is a VIOLATION, with an empty sample when `sampleSize` is 0, and data that can't be read keeps
      * it and throws the refusal. Only an engine whose constraint brings its own index reports one in the way (Neo4j), so
      * elsewhere this changes nothing.
+     *
+     * A constraint that ignores case (see UniquenessConstraintSpec) is made over the lowercased copies, and first fills
+     * them in, as IndexManager's `ensure` does: again, recorded or not, where the constraint isn't there yet. FalkorDB
+     * can't make one, and refuses it before that.
      */
     async ensure(
         spec: UniquenessConstraintSpec,
         sampleSize: number = VIOLATION_SAMPLE,
         replaceBlockingIndex: boolean = false
+    ): Promise<EnsureResult<UniquenessConstraintSpec>> {
+        const made = madeAs(spec);
+        this.grammar.requireConstrainable?.(made);
+        if (lowercased(spec).length) {
+            // A node saved before there were copies is held to the constraint too. One made anew fills them in again,
+            // recorded or not: they may have gone out of step while it was gone.
+            await fillInLowerCopies(this.copies, spec, !(await this.exists(made)));
+        }
+        return { ...(await this.ensureMade(made, sampleSize, replaceBlockingIndex)), spec };
+    }
+
+    /**
+     * Whether the constraint is there and built, so that the engine enforces it, as one another process made. One still
+     * being built is waited on; one whose build failed (FalkorDB) is not in force, and is left as it is.
+     */
+    async inForce(spec: UniquenessConstraintSpec): Promise<boolean> {
+        return (await this.awaitBuild(madeAs(spec), false)) === 'BUILT';
+    }
+
+    /** Drops the constraint, or one whose build FalkorDB marked FAILED, which `list` leaves out. */
+    async drop(declared: UniquenessConstraintSpec): Promise<void> {
+        const spec = madeAs(declared);
+        if ((await this.exists(spec)) || (await this.failed(spec))) {
+            await this.dropUnique(spec);
+            this.changed();
+        }
+    }
+
+    /** `ensure`, of the constraint as it is made. */
+    private async ensureMade(
+        spec: UniquenessConstraintSpec,
+        sampleSize: number,
+        replaceBlockingIndex: boolean
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
         if (await this.built(spec)) {
             return { status: 'ALREADY_MATCHING', spec };
@@ -95,22 +145,6 @@ export class ConstraintManager {
             await this.create(spec);
         }
         return this.awaitBuilt(spec, sampleSize);
-    }
-
-    /**
-     * Whether the constraint is there and built, so that the engine enforces it, as one another process made. One still
-     * being built is waited on; one whose build failed (FalkorDB) is not in force, and is left as it is.
-     */
-    async inForce(spec: UniquenessConstraintSpec): Promise<boolean> {
-        return (await this.awaitBuild(spec, false)) === 'BUILT';
-    }
-
-    /** Drops the constraint, or one whose build FalkorDB marked FAILED, which `list` leaves out. */
-    async drop(spec: UniquenessConstraintSpec): Promise<void> {
-        if ((await this.exists(spec)) || (await this.failed(spec))) {
-            await this.dropUnique(spec);
-            this.changed();
-        }
     }
 
     /**

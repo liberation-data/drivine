@@ -1,6 +1,7 @@
 import {
     Aggregate,
     AggregateFunction,
+    CaseInsensitive,
     Count,
     Default,
     Direction,
@@ -174,4 +175,24 @@ export class Badge {
     @PropertyBag({ flat: true }) extras: Record<string, any> = {};
     @NodeLabels() kinds: string[] = [];
     @NodeStamp() stamp?: string;
+}
+
+/**
+ * An account looked up by its email and its display name whatever their case: a save keeps a lowercased copy of each,
+ * the display name's under the property it is stored as.
+ */
+@NodeFragment({ labels: ['Account'] })
+export class Account {
+    @NodeId() uuid: string;
+    @CaseInsensitive() email?: string;
+    @CaseInsensitive() @GraphProperty('display_name') displayName?: string;
+    name?: string;
+    @NodeStamp() stamp?: string;
+}
+
+/** An account and those it knows: a save writes the copies of each, a lookup reads the root's alone. */
+@GraphView()
+export class AccountFriends {
+    @Root() account: Account;
+    @GraphRelationship({ type: 'KNOWS', target: () => Account }) friends: Account[];
 }

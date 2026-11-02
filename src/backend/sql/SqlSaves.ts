@@ -68,6 +68,8 @@ export interface NodeWrite {
     props: Record<string, any>;
     /** For an open @NodeLabels field: the property recording the labels it wrote, and whether it is replaced. */
     record?: { property: string; replace: boolean };
+    /** The properties whose lowercased copies the write keeps: the model's `@CaseInsensitive` fields'. */
+    lower: string[];
 }
 
 /**
@@ -89,7 +91,8 @@ export function nodeWrite(
         labels: [...model.labels],
         add: model === found ? [] : model.labels.filter((it) => !found.labels.includes(it)),
         remove: [],
-        props
+        props,
+        lower: model.lowerCopied
     };
     if (labelsClear !== undefined && model.nodeLabels) {
         const field = model.nodeLabels;

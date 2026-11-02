@@ -32,6 +32,10 @@ import { EdgeOperations } from '@/manager/EdgeOperations';
 import { GroupOperations } from '@/manager/GroupOperations';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { IndexManager } from '@/schema/IndexManager';
+import { CYPHER_LOWER_COPIES, LowerCopyCatalog } from '@/schema/LowerCopyCatalog';
+import { lowered, loweredQuery, loweredWhere } from '@/dsl/LowerCopyLookups';
+import { scopeOf } from '@/dsl/ModelScope';
+import { FragmentModel } from '@/model/FragmentModel';
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
 import { OracleBackend } from '@/backend/oracle/OracleBackend';
@@ -219,6 +223,8 @@ export class StatelessGraphObjectManager {
 
     private readonly logger = new DrivineLogger(StatelessGraphObjectManager.name);
     private warnedNonAtomic = false;
+    /** See `lowerCopies`: null where the store keeps no record of them. */
+    private lowerCopyCatalog?: LowerCopyCatalog | null;
     private identity?: Promise<StoreIdentity>;
 
     private readonly mapper: GraphObjectMapper;
@@ -249,18 +255,30 @@ export class StatelessGraphObjectManager {
             registry,
             async (statement: GraphStatement) => this.persistenceManager.query(statement.spec()),
             this.mapper,
-            backend
+            backend,
+            async (model, where) =>
+                lowered(where, scopeOf({ kind: 'NODE_FRAGMENT', model }), await this.filledCopies(model))
         );
     }
 
     /** Range indexes of this manager's database: made idempotently, outside any transaction. */
     get indexes(): IndexManager {
-        return new IndexManager(this.schemaExecutor(), this.schemaGrammar(), () => this.indexAdvisor.refresh());
+        return new IndexManager(
+            this.schemaExecutor(),
+            this.schemaGrammar(),
+            () => this.indexAdvisor.refresh(),
+            this.lowerCopies()
+        );
     }
 
     /** Uniqueness constraints of this manager's database: made idempotently, outside any transaction. */
     get constraints(): ConstraintManager {
-        return new ConstraintManager(this.schemaExecutor(), this.schemaGrammar(), () => this.indexAdvisor.refresh());
+        return new ConstraintManager(
+            this.schemaExecutor(),
+            this.schemaGrammar(),
+            () => this.indexAdvisor.refresh(),
+            this.lowerCopies()
+        );
     }
 
     /**
@@ -288,8 +306,9 @@ export class StatelessGraphObjectManager {
      * Loads every object of the class, optionally filtered: `where` is a Cypher predicate over the root, `n`, with
      * values in `bindings`. Give a LoadOptions instead to override a recursive relationship's maxDepth for this load.
      */
-    async loadAll<T>(type: ClassRef<T>, where?: Filter<T>, bindings: Record<string, any> = {}): Promise<T[]> {
+    async loadAll<T>(type: ClassRef<T>, filter?: Filter<T>, bindings: Record<string, any> = {}): Promise<T[]> {
         const target = this.modelOf(type);
+        const where = await this.lookups(filter, target);
         const options = loadOptions(where, bindings, target, this.backend, await this.filterIndexes(where));
         if (options.query?.ordered.length) {
             await this.indexAdvisor.check(
@@ -324,10 +343,11 @@ export class StatelessGraphObjectManager {
 
     async count<T>(
         type: ClassRef<T>,
-        where?: string | QueryFn<T>,
+        given?: string | QueryFn<T>,
         bindings: Record<string, any> = {}
     ): Promise<number> {
         const target = this.modelOf(type);
+        const where = await this.lookups(given, target);
         const filter = filterOnly(where, bindings, target, this.backend, 'count', await this.filterIndexes(where));
         const statement =
             target.kind === 'GRAPH_VIEW'
@@ -526,7 +546,11 @@ export class StatelessGraphObjectManager {
      */
     async patch<T>(type: ClassRef<T>, id: unknown, options: PatchOptions<T>): Promise<PatchResult> {
         const target = this.modelOf(type);
-        const filter = this.condition(target, options.where, options.bindings);
+        const filter = this.condition(
+            target,
+            await this.lookups(options.where, target, loweredWhere),
+            options.bindings
+        );
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const set: Record<string, any> = {};
         const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
@@ -708,10 +732,11 @@ export class StatelessGraphObjectManager {
      */
     async deleteAll<T>(
         type: ClassRef<T>,
-        where?: string | QueryFn<T>,
+        given?: string | QueryFn<T>,
         bindings: Record<string, any> = {}
     ): Promise<number> {
         const target = this.modelOf(type);
+        const where = await this.lookups(given, target);
         const filter = filterOnly(where, bindings, target, this.backend, 'delete', await this.filterIndexes(where));
         return this.persistenceManager.getOne<number>(
             this.backend.deleteAll(target, filter.where, filter.tested).spec(filter.bindings)
@@ -1015,6 +1040,50 @@ export class StatelessGraphObjectManager {
             this.backend.heldProperties(root).spec({ id: rootObject[root.nodeIdField!] })
         );
         return { ...options, heldProperties: held[0] ?? {} };
+    }
+
+    /**
+     * The record of which lowercased copies every node of a label has, which an index or constraint that ignores case
+     * fills in, read and kept for this manager: none for a store with no schema grammar, or not registered.
+     */
+    private lowerCopies(): LowerCopyCatalog | undefined {
+        if (this.lowerCopyCatalog === undefined) {
+            try {
+                const grammar = this.schemaGrammar();
+                const executor = this.schemaExecutor();
+                this.lowerCopyCatalog = new LowerCopyCatalog(
+                    async (statement, bindings) => executor.run(statement, bindings),
+                    grammar.lowerCopies ?? CYPHER_LOWER_COPIES,
+                    async () => this.storeIdentity()
+                );
+            } catch {
+                this.lowerCopyCatalog = null;
+            }
+        }
+        return this.lowerCopyCatalog ?? undefined;
+    }
+
+    /**
+     * The filter, a query's case-insensitive comparisons of the root's `@CaseInsensitive` properties made comparisons
+     * with their lowercased copies, where every node is known to have them (see LowerCopyLookups); a filter written as
+     * Cypher or SQL as it is.
+     */
+    private async lookups<F>(
+        where: F,
+        target: TargetModel,
+        written: typeof loweredQuery | typeof loweredWhere = loweredQuery
+    ): Promise<F> {
+        if (typeof where !== 'function') {
+            return where;
+        }
+        const filled = await this.filledCopies(target.kind === 'GRAPH_VIEW' ? target.model.root : target.model);
+        return written(where as any, target, filled) as F;
+    }
+
+    /** The `@CaseInsensitive` properties of the fragment whose copy every node of one of its labels is known to have. */
+    private async filledCopies(root: FragmentModel): Promise<Set<string>> {
+        const catalog = root.lowerCopied?.length ? this.lowerCopies() : undefined;
+        return catalog ? catalog.filled(root.labels, root.lowerCopied) : new Set();
     }
 
     /** The schema grammar of this manager's store, over the graph its backend works on. */

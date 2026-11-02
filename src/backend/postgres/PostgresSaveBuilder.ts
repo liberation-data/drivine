@@ -197,7 +197,8 @@ export class PostgresSaveBuilder {
             drop: write.remove,
             owned: write.record
                 ? { property: write.record.property, clear: write.record.replace, base: write.model.labels }
-                : undefined
+                : undefined,
+            lower: write.lower
         };
         return this.plan.node(
             this.plan.shape(write.model.labels, key),

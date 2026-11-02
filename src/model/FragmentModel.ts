@@ -44,4 +44,9 @@ export interface FragmentModel extends FieldMapping {
     graphProperties: Map<string, string>;
     /** Fields that are neither loaded nor saved. */
     transientFields: Set<string>;
+    /**
+     * The stored names of the `@CaseInsensitive` fields, in the order of their fields' names, each of which a save gives
+     * a lowercased copy: see LowerCopies.
+     */
+    lowerCopied: string[];
 }

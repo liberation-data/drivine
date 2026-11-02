@@ -12,6 +12,7 @@ import {
     EnsureResult,
     IndexSpec,
     itemName,
+    madeAs,
     uniquenessConstraint,
     UniquenessConstraintSpec
 } from '@/schema/SchemaSpecs';
@@ -46,16 +47,20 @@ const GRAPH_TYPES = [
     DatabaseType.POSTGRES
 ];
 
-const keyOf = (spec: SchemaSpec): string => `${spec.kind}:${spec.label}:${[...spec.properties].sort().join(',')}`;
+/** What makes two declarations the same item: kind, label and the properties it is made over (see `madeAs`). */
+const keyOf = (spec: SchemaSpec): string =>
+    `${spec.kind}:${spec.label}:${[...madeAs(spec).properties].sort().join(',')}`;
 
 /** The label of the schema markers: drivine4j's, so both read one. */
 const MARKER_LABEL = '_DrivineSchema';
 
 /**
  * An item's identity in an owner's inventory, drivine4j's `inventoryKey`: kind, label, properties and name, so a renamed
- * item shows as an orphan rather than coexisting unattributed.
+ * item shows as an orphan rather than coexisting unattributed. Of the item as it is made (see `madeAs`): one that ignores
+ * case names the lowercased copies and its own name, `RANGE_INDEX:Account:__drivine.lower.email:Account_email_ci_range`.
  */
-export function inventoryKey(spec: SchemaSpec): string {
+export function inventoryKey(declared: SchemaSpec): string {
+    const spec = madeAs(declared);
     return `${CATALOG_KINDS[spec.kind]}:${spec.label}:${spec.properties.join(',')}:${itemName(spec)}`;
 }
 
@@ -95,7 +100,7 @@ interface RuntimeItems {
 }
 
 /** An inventory key without its name: what a renamed item shares with the key it had. */
-const identityOf = (spec: SchemaSpec): string => inventoryKey(spec).slice(0, -itemName(spec).length);
+const identityOf = (spec: SchemaSpec): string => inventoryKey(spec).slice(0, -itemName(madeAs(spec)).length);
 
 /**
  * The items an earlier manager ensured at runtime that this one has not been given: kept in the inventory, not
