@@ -14,7 +14,7 @@ import {
 import { extendedDoubles, jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
-import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { PLAIN_FLOAT, SHARED_ABOVE, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
@@ -1590,7 +1590,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /** An anonymous block, which returns its rows as an implicit result. */
-    procedure(body: string[]): ProcedureCall {
+    procedure(program: ProcedureStep[]): ProcedureCall {
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} JSON;`,
             `    ${GATHERED}${i + 1} JSON;`,
@@ -1615,7 +1615,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             'BEGIN',
             // The clock is read once, by a query: see OracleTemporalSql's now.
             `    SELECT ${OracleTemporalSql.CLOCK} INTO ${OracleTemporalSql.NOW} FROM DUAL;`,
-            indent(body.join('\n')),
+            indent(this.statements(program).join('\n')),
             'END;'
         ].join('\n');
         return { setup: [], sql };

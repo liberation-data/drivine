@@ -17,7 +17,7 @@ import {
 } from '@/cypher/sql/CypherSyntax';
 import { javaDouble, jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
-import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
@@ -1004,17 +1004,66 @@ export abstract class SqlCypherCompiler {
     // ----- A store's procedure, for a statement that writes -----
 
     /**
-     * The statement that runs the procedure whose statements are `body`, each ending in `;`, and gives the rows it
-     * returns, of one column, {@link returnRows}. The procedure declares the variables {@link Procedure} names and sets
-     * its parameters from the object bound at {@link PARAMETERS_OBJECT}.
+     * The statement that runs the procedure whose steps are `program`, and gives the rows it returns, of one column. Its
+     * variables are those {@link Procedure} names, its parameters set from the object bound at
+     * {@link PARAMETERS_OBJECT}. A store with a procedural language writes the steps in it: see {@link statements}.
      */
-    abstract procedure(body: string[]): ProcedureCall;
+    abstract procedure(program: ProcedureStep[]): ProcedureCall;
 
-    /** The statements that return the rows of the query `query`, whose one column is `result`. */
-    abstract returnRows(query: string): string[];
+    /**
+     * The steps `program` as the statements of a procedural language, each ending in `;`, indented by how deep in loops
+     * and conditions it is, from `depth`: a loop over a query's rows is `FOR … IN (…) LOOP`, a value set into a variable
+     * `SELECT … INTO …` or `… := …`, and the rows returned and a failure the store's own, {@link returnRows} and
+     * {@link raise}.
+     */
+    statements(program: ProcedureStep[], depth = 0): string[] {
+        const prefix = '    '.repeat(depth);
+        const line = (text: string): string =>
+            text
+                .split('\n')
+                .map((it) => prefix + it)
+                .join('\n');
+        return program.flatMap((step): string[] => {
+            switch (step.kind) {
+                case 'Select':
+                    return [line(`${step.planned};`)];
+                case 'Let':
+                    return [line(`${step.variable} := ${step.expression};`)];
+                case 'Loop':
+                    return [
+                        line(
+                            step.multiline
+                                ? `FOR ${step.record} IN (\n${indent(step.query)}\n) LOOP`
+                                : `FOR ${step.record} IN (${step.query}) LOOP`
+                        ),
+                        ...this.statements(step.body, depth + 1),
+                        line('END LOOP;')
+                    ];
+                case 'If':
+                    return [
+                        line(`IF ${step.condition} THEN`),
+                        ...this.statements(step.body, depth + 1),
+                        line('END IF;')
+                    ];
+                case 'Raise':
+                    return [line(this.raise(step.message))];
+                case 'Execute':
+                    return [line(`${step.statement}${step.into !== undefined ? ` INTO ${step.into}` : ''};`)];
+                case 'Return':
+                    return this.returnRows(step.query).map(line);
+            }
+        });
+    }
 
-    /** The statement that fails the procedure with `message`. */
-    abstract raise(message: string): string;
+    /** The statements of a procedural language that return the rows of the query `query`, whose one column is `result`: see {@link statements}. */
+    returnRows(_query: string): string[] {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
+
+    /** The statement of a procedural language that fails the procedure with `message`: see {@link statements}. */
+    raise(_message: string): string {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
 
     /**
      * A whole number that fails the statement when it is worked out, with `message` and the SQL value `value` it names:
