@@ -25,8 +25,9 @@ A Cypher statement runs on every store: on Postgres, Oracle and SQLite, Drivine 
 drivine-python read. A transaction there gives one writer at a time: it takes the file's write lock as it begins, so even
 one that only reads waits for the lock, up to the busy timeout. Reads outside a transaction don't wait for a writer; saves
 and deletes outside one are retried when contended; each statement Drivine writes applies whole or not at all; and a
-connection you open on the file yourself has none of this. See
-[SQLite](docs/07-supported-engines.md#sqlite).
+connection you open on the file yourself has none of this. Node 22.23 or later, or 24.22 or later, is recommended: an
+older Node's SQLite gives a float it computes in compiled Cypher to 15 significant digits, and Drivine warns once of it.
+See [SQLite](docs/07-supported-engines.md#sqlite).
 
 > **On Python or the JVM?** [drivine-python](https://github.com/liberation-data/drivine-python) (`pip install drivine`)
 > is Drivine's Python twin, and [drivine4j](https://github.com/liberation-data/drivine4j) (`org.drivine:drivine4j`) its

@@ -197,9 +197,23 @@ drivine-python wrote is read and written here, and the other way round. Drivine 
 an `ExperimentalWarning` the first time `node:sqlite` is loaded. Models, the DSL and the object manager are the same as on
 the graph engines; `PersistenceManager` runs plain SQL, with cursors and transactions, and Cypher, compiled to SQLite's
 SQL as drivine4j compiles it (a cursor runs SQL alone). What Cypher does that SQLite's JSON functions don't, Drivine's
-functions registered on each connection do. A float is given back to its last digit by the SQLite of a current Node
-(3.53, in Node 22.23, 24.22 and 26): SQLite 3.50, in Node 24.13 and earlier, writes a float in JSON to 15 digits,
-`0.333333333333333`.
+functions registered on each connection do.
+
+**Which Node.** The SQLite comes with Node, so Node 22.23 or later, or 24.22 or later, is recommended; 26 is fine too.
+Their SQLite, 3.53 or later, writes a float it computes in JSON as the shortest text that reads back as it:
+`json_quote(1.0/3)` is `0.33333333333333332`. SQLite before 3.53 writes 15 significant digits, and every value compiled
+Cypher gives is JSON, so a float SQLite computes comes back rounded: `1.0/3` as `0.333333333333333`, `pi()` as
+`3.14159265358979`, a value passed through `WITH` and multiplied back as `0.999999999999999` where `1.0` is wanted, and
+a computed float a statement `SET`s is stored rounded. Parameters and stored values keep their digits. Drivine warns
+once, when it first opens a file, where Node's SQLite is older than 3.53 (logged at `WARN`); it runs all the same.
+
+| Node | SQLite | Floats SQLite computes |
+| --- | --- | --- |
+| 22.13 to 22.22 | 3.50 or earlier | 15 significant digits, warned of |
+| 22.23 or later | 3.53 or later | to their last digit |
+| 24.0 to 24.13 | 3.50 | 15 significant digits, warned of |
+| 24.22 or later | 3.53 or later | to their last digit |
+| 26 | 3.54 | to their last digit |
 
 ```bash
 DATABASE_TYPE=SQLITE
