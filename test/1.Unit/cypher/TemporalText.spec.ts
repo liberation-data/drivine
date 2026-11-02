@@ -1,5 +1,7 @@
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
+import { Temporal } from '@/cypher/sql/Temporal';
+import { Temporals } from '@/cypher/sql/Temporals';
 
 /**
  * A temporal value written as a text of its kind's shape that is no such value is refused with what drivine4j says of
@@ -49,6 +51,15 @@ describe('A temporal text that is no such value', () => {
             "'2024-02-30T10:00:00.1234567890' is no localdatetime: Text '2024-02-30T10:00:00.1234567890' could not be parsed, unparsed text found at index 29"
         ],
         [
+            "date('-0001-02-29')",
+            "'-0001-02-29' is no date: Text '-0001-02-29' could not be parsed: Invalid date 'February 29' as '-1' is not a leap year"
+        ],
+        ["date('-0000-01-01')", "'-0000-01-01' is no date: Text '-0000-01-01' could not be parsed at index 0"],
+        [
+            "datetime('-0000-01-01T10:00:00.1234567890Z')",
+            "'-0000-01-01T10:00:00.1234567890Z' is no datetime: Text '-0000-01-01T10:00:00.1234567890' could not be parsed at index 0"
+        ],
+        [
             "time('10:00:00.1234567890Z')",
             "'10:00:00.1234567890Z' is no time: Text '10:00:00.1234567890' could not be parsed, unparsed text found at index 18"
         ]
@@ -70,5 +81,30 @@ describe('A temporal text that is no such value', () => {
 
     it('of nine digits of a fraction of a second is a time', () => {
         expect(() => new PostgresCypherCompiler('g').compile("RETURN localtime('10:00:00.123456789')")).not.toThrow();
+    });
+});
+
+/**
+ * A year as Neo4j and ISO 8601 number it, read off a text the statement writes and written back as `toString` writes it:
+ * `0000` is 1 BC, `-0044` is 45 BC (#511). A year of five digits is of no kind, as in drivine4j.
+ */
+describe('The canonical text of a year before 1', () => {
+    it.each([
+        ['0000-01-01', Temporal.DATE, '0000-01-01'],
+        ['-0001-12-31', Temporal.DATE, '-0001-12-31'],
+        ['-0044-03-15', Temporal.DATE, '-0044-03-15'],
+        ['0000-02-29', Temporal.DATE, '0000-02-29'],
+        ['-0004-02-29', Temporal.DATE, '-0004-02-29'],
+        ['-0044-03-15T12:00:00.5+0200', Temporal.DATE_TIME, '-0044-03-15T12:00:00.500+02:00'],
+        ['-0044-03-15T12:00:00.5+02:00', Temporal.DATE, '-0044-03-15'],
+        ['-0044-03-15T12:00', Temporal.LOCAL_DATE_TIME, '-0044-03-15T12:00:00'],
+        ['-0044-03-15T12:00:00.5+02:00', Temporal.LOCAL_TIME, '12:00:00.500'],
+        ['12345-01-01', Temporal.DATE, undefined],
+        ['-12345-01-01', Temporal.DATE, undefined]
+    ])('of %s, as the kind asked for, is written back as it reads', (text, kind, canonical) => {
+        expect(Temporals.canonical(text, kind)).toEqual(canonical);
+        if (canonical !== undefined) {
+            expect(Temporals.canonical(canonical, kind)).toEqual(canonical);
+        }
     });
 });

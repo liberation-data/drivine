@@ -80,6 +80,10 @@ function parsed(local: string, from: Temporal): Clock {
             ? local.split('T')
             : ['1970-01-01', local];
     const [hms, digits = ''] = timePart?.split('.') ?? [];
+    if (datePart.startsWith('-0000')) {
+        // java.time reads no year of minus zero, before it looks at anything else.
+        refuse(local, ' at index 0');
+    }
     if (digits.length > 9) {
         // java.time reads nine digits of a fraction, and finds the rest left over before it checks any field.
         refuse(local, `, unparsed text found at index ${local.indexOf('.') + 10}`);
