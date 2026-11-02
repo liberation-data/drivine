@@ -119,6 +119,10 @@ describe('SqliteCypherFunctions', () => {
                 )
             ).toEqual(['18446744073709551614', '100.0', '"x1.0E7"', '[{"b":1,"1":2},1.5]', '"\\u0001"']);
         });
+
+        it('adds a whole number already past a long whole, not by its low 64 bits (liberation-data/drivine4j#547)', () => {
+            expect(row(`SELECT drivine_add('18446744073709551617', '1')`)).toEqual(['18446744073709551618']);
+        });
     });
 
     it("drivine_canonical puts a map's keys in order at any depth", () => {
