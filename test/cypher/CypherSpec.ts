@@ -60,18 +60,18 @@ const BEYOND_2_53: Skip = {
 };
 
 /**
- * A JavaScript number does not tell a float that is a whole number, 2.0, from the whole number 2, so a SQL store, which
- * binds a parameter as JSON, binds such a parameter as a whole number: these steps bind one, and expect it back as a
- * float. Neo4j's driver sends a number as a float, so Neo4j runs them. The spec reads a whole number as a `bigint`, so a
- * parameter that is a `number` and whole was written as a float.
- */
-/**
  * {@link BEYOND_2_53} on the SQL stores alone: these steps expect a float past a long's range, which a JavaScript number
  * can't tell from the whole number past it that a SQL store sums exactly, so a store that sums so would pass them all the
  * same. Neo4j, which gives the float, runs them.
  */
 const BEYOND_2_53_ON_SQL: Skip = { ...BEYOND_2_53, on: ['sql'] };
 
+/**
+ * A JavaScript number does not tell a float that is a whole number, 2.0, from the whole number 2, so a SQL store, which
+ * binds a parameter as JSON, binds such a parameter as a whole number: these steps bind one, and expect it back as a
+ * float. Neo4j's driver sends a number as a float, so Neo4j runs them. The spec reads a whole number as a `bigint`, so a
+ * parameter that is a `number` and whole was written as a float.
+ */
 const WHOLE_FLOAT_PARAMETER: Skip = {
     why: 'a float parameter that is a whole number',
     on: ['sql'],
@@ -124,9 +124,12 @@ const HELD: Record<string, Record<string, Hold[]>> = {
         // Oracle holds NaN equal to NaN.
         'NaN worked out': [{ issue: 512, steps: [2, 3], on: ['oracle'] }],
         // A float literal past a double's range is read as an infinity, not refused. Postgres fails on each step of its
-        // own, reading the infinity as JSON (`CAST('Infinity' AS jsonb)`), which is all the spec asks of it. Step 4, too
-        // small to tell from 0, passes.
-        'Float bounds': [{ issue: 508, steps: [1, 2, 3], on: ['oracle'] }]
+        // own, reading the infinity as JSON (`CAST('Infinity' AS jsonb)`), which is all the spec asks of it, and SQLite
+        // on step 1. Step 4, too small to tell from 0, passes.
+        'Float bounds': [
+            { issue: 508, steps: [1, 2, 3], on: ['oracle'] },
+            { issue: 508, steps: [2, 3], on: ['sqlite'] }
+        ]
     },
     'writes.yaml': {
         'NaN and the infinities written': [

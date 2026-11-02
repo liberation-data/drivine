@@ -42,4 +42,16 @@ describe('Cypher compiled to SQLite', () => {
         expect(sql).toContain('DESC NULLS FIRST');
         expect(sql).toContain('LIMIT -1 OFFSET 1');
     });
+
+    it('reads a year before 1 as its calendar numbers it, with no era to rewrite nor an AD-first test (#511)', () => {
+        // drivine_temporal numbers years as Cypher does, and drivine_to_char writes one before 0 with its sign: the year
+        // is extracted as it is, where Postgres and Oracle add one to a year BC and test a stored text for 1000 on first.
+        const sql = new SqliteCypherCompiler('g').compile(
+            'MATCH (n:C) WHERE n.day < date($d) RETURN n.day.year, n.day.weekYear, toString(n.day)',
+            { d: '-0044-03-15' }
+        ).sql;
+        expect(sql).toContain("drivine_temporal('extract', ");
+        expect(sql).not.toContain('< 0 THEN 1');
+        expect(sql).not.toContain('[1-9][0-9]{3}');
+    });
 });
