@@ -31,9 +31,16 @@ describe('SqlitePatterns without flag groups of their own', () => {
         expect(matches('^(?:(?m)a$)\\z', 'a\nb')).toBe(false);
     });
 
+    it('turns on a flag group that opens the whole expression before a |, which Java reads over each alternative', () => {
+        expect(matches('^(?:(?i)a|b)\\z', 'B')).toBe(true);
+        expect(matches('^(?:(?i)a|b)\\z', 'A')).toBe(true);
+    });
+
     it('fails on a flag group in force over only part of the expression', () => {
         expect(() => matches('^(?:x(?i)abc)$', 'XABC')).toThrow('Invalid group');
         expect(() => matches('^(?:(?:(?i)a)b)\\z', 'AB')).toThrow('Invalid group');
         expect(() => matches('^(?:(?m)a)$', 'a\nb')).toThrow('Invalid group');
+        expect(() => matches('^(?:x|(?i)a|b)\\z', 'B')).toThrow('Invalid group');
+        expect(() => matches('^(?:a(?i)b|c)\\z', 'C')).toThrow('Invalid group');
     });
 });

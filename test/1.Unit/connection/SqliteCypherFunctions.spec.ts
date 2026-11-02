@@ -192,6 +192,40 @@ describe('SqliteCypherFunctions', () => {
             ).toEqual([n(1), n(0), n(1), n(0), n(1)]);
         });
 
+        // Each result as Java gives it, `Pattern.compile("^(?:" + pattern + ")\\z").matcher(text).find()`.
+        it.each([
+            ['a(?i)b|c', 'C', 1],
+            ['a(?i)b|c', 'ac', 0],
+            ['a(?i)b|c', 'aB', 1],
+            ['a(?i)b|c', 'xC', 0],
+            ['a(?i)b|c|d', 'D', 1],
+            ['a(?i)b|c|d', 'aC', 0],
+            ['(?:x|y(?i)z|w)', 'W', 1],
+            ['(?:x|y(?i)z|w)', 'yZ', 1],
+            ['(?:x|y(?i)z|w)', 'x', 1],
+            ['(?:x|y(?i)z|w)', 'X', 0],
+            ['a(?i)(?:b|c)d|e', 'aCD', 1],
+            ['a(?i)(?:b|c)d|e', 'E', 1],
+            ['a(?i)(?:b|c)d|e', 'aE', 0],
+            ['a(?i)[b|c]', 'A|', 0],
+            ['a(?i)[b|c]', 'a|', 1],
+            ['a(?i)[b|c]', 'aC', 1],
+            ['a(?i)[b|c]', 'C', 0],
+            ['a(?i)b\\|c', 'aB|C', 1],
+            ['a(?i)b\\|c', 'C', 0],
+            ['a(?i)b\\|c', 'aB', 0],
+            ['a(?i)b(?-i)c|d', 'D', 0],
+            ['a(?i)b(?-i)c|d', 'd', 1],
+            ['a(?i)b(?-i)c|d', 'aBc', 1],
+            ['x|(?i)a|b', 'B', 1],
+            ['x|(?i)a|b', 'X', 0]
+        ])(
+            'read a flag group before a | as Java does, to the group end with each alternative its own: %s on %s',
+            (pattern, text, expected) => {
+                expect(one(`'${text}' REGEXP '^(?:${pattern})\\z'`)).toEqual(n(expected));
+            }
+        );
+
         it('read \\z as the text end, and an escaped backslash before a z as itself', () => {
             expect(
                 row(`SELECT 'a\\z' REGEXP '^(?:a\\\\z)\\z', 'a' REGEXP '^(?:a)\\z', 'ab' REGEXP '^(?:a)\\z'`)
