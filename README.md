@@ -19,7 +19,7 @@ Amazon Neptune through the low-level API. It gives you two ways to work with a g
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
    query DSL whose references come from the classes themselves.
 
-A Cypher statement runs on every store but SQLite: on Postgres and Oracle, Drivine compiles it to SQL.
+A Cypher statement runs on every store: on Postgres, Oracle and SQLite, Drivine compiles it to SQL.
 
 **SQLite** keeps a graph in one file, through Node's own `node:sqlite` (Node 22.13 or later), in the tables drivine4j and
 drivine-python read. A transaction there gives one writer at a time: it takes the file's write lock as it begins, so even

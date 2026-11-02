@@ -1,9 +1,9 @@
 ## Cypher on a relational database
 
 Write a Cypher statement once, and run it on whichever store you connect to. Neo4j, Memgraph, FalkorDB and Neptune run
-it as written. On **Postgres** and **Oracle**, the SQL stores Drivine for TypeScript supports, Drivine compiles it to
-SQL over the graph's two tables, one of nodes and one of relationships, and gives back the rows a graph engine gives.
-SQLite is [drivine4j](https://github.com/liberation-data/drivine4j)'s for now.
+it as written. On **Postgres**, **Oracle** and **SQLite**, the SQL stores Drivine for TypeScript supports, Drivine
+compiles it to SQL over the graph's two tables, one of nodes and one of relationships, and gives back the rows a graph
+engine gives.
 
 ### Connect
 
