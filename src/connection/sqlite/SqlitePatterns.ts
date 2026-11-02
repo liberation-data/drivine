@@ -33,7 +33,7 @@ export class SqlitePatterns {
             const ignoreCase = expression.startsWith('(?i)');
             const java = POSIX.reduce(
                 (text, [posix, js]) => text.split(posix).join(js),
-                (ignoreCase ? expression.slice(4) : expression).replace(/\\z/g, '$')
+                ignoreCase ? expression.slice(4) : expression
             );
             found = compiled(java, `u${flags}${ignoreCase ? 'i' : ''}`);
             if (this.compiled.size >= SqlitePatterns.MAX) {
@@ -49,19 +49,24 @@ export class SqlitePatterns {
 /**
  * `java` as JavaScript reads it, with `flags`. A flag group within it is a group of its own (see {@link scopedFlags}),
  * which Node 22's JavaScript does not read: there, where each flag group only turns flags on, they are turned on for the
- * whole expression, which is the same where the group runs to its end but for anchors, as in the `^(?:(?i)abc)\z`
+ * whole expression, which is the same where the group runs to its end but for the text's start and end, as in the `^(?:(?i)abc)\z`
  * compiled Cypher's `=~ '(?i)abc'` gives.
  */
 function compiled(java: string, flags: string): RegExp {
     try {
-        return new RegExp(scopedFlags(java), flags);
+        return new RegExp(scopedFlags(java).replace(/\\z/g, '$'), flags);
     } catch (e) {
         const groups = [...java.matchAll(new RegExp(FLAGS.source.slice(1), 'g'))].map((it) => it[1]);
         if (groups.length === 0 || groups.some((it) => it.includes('-'))) {
             throw e;
         }
         const on = [...new Set(groups.join(''))].filter((it) => !flags.includes(it)).join('');
-        return new RegExp(java.replace(new RegExp(FLAGS.source.slice(1), 'g'), ''), `${flags}${on}`);
+        // The text's start and end, which `m` turned on for the whole expression would move to each line's.
+        const anchored = java
+            .replace(/^\^/, '(?<![\\s\\S])')
+            .replace(/\\z/g, '(?![\\s\\S])')
+            .replace(new RegExp(FLAGS.source.slice(1), 'g'), '');
+        return new RegExp(anchored, `${flags}${on}`);
     }
 }
 
