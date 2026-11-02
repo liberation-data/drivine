@@ -108,3 +108,46 @@ describe('The canonical text of a year before 1', () => {
         }
     });
 });
+
+/**
+ * Postgres and Oracle read a text whose year is 1000 to 9999 as it is, in a `WHEN` of its own ahead of its kind's, with
+ * no test of its era: such a year is AD, written as ISO 8601 writes it. A year after 0 but before 1000, `0999`, opens
+ * with `0` as 1 BC does, `0000`, so takes the kind's `WHEN`, which reads it by its era (#511).
+ */
+describe('A text of a year from 1000 on', () => {
+    it.each([
+        ['1000-01-01', true],
+        ['9999-12-31', true],
+        ['0999-12-31', false],
+        ['0001-01-01', false],
+        ['0000-01-01', false],
+        ['-0044-03-15', false]
+    ])('%s is read as it is: %s', (text, ad) => {
+        expect(new RegExp(Temporal.DATE.adPattern!).test(text)).toEqual(ad);
+        expect(new RegExp(Temporal.LOCAL_DATE_TIME.adPattern!).test(`${text}T12:00`)).toEqual(ad);
+        expect(new RegExp(Temporal.DATE_TIME.adPattern!).test(`${text}T12:00:00+02:00`)).toEqual(ad);
+        expect(new RegExp(Temporal.DATE.pattern).test(text)).toEqual(true);
+    });
+
+    it('has no pattern of its own for a time of day or a duration', () => {
+        expect([Temporal.LOCAL_TIME, Temporal.TIME, Temporal.DURATION].map((it) => it.adPattern)).toEqual([
+            undefined,
+            undefined,
+            undefined
+        ]);
+    });
+
+    it.each([
+        ['oracle', () => new OracleCypherCompiler('g')],
+        ['postgres', () => new PostgresCypherCompiler('g')]
+    ])('is compared with no test of its era on %s, ahead of a text of any year', (_, compilerFor) => {
+        const sql = compilerFor().compile("MATCH (n:C) WHERE n.day < date('0001-01-01') RETURN n.id").sql;
+        const where = sql.substring(sql.indexOf('CASE WHEN', sql.indexOf('WHERE')));
+        const [ad, any] = [Temporal.DATE.adPattern!, Temporal.DATE.pattern].map((it) => where.indexOf(`'${it}'`));
+        expect(ad).toBeGreaterThan(-1);
+        expect(ad).toBeLessThan(any);
+        // The era is tested for only after the kind's own test.
+        expect(where.substring(0, any).toLowerCase()).not.toContain('ascii(');
+        expect(where.substring(any).toLowerCase()).toContain('ascii(');
+    });
+});
