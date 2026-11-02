@@ -7,7 +7,7 @@ import { ClassRef, ClassType } from '@/query/QuerySpecification';
 import { GroupAggregate, GroupKey, GroupQuery, GroupRow, count, key } from '@/manager/Groups';
 import { scopeOf } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
-import { RootRefs } from '@/dsl/Refs';
+import { RootRefs, Where } from '@/dsl/Refs';
 import { GraphBackend } from '@/backend/GraphBackend';
 
 function fragmentOf(model: FragmentModel): { kind: 'NODE_FRAGMENT'; model: FragmentModel } {
@@ -20,11 +20,17 @@ function fragmentOf(model: FragmentModel): { kind: 'NODE_FRAGMENT'; model: Fragm
  * the keys.
  */
 export class GroupOperations {
+    /**
+     * @param lookups the condition with its case-insensitive comparisons of the source's `@CaseInsensitive` properties
+     * made comparisons with their lowercased copies, where every node is known to have them: see LowerCopyLookups.
+     */
     constructor(
         private readonly registry: ModelRegistry,
         private readonly query: (statement: GraphStatement) => Promise<any[]>,
         private readonly mapper: GraphObjectMapper,
-        private readonly backend: GraphBackend
+        private readonly backend: GraphBackend,
+        private readonly lookups: (model: FragmentModel, where: Where) => Promise<Where> = async (_, where) =>
+            Promise.resolve(where)
     ) {}
 
     /**
@@ -36,7 +42,12 @@ export class GroupOperations {
         spec: GroupQuery<K, A> | ((q: RootRefs<T>) => GroupQuery<K, A>)
     ): Promise<GroupRow<K, A>[]> {
         const model = this.registry.fragment(source as ClassType);
-        const query = this.written(typeof spec === 'function' ? spec(rootRefs<T>(scopeOf(fragmentOf(model)))) : spec);
+        const asked = typeof spec === 'function' ? spec(rootRefs<T>(scopeOf(fragmentOf(model)))) : spec;
+        const where =
+            asked.where === undefined || typeof asked.where === 'string'
+                ? asked.where
+                : await this.lookups(model, asked.where);
+        const query = this.written({ ...asked, where });
         const targets = new Map<string, FragmentModel>();
         for (const [name, groupKey] of Object.entries(query.keys as Record<string, GroupKey>)) {
             if (groupKey.kind === 'path') {

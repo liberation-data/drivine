@@ -12,6 +12,9 @@ import {
     SchemaGrammar,
     uniquenessConstraint,
     vectorIndex,
+    madeAs,
+    LowerCopyStatements,
+    CYPHER_LOWER_COPIES,
     avg,
     count,
     hop,
@@ -49,6 +52,8 @@ import {
     TargetModel
 } from '@liberation-data/drivine';
 import {
+    Account,
+    AccountFriends,
     ActorStats,
     Badge,
     Customer,
@@ -71,6 +76,7 @@ import {
 } from './GoldenModels';
 import { PostgresSaveStatement } from '@/backend/postgres/PostgresSaveStatement';
 import { PostgresWriteStatement } from '@/backend/postgres/PostgresWriteStatement';
+import { loweredQuery } from '@/dsl/LowerCopyLookups';
 
 /**
  * The statements this backend writes for drivine-python's test models, in `statements.json`, which drivine-python
@@ -162,7 +168,23 @@ function indexedReads(backend: OracleBackend, registry: ModelRegistry): Record<s
         'query.Movie.indexed.count': backend.countFragments(movie.model, movies.where, movies.labelsTested).text,
         'query.Dog.indexed': backend.loadAllFragments(dog.model, dogs.where, {}, dogs.labelsTested).text,
         'query.Dog.indexed.deleteAll': backend.deleteAll(dog, dogs.where, dogs.labelsTested).text,
-        'query.Dog.notIndexed': backend.loadAllFragments(dog.model, names.where, {}, names.labelsTested).text
+        'query.Dog.notIndexed': backend.loadAllFragments(dog.model, names.where, {}, names.labelsTested).text,
+        ...loweredIndexedRead(backend, registry)
+    };
+}
+
+/** Oracle's lookup of a lowercased copy through the labelled index over it. */
+function loweredIndexedRead(backend: OracleBackend, registry: ModelRegistry): Record<string, string> {
+    const account: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Account) };
+    const indexed: SchemaItem[] = [{ label: 'Account', properties: ['__drivine.lower.email'] }];
+    const query = backend.renderQuery(
+        loweredQuery((q: any) => ({ where: q.email.eqIgnoreCase('Ada@X.com') }), account, new Set(['email'])),
+        account,
+        indexed
+    );
+    return {
+        'query.Account.lowered.indexed': backend.loadAllFragments(account.model, query.where, {}, query.labelsTested)
+            .text
     };
 }
 
@@ -219,7 +241,9 @@ function postgresStatements(): Record<string, string> {
                 { id: 'p1', props: { name: 'Ada' }, vectors: {} },
                 { id: 2, props: { bio: null } }
             ]
-        }
+        },
+        'Account.patch': { id: 'a1', set: { email: 'Ada@X.com' }, vectors: {} },
+        'Account.patchAll': { rows: [{ id: 'a1', props: { email: 'Ada@X.com', display_name: null }, vectors: {} }] }
     };
     const plans = Object.entries(cases)
         .filter(([, it]) => it instanceof PostgresWriteStatement || it instanceof PostgresSaveStatement)
@@ -390,6 +414,32 @@ function queries(registry: ModelRegistry, backend: GraphBackend): Record<string,
         'query.Person.count': backend.countFragments(
             registry.fragment(Person),
             backend.renderWhere((q: any) => q.name.eqIgnoreCase('ada'), fragment(Person)).where
+        ),
+        // Once every node has the copies of email and display_name: a lookup on either, of the root alone, reads the
+        // copy, the value lowercased by the store; one on name, or of an empty value, lowercases the property.
+        'query.Account.lowered': load(
+            fragment(Account),
+            loweredQuery(
+                (q: any) => ({
+                    where: [
+                        q.email.eqIgnoreCase('Ada@X.com'),
+                        anyOf(q.displayName.containsIgnoreCase('AD'), q.name.eqIgnoreCase('Ada')),
+                        not(q.email.eqIgnoreCase(''))
+                    ]
+                }),
+                fragment(Account),
+                new Set(['email', 'display_name'])
+            )
+        ),
+        'query.AccountFriends.lowered': load(
+            view(AccountFriends),
+            loweredQuery(
+                (q: any) => ({
+                    where: [q.account.email.eqIgnoreCase('Ada@X.com'), q.friends.email.eqIgnoreCase('Bo')]
+                }),
+                view(AccountFriends),
+                new Set(['email'])
+            )
         )
     };
 }
@@ -488,6 +538,23 @@ function saves(
             ],
             {}
         ),
+        'Account.save': save(
+            fragment(Account),
+            make(Account, { uuid: 'a1', email: 'Ada@X.com', displayName: 'Ada L', name: 'Ada' })
+        ),
+        'AccountFriends.save': save(
+            view(AccountFriends),
+            make(AccountFriends, {
+                account: make(Account, { uuid: 'a1', email: 'Ada@X.com' }),
+                friends: [make(Account, { uuid: 'a2', email: 'Bo@X.com' })]
+            })
+        ),
+        'saveAll.accounts': backend.fragmentBatch(
+            [{ model: registry.fragment(Account), objects: [make(Account, { uuid: 'a1', email: 'Ada@X.com' })] }],
+            {}
+        ),
+        'Account.patch': backend.patchOne(registry.fragment(Account)),
+        'Account.patchAll': backend.patchMany(registry.fragment(Account)),
         'Person.patch': backend.patchOne(registry.fragment(Person)),
         'Person.patch.where': backend.patchOne(registry.fragment(Person), where),
         'Person.patchAll': backend.patchMany(registry.fragment(Person)),
@@ -551,7 +618,26 @@ function schema(grammar: SchemaGrammar): Record<string, string> {
     const single = fullTextIndex('Article', 'title');
     const shown = (statements: unknown[]): string =>
         statements.map((it) => (typeof it === 'string' ? it : JSON.stringify(it))).join('\n');
+    // Made over the lowercased copies, under their own names; FalkorDB can make no constraint over a copy.
+    const ignoringCase = {
+        'schema.createRange.ignoreCase': shown(
+            grammar.createRange(madeAs(rangeIndex('Account', 'email', { ignoreCase: true })))
+        ),
+        ...(grammar === FALKORDB_SCHEMA
+            ? {}
+            : {
+                  'schema.createUnique.ignoreCase': shown(
+                      grammar.createUnique(madeAs(uniquenessConstraint('Account', 'email', { ignoreCase: true })))
+                  )
+              })
+    };
+    const copies: LowerCopyStatements = grammar.lowerCopies ?? CYPHER_LOWER_COPIES;
+    const record = copies.record('Account', 'email');
     return {
+        ...ignoringCase,
+        'schema.lowerCopies.fill': copies.fill('Account', 'email', 10000),
+        'schema.lowerCopies.record': record.statement,
+        'schema.lowerCopies.read': copies.read,
         'schema.listRanges': grammar.listRanges.statement,
         'schema.listUniques': grammar.listUniques.statement,
         'schema.listVectors': grammar.listVectors.statement,

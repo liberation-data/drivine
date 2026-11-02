@@ -1,9 +1,11 @@
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
 import {
     EnsureResult,
     IndexSpec,
     itemName,
+    madeAs,
     RangeIndexSpec,
     SchemaItemShape,
     vectorTuning,
@@ -34,11 +36,16 @@ function shapeOf(found: SchemaItem): SchemaItemShape {
 export class IndexManager {
     private readonly logger = new DrivineLogger(IndexManager.name);
 
-    /** @param changed told once this has made or dropped an index, as the object manager's index list is then stale. */
+    /**
+     * @param changed told once this has made or dropped an index, as the object manager's index list is then stale.
+     * @param copies fills in the lowercased copies an index that ignores case is made over; without it, such an index is
+     * refused.
+     */
     constructor(
         private readonly executor: SchemaExecutor,
         private readonly grammar: SchemaGrammar,
-        private readonly changed: () => void = () => undefined
+        private readonly changed: () => void = () => undefined,
+        private readonly copies?: LowerCopyFiller
     ) {}
 
     /** The indexes of a kind the engine holds. */
@@ -52,9 +59,52 @@ export class IndexManager {
         return listing.read(await this.executor.run(listing.statement));
     }
 
+    /**
+     * Makes the index unless the engine holds one over its label and properties. An index that ignores case (see
+     * RangeIndexSpec) is made over the lowercased copies, and first fills them in on the nodes of its label that have
+     * none, recording that they all have them, whatever the result. Where the index isn't there yet, the copies are
+     * filled in again even where recorded, as by `recreate`: those a field kept before it lost `@CaseInsensitive` went
+     * out of step meanwhile.
+     */
     async ensure<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
-        this.warnUnsupported(spec);
+        const made = madeAs(spec);
+        this.warnUnsupported(made);
+        const found = await this.find(made);
+        await fillInLowerCopies(this.copies, spec, !found);
+        return { ...(await this.ensureMade(made, found)), spec };
+    }
+
+    /**
+     * Drops the index over the label and properties, whatever its shape, and makes it as the spec says. Destructive. An
+     * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not.
+     */
+    async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
+        // The copies are filled in again too, where a write that bypassed Drivine left one out of step.
+        await fillInLowerCopies(this.copies, spec, true);
+        await this.drop(spec);
+        await this.create(madeAs(spec));
+        this.changed();
+        return { status: 'RECREATED', spec };
+    }
+
+    async drop(declared: IndexSpec): Promise<void> {
+        const spec = madeAs(declared);
         const found = await this.find(spec);
+        if (!found) {
+            return;
+        }
+        // Dropped as it was made: by the engine's name for it where it names items, else over the properties it holds.
+        const held = { ...spec, properties: found.properties.length ? found.properties : spec.properties } as IndexSpec;
+        const statements =
+            held.kind === 'FULLTEXT' ? this.grammar.dropFullText(held, found.name) : this.statements(held, 'drop');
+        for (const statement of statements) {
+            await this.executor.run(statement);
+        }
+        this.changed();
+    }
+
+    /** `ensure`, of the index as it is made, which the engine holds as `found`. */
+    private async ensureMade<S extends IndexSpec>(spec: S, found: SchemaItem | undefined): Promise<EnsureResult<S>> {
         if (found?.incomplete) {
             await this.create(spec);
             this.changed();
@@ -74,29 +124,6 @@ export class IndexManager {
         this.changed();
         await this.logEffective(spec);
         return { status: 'CREATED', spec };
-    }
-
-    /** Drops the index over the label and properties, whatever its shape, and makes it as the spec says. Destructive. */
-    async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
-        await this.drop(spec);
-        await this.create(spec);
-        this.changed();
-        return { status: 'RECREATED', spec };
-    }
-
-    async drop(spec: IndexSpec): Promise<void> {
-        const found = await this.find(spec);
-        if (!found) {
-            return;
-        }
-        // Dropped as it was made: by the engine's name for it where it names items, else over the properties it holds.
-        const held = { ...spec, properties: found.properties.length ? found.properties : spec.properties } as IndexSpec;
-        const statements =
-            held.kind === 'FULLTEXT' ? this.grammar.dropFullText(held, found.name) : this.statements(held, 'drop');
-        for (const statement of statements) {
-            await this.executor.run(statement);
-        }
-        this.changed();
     }
 
     /** Says which pins of a vector index the engine can't express: they are reported, never dropped silently. */

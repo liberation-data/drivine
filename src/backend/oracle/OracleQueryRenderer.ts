@@ -111,7 +111,8 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
     /**
      * The comparison of the root's property `name` with text as the expression of a range index or a uniqueness
      * constraint of one of the root's labels that begins with the property, the first label with one: undefined where
-     * there is none, or where the comparison isn't `eq`, `gt`, `gte`, `lt` or `lte` with text of at most 4,000 bytes.
+     * there is none, or where the comparison isn't `eq`, `gt`, `gte`, `lt`, `lte` or an equality with a lowercased copy
+     * (see LowerCopies), with text of at most 4,000 bytes.
      *
      * It is written beside the JSON test, which still decides: the expression is the property as text, so it holds of
      * every node the test holds of, and of a number written as the same text too. It is null for a node without the
@@ -121,7 +122,8 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
         if (test.kind !== 'COMPARE' || jsonPacked || name === Stamps.PROPERTY) {
             return undefined;
         }
-        const operator = SQL_OPERATORS[test.operator as keyof typeof SQL_OPERATORS];
+        const lowered = test.operator === 'EQ_LOWERED';
+        const operator = lowered ? '=' : SQL_OPERATORS[test.operator as keyof typeof SQL_OPERATORS];
         const value = this.storable(test.value);
         if (!operator || typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 4000) {
             return undefined;
@@ -133,7 +135,9 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
             return undefined;
         }
         this.tested.add(label);
-        return `${labelledValue(this.root.alias, label, name)} ${operator} ${this.bind(value)}`;
+        // A lowercased copy is compared with the value as Oracle lowercases it, as the test beside it does.
+        const bound = lowered ? `LOWER(${this.bind(value)})` : this.bind(value);
+        return `${labelledValue(this.root.alias, label, name)} ${operator} ${bound}`;
     }
 
     /** A test of the property `name` of the JSON column `column`. */
@@ -187,6 +191,11 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
                 return this.matches(text, String(value));
             case 'CONTAINS_IGNORE_CASE':
                 return `INSTR(LOWER(${text}), ${this.bind(String(value).toLowerCase())}) > 0`;
+            // A lowercased copy, compared with the value as Oracle lowercases it: see LowerCopies.
+            case 'EQ_LOWERED':
+                return `${text} = LOWER(${this.bind(String(value))})`;
+            case 'CONTAINS_LOWERED':
+                return `INSTR(${text}, LOWER(${this.bind(String(value))})) > 0`;
             default:
                 return `LOWER(${text}) = ${this.bind(String(value).toLowerCase())}`;
         }

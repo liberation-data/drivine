@@ -1,10 +1,19 @@
 import type { SchemaItem } from '@/schema/SchemaGrammar';
+import { LowerCopies } from '@/model/LowerCopies';
 
 /** A range index over one or more properties of a label's nodes. */
 export interface RangeIndexSpec {
     kind: 'RANGE';
     label: string;
     properties: string[];
+    /**
+     * Whether the index is over the lowercased copy of each property, which a `@CaseInsensitive` field keeps (see
+     * LowerCopies), so that it serves `eqIgnoreCase`. Ensuring it fills the copies in on the label's nodes that have
+     * none, and records that they all have one. It is made under its own name, `<label>_<properties>_ci_range`.
+     */
+    ignoreCase?: boolean;
+    /** The name it is made under, where it is not the one derived from its label and properties: see `itemName`. */
+    name?: string;
 }
 
 /** A constraint that no two of a label's nodes hold the same values of the properties. */
@@ -18,6 +27,14 @@ export interface UniquenessConstraintSpec {
      * engine's own id, and two declarations that differ only in it are one.
      */
     nodeIdProperty?: string;
+    /**
+     * Whether the constraint is over the lowercased copy of each property, which a `@CaseInsensitive` field keeps (see
+     * LowerCopies), so that `A@x.com` is refused beside `a@x.com`. Ensuring it fills the copies in on the label's nodes
+     * that have none first. It is made under its own name, `<label>_<properties>_ci_unique`. FalkorDB can't make one.
+     */
+    ignoreCase?: boolean;
+    /** The name it is made under, where it is not the one derived from its label and properties: see `itemName`. */
+    name?: string;
 }
 
 export type SimilarityFunction = 'COSINE' | 'EUCLIDEAN';
@@ -142,20 +159,52 @@ export function fullTextIndex(label: string, properties: string | string[]): Ful
     return { kind: 'FULLTEXT', label, properties: [properties].flat() };
 }
 
-export function rangeIndex(label: string, properties: string | string[]): RangeIndexSpec {
-    return { kind: 'RANGE', label, properties: [properties].flat() };
+/** A range index; with `ignoreCase`, over the lowercased copies of the properties (see RangeIndexSpec). */
+export function rangeIndex(
+    label: string,
+    properties: string | string[],
+    options: { ignoreCase?: boolean } = {}
+): RangeIndexSpec {
+    const spec: RangeIndexSpec = { kind: 'RANGE', label, properties: [properties].flat() };
+    if (options.ignoreCase) {
+        spec.ignoreCase = true;
+    }
+    return spec;
 }
 
+/** A uniqueness constraint; with `ignoreCase`, over the lowercased copies of the properties (see the spec). */
 export function uniquenessConstraint(
     label: string,
     properties: string | string[],
-    options: { nodeIdProperty?: string } = {}
+    options: { nodeIdProperty?: string; ignoreCase?: boolean } = {}
 ): UniquenessConstraintSpec {
     const spec: UniquenessConstraintSpec = { kind: 'UNIQUE', label, properties: [properties].flat() };
     if (options.nodeIdProperty !== undefined) {
         spec.nodeIdProperty = options.nodeIdProperty;
     }
+    if (options.ignoreCase) {
+        spec.ignoreCase = true;
+    }
     return spec;
+}
+
+/**
+ * The item as it is made, drivine4j's `made()`: one that ignores case is made over the lowercased copies of its
+ * properties (see LowerCopies), under its own name; any other as it is declared. What the store holds, its catalog
+ * records and an owner's inventory names is the item as it is made.
+ */
+export function madeAs<S extends IndexSpec | UniquenessConstraintSpec>(spec: S): S {
+    if ((spec.kind !== 'RANGE' && spec.kind !== 'UNIQUE') || !spec.ignoreCase) {
+        return spec;
+    }
+    const made: S = { ...spec, properties: spec.properties.map(LowerCopies.of), name: itemName(spec) };
+    delete (made as RangeIndexSpec | UniquenessConstraintSpec).ignoreCase;
+    return made;
+}
+
+/** The properties whose lowercased copies the item is made over: none for one that doesn't ignore case. */
+export function lowercased(spec: IndexSpec | UniquenessConstraintSpec): string[] {
+    return (spec.kind === 'RANGE' || spec.kind === 'UNIQUE') && spec.ignoreCase ? spec.properties : [];
 }
 
 /**
@@ -210,9 +259,15 @@ export interface SchemaItemShape extends VectorTuning {
 
 /**
  * The name Drivine gives an item on an engine that names them: drivine4j's default, `<label>_<properties>_<kind>`, so
- * that a store written from the JVM and from Node holds one item, not two.
+ * that a store written from the JVM and from Node holds one item, not two. One that ignores case is
+ * `<label>_<properties>_ci_<kind>`, its properties named as declared; a spec that names itself, as one made over the
+ * copies does (see `madeAs`), goes by that name.
  */
 export function itemName(spec: IndexSpec | UniquenessConstraintSpec): string {
+    if ((spec.kind === 'RANGE' || spec.kind === 'UNIQUE') && spec.name) {
+        return spec.name;
+    }
     const suffix = { RANGE: 'range', UNIQUE: 'unique', VECTOR: 'vector', FULLTEXT: 'fulltext' }[spec.kind];
-    return `${spec.label}_${spec.properties.join('_')}_${suffix}`;
+    const ci = (spec.kind === 'RANGE' || spec.kind === 'UNIQUE') && spec.ignoreCase ? 'ci_' : '';
+    return `${spec.label}_${spec.properties.join('_')}_${ci}${suffix}`;
 }

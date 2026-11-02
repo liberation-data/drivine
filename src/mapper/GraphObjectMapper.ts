@@ -28,6 +28,8 @@ export function knownProperties(type: Function, mapping: FieldMapping, fragment:
         ...mapping.defaults,
         ...mapping.emptyWhenAbsent.keys(),
         ...[fragment.nodeIdProperty, fragment.stampField].filter((it): it is string => !!it),
+        // A @CaseInsensitive field is declared by its decorator, whether or not the class initializes it.
+        ...(fragment.lowerCopied ?? []),
         ...Object.keys(plainToInstance(type as any, {}) as object)
     ]);
 }

@@ -58,6 +58,7 @@ export interface PropertyMetadata {
     root?: { target?: ClassThunk };
     nodeId?: boolean;
     nodeStamp?: boolean;
+    caseInsensitive?: boolean;
     relationship?: RelationshipOptions;
     graphProperty?: string;
     transient?: boolean;
@@ -72,6 +73,7 @@ export interface PropertyMetadata {
         dimensions?: number;
         hnswM?: number;
         hnswEfConstruction?: number;
+        ignoreCase?: boolean;
     }[];
     default?: boolean;
     emptyWhenAbsent?: EmptyWhenAbsentOptions;

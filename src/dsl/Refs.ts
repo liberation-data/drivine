@@ -141,6 +141,14 @@ export type Operator =
     | 'MATCHES'
     | 'CONTAINS_IGNORE_CASE'
     | 'EQ_IGNORE_CASE'
+    /**
+     * Equals the value as the store lowercases it: what `eqIgnoreCase` on a `@CaseInsensitive` property becomes once
+     * every node has its lowercased copy, compared with the copy (see LowerCopies), which an index over the copy serves.
+     * Drivine writes it.
+     */
+    | 'EQ_LOWERED'
+    /** Contains the value as the store lowercases it: `containsIgnoreCase` on a copy, as `EQ_LOWERED` is. */
+    | 'CONTAINS_LOWERED'
     | 'IS_NULL'
     | 'IS_NOT_NULL'
     | 'HAS_ITEM';
