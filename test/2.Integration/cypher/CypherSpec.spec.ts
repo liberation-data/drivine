@@ -42,7 +42,8 @@ interface Store {
 }
 
 /**
- * The stores configured in the environment: Neo4j, the default connection; Postgres; and Oracle with ORACLE_TESTS=true.
+ * The stores configured in the environment: Neo4j, the default connection; Postgres; Oracle with ORACLE_TESTS=true; and
+ * SQLite, a file of the tests' own.
  * On a SQL store each statement is compiled to SQL over the graph's tables.
  */
 function stores(): Store[] {
@@ -55,6 +56,9 @@ function stores(): Store[] {
             : []),
         ...(process.env.ORACLE_DATABASE_TYPE === 'ORACLE'
             ? [{ name: 'oracle', type: DatabaseType.ORACLE, connection: 'CYPHER_ORACLE', from: 'ORACLE' }]
+            : []),
+        ...(process.env.SQLITE_DATABASE_TYPE === 'SQLITE'
+            ? [{ name: 'sqlite', type: DatabaseType.SQLITE, connection: 'CYPHER_SQLITE', from: 'SQLITE' }]
             : [])
     ];
 }
@@ -4390,14 +4394,12 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     [10],
                     10
                 ]);
-                expect(await query('CALL { RETURN [1, 2] AS v UNION ALL RETURN 10 AS v } RETURN v ORDER BY v')).toEqual([
-                    [1, 2],
-                    10
-                ]);
-                expect(await query('CALL { RETURN [10] AS v UNION ALL RETURN {a: 1} AS v } RETURN v ORDER BY v')).toEqual([
-                    { a: 1 },
-                    [10]
-                ]);
+                expect(await query('CALL { RETURN [1, 2] AS v UNION ALL RETURN 10 AS v } RETURN v ORDER BY v')).toEqual(
+                    [[1, 2], 10]
+                );
+                expect(
+                    await query('CALL { RETURN [10] AS v UNION ALL RETURN {a: 1} AS v } RETURN v ORDER BY v')
+                ).toEqual([{ a: 1 }, [10]]);
                 expect(
                     await query(
                         'CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v UNION ALL RETURN [9] AS v UNION ALL RETURN [2] AS v } RETURN v ORDER BY v'
@@ -4418,7 +4420,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     )
                 ).toEqual(unordered([true, null]));
                 expect(
-                    await query('CALL { RETURN [[1]] AS v UNION ALL RETURN [1] AS v } UNWIND v AS x RETURN x AS r ORDER BY r')
+                    await query(
+                        'CALL { RETURN [[1]] AS v UNION ALL RETURN [1] AS v } UNWIND v AS x RETURN x AS r ORDER BY r'
+                    )
                 ).toEqual([[1], 1]);
             }
         );

@@ -229,9 +229,28 @@ describe('a SQLite store', () => {
             );
         });
 
-        it('should refuse Cypher, whose compiler for SQLite comes later', async () => {
+        it('should run Cypher, compiled to its SQL over the graph', async () => {
+            expect(
+                await pm.query(
+                    new QuerySpecification({
+                        text: 'UNWIND [1, 2, 3] AS x RETURN sum(x) + $y',
+                        language: 'CYPHER'
+                    }).bind({ y: 4 })
+                )
+            ).toEqual([10]);
+        });
+
+        it('should refuse a cursor over Cypher, which a query compiles', async () => {
             await expect(
-                pm.query(new QuerySpecification({ text: 'MATCH (n) RETURN n', language: 'CYPHER' }))
+                connection('main').then(async (it) => {
+                    try {
+                        return await it.openCursor(
+                            new CursorSpecification({ text: 'MATCH (n) RETURN n', language: 'CYPHER' })
+                        );
+                    } finally {
+                        await it.release();
+                    }
+                })
             ).rejects.toThrow(/CYPHER is not run on SQLite/);
         });
     });
