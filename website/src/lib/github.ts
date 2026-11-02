@@ -1,6 +1,6 @@
 /**
- * The libraries' repositories, and their stars as GitHub counts them when the site is built: the daily build keeps
- * the counts fresh, and a visitor's browser never calls GitHub. A count that can't be fetched is left out.
+ * The libraries' repositories, their stars as GitHub counts them when the site is built, and the newest release train:
+ * the daily build keeps them fresh, and a visitor's browser never calls GitHub. What can't be fetched is left out.
  */
 export const REPOS = {
     ts: { name: 'Drivine', language: 'TypeScript', repo: 'liberation-data/drivine' },
@@ -12,19 +12,24 @@ export type Topic = keyof typeof REPOS;
 
 export const repoUrl = (topic: Topic): string => `https://github.com/${REPOS[topic].repo}`;
 
+/** A GET of GitHub's API, with GITHUB_TOKEN if it's set, given up after 10 s. */
+const github = (path: string): Promise<Response> => {
+    const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
+    if (process.env.GITHUB_TOKEN) {
+        headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    }
+    return fetch(`https://api.github.com/${path}`, { headers, signal: AbortSignal.timeout(10_000) });
+};
+
 const counts = new Map<string, Promise<number | undefined>>();
 
 /** The repository's star count, fetched once per build. */
 export function stars(topic: Topic): Promise<number | undefined> {
     const { repo } = REPOS[topic];
     if (!counts.has(repo)) {
-        const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
-        if (process.env.GITHUB_TOKEN) {
-            headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-        }
         counts.set(
             repo,
-            fetch(`https://api.github.com/repos/${repo}`, { headers, signal: AbortSignal.timeout(10_000) })
+            github(`repos/${repo}`)
                 .then(async (response) => (response.ok ? ((await response.json()).stargazers_count as number) : undefined))
                 .catch(() => undefined)
         );
@@ -35,3 +40,78 @@ export function stars(topic: Topic): Promise<number | undefined> {
 /** 174, or 1.2k. */
 export const formatStars = (count: number): string =>
     count < 1000 ? String(count) : `${(count / 1000).toFixed(count < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`;
+
+/**
+ * A release train: the library versions that shipped together, and the Cypher spec tag they were tested against, as
+ * recorded in liberation-data/drivine-release's `trains/<train>.json`.
+ */
+export interface Train {
+    train: string;
+    spec: string;
+    libraries: Record<string, string>;
+    released: string;
+}
+
+const RELEASE_REPO = 'liberation-data/drivine-release';
+
+/** Each library's name in a train manifest, and its repository here. */
+export const TRAIN_LIBRARIES: Record<string, Topic> = { drivine: 'ts', 'drivine-python': 'py', drivine4j: 'jvm' };
+
+export const trainUrl = (train: string): string => `https://github.com/${RELEASE_REPO}/blob/main/trains/${train}.json`;
+
+/** Train names are YYYY.MM or YYYY.MM.N: compared part by part as numbers, so 2026.10 is after 2026.9, and 2026.11.1 after 2026.11. */
+export const compareTrains = (a: string, b: string): number => {
+    const [x, y] = [a, b].map((name) => name.split('.').map(Number));
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+        if (x[i] !== y[i]) {
+            return (x[i] ?? -1) - (y[i] ?? -1);
+        }
+    }
+    return 0;
+};
+
+const TRAIN_FILE = /^\d{4}\.\d{2}(\.\d+)?\.json$/;
+
+const githubJson = async (path: string): Promise<any> => {
+    const response = await github(path);
+    if (!response.ok) {
+        throw new Error(`GitHub answered ${response.status} for ${path}`);
+    }
+    return response.json();
+};
+
+const isReleased = (manifest: any): manifest is Train =>
+    typeof manifest?.train === 'string' &&
+    typeof manifest.spec === 'string' &&
+    typeof manifest.released === 'string' &&
+    typeof manifest.libraries === 'object' &&
+    manifest.libraries !== null &&
+    Object.values(manifest.libraries).every((version) => typeof version === 'string');
+
+async function fetchReleasedTrain(): Promise<Train | undefined> {
+    const listing: { name: string; type: string }[] = await githubJson(`repos/${RELEASE_REPO}/contents/trains`);
+    const manifests = await Promise.all(
+        listing
+            .filter((entry) => entry.type === 'file' && TRAIN_FILE.test(entry.name))
+            .map(async (entry) => {
+                const file = await githubJson(`repos/${RELEASE_REPO}/contents/trains/${entry.name}`);
+                try {
+                    return JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+                } catch {
+                    return undefined; // a manifest that isn't JSON is no released train
+                }
+            })
+    );
+    return manifests.filter(isReleased).sort((a, b) => compareTrains(b.train, a.train))[0];
+}
+
+let train: Promise<Train | undefined> | undefined;
+
+/**
+ * The newest train that has been released, fetched once per build. A draft (`"released": null`) has not published, so it
+ * is never the answer. If any fetch fails, or no train is released, there is none, and the page goes without it.
+ */
+export function releasedTrain(): Promise<Train | undefined> {
+    train ??= fetchReleasedTrain().catch(() => undefined);
+    return train;
+}
