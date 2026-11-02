@@ -270,7 +270,9 @@ const names = await pm.query<string>(
   ([#475](https://github.com/liberation-data/drivine/issues/475)), wherever the `coalesce()` is (`coalesce($p.q,
   n.bio)`, `size(trim(coalesce(n.bio, '')))`, `SET n.a = coalesce(n.bio, '')`): a text of at most 4,000 bytes is read
   as a `VARCHAR2`, at no cost drivine4j measured (20,000 rows take 72 ms either way), and a longer one through its text.
-  Any other value is read as before, and so is a value of a map (`coalesce(m.a, 'z')`). See "An argument of
+  Any other value is read as before, and so is a value of a map (`coalesce(m.a, 'z')`). In a step of `reduce()`, where
+  a node arrives as JSON, the property is still taken out as JSON and can close the session
+  ([#516](https://github.com/liberation-data/drivine/issues/516)). See "An argument of
   `coalesce()`" in drivine4j's
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Oracle, a text past 4,000 bytes is measured, cut, changed, searched, reversed and added to whole (`size()`,
