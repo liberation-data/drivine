@@ -17,7 +17,15 @@ export default defineConfig({
             logo: { light: './src/assets/cow-black.png', dark: './src/assets/cow-white.png' },
             favicon: '/favicon.ico',
             // The header's GitHub link follows the open docs: Drivine's repository, drivine-python's, or drivine4j's.
-            components: { SocialIcons: './src/components/SocialIcons.astro' },
+            // Each docs page's title has Share beside it.
+            components: { SocialIcons: './src/components/SocialIcons.astro', PageTitle: './src/components/PageTitle.astro' },
+            // A shared docs page shows the explainer's title card, with the page's own title and description.
+            head: [
+                { tag: 'meta', attrs: { property: 'og:image', content: 'https://drivine.org/og-card.jpg' } },
+                { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+                { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+                { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } }
+            ],
             // The fonts are served from the site itself (Fontsource), not from Google, and only their Latin subset: the
             // full stylesheets declare every subset, which grows the CSS a first paint waits on.
             customCss: [

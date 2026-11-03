@@ -16,6 +16,7 @@ import ocean from '../assets/hero-ocean.jpg';
 import studioCypher from '../assets/studio-cypher.png';
 import videoPoster from '../assets/video-poster.jpg';
 import videoEnd from '../assets/video-end.jpg';
+import Share from '../components/Share.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 
@@ -40,6 +41,10 @@ const image = (name: string) => `${base}images/${name}`;
 const VIDEO = `${base}video/drivine-explainer.mp4`;
 const VIDEO_CAPTIONS = `${base}video/drivine-explainer.vtt`;
 const VIDEO_ID = 'uETP0EN_04E';
+// What Share passes on: drivine.org itself, or at the video. The card a link shows is the video's title card.
+const SITE = 'https://drivine.org/';
+const VIDEO_SHARE = new URL('#watch', SITE).href;
+const SHARE_TEXT = 'Drivine: graph RAG on any database. Build AI apps on the database you already run.';
 
 import { REPOS, STUDIO, TRAIN_LIBRARIES, type Topic, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
@@ -136,6 +141,17 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
         <title>Drivine: graph database client for TypeScript, Python and the JVM</title>
         <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB, Oracle, Postgres and SQLite, with Cypher on all of them." />
         <link rel="icon" href={`${base}favicon.ico`} />
+        <link rel="canonical" href={SITE} />
+        <!-- The card LinkedIn, Slack, Discord and X show for a link to the site: the explainer's title card. -->
+        <meta property="og:title" content="Drivine: graph RAG on any database" />
+        <meta property="og:description" content="Build AI apps on the database you already run. Graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB, Oracle, Postgres and SQLite, with Cypher on all of them." />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Drivine" />
+        <meta property="og:url" content={SITE} />
+        <meta property="og:image" content={`${SITE}og-card.jpg`} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta name="twitter:card" content="summary_large_image" />
         <!-- The heading's font, which the largest paint (DRIVINE) waits for. -->
         <link rel="preload" href={headingFont} as="font" type="font/woff2" crossorigin />
         <!-- The hero photo, at the size the stylesheet picks for the screen (its 800px breakpoint). -->
@@ -247,6 +263,11 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             /* On a phone the end card's lines reach its bottom corner, so Watch again goes to the top, over the water. */
             @media (max-width: 600px) { .watch .play.again { align-items: flex-start; } .watch .play.again > span { min-height: 30px; font-size: 12px; } }
             .watch p { margin: 0; text-align: center; font-size: 16px; color: var(--muted); }
+            /* Share, under the video and, at its end, in the end card's top corner, clear of its words and the controls. */
+            .watch .watch-share { display: flex; justify-content: center; }
+            .watch .player .ending-share { position: absolute; top: 16px; right: 16px; }
+            /* On a phone Watch again is at the top, and the row under the video is in sight. */
+            @media (max-width: 600px) { .watch .player .ending-share { display: none; } }
 
             .libraries { padding: 0 32px 96px; }
             .row { display: flex; flex-wrap: wrap; gap: 28px; }
@@ -353,6 +374,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             footer nav span { font-weight: 700; color: #fff; }
             footer a { color: #cfe3e7; text-decoration: none; }
             footer a:hover { color: #fff; text-decoration: underline; }
+            footer .wrap > .share { flex-basis: 100%; justify-content: center; }
         </style>
     </head>
     <body style={photoVars}>
@@ -453,6 +475,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             Drivine in four and a half minutes: graph RAG on any database. With captions.
                             {VIDEO_ID && <> <a href={`https://youtu.be/${VIDEO_ID}`}>Also on YouTube</a>.</>}
                         </p>
+                        <div class="watch-share"><Share label="Share the video" url={VIDEO_SHARE} text={SHARE_TEXT} /></div>
+                        {/* Moved over the end card when the video ends, and back out of sight when it plays again. */}
+                        <div hidden><Share tone="dark" url={VIDEO_SHARE} text={SHARE_TEXT} class="ending-share" /></div>
                     </div>
                 </section>
             )}
@@ -696,6 +721,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={`${studioUrl}#install-it-yourself`}>Build it</a></div>
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
+                <Share tone="dark" label="Share Drivine" url={SITE} text={SHARE_TEXT} />
             </div>
         </footer>
 
@@ -731,6 +757,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 // Imported rather than cloned: a clone would stay in the template's inert document, which loads nothing.
                 const end = (document.getElementById('video-end') as HTMLTemplateElement | null)?.content.firstElementChild;
                 const card = end ? (document.importNode(end, true) as HTMLElement) : undefined;
+                const ending = document.querySelector<HTMLElement>('.ending-share');
+                const shelf = ending?.parentElement;
                 const again = document.createElement('button');
                 again.type = 'button';
                 again.className = 'play again';
@@ -746,11 +774,13 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     const focused = document.activeElement === video;
                     if (card) player.append(card);
                     player.append(again);
+                    if (ending) player.append(ending);
                     if (focused) again.focus({ preventScroll: true });
                 });
                 video.addEventListener('play', () => {
                     card?.remove();
                     again.remove();
+                    if (ending && shelf) shelf.append(ending);
                 });
                 player.replaceChildren(video);
                 video.focus({ preventScroll: true });
