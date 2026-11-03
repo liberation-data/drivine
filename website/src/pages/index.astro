@@ -13,7 +13,7 @@ import '@fontsource/jetbrains-mono/latin-500.css';
 import headingFont from '@fontsource/ubuntu/files/ubuntu-latin-700-normal.woff2?url';
 import { Image } from 'astro:assets';
 import ocean from '../assets/hero-ocean.jpg';
-import studioCanvas from '../assets/studio-canvas.png';
+import studioCypher from '../assets/studio-cypher.png';
 import videoPoster from '../assets/video-poster.jpg';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
@@ -610,13 +610,13 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         </ul>
                         <p>
                             Drivine Studio reads it: drag a view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws what came
-                            back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or as a
-                            desktop app.
+                            back. Or type Cypher and see a graph or rows, on Postgres and Oracle too. It only reads, unless you
+                            let a connection write, in a browser or as a desktop app.
                         </p>
                     </header>
                     <figure>
-                        <Image src={studioCanvas} widths={[800, 1600, 2400]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio: the catalogue of a model's views and fragments beside a canvas drawing issues, the people assigned to and raising them, and where they work" />
-                        <figcaption>One view on the canvas: each issue, who it’s assigned to, who raised it and where they work, loaded in one statement.</figcaption>
+                        <Image src={studioCypher} widths={[800, 1458]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station Bastille chosen and its properties shown beside the graph" />
+                        <figcaption>Cypher on Postgres, compiled to SQL by Drivine: a metro network drawn as a graph, the station chosen shown beside it.</figcaption>
                     </figure>
                     <p class="note">Early days: run it from <a href="https://github.com/liberation-data/drivine-studio">source</a>.</p>
                 </div>
