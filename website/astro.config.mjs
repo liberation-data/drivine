@@ -19,7 +19,8 @@ export default defineConfig({
             // The header's GitHub link follows the open docs: Drivine's repository, drivine-python's, or drivine4j's.
             // Each docs page's title has Share beside it.
             components: { SocialIcons: './src/components/SocialIcons.astro', PageTitle: './src/components/PageTitle.astro' },
-            // A shared docs page shows the explainer's title card, with the page's own title and description.
+            // A shared docs page shows the explainer's title card, with the page's own title and the site's description (the
+            // generated docs pages have none of their own).
             head: [
                 { tag: 'meta', attrs: { property: 'og:image', content: 'https://drivine.org/og-card.jpg' } },
                 { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
