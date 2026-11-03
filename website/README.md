@@ -16,6 +16,10 @@ The site at [drivine.org](https://drivine.org/), built with
   `ffmpeg -ss <a second before the end> -i <the video> -frames:v 1 -q:v 4 src/assets/video-end.jpg`), and the length
   on the page: `4:26` in the hero's tip and on the play button, and in words in the button's `aria-label` and the line
   under the player.
+- `public/og-card.jpg`: the card a shared link to the site shows (the landing page's and every docs page's
+  `og:image`), the video's poster `src/assets/video-poster.jpg` cropped to 1200x630. A new poster replaces it too.
+- `src/components/Share.astro`: the Share buttons under the video, on its end card, in the footer, and beside each docs
+  page's title (`src/components/PageTitle.astro`).
 - The docs are generated, not written here: `scripts/import-readmes.mjs` turns this repository's `docs/` into the
   TypeScript docs (`/ts/`), drivine-python's into the Python docs (`/py/`) and drivine4j's into the Kotlin & Java docs
   (`/jvm/`). Each library's `docs/` holds its guide a file to each `##` section, after `00-introduction.md`; a library
