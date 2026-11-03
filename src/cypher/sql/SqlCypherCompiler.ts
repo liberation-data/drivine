@@ -322,6 +322,14 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The source `source` joined to those before it, every row of each with every row of the other: a `CROSS JOIN`,
+     * which Postgres and Oracle reorder as their planners choose.
+     */
+    crossJoin(source: string): string {
+        return `CROSS JOIN ${source}`;
+    }
+
+    /**
      * The join of the lateral query `query`, named `name`, to the row: an `OPTIONAL CALL`'s or an `OPTIONAL MATCH`'s
      * keeps the row it finds nothing for, and a `CALL`'s does not.
      */

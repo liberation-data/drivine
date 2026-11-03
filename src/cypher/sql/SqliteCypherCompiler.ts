@@ -514,12 +514,22 @@ export class SqliteCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * The source `source` joined to those before it as an inner join `ON TRUE`: SQLite reads a `CROSS JOIN` as an
+     * instruction to keep the order it is written in, so `MATCH (n)-[r]->(m)` would read every pair of nodes before an
+     * edge (liberation-data/drivine#589). A source that reads an earlier one's column, such as a `json_each`, is still
+     * read after it.
+     */
+    crossJoin(source: string): string {
+        return `JOIN ${source} ON TRUE`;
+    }
+
+    /**
      * A JSON list of maps, a map for each row of `query`, gathered in a subquery that may read the row it is in, and
      * joined as `json_each` gives its items: SQLite joins no lateral query.
      */
     lateral(query: string, name: string, optional: boolean, columns: [string, boolean][]): string {
         const rows = this.gathered(query, name, columns);
-        return optional ? `LEFT JOIN ${rows} ON TRUE` : `CROSS JOIN ${rows}`;
+        return optional ? `LEFT JOIN ${rows} ON TRUE` : this.crossJoin(rows);
     }
 
     /**

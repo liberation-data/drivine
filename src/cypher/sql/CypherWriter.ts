@@ -1636,7 +1636,7 @@ export class CypherWriter {
         // A value made anew for each row is one value however often the clauses after read it: see SqlCypherCompiler.once.
         const anew = clause.projection.items.some((item) => holdsAnew(item.expression));
         const sql = anew ? this.sql.once(projected.sql) : projected.sql;
-        next.source(`(\n${indent(apart ? this.sql.called(sql) : sql)}\n) ${name}`);
+        next.source(`(\n${indent(apart ? this.sql.called(sql) : sql)}\n) ${name}`, this.sql);
         projected.scope.forEach((value, variable) => next.bind(variable, columnsOf(value, name)));
         projected.order.forEach(([column, descending]) => next.order.push([`${name}.${column}`, descending]));
         return clause.where ? this.filteredRows(next, clause.where) : next;
@@ -1883,7 +1883,7 @@ export class CypherWriter {
         let inner = new Select(imported);
         const apart = this.importsApart(imported, clauses);
         if (apart) {
-            inner.source(apart.source);
+            inner.source(apart.source, this.sql);
             apart.imports.forEach((value, variable) => inner.bind(variable, value));
         }
         const outer: Scope = bracketed(call) ? imported : new Map();
@@ -2083,7 +2083,7 @@ export class CypherWriter {
         const name = this.alias('u');
         // A list of nodes or relationships unwinds to them, as they are now, so a write reaches them; a null item is a null one.
         if (list.kind === 'Entities') {
-            select.source(this.sql.elements(list.ids, name));
+            select.source(this.sql.elements(list.ids, name), this.sql);
             const row = this.alias(list.relationships ? 'e' : 'n');
             if (list.relationships) {
                 select.join(`LEFT JOIN ${this.sql.edges} ${row} ON ${row}.eid = ${this.sql.idOf(this.sql.item(name))}`);
@@ -2102,7 +2102,7 @@ export class CypherWriter {
                 `CASE WHEN ${this.sql.typeOf(x)} = 'array' THEN ${x} WHEN NOT ${this.sql.isJsonNull(x)} THEN ` +
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
-        select.source(this.listElements(list, items, name));
+        select.source(this.listElements(list, items, name), this.sql);
         // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none, nor is JSON's null.
         select.bind(
             unwind.variable,
@@ -2220,7 +2220,7 @@ export class CypherWriter {
             value = existing;
         } else if (existing === undefined) {
             const name = this.alias('n');
-            select.source(`${this.sql.nodes} ${name}`);
+            select.source(`${this.sql.nodes} ${name}`, this.sql);
             value = nodeOf(name);
             if (node.variable !== undefined) {
                 select.bind(node.variable, value);
@@ -2243,7 +2243,7 @@ export class CypherWriter {
             unsupported('A relationship variable bound before its pattern');
         }
         const name = this.alias('e');
-        select.source(`${this.sql.edges} ${name}`);
+        select.source(`${this.sql.edges} ${name}`, this.sql);
         const value = relationshipOf(name);
         if (relationship.variable !== undefined) {
             select.bind(relationship.variable, value);
@@ -2399,7 +2399,7 @@ export class CypherWriter {
             backwards,
             seed
         });
-        select.source(walked.source);
+        select.source(walked.source, this.sql);
         select.walks = true;
         select.where.push(walked.condition);
         // A variable on it is the list of its relationships.
@@ -2499,7 +2499,7 @@ export class CypherWriter {
             backwards: false,
             seed
         });
-        select.source(walked.source);
+        select.source(walked.source, this.sql);
         select.walks = true;
         select.where.push(walked.condition);
         // The step's nodes and relationships, k of each a repetition, in turn: each variable is every k-th of them.
@@ -2775,7 +2775,7 @@ export class CypherWriter {
     private rows(): Select {
         const select = new Select(new Map());
         const r = this.alias('r');
-        select.source(this.sql.elements(ROWS, r));
+        select.source(this.sql.elements(ROWS, r), this.sql);
         select.order.push([this.sql.itemNo(r), false]);
         this.bindRow(select, this.sql.item(r));
         this.unread = [select, select.size()];
