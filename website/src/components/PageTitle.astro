@@ -1,0 +1,20 @@
+---
+/**
+ * Starlight's page title, with Share beside it (astro.config.mjs overrides PageTitle with this): a guide or reference
+ * page is what someone passes on when it answered their question. It shares the page's address on drivine.org.
+ */
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+import Share from './Share.astro';
+
+const url = new URL(Astro.url.pathname, Astro.site ?? 'https://drivine.org').href;
+const title = Astro.locals.starlightRoute.entry.data.title;
+---
+<div class="titled">
+    <Default />
+    <Share icons tone="docs" url={url} text={title === 'Drivine' ? title : `${title} · Drivine`} />
+</div>
+
+<style>
+    .titled { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
+    .titled :global(.share) { margin-bottom: 4px; }
+</style>
