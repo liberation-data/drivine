@@ -298,7 +298,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .feature code { font-size: 14px; }
             .features .row { gap: 24px; }
 
-            .perf { padding: 0 32px 96px; }
+            /* Clear of the dark section above it, so the card sits on the page rather than against its edge. */
+            .perf { padding: 64px 32px 96px; }
             .perf .wrap { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; background: #e3eff1; border-radius: 16px; padding: 48px; }
             .perf .text { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
             .perf .text > p:not(.eyebrow) { margin: 0; font-size: 17px; line-height: 1.65; color: #123a45; }
@@ -306,7 +307,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .perf .stats div { background: #fff; border-radius: 12px; padding: 18px 22px; }
             .perf dt { font-size: 30px; font-weight: 700; color: var(--ink); }
             .perf dd { margin: 4px 0 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
-            @media (max-width: 600px) { .perf .wrap { padding: 28px 22px; gap: 28px; } }
+            @media (max-width: 600px) { .perf { padding-top: 32px; } .perf .wrap { padding: 28px 22px; gap: 28px; } }
 
             .studio { padding: 0 32px 96px; }
             .studio .wrap { display: flex; flex-direction: column; gap: 36px; }
