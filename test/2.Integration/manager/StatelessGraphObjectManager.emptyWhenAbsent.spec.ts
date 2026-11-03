@@ -12,7 +12,7 @@ import {
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
-import { rawProps, SqlStore } from '../support/SqlStores';
+import { isSqlStore, rawProps, SqlStore } from '../support/SqlStores';
 
 // Neo4j plans each statement the first time it sees it, a few hundred milliseconds for one of the object manager's, and
 // the tests here send statements of their own shapes. On fresh containers, beside the suites running in parallel, a
@@ -45,7 +45,7 @@ describe.each(allStores())('@EmptyWhenAbsent lists and sets on $type', (engine) 
     let gom: StatelessGraphObjectManager;
 
     const stored = async (): Promise<Record<string, any>> => {
-        const sql = engine.type === DatabaseType.ORACLE || engine.type === DatabaseType.POSTGRES;
+        const sql = isSqlStore(engine.type);
         const row = await pm.getOne<any>(
             new QuerySpecification(
                 sql ? rawProps(engine as SqlStore, 'EmptyAbsent') : 'MATCH (n:EmptyAbsent) RETURN properties(n)'

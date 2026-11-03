@@ -7,6 +7,7 @@ import {
     ddlDeadlocked,
     ddlWillNotMake,
     DrivineError,
+    gaveUpAsContended,
     NEO4J_GRAMMAR,
     whenNotContended
 } from '@liberation-data/drivine';
@@ -89,6 +90,49 @@ describe('whenNotContended', () => {
             )
         ).rejects.toBe(other);
         expect(calls).toEqual(1);
+    });
+
+    // Each failure is made afresh: the marks are held by the failure itself, across tests.
+    describe('gaveUpAsContended', () => {
+        it('should take a failure run again until attempts ran out, under a cause or not', async () => {
+            const turnedAway = new Error('turned away');
+            await expect(whenNotContended(async () => Promise.reject(turnedAway), () => true, sleep)).rejects.toBe(
+                turnedAway
+            );
+            expect(gaveUpAsContended(turnedAway)).toBe(true);
+            expect(gaveUpAsContended(DrivineError.withRootCause(turnedAway))).toBe(true);
+        });
+
+        it('should take the first failure, run again, when a failure of another kind followed it', async () => {
+            const first = new Error('first');
+            const other = new Error('other');
+            let calls = 0;
+            await expect(
+                whenNotContended(async () => Promise.reject(++calls === 1 ? first : other), (it) => it === first, sleep)
+            ).rejects.toBe(first);
+            expect(gaveUpAsContended(first)).toBe(true);
+            expect(gaveUpAsContended(other)).toBe(false);
+        });
+
+        it('should not take a failure thrown at once, as not turned away, though the run gave up on it', async () => {
+            const other = new Error('other');
+            await expect(whenNotContended(async () => Promise.reject(other), () => false, sleep)).rejects.toBe(other);
+            expect(gaveUpAsContended(other)).toBe(false);
+        });
+
+        it('should take what an inner run gave up on as contended, under an outer run that threw it at once', async () => {
+            const turnedAway = new Error('turned away');
+            const failure = await whenNotContended(
+                async () =>
+                    whenNotContended(async () => Promise.reject(turnedAway), (it) => it === turnedAway, sleep).catch(
+                        async (e) => Promise.reject(DrivineError.withRootCause(e))
+                    ),
+                () => true,
+                sleep
+            ).catch((e: unknown) => e);
+            expect(failure).toMatchObject({ rootCause: turnedAway });
+            expect(gaveUpAsContended(failure)).toBe(true);
+        });
     });
 
     it('should pause longer each time, and for a random part as long again', () => {

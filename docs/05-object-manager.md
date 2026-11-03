@@ -388,6 +388,70 @@ where: q.mentions.none((m) => m.resolvedId.eq(entityId))
 
 `gt`, `gte`, `lt` and `lte` are offered on numbers, texts and dates, and the text operators on texts alone.
 
+`eqIgnoreCase` and `containsIgnoreCase` lowercase the property, which no index reads. On a `@CaseInsensitive` field
+whose index ignores case, they compare with a lowercased copy instead, which the index serves: see
+[Lookups That Ignore Case](#lookups-that-ignore-case).
+
+#### Lookups That Ignore Case
+
+Logging in by email whatever its case is a lookup by `eqIgnoreCase` alone, and on its own it reads every node of the
+label. Mark the field `@CaseInsensitive()` and give it an index that ignores case:
+
+```typescript
+@NodeFragment({ labels: ['Account'] })
+export class Account {
+    @NodeId() id: string;
+    @CaseInsensitive() @Unique({ ignoreCase: true }) email: string;
+}
+
+await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.com') }));
+```
+
+- **The copy.** Every save, create, update, `saveAll`, `patch` and `patchAll`, and the save of a view's related nodes,
+  writes a lowercased copy of the property beside it, under `__drivine.lower.<property>` (the name it is stored under,
+  after `@GraphProperty`). The database lowercases it, as it lowercases the value a lookup compares with, so Drivine,
+  drivine4j and drivine-python store and match the same thing. A property with no value has no copy. A load doesn't
+  read it, and a flat `@PropertyBag` never holds it. The copy is no part of whether a save changed the node, so a save
+  that only fills one in keeps the node's stamp. Cypher you send yourself writes no copy: see
+  [below](#cypher-of-your-own).
+- **The index.** `@RangeIndex({ ignoreCase: true })`, `@Unique({ ignoreCase: true })`, `rangeIndex(label, property,
+  { ignoreCase: true })` and `uniquenessConstraint(label, property, { ignoreCase: true })` are made over the copy, under
+  their own names, `<Label>_<property>_ci_range` and `_ci_unique`. One that ignores case is refused on a field that
+  isn't `@CaseInsensitive`, since no save would keep its copy. A uniqueness constraint that ignores case refuses
+  `A@x.com` beside `a@x.com`. FalkorDB can't make one: `GRAPH.CONSTRAINT` takes no property name with a dot in it
+  ([FalkorDB#551](https://github.com/FalkorDB/FalkorDB/issues/551)), so it is refused there; its range index works.
+- **Filling it in.** Ensuring an item that ignores case first fills the copy in on every node of the label that lacks
+  it, 10,000 nodes a statement, and records that every node has it: on the store's `DrivineStore` node on the graph
+  engines, in the graph's catalog on Oracle and Postgres. An item made anew, or recreated, fills the copies in again.
+- **The lookup.** Once the copy is recorded, `eqIgnoreCase` and `containsIgnoreCase` on the field compare with the copy:
+  in a load, a count, a `deleteAll`, a grouped read and a patch's condition, on the root's own fields. Until then, and
+  for an empty value or a related node's field, they lowercase the property, as for any field: the same answer, without
+  the index. A manager knows at once what it recorded, and reads what another recorded at least once a minute.
+- <a id="cypher-of-your-own"></a>**Cypher of your own keeps no copy, on any store.** Drivine runs a statement you send
+  as written on the graph engines, and on Oracle, Postgres and SQLite compiles it to SQL and adds nothing to it. So a
+  `SET`, `CREATE`, `MERGE` or `REMOVE` of the property leaves the copy as it was, or leaves the node without one, and so
+  does SQL of your own. Once the copy is recorded, a lookup misses a node so written, or finds it by its old value. A
+  node saved by a process whose fragment isn't yet `@CaseInsensitive`, as while an upgrade rolls out, is missed the same
+  way. Set the copy in the same statement, in a `SET` of its own after the one that writes the property, since an
+  engine may read every value of one `SET` before it writes any. The same `SET` after a `REMOVE` of the property
+  removes the copy.
+
+  ```cypher
+  MATCH (a:Account {id: $id})
+  SET a.email = $email
+  SET a.`__drivine.lower.email` = toLower(a.email)
+  ```
+
+  `LowerCopies.setClause('a', 'email')` gives that last item. Or, after the writes, `recreate` the index that ignores
+  case, which fills the copy in again on every node of the label:
+
+  ```typescript
+  await gom.indexes.recreate(rangeIndex('Account', 'email', { ignoreCase: true }));
+  ```
+
+  A constraint that ignores case has no `recreate`: `drop` it and `ensure` it again, which fills the copies in again
+  as it makes the constraint anew.
+
 #### Querying Fragments
 
 The DSL isn't only for views. Every fragment has references to its own fields:

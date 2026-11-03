@@ -12,14 +12,24 @@
 </p>
 
 Drivine is a graph database client for Node.js and TypeScript, with a [NestJS](https://nestjs.com/) module, and no need
-for one. It supports **Neo4j**, **Memgraph**, **FalkorDB**, **Oracle** (SQL/PGQ) and **Postgres** as graph stores, plus
+for one. It supports **Neo4j**, **Memgraph**, **FalkorDB**, **Oracle** (SQL/PGQ), **Postgres** and **SQLite** as graph stores, plus
 Amazon Neptune through the low-level API. It gives you two ways to work with a graph:
 
 1. **PersistenceManager**: a low-level API where you write the queries yourself. This is the classic Drivine approach.
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
    query DSL whose references come from the classes themselves.
 
-A Cypher statement runs on every store, the SQL ones too: on Postgres and Oracle, Drivine compiles it to SQL.
+A Cypher statement runs on every store: on Postgres, Oracle and SQLite, Drivine compiles it to SQL.
+
+**SQLite** keeps a graph in one file, through Node's own `node:sqlite` (Node 22.13 or later), in the tables drivine4j and
+drivine-python read. A transaction there gives one writer at a time: it takes the file's write lock as it begins, so even
+one that only reads waits for the lock, up to the busy timeout. Reads outside a transaction don't wait for a writer; saves
+and deletes outside one are retried when contended; each statement Drivine writes applies whole or not at all; and a
+connection you open on the file yourself has none of this. Use a Node whose SQLite writes a computed float to 17
+significant digits, as Node 22.23.4, 24.22.2 and 26.13 were measured to, for example: one that writes 15 rounds a float
+it computes in compiled Cypher. Drivine detects it at run time and warns once, as a process warning that
+`node --disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` silences. See
+[SQLite](docs/07-supported-engines.md#sqlite).
 
 > **On Python or the JVM?** [drivine-python](https://github.com/liberation-data/drivine-python) (`pip install drivine`)
 > is Drivine's Python twin, and [drivine4j](https://github.com/liberation-data/drivine4j) (`org.drivine:drivine4j`) its

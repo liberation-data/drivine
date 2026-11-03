@@ -27,6 +27,20 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN properties(n)"
         rows: [{name: "Ada", age: 36}]
 
+  - name: "A null in a written row and a missing key are one null"
+    description: "A write's rows, read after it, group a map's null and a missing key as one null, and keep it once by DISTINCT."
+    steps:
+      - cypher: "UNWIND $rows AS r CREATE (:CyWrite {b: 9}) RETURN r.a AS a, count(*) AS c"
+        only: [neo4j, sql]
+        parameters: {rows: [{a: null}, {b: 1}]}
+        rows: [[null, 2]]
+      - cypher: "UNWIND [{a: null}, {b: 1}] AS r CREATE (:CyWrite {b: 9}) WITH r RETURN DISTINCT r.a AS a"
+        only: [neo4j, sql]
+        rows: [null]
+      - cypher: "MATCH (n:CyWrite) RETURN n.b AS b, count(*) AS c"
+        only: [neo4j, sql]
+        rows: [[9, 4]]
+
   - name: "MERGE"
     description: "MERGE finds what exists, or what an earlier row made, and makes it once."
     steps:
@@ -386,6 +400,63 @@ cases:
       - cypher: "WITH 'outer' AS a CALL (a) { WITH 'inner' AS b CREATE (:CyWrite {name: b}) RETURN b + '!' AS c } RETURN [a, c]"
         rows: [["outer", "inner!"]]
 
+  - name: "CALL that writes imports only what it names"
+    description: "A name a writing CALL does not import is a new variable in it: a CREATE of it makes a node."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 1}), (:CyWrite {id: 2})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (a:CyWrite) CALL () { CREATE (a:CyWrite {made: true}) RETURN a.made AS m } RETURN a.id, m ORDER BY a.id"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, true]]
+      - cypher: "MATCH (a:CyWrite {id: 1}) CALL { CREATE (a:CyWrite {made: false}) RETURN 1 AS x } RETURN [a.id, x]"
+        only: [neo4j, sql]
+        rows: [[1, 1]]
+      - cypher: "MATCH (n:CyWrite) RETURN [count(n.id), count(n.made)]"
+        only: [neo4j, sql]
+        rows: [[2, 3]]
+      - note: "CALL (a) imports a alone: b in it is new, and the row's b is as it was after it."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {id: 1}), (b:CyWrite {id: 2}) CALL (a) { CREATE (a)-[:R]->(b:CyWrite {id: 3}) } RETURN 1"
+      - cypher: "MATCH (a:CyWrite)-[:R]->(b) RETURN [a.id, b.id]"
+        only: [neo4j, sql]
+        rows: [[1, 3]]
+      - cypher: "MATCH (a:CyWrite {id: 1}), (b:CyWrite {id: 2}) CALL (a) { CREATE (b:CyWrite {id: 4}) RETURN b.id AS made } RETURN [b.id, made]"
+        only: [neo4j, sql]
+        rows: [[2, 4]]
+      - note: "What brackets import is seen after a leading WITH that does not pass it on."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {id: 1}), (b:CyWrite {id: 2}) CALL (a, b) { WITH a SET b.seen = true } RETURN b.seen"
+        rows: [true]
+      - note: "And after any WITH: a CREATE of it joins the row's node, and a SET writes it."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {id: 1}) CALL (a) { WITH 1 AS one CREATE (a)-[:S]->(:CyWrite {id: 5}) } RETURN 1"
+      - cypher: "MATCH (a:CyWrite)-[:S]->(b) RETURN [a.id, b.id]"
+        only: [neo4j, sql]
+        rows: [[1, 5]]
+      - cypher: "MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyWrite {id: 5}) WITH c SET a.next = c.id RETURN a.next AS n } RETURN n"
+        only: [neo4j, sql]
+        rows: [5]
+      - cypher: "MATCH (a:CyWrite {id: 2}) CALL (*) { WITH 1 AS one SET a.one = one } RETURN a.one"
+        only: [neo4j, sql]
+        rows: [1]
+      - note: "An aggregate over no rows still gives its row, and the WITH's WHERE reads what brackets import."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyNone) WITH count(c) AS n SET a.none = n RETURN a.none AS v } RETURN v"
+        rows: [0]
+      - cypher: "MATCH (a:CyWrite {id: 1}) CALL (a) { MATCH (c:CyWrite) WITH c WHERE c.id = a.next SET c.prev = a.id RETURN c.prev AS p, c.id AS i } RETURN [p, i]"
+        only: [neo4j, sql]
+        rows: [[1, 5]]
+      - note: "A leading WITH * passes on what the CALL imports, and nothing where it imports nothing."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {id: 1}) CALL { WITH * SET a.starred = true RETURN a.starred AS s } RETURN s"
+        rows: [true]
+      - cypher: "UNWIND [6, 7] AS i CALL (i) { WITH * CREATE (x:CyWrite {id: i}) RETURN x.id AS made } RETURN made"
+        only: [neo4j, sql]
+        rows: [6, 7]
+      - cypher: "CALL { WITH * CREATE (x:CyWrite {id: 8}) RETURN x.id AS made } RETURN made"
+        only: [neo4j, sql]
+        rows: [8]
+
   - name: "Writing through lists"
     description: "A list of nodes or relationships refers to them, so writing to an item writes to the node."
     steps:
@@ -415,6 +486,15 @@ cases:
       - note: A path, and a list of its nodes, that are null, carried past a write.
         cypher: "MATCH (c:CyWrite {id: 'c'}) OPTIONAL MATCH p = (c)-[:NEXT]->() WITH p, nodes(p) AS ns CREATE (:CyWrite {id: 'y'}) RETURN [length(p), ns, p IS NULL]"
         rows: [[null, null, true]]
+
+  - name: "A path a WITH passes on, written from"
+    description: "Each row's write reads its own path's nodes and relationships, passed on by a WITH."
+    steps:
+      - note: "Oracle gave every row the first row's nodes and relationships after the WITH (drivine4j#537)."
+        cypher: "CREATE (a:CyWrite {i: 0})-[:NEXT {i: 0}]->(b:CyWrite {i: 1})-[:NEXT {i: 1}]->(a)"
+      - cypher: "MATCH p = (a:CyWrite)-[:NEXT]->() WITH p, a SET a.r = relationships(p)[0].i, a.n = [x IN nodes(p) | x.i]"
+      - cypher: "MATCH (a:CyWrite) RETURN [a.i, a.r, a.n] ORDER BY a.i"
+        rows: [[0, 0, [0, 1]], [1, 1, [1, 0]]]
 
   - name: "Nodes with equal properties are different"
     description: "Two nodes with the same properties are different, as items of a list too, and collect(DISTINCT) keeps both."
@@ -703,3 +783,92 @@ cases:
       - cypher: "MATCH (m:CyWrite) WHERE m.l IS NOT NULL RETURN [m.l, m.small] ORDER BY m.l[0], size(m.l)"
         except: [memgraph, falkordb, neptune, oracle]
         rows: [[[1], true], [[1, 3], true], [[2], null]]
+
+  - name: "NaN and the infinities written"
+    description: "Neo4j and Oracle store NaN and the infinities as the floats they are, and SQLite an infinity. Postgres's JSON holds neither, and SQLite's no NaN, so they refuse a statement that writes and is given one, rather than store another value."
+    steps:
+      - only: [neo4j, oracle, sqlite]
+        cypher: "CREATE (n:CyWrite {b: $i, c: [$n]}) RETURN [n.b, n.c, n.b = n.b]"
+        parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
+        rows: [[{$float: "Infinity"}, [{$float: "-Infinity"}], true]]
+      - only: [neo4j, oracle, sqlite]
+        cypher: "MATCH (n:CyWrite) RETURN [n.b = $i, n.b > 1e308, n.c[0] < -1e308, n.b + 1, n.b - n.b]"
+        parameters: {i: {$float: "Infinity"}}
+        rows: [[true, true, true, {$float: "Infinity"}, {$float: "NaN"}]]
+      - only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) SET n.a = $p RETURN [n.a, n.a = n.a, n.a = $p, n.a + 1]"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, false, false, {$float: "NaN"}]]
+      - only: [postgres]
+        cypher: "CREATE (n:CyWrite {b: [$i]})"
+        parameters: {i: {$float: "Infinity"}}
+        error: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."
+      - only: [sqlite]
+        cypher: "CREATE (n:CyWrite {a: $p})"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."
+      - note: "The two infinities stored are summed to NaN by a statement given neither (drivine4j#544)."
+        only: [neo4j, oracle, sqlite]
+        cypher: "CREATE (:CyWrite {b: $n})"
+        parameters: {n: {$float: "-Infinity"}}
+      - only: [neo4j, oracle, sqlite]
+        cypher: "MATCH (n:CyWrite) RETURN [min(n.b), max(n.b), sum(n.b), avg(n.b)]"
+        rows: [[{$float: "-Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "NaN"}]]
+
+  - name: "MERGE of a null or NaN property"
+    description: "A MERGE fails where it makes a node or relationship whose pattern gives a property that is null or NaN, which is equal to nothing, which no MERGE would find again; over no rows it does not fail. ON CREATE SET and ON MATCH SET write NaN, and a list that holds NaN is merged, and made again each time."
+    steps:
+      - note: "A SQL store made a new node on every run (drivine4j#543)."
+        except: [neptune]
+        cypher: "MERGE (n:CyWrite {id: 1, x: null})"
+        error: true
+      - except: [neptune]
+        cypher: "MERGE (n:CyWrite {id: 1, x: $p})"
+        parameters: {p: null}
+        error: true
+      - cypher: "CREATE (:CyWrite {id: 1})"
+      - except: [neptune]
+        cypher: "MATCH (s:CyWrite {id: 1}) MERGE (n:CyWrite {x: s.none})"
+        error: true
+      - except: [neptune]
+        cypher: "MATCH (s:CyWrite {id: 1}) MERGE (s)-[:R {x: null}]->(:CyWrite {id: 2})"
+        error: true
+      - except: [neptune]
+        cypher: "UNWIND [2, null] AS v MERGE (:CyWrite {id: v})"
+        error: true
+      - except: [neptune]
+        cypher: "MATCH (s:CyWrite {id: 9}) MERGE (n:CyWrite {x: null}) RETURN n.x"
+        rows: []
+      - cypher: "MATCH (n) RETURN count(n)"
+        rows: [1]
+      - only: [neo4j, oracle]
+        cypher: "MERGE (n:CyWrite {x: $p})"
+        parameters: {p: {$float: "NaN"}}
+        error: true
+      - only: [neo4j, oracle]
+        cypher: "MATCH (s:CyWrite {id: 1}) MERGE (s)-[:R {x: $i - $i}]->(:CyWrite {id: 2})"
+        parameters: {i: {$float: "Infinity"}}
+        error: true
+      - only: [neo4j, oracle, sqlite]
+        cypher: "MATCH (s:CyWrite {id: 1}) SET s.a = $i, s.b = -$i"
+        parameters: {i: {$float: "Infinity"}}
+      - only: [neo4j, oracle, sqlite]
+        cypher: "MATCH (s:CyWrite {id: 1}) MERGE (n:CyWrite {x: s.a + s.b})"
+        error: true
+      - cypher: "MATCH (n) RETURN count(n)"
+        rows: [1]
+      - only: [neo4j, oracle]
+        cypher: "MERGE (n:CyWrite {id: 3}) ON CREATE SET n.x = $p RETURN n.x"
+        parameters: {p: {$float: "NaN"}}
+        rows: [{$float: "NaN"}]
+      - only: [neo4j, oracle]
+        cypher: "MERGE (n:CyWrite {id: 3}) ON MATCH SET n.y = $p RETURN [n.x, n.y]"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
+      - only: [neo4j, oracle]
+        cypher: "UNWIND [1, 2] AS i MERGE (n:CyWrite {l: [$p]}) RETURN n.l"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}], [{$float: "NaN"}]]
+      - only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(n)"
+        rows: [2]

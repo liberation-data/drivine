@@ -344,8 +344,19 @@ export class QueryRenderer {
             case 'IS_NOT_NULL':
                 return `${expression} IS NOT NULL`;
             default:
-                return `${expression} ${BINARY[test.operator]} ${this.bind(packed(test.value))}`;
+                return this.binary(test.operator, expression, test.value, packed);
         }
+    }
+
+    /**
+     * A comparison written between the property and its value. A lowercased copy is compared with the value as the
+     * engine lowercases it: see LowerCopies.
+     */
+    private binary(operator: Operator, expression: string, value: unknown, packed: (it: unknown) => unknown): string {
+        const lowered = LOWERED[operator];
+        return lowered
+            ? `${expression} ${lowered} toLower(${this.bind(String(value))})`
+            : `${expression} ${BINARY[operator]} ${this.bind(packed(value))}`;
     }
 
     /** The pattern of one relationship from `from`, its far node labelled; over several hops for a deep fragment list. */
@@ -366,6 +377,9 @@ export class QueryRenderer {
         return `_${prefix}${this.aliasCount++}`;
     }
 }
+
+/** The comparisons with a lowercased copy, each written between the copy and the value lowercased. */
+const LOWERED: Partial<Record<Operator, string>> = { EQ_LOWERED: '=', CONTAINS_LOWERED: 'CONTAINS' };
 
 /** The operators written between the property and its value. */
 const BINARY: Partial<Record<Operator, string>> = {

@@ -34,6 +34,13 @@ function dropping(store: SqlStore, graph: string): string[] {
             `DROP TABLE IF EXISTS ${graph}_schema PURGE`
         ];
     }
+    if (store.type === DatabaseType.SQLITE) {
+        return [
+            `DROP TABLE IF EXISTS ${graph}_edge`,
+            `DROP TABLE IF EXISTS ${graph}_node`,
+            `DROP TABLE IF EXISTS ${graph}_schema`
+        ];
+    }
     return [
         `DO $drop$ DECLARE r record; BEGIN
             FOR r IN SELECT oid::regprocedure AS f FROM pg_proc
@@ -47,6 +54,9 @@ function dropping(store: SqlStore, graph: string): string[] {
 
 /** Whether the graph's node table is there, as the store's catalog says. */
 function nodeTableCount(store: SqlStore, graph: string): string {
+    if (store.type === DatabaseType.SQLITE) {
+        return `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '${graph}_node'`;
+    }
     return store.type === DatabaseType.ORACLE
         ? `SELECT COUNT(*) FROM user_tables WHERE table_name = '${graph.toUpperCase()}_NODE'`
         : `SELECT COUNT(*) FROM pg_tables WHERE tablename = '${graph.toLowerCase()}_node'`;
@@ -54,10 +64,15 @@ function nodeTableCount(store: SqlStore, graph: string): string {
 
 /**
  * How many of the graph's store objects are there, as the store's catalog says: its node, edge and schema tables, and on
- * Oracle the property graph over them, made last. A whole store has all four, or three on Postgres.
+ * Oracle the property graph over them, made last. A whole store has all four, or three on Postgres and SQLite.
  */
 function storeObjectCount(store: SqlStore, graph: string): string {
     const tables = ['node', 'edge', 'schema'];
+    if (store.type === DatabaseType.SQLITE) {
+        return `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN (${tables
+            .map((it) => `'${graph}_${it}'`)
+            .join(', ')})`;
+    }
     return store.type === DatabaseType.ORACLE
         ? `SELECT (SELECT COUNT(*) FROM user_tables WHERE table_name IN (${tables
               .map((it) => `'${graph.toUpperCase()}_${it.toUpperCase()}'`)

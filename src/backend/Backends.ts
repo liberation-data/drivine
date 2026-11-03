@@ -6,9 +6,11 @@ import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
 import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
+import { SqliteBackend } from '@/backend/sqlite/SqliteBackend';
+import { SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 
 /**
- * The backend for a database: SQL/PGQ on Oracle and SQL on Postgres, each over the named graph (`drivine` unless named);
+ * The backend for a database: SQL/PGQ on Oracle and SQL on Postgres and SQLite, each over the named graph (`drivine` unless named);
  * Cypher elsewhere.
  */
 export function backendFor(type: DatabaseType, graphName?: string): GraphBackend {
@@ -17,6 +19,8 @@ export function backendFor(type: DatabaseType, graphName?: string): GraphBackend
             return new OracleBackend(new OracleGraph(graphName));
         case DatabaseType.POSTGRES:
             return new PostgresBackend(new PostgresGraph(graphName));
+        case DatabaseType.SQLITE:
+            return new SqliteBackend(new SqliteGraph(graphName));
         default:
             return new CypherBackend(cypherGrammarFor(type));
     }

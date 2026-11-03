@@ -49,7 +49,9 @@ class User {
 
 describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) => {
     const oracle = engine.type === DatabaseType.ORACLE;
-    const postgres = engine.type === DatabaseType.POSTGRES;
+    const sqlite = engine.type === DatabaseType.SQLITE;
+    // SQLite reads Postgres's `->` and `->>` alike, and so these filters, but for a cast to jsonb.
+    const postgres = engine.type === DatabaseType.POSTGRES || sqlite;
     /** A raw filter in the store's own language: Cypher over n, or SQL over the row n on Oracle and on Postgres. */
     const raw = (cypher: string, oracleSql: string, postgresSql: string): string =>
         oracle ? oracleSql : postgres ? postgresSql : cypher;
@@ -58,7 +60,7 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
     const helpful = raw(
         'n.helpful = true',
         "JSON_EXISTS(n.props, '$?(@.helpful == true)')",
-        "(n.props -> 'helpful') = 'true'::jsonb"
+        sqlite ? "(n.props -> 'helpful') = 'true'" : "(n.props -> 'helpful') = 'true'::jsonb"
     );
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
@@ -230,6 +232,21 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
             skip: 1
         });
         expect(second).toEqual([{ helpful: true, votes: 3 }]);
+    });
+
+    it('should order a missing key or aggregate last ascending and first descending', async () => {
+        const read = async (orderBy: ['page' | 'mean', 'asc' | 'desc']): Promise<any[]> =>
+            gom.groups.load(Feedback, {
+                keys: { page: key('page') },
+                aggregates: { mean: avg('score') },
+                orderBy: [orderBy]
+            });
+        const pages = (rows: any[]): (string | undefined)[] => rows.map((it) => it.page);
+        expect(pages(await read(['page', 'asc']))).toEqual(['/agents', '/install', undefined]);
+        expect(pages(await read(['page', 'desc']))).toEqual([undefined, '/install', '/agents']);
+        // The group with no page has no score either: f6.
+        expect(pages(await read(['mean', 'asc']))).toEqual(['/agents', '/install', undefined]);
+        expect(pages(await read(['mean', 'desc']))).toEqual([undefined, '/install', '/agents']);
     });
 
     it('should take a query over the references: typed keys, aggregates and conditions', async () => {

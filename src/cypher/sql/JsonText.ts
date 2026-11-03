@@ -9,7 +9,8 @@ import { CypherFloat } from '@/cypher/ast/Expression';
  * writes a byte array. Any other iterable, a `Set` or a `Map`, is the list of its items, as the Neo4j driver sends it.
  * With `wholeFloats`, a float that is a whole number is written out in full, as Postgres takes it: see
  * {@link wholeFloatText}. With `wholeFloats` `'extended'`, a JavaScript number past a whole number's range is written
- * as Oracle's extended JSON writes a double, as Oracle takes it: see {@link extendedDoubles}.
+ * as Oracle's extended JSON writes a double, as Oracle takes it: see {@link extendedDoubles}. With `wholeFloats`
+ * `'java'`, a float the statement writes is written as Java writes a double, `1.0E9`, as drivine4j writes it on SQLite.
  */
 export function jsonText(value: any, wholeFloats: WholeFloats = false): string {
     if (value === null || value === undefined) {
@@ -32,11 +33,14 @@ export function jsonText(value: any, wholeFloats: WholeFloats = false): string {
  * (`true`), or a JavaScript number past a whole number's range as Oracle's extended JSON writes a double
  * (`'extended'`).
  */
-export type WholeFloats = boolean | 'extended';
+export type WholeFloats = boolean | 'extended' | 'java';
 
 /** A number as JSON text: see {@link jsonText}. */
 function numberText(value: CypherFloat | number | bigint | Integer, wholeFloats: WholeFloats): string {
     if (value instanceof CypherFloat) {
+        if (wholeFloats === 'java') {
+            return javaDouble(value.value);
+        }
         if (wholeFloats !== true) {
             return value.toString();
         }
@@ -44,9 +48,10 @@ function numberText(value: CypherFloat | number | bigint | Integer, wholeFloats:
     }
     // A number past a whole number's range is a float, which it is on a graph engine.
     if (wholeFloats && typeof value === 'number' && pastLongRange(value)) {
-        return wholeFloats === 'extended'
-            ? `{${JSON.stringify(DOUBLE)}:${JSON.stringify(javaDouble(value))}}`
-            : wholeFloatText(value);
+        if (wholeFloats === 'extended') {
+            return `{${JSON.stringify(DOUBLE)}:${JSON.stringify(javaDouble(value))}}`;
+        }
+        return wholeFloats === 'java' ? javaDouble(value) : wholeFloatText(value);
     }
     return typeof value === 'number' ? JSON.stringify(value) ?? 'null' : value.toString();
 }

@@ -157,7 +157,7 @@ export class ModelRegistry {
         this.assertOnly(
             type,
             properties,
-            ['nodeId', 'nodeStamp', 'propertyBag', 'nodeLabels', ...MAPPING_KEYS],
+            ['nodeId', 'nodeStamp', 'propertyBag', 'nodeLabels', 'caseInsensitive', ...MAPPING_KEYS],
             'a @NodeFragment'
         );
         const ids = [...properties].filter(([, it]) => it.nodeId).map(([field]) => field);
@@ -214,7 +214,8 @@ export class ModelRegistry {
             ),
             nodeLabels: this.nodeLabels(type, properties, [...labels]),
             ...this.fieldMapping(type, properties),
-            graphProperties
+            graphProperties,
+            lowerCopied: this.lowerCopied(type, properties, graphProperties)
         };
         // A catalog's vector index over a field without @VectorIndex is refused here as well as when the catalog is
         // applied, since either may come first.
@@ -443,6 +444,7 @@ export class ModelRegistry {
             'root',
             'nodeId',
             'nodeStamp',
+            'caseInsensitive',
             'relationship',
             'graphProperty',
             'transient',
@@ -588,6 +590,47 @@ export class ModelRegistry {
         return result;
     }
 
+    /**
+     * The stored names of the `@CaseInsensitive` fields, in the order of their fields' names, as drivine4j orders them. A
+     * `@CaseInsensitive` field holds text stored as a property of its own: not the stamp, a property bag, the node's
+     * labels, a field that isn't stored, or one stored as packed JSON.
+     */
+    private lowerCopied(
+        type: ClassType,
+        properties: Map<string, PropertyMetadata>,
+        graphProperties: Map<string, string>
+    ): string[] {
+        const fields = [...properties].filter(([, it]) => it.caseInsensitive);
+        for (const [field, it] of fields) {
+            const other = it.nodeStamp
+                ? '@NodeStamp'
+                : it.propertyBag
+                ? '@PropertyBag'
+                : it.nodeLabels
+                ? '@NodeLabels'
+                : it.transient
+                ? '@GraphTransient'
+                : it.jsonPacked
+                ? '@JsonPacked'
+                : undefined;
+            // TypeScript records a union, such as `string | null`, as Object.
+            const text = it.designType === undefined || it.designType === String || it.designType === Object;
+            if (other || !text) {
+                throw new DrivineError(
+                    `@CaseInsensitive ${type.name}.${field} is ${
+                        other ? `a ${other} field` : `a ${it.designType!.name}`
+                    }. ` +
+                        `It must hold text stored as a property of its own: not a @NodeStamp, @PropertyBag, @NodeLabels, ` +
+                        `@GraphTransient or @JsonPacked field.`
+                );
+            }
+        }
+        return fields
+            .map(([field]) => field)
+            .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+            .map((field) => graphProperties.get(field) ?? field);
+    }
+
     private transientFields(properties: Map<string, PropertyMetadata>): Set<string> {
         return new Set([...properties].filter(([, it]) => it.transient).map(([field]) => field));
     }
@@ -598,6 +641,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         root: '@Root',
         nodeId: '@NodeId',
         nodeStamp: '@NodeStamp',
+        caseInsensitive: '@CaseInsensitive',
         relationship: '@GraphRelationship',
         graphProperty: '@GraphProperty',
         transient: '@GraphTransient',

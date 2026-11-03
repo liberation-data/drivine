@@ -58,7 +58,7 @@ function textOf(clock: Clock, kind: Temporal, zone: string): string {
             ? `.${pad(clock.micros / 1000, 3)}`
             : `.${pad(clock.micros, 6)}`;
     const time = `${pad(clock.hour, 2)}:${pad(clock.minute, 2)}:${pad(clock.second, 2)}${fraction}`;
-    const date = `${pad(clock.year, 4)}-${pad(clock.month, 2)}-${pad(clock.day, 2)}`;
+    const date = `${year(clock.year)}-${pad(clock.month, 2)}-${pad(clock.day, 2)}`;
     if (kind === Temporal.DATE) {
         return date;
     }
@@ -80,11 +80,19 @@ function parsed(local: string, from: Temporal): Clock {
             ? local.split('T')
             : ['1970-01-01', local];
     const [hms, digits = ''] = timePart?.split('.') ?? [];
+    if (datePart.startsWith('-0000')) {
+        // java.time reads no year of minus zero, before it looks at anything else.
+        refuse(local, ' at index 0');
+    }
     if (digits.length > 9) {
         // java.time reads nine digits of a fraction, and finds the rest left over before it checks any field.
         refuse(local, `, unparsed text found at index ${local.indexOf('.') + 10}`);
     }
-    const [year, month, day] = datePart.split('-').map(Number);
+    // A year before 0 opens with its sign: `-0044-03-15` is 45 BC, as java.time reads it.
+    const [year, month, day] = datePart
+        .replace(/^-/, '~')
+        .split('-')
+        .map((it) => Number(it.replace('~', '-')));
     checked(local, 'MonthOfYear', month, 1, 12);
     checked(local, 'DayOfMonth', day, 1, 31, '1 - 28/31');
     if (day > daysIn(year, month)) {
@@ -131,6 +139,11 @@ function daysIn(year: number, month: number): number {
         return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
     }
     return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+/** A year as ISO 8601 writes it, four digits after its sign: `0000` for 1 BC, `-0044` for 45 BC. */
+function year(value: number): string {
+    return (value < 0 ? '-' : '') + pad(Math.abs(value), 4);
 }
 
 function pad(value: number, digits: number): string {

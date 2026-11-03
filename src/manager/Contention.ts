@@ -15,7 +15,7 @@ export function contendedPause(attempt: number, random: () => number = Math.rand
 }
 
 /** Whether `failure`, or a cause under it, as deep as ten, is one `matches` takes. */
-function anyCause(failure: unknown, matches: (cause: any) => boolean): boolean {
+export function anyCause(failure: unknown, matches: (cause: any) => boolean): boolean {
     for (let cause: any = failure, depth = 0; cause && depth < 10; cause = cause.rootCause ?? cause.cause, depth++) {
         if (matches(cause)) {
             return true;
@@ -48,17 +48,28 @@ export function ddlContended(failure: unknown): boolean {
 /**
  * Whether a SQL store refused schema statements for good, so that running them again would fail the same way: the user
  * may not make tables (ORA-01031 on Oracle, 42501 on Postgres), or the database may only be read (ORA-16000, and 25006,
- * as on a hot standby). A graph's first-use block refused so is not run again by its provider (see `FirstConnection`).
+ * as on a hot standby; SQLITE_READONLY on SQLite). A graph's first-use block refused so is not run again by its provider (see `FirstConnection`).
  * The failure and each cause under it are looked at. drivine4j's `JdbcConnectionProvider.cannotMake` and
  * drivine-python's `will_not_make` take the same codes.
  */
 export function ddlWillNotMake(failure: unknown): boolean {
-    return anyCause(failure, (it) => /ORA-(01031|16000)\b/.test(it.message ?? '') || ['42501', '25006'].includes(it.code));
+    return anyCause(
+        failure,
+        (it) =>
+            /ORA-(01031|16000)\b/.test(it.message ?? '') ||
+            ['42501', '25006'].includes(it.code) ||
+            (typeof it.errcode === 'number' && (it.errcode & 0xff) === SQLITE_READONLY)
+    );
 }
+
+/** SQLite's primary result code for a file it may only read. */
+const SQLITE_READONLY = 8;
 
 /**
  * The failures a run of {@link whenNotContended} threw: ran out of attempts on, or would not run again. Held weakly, by
- * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does.
+ * the failure itself, so an outer run finds it under the error that wraps it, and it goes when the failure does. Every
+ * failure a run throws is here, contended or not, for an outer run should run again neither; that it was run again as
+ * turned away is the narrower `runAgainAlready`.
  */
 const givenUp = new WeakSet();
 
@@ -70,10 +81,25 @@ function gaveUpOn(failure: unknown): boolean {
     return anyCause(failure, (it) => typeof it === 'object' && givenUp.has(it));
 }
 
-/** `failure`, marked as one a run gave up on (see {@link gaveUpOn}). */
-function givingUp(failure: unknown): unknown {
+/** Of the failures in `givenUp`, those a run had already run again as turned away: see {@link gaveUpAsContended}. */
+const runAgainAlready = new WeakSet();
+
+/**
+ * Whether `failure`, or a cause under it, is one a run of {@link whenNotContended} took as turned away, ran again, and
+ * then gave up on, so that a retry outside it, of its own, would multiply its attempts. A failure it threw at once, as
+ * not turned away, is not one.
+ */
+export function gaveUpAsContended(failure: unknown): boolean {
+    return anyCause(failure, (it) => typeof it === 'object' && runAgainAlready.has(it));
+}
+
+/** `failure`, marked as one a run gave up on (see {@link gaveUpOn}), and, when it was `runAgain`, as that too. */
+function givingUp(failure: unknown, runAgain: boolean): unknown {
     if (typeof failure === 'object' && failure) {
         givenUp.add(failure);
+        if (runAgain) {
+            runAgainAlready.add(failure);
+        }
     }
     return failure;
 }
@@ -97,7 +123,7 @@ export async function whenNotContended<T>(
             return await statement();
         } catch (failure) {
             if (gaveUpOn(failure) || !contended(failure)) {
-                throw givingUp(first ?? failure);
+                throw givingUp(first ?? failure, first !== undefined);
             }
             first = first ?? failure;
             if (attempt < CONTENDED_ATTEMPTS - 1) {
@@ -105,5 +131,5 @@ export async function whenNotContended<T>(
             }
         }
     }
-    throw givingUp(first);
+    throw givingUp(first, true);
 }

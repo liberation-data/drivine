@@ -1,6 +1,6 @@
-import { rangeIndex } from '@liberation-data/drivine';
+import { rangeIndex, uniquenessConstraint } from '@liberation-data/drivine';
 import { OracleGraph } from '@/backend/oracle';
-import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
+import { BUSY_ATTEMPTS, OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
 
 describe('OracleSchemaGrammar', () => {
     const grammar = new OracleSchemaGrammar(new OracleGraph('jvm'));
@@ -21,5 +21,21 @@ describe('OracleSchemaGrammar', () => {
         expect(sharedIndex('2fa')).toContain(`(JSON_VALUE(props, ''$."2fa"''))`);
         expect(sharedIndex("it's")).toContain(`(JSON_VALUE(props, ''$."it''''s"''))`);
         expect(sharedIndex('a"b')).toContain(`(JSON_VALUE(props, ''$."a\\"b"''))`);
+    });
+
+    // Managers making the store key's constraint together were turned away at once by each other's lock on the node
+    // table (ORA-00054), ran out of attempts, and went on without it.
+    it("should run an index over the node table again while another session's lock turns it away, up to a bound", () => {
+        const unique = grammar
+            .createUnique(uniquenessConstraint('DrivineStore', 'key'))
+            .find((it) => it.includes('CREATE UNIQUE INDEX'))!;
+        for (const block of [sharedIndex('name'), unique]) {
+            expect(block).toContain('PRAGMA EXCEPTION_INIT(e_busy, -54);');
+            expect(block).toContain(`FOR attempt IN 1 .. ${BUSY_ATTEMPTS} LOOP`);
+            expect(block).toMatch(
+                /WHEN e_busy THEN\s+IF attempt = \d+ THEN RAISE; END IF;\s+DBMS_SESSION\.SLEEP\(0\.1\);/
+            );
+            expect(block).toMatch(/EXECUTE IMMEDIATE 'CREATE[^;]*;\s+RETURN;/);
+        }
     });
 });

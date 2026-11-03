@@ -3,10 +3,12 @@ import {
     Connection,
     ConnectionProvider,
     DatabaseType,
-    SchemaExecutor
+    SchemaExecutor,
+    uniquenessConstraint
 } from '@liberation-data/drivine';
 import { FirstConnection } from '@/connection/FirstConnection';
 import { OracleGraph } from '@/backend/oracle';
+import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
 import { error, Neo4jError } from 'neo4j-driver';
 
 describe('SchemaExecutor', () => {
@@ -66,6 +68,20 @@ describe('SchemaExecutor', () => {
         ]);
         await expect(new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)')).resolves.toEqual([]);
         expect(runs()).toEqual(3);
+    });
+
+    // An Oracle index's block has waited thirty seconds on the busy lock before it gives up: run again, as other DDL is,
+    // it would wait as long again each time, three minutes in all.
+    it("should not run again an Oracle index's block that waited out a busy lock itself, but should for a deadlock", async () => {
+        const block = new OracleSchemaGrammar(new OracleGraph('jvm'))
+            .createUnique(uniquenessConstraint('DrivineStore', 'key'))
+            .find((it) => it.includes('CREATE UNIQUE INDEX'))!;
+        const busy = failing(['ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired']);
+        await expect(new SchemaExecutor(busy.provider).run(block)).rejects.toThrow(/ORA-00054/);
+        expect(busy.runs()).toEqual(1);
+        const deadlocked = failing(['ORA-04020: deadlock detected while trying to lock object JVM_NODE']);
+        await expect(new SchemaExecutor(deadlocked.provider).run(block)).resolves.toEqual([]);
+        expect(deadlocked.runs()).toEqual(2);
     });
 
     it('should run DDL again that Postgres turned away for a deadlock, but not for a lock not had in time', async () => {

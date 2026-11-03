@@ -10,6 +10,7 @@ The same models, queries and DSL run on each graph store. Switch the engine with
 | Oracle 23.9 or later | `ORACLE` | yes | full | vector, Oracle Text |
 | Amazon Neptune | `NEPTUNE` | no: `PersistenceManager` only | full | no |
 | Postgres 14 or later | `POSTGRES` | yes | full | vector (pgvector), full-text |
+| SQLite 3.45 or later | `SQLITE` | yes | one writer at a time | vector and full-text, by reading every node |
 
 ### Neo4j
 
@@ -188,6 +189,89 @@ Notes:
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
   `"phrase"`, `+must`, `-not` and a `prefix*`.
 
+### SQLite
+
+SQLite keeps a graph in a file, with no server: the same tables as Oracle and Postgres, so a file drivine4j or
+drivine-python wrote is read and written here, and the other way round. Drivine opens it through Node's own driver,
+`node:sqlite`, in Node 22.13 or later, which brings SQLite 3.45 or later; nothing else is installed. Node 22 and 24 print
+an `ExperimentalWarning` the first time `node:sqlite` is loaded. Models, the DSL and the object manager are the same as on
+the graph engines; `PersistenceManager` runs plain SQL, with cursors and transactions, and Cypher, compiled to SQLite's
+SQL as drivine4j compiles it (a cursor runs SQL alone). What Cypher does that SQLite's JSON functions don't, Drivine's
+functions registered on each connection do.
+
+**Which Node.** The SQLite comes with Node, so use a Node whose SQLite writes a float it computes in JSON to 17
+significant digits, which read back as it: `json_quote(0.1 + 0.2)` is `0.30000000000000004`. SQLite 3.53 does so by
+default, but a build may still write 15 (one Python's 3.53.1 does), so Drivine asks SQLite rather than reading its
+version. Node 22.23.4, 24.22.2 and 26.13, for example, were measured to write 17. A SQLite that writes 15 significant
+digits, as every one before 3.53 does, rounds what it computes, and every value compiled Cypher gives is JSON: `0.1 +
+0.2` comes back as `0.3`, `1.0/3` as `0.333333333333333`, a value passed through `WITH` and multiplied back as
+`0.999999999999999` where `1.0` is wanted, and a computed float a statement `SET`s is stored rounded. Parameters,
+stored values and Drivine's own functions, such as `pi()`, keep their digits. Drivine detects this at run time: when it
+first opens a file, it asks SQLite for `json_quote(0.1 + 0.2)`, and warns once where the answer is rounded; it runs all
+the same. The warning is a Node process warning, so it shows whatever `DRIVINE_LOG_LEVEL` is, and its code is
+`DRIVINE_SQLITE_ROUNDED_FLOATS`. `node --disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` (or the same in
+`NODE_OPTIONS`) silences it alone, and `node --no-warnings` with every other process warning.
+
+| Node, measured | SQLite | `json_quote(0.1 + 0.2)` |
+| --- | --- | --- |
+| 24.7.0 | 3.50.4 | `0.3`, warned of |
+| 22.23.4 | 3.53.4 | `0.30000000000000004` |
+| 24.22.2 | 3.53.4 | `0.30000000000000004` |
+| 26.13.0 | 3.54.0 | `0.30000000000000004` |
+
+```bash
+DATABASE_TYPE=SQLITE
+DATABASE_NAME=./data/graph.db          # the path of the file, made if it is not there; the folder must be
+DATABASE_DEFAULT_GRAPH_PATH=drivine    # names the graph's tables; this is the default
+DATABASE_CONNECTION_TIMEOUT=30000      # how long a statement waits for the file's lock, in ms; this is the default
+```
+
+A SQLite store has no host, port, user or password. `:memory:` is refused: each pooled connection would open a database
+of its own. The tables are made on the first connection, when they are not there, as on Postgres.
+
+**How a graph is stored.** drivine4j's layout, so the three libraries read one file:
+`<graph>_node (nid INTEGER PRIMARY KEY, labels TEXT, props TEXT, stamp TEXT)`,
+`<graph>_edge (eid INTEGER PRIMARY KEY, src, dst REFERENCES node ON DELETE CASCADE, type, props TEXT)`, and
+`<graph>_schema`. Labels and properties are JSON text, not SQLite's binary `jsonb`. Labels are written sorted, with no
+character escaped that JSON does not require, because a label is found by its text, `"Label"`, within `labels`. The stamp
+is a column. A moment is ISO 8601 text.
+
+**What a transaction gives.**
+
+- One writer at a time. A transaction takes the file's write lock as it begins (`BEGIN IMMEDIATE`), so even one that only
+  reads waits for the lock, up to the connection timeout. One that holds the lock longer than five seconds is warned of
+  when it ends, committed, rolled back or released.
+- A read outside a transaction doesn't wait for a writer: the journal is a write-ahead log, and a read sees what was
+  committed.
+- A save or a delete outside a transaction that finds the file locked is run again, as one turned away as contended is
+  on the other stores.
+- Each statement Drivine writes applies whole or not at all: a save is a call of `drivine_write`, a function each
+  connection registers, which carries out the save's steps under a savepoint.
+- Node's driver is synchronous, so a connection that finds the file locked waits for it by trying again after a pause,
+  which leaves the rest of the process running. A connection you open yourself on the file has none of this, nor the
+  functions Drivine's statements call.
+
+Notes:
+
+- A statement you write yourself is SQL; parameters are named `$name`, and a statement is bound only the ones it names.
+  A statement Drivine writes whose text values are each JSON opens with `/* drivine:json */`, and is read as JSON.
+- A predicate you write yourself is SQL over the root's row: its `props`, `labels` and `stamp`, e.g.
+  `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name`, and is read
+  as that property, as text, as on Postgres. SQLite's own `->>` reads `true` as `1` and a number as a number.
+- Each connection registers the functions Drivine's statements call, by drivine4j's names: `drivine_write`,
+  `drivine_delete`, `drivine_lower_copies`, `drivine_similarity`, `drivine_epoch` (a moment as nanoseconds since the
+  epoch), `drivine_lower` (a Unicode `lower`), `drivine_regexp_count`, and `regexp`, which SQLite's `REGEXP` calls.
+- A range index or a uniqueness constraint is a partial index over the property's text, for the nodes of the label.
+  A vector or a full-text index is recorded and not made: `loadNearest` measures every node of the label that holds an
+  embedding of the vector's size, and `loadMatching` reads every node of the label.
+- `matches` takes a JavaScript regular expression, matched against the whole value: `\w`, `\d` and `\b` are ASCII, as
+  JavaScript reads them, where drivine4j reads them as Unicode
+  ([#560](https://github.com/liberation-data/drivine/issues/560)).
+- Text compares and sorts by SQLite's `BINARY` collation, the order of its code points, so a page of mixed-case text is
+  in the order Neo4j gives (`B, a, b`), not by a collation as on Postgres.
+- A whole number past 2^53 that a statement gives back is refused by Node's driver; one a save leaves alone keeps its
+  digits.
+
 ### Cypher on Oracle and Postgres
 
 A Cypher statement given to a `PersistenceManager` on Oracle or Postgres is compiled to SQL over the graph's tables, so
@@ -266,6 +350,15 @@ const names = await pm.query<string>(
   as before, and so is an unwound item. A list made of a long property (`[n.bio, 'y']`) still takes the property out as
   JSON, as above. See "An item of a list, read by its place" in drivine4j's
   [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
+- On Oracle, so are reads of an argument of `coalesce()` that is a property of a node or a relationship
+  ([#475](https://github.com/liberation-data/drivine/issues/475)), wherever the `coalesce()` is (`coalesce($p.q,
+  n.bio)`, `size(trim(coalesce(n.bio, '')))`, `SET n.a = coalesce(n.bio, '')`): a text of at most 4,000 bytes is read
+  as a `VARCHAR2`, at no cost drivine4j measured (20,000 rows take 72 ms either way), and a longer one through its text.
+  Any other value is read as before, and so is a value of a map (`coalesce(m.a, 'z')`). In a step of `reduce()`, where
+  a node arrives as JSON, the property is still taken out as JSON and can close the session
+  ([#516](https://github.com/liberation-data/drivine/issues/516)). See "An argument of
+  `coalesce()`" in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Oracle, a text past 4,000 bytes is measured, cut, changed, searched, reversed and added to whole (`size()`,
   `toUpper()`, `substring()`, `replace()`, `split()`, `reverse()`, `STARTS WITH`, `CONTAINS`, `=~`, `+` …): Oracle reads
   a text out of JSON as a `VARCHAR2` of at most 4,000 bytes, so a longer one is read again as a CLOB, and a short one
@@ -274,6 +367,23 @@ const names = await pm.query<string>(
   aggregate's result too (`head(collect(n.t)) CONTAINS $x`), whose aggregates are worked out first
   ([#414](https://github.com/liberation-data/drivine/issues/414)). A property such a function reads is read from the
   properties by its own path, which costs about a quarter more on short texts, and a `+` that may put texts together costs about a tenth more, as drivine4j measured.
+- On Oracle, two texts are compared (`=`, `<>`, `<`, `>=`, `IN` …) as `VARCHAR2`s, and as CLOBs with `DBMS_LOB.COMPARE`
+  where either is past 4,000 bytes ([#469](https://github.com/liberation-data/drivine/issues/469)). As JSON, `=` of a
+  text past about 32 KB was refused (ORA-40180), even `n.bio = 'abc'` where one node's bio was that long, and `<` of
+  one read from the store over two rows or more crashed the session (ORA-03113), as the bug above did. A property
+  compared so is read by its own path, and such a query carries `NO_JSON_TABLE_TRANSFORM` (see below). Beside a
+  number, a truth value or a short text the statement gives or writes, a list or a map it writes, or an `IN` of such
+  items, only the other side is read for its kind (`n.name = $x`, `n.name = 'abc'`, `n.name IN $names`), and beside a
+  single value it writes, a list or a map is not equal and isn't compared as JSON. Where no item of an `IN` the
+  statement gives or writes, none a list or a map, is equal, the answer is null where they hold a null and else false, and the value isn't read again for its nulls, which
+  took a text past 32 KB out as JSON and crashed the session
+  ([drivine4j#475](https://github.com/liberation-data/drivine4j/issues/475)). A statement
+  that writes, and the step of a `reduce`, which run as PL/SQL, compare as JSON, as before, and refuse a text past
+  32 KB: there a CLOB read from an unwound row's JSON crashed the session. A list or a map that holds such a text is
+  compared as JSON anywhere, and refused. Between two texts, either past 4,000 bytes, that first differ where one has a
+  character past U+FFFF and the other one from U+E000 to U+FFFF, the order is the other way round from Cypher's, as a
+  CLOB compares by UTF-16 units. See "Two texts, compared" in drivine4j's
+  [docs/oracle-long-json-string-crash.md](https://github.com/liberation-data/drivine4j/blob/master/docs/oracle-long-json-string-crash.md).
 - On Oracle, an `OPTIONAL CALL` or an `OPTIONAL MATCH` is joined `ON 1 = 1`, where Postgres joins `ON TRUE`. This works
   around an Oracle bug, seen on 23.26.3: in a scalar subquery, as a `COUNT { … }` is compiled, a join `ON TRUE` is
   refused (ORA-00907) or crashes the session (ORA-03113, with ORA-07445 in the alert log)
@@ -285,7 +395,9 @@ const names = await pm.query<string>(
   Oracle's JSON table transformation reads several JSON values of one node's row by one `JSON_TABLE`, and so rewritten
   beside another node's table the query lost that node's label and property tests, giving rows its pattern doesn't
   have and values of the wrong node, or crashing the session (ORA-03113)
-  ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint.
+  ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint, but where it
+  compares a property as a text (see above): there the transformation lost the property's reads beside a quantifier's
+  subquery.
 - On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
   is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
   that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for
@@ -303,15 +415,42 @@ const names = await pm.query<string>(
   map, still order the texts in them by the database's collation (`ORDER BY n.tags`).
 - Cypher the compiler doesn't take is refused by name before the store is sent anything, e.g. `A path variable in
   CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
-- A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A zoned value the
-  statement makes sorts as its moment (`ORDER BY datetime(n.at)`); one read as a property sorts as its text, and so
-  does a map that holds one. A list of them, or a list of lists of them, sorts item by item so in an `ORDER BY`, `min`
-  and `max`. Oracle reads by their places, not with `JSON_TABLE`, the items of a list that holds temporal values the
-  statement makes, at any depth: a list of them, a list of lists or of maps of them (`collect(DISTINCT [l, l])`), one a
-  `CASE`, `coalesce` or `reduce` may give, or one taken back out of a map; and the keys of any map, which `keys` reads
-  from a list Oracle makes of them. Oracle 23 takes many seconds, or minutes, to parse a `JSON_TABLE` over a list
-  worked out item by item with temporal arithmetic (`[i IN range(1, 10) | t + duration({minutes: i})]`), and neither a
-  query timeout nor a kill ends the parse ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331),
+- A value whose kind the statement fixes (a literal, a list or a map written, or a variable a `WITH` binds to one) is
+  refused where an operator or a function takes another kind, as Neo4j refuses it when it plans the statement:
+  `RETURN 123 AND true` fails with `AND takes a truth value, not an integer, as in Neo4j.`, and so do
+  `WITH 123 AS x RETURN x.num` and `RETURN 1 IN 'foo'`. A step of 0 in `range()`, written or given, a parameter given
+  as the index of a list or a map written that isn't indexed by its kind, and a map, or a list of maps or of lists,
+  written in `SET`, are refused too, though Neo4j fails on them only when a row reaches them. A value whose kind is
+  known only when the row is read, such as a property or a parameter, is compiled: where it is of the wrong kind, the
+  statement may give null where Neo4j fails. A variable used as two kinds is refused, as Neo4j refuses it:
+  `MATCH (a)-[a]->()` fails with `a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j.`
+  So is one a pattern makes where it is bound already: `MATCH (a) CREATE (a)`, a path variable bound before its
+  `MATCH`, or a relationship variable bound as something else.
+- `truncate` takes each unit Neo4j does, from `millennium` to `microsecond`, and a map of fields to set on the value
+  cut short (`date.truncate('month', d, {day: 2})`), but not yet a nanosecond, a week's or a quarter's field, or a
+  named zone.
+- A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A year is numbered as
+  Neo4j and ISO 8601 number it on every SQL store, where Oracle and Postgres keep no year 0: `0000` is 1 BC and `-0044`
+  is 45 BC, made, read, worked out, truncated, written and read back
+  ([#511](https://github.com/liberation-data/drivine/issues/511)). On Oracle and Postgres a stored value whose year is
+  1000 or later is read as before; one of an earlier year is read by its era, so a statement that reads a stored date or
+  moment compiles to SQL up to three and a half times as long (a filter on a stored date, 979 characters on Oracle and
+  703 on Postgres before, is 2,805 and 2,211), and in drivine4j, which compiles the same SQL, an aggregate of temporal
+  arithmetic runs 8 to 10% slower (a `truncate` on Postgres, about 16%). SQLite's calendar, Drivine's functions, numbers
+  years so already. Oracle counts days before 1582-10-15 by the Julian calendar, so the day of the week, the ISO week,
+  the day of the year and a leap day of such a date are not Neo4j's. On every SQL store, two stored values BC compare by
+  their text, which orders them backwards ([#415](https://github.com/liberation-data/drivine/issues/415)); on SQLite,
+  whose timestamps are texts, so do two the statement makes. A JavaScript `Date` BC given as a parameter is written with
+  six digits of its year, as `toISOString` writes it (`-000044-03-15T…`), which the stores don't read as that year: give
+  its ISO text, `-0044-03-15T…`, to `datetime()`. A zoned value the statement makes sorts as its moment (`ORDER BY
+  datetime(n.at)`); one read as a property sorts as its text, and so does a map that holds one. A list of them, or a
+  list of lists of them, sorts item by item so in an `ORDER BY`, `min` and `max`. Oracle reads by their places, not with
+  `JSON_TABLE`, the items of a list that holds temporal values the statement makes, at any depth: a list of them, a list
+  of lists or of maps of them (`collect(DISTINCT [l, l])`), one a `CASE`, `coalesce` or `reduce` may give, or one taken
+  back out of a map; and the keys of any map, which `keys` reads from a list Oracle makes of them. Oracle 23 takes many
+  seconds, or minutes, to parse a `JSON_TABLE` over a list worked out item by item with temporal arithmetic (`[i IN
+  range(1, 10) | t + duration({minutes: i})]`), and neither a query timeout nor a kill ends the parse
+  ([drivine4j#331](https://github.com/liberation-data/drivine4j/issues/331),
   [drivine4j#347](https://github.com/liberation-data/drivine4j/issues/347)). Other lists keep `JSON_TABLE`, which is
   about ten times as fast for a short list; read by their places, the keys are faster than `JSON_TABLE` gave them.
 - A parameter is bound as JSON, so a number that is whole is a whole number, though it was written `2.0`:

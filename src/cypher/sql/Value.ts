@@ -1,3 +1,5 @@
+import { isInt } from 'neo4j-driver';
+import { CypherFloat } from '@/cypher/ast/Expression';
 import { Temporal } from '@/cypher/sql/Temporal';
 
 /**
@@ -53,6 +55,63 @@ export interface JsonValue {
      * gives is read as {@link SqlCypherCompiler.itemValue} reads it.
      */
     readonly fromList?: boolean;
+    /**
+     * Where the statement writes it as a value of one kind, so that its kind is known when compiling, as Neo4j knows it
+     * when it plans the statement: a number, a text or a truth value written, a list or a map written, or a variable a
+     * `WITH` binds to one. Undefined where the statement leaves its kind open, as for a property or a parameter.
+     */
+    readonly known?: Known;
+    /**
+     * Whether it may be JSON's null: a value read out of a map or a list that may hold a null, as `x.a` of `{a: null}` is, an
+     * entry of a parameter, a null written, a `reduce()`, or a `CASE` that may give one of them. A key that is missing reads as
+     * SQL's null, and the two compare apart, where Cypher has one null: so a projection that groups its rows or keeps them
+     * distinct, and a part of a `UNION`, compares it with the two nulls read as one, and an order ties them (#497). A property
+     * read from the store is never JSON's null, as a graph engine stores none, so the SQL that reads one is unchanged.
+     */
+    readonly jsonNull?: boolean;
+}
+
+/** A kind of value the statement writes: see {@link JsonValue.known}. */
+export type Known = 'INTEGER' | 'FLOAT' | 'TEXT' | 'BOOLEAN' | 'LIST' | 'MAP';
+
+const KNOWN_NOUNS: Record<Known, string> = {
+    INTEGER: 'an integer',
+    FLOAT: 'a float',
+    TEXT: 'a text',
+    BOOLEAN: 'a truth value',
+    LIST: 'a list',
+    MAP: 'a map'
+};
+
+/** A value of the kind `known`, as a message names it: `an integer`, `a truth value`. */
+export function nounOf(known: Known): string {
+    return KNOWN_NOUNS[known];
+}
+
+/** {@link nounOf}, as a sentence begins with it: `An integer`. */
+export function capitalNounOf(known: Known): string {
+    const noun = nounOf(known);
+    return noun.charAt(0).toUpperCase() + noun.slice(1);
+}
+
+/**
+ * The kind of `value`, a literal the reader gives or a parameter's value: a whole number, a bigint or the Neo4j driver's
+ * Integer is an integer, a {@link CypherFloat} or a number with a fraction a float. Undefined for null and for any other.
+ */
+export function knownOf(value: unknown): Known | undefined {
+    if (value instanceof CypherFloat) {
+        return 'FLOAT';
+    }
+    if (typeof value === 'number') {
+        return Number.isInteger(value) ? 'INTEGER' : 'FLOAT';
+    }
+    if (typeof value === 'bigint' || isInt(value)) {
+        return 'INTEGER';
+    }
+    if (typeof value === 'string') {
+        return 'TEXT';
+    }
+    return typeof value === 'boolean' ? 'BOOLEAN' : undefined;
 }
 
 /** What a {@link JsonValue} is besides its SQL. */

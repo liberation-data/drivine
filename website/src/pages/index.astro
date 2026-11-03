@@ -13,7 +13,7 @@ import '@fontsource/jetbrains-mono/latin-500.css';
 import headingFont from '@fontsource/ubuntu/files/ubuntu-latin-700-normal.woff2?url';
 import { Image } from 'astro:assets';
 import ocean from '../assets/hero-ocean.jpg';
-import studioCanvas from '../assets/studio-canvas.png';
+import studioCypher from '../assets/studio-cypher.png';
 import videoPoster from '../assets/video-poster.jpg';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
@@ -30,14 +30,31 @@ const ts = `${base}ts/`;
 const py = `${base}py/`;
 const jvm = `${base}jvm/`;
 const image = (name: string) => `${base}images/${name}`;
-// The explainer on YouTube. The section shows once this is set.
+// The explainer, played from our own copy so every browser gets the full 1080p from the first frame: YouTube's embed
+// served it at 240p in Chrome and Firefox, whatever the connection. The section and the hero's tip show while VIDEO is
+// set. It is on YouTube too (VIDEO_ID), linked under the player for sharing.
+const VIDEO = `${base}video/drivine-explainer.mp4`;
+const VIDEO_CAPTIONS = `${base}video/drivine-explainer.vtt`;
 const VIDEO_ID = 'uETP0EN_04E';
 
-import { REPOS, formatStars, repoUrl, stars } from '../lib/github';
+import { REPOS, STUDIO, TRAIN_LIBRARIES, type Topic, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
+const studioStars = await starsOf(STUDIO.repo);
 const starLabel = (count: number | undefined) => (count === undefined ? '' : formatStars(count));
+// The newest released train, shown under the installs and versioning the Gradle line: without one, neither.
+const train = await releasedTrain();
+const order = (topic: Topic | undefined) => (topic ? Object.keys(REPOS).indexOf(topic) : Infinity);
+const trainLibraries = train
+    ? Object.entries(train.libraries)
+          .map(([library, version]) => ({ topic: Object.hasOwn(TRAIN_LIBRARIES, library) ? TRAIN_LIBRARIES[library] : undefined, library, version }))
+          // In REPOS' order, with a library the site doesn't know after the three, under its manifest name.
+          .sort((a, b) => order(a.topic) - order(b.topic))
+    : [];
+const drivine4jVersion = train?.libraries.drivine4j ?? '<version>';
+// The hero's copy button gives the coordinate with the train's version, so it pastes into Gradle as the card's line does.
+const drivine4jCoordinate = train?.libraries.drivine4j ? `org.drivine:drivine4j:${train.libraries.drivine4j}` : 'org.drivine:drivine4j';
 
 // The same view in each language, highlighted by hand: the panel switches between them.
 const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s">'Person'</span>] })
@@ -167,6 +184,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .repo-menu .menu { position: absolute; right: 0; top: calc(100% + 10px); z-index: 5; min-width: 300px; display: flex; flex-direction: column; padding: 6px; border-radius: 12px; background: #04222c; border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
             .repo-menu .menu a { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 44px; padding: 8px 12px; border-radius: 8px; color: #cfe3e7; }
             .repo-menu .menu a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; text-decoration: none; }
+            /* The libraries, then the studio that reads what they write: a rule between. */
+            .repo-menu .menu .studio-repo { margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0 0 8px 8px; }
             .repo-menu .menu strong { color: #fff; margin-right: 6px; }
             .repo-menu .hint { margin: 4px 12px 6px; font-size: 13px; color: #9db8bf; }
             .repo-menu .count { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; }
@@ -197,6 +216,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .installs .copy:hover svg, .installs .copy:focus-visible svg { opacity: 1; }
             .installs .copy:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
             .installs .copy.done::after { content: 'Copied'; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 7px; background: var(--accent); color: var(--ink); font-weight: 700; }
+            .train { margin: 18px 0 0; font-size: 14px; color: #cfe3e7; text-shadow: 0 1px 8px rgba(0, 30, 40, 0.5); }
+            .train a { color: #fff; font-weight: 500; }
+            .train span { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #fff; }
             .copied-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
             .intro { padding: 96px 32px 72px; }
@@ -206,7 +228,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .watch { padding: 0 32px 96px; scroll-margin-top: 24px; }
             .watch .wrap { max-width: 1040px; display: flex; flex-direction: column; gap: 18px; }
             .watch .player { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: var(--abyss); box-shadow: 0 24px 60px rgba(2, 28, 38, 0.25); }
-            .watch .player img, .watch .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
+            .watch .player img, .watch .player video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
+            /* Whole in fullscreen, on a screen of any shape. */
+            .watch .player video { object-fit: contain; }
             /* The whole poster plays; the pill in its corner says so, clear of the title. */
             .watch .play { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start; padding: 24px; border: 0; cursor: pointer; background: transparent; }
             .watch .play span { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px 0 16px; border-radius: 999px; background: var(--accent); color: var(--ink); font: 700 17px Ubuntu, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); transition: transform 0.15s ease; }
@@ -345,6 +369,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                                 <span><strong>{REPOS.jvm.name}</strong> {REPOS.jvm.language}</span>
                                 {jvmStars !== undefined && <span class="count">★ {starLabel(jvmStars)}</span>}
                             </a>
+                            <a href={studioUrl} class="studio-repo">
+                                <span><strong>{STUDIO.name}</strong> {STUDIO.language}</span>
+                                {studioStars !== undefined && <span class="count">★ {starLabel(studioStars)}</span>}
+                            </a>
                             <p class="hint">★ Star them on GitHub: it helps others find Drivine.</p>
                         </div>
                     </details>
@@ -357,15 +385,15 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 <div class="rule" style="width: min(900px, 94%)" aria-hidden="true"></div>
                 <p class="subtitle">Graph database client for TypeScript, Python &amp; the JVM</p>
                 <p class="tagline">Community project by Liberation Data.</p>
-                {VIDEO_ID && (
+                {VIDEO && (
                     <a href="#watch" class="video-tip">
                         <span class="new">New</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" /></svg>
                         <span>Watch<span class="long">: graph RAG on any database</span><span class="short"> the video</span> · 4:26</span>
                     </a>
                 )}
-                <div class="installs" style={`margin-top: ${VIDEO_ID ? 28 : 44}px`}>
-                    {['npm install @liberation-data/drivine', 'pip install drivine', 'org.drivine:drivine4j'].map((line) => (
+                <div class="installs" style={`margin-top: ${VIDEO ? 28 : 44}px`}>
+                    {['npm install @liberation-data/drivine', 'pip install drivine', drivine4jCoordinate].map((line) => (
                         <button type="button" class="copy" data-copy={line} aria-label={`Copy ${line}`}>
                             <code>{line}</code>
                             <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9z" fill="currentColor" /></svg>
@@ -373,6 +401,13 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     ))}
                     <span class="copied-status" role="status"></span>
                 </div>
+                {train && (
+                    <p class="train">
+                        <a href={trainUrl(train.train)}>Drivine {train.train}</a>:
+                        {trainLibraries.map(({ topic, library, version }) => <> {topic ? REPOS[topic].language : library} <span>{version}</span> ·</>)}
+                        {' '}Cypher spec <span>{train.spec}</span>
+                    </p>
+                )}
             </div>
         </header>
 
@@ -389,16 +424,19 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 </div>
             </section>
 
-            {VIDEO_ID && (
+            {VIDEO && (
                 <section class="watch" id="watch">
                     <div class="wrap">
-                        <div class="player" data-video={VIDEO_ID}>
+                        <div class="player" data-video={VIDEO} data-captions={VIDEO_CAPTIONS}>
                             <Image src={videoPoster} widths={[640, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
                             <button type="button" class="play" aria-label="Watch the video, 4 minutes 26 seconds: Drivine, graph RAG on any database">
                                 <span><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="#0b2530" /></svg>Watch · 4:26</span>
                             </button>
                         </div>
-                        <p>Drivine in four and a half minutes: graph RAG on any database. With captions.</p>
+                        <p>
+                            Drivine in four and a half minutes: graph RAG on any database. With captions.
+                            {VIDEO_ID && <> <a href={`https://youtu.be/${VIDEO_ID}`}>Also on YouTube</a>.</>}
+                        </p>
                     </div>
                 </section>
             )}
@@ -445,7 +483,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                                 The graph client for Embabel. Annotated models in Kotlin or Java, a DSL generated by KSP, and Spring
                                 Boot auto-configuration with test containers built in.
                             </p>
-                            <code>implementation(<wbr /><span>"org.drivine:drivine4j:</span><wbr /><span>&lt;version&gt;")</span></code>
+                            <code>implementation(<wbr /><span>"org.drivine:drivine4j:</span><wbr /><span>{`${drivine4jVersion}")`}</span></code>
                             <div class="links">
                                 <div class="go">
                                     <a href={jvm}>Read the docs →</a>
@@ -533,7 +571,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <li><span>Variable-length relationships and quantified path patterns compile too.</span></li>
                         <li><span>Cypher the compiler doesn’t take yet is refused by name, before the store is sent anything.</span></li>
                         <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries, says what each statement gives on each store.</span></li>
-                        <li><span>About 74% of openCypher’s 3,896 TCK scenarios pass on the SQL stores, and 87% of those the compiler doesn’t refuse on purpose: <a href={`${ts}cypher-on-a-relational-database/#how-complete-is-it`}>how complete it is</a>.</span></li>
+                        <li><span>About 80% of openCypher’s 3,896 TCK scenarios pass on the SQL stores, and 88% of those the compiler doesn’t refuse on purpose: <a href={`${ts}cypher-on-a-relational-database/#how-complete-is-it`}>how complete it is</a>.</span></li>
                     </ul>
                 </div>
             </section>
@@ -580,15 +618,15 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         </ul>
                         <p>
                             Drivine Studio reads it: drag a view to the canvas and it loads as <code>loadAll</code> does, shows the Cypher, and draws what came
-                            back. Or type Cypher and see a graph or rows. It reads and never writes, in a browser or as a
-                            desktop app.
+                            back. Or type Cypher and see a graph or rows, on Postgres and Oracle too. It only reads, unless you
+                            let a connection write, in a browser or as a desktop app.
                         </p>
                     </header>
                     <figure>
-                        <Image src={studioCanvas} widths={[800, 1600, 2400]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio: the catalogue of a model's views and fragments beside a canvas drawing issues, the people assigned to and raising them, and where they work" />
-                        <figcaption>One view on the canvas: each issue, who it’s assigned to, who raised it and where they work, loaded in one statement.</figcaption>
+                        <Image src={studioCypher} widths={[800, 1458]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station Bastille chosen and its properties shown beside the graph" />
+                        <figcaption>Cypher on Postgres, compiled to SQL by Drivine: the metro network from <a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock ’n’ Roll Traffic Routing, with Neo4j</a>, now on any store. The station chosen is shown beside it.</figcaption>
                     </figure>
-                    <p class="note">Early days: run it from <a href="https://github.com/liberation-data/drivine-studio">source</a>.</p>
+                    <p class="note">Early days: <a href="https://github.com/liberation-data/drivine-studio#install-it-yourself">build it from source</a> for macOS, Windows or Linux.</p>
                 </div>
             </section>
 
@@ -640,6 +678,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>TypeScript</span><a href="https://github.com/liberation-data/drivine">GitHub</a><a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a></div>
                     <div><span>Python</span><a href="https://github.com/liberation-data/drivine-python">GitHub</a><a href="https://pypi.org/project/drivine/">PyPI</a></div>
                     <div><span>JVM</span><a href="https://github.com/liberation-data/drivine4j">GitHub</a><a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a></div>
+                    <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={`${studioUrl}#install-it-yourself`}>Build it</a></div>
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
             </div>
@@ -656,16 +695,24 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     menu.querySelector('summary')?.focus();
                 }
             });
-            // The video's player loads only when asked for, from YouTube's no-cookie domain.
+            // The video loads only when asked for, and plays with its controls and its captions, shown from the start.
             document.querySelector<HTMLElement>('.watch .player')?.addEventListener('click', (event) => {
                 const player = event.currentTarget as HTMLElement;
-                const frame = document.createElement('iframe');
-                frame.src = `https://www.youtube-nocookie.com/embed/${player.dataset.video}?autoplay=1&rel=0&cc_load_policy=1`;
-                frame.title = 'Drivine: graph RAG on any database';
-                frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
-                frame.allowFullscreen = true;
-                player.replaceChildren(frame);
-                frame.focus({ preventScroll: true });
+                const video = document.createElement('video');
+                video.src = player.dataset.video!;
+                video.controls = true;
+                video.autoplay = true;
+                video.playsInline = true;
+                video.setAttribute('aria-label', 'Drivine: graph RAG on any database');
+                const captions = document.createElement('track');
+                captions.kind = 'captions';
+                captions.src = player.dataset.captions!;
+                captions.srclang = 'en';
+                captions.label = 'English';
+                captions.default = true;
+                video.append(captions);
+                player.replaceChildren(video);
+                video.focus({ preventScroll: true });
             }, { once: true });
             // Each install line copies itself, and says so for a moment.
             const copied = document.querySelector<HTMLElement>('.copied-status');
@@ -710,14 +757,16 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     }, 1400);
                 });
             });
-            // The hero's tip takes the visitor down to the video and starts it.
+            // The hero's tip takes the visitor down to the video and starts it, or plays it on once it has loaded.
             document.querySelector<HTMLAnchorElement>('.video-tip')?.addEventListener('click', (event) => {
                 const play = document.querySelector<HTMLButtonElement>('.watch .play');
-                if (!play) return;
+                const video = document.querySelector<HTMLVideoElement>('.watch video');
+                if (!play && !video) return;
                 event.preventDefault();
                 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
                 document.getElementById('watch')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth' });
-                play.click();
+                if (play) play.click();
+                else video?.play();
             });
             const buttons = document.querySelectorAll<HTMLButtonElement>('.tabs button');
             const samples = document.querySelectorAll<HTMLElement>('.panel pre[data-lang]');

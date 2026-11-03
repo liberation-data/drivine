@@ -1,6 +1,5 @@
-import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { PostgresSaveStatement } from '@/backend/postgres/PostgresSaveStatement';
-import { PostgresWriteStatement } from '@/backend/postgres/PostgresWriteStatement';
+import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
 import { NodeWrites, RootStep, WritePlan } from '@/backend/sql/WritePlan';
@@ -26,7 +25,7 @@ import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 
 /**
- * Writes a save as one plan for drivine4j's write function, applied whole or not at all, with or without a transaction.
+ * Writes a save as one plan for drivine4j's write function (Postgres's, or SQLite's: see WriteFunction), applied whole or not at all, with or without a transaction.
  * It decides what OracleSaveBuilder decides, from the same model: the root found (or made) and locked, checked against
  * the object's stamp when it carries one, its properties written and its labels set; the relationships named in
  * `replace` trimmed; then each related node written and joined, as deep as the view goes. The function keeps stamps by
@@ -40,7 +39,7 @@ export class PostgresSaveBuilder {
     private options: SaveOptions<any> = {};
 
     constructor(
-        private readonly graph: PostgresGraph,
+        private readonly graph: WriteFunction,
         private readonly registry?: ModelRegistry
     ) {}
 
@@ -197,7 +196,8 @@ export class PostgresSaveBuilder {
             drop: write.remove,
             owned: write.record
                 ? { property: write.record.property, clear: write.record.replace, base: write.model.labels }
-                : undefined
+                : undefined,
+            lower: write.lower
         };
         return this.plan.node(
             this.plan.shape(write.model.labels, key),
@@ -228,7 +228,7 @@ export class PostgresSaveBuilder {
 
     private statement(root: FragmentModel, rootObject: any, expected?: string): SaveStatement {
         return new PostgresSaveStatement(
-            PostgresWriteStatement.call(this.graph, 'STAMPS'),
+            this.graph.writeCall('STAMPS'),
             { ...PostgresWriteStatement.bindings(this.plan), root: { id: idOf(root, rootObject) } },
             root,
             rootObject,

@@ -3,6 +3,7 @@ import { DrivineError } from '@/DrivineError';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
+import { Aggregates } from '@/cypher/sql/Aggregates';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { CypherWriter } from '@/cypher/sql/CypherWriter';
 import {
@@ -16,11 +17,12 @@ import {
 } from '@/cypher/sql/CypherSyntax';
 import { javaDouble, jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
-import { Procedure, ProcedureCall, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
+import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { Shared, TemporalSql } from '@/cypher/sql/TemporalSql';
 import { Temporals } from '@/cypher/sql/Temporals';
 import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
+import { VariableKinds } from '@/cypher/sql/VariableKinds';
 import { CypherFloat } from '@/cypher/ast/Expression';
 
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
@@ -112,6 +114,13 @@ export abstract class SqlCypherCompiler {
     /** How many times {@link shared} has bound its values, which an aggregate's argument it would bind in is worked out first for: see {@link binds}. */
     private sharedBindings = 0;
 
+    /**
+     * Whether SQL is written only to be searched for a subquery of the statement's own, not run: {@link sharedBound} then
+     * writes its values beside its body, read there by names of no subquery, so neither adds a `SELECT` (see
+     * {@link probed}).
+     */
+    private probing = false;
+
     private temporalsOf?: Temporals;
 
     /** The store's SQL for temporal values, which {@link temporals} works openCypher's out of. */
@@ -133,7 +142,7 @@ export abstract class SqlCypherCompiler {
 
     /** openCypher's temporal values: see {@link Temporals}. */
     get temporals(): Temporals {
-        this.temporalsOf ??= new Temporals(this.temporalSql, this.sharedList);
+        this.temporalsOf ??= new Temporals(this.temporalSql, this.sharedList, () => this.sharing);
         return this.temporalsOf;
     }
 
@@ -147,6 +156,10 @@ export abstract class SqlCypherCompiler {
      * where it writes.
      */
     compileQuery(query: Query, parameters: Record<string, any>): CompiledCypher {
+        // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
+        VariableKinds.check(query);
+        // An aggregate in a WHERE too.
+        Aggregates.check(query);
         if (query.unions.length > 0) {
             return this.withFunctions(this.union(query, parameters));
         }
@@ -223,6 +236,21 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * What `work` gives, its SQL only searched for a subquery of the statement's own: see {@link probing}. Compiled
+     * {@link toSee}, so the names it takes and the functions it declares are given back: a `reduce`'s step written so
+     * would declare a function that reads no value it names.
+     */
+    probed<T>(work: () => T): T {
+        const was = this.probing;
+        this.probing = true;
+        try {
+            return this.toSee(work);
+        } finally {
+            this.probing = was;
+        }
+    }
+
+    /**
      * `body` over `values`, each read by name where one is long: bound once in a subquery, so a body that reads a value
      * more than once (to test its kind, then to read it) does not write it out again, and operations nested in one
      * another do not grow the statement exponentially. Short values are written where they are read. Oracle groups by
@@ -237,6 +265,9 @@ export abstract class SqlCypherCompiler {
 
     /** `body` over `values` {@link bound} as {@link shared} binds them, and counted so: see {@link binds}. */
     sharedBound(values: string[], body: (names: string[]) => string): string {
+        if (this.probing) {
+            return [...values, body(values.map((_, i) => `probed.v${i + 1}`))].join(' ');
+        }
         this.sharedBindings++;
         return this.bound(values, body);
     }
@@ -248,6 +279,11 @@ export abstract class SqlCypherCompiler {
 
     /** `body` over the sides `a` and `b` of a `+`, as {@link shared} binds them: see Oracle's. */
     sharedSum(a: string, b: string, body: (names: string[]) => string): string {
+        return this.shared([a, b], body);
+    }
+
+    /** `body` over the sides `a` and `b` of a comparison, an `IN` among them, as {@link shared} binds them: see Oracle's. */
+    sharedCompared(a: string, b: string, body: (names: string[]) => string): string {
         return this.shared([a, b], body);
     }
 
@@ -289,9 +325,52 @@ export abstract class SqlCypherCompiler {
      * The join of the lateral query `query`, named `name`, to the row: an `OPTIONAL CALL`'s or an `OPTIONAL MATCH`'s
      * keeps the row it finds nothing for, and a `CALL`'s does not.
      */
-    lateral(query: string, name: string, optional: boolean): string {
+    lateral(query: string, name: string, optional: boolean, _columns: [string, boolean][]): string {
         const text = `(\n${indent(query)}\n) ${name}`;
         return optional ? `LEFT JOIN LATERAL ${text} ON TRUE` : `CROSS JOIN LATERAL ${text}`;
+    }
+
+    /**
+     * The column `column` of the rows a {@link lateral} join named `name` gives, which holds JSON where `json`: on a
+     * store that joins no lateral query, read back out of the row it was gathered in.
+     */
+    lateralColumn(name: string, column: string, _json: boolean): string {
+        return `${name}.${column}`;
+    }
+
+    /** The item of the row `alias` of {@link elements}, as JSON. */
+    item(alias: string): string {
+        return `${alias}.item`;
+    }
+
+    /** The place of the item of the row `alias` of {@link elements} in its list, counted from 1. */
+    itemNo(alias: string): string {
+        return `${alias}.item_no`;
+    }
+
+    /** The id of the row `alias` of {@link idRows}. */
+    rowId(alias: string): string {
+        return `${alias}.id`;
+    }
+
+    /** The place of the id of the row `alias` of {@link idRows} in its list, counted from 1. */
+    rowOrd(alias: string): string {
+        return `${alias}.ord`;
+    }
+
+    /** The SQL truth value `sql` as JSON's: null where it is null. */
+    boolJson(sql: string): string {
+        return this.scalar(sql);
+    }
+
+    /** The term `term` of an `ORDER BY`, descending where `descending`, its nulls where Cypher puts them. */
+    orderTerm(term: string, descending: boolean): string {
+        return descending ? `${term} DESC` : term;
+    }
+
+    /** The whole number `a` divided by the whole number `b`, toward zero, as Cypher divides two whole numbers. */
+    wholeQuotient(a: string, b: string): string {
+        return `trunc(${a} / ${b})`;
     }
 
     /**
@@ -380,12 +459,37 @@ export abstract class SqlCypherCompiler {
      * thousand relationships' tokens is larger than Oracle's `=` compares, so Oracle compares them otherwise.
      */
     identityEquals(x: string, y: string): string {
-        return `${x} = ${y}`;
+        return this.jsonEquals(x, y);
     }
 
     /** Whether the JSON values `x` and `y`, neither of them null, are equal as JSON. */
     jsonEquals(x: string, y: string): string {
         return `${x} = ${y}`;
+    }
+
+    /** Whether the JSON value `x` is equal to `y`, the JSON of `given`, a value the statement gives that is not null. */
+    givenEquals(x: string, y: string, _given: unknown): string {
+        return this.jsonEquals(x, y);
+    }
+
+    /**
+     * A test of the JSON value `value` alone, where an `IN` of it in a list whose items the statement writes or is given,
+     * `items`, each a text, a number, a truth value or null, compares each item with it as JSON only where the test
+     * holds, and finds it in none where it doesn't: undefined where each item is compared by {@link jsonEquals}. See
+     * Oracle's.
+     */
+    givenItemsTest(_value: string, _items: unknown[]): string | undefined {
+        return undefined;
+    }
+
+    /**
+     * Whether an `IN` of such items, where none is equal to the value, is null where they hold a null and else false, as
+     * the statement is compiled, and the value is not read for its nulls: such items are equal to no value that holds
+     * one, and a comparison with one of them is null only where the item is null. Else the value is read for its nulls,
+     * and compared with each item again where none is equal, as with any list. See Oracle's.
+     */
+    get givenItemsDecided(): boolean {
+        return false;
     }
 
     /** Whether the JSON values `x` and `y`, of one kind, a number, a text or a truth value, stand as `operator` says (`<`, `>=`…). */
@@ -408,6 +512,33 @@ export abstract class SqlCypherCompiler {
      */
     openSortKey(jsonSql: string): string[] {
         return [this.sortKey(jsonSql)];
+    }
+
+    /**
+     * {@link openSortKey} of a value that may be JSON's null ({@link JsonValue.jsonNull}): JSON's null ties with SQL's, as
+     * Cypher has one null, so a term after it decides their order (#497). Where a store's {@link openSortKey} does not tie
+     * them already, it says so.
+     */
+    jsonNullSortKey(jsonSql: string): string[] {
+        return this.openSortKey(jsonSql);
+    }
+
+    /**
+     * The JSON value `json`, JSON's null read as SQL's, where rows are given by it to a `UNION` that compares them, and by
+     * default where they are grouped or kept distinct ({@link groupedNull}): as {@link nullIfJsonNull}, but where a store
+     * binds a long value in a subquery there, which no store groups by, written out where it is read.
+     */
+    comparedNull(jsonSql: string): string {
+        return this.nullIfJsonNull(jsonSql);
+    }
+
+    /**
+     * The JSON value `json` as rows are grouped or kept distinct by it, JSON's null and SQL's one: as {@link comparedNull},
+     * but where a store makes them one more cheaply in a value that each row reads alike, as SQL's null read as JSON's, it
+     * says so (#497).
+     */
+    groupedNull(jsonSql: string): string {
+        return this.comparedNull(jsonSql);
     }
 
     /**
@@ -434,14 +565,14 @@ export abstract class SqlCypherCompiler {
         return this.shared([list], ([x]) => {
             const key = (of: string, at: number): string => {
                 const alias = `mk${at}`;
-                const item = `${alias}.item`;
+                const item = this.item(alias);
                 const itemKey =
                     at === 1
                         ? this.temporalSql.sortable(this.temporals.moment(this.text(item), kind))
                         : key(item, at - 1);
                 const joined = this.joinedTexts(
                     `CASE WHEN ${this.isJsonNull(item)} THEN '~' ELSE ${itemKey} END`,
-                    `${alias}.item_no`
+                    this.itemNo(alias)
                 );
                 return `(SELECT COALESCE(${joined}, '') || '!' FROM ${this.temporalElements(of, alias)})`;
             };
@@ -576,6 +707,15 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The property `key` of the node or relationship whose properties are `props`, where it is an argument of
+     * `coalesce()`: as {@link propertyOf} reads it, null where it is JSON's null, but on a store that must read such an
+     * argument apart.
+     */
+    coalescedProperty(props: string, key: string): string {
+        return this.nullIfJsonNull(this.propertyOf(props, key));
+    }
+
+    /**
      * The value at `keys`, each of a map in the one before, in the row a write is making (`Procedure.ROW`), where a
      * statement of the write reads it to work out what it writes: as {@link propertyOf} reads each key, but on a store
      * that must read it apart.
@@ -620,6 +760,61 @@ export abstract class SqlCypherCompiler {
         return `REPLACE(${text}, ${search}, ${replacement})`;
     }
 
+    /**
+     * The steps `program` as the statements of a procedural language, each ending in `;`, indented by how deep in loops
+     * and conditions it is, from `depth`: a loop over a query's rows is `FOR … IN (…) LOOP`, a value set into a variable
+     * `SELECT … INTO …` or `… := …`, and the rows returned and a failure the store's own, {@link returnRows} and
+     * {@link raise}.
+     */
+    statements(program: ProcedureStep[], depth: number = 0): string[] {
+        const prefix = '    '.repeat(depth);
+        const line = (text: string): string =>
+            text
+                .split('\n')
+                .map((it) => prefix + it)
+                .join('\n');
+        return program.flatMap((step): string[] => {
+            switch (step.kind) {
+                case 'Select':
+                    return [line(`${step.planned};`)];
+                case 'Let':
+                    return [line(`${step.variable} := ${step.expression};`)];
+                case 'Loop':
+                    return [
+                        line(
+                            step.multiline
+                                ? `FOR ${step.record} IN (\n${indent(step.query)}\n) LOOP`
+                                : `FOR ${step.record} IN (${step.query}) LOOP`
+                        ),
+                        ...this.statements(step.body, depth + 1),
+                        line('END LOOP;')
+                    ];
+                case 'If':
+                    return [
+                        line(`IF ${step.condition} THEN`),
+                        ...this.statements(step.body, depth + 1),
+                        line('END IF;')
+                    ];
+                case 'Raise':
+                    return [line(this.raise(step.message))];
+                case 'Execute':
+                    return [line(`${step.statement}${step.into !== undefined ? ` INTO ${step.into}` : ''};`)];
+                default:
+                    return this.returnRows(step.query).map(line);
+            }
+        });
+    }
+
+    /** The statements of a procedural language that return the rows of the query `query`, whose one column is `result`: see {@link statements}. */
+    returnRows(_query: string): string[] {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
+
+    /** The statement of a procedural language that fails the procedure with `message`: see {@link statements}. */
+    raise(_message: string): string {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
+
     /** The parameters of a statement that only reads, each bound at a marker of its own. */
     private readParameters(parameters: Record<string, any>): Parameters {
         return new Parameters(
@@ -660,14 +855,19 @@ export abstract class SqlCypherCompiler {
             );
         }
         const writer = new CypherWriter(this, this.readParameters(parameters));
-        const rows = parts
-            .map(
-                (clauses, i) =>
-                    `SELECT ${i + 1} AS part, ${this.rowNumber} AS n, q.result FROM (\n${indent(
-                        writer.query({ clauses, unions: [] })
-                    )}\n) q`
-            )
-            .join('\nUNION ALL\n');
+        // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
+        writer.give(query);
+        // Its rows are compared, as a UNION without ALL compares them: see CypherWriter.comparingParts.
+        const rows = writer.comparingParts(!query.unions[0].all, () =>
+            parts
+                .map(
+                    (clauses, i) =>
+                        `SELECT ${i + 1} AS part, ${this.rowNumber} AS n, q.result FROM (\n${indent(
+                            writer.query({ clauses, unions: [] })
+                        )}\n) q`
+                )
+                .join('\nUNION ALL\n')
+        );
         let sql: string;
         if (query.unions[0].all) {
             sql = `SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n`;
@@ -768,9 +968,10 @@ export abstract class SqlCypherCompiler {
 
     /**
      * Whether the JSON value `jsonSql`, not null, holds a null in a list or a map, at any depth: exactly, as an `IN` takes
-     * a value that holds one to be equal to no item.
+     * a value that holds one to be equal to no item. Undefined where the store's {@link jsonEquals} is already null for a
+     * value that holds one, as Cypher's comparison is, so no test is needed.
      */
-    abstract holdsNull(jsonSql: string): string;
+    abstract holdsNull(jsonSql: string): string | undefined;
 
     /**
      * Whether the JSON values `x` and `y`, neither of them null, are equal, as Cypher compares values that may hold a
@@ -927,17 +1128,11 @@ export abstract class SqlCypherCompiler {
     // ----- A store's procedure, for a statement that writes -----
 
     /**
-     * The statement that runs the procedure whose statements are `body`, each ending in `;`, and gives the rows it
-     * returns, of one column, {@link returnRows}. The procedure declares the variables {@link Procedure} names and sets
-     * its parameters from the object bound at {@link PARAMETERS_OBJECT}.
+     * The statement that runs the procedure whose steps are `program`, and gives the rows it returns, of one column. Its
+     * variables are those {@link Procedure} names, its parameters set from the object bound at
+     * {@link PARAMETERS_OBJECT}. A store with a procedural language writes the steps in it: see {@link statements}.
      */
-    abstract procedure(body: string[]): ProcedureCall;
-
-    /** The statements that return the rows of the query `query`, whose one column is `result`. */
-    abstract returnRows(query: string): string[];
-
-    /** The statement that fails the procedure with `message`. */
-    abstract raise(message: string): string;
+    abstract procedure(program: ProcedureStep[]): ProcedureCall;
 
     /**
      * A whole number that fails the statement when it is worked out, with `message` and the SQL value `value` it names:

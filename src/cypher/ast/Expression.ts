@@ -248,7 +248,16 @@ export function sameExpression(a: Expression, b: Expression): boolean {
     return expressionKey(a) === expressionKey(b);
 }
 
-/** A text that is the same for two expressions where they are the same. */
+/**
+ * A text that is the same for two expressions where they are the same: a function's name in any case, as Neo4j names
+ * a function, so `toUpper(x)` is the key `TOUPPER(x)` is and neither is refused as grouped without being told.
+ */
 export function expressionKey(expression: Expression): string {
-    return JSON.stringify(expression, (_, value) => (value instanceof CypherFloat ? { float: value.value } : value));
+    return JSON.stringify(expression, (_, value) =>
+        value instanceof CypherFloat
+            ? { float: value.value }
+            : value?.kind === 'Function'
+              ? { ...value, name: (value as FunctionCall).name.toLowerCase() }
+              : value
+    );
 }

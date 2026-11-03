@@ -9,7 +9,7 @@ graph:
 2. **Object manager** (`StatelessGraphObjectManager`): a high-level API that maps decorated classes, with a typed
    query DSL whose references come from the classes themselves.
 
-A Cypher statement runs on every store, the SQL ones too: on Postgres and Oracle, Drivine compiles it to SQL. See
+A Cypher statement runs on every store, the SQL ones too: on Postgres, Oracle and SQLite, Drivine compiles it to SQL. See
 [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database).
 
 > **On Python or the JVM?** [drivine-python](https://github.com/liberation-data/drivine-python) (`pip install drivine`)

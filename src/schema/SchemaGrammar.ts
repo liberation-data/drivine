@@ -4,8 +4,11 @@ import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { PostgresSchemaGrammar } from '@/backend/postgres/PostgresSchemaGrammar';
+import { SqliteGraph } from '@/backend/sqlite/SqliteGraph';
+import { SqliteSchemaGrammar } from '@/backend/sqlite/SqliteSchemaGrammar';
 import { SqlGraph } from '@/backend/sql/SqlGraph';
 import { labelExpression, quoteName } from '@/backend/Cypher';
+import type { LowerCopyStatements } from '@/schema/LowerCopyCatalog';
 import {
     FullTextIndexSpec,
     itemName,
@@ -50,6 +53,11 @@ export interface SchemaGrammar {
     readonly labelledIndexes?: boolean;
     /** Whether a uniqueness constraint needs a range index over its properties, made first. */
     readonly uniqueNeedsRange?: boolean;
+    /**
+     * The statements that fill in the lowercased copies of a property and record that every node of a label has them
+     * (see LowerCopyStatements): Cypher, on the store's node, unless the engine speaks otherwise.
+     */
+    readonly lowerCopies?: LowerCopyStatements;
     /** A statement listing range indexes, and how to read its rows. */
     listRanges: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listUniques: { statement: string; read: (rows: any[]) => SchemaItem[] };
@@ -87,6 +95,11 @@ export interface SchemaGrammar {
      * (`uniqueNeedsRange`, FalkorDB) or is made beside it (Memgraph, Oracle, Postgres).
      */
     blockedByIndex?(failure: unknown): boolean;
+    /**
+     * Throws for a uniqueness constraint the engine can't make, `spec` being as it is made (see `madeAs`), before
+     * anything is filled in or made for it. Absent where the engine can make any.
+     */
+    requireConstrainable?(spec: UniquenessConstraintSpec): void;
 }
 
 /** Neo4j's code for an index over the schema a constraint would make its own index over. */
@@ -301,9 +314,29 @@ const FALKORDB_UNIQUES =
     "CALL db.constraints() YIELD type, label, properties, entitytype, status WHERE type = 'UNIQUE' AND entitytype = 'NODE' " +
     'RETURN {label: label, properties: properties, status: status}';
 
+/** A name `GRAPH.CONSTRAINT` takes, as FalkorDB checks it. */
+const FALKORDB_CONSTRAINABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export const FALKORDB_SCHEMA: SchemaGrammar = {
     conflicts: cypherConflicts('id'),
     engine: 'FalkorDB',
+    /**
+     * `GRAPH.CONSTRAINT` takes a label and properties as plain names, and has no way to quote one: a property whose
+     * name holds a dot, as a lowercased copy's does, can be indexed and not constrained (FalkorDB/FalkorDB#551).
+     */
+    requireConstrainable(spec: UniquenessConstraintSpec): void {
+        const refused = spec.properties.filter((it) => !FALKORDB_CONSTRAINABLE.test(it));
+        if (refused.length) {
+            throw new DrivineError(
+                `FalkorDB cannot make the uniqueness constraint ${itemName(spec)} on ${
+                    spec.label
+                }(${spec.properties.join(', ')}): GRAPH.CONSTRAINT takes only a plain name for a property, and ${refused
+                    .map((it) => `'${it}'`)
+                    .join(', ')} is not one. A uniqueness constraint that ignores case is over the lowercased copy, ` +
+                    'named so. See https://github.com/FalkorDB/FalkorDB/issues/551'
+            );
+        }
+    },
     rangesPerProperty: true,
     uniqueNeedsRange: true,
     listVectors: {
@@ -395,7 +428,7 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     }
 };
 
-/** The schema grammar of an engine; on Oracle and Postgres, over `graph` (the default graph unless given). */
+/** The schema grammar of an engine; on Oracle, Postgres and SQLite, over `graph` (the default graph unless given). */
 export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGrammar {
     switch (type) {
         case DatabaseType.NEO4J:
@@ -408,6 +441,8 @@ export function schemaGrammarFor(type: DatabaseType, graph?: SqlGraph): SchemaGr
             return new OracleSchemaGrammar(graph instanceof OracleGraph ? graph : new OracleGraph(graph?.name));
         case DatabaseType.POSTGRES:
             return new PostgresSchemaGrammar(graph instanceof PostgresGraph ? graph : new PostgresGraph(graph?.name));
+        case DatabaseType.SQLITE:
+            return new SqliteSchemaGrammar(graph instanceof SqliteGraph ? graph : new SqliteGraph(graph?.name));
         default:
             throw new DrivineError(`${type} has no schema management.`);
     }

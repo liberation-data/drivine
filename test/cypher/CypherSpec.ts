@@ -60,6 +60,13 @@ const BEYOND_2_53: Skip = {
 };
 
 /**
+ * {@link BEYOND_2_53} on the SQL stores alone: these steps expect a float past a long's range, which a JavaScript number
+ * can't tell from the whole number past it that a SQL store sums exactly, so a store that sums so would pass them all the
+ * same. Neo4j, which gives the float, runs them.
+ */
+const BEYOND_2_53_ON_SQL: Skip = { ...BEYOND_2_53, on: ['sql'] };
+
+/**
  * A JavaScript number does not tell a float that is a whole number, 2.0, from the whole number 2, so a SQL store, which
  * binds a parameter as JSON, binds such a parameter as a whole number: these steps bind one, and expect it back as a
  * float. Neo4j's driver sends a number as a float, so Neo4j runs them. The spec reads a whole number as a `bigint`, so a
@@ -83,16 +90,98 @@ function wholeFloat(value: any): boolean {
  * differs says so with `except` in the spec. The spec's README names the steps beyond 2^53 as those such a library
  * skips; the whole float parameter's is skipped for the same cause, what a JavaScript number cannot hold.
  */
-const SKIPPED: Record<string, Record<string, [number[], Skip]>> = {
+const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
     'queries.yaml': {
         // The greatest whole number and the least, written as literals.
-        'Integer bounds': [[1], BEYOND_2_53],
+        'Integer bounds': [[[1], BEYOND_2_53]],
+        // A sum past a long's range, which Postgres and Oracle sum exactly as yet (#472), and one that reaches the
+        // greatest whole number and the least, which Neo4j gives as an integer; and on SQLite, a sum past the greatest,
+        // which SQLite's sum() refuses as an integer overflow, where the compiler here reads the literal as a float.
+        'Aggregates of floats': [
+            [[13, 14, 15, 16], BEYOND_2_53_ON_SQL],
+            [[17, 18, 19], BEYOND_2_53]
+        ],
         // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, toString($seven) of
         // seven = 1.0e+7, and toString($f * 2).
-        'A float parameter with no fraction': [[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]
+        'A float parameter with no fraction': [[[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]],
+        // $x / $z of x = 3.0 and z = 0.0, which a SQL store binds as the integer 0, so it fails or gives null as a division
+        // by an integer zero does, where a float zero gives an infinity.
+        'NaN worked out': [[[5], WHOLE_FLOAT_PARAMETER]]
     },
-    'writes.yaml': { 'Typical app round trip': [[19, 20, 21], BEYOND_2_53] }
+    'writes.yaml': { 'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]] }
 };
+
+/**
+ * The steps of a spec tag past what Drivine runs that a port here has yet to make pass, by file and case: the steps (from
+ * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
+ * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
+ */
+const HELD: Record<string, Record<string, Hold[]>> = {
+    'queries.yaml': {
+        // A NaN or infinite parameter is bound as null (step 6 gives null on every store, and step 11 runs on Postgres only).
+        'NaN and the infinities as parameters': [
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], on: ['postgres'] },
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['oracle'] },
+            // drivine4j holds the case on SQLite too, for liberation-data/drivine4j#295.
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['sqlite'] }
+        ],
+        // Postgres works float arithmetic out as numeric, so a division or % by zero fails, and SQLite's gives null (#536,
+        // which covers SQLite too). toFloat reads no NaN or infinity by Java's names there (#573). Oracle holds NaN equal
+        // to NaN (#512). Step 5 is skipped on the SQL stores (SKIPPED).
+        'NaN worked out': [
+            { issue: 536, steps: [1, 2, 3, 4, 6, 13], on: ['postgres'] },
+            { issue: 536, steps: [1, 2, 4, 6, 13], on: ['sqlite'] },
+            { issue: 573, steps: [16, 18, 19], on: ['postgres', 'sqlite'] },
+            { issue: 512, steps: [2, 3, 18], on: ['oracle'] }
+        ],
+        // toString(0.0 / 0.0) and the infinities: the division fails on Postgres, and gives null on SQLite.
+        'Floats written as text': [{ issue: 536, steps: [5], on: ['postgres', 'sqlite'] }],
+        // A float the statement makes, not a written one, is taken as a start or length and cut toward zero.
+        'Start and length of a text function': [{ issue: 538, steps: [6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }],
+        // Oracle gives every row the first row's path after the WITH.
+        'A path a WITH passes on': [{ issue: 556, steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 16], on: ['oracle'] }],
+        // A float literal past a double's range is read as an infinity, not refused. Postgres fails on each step of its
+        // own, reading the infinity as JSON (`CAST('Infinity' AS jsonb)`), which is all the spec asks of it, and SQLite
+        // on step 1. Step 4, too small to tell from 0, passes.
+        'Float bounds': [
+            { issue: 508, steps: [1, 2, 3], on: ['oracle'] },
+            { issue: 508, steps: [2, 3], on: ['sqlite'] }
+        ]
+    },
+    'writes.yaml': {
+        'NaN and the infinities written': [
+            { issue: 344, steps: [4], on: ['postgres'] },
+            { issue: 344, steps: [1, 2, 3], on: ['oracle'] },
+            { issue: 344, steps: [1, 2, 5], on: ['sqlite'] },
+            // The infinities summed: Oracle stores neither, bound as null (#344). SQLite's sum() and avg() of both give 0
+            // and null (#579), and it too stores the -Infinity of step 6 as null until #344's port lands. Step 6 has no
+            // rows or error to check, so passes.
+            { issue: 344, steps: [7], on: ['oracle'] },
+            { issue: 579, steps: [7], on: ['sqlite'] }
+        ],
+        // A MERGE of a null property makes the element, on every run (#569), so the counts after are off too. Oracle's
+        // NaN, bound as null, does the same (#569), and is written as null by ON CREATE SET, ON MATCH SET and in a
+        // list (#344). Steps 3 and 11 have no rows or error to check, so pass.
+        'MERGE of a null or NaN property': [
+            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 13], on: ['postgres'] },
+            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 12, 13], on: ['sqlite'] },
+            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 9, 10, 12, 13], on: ['oracle'] },
+            { issue: 344, steps: [14, 15, 16], on: ['oracle'] }
+        ]
+    },
+    'refusals.yaml': {
+        // A float literal past a double's range is read as an infinity, not refused.
+        'Float too large': [{ issue: 508, steps: 'all', on: ['sql'] }],
+        // A float the statement makes, not a written one, is not refused.
+        'Start or length of a text function': [{ issue: 538, steps: [6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }]
+    }
+};
+
+interface Hold {
+    issue: number;
+    steps: number[] | 'all';
+    on: string[];
+}
 
 /**
  * Reads the spec file `file`. A whole number is a `bigint`, as the spec writes it, so a runner binds it as an integer
@@ -114,8 +203,8 @@ function named(names: string[], store: string): boolean {
 
 /** Whether the step at `index` (from 0) of `case` in `file` is skipped on `store`: see {@link SKIPPED}. */
 export function skipped(file: string, cypherCase: CypherCase, index: number, store: string): boolean {
-    const [steps, skip] = SKIPPED[file]?.[cypherCase.name] ?? [[], undefined];
-    if (!skip || !steps.includes(index + 1)) {
+    const [, skip] = (SKIPPED[file]?.[cypherCase.name] ?? []).find(([steps]) => steps.includes(index + 1)) ?? [];
+    if (!skip) {
         return false;
     }
     if (!skip.holds(cypherCase.steps[index])) {
@@ -137,7 +226,10 @@ export function trimIndent(text: string): string {
     return lines.map((it) => it.substring(Math.min(indent, it.length))).join('\n');
 }
 
-/** `value` with each `{$repeat: text, times: n}` in it written out, and each whole number given by `whole`. */
+/**
+ * `value` with each `{$repeat: text, times: n}` in it written out, each `{$float: "NaN"}`, `{$float: "Infinity"}` and
+ * `{$float: "-Infinity"}` the number it names, and each whole number given by `whole`.
+ */
 export function valuesFor(value: any, whole: (value: bigint) => any): any {
     if (typeof value === 'bigint') {
         return whole(value);
@@ -150,16 +242,67 @@ export function valuesFor(value: any, whole: (value: bigint) => any): any {
         if (keys.length === 2 && keys.includes('$repeat') && keys.includes('times')) {
             return String(value.$repeat).repeat(Number(value.times));
         }
+        if (keys.length === 1 && keys[0] === '$float') {
+            return Number(value.$float);
+        }
         return Object.fromEntries(keys.map((key) => [key, valuesFor(value[key], whole)]));
     }
     return value;
 }
 
+/** The issue the step at `index` (from 0) of `case` in `file` is held for on `store`, if it is: see {@link HELD}. */
+export function heldFor(file: string, cypherCase: CypherCase, index: number, store: string): number | undefined {
+    return (HELD[file]?.[cypherCase.name] ?? []).find(
+        (hold) => named(hold.on, store) && (hold.steps === 'all' || hold.steps.includes(index + 1))
+    )?.issue;
+}
+
+/** A step that gives rows, or fails with a message, not as the spec says. */
+class Mismatch extends Error {}
+
 /**
- * Runs the step at `index` of `cypherCase` on `store`, and checks what it gives or how it fails. `run` gives a step's
- * rows, or fails as the store fails.
+ * Runs the step at `index` of `cypherCase`, of the spec file `file`, on `store`, and checks what it gives or how it
+ * fails; a step held there ({@link HELD}) is checked to fail as it does until its port lands, by rows or a message
+ * not as the spec says, or as the store fails, not as the runner crashes. `run` gives a step's rows, or fails as the
+ * store fails.
  */
 export async function check(
+    file: string,
+    cypherCase: CypherCase,
+    index: number,
+    store: string,
+    run: (step: CypherStep) => Promise<any[]>
+): Promise<void> {
+    const issue = heldFor(file, cypherCase, index, store);
+    if (issue === undefined) {
+        await checkStep(cypherCase, index, store, run);
+        return;
+    }
+    let storeFailed = false;
+    try {
+        await checkStep(cypherCase, index, store, async (step) => {
+            try {
+                return await run(step);
+            } catch (e) {
+                storeFailed = true;
+                throw e;
+            }
+        });
+    } catch (e) {
+        // Held, as liberation-data/drivine#<issue> has it, if it fails as the spec says it does not or as the store
+        // fails: anything else the runner throws is thrown on, so that a hold does not hide the runner's own crash.
+        if (e instanceof Mismatch || storeFailed) {
+            return;
+        }
+        throw e;
+    }
+    throw new Error(
+        `${file}, ${cypherCase.name}, step ${index + 1} is held on ${store} for liberation-data/drivine#${issue}, ` +
+            'and passes: take it out of HELD.'
+    );
+}
+
+async function checkStep(
     cypherCase: CypherCase,
     index: number,
     store: string,
@@ -178,7 +321,7 @@ export async function check(
     const expected = canonical(valuesFor(step.rows, Number), step, step.unordered ?? false);
     const actual = canonical(rows, step, step.unordered ?? false);
     if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-        throw new Error(`${where}\nExpected: ${JSON.stringify(expected)}\nReceived: ${JSON.stringify(actual)}`);
+        throw new Mismatch(`${where}\nExpected: ${JSON.stringify(expected)}\nReceived: ${JSON.stringify(actual)}`);
     }
 }
 
@@ -191,21 +334,25 @@ async function failure(step: CypherStep, where: string, run: (step: CypherStep) 
         failed = e as Error;
     }
     if (!failed) {
-        throw new Error(`Expected a failure: ${where}`);
+        throw new Mismatch(`Expected a failure: ${where}`);
     }
     if (typeof step.error === 'string' && failed.message !== step.error) {
-        throw new Error(`Expected <${step.error}>, but was <${failed.message}>: ${where}`);
+        throw new Mismatch(`Expected <${step.error}>, but was <${failed.message}>: ${where}`);
     }
     if (Array.isArray(step.error) && !step.error.includes(failed.message)) {
-        throw new Error(`Expected one of ${JSON.stringify(step.error)}, but was <${failed.message}>: ${where}`);
+        throw new Mismatch(`Expected one of ${JSON.stringify(step.error)}, but was <${failed.message}>: ${where}`);
     }
 }
 
 /**
  * `value` in a form that compares as the step says: a map as its entries in order where key order counts, and by its
- * keys sorted where it does not; a list sorted where its order does not count.
+ * keys sorted where it does not; a list sorted where its order does not count. NaN and the infinities are their names,
+ * which JSON would otherwise write as null.
  */
 function canonical(value: any, step: CypherStep, sorted: boolean = step.unorderedLists ?? false): any {
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+        return { $float: String(value) };
+    }
     if (Array.isArray(value)) {
         const items = value.map((it) => canonical(it, step));
         return sorted ? items.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)) : items;

@@ -1,7 +1,8 @@
 /**
  * A kind of temporal value, as openCypher has them. On a SQL store a temporal value is the ISO 8601 text a store keeps a
  * moment as, and `pattern` tells the kind from the text: a regular expression both stores read, written with capturing
- * groups alone, for Oracle's take no other kind.
+ * groups alone, for Oracle's take no other kind. A year is numbered as Neo4j and ISO 8601 number it, astronomically:
+ * `0000` is 1 BC and `-0044` is 45 BC.
  */
 export interface Temporal {
     readonly name: 'DATE' | 'LOCAL_TIME' | 'TIME' | 'LOCAL_DATE_TIME' | 'DATE_TIME' | 'DURATION';
@@ -9,22 +10,42 @@ export interface Temporal {
     readonly zoned: boolean;
     /** Whether a value of this kind is a moment or a time of day, which a duration is added to. */
     readonly instant: boolean;
+    /** The name of the function that makes a value of this kind: `date`, `localdatetime`… */
+    readonly function: string;
+    /**
+     * Where this kind has a date, `pattern` for a text of it whose year is 1000 or later, which every store reads as ISO
+     * 8601 writes it: no year BC, nor 0000, which Postgres and Oracle number otherwise. Undefined for a kind of no date.
+     */
+    readonly adPattern?: string;
 }
+
+/** How `pattern` opens for a kind with a date: the year, its sign before 1 BC. */
+const SIGNED_YEAR = '^-?[0-9]{4}';
 
 function kind(name: Temporal['name'], pattern: string, zoned: boolean = false): Temporal {
-    return { name, pattern, zoned, instant: name !== 'DURATION' };
+    const adPattern = pattern.startsWith(SIGNED_YEAR)
+        ? `^[1-9][0-9]{3}${pattern.substring(SIGNED_YEAR.length)}`
+        : undefined;
+    return {
+        name,
+        pattern,
+        zoned,
+        instant: name !== 'DURATION',
+        function: name.toLowerCase().replace(/_/g, ''),
+        adPattern
+    };
 }
 
-const DATE = kind('DATE', '^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+const DATE = kind('DATE', '^-?[0-9]{4}-[0-9]{2}-[0-9]{2}$');
 const LOCAL_TIME = kind('LOCAL_TIME', '^[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?$');
 const TIME = kind('TIME', '^[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})$', true);
 const LOCAL_DATE_TIME = kind(
     'LOCAL_DATE_TIME',
-    '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?$'
+    '^-?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?$'
 );
 const DATE_TIME = kind(
     'DATE_TIME',
-    '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})$',
+    '^-?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})$',
     true
 );
 /** `P1Y2M3W4DT5H6M7.5S`, each part optional and signed, or the whole negated: its parts are read by `DURATION_PARTS`. */

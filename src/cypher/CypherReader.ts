@@ -45,6 +45,7 @@ import {
     OC_StandaloneCallContext,
     OC_StringListNullPredicateExpressionContext,
     OC_StringPredicateExpressionContext,
+    OC_SubqueryCallContext,
     OC_SubqueryReadingsContext,
     OC_SymbolicNameContext,
     OC_UnaryAddOrSubtractExpressionContext,
@@ -162,7 +163,9 @@ function inQuery(call: OC_InQueryCallContext): Clause {
             invocation.oC_Expression().map(expression),
             yields(items),
             condition ? expression(condition.oC_Expression()) : undefined
-        )
+        ),
+        // Its WHERE may read any variable of the row.
+        importsAll: true
     };
 }
 
@@ -260,7 +263,7 @@ function updating(context: OC_UpdatingClauseContext): Clause {
     }
     const call = context.oC_SubqueryCall();
     if (call) {
-        return { kind: 'Call', optional: call.OPTIONAL() !== null, query: regular(call.oC_RegularQuery()) };
+        return subquery(call);
     }
     const foreach = context.oC_Foreach();
     if (foreach) {
@@ -316,10 +319,22 @@ function labelsOf(context: OC_NodeLabelsContext): string[] {
     return context.oC_NodeLabel().map((it) => schemaName(it.oC_LabelName().oC_SchemaName()));
 }
 
+/** `CALL { … }`, with the variables its brackets import where it has them, `CALL (a, b) { … }` or `CALL (*) { … }`. */
+function subquery(call: OC_SubqueryCallContext): Clause {
+    const bracketed = call.children.some((it) => it.getText() === '(');
+    return {
+        kind: 'Call',
+        optional: call.OPTIONAL() !== null,
+        query: regular(call.oC_RegularQuery()),
+        ...(bracketed ? { imports: call.oC_Variable().map(name) } : {}),
+        ...(call.children.some((it) => it.getText() === '*') ? { importsAll: true } : {})
+    };
+}
+
 function reading(context: OC_ReadingClauseContext): Clause {
     const call = context.oC_SubqueryCall();
     if (call) {
-        return { kind: 'Call', optional: call.OPTIONAL() !== null, query: regular(call.oC_RegularQuery()) };
+        return subquery(call);
     }
     const match = context.oC_Match();
     if (match) {
@@ -347,10 +362,17 @@ function projection(context: OC_ProjectionBodyContext): Projection {
     return {
         distinct: context.DISTINCT() !== null,
         star: items.children[0]?.getText() === '*',
-        items: items.oC_ProjectionItem().map((item) => ({
-            expression: expression(item.oC_Expression()!),
-            name: optionalName(item.oC_Variable()) ?? item.oC_Expression()!.getText()
-        })),
+        // As Neo4j names them: an item a map projection is, unnamed, after its variable, so `ORDER BY p.name` after
+        // `RETURN p {.name}, count(*)` reads the item.
+        items: items.oC_ProjectionItem().map((item) => {
+            const read = expression(item.oC_Expression()!);
+            return {
+                expression: read,
+                name:
+                    optionalName(item.oC_Variable()) ??
+                    (read.kind === 'MapProjection' ? read.variable : item.oC_Expression()!.getText())
+            };
+        }),
         orderBy: (context.oC_Order()?.oC_SortItem() ?? []).map((sort) => ({
             expression: expression(sort.oC_Expression()),
             descending: sort.DESC() !== null || sort.DESCENDING() !== null

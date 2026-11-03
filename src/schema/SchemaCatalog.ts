@@ -45,10 +45,27 @@ export class SchemaCatalog {
             ];
             return declarations.map((it) => {
                 const properties = it.fields.map(graphName);
+                // An item that ignores case is over the lowercased copies a @CaseInsensitive field keeps, and a save
+                // keeps none of another field: it would hold the nodes there were when it was ensured, and none after.
+                const uncopied = it.ignoreCase ? properties.filter((p) => !model.lowerCopied.includes(p)) : [];
+                if (uncopied.length) {
+                    throw new DrivineError(
+                        `The ${it.kind === 'UNIQUE' ? 'uniqueness constraint' : 'range index'} on ${
+                            type.name
+                        }(${it.fields.join(', ')}) ignores case, and ${uncopied
+                            .map((p) => `'${p}'`)
+                            .join(', ')} is not the property of a ` +
+                            '@CaseInsensitive field, which a save keeps a lowercased copy of. Add @CaseInsensitive to the field.'
+                    );
+                }
+                const ignoreCase = it.ignoreCase ? { ignoreCase: true } : {};
                 switch (it.kind) {
                     case 'UNIQUE':
                         // A violation's sample names each conflicting node by the fragment's @NodeId too.
-                        return uniquenessConstraint(label, properties, { nodeIdProperty: model.nodeIdProperty });
+                        return uniquenessConstraint(label, properties, {
+                            nodeIdProperty: model.nodeIdProperty,
+                            ...ignoreCase
+                        });
                     case 'FULLTEXT':
                         return fullTextIndex(label, properties);
                     case 'VECTOR': {
@@ -65,7 +82,7 @@ export class SchemaCatalog {
                         });
                     }
                     default:
-                        return rangeIndex(label, properties);
+                        return rangeIndex(label, properties, ignoreCase);
                 }
             });
         });
