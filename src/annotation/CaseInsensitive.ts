@@ -22,8 +22,23 @@ import { definePropertyMetadata } from '@/annotation/Metadata';
  * }
  * ```
  *
- * A write that doesn't go through Drivine, Cypher or SQL of your own, doesn't keep the copy in step: set it with
- * `LowerCopies.setClause`, or recreate the index.
+ * The object manager keeps the copy in step: `save`, `saveAll`, `create`, `update`, `patch`, `patchAll` and the save of
+ * a view. Cypher you send yourself does not, on any store: Drivine runs it as written, or compiles it to SQL, and adds
+ * nothing to it. Nor does SQL of your own. Such a write to the property sets the copy too, in a `SET` of its own after
+ * the one that writes the property, or is followed by a `recreate` of the index that ignores case, which fills every
+ * copy of the label in again:
+ *
+ * ```ts
+ * await pm.execute(
+ *     new QuerySpecification(
+ *         `MATCH (a:Account {id: $id}) SET a.email = $email SET ${LowerCopies.setClause('a', 'email')}`
+ *     ).bind({ id, email })
+ * );
+ * // or, after the writes:
+ * await gom.indexes.recreate(rangeIndex('Account', 'email', { ignoreCase: true }));
+ * ```
+ *
+ * `LowerCopies.setClause('a', 'email')` gives ``a.`__drivine.lower.email` = toLower(a.email)``.
  */
 export function CaseInsensitive(): PropertyDecorator {
     return (prototype: object, property: string | symbol) =>
