@@ -60,9 +60,6 @@ export interface Train {
 
 const RELEASE_REPO = 'liberation-data/drivine-release';
 
-/** Each library's name in a train manifest, and its repository here. */
-export const TRAIN_LIBRARIES: Record<string, Topic> = { drivine: 'ts', 'drivine-python': 'py', drivine4j: 'jvm' };
-
 export const trainUrl = (train: string): string => `https://github.com/${RELEASE_REPO}/blob/main/trains/${train}.json`;
 
 /** Train names are YYYY.MM or YYYY.MM.N: compared part by part as numbers, so 2026.10 is after 2026.9, and 2026.11.1 after 2026.11. */

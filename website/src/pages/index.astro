@@ -46,24 +46,23 @@ const SITE = 'https://drivine.org/';
 const VIDEO_SHARE = new URL('#watch', SITE).href;
 const SHARE_TEXT = 'Drivine: graph RAG on any database. Build AI apps on the database you already run.';
 
-import { REPOS, STUDIO, TRAIN_LIBRARIES, type Topic, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
+import { REPOS, STUDIO, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
 const studioStars = await starsOf(STUDIO.repo);
 const starLabel = (count: number | undefined) => (count === undefined ? '' : formatStars(count));
-// The newest released train, shown under the installs and versioning the Gradle line: without one, neither.
+// The newest released train, named under the installs and versioning them: without one, neither, and the installs take
+// the latest of each.
 const train = await releasedTrain();
-const order = (topic: Topic | undefined) => (topic ? Object.keys(REPOS).indexOf(topic) : Infinity);
-const trainLibraries = train
-    ? Object.entries(train.libraries)
-          .map(([library, version]) => ({ topic: Object.hasOwn(TRAIN_LIBRARIES, library) ? TRAIN_LIBRARIES[library] : undefined, library, version }))
-          // In REPOS' order, with a library the site doesn't know after the three, under its manifest name.
-          .sort((a, b) => order(a.topic) - order(b.topic))
-    : [];
 const drivine4jVersion = train?.libraries.drivine4j ?? '<version>';
-// The hero's copy button gives the coordinate with the train's version, so it pastes into Gradle as the card's line does.
-const drivine4jCoordinate = train?.libraries.drivine4j ? `org.drivine:drivine4j:${train.libraries.drivine4j}` : 'org.drivine:drivine4j';
+// The hero's installs, each pinned to the train's version of its library, so the three copied together work together.
+const pinned = (library: string, at: string) => (train?.libraries[library] ? `${at}${train.libraries[library]}` : '');
+const installs = [
+    `npm install @liberation-data/drivine${pinned('drivine', '@')}`,
+    `pip install drivine${pinned('drivine-python', '==')}`,
+    `org.drivine:drivine4j${pinned('drivine4j', ':')}`,
+];
 
 // The same view in each language, highlighted by hand: the panel switches between them.
 const tsSample = `<span class="a">@NodeFragment</span>({ labels: [<span class="s">'Person'</span>] })
@@ -241,7 +240,6 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .installs .copy.done::after { content: 'Copied'; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 7px; background: var(--accent); color: var(--ink); font-weight: 700; }
             .train { margin: 18px 0 0; font-size: 14px; color: #cfe3e7; text-shadow: 0 1px 8px rgba(0, 30, 40, 0.5); }
             .train a { color: #fff; font-weight: 500; }
-            .train span { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #fff; }
             .copied-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
             .intro { padding: 96px 32px 72px; }
@@ -425,7 +423,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     </a>
                 )}
                 <div class="installs" style={`margin-top: ${VIDEO ? 28 : 44}px`}>
-                    {['npm install @liberation-data/drivine', 'pip install drivine', drivine4jCoordinate].map((line) => (
+                    {installs.map((line) => (
                         <button type="button" class="copy" data-copy={line} aria-label={`Copy ${line}`}>
                             <code>{line}</code>
                             <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9z" fill="currentColor" /></svg>
@@ -435,9 +433,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 </div>
                 {train && (
                     <p class="train">
-                        <a href={trainUrl(train.train)}>Drivine {train.train}</a>:
-                        {trainLibraries.map(({ topic, library, version }) => <> {topic ? REPOS[topic].language : library} <span>{version}</span> ·</>)}
-                        {' '}Cypher spec <span>{train.spec}</span>
+                        <a href={trainUrl(train.train)}>Drivine {train.train}</a>
                     </p>
                 )}
             </div>

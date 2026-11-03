@@ -33,7 +33,8 @@ npm run build      # the same, into dist/
 `DRIVINE_PYTHON_DOCS=<dir>` and `DRIVINE4J_DOCS=<dir>` read local `docs/` folders instead, and
 `DRIVINE_PYTHON_README=<path>` and `DRIVINE4J_README=<path>` local READMEs.
 
-The landing page's star counts, and the newest released train under its installs (which also versions the Gradle
-line and the hero's drivine4j copy button), are fetched from GitHub's API when the site is built, with `GITHUB_TOKEN`
-if set: the train from liberation-data/drivine-release's `trains/<train>.json`, the newest whose `released` is set.
-What can't be fetched is left out: the Gradle line keeps `<version>`, and the copy button the bare coordinate.
+The landing page's star counts, and the newest released train named under its installs (which also pins the hero's
+three install commands and the Gradle line to the train's versions), are fetched from GitHub's API when the site is
+built, with `GITHUB_TOKEN` if set: the train from liberation-data/drivine-release's `trains/<train>.json`, the newest
+whose `released` is set. What can't be fetched is left out: the train's name goes, the installs are left unpinned, and
+the Gradle line keeps `<version>`.
