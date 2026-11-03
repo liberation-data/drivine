@@ -37,10 +37,11 @@ const VIDEO = `${base}video/drivine-explainer.mp4`;
 const VIDEO_CAPTIONS = `${base}video/drivine-explainer.vtt`;
 const VIDEO_ID = 'uETP0EN_04E';
 
-import { REPOS, TRAIN_LIBRARIES, type Topic, formatStars, releasedTrain, repoUrl, stars, trainUrl } from '../lib/github';
+import { REPOS, STUDIO, TRAIN_LIBRARIES, type Topic, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
+const studioStars = await starsOf(STUDIO.repo);
 const starLabel = (count: number | undefined) => (count === undefined ? '' : formatStars(count));
 // The newest released train, shown under the installs and versioning the Gradle line: without one, neither.
 const train = await releasedTrain();
@@ -183,6 +184,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .repo-menu .menu { position: absolute; right: 0; top: calc(100% + 10px); z-index: 5; min-width: 300px; display: flex; flex-direction: column; padding: 6px; border-radius: 12px; background: #04222c; border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
             .repo-menu .menu a { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 44px; padding: 8px 12px; border-radius: 8px; color: #cfe3e7; }
             .repo-menu .menu a:hover { background: rgba(255, 255, 255, 0.08); color: #fff; text-decoration: none; }
+            /* The libraries, then the studio that reads what they write: a rule between. */
+            .repo-menu .menu .studio-repo { margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0 0 8px 8px; }
             .repo-menu .menu strong { color: #fff; margin-right: 6px; }
             .repo-menu .hint { margin: 4px 12px 6px; font-size: 13px; color: #9db8bf; }
             .repo-menu .count { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; }
@@ -365,6 +368,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                             <a href={repoUrl('jvm')}>
                                 <span><strong>{REPOS.jvm.name}</strong> {REPOS.jvm.language}</span>
                                 {jvmStars !== undefined && <span class="count">★ {starLabel(jvmStars)}</span>}
+                            </a>
+                            <a href={studioUrl} class="studio-repo">
+                                <span><strong>{STUDIO.name}</strong> {STUDIO.language}</span>
+                                {studioStars !== undefined && <span class="count">★ {starLabel(studioStars)}</span>}
                             </a>
                             <p class="hint">★ Star them on GitHub: it helps others find Drivine.</p>
                         </div>
@@ -616,7 +623,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     </header>
                     <figure>
                         <Image src={studioCypher} widths={[800, 1458]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station Bastille chosen and its properties shown beside the graph" />
-                        <figcaption>Cypher on Postgres, compiled to SQL by Drivine: a metro network drawn as a graph, the station chosen shown beside it.</figcaption>
+                        <figcaption>Cypher on Postgres, compiled to SQL by Drivine: the metro network from <a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock ’n’ Roll Traffic Routing, with Neo4j</a>, now on any store. The station chosen is shown beside it.</figcaption>
                     </figure>
                     <p class="note">Early days: <a href="https://github.com/liberation-data/drivine-studio#install-it-yourself">build it from source</a> for macOS, Windows or Linux.</p>
                 </div>
@@ -670,6 +677,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>TypeScript</span><a href="https://github.com/liberation-data/drivine">GitHub</a><a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a></div>
                     <div><span>Python</span><a href="https://github.com/liberation-data/drivine-python">GitHub</a><a href="https://pypi.org/project/drivine/">PyPI</a></div>
                     <div><span>JVM</span><a href="https://github.com/liberation-data/drivine4j">GitHub</a><a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a></div>
+                    <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={`${studioUrl}#install-it-yourself`}>Build it</a></div>
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
             </div>

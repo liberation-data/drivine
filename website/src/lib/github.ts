@@ -10,6 +10,10 @@ export const REPOS = {
 
 export type Topic = keyof typeof REPOS;
 
+/** Drivine Studio: not a library with docs of its own, so not a topic, but in the GitHub menu beside them. */
+export const STUDIO = { name: 'Drivine Studio', language: 'Desktop app', repo: 'liberation-data/drivine-studio' } as const;
+export const studioUrl = `https://github.com/${STUDIO.repo}`;
+
 export const repoUrl = (topic: Topic): string => `https://github.com/${REPOS[topic].repo}`;
 
 /** A GET of GitHub's API, with GITHUB_TOKEN if it's set, given up after 10 s. */
@@ -24,8 +28,10 @@ const github = (path: string): Promise<Response> => {
 const counts = new Map<string, Promise<number | undefined>>();
 
 /** The repository's star count, fetched once per build. */
-export function stars(topic: Topic): Promise<number | undefined> {
-    const { repo } = REPOS[topic];
+export const stars = (topic: Topic): Promise<number | undefined> => starsOf(REPOS[topic].repo);
+
+/** Any of the project's repositories' star count, fetched once per build. */
+export function starsOf(repo: string): Promise<number | undefined> {
     if (!counts.has(repo)) {
         counts.set(
             repo,
