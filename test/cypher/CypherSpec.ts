@@ -103,7 +103,10 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
         ],
         // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, toString($seven) of
         // seven = 1.0e+7, and toString($f * 2).
-        'A float parameter with no fraction': [[[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]]
+        'A float parameter with no fraction': [[[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]],
+        // $x / $z of x = 3.0 and z = 0.0, which a SQL store binds as the integer 0, so it fails or gives null as a division
+        // by an integer zero does, where a float zero gives an infinity.
+        'NaN worked out': [[[5], WHOLE_FLOAT_PARAMETER]]
     },
     'writes.yaml': { 'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]] }
 };
@@ -122,8 +125,21 @@ const HELD: Record<string, Record<string, Hold[]>> = {
             // drivine4j holds the case on SQLite too, for liberation-data/drivine4j#295.
             { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['sqlite'] }
         ],
-        // Oracle holds NaN equal to NaN.
-        'NaN worked out': [{ issue: 512, steps: [2, 3], on: ['oracle'] }],
+        // Postgres works float arithmetic out as numeric, so a division or % by zero fails, and SQLite's gives null (#536,
+        // which covers SQLite too). toFloat reads no NaN or infinity by Java's names there (#573). Oracle holds NaN equal
+        // to NaN (#512). Step 5 is skipped on the SQL stores (SKIPPED).
+        'NaN worked out': [
+            { issue: 536, steps: [1, 2, 3, 4, 6, 13], on: ['postgres'] },
+            { issue: 536, steps: [1, 2, 4, 6, 13], on: ['sqlite'] },
+            { issue: 573, steps: [16, 18, 19], on: ['postgres', 'sqlite'] },
+            { issue: 512, steps: [2, 3, 18], on: ['oracle'] }
+        ],
+        // toString(0.0 / 0.0) and the infinities: the division fails on Postgres, and gives null on SQLite.
+        'Floats written as text': [{ issue: 536, steps: [5], on: ['postgres', 'sqlite'] }],
+        // A float the statement makes, not a written one, is taken as a start or length and cut toward zero.
+        'Start and length of a text function': [{ issue: 538, steps: [6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }],
+        // Oracle gives every row the first row's path after the WITH.
+        'A path a WITH passes on': [{ issue: 556, steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 16], on: ['oracle'] }],
         // A float literal past a double's range is read as an infinity, not refused. Postgres fails on each step of its
         // own, reading the infinity as JSON (`CAST('Infinity' AS jsonb)`), which is all the spec asks of it, and SQLite
         // on step 1. Step 4, too small to tell from 0, passes.
@@ -136,12 +152,28 @@ const HELD: Record<string, Record<string, Hold[]>> = {
         'NaN and the infinities written': [
             { issue: 344, steps: [4], on: ['postgres'] },
             { issue: 344, steps: [1, 2, 3], on: ['oracle'] },
-            { issue: 344, steps: [1, 2, 5], on: ['sqlite'] }
+            { issue: 344, steps: [1, 2, 5], on: ['sqlite'] },
+            // The infinities summed: Oracle stores neither, bound as null (#344). SQLite's sum() and avg() of both give 0
+            // and null (#579), and it too stores the -Infinity of step 6 as null until #344's port lands. Step 6 has no
+            // rows or error to check, so passes.
+            { issue: 344, steps: [7], on: ['oracle'] },
+            { issue: 579, steps: [7], on: ['sqlite'] }
+        ],
+        // A MERGE of a null property makes the element, on every run (#569), so the counts after are off too. Oracle's
+        // NaN, bound as null, does the same (#569), and is written as null by ON CREATE SET, ON MATCH SET and in a
+        // list (#344). Steps 3 and 11 have no rows or error to check, so pass.
+        'MERGE of a null or NaN property': [
+            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 13], on: ['postgres'] },
+            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 12, 13], on: ['sqlite'] },
+            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 9, 10, 12, 13], on: ['oracle'] },
+            { issue: 344, steps: [14, 15, 16], on: ['oracle'] }
         ]
     },
     'refusals.yaml': {
         // A float literal past a double's range is read as an infinity, not refused.
-        'Float too large': [{ issue: 508, steps: 'all', on: ['sql'] }]
+        'Float too large': [{ issue: 508, steps: 'all', on: ['sql'] }],
+        // A float the statement makes, not a written one, is not refused.
+        'Start or length of a text function': [{ issue: 538, steps: [6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }]
     }
 };
 
