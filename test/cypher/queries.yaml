@@ -669,7 +669,7 @@ cases:
         rows: [["trix", "tr", "Ma", "rix", "The Matrix", "The M_trix"]]
 
   - name: "Start and length of a text function"
-    description: "substring(), left() and right() refuse a written float and a start or length outside 0 to 2147483647, and cut a bound float toward zero, as Neo4j does."
+    description: "substring(), left() and right() refuse a float the statement writes or makes and a start or length outside 0 to 2147483647, and cut a bound float toward zero, as Neo4j does."
     steps:
       - note: "A written float is refused whatever the text, a whole one too."
         cypher: "RETURN left('hello', 2.7)"
@@ -682,6 +682,27 @@ cases:
         error: true
       - cypher: "RETURN right(null, 2.7)"
         error: true
+      - note: "So is a float the statement makes: toFloat(), a function that gives a float, arithmetic of numbers with a float side, a CASE of floats, an UNWIND of a list of floats written, and a WITH that binds one."
+        cypher: "RETURN left('hello', toFloat(2))"
+        error: true
+      - cypher: "RETURN right('hello', round(2.7))"
+        error: true
+      - cypher: "RETURN left('hello', 1.5 + 1)"
+        error: true
+      - cypher: "RETURN substring('hello', 1, 2 ^ 1)"
+        error: true
+      - cypher: "RETURN left('hello', CASE WHEN true THEN 2.5 ELSE 1.5 END)"
+        error: true
+      - cypher: "UNWIND [2.7] AS c RETURN left('hello', c)"
+        error: true
+      - cypher: "WITH 2.7 AS c RETURN substring('hello', c)"
+        error: true
+      - cypher: "WITH toFloat(2) AS c RETURN left(null, c)"
+        error: true
+      - note: "A value that may be an integer or a float is taken, and a float cut toward zero: an item of a list of both, and a CASE of both. Memgraph and FalkorDB refuse a float."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2.7] AS c RETURN [left('hello', c), left('hello', CASE WHEN c > 2 THEN 2 ELSE 1.5 END), right('hello', abs(c))]"
+        rows: [["h", "h", "o"], ["he", "he", "lo"]]
       - note: "Below 0, written, bound or read from data, it fails."
         cypher: "RETURN left('hello', -1)"
         error: true
@@ -2037,6 +2058,57 @@ cases:
           RETURN [a.name, length(p)] ORDER BY a.name
         rows: [["Hugo", null], ["Keanu", 1]]
 
+  - name: "A path a WITH passes on"
+    description: "A path a WITH passes on gives each row its own nodes and relationships when a later clause reads them."
+    steps:
+      - note: "Oracle gave every row the first row's nodes and relationships after the WITH (drivine4j#537)."
+        cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a RETURN a.name, [r IN relationships(p) | r.role] ORDER BY a.name"
+        rows: [["Carrie", ["Trinity"]], ["Keanu", ["Neo"]], ["Laurence", ["Morpheus"]]]
+      - cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a ORDER BY a.name RETURN relationships(p)[0].role"
+        rows: ["Trinity", "Neo", "Morpheus"]
+      - cypher: "MATCH p = (a:Person)-[:KNOWS]->(:Person) WITH p, a ORDER BY a.name RETURN [x IN nodes(p) | x.name]"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+      - cypher: "MATCH p = (a:Person)-[:KNOWS]->(:Person) WITH p, a ORDER BY a.name RETURN nodes(p)[1].name"
+        rows: ["Carrie", "Keanu"]
+      - cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a.name AS name ORDER BY name RETURN [name, [r IN relationships(p) | r.role]]"
+        rows: [["Carrie", ["Trinity"]], ["Keanu", ["Neo"]], ["Laurence", ["Morpheus"]]]
+      - cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a ORDER BY a.name RETURN [length(p), size(nodes(p)), head(nodes(p)).name, last(relationships(p)).role]"
+        rows: [[1, 2, "Carrie", "Trinity"], [1, 2, "Keanu", "Neo"], [1, 2, "Laurence", "Morpheus"]]
+      - note: "A WHERE on the WITH reads each row's path."
+        cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a WHERE relationships(p)[0].role = 'Neo' RETURN a.name"
+        rows: ["Keanu"]
+      - cypher: "MATCH p = (a:Person)-[:KNOWS]->(:Person) WITH p, a WITH p, a ORDER BY a.name RETURN [x IN nodes(p) | x.name]"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+      - note: "Variable-length paths."
+        cypher: "MATCH p = (a:Person)-[:KNOWS*]->(:Person) WITH p, a ORDER BY length(p), a.name RETURN [length(p), [x IN nodes(p) | x.name]]"
+        rows: [[1, ["Keanu", "Carrie"]], [1, ["Laurence", "Keanu"]], [2, ["Laurence", "Keanu", "Carrie"]]]
+      - cypher: "MATCH p = (:Person {name: 'Laurence'})-[:ACTED_IN*2]-(b:Person) WITH p, b ORDER BY b.name RETURN [[x IN nodes(p) | coalesce(x.name, x.title)], [r IN relationships(p) | r.role]]"
+        rows: [[["Laurence", "The Matrix", "Carrie"], ["Morpheus", "Trinity"]], [["Laurence", "The Matrix", "Keanu"], ["Morpheus", "Neo"]]]
+      - cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a ORDER BY a.name DESC LIMIT 2 RETURN nodes(p)[0].name"
+        rows: ["Laurence", "Keanu"]
+      - cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH * ORDER BY a.name RETURN relationships(p)[0].role"
+        rows: ["Trinity", "Neo", "Morpheus"]
+      - note: "A MATCH or an UNWIND after the WITH."
+        cypher: "MATCH p = (a:Person)-[:KNOWS]->(:Person) WITH p, a MATCH (a)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN [a.name, nodes(p)[1].name] ORDER BY a.name"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+      - cypher: "MATCH p = (a:Person)-[:ACTED_IN]->(:Movie {title: 'The Matrix'}) WITH p, a UNWIND relationships(p) AS r RETURN [a.name, r.role] ORDER BY a.name"
+        rows: [["Carrie", "Trinity"], ["Keanu", "Neo"], ["Laurence", "Morpheus"]]
+      - note: "A path an OPTIONAL MATCH finds, or not, passed on by a WITH."
+        cypher: "MATCH (a:Person) OPTIONAL MATCH p = (a)-[:KNOWS]->() WITH p, a ORDER BY a.name RETURN [x IN nodes(p) | x.name]"
+        rows: [null, null, ["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+      - note: "A WITH in a CALL's own query."
+        cypher: "MATCH (a:Person) CALL (a) { MATCH p = (a)-[:KNOWS]->() WITH p RETURN nodes(p)[1].name AS friend } RETURN [a.name, friend] ORDER BY a.name"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+
+  - name: "A path a lateral query finds"
+    description: "A path an OPTIONAL MATCH or a shortest path finds for each row of the query before it gives each row its own nodes."
+    steps:
+      - note: "Right on every store before drivine4j#537, and pinned with it."
+        cypher: "MATCH (a:Person) OPTIONAL MATCH p = (a)-[:KNOWS]->() RETURN [x IN nodes(p) | x.name] ORDER BY a.name"
+        rows: [null, null, ["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+      - cypher: "MATCH (a:Person), (b:Person) WHERE a <> b MATCH p = shortestPath((a)-[:KNOWS*]->(b)) RETURN [x IN nodes(p) | x.name] ORDER BY a.name, b.name"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu", "Carrie"], ["Laurence", "Keanu"]]
+
   - name: "Variable-length relationship variable"
     description: "A variable on a variable-length relationship is the list of its relationships."
     steps:
@@ -2452,9 +2524,9 @@ cases:
       - cypher: "RETURN [toString($f), toString($g), $f + 'a']"
         parameters: {f: 0.00012, g: 12345678.5}
         rows: [["1.2E-4", "1.23456785E7", "1.2E-4a"]]
-      - note: "JSON holds no NaN: Postgres fails a division by zero, and SQLite's gives null (drivine4j#201)."
+      - note: "NaN and the infinities are written by Java's names. Memgraph writes them nan, inf and -inf, and FalkorDB NaN, inf and -inf."
         cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0), toString(-1.0 / 0)]"
-        except: [postgres, sqlite]
+        except: [memgraph, falkordb]
         rows: [["NaN", "Infinity", "-Infinity"]]
 
   - name: "Sorted by a list"
@@ -2685,18 +2757,82 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "Infinity"}]]
 
   - name: "NaN worked out"
-    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them: NaN is equal to nothing, itself included (drivine4j#409). Postgres fails a division by zero, and SQLite's gives null (drivine4j#201, drivine4j#408)."
+    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545). A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
     steps:
-      - except: [postgres, sqlite]
-        cypher: "RETURN [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0]"
+      - cypher: "RETURN [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
-      - except: [postgres, sqlite]
-        cypher: "RETURN [0.0 / 0.0 = 0.0 / 0.0, 0.0 / 0.0 <> 0.0 / 0.0, 0.0 / 0.0 > 1.0, 0.0 / 0.0 <= 0.0 / 0.0, 0.0 / 0.0 IN [0.0 / 0.0], [0.0 / 0.0] = [0.0 / 0.0], 1.0 / 0.0 = $i]"
+      - cypher: "RETURN [0.0 / 0.0 = 0.0 / 0.0, 0.0 / 0.0 <> 0.0 / 0.0, 0.0 / 0.0 > 1.0, 0.0 / 0.0 <= 0.0 / 0.0, 0.0 / 0.0 IN [0.0 / 0.0], [0.0 / 0.0] = [0.0 / 0.0], 1.0 / 0.0 = $i]"
         parameters: {i: {$float: "Infinity"}}
         rows: [[false, true, false, false, false, false, true]]
-      - except: [postgres]
-        cypher: "RETURN 0.0 / 0.0 IN [0.0 / 0.0, 's', null]"
+      - cypher: "RETURN 0.0 / 0.0 IN [0.0 / 0.0, 's', null]"
         rows: [null]
+      - note: "A float zero worked out from the rows, and an integer divided by it."
+        only: [neo4j, memgraph, falkordb, sql]
+        cypher: "UNWIND [0.0, 2.0] AS z RETURN [1.0 / z, -1 / z, z / z]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, {$float: "NaN"}], [0.5, -0.5, 1.0]]
+      - note: "A float zero given."
+        only: [neo4j, memgraph, falkordb, sql]
+        cypher: "RETURN [$x / $z, 1 / $z, 0 / $z, -$x / $z]"
+        parameters: {x: 3.0, z: 0.0}
+        rows: [[{$float: "Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "-Infinity"}]]
+      - note: "Numbers written in the statement alone, which Neo4j works out as it plans, as Java does: a float by the integer 0 is an infinity."
+        only: [neo4j, memgraph, falkordb, sql]
+        cypher: "RETURN [1.0 / 0, -1.0 / 0, 1.0 / -0, 1.0 / 0.0, (1.0 + 0) / 0, 1.0 / (1 - 1)]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}, {$float: "Infinity"}, {$float: "Infinity"}, {$float: "Infinity"}]]
+      - note: "A float divided by an integer zero worked out as the statement runs fails, as on Neo4j. SQLite gives null, as for an integer divided by zero (drivine4j#554), and Oracle the infinity (drivine4j#559). Memgraph and FalkorDB give the infinity, as for a float zero."
+        only: [neo4j, postgres]
+        cypher: "WITH 3.0 AS x RETURN x / 0"
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "RETURN $x / 0"
+        parameters: {x: 3.0}
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "RETURN 1.0 / $z"
+        parameters: {z: 0}
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "WITH 0 AS z RETURN 1.0 / z"
+        error: true
+      - note: "Taken % by an integer zero at run time: Oracle gives the number taken, as its MOD does (drivine4j#550). Memgraph and FalkorDB give NaN, as for a float zero."
+        only: [neo4j, postgres]
+        cypher: "RETURN 5.0 % $z"
+        parameters: {z: 0}
+        error: true
+      - note: "SQLite gives null for each, as for an integer divided by zero (drivine4j#554), where Neo4j fails."
+        only: [sqlite]
+        cypher: "WITH 3.0 AS x, 0 AS z RETURN [x / 0, $x / 0, 1.0 / $z, 1.0 / z, 5.0 % $z]"
+        parameters: {x: 3.0, z: 0}
+        rows: [[null, null, null, null, null]]
+      - note: "Oracle gives the number taken % by zero, as its MOD does (drivine4j#550)."
+        except: [oracle, neptune]
+        cypher: "RETURN [5.0 % 0, 0.0 % 0, 5 % 0.0, -5.5 % 0.0]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - note: "SQLite gives null for an integer divided by zero (drivine4j#554)."
+        only: [neo4j, memgraph, falkordb, postgres, oracle]
+        cypher: "RETURN 1 / 0"
+        error: true
+      - note: "SQLite gives null (drivine4j#554), and Oracle the number taken % by zero, as its MOD does (drivine4j#550)."
+        only: [neo4j, memgraph, falkordb, postgres]
+        cypher: "RETURN 5 % 0"
+        error: true
+      - note: "toFloat reads a text as Java reads a double: NaN and the infinities by Java's names, spaces around them allowed. Memgraph gives null for each, and FalkorDB reads ' NaN ' as null."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('NaN'), toFloat('Infinity'), toFloat('-Infinity'), toFloat('+Infinity'), toFloat(' NaN '), toFloat('-NaN'), toFloat('Infinityx')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "NaN"}, null]]
+      - note: "Other spellings than Java's give null; Oracle reads them as NaN or an infinity (drivine4j#551). So does FalkorDB."
+        only: [neo4j, memgraph, postgres, sqlite]
+        cypher: "RETURN [toFloat('nan'), toFloat('inf'), toFloat('INFINITY')]"
+        rows: [[null, null, null]]
+      - note: "Memgraph gives null for each text toFloat reads as NaN or an infinity."
+        only: [neo4j, falkordb, sql]
+        cypher: "UNWIND ['NaN', '-Infinity', '1.5'] AS s RETURN [toFloat(s), toFloat(s) = toFloat(s), toFloat(s) < 2.0]"
+        rows: [[{$float: "NaN"}, false, false], [{$float: "-Infinity"}, true, true], [1.5, true, true]]
+      - note: "Memgraph gives null for each, and FalkorDB's toString writes inf."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat($s), toString(toFloat($s)), toFloat($s) IN [toFloat($s)]]"
+        parameters: {s: "Infinity"}
+        rows: [[{$float: "Infinity"}, "Infinity", true]]
 
   - name: "Round by a mode"
     description: "round(value, precision, mode) rounds in decimal by one of Java's rounding modes, as Neo4j does, so 2.345 is halfway; a null gives null."
