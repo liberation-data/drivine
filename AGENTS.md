@@ -21,6 +21,13 @@ These are read by all three libraries. Change them here only together with the o
 - **The golden statements:** `test/1.Unit/golden/statements.json` in Drivine for TypeScript is copied byte for byte to `tests/golden/statements.json` in drivine-python. A change to a statement that the goldens pin is made in both.
 - **The Cypher spec:** what each Cypher statement gives on each store, compiled to SQL or not, lives in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec). `scripts/sync-cypher-spec.sh <tag>` copies a tagged version into `test/cypher`, unchanged; the other two libraries copy the same tag. `scripts/check-cypher-spec.sh`, run in CI, fails when a copy differs from its tag and warns when the spec has a later one. A change to what the compiler gives or refuses goes to the spec first.
 
+## Releases go out as trains
+
+The three libraries are released together, as a train recorded in
+[liberation-data/drivine-release](https://github.com/liberation-data/drivine-release); see RELEASING.md. Don't run
+"Prepare release" in one repository on its own. Start a train from drivine-release, which opens the release PRs in all
+three, once the fixes the train is to carry are in all three. A person merges the release PRs, and merging publishes.
+
 ## Pull requests
 
 - Base each pull request on `master`, not on another open pull request's branch. Branches aren't deleted on merge here, so a stacked pull request merges into its parent's old branch and its change never reaches `master`.

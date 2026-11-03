@@ -15,17 +15,21 @@ import { Image } from 'astro:assets';
 import ocean from '../assets/hero-ocean.jpg';
 import studioCypher from '../assets/studio-cypher.png';
 import videoPoster from '../assets/video-poster.jpg';
+import videoEnd from '../assets/video-end.jpg';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 
-// The hero photo as AVIF and WebP, the JPEG as a fallback, and smaller for phones.
-const photo = async (width: number): Promise<string> => {
+// The hero photo as AVIF and WebP, the JPEG as a fallback, and smaller for phones. Its AVIF is preloaded in the head:
+// as a CSS background it would otherwise be found only once the stylesheet is in, and it is the largest paint on a
+// wide screen.
+const photo = async (width: number) => {
     const [avif, webp, jpeg] = await Promise.all(
         (['avif', 'webp', 'jpeg'] as const).map((format) => getImage({ src: ocean, format, width, quality: format === 'avif' ? 55 : 70 }))
     );
-    return `image-set(url('${avif.src}') type('image/avif'), url('${webp.src}') type('image/webp'), url('${jpeg.src}') type('image/jpeg'))`;
+    return { avif: avif.src, css: `image-set(url('${avif.src}') type('image/avif'), url('${webp.src}') type('image/webp'), url('${jpeg.src}') type('image/jpeg'))` };
 };
-const photoVars = `--photo: ${await photo(1920)}; --photo-small: ${await photo(960)};`;
+const [photoLarge, photoSmall] = await Promise.all([photo(1920), photo(960)]);
+const photoVars = `--photo: ${photoLarge.css}; --photo-small: ${photoSmall.css};`;
 const ts = `${base}ts/`;
 const py = `${base}py/`;
 const jvm = `${base}jvm/`;
@@ -134,6 +138,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
         <link rel="icon" href={`${base}favicon.ico`} />
         <!-- The heading's font, which the largest paint (DRIVINE) waits for. -->
         <link rel="preload" href={headingFont} as="font" type="font/woff2" crossorigin />
+        <!-- The hero photo, at the size the stylesheet picks for the screen (its 800px breakpoint). -->
+        <link rel="preload" href={photoLarge.avif} as="image" type="image/avif" media="(min-width: 801px)" fetchpriority="high" />
+        <link rel="preload" href={photoSmall.avif} as="image" type="image/avif" media="(max-width: 800px)" fetchpriority="high" />
         <style is:global>
             /* Relative to this file, so the build rewrites it wherever the stylesheet ends up. --photo and
                --photo-small, in AVIF, WebP and JPEG, are set on <body> from the frontmatter. */
@@ -233,10 +240,12 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .watch .player video { object-fit: contain; }
             /* The whole poster plays; the pill in its corner says so, clear of the title. */
             .watch .play { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start; padding: 24px; border: 0; cursor: pointer; background: transparent; }
-            .watch .play span { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px 0 16px; border-radius: 999px; background: var(--accent); color: var(--ink); font: 700 17px Ubuntu, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); transition: transform 0.15s ease; }
-            .watch .play:hover span, .watch .play:focus-visible span { transform: scale(1.05); }
+            .watch .play > span { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px 0 16px; border-radius: 999px; background: var(--accent); color: var(--ink); font: 700 17px Ubuntu, sans-serif; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); transition: transform 0.15s ease; }
+            .watch .play:hover > span, .watch .play:focus-visible > span { transform: scale(1.05); }
             .watch .play:focus-visible { outline: 3px solid #fff; outline-offset: -6px; }
-            @media (max-width: 600px) { .watch .play { padding: 10px; } .watch .play span { min-height: 36px; padding: 0 14px 0 10px; gap: 6px; font-size: 13px; } .watch .play svg { width: 16px; height: 16px; } }
+            @media (max-width: 600px) { .watch .play { padding: 10px; } .watch .play > span { min-height: 36px; padding: 0 14px 0 10px; gap: 6px; font-size: 13px; } .watch .play svg { width: 16px; height: 16px; } }
+            /* On a phone the end card's lines reach its bottom corner, so Watch again goes to the top, over the water. */
+            @media (max-width: 600px) { .watch .play.again { align-items: flex-start; } .watch .play.again > span { min-height: 30px; font-size: 12px; } }
             .watch p { margin: 0; text-align: center; font-size: 16px; color: var(--muted); }
 
             .libraries { padding: 0 32px 96px; }
@@ -298,7 +307,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .feature code { font-size: 14px; }
             .features .row { gap: 24px; }
 
-            .perf { padding: 0 32px 96px; }
+            /* Clear of the dark section above it, so the card sits on the page rather than against its edge. */
+            .perf { padding: 64px 32px 96px; }
             .perf .wrap { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; background: #e3eff1; border-radius: 16px; padding: 48px; }
             .perf .text { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
             .perf .text > p:not(.eyebrow) { margin: 0; font-size: 17px; line-height: 1.65; color: #123a45; }
@@ -306,7 +316,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .perf .stats div { background: #fff; border-radius: 12px; padding: 18px 22px; }
             .perf dt { font-size: 30px; font-weight: 700; color: var(--ink); }
             .perf dd { margin: 4px 0 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
-            @media (max-width: 600px) { .perf .wrap { padding: 28px 22px; gap: 28px; } }
+            @media (max-width: 600px) { .perf { padding-top: 32px; } .perf .wrap { padding: 28px 22px; gap: 28px; } }
 
             .studio { padding: 0 32px 96px; }
             .studio .wrap { display: flex; flex-direction: column; gap: 36px; }
@@ -428,11 +438,17 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 <section class="watch" id="watch">
                     <div class="wrap">
                         <div class="player" data-video={VIDEO} data-captions={VIDEO_CAPTIONS}>
-                            <Image src={videoPoster} widths={[640, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
-                            <button type="button" class="play" aria-label="Watch the video, 4 minutes 26 seconds: Drivine, graph RAG on any database">
+                            <Image src={videoPoster} widths={[640, 800, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
+                            <button type="button" class="play" aria-label="Watch · 4:26, the video: Drivine, graph RAG on any database (4 minutes 26 seconds)">
                                 <span><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="#0b2530" /></svg>Watch · 4:26</span>
                             </button>
                         </div>
+                        {/* Shown when the video has played to the end: its end card, which the video fades from to black. In a
+                            template it loads nothing; eager, a copy starts loading as soon as the video does, so the black of
+                            the fade doesn't show while it loads. */}
+                        <template id="video-end">
+                            <Image src={videoEnd} widths={[640, 800, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" loading="eager" alt="" />
+                        </template>
                         <p>
                             Drivine in four and a half minutes: graph RAG on any database. With captions.
                             {VIDEO_ID && <> <a href={`https://youtu.be/${VIDEO_ID}`}>Also on YouTube</a>.</>}
@@ -623,7 +639,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         </p>
                     </header>
                     <figure>
-                        <Image src={studioCypher} widths={[800, 1458]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station Bastille chosen and its properties shown beside the graph" />
+                        <Image src={studioCypher} widths={[800, 1572]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's desktop app on a Mac, its Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station China Town chosen and its properties shown beside the graph" />
                         <figcaption>Cypher on Postgres, compiled to SQL by Drivine: the metro network from <a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock ’n’ Roll Traffic Routing, with Neo4j</a>, now on any store. The station chosen is shown beside it.</figcaption>
                     </figure>
                     <p class="note">Early days: <a href="https://github.com/liberation-data/drivine-studio#install-it-yourself">build it from source</a> for macOS, Windows or Linux.</p>
@@ -695,7 +711,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     menu.querySelector('summary')?.focus();
                 }
             });
-            // The video loads only when asked for, and plays with its controls and its captions, shown from the start.
+            // The video loads only when asked for, and plays with its controls and its captions, shown from the start. At the
+            // end the video fades to black, so its end card (#video-end) covers it, with a Watch again button where Watch
+            // was; pressing it, or the hero's tip, starts it over and takes them away.
             document.querySelector<HTMLElement>('.watch .player')?.addEventListener('click', (event) => {
                 const player = event.currentTarget as HTMLElement;
                 const video = document.createElement('video');
@@ -711,6 +729,30 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 captions.label = 'English';
                 captions.default = true;
                 video.append(captions);
+                // Imported rather than cloned: a clone would stay in the template's inert document, which loads nothing.
+                const end = (document.getElementById('video-end') as HTMLTemplateElement | null)?.content.firstElementChild;
+                const card = end ? (document.importNode(end, true) as HTMLElement) : undefined;
+                const again = document.createElement('button');
+                again.type = 'button';
+                again.className = 'play again';
+                again.setAttribute('aria-label', 'Watch again: Drivine, graph RAG on any database');
+                again.innerHTML = '<span><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="#0b2530" /></svg>Watch again</span>';
+                again.addEventListener('click', () => {
+                    video.currentTime = 0;
+                    void video.play();
+                    video.focus({ preventScroll: true });
+                });
+                video.addEventListener('ended', () => {
+                    // The focus, if it was on the video, goes to the button rather than staying on a finished video.
+                    const focused = document.activeElement === video;
+                    if (card) player.append(card);
+                    player.append(again);
+                    if (focused) again.focus({ preventScroll: true });
+                });
+                video.addEventListener('play', () => {
+                    card?.remove();
+                    again.remove();
+                });
                 player.replaceChildren(video);
                 video.focus({ preventScroll: true });
             }, { once: true });
@@ -757,7 +799,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     }, 1400);
                 });
             });
-            // The hero's tip takes the visitor down to the video and starts it, or plays it on once it has loaded.
+            // The hero's tip takes the visitor down to the video and starts it, plays it on once it has loaded, or, once it
+            // has ended, presses Watch again (a .play too) to start it over.
             document.querySelector<HTMLAnchorElement>('.video-tip')?.addEventListener('click', (event) => {
                 const play = document.querySelector<HTMLButtonElement>('.watch .play');
                 const video = document.querySelector<HTMLVideoElement>('.watch video');
