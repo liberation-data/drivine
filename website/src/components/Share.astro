@@ -41,12 +41,14 @@ const { url = '', text = '', label = 'Share', tone = 'light', icons = false, cla
     .share-label { margin-right: 4px; font-size: 14px; }
     .share a, .share button { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 999px; border: 1px solid; background: transparent; cursor: pointer; transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease; }
     .share svg { width: 15px; height: 15px; }
+    /* The hover colours are set, not inherited, so a page's own a:hover (the landing page's dark teal) doesn't reach
+       them. */
     .share-light .share-label { color: #3e5a64; }
     .share-light a, .share-light button { color: #0f6e7a; border-color: rgba(15, 110, 122, 0.3); }
-    .share-light a:hover, .share-light button:hover, .share-light a:focus-visible, .share-light button:focus-visible { border-color: #0f6e7a; background: rgba(15, 110, 122, 0.08); }
+    .share-light a:hover, .share-light button:hover, .share-light a:focus-visible, .share-light button:focus-visible { color: #0f6e7a; border-color: #0f6e7a; background: rgba(15, 110, 122, 0.08); }
     .share-dark .share-label { color: #cfe3e7; }
     .share-dark a, .share-dark button { color: #e6f1f3; border-color: rgba(255, 255, 255, 0.3); background: rgba(2, 28, 38, 0.55); }
-    .share-dark a:hover, .share-dark button:hover, .share-dark a:focus-visible, .share-dark button:focus-visible { border-color: #f08a5d; background: rgba(240, 138, 93, 0.25); }
+    .share-dark a:hover, .share-dark button:hover, .share-dark a:focus-visible, .share-dark button:focus-visible { color: #fff; border-color: #f08a5d; background: rgba(240, 138, 93, 0.25); }
     .share-docs a, .share-docs button { color: var(--sl-color-gray-3); border-color: var(--sl-color-gray-5); }
     .share-docs a:hover, .share-docs button:hover, .share-docs a:focus-visible, .share-docs button:focus-visible { color: var(--sl-color-text-accent); border-color: var(--sl-color-text-accent); }
     .share-docs .share-said { color: var(--sl-color-gray-3); }
