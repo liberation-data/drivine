@@ -29,11 +29,8 @@ import { definePropertyMetadata } from '@/annotation/Metadata';
  * copy of the label in again:
  *
  * ```ts
- * await pm.execute(
- *     new QuerySpecification(
- *         `MATCH (a:Account {id: $id}) SET a.email = $email SET ${LowerCopies.setClause('a', 'email')}`
- *     ).bind({ id, email })
- * );
+ * const statement = `MATCH (a:Account {id: $id}) SET a.email = $email SET ${LowerCopies.setClause('a', 'email')}`;
+ * await pm.execute(new QuerySpecification(cypherStatement(statement)).bind({ id, email }));
  * // or, after the writes:
  * await gom.indexes.recreate(rangeIndex('Account', 'email', { ignoreCase: true }));
  * ```

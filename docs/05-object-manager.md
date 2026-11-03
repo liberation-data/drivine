@@ -412,7 +412,7 @@ await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.co
   after `@GraphProperty`). The database lowercases it, as it lowercases the value a lookup compares with, so Drivine,
   drivine4j and drivine-python store and match the same thing. A property with no value has no copy. A load doesn't
   read it, and a flat `@PropertyBag` never holds it. The copy is no part of whether a save changed the node, so a save
-  that only fills one in keeps the node's stamp. Cypher you send yourself doesn't: see
+  that only fills one in keeps the node's stamp. Cypher you send yourself writes no copy: see
   [below](#cypher-of-your-own).
 - **The index.** `@RangeIndex({ ignoreCase: true })`, `@Unique({ ignoreCase: true })`, `rangeIndex(label, property,
   { ignoreCase: true })` and `uniquenessConstraint(label, property, { ignoreCase: true })` are made over the copy, under
