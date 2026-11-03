@@ -449,6 +449,9 @@ await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.co
   await gom.indexes.recreate(rangeIndex('Account', 'email', { ignoreCase: true }));
   ```
 
+  A constraint that ignores case has no `recreate`: `drop` it and `ensure` it again, which fills the copies in again
+  as it makes the constraint anew.
+
 #### Querying Fragments
 
 The DSL isn't only for views. Every fragment has references to its own fields:
