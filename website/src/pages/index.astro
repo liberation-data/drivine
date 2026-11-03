@@ -261,6 +261,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             /* On a phone the end card's lines reach its bottom corner, so Watch again goes to the top, over the water. */
             @media (max-width: 600px) { .watch .play.again { align-items: flex-start; } .watch .play.again > span { min-height: 30px; font-size: 12px; } }
             .watch p { margin: 0; text-align: center; font-size: 16px; color: var(--muted); }
+            /* Loading, while the video comes in under the poster. */
+            .watch .play:disabled { cursor: progress; }
+            .watch .play:disabled > span { transform: none; }
             /* Share, under the video and, at its end, in the end card's top corner, clear of its words and the controls. */
             .watch .watch-share { display: flex; justify-content: center; }
             .watch .player .ending-share { position: absolute; top: 16px; right: 16px; }
@@ -778,8 +781,24 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     again.remove();
                     if (ending && shelf) shelf.append(ending);
                 });
-                player.replaceChildren(video);
-                video.focus({ preventScroll: true });
+                // Until its first frame is in, the poster stays and its button says Loading: started cold, a browser shows
+                // only a grey box, Firefox without even a spinner. The video loads under the poster, then takes its place.
+                const button = player.querySelector<HTMLButtonElement>('.play');
+                const label = button?.querySelector('span');
+                if (button && label) {
+                    button.disabled = true;
+                    button.removeAttribute('aria-label');
+                    label.replaceChildren(label.querySelector('svg')!, 'Loading…');
+                }
+                let shown = false;
+                const show = () => {
+                    if (shown) return;
+                    shown = true;
+                    player.replaceChildren(video);
+                    video.focus({ preventScroll: true });
+                };
+                for (const name of ['loadeddata', 'playing', 'error']) video.addEventListener(name, show, { once: true });
+                player.prepend(video);
             }, { once: true });
             // Each install line copies itself, and says so for a moment.
             const copied = document.querySelector<HTMLElement>('.copied-status');
@@ -943,8 +962,19 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 run();
             };
             const idle = (window as { requestIdleCallback?: (callback: () => void) => void }).requestIdleCallback ?? ((callback) => setTimeout(callback, 200));
-            if (document.readyState === 'complete') idle(drawGraph);
-            else addEventListener('load', () => idle(drawGraph), { once: true });
+            // The CDN keeps a large file at the edge near a visitor only while it's asked for there, and the first to press
+            // play after a quiet spell waits while it's fetched. One byte of the video, asked for once the page has loaded,
+            // has the edge fetch the whole file while they're still reading the hero, without each visitor downloading it.
+            const warm = () => {
+                const src = document.querySelector<HTMLElement>('.watch .player')?.dataset.video;
+                if (src) void fetch(src, { headers: { Range: 'bytes=0-0' } }).catch(() => {});
+            };
+            const landed = () => {
+                idle(drawGraph);
+                idle(warm);
+            };
+            if (document.readyState === 'complete') landed();
+            else addEventListener('load', landed, { once: true });
         </script>
     </body>
 </html>
