@@ -78,6 +78,9 @@ export class MessageNode { /* … */ }
 `@RangeIndex({ ignoreCase: true })` and `@Unique({ ignoreCase: true })` on a `@CaseInsensitive` field are made over the
 lowercased copy a save keeps of it, so they serve `eqIgnoreCase` and refuse two values that differ only in case.
 Ensuring one fills the copies in first. See [Lookups That Ignore Case](05-object-manager.md#lookups-that-ignore-case).
+The object manager keeps the copy in step, but Cypher you send yourself doesn't: set the copy in the same statement, or
+`recreate` the index, or `drop` and `ensure` the constraint, afterwards to fill it in again
+([how](05-object-manager.md#cypher-of-your-own)).
 
 ### Declarative: Catalogs, Enforced at Startup
 

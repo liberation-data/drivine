@@ -66,6 +66,11 @@ The graph's tables are made on the first connection to a new store, so there is 
 A statement that writes runs as one statement, applied whole or not at all. Each row is one value, so
 [return one map](03-quick-start.md#return-one-map) or a scalar, as on a graph engine.
 
+A statement is compiled as written, and nothing is added to it. So a write of a
+[`@CaseInsensitive`](05-object-manager.md#lookups-that-ignore-case) property leaves the lowercased copy the object
+manager keeps beside it as it was, on these stores as on the graph engines: set the copy in the same statement, or
+refill it afterwards ([how](05-object-manager.md#cypher-of-your-own)).
+
 ### What compiles
 
 What each statement gives on each store, compiled to SQL or not, is the shared

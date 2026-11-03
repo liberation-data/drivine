@@ -2,6 +2,7 @@ import {
     backendFor,
     CaseInsensitive,
     count,
+    cypherStatement,
     DatabaseRegistry,
     DatabaseType,
     GraphObjectManagerFactory,
@@ -9,6 +10,7 @@ import {
     GraphRelationship,
     GraphView,
     key,
+    LowerCopies,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -41,6 +43,7 @@ const MEMBER = `CiMember${run}`;
 const MARKED = `CiMarked${run}`;
 const ANEW = `CiAnew${run}`;
 const RACE = `CiRace${run}`;
+const REDONE = `CiRedone${run}`;
 
 /** An account looked up by email whatever its case, its display name kept under another name, a flat bag beside them. */
 @NodeFragment({ labels: ['CiAccount'] })
@@ -88,6 +91,13 @@ class CiAnew {
     @CaseInsensitive() email?: string;
 }
 
+/** Written by Cypher of the test's own, which keeps no copy unless it sets one. */
+@NodeFragment({ labels: [REDONE] })
+class CiRedone {
+    @NodeId() id: string;
+    @CaseInsensitive() email?: string;
+}
+
 @GraphView()
 class CiAccountView {
     @Root() account: CiAccount;
@@ -97,7 +107,7 @@ class CiAccountView {
 const account = (id: string, values: Partial<CiAccount> = {}): CiAccount =>
     Object.assign(new CiAccount(), { id, ...values });
 
-/** The test's own write of a node, as one that bypasses Drivine: no copy. */
+/** The test's own write of a node, as Cypher or SQL of your own: no copy. */
 async function bypassing(
     pm: PersistenceManager,
     engine: GraphEngine,
@@ -149,7 +159,7 @@ async function stored(pm: PersistenceManager, engine: GraphEngine, label: string
     return pm.getOne<any>(new QuerySpecification(`MATCH (n:${label} {id: $id}) RETURN properties(n)`).bind({ id }));
 }
 
-/** Takes the copy of email from the node of `label` with the id, as a write that bypasses Drivine leaves it. */
+/** Takes the copy of email from the node of `label` with the id, as Cypher or SQL of your own leaves it. */
 async function withoutCopy(pm: PersistenceManager, engine: GraphEngine, label: string, id: string): Promise<void> {
     const statement =
         engine.type === DatabaseType.ORACLE
@@ -226,7 +236,8 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         await gom.indexes.drop(rangeIndex(ANEW, 'email', { ignoreCase: true }));
         await gom.indexes.drop(rangeIndex(LATE, 'email', { ignoreCase: true }));
         await gom.indexes.drop(rangeIndex(MARKED, 'email', { ignoreCase: true }));
-        await clearLabels(pm, engine, 'CiAccount', 'CiPlain', LATE, MEMBER, MARKED, ANEW);
+        await gom.indexes.drop(rangeIndex(REDONE, 'email', { ignoreCase: true }));
+        await clearLabels(pm, engine, 'CiAccount', 'CiPlain', LATE, MEMBER, MARKED, ANEW, REDONE);
         // This run's marker, and no other suite's.
         await pm.execute(
             new QuerySpecification(
@@ -355,7 +366,7 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         expect((await gom.indexes.ensure(index)).status).toEqual('ALREADY_MATCHING');
         expect((await gom.indexes.list()).some((it) => it.properties.includes('__drivine.lower.email'))).toBe(true);
 
-        // With the copies: the same answers, from the copy. A node written past Drivine afterwards has no copy, so a
+        // With the copies: the same answers, from the copy. A node written by a statement of its own afterwards has no copy, so a
         // load, count, grouped read, patch and deleteAll that read the copy pass it by.
         await bypassing(pm, engine, LATE, { id: 'l4', email: 'ann@X.com', rank: 4 });
         expect(await ann()).toEqual(['l1']);
@@ -406,6 +417,49 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         const constraint = uniquenessConstraint(ANEW, 'email', { ignoreCase: true });
         expect((await gom.constraints.ensure(constraint)).status).toEqual('CREATED');
         expect((await stored(pm, engine, ANEW, 'n1'))['__drivine.lower.email']).toEqual('ann@x.com');
+    });
+
+    it('should keep no copy for Cypher of your own, and find a node whose Cypher sets the copy too, or after a recreate', async () => {
+        const index = rangeIndex(REDONE, 'email', { ignoreCase: true });
+        await gom.save(Object.assign(new CiRedone(), { id: 'c1', email: 'Ann@X.com' }));
+        await gom.indexes.ensure(index);
+        const cypher = async (text: string): Promise<void> => pm.execute(new QuerySpecification(cypherStatement(text)));
+        const found = async (email: string): Promise<string[]> =>
+            (await gom.loadAll(CiRedone, (q) => ({ where: q.email.eqIgnoreCase(email), orderBy: q.id.asc() }))).map(
+                (it) => it.id
+            );
+        const copy = async (id: string): Promise<string | undefined> =>
+            (await stored(pm, engine, REDONE, id))['__drivine.lower.email'];
+
+        // Run as written, or compiled to SQL, a write adds nothing: the copy is stale, or missing.
+        await cypher(`MATCH (n:${REDONE} {id: 'c1'}) SET n.email = 'Anne@X.com'`);
+        await cypher(`CREATE (:${REDONE} {id: 'c2', email: 'Bob@X.com'})`);
+        expect(await found('ANNE@x.com')).toEqual([]);
+        expect(await found('ann@x.com')).toEqual(['c1']);
+        expect(await found('bob@x.com')).toEqual([]);
+
+        // The documented way: the copy set in the same statement, in a SET of its own.
+        await cypher(
+            `MATCH (n:${REDONE} {id: 'c1'}) SET n.email = 'Cat@X.com' SET ${LowerCopies.setClause('n', 'email')}`
+        );
+        await cypher(`CREATE (n:${REDONE} {id: 'c3', email: 'Dan@X.com'}) SET ${LowerCopies.setClause('n', 'email')}`);
+        expect(await found('CAT@x.com')).toEqual(['c1']);
+        expect(await found('dan@X.COM')).toEqual(['c3']);
+
+        // A REMOVE of the property leaves the copy, so the node is found by its old value; the same SET after it
+        // removes the copy.
+        await cypher(`MATCH (n:${REDONE} {id: 'c1'}) REMOVE n.email`);
+        expect(await copy('c1')).toEqual('cat@x.com');
+        expect(await found('cat@x.com')).toEqual(['c1']);
+        await cypher(`MATCH (n:${REDONE} {id: 'c3'}) REMOVE n.email SET ${LowerCopies.setClause('n', 'email')}`);
+        expect(await copy('c3')).toBeUndefined();
+        expect(await found('dan@x.com')).toEqual([]);
+
+        // Or a recreate after the writes, which fills every copy of the label in again.
+        await gom.indexes.recreate(index);
+        expect(await found('BOB@x.com')).toEqual(['c2']);
+        expect(await copy('c1')).toBeUndefined();
+        expect(await found('cat@x.com')).toEqual([]);
     });
 
     it('should keep the record of each of managers recording at once, and record each once', async () => {

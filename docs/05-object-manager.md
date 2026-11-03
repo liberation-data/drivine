@@ -412,7 +412,8 @@ await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.co
   after `@GraphProperty`). The database lowercases it, as it lowercases the value a lookup compares with, so Drivine,
   drivine4j and drivine-python store and match the same thing. A property with no value has no copy. A load doesn't
   read it, and a flat `@PropertyBag` never holds it. The copy is no part of whether a save changed the node, so a save
-  that only fills one in keeps the node's stamp.
+  that only fills one in keeps the node's stamp. Cypher you send yourself writes no copy: see
+  [below](#cypher-of-your-own).
 - **The index.** `@RangeIndex({ ignoreCase: true })`, `@Unique({ ignoreCase: true })`, `rangeIndex(label, property,
   { ignoreCase: true })` and `uniquenessConstraint(label, property, { ignoreCase: true })` are made over the copy, under
   their own names, `<Label>_<property>_ci_range` and `_ci_unique`. One that ignores case is refused on a field that
@@ -426,8 +427,30 @@ await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.co
   in a load, a count, a `deleteAll`, a grouped read and a patch's condition, on the root's own fields. Until then, and
   for an empty value or a related node's field, they lowercase the property, as for any field: the same answer, without
   the index. A manager knows at once what it recorded, and reads what another recorded at least once a minute.
-- **Writes that bypass Drivine.** Cypher or SQL of your own doesn't keep the copy in step. Set it in the same statement
-  (`LowerCopies.setClause('a', 'email')` writes the Cypher), or recreate the index.
+- <a id="cypher-of-your-own"></a>**Cypher of your own keeps no copy, on any store.** Drivine runs a statement you send
+  as written on the graph engines, and on Oracle, Postgres and SQLite compiles it to SQL and adds nothing to it. So a
+  `SET`, `CREATE`, `MERGE` or `REMOVE` of the property leaves the copy as it was, or leaves the node without one, and so
+  does SQL of your own. Once the copy is recorded, a lookup misses a node so written, or finds it by its old value. A
+  node saved by a process whose fragment isn't yet `@CaseInsensitive`, as while an upgrade rolls out, is missed the same
+  way. Set the copy in the same statement, in a `SET` of its own after the one that writes the property, since an
+  engine may read every value of one `SET` before it writes any. The same `SET` after a `REMOVE` of the property
+  removes the copy.
+
+  ```cypher
+  MATCH (a:Account {id: $id})
+  SET a.email = $email
+  SET a.`__drivine.lower.email` = toLower(a.email)
+  ```
+
+  `LowerCopies.setClause('a', 'email')` gives that last item. Or, after the writes, `recreate` the index that ignores
+  case, which fills the copy in again on every node of the label:
+
+  ```typescript
+  await gom.indexes.recreate(rangeIndex('Account', 'email', { ignoreCase: true }));
+  ```
+
+  A constraint that ignores case has no `recreate`: `drop` it and `ensure` it again, which fills the copies in again
+  as it makes the constraint anew.
 
 #### Querying Fragments
 

@@ -149,8 +149,8 @@ const keyOf = (label: string, property: string): string => JSON.stringify([label
  * `maxAge` milliseconds while properties are asked after, a lookup meanwhile going by what was read last. A property
  * that isn't recorded counts as not filled in, and a query lowercases the property itself, which gives the same answer
  * without the index. A record is never taken back: every save keeps the copy in step, and `recreate`, or an `ensure`
- * that makes the item anew, fills it in again where a write that bypassed Drivine, or one made while the field was not
- * `@CaseInsensitive`, left it out of step.
+ * that makes the item anew, fills it in again where Cypher or SQL of your own, which keeps no copy, or a save made while
+ * the field was not `@CaseInsensitive`, left it out of step.
  *
  * @param run runs a statement on a schema connection of its own, outside any transaction
  * @param resolveStore makes the store's `DrivineStore` node where it isn't there, for the graph engines' record

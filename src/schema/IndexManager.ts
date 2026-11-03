@@ -79,7 +79,7 @@ export class IndexManager {
      * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not.
      */
     async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
-        // The copies are filled in again too, where a write that bypassed Drivine left one out of step.
+        // The copies are filled in again too, where Cypher or SQL of your own, which keeps no copy, left one out of step.
         await fillInLowerCopies(this.copies, spec, true);
         await this.drop(spec);
         await this.create(madeAs(spec));
