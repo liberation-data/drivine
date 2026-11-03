@@ -1,3 +1,4 @@
+import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
 
 /** The steps a statement that writes compiles to on SQLite, as `drivine_cypher` reads them. */
@@ -33,6 +34,21 @@ describe('Cypher compiled to SQLite', () => {
         expect(sql).toContain('LEFT JOIN json_each((SELECT json_group_array(json_object(');
         expect(sql).toContain("NULLIF(o4.value -> '$.v5_props', 'null')");
         expect(sql).not.toContain('LATERAL');
+    });
+
+    it('joins its sources ON TRUE, which SQLite may reorder, where Postgres keeps a CROSS JOIN (#589)', () => {
+        const step = 'MATCH (n)-[r]->(m) RETURN n, r, m';
+        const sql = new SqliteCypherCompiler('g').compile(step).sql;
+        expect(sql).toContain('FROM g_node n1\n    JOIN g_node n2 ON TRUE\n    JOIN g_edge e3 ON TRUE');
+        expect(sql).not.toContain('CROSS JOIN');
+        // A lateral query, which reads the row's own node, joins alike.
+        const called = new SqliteCypherCompiler('g').compile(
+            'MATCH (a:P) CALL { WITH a MATCH (a)-->(b) RETURN b } RETURN a, b'
+        ).sql;
+        expect(called).toContain('JOIN json_each((SELECT json_group_array(');
+        expect(called).toContain(')) AS c7 ON TRUE');
+        expect(called).not.toContain('CROSS JOIN');
+        expect(new PostgresCypherCompiler('g').compile(step).sql).toContain('CROSS JOIN g_node n2');
     });
 
     it("orders nulls where Cypher puts them, and pages by SQLite's LIMIT", () => {

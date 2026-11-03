@@ -1,3 +1,4 @@
+import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Value } from '@/cypher/sql/Value';
 
 /** The rows a part of a statement reads: its sources and joins, its conditions, and the variables it binds. */
@@ -26,8 +27,9 @@ export class Select {
         this.bound.set(variable, value);
     }
 
-    source(text: string): void {
-        this.sources.push(this.sources.length === 0 ? `FROM ${text}` : `CROSS JOIN ${text}`);
+    /** Reads the rows of `text`, after those of its other sources, joined as the store `sql` joins them. */
+    source(text: string, sql: Pick<SqlCypherCompiler, 'crossJoin'>): void {
+        this.sources.push(this.sources.length === 0 ? `FROM ${text}` : sql.crossJoin(text));
     }
 
     join(text: string): void {

@@ -36,6 +36,7 @@ import {
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
 import { LONG_LOCK_MILLIS } from '@/connection/sqlite/SqliteConnection';
+import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
 
 jest.setTimeout(30_000);
 
@@ -887,6 +888,70 @@ describe('a SQLite store', () => {
             await gom.saveAll([doc('d1', 'graph databases', [1, 0, 0]), doc('d2', 'relational', [0, 1, 0])]);
             expect((await gom.loadNearest(Doc, [1, 0.1, 0], { topK: 1 })).map((it) => it.value.id)).toEqual(['d1']);
             expect((await gom.loadMatching(Doc, 'graph', { topK: 5 })).map((it) => it.value.id)).toEqual(['d1']);
+        });
+    });
+
+    describe('its compiled Cypher', () => {
+        /**
+         * The tables the plan of `cypher`, compiled for this store, reads, in the order it reads them: `node` or `edge`
+         * for each, where it scans the whole table, and where it searches it by a key.
+         */
+        async function reads(cypher: string): Promise<string[]> {
+            const sql = new SqliteCypherCompiler(new SqliteGraph().name).compile(cypher).sql;
+            const tables = new Map(
+                [...sql.matchAll(/(\w+)_(node|edge) (\w+)/g)].map(([, , table, alias]) => [alias, table])
+            );
+            const plan = await rows(pm, `EXPLAIN QUERY PLAN ${sql}`);
+            return plan
+                .map((it) => /^(SCAN|SEARCH) (\w+)/.exec(it.detail))
+                .filter((it): it is RegExpExecArray => it !== null && tables.has(it[2]))
+                .map(([, how, alias]) => `${how} ${tables.get(alias)}`);
+        }
+
+        beforeAll(async () => {
+            await gom.save(ticket('plan'));
+        });
+
+        // SQLite keeps the order of a CROSS JOIN as it is written: each pair of nodes was read before an edge (#589).
+        it.each([
+            ['a directed step', 'MATCH (n)-[r]->(m) RETURN n, r, m'],
+            ['a walk of one or two steps', 'MATCH (n)-[*1..2]->(m) RETURN n, m']
+        ])('should read %s by its edges, not every pair of nodes first', async (_, cypher) => {
+            const read = await reads(cypher);
+            const edge = read.findIndex((it) => it.endsWith('edge'));
+            expect(edge).toBeGreaterThan(-1);
+            expect(read.slice(0, edge).filter((it) => it === 'SCAN node').length).toBeLessThan(2);
+        });
+
+        // A source SQLite may now reorder still gives Cypher's rows: after a LEFT JOIN, over its node, and in a lateral.
+        it.each([
+            [
+                'an OPTIONAL MATCH followed by a MATCH',
+                'MATCH (a:SqliteStore) OPTIONAL MATCH (a)-[:NEXT]->(b) MATCH (c:SqliteStore) RETURN a.id, b.id, c.id',
+                ['a b a', 'a b b', 'a b c', 'b - a', 'b - b', 'b - c', 'c - a', 'c - b', 'c - c']
+            ],
+            [
+                'an UNWIND of a list on a node an OPTIONAL MATCH may not find',
+                'MATCH (a:SqliteStore) OPTIONAL MATCH (a)-[:NEXT]->(b) UNWIND b.tags AS t RETURN a.id, t',
+                ['a x', 'a y']
+            ],
+            [
+                'a CALL that imports its row',
+                'MATCH (a:SqliteStore) CALL { WITH a MATCH (a)-[:NEXT]->(b) RETURN b } RETURN a.id, b.id',
+                ['a b']
+            ]
+        ])('should give the rows of %s', async (_, cypher, expected) => {
+            expect(new SqliteCypherCompiler(new SqliteGraph().name).compile(cypher).sql).not.toContain('CROSS JOIN');
+            await pm.execute(
+                new QuerySpecification({
+                    text: "CREATE (:SqliteStore {id: 'a'})-[:NEXT]->(:SqliteStore {id: 'b', tags: ['x', 'y']}), (:SqliteStore {id: 'c'})",
+                    language: 'CYPHER'
+                })
+            );
+            const found = await pm.query<Record<string, unknown>>(
+                new QuerySpecification({ text: cypher, language: 'CYPHER' })
+            );
+            expect(found.map((it) => Object.values(it).map((value) => value ?? '-').join(' ')).sort()).toEqual(expected);
         });
     });
 });
