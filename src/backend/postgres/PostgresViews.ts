@@ -37,13 +37,7 @@ export class PostgresViews extends SqlViews {
      */
     reached(type: string, direction: Direction, from: string, depth: number): string {
         const walk = this.nextAlias('w');
-        const edges =
-            direction === Direction.UNDIRECTED
-                ? `(SELECT eid, src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)} UNION ALL ` +
-                  `SELECT eid, dst, src FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : direction === Direction.INCOMING
-                ? `(SELECT eid, dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : `(SELECT eid, src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
+        const edges = this.steps(type, direction);
         return (
             `WITH RECURSIVE ${walk} (nid, depth, eids) AS (` +
             `SELECT e.b, 1, ARRAY[e.eid] FROM ${edges} e WHERE e.a = ${from}.nid ` +

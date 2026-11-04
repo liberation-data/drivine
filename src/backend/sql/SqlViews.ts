@@ -132,6 +132,19 @@ export abstract class SqlViews {
         return walk.cascade;
     }
 
+    /**
+     * The relationships of the type as a subquery of rows `eid`, `a` and `b`, each a step from `a` to `b` in the
+     * direction, an undirected relationship a row each way round: what `reached` walks.
+     */
+    protected steps(type: string, direction: Direction): string {
+        const typed = `FROM ${this.graph.edges} WHERE type = ${sqlText(type)}`;
+        return direction === Direction.UNDIRECTED
+            ? `(SELECT eid, src AS a, dst AS b ${typed} UNION ALL SELECT eid, dst, src ${typed})`
+            : direction === Direction.INCOMING
+            ? `(SELECT eid, dst AS a, src AS b ${typed})`
+            : `(SELECT eid, src AS a, dst AS b ${typed})`;
+    }
+
     /** What ends a query that reads its first row only. */
     protected firstRow(): string {
         return 'FETCH FIRST 1 ROW ONLY';

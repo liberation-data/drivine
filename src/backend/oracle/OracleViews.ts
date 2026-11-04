@@ -47,13 +47,7 @@ export class OracleViews extends SqlViews {
      * does (#597).
      */
     reached(type: string, direction: Direction, from: string, depth: number): string {
-        const edges =
-            direction === Direction.UNDIRECTED
-                ? `(SELECT eid, src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)} UNION ALL ` +
-                  `SELECT eid, dst, src FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : direction === Direction.INCOMING
-                ? `(SELECT eid, dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : `(SELECT eid, src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
+        const edges = this.steps(type, direction);
         const branches: string[] = [];
         for (let k = 1; k <= depth; k++) {
             let branch = `SELECT h${k}.b AS nid FROM ${edges} h1`;
