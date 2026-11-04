@@ -1,6 +1,6 @@
 import { DrivineError } from '@/DrivineError';
 import { Expression, FunctionCall } from '@/cypher/ast/Expression';
-import { Group, Pattern } from '@/cypher/ast/Pattern';
+import { Group, isMapped, Pattern } from '@/cypher/ast/Pattern';
 import { Call, Clause, Projection, Query, SetItem } from '@/cypher/ast/Query';
 import { bracketed, imports } from '@/cypher/sql/CypherSyntax';
 import { Known, knownOf, nounOf } from '@/cypher/sql/Value';
@@ -268,7 +268,7 @@ function madeOf(pattern: Pattern, scope: Scope, made: Set<string>, merging: bool
             scope.set(variable, 'NODE');
             return;
         }
-        if (!foreach && (node.labels.length > 0 || node.properties !== undefined)) {
+        if (!foreach && (node.labels.length > 0 || isMapped(node))) {
             throw new DrivineError(
                 `${variable} is bound already, so a CREATE or MERGE makes no node of it with labels or properties.`
             );
@@ -376,7 +376,10 @@ const EXPRESSIONS: { [K in Expression['kind']]: (value: Extract<Expression, { ki
         matched(it.pattern, inner, true);
         each([it.where, it.projection], inner);
     },
-    PatternPredicate: (it, scope) => matched(it.pattern, new Map(scope), true),
+    PatternPredicate: (it, scope) => {
+        predicated(it.pattern, scope);
+        matched(it.pattern, new Map(scope), true);
+    },
     Exists: (it, scope) => {
         const inner: Scope = new Map(scope);
         it.patterns.forEach((pattern) => matched(pattern, inner, true));
@@ -387,8 +390,32 @@ const EXPRESSIONS: { [K in Expression['kind']]: (value: Extract<Expression, { ki
     }
 };
 
-/** A function of a variable whose kind it does not take, as Neo4j refuses it: `size()` of a path. */
+/**
+ * A pattern used as an expression, `WHERE (n)-[r]->(a)`, that names a variable not bound in `scope`: Neo4j refuses it
+ * (its 42N29), as such a pattern only tests for a match, and binds nothing.
+ */
+function predicated(pattern: Pattern, scope: Scope): void {
+    const names = pattern.nodes.flatMap((node, i) => [node.variable, pattern.relationships[i]?.variable]);
+    const unbound = names.find((it) => it !== undefined && !scope.has(it));
+    if (unbound !== undefined) {
+        throw new DrivineError(
+            `${unbound} is not defined: a pattern used as an expression binds no new variable, as in Neo4j. ` +
+                'Bind it in a MATCH, or test the pattern with EXISTS { … }.'
+        );
+    }
+}
+
+/**
+ * A function of a variable whose kind it does not take, as Neo4j refuses it: `size()` of a path, and `size()` of a
+ * pattern, `size((a)-->())` (Neo4j's 42I52). Read after its arguments, so a pattern there that names a new variable is
+ * refused for that first, as Neo4j does.
+ */
 function functionOf(fn: FunctionCall, scope: Scope): void {
+    if (fn.name.toLowerCase() === 'size' && fn.arguments.length === 1 && fn.arguments[0].kind === 'PatternPredicate') {
+        throw new DrivineError(
+            "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
+        );
+    }
     const argument = fn.arguments.length === 1 ? fn.arguments[0] : undefined;
     const kind = argument?.kind === 'Variable' ? scope.get(argument.name) : undefined;
     if (fn.name.toLowerCase() === 'size' && kind === 'PATH') {

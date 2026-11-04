@@ -62,7 +62,7 @@ import {
     MapProjectionElement,
     Parameter
 } from '@/cypher/ast/Expression';
-import { Direction, NodePattern, Pattern, Range, RelationshipPattern } from '@/cypher/ast/Pattern';
+import { Direction, NodePattern, Pattern, Range, RelationshipPattern, withEmptyMap } from '@/cypher/ast/Pattern';
 import { Clause, Projection, Query, RemoveItem, SetItem } from '@/cypher/ast/Query';
 import { CypherProcedure, CypherProcedures } from '@/cypher/CypherProcedure';
 
@@ -516,11 +516,13 @@ function quantified(context: OC_PathQuantifierContext): Range {
 function node(context: OC_NodePatternContext): NodePattern {
     const labels = context.oC_NodeLabels();
     const properties = context.oC_Properties();
-    return {
+    const read = properties ? propertiesOf(properties) : undefined;
+    const written: NodePattern = {
         variable: optionalName(context.oC_Variable()),
         labels: labels ? labelsOf(labels) : [],
-        properties: properties ? propertiesOf(properties) : undefined
+        properties: read
     };
+    return properties && !read ? withEmptyMap(written) : written;
 }
 
 function relationshipOf(context: OC_RelationshipPatternContext): RelationshipPattern {
@@ -557,9 +559,17 @@ function rangeOf(context: OC_RangeLiteralContext): Range {
     return dots < context.children.indexOf(integers[0]) ? { max: bounds[0] } : { min: bounds[0] };
 }
 
-function propertiesOf(context: OC_PropertiesContext): Expression {
+/**
+ * A pattern's properties: a map of them, or a parameter's map. An empty map is read as none, as every node and
+ * relationship meets it, so a store compiles `(a {})` as it compiles `(a)`, and not to a test with nothing in it (#605).
+ */
+function propertiesOf(context: OC_PropertiesContext): Expression | undefined {
     const map = context.oC_MapLiteral();
-    return map ? mapLiteral(map) : parameter(context.oC_Parameter()!);
+    if (!map) {
+        return parameter(context.oC_Parameter()!);
+    }
+    const read = mapLiteral(map);
+    return read.entries.length > 0 ? read : undefined;
 }
 
 // ----- Expressions -----

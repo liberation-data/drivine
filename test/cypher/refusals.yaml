@@ -777,6 +777,34 @@ cases:
       - cypher: "MATCH p = (a)-[*]->(b) RETURN size(p)"
         error: "size() takes a list or a text, not a path, as in Neo4j: length() takes a path."
 
+  - name: "size() of a pattern"
+    description: "size() of a pattern is refused, as Neo4j (its 42I52) refuses it: COUNT { … } counts a pattern's matches."
+    steps:
+      - note: "The openCypher TCK's List6 [6]."
+        cypher: "MATCH (a) RETURN size((a)-->())"
+        error: "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
+      - cypher: "MATCH (a), (b), (c) RETURN size(()--())"
+        error: "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
+      - cypher: "MATCH (a), (b), (c) RETURN size((a)<--(a {}))"
+        error: "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
+      - cypher: "MATCH (a), (b), (c) RETURN size(()-[:REL*0..2]->()<-[:REL]-(:A {num: 5}))"
+        error: "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
+
+  - name: "Pattern expression with a new variable"
+    description: "A pattern used as an expression, which tests for a match and binds nothing, is refused where it names a node or relationship variable not bound before it, as Neo4j (its 42N29) refuses it."
+    steps:
+      - note: "The openCypher TCK's Pattern1 [10]."
+        cypher: "MATCH (n) WHERE (n)-[r]->(a) RETURN n"
+        error: "r is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
+      - cypher: "MATCH (n) WHERE ()-[r]->() RETURN n"
+        error: "r is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
+      - cypher: "MATCH (n) WHERE (n)<-[r {}]-(a) RETURN n"
+        error: "r is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
+      - cypher: "MATCH (n) WHERE (n)-[r:REL*0..2]->(a {num: 5}) RETURN n"
+        error: "r is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
+      - cypher: "MATCH (n) WHERE (n)-->(a) RETURN n"
+        error: "a is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
+
   - name: "Aggregate in a WHERE"
     description: "An aggregate in a WHERE is refused, as Neo4j refuses it (its 42I24, \"invalid use of aggregate function\"): of a MATCH or a WITH that groups nothing, a pattern comprehension, a list comprehension, a quantifier, a quantified path pattern, EXISTS { … } and COUNT { … }, in a subquery's or a CALL { … }'s query too, and in a comprehension's, a quantifier's or a pattern's own WHERE or body within the WHERE of a WITH that groups. The WHERE of a WITH that aggregates, or is DISTINCT, holds an aggregate, and so does one after a subquery or a CALL that aggregates in its own projection (see queries.yaml, \"Aggregate in the WHERE of a WITH that groups\" and \"Aggregate beside a WHERE\")."
     steps:
