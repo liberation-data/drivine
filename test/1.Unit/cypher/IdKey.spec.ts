@@ -47,11 +47,11 @@ describe('An id compared, compiled', () => {
         expect(sql(compiler, 'MATCH (n) WHERE id(n) IN n.ids RETURN n')).not.toMatch(/\bn1\.nid IN \(SELECT /);
     });
 
-    it('compares two keys plainly, and on Oracle with + 0 on one side', () => {
+    it('compares two keys plainly, and on Oracle with + 0 on one side, both ways round', () => {
         const cypher = 'MATCH (a) MATCH (b) WHERE id(b) = id(a) RETURN b';
         expect(sql(new PostgresCypherCompiler(GRAPH), cypher)).toContain('n2.nid = n1.nid AND');
         expect(sql(new SqliteCypherCompiler(GRAPH), cypher)).toContain('n2.nid = n1.nid AND');
-        expect(sql(new OracleCypherCompiler(GRAPH), cypher)).toContain('n2.nid = n1.nid + 0 AND');
+        expect(sql(new OracleCypherCompiler(GRAPH), cypher)).toContain('(n2.nid = n1.nid + 0 AND n1.nid = n2.nid + 0) AND');
     });
 
     it.each(stores)('reads a relationship by its key, on %s', (_, compiler) => {

@@ -398,6 +398,13 @@ const names = await pm.query<string>(
   ([#435](https://github.com/liberation-data/drivine/issues/435)). A query of one table carries no hint, but where it
   compares a property as a text (see above): there the transformation lost the property's reads beside a quantifier's
   subquery.
+- On Oracle, a compiled node compared with a node (`c = q`, `c <> q`, `c IN [q]`), or an id with an id
+  (`id(c) = id(q)`), compares their keys with `+ 0` on one side and again the other way round,
+  `(n4.nid = n2.nid + 0 AND n2.nid = n4.nid + 0)`, so either node is still read by its key. This works around Oracle
+  rewrites, seen on 23.26.3, of a key equal to a key: Oracle dropped the later node's join and tested its label in a
+  form that misses a node with more than one label, or read the other node by the key of a node it had dropped, and
+  gave no rows ([#596](https://github.com/liberation-data/drivine/issues/596),
+  [#598](https://github.com/liberation-data/drivine/issues/598)).
 - On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
   is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
   that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for

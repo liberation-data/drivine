@@ -456,8 +456,9 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
-     * Whether the key columns `a` and `b`, of two rows, hold the same key, as a test of the key beside `id(a) = id(b)`:
-     * see Oracle's.
+     * Whether the key columns `a` and `b`, of two rows, hold the same key: a node equal to a node, and a test of the key
+     * beside `id(a) = id(b)`. A store whose planner rewrites a join on key = key into a wrong answer compares them in a
+     * form it can't rewrite: see Oracle's.
      */
     sameKey(a: string, b: string): string {
         return `${a} = ${b}`;
