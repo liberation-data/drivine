@@ -114,7 +114,10 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
         assertKeyedLabels('MATCH (a:Big) WHERE EXISTS { MATCH (b:Big) WHERE a = b } RETURN count(*)');
         assertKeyedLabels('MATCH (a:Big) RETURN COUNT { MATCH (b:Big) WHERE b = a }');
         assertKeyedLabels('MATCH (a:Big) RETURN [(x)-[:R]->(b:Big) WHERE b = a | b.k]');
+        assertKeyedLabels('MATCH (a:Big) MATCH p = shortestPath((b:Big)-[*]-(c:Big)) WHERE b = a RETURN length(p)');
         assertKeyedLabels('MATCH (a:Big:Other) MATCH (b:Big:Other) WHERE a = b RETURN count(*)', ['Big', 'Other']);
+        // Each test of the later node's labels, where a pattern names it again.
+        assertKeyedLabels('MATCH (a:Big) MATCH (b:Big) MATCH (b:Other) WHERE a = b RETURN count(*)', ['Big', 'Other']);
         // The earlier node found by its properties, a relationship it ends, or its id, with no label.
         assertKeyedLabels('MATCH (a {k: 1}) MATCH (b:Big) WHERE a = b RETURN b', ['Big'], false);
         assertKeyedLabels('MATCH (x)-[:R]->(a) MATCH (b:Big) WHERE a = b RETURN count(*)', ['Big'], false);
@@ -152,6 +155,12 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
         // Found by nothing but the key: the index over labels is the way in, to b, and the earlier node is read by its key.
         assertScannedLabels('MATCH (a) MATCH (b:Big) WHERE a = b RETURN count(*)', 1);
         assertScannedLabels('MATCH (a) WHERE EXISTS { MATCH (b:Big) WHERE a = b } RETURN count(*)', 1);
+        // Nor does a subquery find the node around it, by its id or a relationship it ends there: it reads a's rows.
+        assertScannedLabels('MATCH (a) WHERE EXISTS { MATCH (b:Big) WHERE id(a) = 5 AND a = b } RETURN count(*)', 1);
+        assertScannedLabels(
+            'MATCH (a) WHERE EXISTS { MATCH (a)-[:R]->(x) } AND EXISTS { MATCH (b:Big) WHERE a = b } RETURN count(*)',
+            1
+        );
         // Passed through a WITH, the earlier node is a column of that query, whose finding the condition doesn't see.
         assertScannedLabels('MATCH (a:Big) WITH a MATCH (b:Big) WHERE a = b RETURN count(*)');
         // An aggregate's argument compiled first only to see whether it binds a value: what it finds by a label, in the
@@ -159,6 +168,11 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
         // than its key. Each EXISTS is written twice, for its count to be of the values that aren't null.
         assertScannedLabels(
             'MATCH (z) RETURN count(EXISTS { MATCH (u) MATCH (v:Big) WHERE u = v }) AS c, count(EXISTS { MATCH (p:Big) }) AS d',
+            4
+        );
+        // The same of an operation over aggregates, compiled first to see whether it binds a value in a subquery.
+        assertScannedLabels(
+            'MATCH (z) RETURN count(EXISTS { MATCH (u) MATCH (v:Big) WHERE u = v }) + count(EXISTS { MATCH (p:Big) }) AS c',
             4
         );
         // A node equal to itself is the only node there is.
