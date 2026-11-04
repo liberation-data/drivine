@@ -6119,7 +6119,9 @@ export class CypherWriter {
      */
     private identityEquality(left: Value, right: Value, plain: boolean): string | undefined {
         if (left.kind === 'Node' && right.kind === 'Node') {
-            return `${left.nid} = ${right.nid}`;
+            // Through the store's comparison of two keys: on Oracle, a plain `nid = nid` lets it drop the later node's
+            // join (#598).
+            return this.sql.sameKey(left.nid, right.nid);
         }
         if (left.kind === 'Relationship' && right.kind === 'Relationship') {
             return `${left.eid} = ${right.eid}`;

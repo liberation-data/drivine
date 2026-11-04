@@ -970,14 +970,20 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
-     * The keys compared with `+ 0` on one side. Where a node is joined to a relationship's end by the edge table's
-     * foreign key, Oracle (23.26) drops that node from the join, and where another node's key is equal to its key, still
-     * reads the other node by the key of the node it dropped, and finds no row: `MATCH (p)-[:KNOWS]->(q) MATCH (c:Person)
-     * WHERE id(c) = id(q)` gave none (liberation-data/drivine4j#577). A key equal to an expression, not to a column, is
-     * not carried across the join, and `a` is still read by its key.
+     * The keys compared with `+ 0` on one side, and again the other way round, for a node equal to a node and for the
+     * test beside `id(a) = id(b)`. Compared column to column, Oracle (23.26) rewrites the join and finds no row, in two
+     * ways. Where a node is joined to a relationship's end by the edge table's foreign key, it drops that node from the
+     * join, and still reads the other node by the key of the node it dropped: `MATCH (p)-[:KNOWS]->(q) MATCH (c:Person)
+     * WHERE id(c) = id(q)` gave none (#596, liberation-data/drivine4j#575). And it drops the later node's join on the
+     * primary key equal to a primary key, moving that node's label test onto the other node as the multivalue index's
+     * filter, row by row, which misses a node with more than one label: `MATCH (p)-[:KNOWS]->(q) MATCH (c:Person) WHERE
+     * c = q` gave none (#598, liberation-data/drivine4j#576). A key equal to an expression, not to a column, is not
+     * carried across the join and can't eliminate it, and the bare key is still read by its index. Both ways round, so
+     * either node is read by its key, whichever Oracle reads first: with `+ 0` on `b` alone, `MATCH (a) WHERE id(a) =
+     * $id MATCH (b) WHERE a = b` read every node for `b`.
      */
     sameKey(a: string, b: string): string {
-        return `${a} = ${b} + 0`;
+        return `(${a} = ${b} + 0 AND ${b} = ${a} + 0)`;
     }
 
     /** A number, as the key's `NUMBER`; anything else, or a number past one, null. */

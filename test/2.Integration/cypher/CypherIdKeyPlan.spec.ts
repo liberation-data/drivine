@@ -4,6 +4,7 @@ import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
+import { oraclePlan } from '../support/Oracle';
 import { cypherSqlStores, sqlPersistenceManager, SqlStore } from '../support/SqlStores';
 
 jest.setTimeout(300_000);
@@ -31,6 +32,9 @@ interface Planner {
 
     /** Whether `plan` reads every row of the table `table`. */
     scans(plan: string, table: string): boolean;
+
+    /** Whether `plan` reads every row of the table `table` for some node, though it reads another by its key. */
+    scansAny(plan: string, table: string): boolean;
 
     /** Gathers the store's statistics of the graph's tables, where it plans by them. */
     analyze(): Promise<void>;
@@ -66,6 +70,9 @@ function sqlitePlanner(pm: PersistenceManager): Planner {
                 .split('\n')
                 .some((it) => it.startsWith(`${table}: SEARCH `) && it.includes('INTEGER PRIMARY KEY (rowid=?)')),
         scans: (plan, table) => plan.split('\n').some((it) => it.startsWith(`${table}: SCAN `)),
+        scansAny(plan: string, table: string): boolean {
+            return this.scans(plan, table);
+        },
         async analyze() {
             await pm.execute(new QuerySpecification(`ANALYZE ${GRAPH}_node`));
             await pm.execute(new QuerySpecification(`ANALYZE ${GRAPH}_edge`));
@@ -123,6 +130,9 @@ function postgresPlanner(pm: PersistenceManager, store: SqlStore): Planner {
                         !(lines[i + 1] ?? '').includes(`Index Cond: (${key(table)} = `))
             );
         },
+        scansAny(plan: string, table: string): boolean {
+            return this.scans(plan, table);
+        },
         async analyze() {
             await pm.execute(new QuerySpecification(`ANALYZE ${GRAPH}_node`));
             await pm.execute(new QuerySpecification(`ANALYZE ${GRAPH}_edge`));
@@ -144,40 +154,13 @@ function oraclePlanner(pm: PersistenceManager, store: SqlStore): Planner {
                     (table === 'node' && /access\("\w+"\."(SRC|DST)"=JSON_VALUE/.test(line))
             );
     };
+    const scansAny = (plan: string, table: string): boolean =>
+        new RegExp(`TABLE ACCESS (STORAGE )?FULL\\s*\\|\\s*${GRAPH.toUpperCase()}_${table.toUpperCase()}\\b`).test(plan);
     return {
         item: '',
         compiled: (cypher, parameters) => new OracleCypherCompiler(GRAPH).compile(cypher, parameters),
         /** The plan Oracle makes for `compiled`, its values written in as literals, explained and read on one session. */
-        async plan(compiled: CompiledCypher): Promise<string> {
-            const sql = Object.entries(compiled.parameters)
-                .sort(([a], [b]) => b.length - a.length)
-                .reduce(
-                    (text, [name, value]) =>
-                        text
-                            .split(`$${name}`)
-                            .join(
-                                value === null || value === undefined
-                                    ? 'NULL'
-                                    : `'${String(value).replace(/'/g, "''")}'`
-                            ),
-                    compiled.sql
-                );
-            const id = `idkey_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-            const connection = await DatabaseRegistry.getInstance()
-                .connectionProvider(connectionName(store))!
-                .connect();
-            try {
-                await connection.query(new QuerySpecification(`EXPLAIN PLAN SET STATEMENT_ID = '${id}' FOR ${sql}`));
-                const lines = await connection.query(
-                    new QuerySpecification(
-                        `SELECT plan_table_output AS "line" FROM TABLE(DBMS_XPLAN.DISPLAY('PLAN_TABLE', '${id}', 'BASIC +PREDICATE'))`
-                    )
-                );
-                return lines.map((it) => it.line ?? it.LINE ?? it).join('\n');
-            } finally {
-                await connection.release();
-            }
-        },
+        plan: async (compiled) => oraclePlan(connectionName(store), compiled, 'BASIC +PREDICATE'),
         /**
          * The key read, by its index or as the key of a join: over a graph this small, Oracle, which takes a `JSON_TABLE`
          * to give 8,168 rows, joins the nodes to the ids by a hash of the key, once over the nodes, where it reads each node
@@ -186,11 +169,9 @@ function oraclePlanner(pm: PersistenceManager, store: SqlStore): Planner {
         readsByKey,
         /** A scan of the table, or of an index, that reads no row by its key: each row is compared with each id. */
         scans: (plan, table) =>
-            (new RegExp(`TABLE ACCESS (STORAGE )?FULL\\s*\\|\\s*${GRAPH.toUpperCase()}_${table.toUpperCase()}\\b`).test(
-                plan
-            ) ||
-                /INDEX (FULL|FAST FULL|RANGE) SCAN/.test(plan)) &&
-            !readsByKey(plan, table),
+            (scansAny(plan, table) || /INDEX (FULL|FAST FULL|RANGE) SCAN/.test(plan)) && !readsByKey(plan, table),
+        /** A scan of the table, beside a read of another node by its key or not. */
+        scansAny,
         async analyze() {
             await pm.execute(
                 new QuerySpecification(
@@ -349,6 +330,16 @@ describe.each(cypherSqlStores())('An id compared, as $type plans it', (store) =>
             { id: id(5) },
             [5]
         );
+    });
+
+    it('reads a node equal to a node read by its key by its key too, whichever side of the = it is on', async () => {
+        // Oracle's comparison of two keys, both ways round (#598): with `+ 0` on one side alone, it read every node for b.
+        for (const test of ['b = a', 'a = b', 'id(b) = id(a)', 'id(a) = id(b)']) {
+            const statement = `MATCH (a${item}) WHERE id(a) = $id MATCH (b${item}) WHERE ${test} RETURN b.k`;
+            await assertKeyed(statement, { id: id(5) }, [5]);
+            const plan = await planner.plan(planner.compiled(statement, { id: id(5) }));
+            expect([statement, plan, planner.scansAny(plan, 'node')]).toEqual([statement, plan, false]);
+        }
     });
 
     it('reads the key of an id compared across a relationship of either direction, read both ways round', async () => {
