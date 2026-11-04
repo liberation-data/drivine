@@ -71,6 +71,15 @@ A statement is compiled as written, and nothing is added to it. So a write of a
 manager keeps beside it as it was, on these stores as on the graph engines: set the copy in the same statement, or
 refill it afterwards ([how](05-object-manager.md#cypher-of-your-own)).
 
+A node's id, `id(n)` or `elementId(n)`, is the key of its row, and a relationship's is the key of its own. Where the
+row must pass a comparison of one by `=` or `IN`, as a `WHERE` or one of its conditions joined by `AND` must be passed,
+the store reads the row by that key: `MATCH (n) WHERE id(n) = $id`, `MATCH (n) WHERE id(n) IN $ids` and
+`UNWIND $ids AS i MATCH (n) WHERE id(n) = i` read a row for each id, not every node for each. The comparison is still
+Cypher's, so `5.0` is the id `5`, and a text, a list or null is no id. Under `NOT`, beside an `OR`, or as a value
+(`RETURN id(n) = $id`), it reads every row it compares, as an expression of a property does. Oracle may still read
+the nodes of a label the pattern names (`MATCH (n:Person) WHERE id(n) = $id`) by the index over labels, as it does for
+a key written in SQL, `nid = 6`; without the label it reads the key.
+
 ### What compiles
 
 What each statement gives on each store, compiled to SQL or not, is the shared
