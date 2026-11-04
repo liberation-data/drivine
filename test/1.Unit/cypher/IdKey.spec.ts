@@ -75,6 +75,22 @@ describe('An id compared, compiled', () => {
         }
     );
 
+    it.each(stores)(
+        'reads no key beside an id compared with a temporal value, a list of them, or a parameter that is no list, on %s',
+        (_, compiler) => {
+            // A temporal value compares by its kind, not as its JSON: no number it holds is a key.
+            [
+                "MATCH (n) WHERE id(n) = date('2020-01-01') RETURN n",
+                "MATCH (n) WHERE id(n) IN [date('2020-01-01'), 1] RETURN n",
+                "MATCH (n) WHERE id(n) IN [date('2020-01-01'), null] RETURN n",
+                'MATCH (n) WHERE id(n) IN $ids RETURN n'
+            ].forEach((cypher) => {
+                const compiled = sql(compiler, cypher, { ids: null });
+                expect([cypher, compiled]).toEqual([cypher, expect.not.stringMatching(/\bn1\.nid (=|IN) /)]);
+            });
+        }
+    );
+
     it.each(stores)('compiles a statement with no id compared as it did, on %s', (_, compiler) => {
         // No key test where nothing is an id: an equality of properties, and an IN of a property.
         ['MATCH (n) WHERE n.k = $k RETURN n', 'MATCH (n) WHERE n.k IN $ks RETURN n'].forEach((cypher) =>
