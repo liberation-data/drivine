@@ -185,6 +185,9 @@ describe.each(stores())('A DELETE on $type', (store) => {
         expect(seen).toEqual([[1, 2], [4]]);
         expect(await ks()).toEqual([1, 2, 3, 4]);
         expect(await rs()).toEqual([1, 2, 3, 4]);
+        // Planned again after the rollback, Oracle crashed the session on this delete without NO_ADAPTIVE_PLAN (#612).
+        await query('MATCH (a:CyDelete) OPTIONAL MATCH (a)-[r:R]->(:CyDelete {k: 2}) DELETE r');
+        expect(await rs()).toEqual([2, 3, 4]);
     });
 
     it("should DELETE an optional match's variable where it is not null, and nothing for a match of no rows", async () => {
