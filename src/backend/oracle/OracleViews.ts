@@ -12,7 +12,7 @@ import { byId, NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
 
 /**
  * Writes a view on Oracle (see SqlViews): each relationship's nodes aggregated with JSON_ARRAYAGG, and a relationship
- * to a depth followed by a recursive query.
+ * to a depth followed by a join for each relationship along the way.
  */
 export class OracleViews extends SqlViews {
     protected readonly emptyObject = `JSON('{}')`;
