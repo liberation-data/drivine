@@ -35,8 +35,6 @@ export const Procedure = {
     CALLER: 'cy_caller',
     /** How deep `FOREACH`es and writing `CALL`s nest. */
     NESTING: 3,
-    /** The nodes a `DELETE` deletes once its rows are done, a JSON list of ids. */
-    DOOMED: 'cy_doomed',
     /** The record of a write's loop over the rows: its `item` is a row. */
     RECORD: 'cy_record',
     /** The record of a `MERGE`'s loop over what it found: its `item` is a row. */

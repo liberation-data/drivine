@@ -106,22 +106,8 @@ import {
 } from '@/cypher/sql/Value';
 import { columnKinds, columns, columnsOf, groupKeys, laterally, PENDING } from '@/cypher/sql/ValueColumns';
 
-const {
-    ROWS,
-    OUT,
-    ROW,
-    VALUE,
-    ID,
-    COUNT,
-    FOUND,
-    SAVED,
-    GATHERED,
-    CALLER,
-    NESTING,
-    DOOMED,
-    RECORD,
-    MATCHED
-}: typeof Procedure = Procedure;
+const { ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, CALLER, NESTING, RECORD, MATCHED }: typeof Procedure =
+    Procedure;
 
 /** What a variable a row holds is. */
 type Kind = 'NODE' | 'RELATIONSHIP' | 'VALUE' | 'NODES' | 'RELATIONSHIPS' | 'PATH';
@@ -1513,16 +1499,17 @@ export class CypherWriter {
     procedure(query: Query): ProcedureStep[] {
         this.give(query);
         let select = new Select(new Map());
-        for (const clause of this.creates(query.clauses)) {
+        const clauses = this.creates(query.clauses);
+        clauses.forEach((clause, i) => {
             if (clause.kind === 'Return') {
                 this.step({
                     kind: 'Return',
                     query: this.sql.planned(this.project(select, clause.projection, true).sql)
                 });
-            } else {
+            } else if (!(clause.kind === 'Delete' && i === clauses.length - 1 && this.deleteMatched(select, clause))) {
                 select = this.next(select, clause);
             }
-        }
+        });
         return this.blocks[0];
     }
 
@@ -2966,13 +2953,16 @@ export class CypherWriter {
         );
     }
 
-    /** One write: made for each row of `ROWS` in turn, and the rows it leaves put back there. */
+    /**
+     * One write: made for each row of `ROWS` in turn, and the rows it leaves put back there; a `DELETE` over all of them
+     * at once, see {@link delete}.
+     */
     private write(clause: Clause): void {
-        this.assign(OUT, this.sql.literalJson([]));
-        const deleting = clause.kind === 'Delete' && !clause.detach;
-        if (deleting) {
-            this.assign(DOOMED, this.sql.literalJson([]));
+        if (clause.kind === 'Delete') {
+            this.delete(clause);
+            return;
         }
+        this.assign(OUT, this.sql.literalJson([]));
         const r = this.alias('r');
         this.loop(
             RECORD,
@@ -2986,23 +2976,6 @@ export class CypherWriter {
             }
         );
         this.let(ROWS, OUT);
-        if (deleting) {
-            // A node is deleted when the clause has deleted the relationships it deletes: one it does not delete must not be there.
-            const d = this.alias('d');
-            const doomed = `SELECT ${this.sql.idOf(this.sql.item(d))} FROM ${this.sql.elements(DOOMED, d)}`;
-            this.selectInto(
-                COUNT,
-                'count(*)',
-                ` FROM ${this.sql.edges} WHERE src IN (${doomed}) OR dst IN (${doomed})`
-            );
-            this.branch(`${COUNT} > 0`, () =>
-                this.step({
-                    kind: 'Raise',
-                    message: 'A node is deleted that still has relationships: delete them first, or DETACH DELETE it.'
-                })
-            );
-            this.execute(`DELETE FROM ${this.sql.nodes} WHERE nid IN (${doomed})`);
-        }
     }
 
     /** The write `clause` makes for the row in `ROW`. */
@@ -3021,10 +2994,6 @@ export class CypherWriter {
                 return;
             case 'Remove':
                 clause.items.forEach((it) => this.remove(it));
-                this.keep();
-                return;
-            case 'Delete':
-                this.delete(clause);
                 this.keep();
                 return;
             default:
@@ -3491,27 +3460,98 @@ export class CypherWriter {
     }
 
     /**
-     * A `DELETE` for the row in `ROW`: its relationships first, then its nodes, each with its relationships where it is
-     * `DETACH`; without, a node is gathered in `DOOMED` and deleted once the rows are done.
+     * A `DELETE` over all the rows in `ROWS` at once, which it leaves as they are (#612, liberation-data/drivine4j#587):
+     * one statement for each table, the ids of every row's relationships, then of its nodes, each with its relationships
+     * where it is `DETACH`, as the edge table's foreign keys cascade. A node or a relationship on many rows, or named
+     * twice, is deleted once. Nothing the clause writes is read before it is done, so it deletes what a statement for
+     * each row in turn would.
      */
     private delete(clause: Delete): void {
-        const targets = clause.expressions.map((expression) => {
+        const targets = clause.expressions.map((expression): [string, string] => {
             const variable =
                 expression.kind === 'Variable' ? expression.name : unsupported('A DELETE of anything but a variable');
-            return this.target(variable, 'DELETE');
+            return [variable, this.target(variable, 'DELETE')[0]];
         });
-        targets
-            .filter(([table]) => table === this.sql.edges)
-            .forEach(([, , row]) => this.execute(`DELETE FROM ${this.sql.edges} WHERE eid = ${row}`));
-        targets
-            .filter(([table]) => table === this.sql.nodes)
-            .forEach(([, , row]) => {
-                if (clause.detach) {
-                    this.execute(`DELETE FROM ${this.sql.nodes} WHERE nid = ${row}`);
-                } else {
-                    this.assign(DOOMED, this.sql.appended(DOOMED, this.sql.scalar(row)));
-                }
-            });
+        const ids = (table: string): string | undefined => {
+            const variables = [...new Set(targets.filter(([, it]) => it === table).map(([variable]) => variable))];
+            return variables.length === 0
+                ? undefined
+                : variables
+                      .map((variable) => {
+                          const r = this.alias('r');
+                          return `SELECT ${this.sql.idOf(
+                              this.sql.item(r),
+                              this.key(variable)
+                          )} FROM ${this.sql.elements(ROWS, r)}`;
+                      })
+                      .join(' UNION ALL ');
+        };
+        this.deleteIds(ids(this.sql.edges), ids(this.sql.nodes), clause.detach);
+    }
+
+    /**
+     * The relationships whose ids the query `relationships` gives deleted, then the nodes whose ids `nodes` gives: with
+     * their relationships where `detach`; without, the statement fails where one has a relationship still.
+     */
+    private deleteIds(relationships: string | undefined, nodes: string | undefined, detach: boolean): void {
+        if (relationships !== undefined) {
+            this.execute(`DELETE FROM ${this.sql.edges} WHERE eid IN (${relationships})`);
+        }
+        if (nodes === undefined) {
+            return;
+        }
+        if (!detach) {
+            this.selectInto(COUNT, 'count(*)', ` FROM ${this.sql.edges} WHERE src IN (${nodes}) OR dst IN (${nodes})`);
+            this.branch(`${COUNT} > 0`, () =>
+                this.step({
+                    kind: 'Raise',
+                    message: 'A node is deleted that still has relationships: delete them first, or DETACH DELETE it.'
+                })
+            );
+        }
+        this.execute(`DELETE FROM ${this.sql.nodes} WHERE nid IN (${nodes})`);
+    }
+
+    /**
+     * A `DELETE` that ends the statement written as one statement that reads the ids it deletes from `select` itself, so
+     * the rows of its match, which nothing after it reads, are not gathered into `ROWS` first (#612,
+     * liberation-data/drivine4j#587): that list held an id for each of 1.1M nodes in `MATCH (n) DETACH DELETE n`. Only
+     * where the statement reads its match once, and that is all it would read: the clause deletes one variable, a node
+     * with `DETACH` or a relationship, and every variable `select` binds is a node or a relationship, so gathering the
+     * rows works out no value it would not. A plain `DELETE` of nodes reads them twice, to test them for relationships
+     * and to delete them, and one of relationships and nodes would read the match again once the relationships are gone,
+     * so they are gathered as before. False where it is not written so, and then nothing is.
+     */
+    private deleteMatched(select: Select, clause: Delete): boolean {
+        const scope = select.scope;
+        if (![...scope.values()].every((it) => it.kind === 'Node' || it.kind === 'Relationship')) {
+            return false;
+        }
+        const variables = new Set<string>();
+        for (const expression of clause.expressions) {
+            if (expression.kind !== 'Variable') {
+                return false;
+            }
+            variables.add(expression.name);
+        }
+        if (variables.size !== 1) {
+            return false;
+        }
+        const read = [...this.from(select), ...optional(select.whereClause())].map((it) => `\n${it}`).join('');
+        const target = scope.get([...variables][0]);
+        if (target?.kind === 'Node' && clause.detach) {
+            this.deleteIds(undefined, this.sql.planned(`SELECT ${this.sql.inKey(target.nid)} AS id${read}`), true);
+            return true;
+        }
+        if (target?.kind === 'Relationship') {
+            this.deleteIds(
+                this.sql.planned(`SELECT ${this.sql.inKey(target.eid)} AS id${read}`),
+                undefined,
+                clause.detach
+            );
+            return true;
+        }
+        return false;
     }
 
     // ----- Projection -----

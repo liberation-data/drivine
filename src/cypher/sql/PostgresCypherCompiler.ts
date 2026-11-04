@@ -22,7 +22,6 @@ const {
     GATHERED,
     CALLER,
     NESTING,
-    DOOMED,
     RECORD,
     MATCHED
 }: typeof Procedure = Procedure;
@@ -626,7 +625,6 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             `    ${ID} bigint;`,
             `    ${COUNT} bigint;`,
             `    ${FOUND} boolean;`,
-            `    ${DOOMED} jsonb;`,
             `    ${RECORD} record;`,
             `    ${MATCHED} record;`,
             ...saved.flat(),

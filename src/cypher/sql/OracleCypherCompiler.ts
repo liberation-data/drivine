@@ -19,7 +19,7 @@ import { PLAIN_FLOAT, SHARED_ABOVE, SqlCypherCompiler } from '@/cypher/sql/SqlCy
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
 
-const { PARAMS, ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, CALLER, NESTING, DOOMED }: typeof Procedure =
+const { PARAMS, ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, CALLER, NESTING }: typeof Procedure =
     Procedure;
 
 /** The cursor a procedure returns its rows by. */
@@ -1008,6 +1008,16 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * The key with `+ 0`, as {@link sameKey} has it: Oracle (23.26) unnests `nid IN (SELECT n1.nid FROM <nodes> n1 WHERE
+     * <label test>)` into the table itself, the label test answered by the multivalue index, and finds no row, so
+     * `MATCH (g:Gone) DETACH DELETE g` deleted nothing, and a `COUNT(*)` of the same found none (#612,
+     * liberation-data/drivine4j#587). The key of an expression is not rewritten so.
+     */
+    inKey(key: string): string {
+        return `${key} + 0`;
+    }
+
+    /**
      * Each label by the labels' text ({@link holdsLabel}), the form for a node found some other way, which the index over
      * labels can't answer. With the first in the index's form ({@link hasLabels}), Oracle (23.26) read that index again
      * for each row of the node the key is equal to, and filtered it on the key, rather than read the one row by the
@@ -1664,7 +1674,6 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `    ${ID} NUMBER;`,
             `    ${COUNT} NUMBER;`,
             `    ${FOUND} BOOLEAN;`,
-            `    ${DOOMED} JSON;`,
             `    ${CURSOR} SYS_REFCURSOR;`,
             `    ${OracleTemporalSql.NOW} TIMESTAMP;`,
             ...saved.flat(),
