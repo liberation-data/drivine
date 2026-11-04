@@ -12,7 +12,7 @@ import { byId, NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
 
 /**
  * Writes a view on Oracle (see SqlViews): each relationship's nodes aggregated with JSON_ARRAYAGG, and a relationship
- * to a depth followed with CONNECT BY.
+ * to a depth followed by a join for each relationship along the way.
  */
 export class OracleViews extends SqlViews {
     protected readonly emptyObject = `JSON('{}')`;
@@ -39,15 +39,30 @@ export class OracleViews extends SqlViews {
         return relatedSubquery(...hints);
     }
 
+    /**
+     * Each way from the node row `from`, as far as `depth` relationships, taking no relationship twice in a walk, as
+     * Cypher takes a relationship once in a path: a node reached by several ways is a row for each. CONNECT BY can't
+     * carry the relationships taken, and a recursive WITH can't see the outer row on Oracle (ORA-00904), so the walk
+     * is unrolled to its depth, a branch for each length with each pair of its relationships told apart, as drivine4j
+     * does (#597).
+     */
     reached(type: string, direction: Direction, from: string, depth: number): string {
-        const edges =
-            direction === Direction.UNDIRECTED
-                ? `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)} UNION ALL ` +
-                  `SELECT dst, src FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : direction === Direction.INCOMING
-                ? `(SELECT dst AS a, src AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`
-                : `(SELECT src AS a, dst AS b FROM ${this.graph.edges} WHERE type = ${sqlText(type)})`;
-        return `SELECT b AS nid FROM ${edges} START WITH a = ${from}.nid CONNECT BY NOCYCLE PRIOR b = a AND LEVEL <= ${depth}`;
+        const edges = this.steps(type, direction);
+        const branches: string[] = [];
+        for (let k = 1; k <= depth; k++) {
+            let branch = `SELECT h${k}.b AS nid FROM ${edges} h1`;
+            for (let i = 2; i <= k; i++) {
+                branch += ` JOIN ${edges} h${i} ON h${i}.a = h${i - 1}.b`;
+            }
+            branch += ` WHERE h1.a = ${from}.nid`;
+            for (let i = 1; i < k; i++) {
+                for (let j = i + 1; j <= k; j++) {
+                    branch += ` AND h${i}.eid <> h${j}.eid`;
+                }
+            }
+            branches.push(branch);
+        }
+        return branches.join(' UNION ALL ');
     }
 
     /**
