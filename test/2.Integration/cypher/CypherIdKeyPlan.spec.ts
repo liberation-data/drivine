@@ -332,15 +332,27 @@ describe.each(cypherSqlStores())('An id compared, as $type plans it', (store) =>
         );
     });
 
-    it('reads a node equal to a node read by its key by its key too, whichever side of the = it is on', async () => {
-        // Oracle's comparison of two keys, both ways round (#598): with `+ 0` on one side alone, it read every node for b.
+    /** That a node matched by `label`, equal to one matched by it and read by its key, is read by its key too, whichever way round. */
+    const nodeEqualToKeyed = async (label: string): Promise<void> => {
         for (const test of ['b = a', 'a = b', 'id(b) = id(a)', 'id(a) = id(b)']) {
-            const statement = `MATCH (a${item}) WHERE id(a) = $id MATCH (b${item}) WHERE ${test} RETURN b.k`;
+            const statement = `MATCH (a${label}) WHERE id(a) = $id MATCH (b${label}) WHERE ${test} RETURN b.k`;
             await assertKeyed(statement, { id: id(5) }, [5]);
             const plan = await planner.plan(planner.compiled(statement, { id: id(5) }));
             expect([statement, plan, planner.scansAny(plan, 'node')]).toEqual([statement, plan, false]);
         }
+    };
+
+    it('reads a node equal to a node read by its key by its key too, whichever side of the = it is on', async () => {
+        // Oracle's comparison of two keys, both ways round (#598): with `+ 0` on one side alone, it read every node for b.
+        await nodeEqualToKeyed(item);
     });
+
+    // With a label on each, on Oracle: b's, tested so the index over labels can't answer it, has Oracle read b by its
+    // key, where it read that index for b once for a's row (#606, liberation-data/drivine4j#578).
+    (store.type === DatabaseType.ORACLE ? it : it.skip)(
+        'reads a labelled node equal to a labelled node read by its key by its key too, whichever side of the = it is on',
+        async () => nodeEqualToKeyed(':Item')
+    );
 
     it('reads the key of an id compared across a relationship of either direction, read both ways round', async () => {
         // Postgres and Oracle read such a relationship from both halves of a UNION ALL (#588): its eid is the halves',

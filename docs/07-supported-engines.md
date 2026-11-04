@@ -405,6 +405,14 @@ const names = await pm.query<string>(
   form that misses a node with more than one label, or read the other node by the key of a node it had dropped, and
   gave no rows ([#596](https://github.com/liberation-data/drivine/issues/596),
   [#598](https://github.com/liberation-data/drivine/issues/598)).
+- On Oracle, a compiled node with a label whose key a `WHERE` sets equal to another node's (`a = b`, `id(b) = id(a)`,
+  as a condition the row must pass, not under `NOT` or beside an `OR`) tests its labels by their text, which the index
+  over labels can't answer, where the other node is found by a label, properties, a relationship or its id: Oracle
+  then reads it by its primary key. With the index's form, Oracle 23.26 read that index again for each row of the
+  other node, so `MATCH (a:Big) MATCH (b:Big) WHERE a = b` took 1.5 s over 4,000 nodes, growing with their square, and
+  takes about 10 ms now ([#606](https://github.com/liberation-data/drivine/issues/606)). The earlier of two such nodes
+  keeps the index's form, and so does a node equal to one found by nothing else (`MATCH (a) MATCH (b:Rare) WHERE a = b`),
+  where the index is the way in.
 - On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
   is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
   that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for
