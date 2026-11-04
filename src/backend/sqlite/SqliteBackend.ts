@@ -127,6 +127,8 @@ export class SqliteBackend implements GraphBackend {
         }
         const cascaded = new SqliteViews(this.graph).cascade(target.model, 'n.nid IN (SELECT nid FROM cascade_roots)');
         const orphans = cascade === CascadeType.DELETE_ORPHAN && cascaded.reached.length > 0;
+        // Read both ways round where it follows a relationship of either direction (#588).
+        const kept = keptTargets(this.graph, cascaded.followed, 'UNION', true);
         const targets = cascaded.reached.length
             ? [
                   `cascade_targets AS (SELECT DISTINCT t.nid FROM (${cascaded.reached.join('\n    UNION ALL ')}) t ` +
@@ -134,7 +136,7 @@ export class SqliteBackend implements GraphBackend {
                   ...(orphans
                       ? [
                             `cascade_all AS (SELECT nid FROM cascade_roots UNION SELECT nid FROM cascade_targets),`,
-                            `cascade_kept (nid) AS (\n    ${keptTargets(this.graph, cascaded.followed, 'UNION')}),`
+                            `cascade_kept (nid) AS (\n    ${kept}),`
                         ]
                       : [])
               ]

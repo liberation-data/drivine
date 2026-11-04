@@ -524,6 +524,17 @@ export class SqliteCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * A relationship of either direction keeps its OR across the two directions here, which SQLite plans as a
+     * `MULTI-INDEX OR`, probing the index on each end. Read both ways round, as on Postgres and Oracle
+     * (liberation-data/drivine#588), SQLite builds an index over all of it for each statement: at 20,000 nodes a walk
+     * from 20 of them took 59 ms, against 9.5 ms with the OR, and a single step 66 ms against 30
+     * (liberation-data/drivine4j#574).
+     */
+    undirectedBothWays(): boolean {
+        return false;
+    }
+
+    /**
      * A JSON list of maps, a map for each row of `query`, gathered in a subquery that may read the row it is in, and
      * joined as `json_each` gives its items: SQLite joins no lateral query.
      */
