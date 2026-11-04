@@ -378,7 +378,12 @@ function direct(sql: string, json: string): string {
  * what the node walked from meets of its own, and carries the node it started from.
  */
 export class OracleCypherCompiler extends SqlCypherCompiler {
-    readonly temporalSql: TemporalSql = new OracleTemporalSql(this.sharedList, () => this.procedural);
+    readonly temporalSql: TemporalSql = new OracleTemporalSql(
+        this.sharedList,
+        () => this.procedural,
+        this.eraStored ? this.graph : undefined,
+        () => (this.storedEraCalled = true)
+    );
     readonly noIds = "','";
     /** `ROW_NUMBER()` takes an order of its own; `ROWNUM` counts the rows as the query gives them. */
     readonly rowNumber = 'ROWNUM';
@@ -401,6 +406,9 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /** Whether the statement compiled calls the store's {@link nullsEqualName}: see {@link callsStoredNullsEqual}. */
     private storedNullsEqualCalled = false;
 
+    /** Whether the statement compiled calls the store's era functions: see {@link callsStoredEra}. */
+    private storedEraCalled = false;
+
     /**
      * Whether the texts {@link texts} gives its body are CLOBs: see {@link scalar}, {@link startsWith}, {@link endsWith},
      * {@link containsText}, {@link split}, {@link replaceText} and {@link reversedText}, which read them otherwise.
@@ -417,13 +425,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     private readsCompared = false;
 
     /**
-     * @param graph the graph whose tables, and whose function {@link nullsEqualName}, a statement is compiled against
+     * @param graph the graph whose tables, and whose functions {@link nullsEqualName}, `eraName` and `eraDateName`, a
+     * statement is compiled against
      * @param nullsEqualStored whether two values that may hold a null are compared by the function the store keeps
      * beside the graph's tables: see {@link nullsEqual}
+     * @param eraStored whether a text or a timestamp whose year may be BC is renumbered by the functions the store keeps
+     * beside the graph's tables, `eraName` and `eraDateName` (see `OracleStoredFunctions`): see `OracleTemporalSql.era`
      */
     constructor(
         private readonly graph: string,
-        private readonly nullsEqualStored: boolean = true
+        private readonly nullsEqualStored: boolean = true,
+        private readonly eraStored: boolean = true
     ) {
         super(graph);
     }
@@ -435,6 +447,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      */
     get callsStoredNullsEqual(): boolean {
         return this.storedNullsEqualCalled;
+    }
+
+    /**
+     * Whether the statement compiled calls the store's `eraName`'s or `eraDateName`'s function, which a store made by an
+     * earlier version, or by a user who may not make a function, does not have: compiled again with `eraStored` false,
+     * it calls neither, and renumbers a year BC inline, as it gives the same rows but takes Oracle longer to plan.
+     */
+    get callsStoredEra(): boolean {
+        return this.storedEraCalled;
     }
 
     literalJson(value: any): string {

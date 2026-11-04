@@ -1,5 +1,10 @@
 import { OracleGraph } from '@/backend/oracle';
-import { nullsEqualFunction, OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
+import {
+    eraDateFunction,
+    eraFunction,
+    nullsEqualFunction,
+    OracleStoredFunctions
+} from '@/backend/oracle/OracleStoredFunctions';
 import { sqlText } from '@/backend/oracle/OracleGraph';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 
@@ -71,17 +76,60 @@ function drivine4jNullsEqual(name: string): string {
     return DRIVINE4J_NULLS_EQUAL.join('\n').replace('$name', name);
 }
 
-describe('The function an Oracle graph is made with, which compares values that may hold a null', () => {
-    it("is drivine4j's text byte for byte, as CREATE OR REPLACE of it", () => {
+/**
+ * The lines of drivine4j's `OracleCypherCompiler.eraFunction` and `eraDateFunction`, copied verbatim from drivine4j at
+ * liberation-data/drivine4j#584, `${TemporalSql.BC_BELOW}` written as the 49 it is and `$name` replaced by the function's
+ * name, as {@link DRIVINE4J_NULLS_EQUAL}'s is (liberation-data/drivine#609).
+ */
+// prettier-ignore
+const DRIVINE4J_ERA = [
+    "FUNCTION $name(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
+    "BEGIN",
+    "    IF ASCII(t) < 49 THEN",
+    "        RETURN REGEXP_REPLACE(t, '^(-[0-9]{4}|0000)', TO_CHAR(TO_NUMBER(REGEXP_SUBSTR(t, '^-?[0-9]{4}')) - 1, 'FM0000'));",
+    "    END IF;",
+    "    RETURN t;",
+    "END;",
+];
+
+/** See {@link DRIVINE4J_ERA}. */
+// prettier-ignore
+const DRIVINE4J_ERA_DATE = [
+    "FUNCTION $name(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
+    "BEGIN",
+    "    IF SUBSTR(t, 1, 1) = '-' THEN",
+    "        RETURN TO_CHAR(TO_NUMBER(SUBSTR(t, 1, 5)) + 1, 'FM0000') || SUBSTR(t, 6);",
+    "    END IF;",
+    "    RETURN t;",
+    "END;",
+];
+
+describe('The functions an Oracle graph is made with', () => {
+    it("are drivine4j's texts byte for byte, as CREATE OR REPLACE of each", () => {
         expect(nullsEqualFunction('myGraph_nulls_equal')).toEqual(drivine4jNullsEqual('myGraph_nulls_equal'));
+        expect(eraFunction('myGraph_era')).toEqual(DRIVINE4J_ERA.join('\n').replace('$name', 'myGraph_era'));
+        expect(eraDateFunction('myGraph_era_date')).toEqual(
+            DRIVINE4J_ERA_DATE.join('\n').replace('$name', 'myGraph_era_date')
+        );
         const graph = new OracleGraph('myGraph');
-        expect(graph.nullsEqual).toEqual('myGraph_nulls_equal');
-        expect(graph.functions).toEqual([`CREATE OR REPLACE ${drivine4jNullsEqual('myGraph_nulls_equal')}`]);
-        expect(graph.functions[0].endsWith('END;')).toBe(true);
+        expect([graph.nullsEqual, graph.era, graph.eraDate]).toEqual([
+            'myGraph_nulls_equal',
+            'myGraph_era',
+            'myGraph_era_date'
+        ]);
+        expect(graph.functions).toEqual([
+            `CREATE OR REPLACE ${drivine4jNullsEqual('myGraph_nulls_equal')}`,
+            `CREATE OR REPLACE ${DRIVINE4J_ERA.join('\n').replace('$name', 'myGraph_era')}`,
+            `CREATE OR REPLACE ${DRIVINE4J_ERA_DATE.join('\n').replace('$name', 'myGraph_era_date')}`
+        ]);
+        for (const function_ of graph.functions) {
+            expect(function_.endsWith('END;')).toBe(true);
+        }
     });
 
-    it('is made after the tables, where missing or not valid, waiting on locks, tolerant of a user who may not make one', () => {
-        // drivine4j's OracleNamesTest of the block (#270).
+    it('are each made after the tables, where missing or not valid, waiting on locks, tolerant of a user who may not make one', () => {
+        // drivine4j's OracleNamesTest of the block (#270): each is looked for, and made, on its own, as a store an earlier
+        // version made may have one and not the others (liberation-data/drivine#609).
         const graph = new OracleGraph('myGraph');
         const ensuring = graph.ensuring;
         for (const statement of graph.ddl) {
@@ -89,20 +137,26 @@ describe('The function an Oracle graph is made with, which compares values that 
                 `BEGIN EXECUTE IMMEDIATE ${sqlText(statement)}; EXCEPTION WHEN e_exists THEN NULL; END;`
             );
         }
-        const checked = ensuring.indexOf(
-            "SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = 'MYGRAPH_NULLS_EQUAL' AND status = 'VALID';"
-        );
-        expect(checked).toBeGreaterThan(ensuring.lastIndexOf('EXCEPTION WHEN e_exists THEN NULL; END;'));
         expect(ensuring).toContain('PRAGMA EXCEPTION_INIT(e_denied, -1031);');
-        const made = ensuring.indexOf(
-            `BEGIN EXECUTE IMMEDIATE ${sqlText(graph.functions[0])}; EXCEPTION WHEN e_denied THEN NULL; END;`
-        );
-        expect(made).toBeGreaterThan(checked);
-        // The function waits on another session's locks as the tables do (#365), and the wait is set back after it.
         const waits = `EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';`;
         const resets = "EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';";
-        expect(ensuring.indexOf(waits, checked)).toBeLessThan(made);
-        expect(ensuring.indexOf(resets, made)).toBeGreaterThan(made);
+        let after = ensuring.lastIndexOf('EXCEPTION WHEN e_exists THEN NULL; END;');
+        ['MYGRAPH_NULLS_EQUAL', 'MYGRAPH_ERA', 'MYGRAPH_ERA_DATE'].forEach((name, i) => {
+            const checked = ensuring.indexOf(
+                `SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${name}' AND status = 'VALID';`
+            );
+            expect(checked).toBeGreaterThan(after);
+            const made = ensuring.indexOf(
+                `BEGIN EXECUTE IMMEDIATE ${sqlText(graph.functions[i])}; EXCEPTION WHEN e_denied THEN NULL; END;`
+            );
+            expect(made).toBeGreaterThan(checked);
+            // Each waits on another session's locks as the tables do (#365), and the wait is set back after it.
+            expect(ensuring.indexOf(waits, checked)).toBeLessThan(made);
+            const reset = ensuring.indexOf(resets, made);
+            expect(reset).toBeGreaterThan(made);
+            expect(ensuring.startsWith('\n    END IF;', reset + resets.length)).toBe(true);
+            after = made;
+        });
         expect(ensuring.match(/BEGIN EXECUTE IMMEDIATE /g)).toHaveLength(graph.ddl.length + graph.functions.length);
     });
 });
@@ -199,5 +253,42 @@ describe('Whether a session may call the graph function', () => {
         } finally {
             warned.mockRestore();
         }
+    });
+
+    it('asks of both era functions in one call, apart from nulls_equal, and warns once for them', async () => {
+        // A store ensured before liberation-data/drivine#609 has nulls_equal and not the era functions.
+        const g = graph();
+        const warned = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        try {
+            const asked = session('found', 904, 904);
+            expect(await OracleStoredFunctions.nullsEqual(asked, 'db|me', g)).toBe(true);
+            expect(await OracleStoredFunctions.era(asked, 'db|me', g)).toBe(false);
+            expect(await OracleStoredFunctions.era(asked, 'db|me', g)).toBe(false);
+            expect(asked.execute).toHaveBeenCalledTimes(2);
+            expect(asked.execute).toHaveBeenLastCalledWith(
+                `SELECT ${g}_era('0000-01-01'), ${g}_era_date('-0001-01-01') FROM DUAL`
+            );
+            expect(await OracleStoredFunctions.nullsEqual(asked, 'db|me', g)).toBe(true);
+            now += OracleStoredFunctions.ABSENT_FOR_MS;
+            expect(await OracleStoredFunctions.era(asked, 'db|me', g)).toBe(false);
+            expect(asked.execute).toHaveBeenCalledTimes(3);
+            const warnings = warned.mock.calls.map(([text]) => String(text));
+            expect(warnings.filter((it) => it.includes(`has no function ${g}_era and ${g}_era_date`))).toHaveLength(1);
+            expect(warnings.filter((it) => it.includes(`${g}_nulls_equal`))).toHaveLength(0);
+        } finally {
+            warned.mockRestore();
+        }
+    });
+
+    it('remembers a yes for the era functions apart from a no for nulls_equal, and asks again of them once ensured', async () => {
+        const g = graph();
+        const asked = session(904, 904, 'found', 'found');
+        expect(await OracleStoredFunctions.nullsEqual(asked, 'db|me', g)).toBe(false);
+        expect(await OracleStoredFunctions.era(asked, 'db|me', g)).toBe(false);
+        await new OracleGraph(g).ensure({ execute: async () => Promise.resolve(undefined) });
+        expect(await OracleStoredFunctions.era(asked, 'db|me', g)).toBe(true);
+        expect(await OracleStoredFunctions.nullsEqual(asked, 'db|me', g)).toBe(true);
+        expect(await OracleStoredFunctions.era(asked, 'db|me', g)).toBe(true);
+        expect(asked.execute).toHaveBeenCalledTimes(4);
     });
 });

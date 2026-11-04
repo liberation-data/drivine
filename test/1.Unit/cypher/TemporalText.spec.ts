@@ -138,16 +138,18 @@ describe('A text of a year from 1000 on', () => {
     });
 
     it.each([
-        ['oracle', () => new OracleCypherCompiler('g')],
-        ['postgres', () => new PostgresCypherCompiler('g')]
-    ])('is compared with no test of its era on %s, ahead of a text of any year', (_, compilerFor) => {
+        // On Oracle the store's function renumbers the year (#609), or a test inline where the store has none.
+        ['oracle', () => new OracleCypherCompiler('g'), 'g_era('],
+        ['oracle without the era functions', () => new OracleCypherCompiler('g', true, false), 'ascii('],
+        ['postgres', () => new PostgresCypherCompiler('g'), 'ascii(']
+    ])('is compared with no test of its era on %s, ahead of a text of any year', (_, compilerFor, era) => {
         const sql = compilerFor().compile("MATCH (n:C) WHERE n.day < date('0001-01-01') RETURN n.id").sql;
         const where = sql.substring(sql.indexOf('CASE WHEN', sql.indexOf('WHERE')));
         const [ad, any] = [Temporal.DATE.adPattern!, Temporal.DATE.pattern].map((it) => where.indexOf(`'${it}'`));
         expect(ad).toBeGreaterThan(-1);
         expect(ad).toBeLessThan(any);
         // The era is tested for only after the kind's own test.
-        expect(where.substring(0, any).toLowerCase()).not.toContain('ascii(');
-        expect(where.substring(any).toLowerCase()).toContain('ascii(');
+        expect(where.substring(0, any).toLowerCase()).not.toContain(era);
+        expect(where.substring(any).toLowerCase()).toContain(era);
     });
 });

@@ -2,6 +2,10 @@ import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
 import { ddlDeadlocked, whenNotContended } from '@/manager/Contention';
 import { Stamps } from '@/model/Stamps';
 import {
+    eraDateFunction,
+    eraDateName,
+    eraFunction,
+    eraName,
     Executes,
     nullsEqualFunction,
     nullsEqualName,
@@ -69,19 +73,43 @@ export class OracleGraph extends SqlGraph {
         return nullsEqualName(this.name);
     }
 
-    /** What makes {@link nullsEqual}: safe to run again. */
+    /**
+     * The functions a compiled Cypher statement renumbers a year that may be BC by, as it reads an ISO text (this) and
+     * as it writes one ({@link eraDate}): each reads its text once, where the SQL it stands for read it three or four
+     * times, which Oracle took far longer to plan (see `OracleTemporalSql.era`). drivine4j and drivine-python make them
+     * byte for byte alike.
+     */
+    get era(): string {
+        return eraName(this.name);
+    }
+
+    /** See {@link era}. */
+    get eraDate(): string {
+        return eraDateName(this.name);
+    }
+
+    /** What makes {@link nullsEqual}, {@link era} and {@link eraDate}, in that order: safe to run again. */
     get functions(): string[] {
-        return [`CREATE OR REPLACE ${nullsEqualFunction(this.nullsEqual)}`];
+        return this.made.map(([, making]) => making);
+    }
+
+    /** Each function the store keeps beside the graph's tables, by name, and what makes it. */
+    private get made(): [string, string][] {
+        return [
+            [this.nullsEqual, nullsEqualFunction(this.nullsEqual)],
+            [this.era, eraFunction(this.era)],
+            [this.eraDate, eraDateFunction(this.eraDate)]
+        ].map(([name, function_]) => [name, `CREATE OR REPLACE ${function_}`]);
     }
 
     /**
      * The block that makes the store when it is not there and does nothing when it is: the property graph is made
      * last, so its presence says the rest is. One another process made meanwhile (ORA-00955) is taken as made.
      *
-     * The {@link functions} are made after the tables, where they are not there or not valid, so a store an earlier
-     * version made gains them. A user who may not make a function (ORA-01031: making one takes `CREATE PROCEDURE`, which
-     * the `RESOURCE` role grants) still has the store made: a statement then compares as it would without them (see
-     * {@link OracleStoredFunctions}).
+     * Each of the {@link functions} is made after the tables, where it is not there or not valid, so a store an earlier
+     * version made gains those it lacks. A user who may not make a function (ORA-01031: making one takes
+     * `CREATE PROCEDURE`, which the `RESOURCE` role grants) still has the store made: a statement then calls none of
+     * those it lacks (see {@link OracleStoredFunctions}).
      *
      * Two sessions that each find the store missing, as two pools or processes first connecting at once do, make it
      * together: a statement of one waits on the lock the other's holds, rather than being turned away at once
@@ -95,8 +123,17 @@ export class OracleGraph extends SqlGraph {
         const statements = this.ddl
             .map((it) => `    BEGIN EXECUTE IMMEDIATE ${sqlText(it)}; EXCEPTION WHEN e_exists THEN NULL; END;`)
             .join('\n');
-        const functions = this.functions
-            .map((it) => `    BEGIN EXECUTE IMMEDIATE ${sqlText(it)}; EXCEPTION WHEN e_denied THEN NULL; END;`)
+        const functions = this.made
+            .map(([name, making]) =>
+                [
+                    `    SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${name.toUpperCase()}' AND status = 'VALID';`,
+                    '    IF v_made = 0 THEN',
+                    waits,
+                    `    BEGIN EXECUTE IMMEDIATE ${sqlText(making)}; EXCEPTION WHEN e_denied THEN NULL; END;`,
+                    resets,
+                    '    END IF;'
+                ].join('\n')
+            )
             .join('\n');
         return `DECLARE
     v_made NUMBER;
@@ -111,12 +148,7 @@ ${waits}
 ${statements}
 ${resets}
     END IF;
-    SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${this.nullsEqual.toUpperCase()}' AND status = 'VALID';
-    IF v_made = 0 THEN
-${waits}
 ${functions}
-${resets}
-    END IF;
 EXCEPTION
     WHEN OTHERS THEN
         EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';

@@ -117,19 +117,22 @@ export class OracleConnection implements Connection {
 
     /**
      * The Cypher statement `given` compiled for Oracle, calling the functions the graph's store keeps where the
-     * statement needs one and the session may call it, and compiled again to call none where it may not: see
+     * statement needs one and the session may call it, and compiled again to call none of those it may not: see
      * {@link OracleStoredFunctions}.
      */
     private async compiled<T>(given: QuerySpecification<T>): Promise<QuerySpecification<T>> {
         const compiler = new OracleCypherCompiler(this.graph);
         const compiled = compiledSpecification(given, compiler).spec;
-        if (
+        // Each is asked of apart: a store an earlier version made may have the one and not the others.
+        const nullsEqual =
             !compiler.callsStoredNullsEqual ||
-            (await OracleStoredFunctions.nullsEqual(this.connection, this.database, this.graph))
-        ) {
+            (await OracleStoredFunctions.nullsEqual(this.connection, this.database, this.graph));
+        const era =
+            !compiler.callsStoredEra || (await OracleStoredFunctions.era(this.connection, this.database, this.graph));
+        if (nullsEqual && era) {
             return compiled;
         }
-        return compiledSpecification(given, new OracleCypherCompiler(this.graph, false)).spec;
+        return compiledSpecification(given, new OracleCypherCompiler(this.graph, nullsEqual, era)).spec;
     }
 }
 
