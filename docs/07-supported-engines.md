@@ -443,7 +443,11 @@ const names = await pm.query<string>(
   statement may give null where Neo4j fails. A variable used as two kinds is refused, as Neo4j refuses it:
   `MATCH (a)-[a]->()` fails with `a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j.`
   So is one a pattern makes where it is bound already: `MATCH (a) CREATE (a)`, a path variable bound before its
-  `MATCH`, or a relationship variable bound as something else.
+  `MATCH`, or a relationship variable bound as something else. A pattern used as an expression, which tests for a
+  match and binds nothing, is refused where it names a variable not bound before it, as Neo4j refuses it:
+  `MATCH (n) WHERE (n)-[r]->() RETURN n` fails with `r is not defined: a pattern used as an expression binds no new
+  variable, as in Neo4j. …`, where `EXISTS { (n)-[r]->() }` may bind one. So is `size()` of a pattern,
+  `size((a)-->())`: `COUNT { … }` counts its matches.
 - `truncate` takes each unit Neo4j does, from `millennium` to `microsecond`, and a map of fields to set on the value
   cut short (`date.truncate('month', d, {day: 2})`), but not yet a nanosecond, a week's or a quarter's field, or a
   named zone.
