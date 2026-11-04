@@ -104,13 +104,15 @@ describeOnOracle('a list of zoned values on Oracle', () => {
 
     /**
      * The first column of each row `cypher`, compiled for Oracle, gives, as JSON text; failing where they take past
-     * `seconds`, which is short of the 21 seconds the parse of a `JSON_TABLE` over liberation-data/drivine4j#331's list
-     * took, and far past the 15 to 200 milliseconds each of these statements takes, so a loaded machine does not fail them.
+     * `seconds`, which is far past the 15 to 200 milliseconds each of these statements takes, so a loaded machine does
+     * not fail them. At 10 it is short of the 21 seconds the parse of a `JSON_TABLE` over liberation-data/drivine4j#331's
+     * list took; at 30, until #572, it is not, and only a parse past 30 seconds fails.
      * A statement that writes is a block that hands its rows back in one, as OracleConnection reads them, and what it
      * writes is rolled back.
      */
     // 30 seconds, not 10: since #564's BC years, Oracle takes up to 5 seconds to parse the temporal arithmetic here on
-    // an idle machine, and a slow CI runner 1.7 times as long (#572). Back to 10 where #572's store functions land.
+    // an idle machine, and on a slow CI runner, beside the suites that run with it, past 10 (#572). Back to 10 where
+    // #572's store functions land.
     const rows = async (cypher: string, seconds: number = 30): Promise<string[]> => {
         const cypherCompiled = new OracleCypherCompiler(GRAPH).compile(cypher);
         // Its parameters bound as OracleConnection binds them: a write reads them from one, `$_cy_params`.
