@@ -1,4 +1,12 @@
-import { DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
+import {
+    DatabaseRegistry,
+    DatabaseType,
+    inDrivineContext,
+    PersistenceManager,
+    PersistenceManagerFactory,
+    QuerySpecification,
+    TransactionContextHolder
+} from '@liberation-data/drivine';
 import {
     clearLabels,
     closeGraphEngines,
@@ -126,7 +134,7 @@ describe.each(stores())('A DELETE on $type', (store) => {
     it('should fail a DELETE of a node that keeps a relationship no row deletes, deleting nothing, and delete one whose rows delete them all', async () => {
         await ring();
         // Node 1 keeps the relationship from 3.
-        await expect(query('MATCH (a:CyDelete {k: 1})-[r]->() DELETE r, a')).rejects.toThrow();
+        await expect(query('MATCH (a:CyDelete {k: 1})-[r]->() DELETE r, a')).rejects.toThrow(/still has relationships/);
         expect(await ks()).toEqual([1, 2, 3, 4]);
         expect(await rs()).toEqual([1, 2, 3, 4]);
         // Each row deletes one of node 1's relationships, and node 1 is deleted once.
@@ -153,6 +161,30 @@ describe.each(stores())('A DELETE on $type', (store) => {
         await query('MATCH (n:CyDelete) WITH collect(n) AS ns FOREACH (n IN ns | DETACH DELETE n)');
         expect(await ks()).toEqual([]);
         expect(await rs()).toEqual([]);
+    });
+
+    it('should undo a DELETE in a transaction that rolls back, which reads within it what the DELETE left', async () => {
+        // Drivine Studio runs Cypher in a transaction of its own: the one statement a DELETE is goes with the rest of it.
+        const tpm = new PersistenceManagerFactory(
+            DatabaseRegistry.getInstance(),
+            TransactionContextHolder.getInstance()
+        ).get(sql ? `${store.name}_${GRAPH}` : store.name, 'TRANSACTIONAL');
+        const inside = async (cypher: string): Promise<any[]> =>
+            tpm.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }));
+        await ring();
+        const seen = await inDrivineContext()
+            .withTransaction({ rollback: true })
+            .run(async () => {
+                await inside('MATCH (n:CyDelete) WHERE n.k > 2 DETACH DELETE n');
+                await inside('MATCH (:CyDelete)-[r {i: 1}]->() DELETE r');
+                return [
+                    await inside('MATCH (n:CyDelete) RETURN n.k ORDER BY n.k'),
+                    await inside('MATCH (:CyDelete)-[r]->() RETURN r.i ORDER BY r.i')
+                ];
+            });
+        expect(seen).toEqual([[1, 2], [4]]);
+        expect(await ks()).toEqual([1, 2, 3, 4]);
+        expect(await rs()).toEqual([1, 2, 3, 4]);
     });
 
     it("should DELETE an optional match's variable where it is not null, and nothing for a match of no rows", async () => {

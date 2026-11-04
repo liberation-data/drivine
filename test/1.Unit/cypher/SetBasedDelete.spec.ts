@@ -89,10 +89,10 @@ describe('A DELETE, compiled', () => {
     it('reads the key with + 0 on Oracle, where a DELETE reads its match, which Oracle does not unnest into a wrong answer', () => {
         const oracle = new OracleCypherCompiler('g');
         expect(compiled(oracle, 'MATCH (g:Gone) DETACH DELETE g')).toMatch(
-            /DELETE FROM g_node WHERE nid IN \(SELECT n\d+\.nid \+ 0 AS id/
+            /DELETE FROM g_node WHERE nid IN \(SELECT \/\*\+ NO_ADAPTIVE_PLAN \*\/ n\d+\.nid \+ 0 AS id/
         );
         expect(compiled(oracle, 'MATCH ()-[r:R]->() DELETE r')).toMatch(
-            /DELETE FROM g_edge WHERE eid IN \(SELECT (\/\*\+ [^*]*\*\/ )?e\d+\.eid \+ 0 AS id/
+            /DELETE FROM g_edge WHERE eid IN \(SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM NO_ADAPTIVE_PLAN \*\/ e\d+\.eid \+ 0 AS id/
         );
         for (const compiler of [new PostgresCypherCompiler('g'), new SqliteCypherCompiler('g')]) {
             expect(compiled(compiler, 'MATCH (g:Gone) DETACH DELETE g')).toMatch(

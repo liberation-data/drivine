@@ -484,6 +484,14 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The query a `DELETE` reads the ids it deletes from, `query`, a subquery of the match itself in the `DELETE`'s
+     * `IN`, as {@link planned} gives it: a store whose planner fails on such a subquery is told more: see Oracle's.
+     */
+    deletedIds(query: string): string {
+        return this.planned(query);
+    }
+
+    /**
      * A test an index answers, to stand beside the comparison of the `property`, read as {@link propertyOf} gives it,
      * with the `value`, a text or a truth value; undefined where there is none.
      */

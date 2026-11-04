@@ -1018,6 +1018,21 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
+     * With no plan that adapts (`NO_ADAPTIVE_PLAN`), as {@link walk}'s steps: Oracle (23.26) crashed the session
+     * (ORA-07445 in `qjsnmvFindOpt`, the multivalue index over labels, ORA-03113 to the client) planning `DELETE FROM
+     * <edges> WHERE eid IN (SELECT … FROM <nodes> n1 LEFT JOIN LATERAL (…) …)` of `MATCH (a:X) OPTIONAL MATCH
+     * (a)-[r:R]->(:X {k: 2}) DELETE r` again, where a transaction that deleted and read nodes of the label had rolled
+     * back (#612). So hinted, or with `NO_UNNEST`, or without the label index, it ran clean.
+     */
+    deletedIds(query: string): string {
+        const planned = super.deletedIds(query);
+        const hinted = HINTED.exec(planned);
+        return hinted
+            ? `SELECT /*+ ${hinted[1]} NO_ADAPTIVE_PLAN */${planned.slice(hinted[0].length)}`
+            : planned.replace(/^SELECT /, 'SELECT /*+ NO_ADAPTIVE_PLAN */ ');
+    }
+
+    /**
      * Each label by the labels' text ({@link holdsLabel}), the form for a node found some other way, which the index over
      * labels can't answer. With the first in the index's form ({@link hasLabels}), Oracle (23.26) read that index again
      * for each row of the node the key is equal to, and filtered it on the key, rather than read the one row by the

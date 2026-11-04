@@ -3540,12 +3540,12 @@ export class CypherWriter {
         const read = [...this.from(select), ...optional(select.whereClause())].map((it) => `\n${it}`).join('');
         const target = scope.get([...variables][0]);
         if (target?.kind === 'Node' && clause.detach) {
-            this.deleteIds(undefined, this.sql.planned(`SELECT ${this.sql.inKey(target.nid)} AS id${read}`), true);
+            this.deleteIds(undefined, this.sql.deletedIds(`SELECT ${this.sql.inKey(target.nid)} AS id${read}`), true);
             return true;
         }
         if (target?.kind === 'Relationship') {
             this.deleteIds(
-                this.sql.planned(`SELECT ${this.sql.inKey(target.eid)} AS id${read}`),
+                this.sql.deletedIds(`SELECT ${this.sql.inKey(target.eid)} AS id${read}`),
                 undefined,
                 clause.detach
             );
