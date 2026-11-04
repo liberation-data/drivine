@@ -1020,6 +1020,16 @@ export class CypherWriter {
     /** Whether the expression `expression` has begun is read by a `WHERE` for its truth alone, as {@link filtering} said as it began. */
     private filtered = false;
 
+    /**
+     * Whether the expression being compiled is one a row must pass to be kept: the `WHERE` {@link keeps} reads itself, or
+     * one of its conditions joined by `AND` alone. A test beside such a one, true wherever it is, may stand by it
+     * ({@link idKey}).
+     */
+    private conjoining = false;
+
+    /** Whether the expression `expression` has begun is one a row must pass to be kept, as {@link conjoining} said as it began. */
+    private conjoined = false;
+
     /** Each parameter's value as the JSON it is bound as, by name, as {@link parameterTree} reads it. */
     private readonly parameterTrees: Map<string, unknown> = new Map();
 
@@ -4509,10 +4519,12 @@ export class CypherWriter {
      */
     private keeps(where: Expression, scope: Scope): string {
         this.filtering = true;
+        this.conjoining = true;
         try {
             return this.condition(this.expression(where, scope));
         } finally {
             this.filtering = false;
+            this.conjoining = false;
         }
     }
 
@@ -4522,15 +4534,19 @@ export class CypherWriter {
      */
     private expression(expression: Expression, scope: Scope): Value {
         const outer = this.filtering;
+        const conjunct = this.conjoining;
         // Only a condition joined by AND or OR is read for its truth alone: NOT, a CASE or a function reads null apart from false.
-        this.filtering =
-            outer && expression.kind === 'Binary' && (expression.operator === 'AND' || expression.operator === 'OR');
+        this.filtering = outer && joinedBy(expression, 'AND', 'OR');
         this.filtered = outer;
+        // And only one joined by AND must itself be true for the row to be kept: beside an OR, another may keep it.
+        this.conjoining = conjunct && joinedBy(expression, 'AND');
+        this.conjoined = conjunct;
         let value: Value;
         try {
             value = this.expressions[expression.kind](expression, scope);
         } finally {
             this.filtering = outer;
+            this.conjoining = conjunct;
         }
         if (value.kind === 'Json' && value.known === undefined) {
             const known = this.knownKind(expression, scope);
@@ -5764,6 +5780,7 @@ export class CypherWriter {
 
     private binary(binary: Binary, scope: Scope): Value {
         const filter = this.filtered;
+        const conjunct = this.conjoined;
         if (binary.operator === 'AND' || binary.operator === 'OR' || binary.operator === 'XOR') {
             [binary.left, binary.right].forEach((it) => this.requireCondition(it, scope, binary.operator));
             const left = this.condition(this.expression(binary.left, scope));
@@ -5775,9 +5792,11 @@ export class CypherWriter {
             return bool(binary.operator === 'OR' ? `(${left} OR ${right})` : `((${left}) <> (${right}))`);
         }
         this.inOfKind(binary, scope);
+        const keyIn = conjunct ? this.keyIn(binary, scope) : undefined;
         const itemwise = this.itemwise(binary, scope);
         if (itemwise !== undefined) {
-            return bool(binary.operator === 'NOT_EQUALS' ? `(NOT ${itemwise})` : itemwise);
+            const keyed = keyIn ? this.keyedIn(keyIn, this.expression(binary.right, scope), itemwise) : itemwise;
+            return bool(binary.operator === 'NOT_EQUALS' ? `(NOT ${itemwise})` : keyed);
         }
         const [left, right] = this.compared(
             this.expression(binary.left, scope),
@@ -5788,7 +5807,7 @@ export class CypherWriter {
         if (temporal) {
             return temporal;
         }
-        const compared = this.comparison(binary, left, right, scope, filter);
+        const compared = this.comparison(binary, left, right, scope, filter, conjunct, keyIn);
         if (compared !== undefined) {
             return bool(compared);
         }
@@ -6301,9 +6320,18 @@ export class CypherWriter {
      * `binary`, an equality or an `IN` of `left` and `right`, compiled already, as SQL: undefined where it is another
      * operator. An `IN` read by a `WHERE` for its truth alone is `filter`: see {@link membership}.
      */
-    private comparison(binary: Binary, left: Value, right: Value, scope: Scope, filter: boolean): string | undefined {
+    private comparison(
+        binary: Binary,
+        left: Value,
+        right: Value,
+        scope: Scope,
+        filter: boolean,
+        conjunct: boolean,
+        keyIn: string | undefined
+    ): string | undefined {
         if (binary.operator === 'IN') {
-            return this.membership(binary, left, right, scope, filter);
+            const within = this.membership(binary, left, right, scope, filter);
+            return keyIn ? this.keyedIn(keyIn, right, within) : within;
         }
         if (binary.operator !== 'EQUALS' && binary.operator !== 'NOT_EQUALS') {
             return undefined;
@@ -6312,7 +6340,96 @@ export class CypherWriter {
         const equal =
             (plain ? undefined : this.givenItemwise(binary.left, left, binary.right, right)) ??
             this.equality(left, right, binary.right, plain, this.stored(binary.left, scope));
-        return binary.operator === 'EQUALS' ? equal : `NOT (${equal})`;
+        if (binary.operator === 'NOT_EQUALS') {
+            return `NOT (${equal})`;
+        }
+        const keyed = conjunct ? this.idEquality(binary, left, right, scope) : undefined;
+        return keyed ? `(${keyed} AND ${equal})` : equal;
+    }
+
+    /**
+     * The key column of the id `binary`, an `IN`, compares with a list written or given, where the row must pass it: its
+     * items are tested by their key beside it ({@link keyedIn}). A list read from the store or worked out may be no list,
+     * whose items no store's elements of it would read as Cypher does. Undefined for any other comparison.
+     */
+    private keyIn(binary: Binary, scope: Scope): string | undefined {
+        const written =
+            binary.right.kind === 'ListLiteral' ||
+            (binary.right.kind === 'Parameter' && Array.isArray(this.parameterTree(binary.right.name)));
+        return binary.operator === 'IN' && written ? this.idKey(binary.left, scope) : undefined;
+    }
+
+    /**
+     * The key column `expression` reads, where it is the id of a node or a relationship in `scope`, `id(n)` or
+     * `elementId(n)`: its `nid` or `eid`. The id is JSON, and compared as JSON gives Cypher's answer for a float, a text,
+     * a list or null, but no store's primary key answers that comparison, so `WHERE id(n) = $id` read every node, and an
+     * `UNWIND` of ids every node for each (#596, liberation-data/drivine4j#575). Where the row must pass the comparison
+     * ({@link conjoining}), a test of the key stands beside it: true wherever the comparison is, as an id is equal only
+     * to the number it is, so the two keep the rows the comparison keeps, and the store reads them by the key.
+     */
+    private idKey(expression: Expression, scope: Scope): string | undefined {
+        if (expression.kind !== 'Function' || expression.distinct) {
+            return undefined;
+        }
+        if (!['id', 'elementid'].includes(expression.name.toLowerCase()) || expression.arguments.length !== 1) {
+            return undefined;
+        }
+        const argument = expression.arguments[0];
+        const subject = argument.kind === 'Variable' ? scope.get(argument.name) : undefined;
+        return subject?.kind === 'Node' ? subject.nid : subject?.kind === 'Relationship' ? subject.eid : undefined;
+    }
+
+    /**
+     * Whether `value` compares as its JSON, as {@link membership} compares a value with a list's items: no node,
+     * relationship or value that holds one, which compares by identity, and no temporal value, which compares by its kind.
+     */
+    private plainJson(value: Value): value is JsonValue {
+        return (
+            value.kind === 'Json' &&
+            value.identity === undefined &&
+            !this.holdsTemporals(value) &&
+            value.temporal === undefined
+        );
+    }
+
+    /**
+     * The key test to stand beside `binary`, an equality of `left` and `right` where one side is an id ({@link idKey}):
+     * the two keys the same ({@link SqlCypherCompiler.sameKey}), where both are, or the key and the number the other side
+     * is ({@link SqlCypherCompiler.keyValue}). Undefined where neither side is an id, or the other is no plain JSON
+     * value, which is no number.
+     */
+    private idEquality(binary: Binary, left: Value, right: Value, scope: Scope): string | undefined {
+        const a = this.idKey(binary.left, scope);
+        const b = this.idKey(binary.right, scope);
+        const keyed = (key: string, other: Value): string | undefined =>
+            this.plainJson(other) ? `${key} = ${this.sql.keyValue(this.sql.comparable(other))}` : undefined;
+        if (a !== undefined && b !== undefined) {
+            return this.sql.sameKey(a, b);
+        }
+        if (a !== undefined) {
+            return keyed(a, right);
+        }
+        return b !== undefined ? keyed(b, left) : undefined;
+    }
+
+    /**
+     * `within`, an id's `IN` the list `list`, with the test beside it that its `key` is the number an item is
+     * ({@link SqlCypherCompiler.keyValue}): true wherever `within` is. An item that is no number has a null key, so where
+     * none is the id the test is null, not false, as `within` is where the list holds a null: the two together keep the
+     * rows `within` keeps. A list of nodes, of temporal values or of values that hold a node is compared otherwise, and
+     * has no such test.
+     */
+    private keyedIn(key: string, list: Value, within: string): string {
+        if (!this.plainJson(list)) {
+            return within;
+        }
+        const i = this.alias('k');
+        const json = this.sql.comparable(list);
+        return `(${key} IN (SELECT ${this.sql.keyValue(this.sql.item(i))} FROM ${this.sql.elementsOf(
+            json,
+            i,
+            this.holdsTemporals(list)
+        )}) AND ${within})`;
     }
 
     /**
@@ -7544,6 +7661,11 @@ function isGiven(expression: Expression): boolean {
         expression.kind === 'Parameter' ||
         (expression.kind === 'Property' && expression.subject.kind === 'Parameter')
     );
+}
+
+/** Whether `expression` is a condition joined by one of `operators`: see `CypherWriter.expression`. */
+function joinedBy(expression: Expression, ...operators: string[]): boolean {
+    return expression.kind === 'Binary' && operators.includes(expression.operator);
 }
 
 /**

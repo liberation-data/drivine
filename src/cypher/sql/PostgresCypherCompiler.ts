@@ -256,6 +256,20 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
         );
     }
 
+    /**
+     * A whole number as the `bigint` the key is: a key compared with a `numeric` is cast to one, and read by no index.
+     * A number that isn't whole, or is past a `bigint`, is no key. Each test is a `CASE` of its own, as SQL takes an
+     * `AND`'s sides in no order, and a text cast to a number fails.
+     */
+    keyValue(json: string): string {
+        return this.shared(
+            [json],
+            ([x]) =>
+                `(CASE WHEN jsonb_typeof(${x}) = 'number' THEN CASE WHEN (${x})::numeric = trunc((${x})::numeric) AND ` +
+                `abs((${x})::numeric) <= 9223372036854775807 THEN (${x})::numeric::bigint END END)`
+        );
+    }
+
     elements(json: string, alias: string): string {
         return `jsonb_array_elements(${json}) WITH ORDINALITY ${alias} (item, item_no)`;
     }

@@ -456,6 +456,14 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * Whether the key columns `a` and `b`, of two rows, hold the same key, as a test of the key beside `id(a) = id(b)`:
+     * see Oracle's.
+     */
+    sameKey(a: string, b: string): string {
+        return `${a} = ${b}`;
+    }
+
+    /**
      * A test an index answers, to stand beside the comparison of the `property`, read as {@link propertyOf} gives it,
      * with the `value`, a text or a truth value; undefined where there is none.
      */
@@ -931,6 +939,13 @@ export abstract class SqlCypherCompiler {
         return { sql: this.planned(sql), parameters: writer.parameters.values, setup: [] };
     }
     // ----- A store's SQL -----
+
+    /**
+     * The JSON value `json` as a node's or a relationship's key column compares with it: the number it is, a whole one
+     * where the store's key holds no other, or null where it is no number. A test of the key that stands beside an id's
+     * comparison reads it, so the store reads the row by its primary key (see `CypherWriter.idKey`).
+     */
+    abstract keyValue(json: string): string;
 
     /** A value `value` the statement writes, as JSON. */
     abstract literalJson(value: any): string;

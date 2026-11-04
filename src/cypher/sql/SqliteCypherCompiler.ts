@@ -224,6 +224,11 @@ export class SqliteCypherCompiler extends SqlCypherCompiler {
         return `${text} = (CASE json_type(${value}) WHEN 'text' THEN ${value} ->> '$' ELSE ${value} END)`;
     }
 
+    /** SQLite compares an `INTEGER PRIMARY KEY` with a float by its value, so `5.0` reads the row whose key is `5`. */
+    keyValue(json: string): string {
+        return this.shared([json], ([x]) => `(CASE WHEN json_type(${x}) IN ('integer', 'real') THEN ${x} ->> '$' END)`);
+    }
+
     elements(json: string, alias: string): string {
         return `json_each(${json}) AS ${alias}`;
     }
