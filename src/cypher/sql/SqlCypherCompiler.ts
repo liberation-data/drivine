@@ -1,5 +1,6 @@
 import { Integer } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
+import { bothWaysOf, selfLoopOnce } from '@/backend/sql/SqlGraph';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
 import { Query, Return } from '@/cypher/ast/Query';
@@ -689,10 +690,7 @@ export abstract class SqlCypherCompiler {
      * {@link selfLoopOnce}.
      */
     bothWays(): string {
-        return (
-            `(SELECT eid, src, dst, type, props, src AS a, dst AS b, 0 AS back FROM ${this.edges}` +
-            ` UNION ALL SELECT eid, src, dst, type, props, dst AS a, src AS b, 1 AS back FROM ${this.edges})`
-        );
+        return bothWaysOf(this.edges);
     }
 
     /**
@@ -702,7 +700,7 @@ export abstract class SqlCypherCompiler {
      * whole table twice at each step of a walk, ten times slower than the OR (liberation-data/drivine4j#570).
      */
     selfLoopOnce(edge: string): string {
-        return `(${edge}.back = 0 OR ${edge}.src <> ${edge}.dst)`;
+        return selfLoopOnce(edge);
     }
 
     /**

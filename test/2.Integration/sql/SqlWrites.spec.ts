@@ -56,6 +56,15 @@ class Pairing {
     @GraphRelationship({ type: 'PAIRED', direction: Direction.UNDIRECTED, target: () => Person }) pairs: Person[] = [];
 }
 
+/** People a root leads, is mentored by and is paired with: a cascade's steps out, in and either way. */
+@GraphView()
+class Team {
+    @Root() person: Person;
+    @GraphRelationship({ type: 'LEADS', target: () => Person }) led: Person[] = [];
+    @GraphRelationship({ type: 'MENTORS', direction: Direction.INCOMING, target: () => Person }) mentors: Person[] = [];
+    @GraphRelationship({ type: 'PAIRED', direction: Direction.UNDIRECTED, target: () => Person }) pairs: Person[] = [];
+}
+
 const session = (id: string, fields: Partial<Session> = {}): Session => Object.assign(new Session(), { id, ...fields });
 const message = (id: string, text?: string): Message => Object.assign(new Message(), { id, text });
 
@@ -256,6 +265,37 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
             false,
             true
         ]);
+    });
+
+    it('should keep, in a cascade that steps either way, a node by a step out or in as stored (#588)', async () => {
+        const ids = ['root', 'a', 'b', 'c', 'd', 'f', 'g', 'outside'];
+        await gom.saveAll(ids.map((id) => Object.assign(new Person(), { id })));
+        const relate = async (from: string, to: string, type: string): Promise<boolean> =>
+            gom.edges.relate(nodeRef(Person, from), nodeRef(Person, to), type);
+        // The view reaches a, b and c led by the root, d and f its mentors, and g paired with it.
+        await Promise.all(['a', 'b', 'c'].map(async (it) => relate('root', it, 'LEADS')));
+        await relate('d', 'root', 'MENTORS');
+        await relate('f', 'root', 'MENTORS');
+        await relate('root', 'g', 'PAIRED');
+        // a is kept by a node outside the cascade. From a, b is led and d a mentor, so both are kept; c leads a and f
+        // is mentored by a, each stored the other way round from a step of the view, so neither is.
+        await relate('a', 'outside', 'KNOWS');
+        await relate('a', 'b', 'LEADS');
+        await relate('d', 'a', 'MENTORS');
+        await relate('c', 'a', 'LEADS');
+        await relate('a', 'f', 'MENTORS');
+        expect(await gom.delete(Team, 'root', { cascade: CascadeType.DELETE_ORPHAN })).toBe(1);
+        const left = async (id: string): Promise<boolean> => (await gom.load(Person, id)) !== undefined;
+        expect(Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await left(id)])))).toEqual({
+            root: false,
+            a: true,
+            b: true,
+            c: false,
+            d: true,
+            f: false,
+            g: false,
+            outside: true
+        });
     });
 
     it('should cascade a delete to every node the view reaches, or to those left with none', async () => {

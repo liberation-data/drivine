@@ -50,10 +50,7 @@ export abstract class SqlGraph {
      * The same rows as compiled Cypher's (`SqlCypherCompiler.bothWays`).
      */
     bothWays(): string {
-        return (
-            `(SELECT eid, src, dst, type, props, src AS a, dst AS b, 0 AS back FROM ${this.edges}` +
-            ` UNION ALL SELECT eid, src, dst, type, props, dst AS a, src AS b, 1 AS back FROM ${this.edges})`
-        );
+        return bothWaysOf(this.edges);
     }
 
     /** The table that holds the embeddings a vector index on the label's property is over. */
@@ -81,6 +78,14 @@ export abstract class SqlGraph {
             .slice(0, room);
         return `${this.name}_${kind}_${readable}_${hash}`;
     }
+}
+
+/** {@link SqlGraph.bothWays} of the relationship table `edges`, which compiled Cypher reads too. */
+export function bothWaysOf(edges: string): string {
+    return (
+        `(SELECT eid, src, dst, type, props, src AS a, dst AS b, 0 AS back FROM ${edges}` +
+        ` UNION ALL SELECT eid, src, dst, type, props, dst AS a, src AS b, 1 AS back FROM ${edges})`
+    );
 }
 
 /**
