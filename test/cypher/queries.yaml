@@ -1590,6 +1590,26 @@ cases:
         only: [neo4j, sql]
         rows: [[false, null, true, false], [null, null, null, null]]
 
+  - name: "A node equal to one matched before it"
+    description: "A node with a label, compared with = to a node matched before it, is that node, whichever side of the = it is on."
+    steps:
+      - note: "Oracle gave no rows: it dropped c's join on the key equality and tested c's label in a form that misses a node with more than one label (drivine4j#576)."
+        cypher: "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE c = q RETURN c.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE c = q RETURN c.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q), (c:Person) WHERE c = q RETURN c.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE q = c RETURN c.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q) WITH q MATCH (c:Person) WHERE c = q RETURN c.name"
+        rows: ["Carrie"]
+      - cypher: "MATCH (p {name: 'Keanu'})<-[:KNOWS]-(q) MATCH (c:Person) WHERE c = q RETURN c.name"
+        rows: ["Laurence"]
+      - note: "Their ids compared, which the SQL stores read through the key too (drivine4j#575)."
+        cypher: "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE id(c) = id(q) RETURN c.name"
+        rows: ["Carrie"]
+
   - name: "Relationships in lists compare by identity"
     description: "Two relationships with the same properties are different, as items of a list too."
     steps:
