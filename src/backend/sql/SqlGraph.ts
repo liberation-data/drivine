@@ -41,6 +41,21 @@ export abstract class SqlGraph {
         this.catalog = `${name}_schema`;
     }
 
+    /**
+     * The relationship rows read both ways round, for a relationship of either direction from one node: each row once
+     * with its ends `a` and `b` as it is stored, `back` 0, and once the other way round, `back` 1, with its `src` and
+     * `dst` as stored. A read joins on `a` with an equality, which a store can index, where an OR across the two
+     * directions left Postgres reading every relationship of the type for a node's neighbours, and Oracle's and
+     * SQLite's recursive cascade reading every relationship at each step (#588). It is read with {@link selfLoopOnce}.
+     * The same rows as compiled Cypher's (`SqlCypherCompiler.bothWays`).
+     */
+    bothWays(): string {
+        return (
+            `(SELECT eid, src, dst, type, props, src AS a, dst AS b, 0 AS back FROM ${this.edges}` +
+            ` UNION ALL SELECT eid, src, dst, type, props, dst AS a, src AS b, 1 AS back FROM ${this.edges})`
+        );
+    }
+
     /** The table that holds the embeddings a vector index on the label's property is over. */
     vectors(label: string, property: string): string {
         return this.objectName('v', [label, property]);
@@ -66,6 +81,15 @@ export abstract class SqlGraph {
             .slice(0, room);
         return `${this.name}_${kind}_${readable}_${hash}`;
     }
+}
+
+/**
+ * That a row `edge` of {@link SqlGraph.bothWays} is a relationship from a node to itself only once, read as it is
+ * stored: a condition of the join, not a `WHERE` of the second half, which would stop Postgres reading each half by
+ * its index (liberation-data/drivine4j#570).
+ */
+export function selfLoopOnce(edge: string): string {
+    return `(${edge}.back = 0 OR ${edge}.src <> ${edge}.dst)`;
 }
 
 /** A string as an SQL literal. */

@@ -133,7 +133,7 @@ export class OracleBackend implements GraphBackend {
                   `WITH cascade_targets AS (SELECT DISTINCT t.nid FROM (${reached}) t ` +
                       `WHERE t.nid NOT IN (SELECT column_value FROM TABLE(v_roots))),`,
                   `    cascade_all AS (SELECT column_value AS nid FROM TABLE(v_roots) UNION SELECT nid FROM cascade_targets),`,
-                  `    cascade_kept (nid) AS (\n    ${keptTargets(this.graph, cascaded.followed, 'UNION ALL')}`,
+                  `    cascade_kept (nid) AS (\n    ${keptTargets(this.graph, cascaded.followed, 'UNION ALL', true)}`,
                   `    ) CYCLE nid SET looped TO 'Y' DEFAULT 'N'`,
                   `    SELECT nid BULK COLLECT INTO v_targets FROM cascade_targets WHERE nid NOT IN (SELECT nid FROM cascade_kept);`
               ].join('\n')

@@ -16,7 +16,7 @@ import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
-import { sqlText } from '@/backend/sql/SqlGraph';
+import { selfLoopOnce, sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
@@ -257,16 +257,18 @@ export class PostgresBackend implements GraphBackend {
                 `${from.model.type.name} has no @NodeId property, so a node of it can't be referred to by id.`
             );
         }
-        const join =
+        // Either way, from the relationships read both ways round and joined on an equality: with an OR across the two
+        // directions, Postgres read every relationship of the type, 136 ms at 40,000 against 0.2 (#588).
+        const [edges, join] =
             direction === Direction.INCOMING
-                ? 'e.dst = a.nid AND x.nid = e.src'
+                ? [this.graph.edges, 'e.dst = a.nid AND x.nid = e.src']
                 : direction === Direction.UNDIRECTED
-                ? '((e.src = a.nid AND x.nid = e.dst) OR (e.dst = a.nid AND x.nid = e.src))'
-                : 'e.src = a.nid AND x.nid = e.dst';
+                ? [this.graph.bothWays(), `e.a = a.nid AND ${selfLoopOnce('e')} AND x.nid = e.b`]
+                : [this.graph.edges, 'e.src = a.nid AND x.nid = e.dst'];
         const labels = [...new Set([...from.model.labels, ...(from.labels ?? [])])];
         return new PostgresStatement(
             `SELECT ${nodeDocument('n')} AS "result" FROM ${this.graph.nodes} n WHERE n.nid IN (` +
-                `SELECT x.nid FROM ${this.graph.nodes} a JOIN ${this.graph.edges} e ON e.type = CAST($x_type AS text) ` +
+                `SELECT x.nid FROM ${this.graph.nodes} a JOIN ${edges} e ON e.type = CAST($x_type AS text) ` +
                 `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasLabels('a', labels)} AND ` +
                 `${textOf('a', from.model.nodeIdProperty)} = CAST($x_from AS text) AND ${hasLabels(
                     'x',

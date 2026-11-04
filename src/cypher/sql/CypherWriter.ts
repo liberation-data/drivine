@@ -2243,7 +2243,7 @@ export class CypherWriter {
             unsupported('A relationship variable bound before its pattern');
         }
         const name = this.alias('e');
-        select.source(`${this.sql.edges} ${name}`, this.sql);
+        select.source(`${this.sql.edgesFor(relationship.direction)} ${name}`, this.sql);
         const value = relationshipOf(name);
         if (relationship.variable !== undefined) {
             select.bind(relationship.variable, value);
@@ -2251,8 +2251,10 @@ export class CypherWriter {
         const directions = {
             OUTGOING: `${value.src} = ${from} AND ${value.dst} = ${to}`,
             INCOMING: `${value.dst} = ${from} AND ${value.src} = ${to}`,
-            // Either way, and a relationship from a node to itself once.
-            EITHER: `((${value.src} = ${from} AND ${value.dst} = ${to}) OR (${value.dst} = ${from} AND ${value.src} = ${to}))`
+            // Either way, and a relationship from a node to itself once: read from bothWays, or with an OR.
+            EITHER: this.sql.undirectedBothWays()
+                ? `${name}.a = ${from} AND ${name}.b = ${to} AND ${this.sql.selfLoopOnce(name)}`
+                : `((${value.src} = ${from} AND ${value.dst} = ${to}) OR (${value.dst} = ${from} AND ${value.src} = ${to}))`
         };
         select.where.push(directions[relationship.direction]);
         select.where.push(...optional(this.types(value.type, relationship.types)));

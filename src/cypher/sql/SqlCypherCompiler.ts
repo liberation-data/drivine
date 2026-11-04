@@ -654,12 +654,55 @@ export abstract class SqlCypherCompiler {
             case 'INCOMING':
                 return [`${edge}.dst = ${at}`, `${edge}.src`];
             default:
-                // Either way, and a relationship from a node to itself once.
+                // Either way, and a relationship from a node to itself once: read from bothWays, or with an OR.
+                if (this.undirectedBothWays()) {
+                    return [`${edge}.a = ${at} AND ${this.selfLoopOnce(edge)}`, `${edge}.b`];
+                }
                 return [
                     `(${edge}.src = ${at} OR ${edge}.dst = ${at})`,
                     `CASE WHEN ${edge}.src = ${at} THEN ${edge}.dst ELSE ${edge}.src END`
                 ];
         }
+    }
+
+    /**
+     * Whether a relationship of either direction is read from {@link bothWays} and joined on equalities, or from the
+     * relationship table with an OR across its two directions. Postgres and Oracle read it both ways round
+     * (liberation-data/drivine#588). SQLite plans the OR itself, probing the index on each end, and keeps it: see its
+     * compiler.
+     */
+    undirectedBothWays(): boolean {
+        return true;
+    }
+
+    /** The rows a relationship row of `direction` is read from: {@link bothWays} for either way where {@link undirectedBothWays}, else the relationship table. */
+    edgesFor(direction: Direction): string {
+        return direction === 'EITHER' && this.undirectedBothWays() ? this.bothWays() : this.edges;
+    }
+
+    /**
+     * The relationship rows read both ways round, for a relationship of either direction: each row once with its ends
+     * `a` and `b` as it is stored, `back` 0, and once the other way round, `back` 1. Its `src` and `dst` stay the stored
+     * ones, so the relationship keeps the direction it was written in. A step then joins on `a` and `b` with
+     * equalities, which a store can hash or index, where an OR across the two directions left Postgres comparing every
+     * pair of nodes, and Oracle reading every relationship at each step of a walk. A step reads it with
+     * {@link selfLoopOnce}.
+     */
+    bothWays(): string {
+        return (
+            `(SELECT eid, src, dst, type, props, src AS a, dst AS b, 0 AS back FROM ${this.edges}` +
+            ` UNION ALL SELECT eid, src, dst, type, props, dst AS a, src AS b, 1 AS back FROM ${this.edges})`
+        );
+    }
+
+    /**
+     * That a row `edge` of {@link bothWays} is a relationship from a node to itself only once, read as it is stored. It
+     * is a condition of the join, not a `WHERE` of the second half, for Postgres pushes a join's equality on `a` into
+     * the halves, and reads each by its index, only where neither half has a `WHERE` of its own: with one, it read the
+     * whole table twice at each step of a walk, ten times slower than the OR (liberation-data/drivine4j#570).
+     */
+    selfLoopOnce(edge: string): string {
+        return `(${edge}.back = 0 OR ${edge}.src <> ${edge}.dst)`;
     }
 
     /**
@@ -680,7 +723,7 @@ export abstract class SqlCypherCompiler {
         }
         walk.hops.forEach((hop, i) => {
             const [join, far] = this.leaves(hop.edge, hop.direction, reached[reached.length - 1] ?? at);
-            joins.push(`JOIN ${this.edges} ${hop.edge} ON ${join}`);
+            joins.push(`JOIN ${this.edgesFor(hop.direction)} ${hop.edge} ON ${join}`);
             reached.push(far);
             const node = walk.nodes[i + 1];
             if (node !== undefined) {
