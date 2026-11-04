@@ -72,15 +72,18 @@ they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>
 constraints Drivine made, as drivine4j records them. The layout is drivine4j's, so the JVM, Node and Python read one
 store, and each sees and drops the indexes the others made, and makes none beside them.
 
-Beside the tables the graph is made with one function, `<graph>_nulls_equal`, by which a compiled Cypher statement
+Beside the tables the graph is made with three functions: `<graph>_nulls_equal`, by which a compiled Cypher statement
 compares two lists or maps that may hold a null (see the notes in
-[Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)). Making it takes `CREATE PROCEDURE`, which the
-`RESOURCE` role grants, as well as the `CREATE TABLE` the tables take. A store an earlier version made gains it the
-next time a connection to the graph first connects. Where the user that makes the graph may not make a function, the
-graph is made without it, and Drivine logs a warning once for the graph when a statement would call it, and looks for
-it again a minute later. Until then a statement that writes, or the step of a `reduce`, compares two lists or maps that
-hold a null and differ as JSON as false, where Cypher may give null (`[null] = [1]`), and a read declares the function
-itself.
+[Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)), and `<graph>_era` and `<graph>_era_date`, which
+renumber a year before 1 between Cypher's numbering and Oracle's as a date or a moment is read and written. Making them
+takes `CREATE PROCEDURE`, which the `RESOURCE` role grants, as well as the `CREATE TABLE` the tables take. A store an
+earlier version made gains those it lacks the next time a connection to the graph first connects. Where the user that
+makes the graph may not make a function, the graph is made without them, and Drivine logs a warning once for the graph
+when a statement would call one, and looks for it again a minute later. Without `<graph>_nulls_equal`, a statement that
+writes, or the step of a `reduce`, compares two lists or maps that hold a null and differ as JSON as false, where Cypher
+may give null (`[null] = [1]`), and a read declares the function itself. Without the era functions, a statement gives
+the same rows, renumbering a year inline, but Oracle takes longer to plan one of temporal arithmetic: seconds, and over
+a minute for a moment two `CALL`s deep.
 
 Notes:
 
@@ -450,9 +453,10 @@ const names = await pm.query<string>(
   ([#511](https://github.com/liberation-data/drivine/issues/511)). On Oracle and Postgres a stored value whose year is
   1000 or later is read as before; one of an earlier year is read by its era, so a statement that reads a stored date or
   moment compiles to SQL up to three and a half times as long (a filter on a stored date, 979 characters on Oracle and
-  703 on Postgres before, is 2,805 and 2,211), and in drivine4j, which compiles the same SQL, an aggregate of temporal
-  arithmetic runs 8 to 10% slower (a `truncate` on Postgres, about 16%). SQLite's calendar, Drivine's functions, numbers
-  years so already. Oracle counts days before 1582-10-15 by the Julian calendar, so the day of the week, the ISO week,
+  703 on Postgres before, is 2,805 and 2,211, and 1,721 on Oracle where the store keeps `<graph>_era`), and in
+  drivine4j, which compiles the same SQL, an aggregate of temporal arithmetic runs 8 to 10% slower (a `truncate` on
+  Postgres, about 16%). SQLite's calendar, Drivine's functions, numbers years so already. Oracle counts days before
+  1582-10-15 by the Julian calendar, so the day of the week, the ISO week,
   the day of the year and a leap day of such a date are not Neo4j's. On every SQL store, two stored values BC compare by
   their text, which orders them backwards ([#415](https://github.com/liberation-data/drivine/issues/415)); on SQLite,
   whose timestamps are texts, so do two the statement makes. A JavaScript `Date` BC given as a parameter is written with

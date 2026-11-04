@@ -41,14 +41,15 @@ async function run(statements: string[], user?: string): Promise<void> {
     }
 }
 
-/** What drops the graph `graph`'s store, its function among it. */
+/** What drops the graph `graph`'s store, its functions among it. */
 function dropping(graph: string): string[] {
+    const it = new OracleGraph(graph);
     return [
         `DROP PROPERTY GRAPH IF EXISTS ${graph}`,
         `DROP TABLE IF EXISTS ${graph}_edge PURGE`,
         `DROP TABLE IF EXISTS ${graph}_node PURGE`,
         `DROP TABLE IF EXISTS ${graph}_schema PURGE`,
-        `DROP FUNCTION IF EXISTS ${graph}_nulls_equal`
+        ...[it.nullsEqual, it.era, it.eraDate].map((name) => `DROP FUNCTION IF EXISTS ${name}`)
     ];
 }
 
@@ -146,9 +147,22 @@ describeOnOracle('The function an Oracle graph compares values that may hold a n
             const restricted = managerFor('ORACLE_NO_PROCEDURE', graph, { name: user, password });
             expect(await cypher(restricted, WRITE)).toEqual([[false, 'null']]);
             expect(await cypher(restricted, READ)).toEqual([['null', 'null']]);
+            // A year BC is renumbered inline, as before the store kept its era functions (#609).
+            expect(
+                await cypher(
+                    restricted,
+                    "RETURN [toString(date('0001-01-01') - duration('P1D')), toString(date('-0044-03-15') + duration('P1D')), date('-0044-03-15').year]"
+                )
+            ).toEqual([['0000-12-31', '-0044-03-16', -44]]);
+            expect(
+                await cypher(
+                    restricted,
+                    "CREATE (n:CyTemporal {day: date('-0044-03-15') + duration('P1D')}) RETURN toString(n.day)"
+                )
+            ).toEqual(['-0044-03-16']);
             const made = await restricted.query<number>(
                 new QuerySpecification(
-                    `SELECT COUNT(*) AS "n" FROM user_objects WHERE object_name IN ('${graph.toUpperCase()}_NODE', '${f.toUpperCase()}')`
+                    `SELECT COUNT(*) AS "n" FROM user_objects WHERE object_name IN ('${graph.toUpperCase()}_NODE', '${f.toUpperCase()}', '${graph.toUpperCase()}_ERA', '${graph.toUpperCase()}_ERA_DATE')`
                 )
             );
             expect(made).toEqual([1]);
@@ -164,6 +178,14 @@ describeOnOracle('The function an Oracle graph compares values that may hold a n
         await pm.query(new QuerySpecification('SELECT 1 FROM DUAL'));
         await run([`DROP FUNCTION ${f}`]);
         expect(await cypher(pm, WRITE)).toEqual([[false, 'null']]);
+        // The store keeps its era functions (#609): a statement that calls them too is compiled again to call them and
+        // not nulls_equal.
+        expect(
+            await cypher(
+                pm,
+                "CREATE (n:CyWrite {day: date('-0044-03-15') + duration('P1D')}) WITH n, [null] AS a, [1] AS b RETURN [coalesce(a = b, 'null'), toString(n.day)]"
+            )
+        ).toEqual([[false, '-0044-03-16']]);
         // A read declares the function itself.
         expect(await cypher(pm, READ)).toEqual([['null', 'null']]);
         const connection = await session();

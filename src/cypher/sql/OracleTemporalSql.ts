@@ -1,3 +1,4 @@
+import { eraDateName, eraName } from '@/backend/oracle/OracleStoredFunctions';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { BC_BELOW, Shared, TemporalSql, yearsOf } from '@/cypher/sql/TemporalSql';
 
@@ -18,6 +19,9 @@ const FORMATS: Record<string, string> = {
  * has no time of day apart from a day, so a time of day is read on 1970-01-01. Its intervals keep months apart from
  * days. `ADD_MONTHS` and `MONTHS_BETWEEN` take the last day of a month to the last day of another, where Cypher keeps
  * the day of the month, so months are added and counted from the first of the month.
+ *
+ * A year that may be BC is renumbered by the functions the store keeps beside the graph's tables where it keeps them
+ * (see `OracleStoredFunctions.eraFunction`), and inline otherwise: see {@link era}.
  */
 export class OracleTemporalSql extends TemporalSql {
     /** The clock as the query that reads it starts, in UTC. */
@@ -26,11 +30,27 @@ export class OracleTemporalSql extends TemporalSql {
     /** The variable a block reads {@link CLOCK} into as it starts. */
     static readonly NOW = 'cy_now';
 
+    /** The store's function {@link era} calls, where it keeps one. */
+    private readonly storedEra: string | undefined;
+
+    /** The store's function {@link date} calls, where it keeps one. */
+    private readonly storedEraDate: string | undefined;
+
+    /**
+     * @param procedural whether the statement is a block, which reads its own clock
+     * @param eraGraph the graph whose store keeps the functions {@link era} and {@link date} call, or undefined where it
+     * may keep none: then each renumbers a year BC inline
+     * @param callsStored called where {@link era} or {@link date} calls one of the store's functions
+     */
     constructor(
         shared: Shared,
-        private readonly procedural: () => boolean
+        private readonly procedural: () => boolean,
+        eraGraph?: string,
+        private readonly callsStored: () => void = () => undefined
     ) {
         super(shared);
+        this.storedEra = eraGraph === undefined ? undefined : eraName(eraGraph);
+        this.storedEraDate = eraGraph === undefined ? undefined : eraDateName(eraGraph);
     }
 
     /**
@@ -70,9 +90,20 @@ export class OracleTemporalSql extends TemporalSql {
 
     /**
      * Oracle numbers a year BC from -1, with no year 0, in ISO text as in its own: so 1 BC, the year `0000`, is `-0001`,
-     * and 45 BC, the year `-0044`, is `-0045`. See {@link bcOnly}.
+     * and 45 BC, the year `-0044`, is `-0045`. See {@link bcOnly}. Where the store keeps it, a function does that, the
+     * text written once: the test and the regular expression wrote it four times, and Oracle's hard parse of a statement
+     * grows with each copy, to over a minute for a subquery's temporal arithmetic (liberation-data/drivine#572). A
+     * function a query declares, `WITH FUNCTION`, would add its own compile to every such statement's parse, and runs
+     * in no block, nor a reduce's step.
      */
     era(text: string): string {
+        if (this.storedEra !== undefined) {
+            if (this.readsAd(text)) {
+                return text;
+            }
+            this.callsStored();
+            return `${this.storedEra}(${text})`;
+        }
         return this.shared([text], ([t]) =>
             this.bcOnly(
                 t,
@@ -97,8 +128,15 @@ export class OracleTemporalSql extends TemporalSql {
         return `TO_NUMBER(REGEXP_SUBSTR(${text}, '^-?[0-9]+'))`;
     }
 
-    /** Where it may be BC ({@link bcOnly}), `SYYYY` writes a year with its sign, as Oracle numbers it. */
+    /**
+     * Where it may be BC ({@link bcOnly}), `SYYYY` writes a year with its sign, as Oracle numbers it. Where the store
+     * keeps it, a function renumbers it, the timestamp written once (see {@link era}).
+     */
     date(timestamp: string, then: string = ''): string {
+        if (this.storedEraDate !== undefined && !this.readsAd(timestamp)) {
+            this.callsStored();
+            return `${this.storedEraDate}(LTRIM(TO_CHAR(${timestamp}, 'SYYYY-MM-DD${then}')))`;
+        }
         return this.bcOnly(
             timestamp,
             `${timestamp} < TIMESTAMP '0001-01-01 00:00:00'`,

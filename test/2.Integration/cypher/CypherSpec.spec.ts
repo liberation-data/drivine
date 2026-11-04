@@ -18,15 +18,6 @@ import { check, CypherCase, loadSpec, runsOn, skipped, trimIndent, valuesFor } f
 
 jest.setTimeout(120_000);
 
-/**
- * The cases that take longer than the suite's 120 seconds on a slow CI runner, by store, file and name: since #564's BC
- * years, Oracle takes 70 seconds to parse one statement of "Temporal values from CALL" on an idle machine, and a slow
- * runner 1.7 times as long (#572). Back to none where #572's store functions land.
- */
-const SLOW: Record<string, number> = {
-    'oracle temporal.yaml Temporal values from CALL': 300_000
-};
-
 /** The graph the spec writes on a SQL store: tables of its own, so no other suite's nodes are among its rows. */
 const GRAPH = 'cypher';
 
@@ -191,23 +182,19 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
     describe.each(['queries.yaml', 'writes.yaml', 'temporal.yaml'])('%s', (file) => {
         const spec = loadSpec(file);
         spec.cases.forEach((cypherCase) =>
-            it(
-                cypherCase.name,
-                async () => {
-                    await clear();
-                    if (spec.graph) {
-                        await query(spec.graph);
+            it(cypherCase.name, async () => {
+                await clear();
+                if (spec.graph) {
+                    await query(spec.graph);
+                }
+                for (let i = 0; i < cypherCase.steps.length; i++) {
+                    if (runsOn(cypherCase.steps[i], store.name) && !skipped(file, cypherCase, i, store.name)) {
+                        await check(file, cypherCase, i, store.name, async (step) =>
+                            query(step.cypher, step.parameters ?? {})
+                        );
                     }
-                    for (let i = 0; i < cypherCase.steps.length; i++) {
-                        if (runsOn(cypherCase.steps[i], store.name) && !skipped(file, cypherCase, i, store.name)) {
-                            await check(file, cypherCase, i, store.name, async (step) =>
-                                query(step.cypher, step.parameters ?? {})
-                            );
-                        }
-                    }
-                },
-                SLOW[`${store.name} ${file} ${cypherCase.name}`]
-            )
+                }
+            })
         );
     });
 

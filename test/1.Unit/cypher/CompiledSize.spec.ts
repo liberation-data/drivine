@@ -789,7 +789,9 @@ describe('A compiled Cypher statement', () => {
         'of a truncation with fields of a truncation with fields writes the text of its fields once on %s',
         (_, compilerFor) => {
             // #511: the text a truncation makes of its fields is read twice to number its year as the store does. Written
-            // out twice, four nested compiled to about 18,000 characters in drivine4j; bound once, to about 9,000.
+            // out twice, four nested compiled to about 18,000 characters in drivine4j; bound once, to about 9,000. On Oracle
+            // the store's era function (#609) reads the text once, so nothing binds it, and the statement is a little
+            // longer: 12,043, which Oracle plans in 16 seconds, where the 9,547 written inline was not planned in ten minutes.
             const truncated = (times: number) =>
                 'RETURN ' +
                 "datetime.truncate('second', ".repeat(times) +
@@ -797,7 +799,7 @@ describe('A compiled Cypher statement', () => {
                 ', {hour: 3})'.repeat(times) +
                 '.hour';
             const [two, four] = [2, 4].map((it) => compilerFor().compile(truncated(it)).sql.length);
-            expect(four).toBeLessThan(12_000);
+            expect(four).toBeLessThan(13_000);
             expect(four).toBeLessThan(3 * two);
         }
     );

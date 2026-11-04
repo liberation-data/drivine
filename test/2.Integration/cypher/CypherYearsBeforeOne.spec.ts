@@ -88,6 +88,20 @@ describe.each(stores())('A year before 1 on $type', (store) => {
         ).toEqual([['-0044-03-16', -44, '-0043-03-15T12:00:00+02:00', true]]);
     });
 
+    it('should be numbered as Neo4j numbers it in a statement that writes, and in the step of a reduce', async () => {
+        // #609: on Oracle, a block's queries and a reduce's own function call the store's era functions too.
+        expect(
+            await query(
+                "CREATE (n:CyTemporal {id: 'w', day: date('-0044-03-15') + duration('P1D')}) RETURN [toString(n.day), n.day.year, toString(date('0000-12-31') + duration('P1D'))]"
+            )
+        ).toEqual([['-0044-03-16', -44, '0001-01-01']]);
+        expect(
+            await query(
+                "RETURN reduce(s = '', d IN [date('-0044-03-15'), date('0000-12-31'), date('0500-03-15')] | s + toString(d + duration('P1D')) + ',')"
+            )
+        ).toEqual(['-0044-03-16,0001-01-01,0500-03-16,']);
+    });
+
     it('should compare a stored value of any year, and give its year, as Neo4j does, beside a value written or a parameter', async () => {
         // Postgres and Oracle read a text whose year is 1000 or later as it is, with no test of its era, where a test of its
         // kind has told them so; and read a year off the text. A year after 0 but before 1000, and one BC, take the other way.
