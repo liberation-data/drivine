@@ -79,13 +79,20 @@ describe.each(stores())('A node compared to a node on $type', (store) => {
     });
 
     it('is null where OPTIONAL MATCH finds no node, as a value and as a test', async () => {
-        // Oracle's comparison of two keys, both ways round, is null where either key is.
+        // Oracle's comparison of two keys, both ways round, is null where either key is. A map or a list that holds the
+        // nodes compares them by the same keys, entry by entry: null where no entry differs but one is null.
         const q = "MATCH (q:Person {name: 'Carrie'}) OPTIONAL MATCH (x:CyNeNope)";
         expect(
             await rows(
                 `${q} RETURN [x = q, q = x, x <> q, NOT x = q, x = x, x IN [q], (x = q) IS NULL, coalesce(x = q, true)]`
             )
         ).toEqual([[null, null, null, null, null, null, true, true]]);
+        expect(
+            await rows(
+                `${q} RETURN [{x: x} = {x: q}, {x: q, y: null} = {x: q, y: null}, {x: q} = {x: q, y: 1}, ` +
+                    '{x: x, y: 1} = {x: q, y: 2}, [x, 1] = [q, 1]]'
+            )
+        ).toEqual([[null, null, false, false, null]]);
         expect(await rows(`${q} WITH q, x WHERE x = q OR NOT x = q RETURN q.name`)).toEqual([]);
         expect(await rows(`${q} WITH q, x WHERE (x = q) IS NULL RETURN q.name`)).toEqual(['Carrie']);
         expect(
