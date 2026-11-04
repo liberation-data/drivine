@@ -456,6 +456,17 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * Whether the labels `labels`, a JSON list, hold each of `all`, for a node read by its key: one whose key a condition
+     * every row must pass sets equal to the key of a node found some other way (see `CypherWriter.readByKey`). As
+     * {@link hasLabels} tests them, where the store reads that node by its key anyway. A store whose planner reads the
+     * index over labels for each row of the other node instead, and filters it on the key, tests them in a form the index
+     * can't answer: see Oracle's.
+     */
+    keyedLabels(labels: string, all: string[]): string {
+        return this.hasLabels(labels, all);
+    }
+
+    /**
      * Whether the key columns `a` and `b`, of two rows, hold the same key: a node equal to a node, and a test of the key
      * beside `id(a) = id(b)`. A store whose planner rewrites a join on key = key into a wrong answer compares them in a
      * form it can't rewrite: see Oracle's.

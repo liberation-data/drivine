@@ -130,6 +130,15 @@ type Kind = 'NODE' | 'RELATIONSHIP' | 'VALUE' | 'NODES' | 'RELATIONSHIPS' | 'PAT
 type Scope = Map<string, Value>;
 
 /**
+ * The keys a condition compares where a row must pass the comparison ({@link CypherWriter.conjoining}): `pairs` of keys it
+ * sets equal, and `anchors`, keys it compares with a value. See `CypherWriter.readByKey`.
+ */
+interface ComparedKeys {
+    pairs: [string, string][];
+    anchors: string[];
+}
+
+/**
  * The relationships one part of a pattern matched: one, its id `eids`, or with `many` those a variable-length
  * relationship or a quantified path pattern walked, a list of ids. Of the `types` it may have; `nodes` is the list of
  * the ids of the nodes it reaches after the one it starts from.
@@ -1030,6 +1039,16 @@ export class CypherWriter {
     /** Whether the expression `expression` has begun is one a row must pass to be kept, as {@link conjoining} said as it began. */
     private conjoined = false;
 
+    /** The {@link ComparedKeys} of the condition being compiled: see {@link kept}. */
+    private comparedKeys: ComparedKeys = { pairs: [], anchors: [] };
+
+    /**
+     * The keys of the nodes found by more than a key equal to another's: by a label, properties, a relationship they end,
+     * or their key compared with a value ({@link idEquality}, {@link keyedIn}), each in the part that binds the node
+     * ({@link anchor}). Each key is a column of its own query, so this holds them for the whole statement.
+     */
+    private readonly anchored: Set<string> = new Set();
+
     /** Each parameter's value as the JSON it is bound as, by name, as {@link parameterTree} reads it. */
     private readonly parameterTrees: Map<string, unknown> = new Map();
 
@@ -1662,8 +1681,62 @@ export class CypherWriter {
         anew: (expression: Expression) => boolean = isAnew
     ): Select {
         const [rows, [read]] = this.anewBefore(select, [where], true, anew) ?? [select, [where]];
-        rows.where.push(this.keeps(read, rows.scope));
+        this.filter(rows, read);
         return rows;
+    }
+
+    /** The condition `where` among those `select`'s rows meet, and each node it sets equal to another read by its key: see {@link readByKey}. */
+    private filter(select: Select, where: Expression): void {
+        const [sql, compared] = this.kept(where, select.scope);
+        select.where.push(sql);
+        compared.anchors.filter((it) => select.bindsNode(it)).forEach((it) => this.anchored.add(it));
+        this.readByKey(select, compared.pairs);
+    }
+
+    /** The node whose key is `nid` found by more than its key, where `select` binds it: see {@link anchored}. */
+    private anchor(select: Select, nid: string): void {
+        if (select.bindsNode(nid)) {
+            this.anchored.add(nid);
+        }
+    }
+
+    /**
+     * Each node of `pairs`, keys a condition `select`'s rows must pass sets equal (`a = b`, `id(a) = id(b)`), tested for
+     * its labels as {@link SqlCypherCompiler.keyedLabels} tests a node read by its key, where it is the later of the two
+     * `select` binds and tests for labels, or the one of them it does where the other is {@link anchored}. On Oracle
+     * (23.26) the test of a label the index over labels answers had `MATCH (a:Big) MATCH (b:Big) WHERE a = b` read that
+     * index for each row of `a`, and filter it on the key, rather than read `b` by its primary key, growing with the
+     * square of the label's nodes (#606, liberation-data/drivine4j#578). The earlier node keeps its test, so the index
+     * still finds it; a node equal to one found by nothing else keeps its test too, as there the index is the only way
+     * in: `MATCH (a) MATCH (b:Rare) WHERE a = b` would read every node for `b`. Either test keeps the same rows: only the
+     * plan changes.
+     *
+     * The test is written again in place, as it is added with its pattern, before the `WHERE` that compares the keys is
+     * read; {@link Select.labelTest} keeps where it stands. A comparison under `NOT`, beside an `OR`, or read as a value
+     * is no key the row is found by, and leaves the test as it is ({@link conjoining}).
+     */
+    private readByKey(select: Select, pairs: [string, string][]): void {
+        for (const [x, y] of pairs) {
+            if (x === y) {
+                continue;
+            }
+            const [atX, atY] = [select.labelled(x), select.labelled(y)];
+            const keyed =
+                atX !== undefined && atY !== undefined
+                    ? atX > atY
+                        ? x
+                        : y
+                    : atX !== undefined
+                    ? this.anchored.has(y)
+                        ? x
+                        : undefined
+                    : atY !== undefined && this.anchored.has(x)
+                    ? y
+                    : undefined;
+            if (keyed !== undefined) {
+                select.relabel(keyed, (labels, all) => this.sql.keyedLabels(labels, all));
+            }
+        }
     }
 
     /**
@@ -2239,10 +2312,13 @@ export class CypherWriter {
             throw new DrivineError(`${node.variable} is not a node, and is used as one in a pattern.`);
         }
         if (node.labels.length > 0) {
-            select.where.push(this.sql.hasLabels(value.labels, node.labels));
+            select.labelTest(value, node.labels, this.sql.hasLabels(value.labels, node.labels));
         }
         if (node.properties) {
             select.where.push(this.propertiesMatch(value.props, node.properties, select.scope));
+        }
+        if (node.labels.length > 0 || node.properties) {
+            this.anchor(select, value.nid);
         }
         return value;
     }
@@ -2266,6 +2342,8 @@ export class CypherWriter {
                 ? `${name}.a = ${from} AND ${name}.b = ${to} AND ${this.sql.selfLoopOnce(name)}`
                 : `((${value.src} = ${from} AND ${value.dst} = ${to}) OR (${value.dst} = ${from} AND ${value.src} = ${to}))`
         };
+        this.anchor(select, from);
+        this.anchor(select, to);
         select.where.push(directions[relationship.direction]);
         select.where.push(...optional(this.types(value.type, relationship.types)));
         if (relationship.properties) {
@@ -2303,7 +2381,7 @@ export class CypherWriter {
             hops
         );
         if (where) {
-            inner.where.push(this.keeps(where, inner.scope));
+            this.filter(inner, where);
         }
         const outer = select.scope;
         const found = [...inner.bound]
@@ -4066,11 +4144,21 @@ export class CypherWriter {
      */
     private binds(expression: Expression, select: Select): boolean {
         const counter = this.counter;
+        const anchored = new Set(this.anchored);
         try {
             return this.sql.binds(() => this.expression(expression, select.scope));
         } finally {
             this.counter = counter;
+            this.keepAnchored(anchored);
         }
+    }
+
+    /**
+     * {@link anchored} as it was, `before` a part compiled only to see: a name it takes is taken again later, and may then
+     * be another node's, found by nothing but its key.
+     */
+    private keepAnchored(before: Set<string>): void {
+        [...this.anchored].filter((it) => !before.has(it)).forEach((it) => this.anchored.delete(it));
     }
 
     /**
@@ -4086,6 +4174,7 @@ export class CypherWriter {
             return false;
         }
         const counter = this.counter;
+        const anchored = new Set(this.anchored);
         try {
             return this.sql.toSee(() => {
                 // Each item compiled as `project` compiles it, with shared on where it does not aggregate, lest one nested
@@ -4109,6 +4198,7 @@ export class CypherWriter {
             });
         } finally {
             this.counter = counter;
+            this.keepAnchored(anchored);
         }
     }
 
@@ -4518,13 +4608,25 @@ export class CypherWriter {
      * reads (one of its conditions joined by `AND` or `OR`) may be false where Cypher's is null, as neither keeps a row.
      */
     private keeps(where: Expression, scope: Scope): string {
+        return this.kept(where, scope)[0];
+    }
+
+    /**
+     * {@link keeps}, with the {@link ComparedKeys} it compares where the row must pass the comparison: its own, not a
+     * subquery's within it.
+     */
+    private kept(where: Expression, scope: Scope): [string, ComparedKeys] {
+        const outer = this.comparedKeys;
+        const compared: ComparedKeys = { pairs: [], anchors: [] };
+        this.comparedKeys = compared;
         this.filtering = true;
         this.conjoining = true;
         try {
-            return this.condition(this.expression(where, scope));
+            return [this.condition(this.expression(where, scope)), compared];
         } finally {
             this.filtering = false;
             this.conjoining = false;
+            this.comparedKeys = outer;
         }
     }
 
@@ -5038,7 +5140,7 @@ export class CypherWriter {
         const inner = new Select(scope);
         this.patterns(inner, [comprehension.pattern]);
         if (comprehension.where) {
-            inner.where.push(this.keeps(comprehension.where, inner.scope));
+            this.filter(inner, comprehension.where);
         }
         const projected = this.expression(comprehension.projection, inner.scope);
         // A body that reads no variable of the pattern's own, `[(p)-->() | p.name]`, is worked out for each of the
@@ -5153,7 +5255,7 @@ export class CypherWriter {
         const inner = new Select(scope);
         this.patterns(inner, patterns);
         if (where) {
-            inner.where.push(this.keeps(where, inner.scope));
+            this.filter(inner, where);
         }
         return bool(`EXISTS (${['SELECT 1', ...inner.from(), ...optional(inner.whereClause())].join(' ')})`);
     }
@@ -6345,7 +6447,7 @@ export class CypherWriter {
         if (binary.operator === 'NOT_EQUALS') {
             return `NOT (${equal})`;
         }
-        const keyed = conjunct ? this.idEquality(binary, left, right, scope) : undefined;
+        const keyed = conjunct ? this.keyedEquality(binary, left, right, scope) : undefined;
         return keyed ? `(${keyed} AND ${equal})` : equal;
     }
 
@@ -6395,17 +6497,35 @@ export class CypherWriter {
     }
 
     /**
+     * The key test to stand beside `binary`, an equality of `left` and `right` where the row must pass it
+     * ({@link idEquality}); and, where both are nodes, the two noted in {@link comparedKeys}, as a node equal to a node may
+     * be read by its key ({@link readByKey}).
+     */
+    private keyedEquality(binary: Binary, left: Value, right: Value, scope: Scope): string | undefined {
+        if (left.kind === 'Node' && right.kind === 'Node') {
+            this.comparedKeys.pairs.push([left.nid, right.nid]);
+        }
+        return this.idEquality(binary, left, right, scope);
+    }
+
+    /**
      * The key test to stand beside `binary`, an equality of `left` and `right` where one side is an id ({@link idKey}):
      * the two keys the same ({@link SqlCypherCompiler.sameKey}), where both are, or the key and the number the other side
      * is ({@link SqlCypherCompiler.keyValue}). Undefined where neither side is an id, or the other is no plain JSON
-     * value, which is no number.
+     * value, which is no number. Each is noted in {@link comparedKeys}, for {@link readByKey}.
      */
     private idEquality(binary: Binary, left: Value, right: Value, scope: Scope): string | undefined {
         const a = this.idKey(binary.left, scope);
         const b = this.idKey(binary.right, scope);
-        const keyed = (key: string, other: Value): string | undefined =>
-            this.plainJson(other) ? `${key} = ${this.sql.keyValue(this.sql.comparable(other))}` : undefined;
+        const keyed = (key: string, other: Value): string | undefined => {
+            if (!this.plainJson(other)) {
+                return undefined;
+            }
+            this.comparedKeys.anchors.push(key);
+            return `${key} = ${this.sql.keyValue(this.sql.comparable(other))}`;
+        };
         if (a !== undefined && b !== undefined) {
+            this.comparedKeys.pairs.push([a, b]);
             return this.sql.sameKey(a, b);
         }
         if (a !== undefined) {
@@ -6425,6 +6545,7 @@ export class CypherWriter {
         if (!this.plainJson(list)) {
             return within;
         }
+        this.comparedKeys.anchors.push(key);
         const i = this.alias('k');
         const json = this.sql.comparable(list);
         return `(${key} IN (SELECT ${this.sql.keyValue(this.sql.item(i))} FROM ${this.sql.elementsOf(
