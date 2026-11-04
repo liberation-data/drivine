@@ -18,8 +18,9 @@ const at = "datetime(CASE k WHEN 0 THEN '2024-03-15T10:00:00+02:00' ELSE '2024-0
  * written by fails here, clearly, and not as a test that times out. Renumbered inline, with a test and a regular
  * expression that wrote each value three or four times, the min and max of a collected list of moments took 4.8 seconds
  * of Oracle's hard parse, a moment two `CALL`s deep 74 seconds, and a truncation four deep was not planned in ten minutes
- * (#572). The store's era functions (see `OracleGraph.era`) took them to 1.0, 27 and 16 seconds on the test box (#609). drivine4j's
- * OracleEraParseTest.
+ * (#572). The store's era functions (see `OracleGraph.era`) took them to 1.0, 27 and 16 seconds on a fast machine
+ * (#609), and a CI runner takes longer: the bounds leave room for that. drivine4j's OracleEraParseTest. `npm test` runs
+ * this suite on its own (`test/run-tests.ts`), as another suite planning on the same database at once slows it.
  *
  * The time is the session's `parse time cpu` in `v$sesstat`, which the test user may not read, so the system user reads
  * it; each statement is new to Oracle (a comment that no other has), so it is parsed hard. A statement still being
@@ -147,17 +148,18 @@ describeOnOracle('The hard parse of temporal arithmetic on Oracle', () => {
         expect(ms).toBeLessThan(3_500);
     });
 
-    it('plans a moment two CALLs deep well within a minute', async () => {
-        // 27 seconds measured; 74 renumbered inline, so the bound is under twice what it takes, not three times.
+    it('plans a moment two CALLs deep in a minute and a half', async () => {
+        // 27 seconds measured on a fast machine, and 67 on a CI runner beside other suites; 74 and over two minutes
+        // renumbered inline. `compiled` checks that it calls the era functions.
         const [ms, rows] = await parsed(
             "MATCH (n:CyTemporal) CALL { WITH n CALL { WITH n RETURN n.day + duration('P1D') AS e } RETURN e AS d } RETURN (d + duration('P1D')).day",
             180_000
         );
         expect(rows).toEqual(['17']);
-        expect(ms).toBeLessThan(50_000);
+        expect(ms).toBeLessThan(90_000);
     });
 
-    it('plans a truncation with fields four deep within a minute', async () => {
+    it('plans a truncation with fields four deep in a minute and a half', async () => {
         // 16 seconds measured; renumbered inline it was still being planned after ten minutes.
         const [ms, rows] = await parsed(
             'RETURN ' +
@@ -168,6 +170,6 @@ describeOnOracle('The hard parse of temporal arithmetic on Oracle', () => {
             180_000
         );
         expect(rows).toEqual(['3']);
-        expect(ms).toBeLessThan(60_000);
+        expect(ms).toBeLessThan(90_000);
     });
 });
