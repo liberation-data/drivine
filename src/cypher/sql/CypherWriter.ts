@@ -1035,6 +1035,12 @@ export class CypherWriter {
      */
     private readonly anchored: Set<string> = new Set();
 
+    /**
+     * The keys of the nodes a pattern found after a `WITH` that groups its rows ({@link Select.afterGrouping}): a label a
+     * condition tests of one is tested as its pattern's are, by {@link SqlCypherCompiler.groupedLabels}.
+     */
+    private readonly grouped: Set<string> = new Set();
+
     /** Each parameter's value as the JSON it is bound as, by name, as {@link parameterTree} reads it. */
     private readonly parameterTrees: Map<string, unknown> = new Map();
 
@@ -1110,7 +1116,10 @@ export class CypherWriter {
             if (subject.kind !== 'Node') {
                 throw new DrivineError('A label is tested of a node.');
             }
-            return bool(`(${this.sql.hasLabels(subject.labels, it.labels)})`);
+            const labels = this.grouped.has(subject.nid)
+                ? this.sql.groupedLabels(subject.labels, it.labels)
+                : this.sql.hasLabels(subject.labels, it.labels);
+            return bool(`(${labels})`);
         },
         ListLiteral: (it, scope) => this.listLiteral(it, scope),
         MapLiteral: (it, scope) => {
@@ -2298,6 +2307,9 @@ export class CypherWriter {
             value = nodeOf(name);
             if (node.variable !== undefined) {
                 select.bind(node.variable, value);
+            }
+            if (select.afterGrouping) {
+                this.grouped.add(value.nid);
             }
         } else {
             throw new DrivineError(`${node.variable} is not a node, and is used as one in a pattern.`);
