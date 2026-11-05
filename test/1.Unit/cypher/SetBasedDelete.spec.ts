@@ -1,3 +1,4 @@
+import { holdsLabel } from '@/backend/oracle/OracleGraph';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
@@ -89,16 +90,48 @@ describe('A DELETE, compiled', () => {
     it('reads the key with + 0 on Oracle, where a DELETE reads its match, which Oracle does not unnest into a wrong answer', () => {
         const oracle = new OracleCypherCompiler('g');
         expect(compiled(oracle, 'MATCH (g:Gone) DETACH DELETE g')).toMatch(
-            /DELETE FROM g_node WHERE nid IN \(SELECT \/\*\+ NO_ADAPTIVE_PLAN \*\/ n\d+\.nid \+ 0 AS id/
+            /DELETE FROM g_node WHERE nid IN \(SELECT n\d+\.nid \+ 0 AS id/
         );
         expect(compiled(oracle, 'MATCH ()-[r:R]->() DELETE r')).toMatch(
-            /DELETE FROM g_edge WHERE eid IN \(SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM NO_ADAPTIVE_PLAN \*\/ e\d+\.eid \+ 0 AS id/
+            /DELETE FROM g_edge WHERE eid IN \(SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM \*\/ e\d+\.eid \+ 0 AS id/
         );
         for (const compiler of [new PostgresCypherCompiler('g'), new SqliteCypherCompiler('g')]) {
             expect(compiled(compiler, 'MATCH (g:Gone) DETACH DELETE g')).toMatch(
                 /DELETE FROM g_node WHERE nid IN \(SELECT n\d+\.nid AS id/
             );
         }
+    });
+
+    it("tests labels by their text on Oracle, where a DELETE reads its match, in a LATERAL's query too, which the index over labels does not answer", () => {
+        // Planned with the index over labels, Oracle crashed the session (ORA-07445 in qjsnmvFindOpt) after rolled-back
+        // deletes of the label (#612, liberation-data/drivine4j#595).
+        const oracle = new OracleCypherCompiler('g');
+        const subquery = (cypher: string): string => {
+            const sql = oracle.compile(cypher).sql;
+            return sql.slice(sql.indexOf('IN (SELECT '));
+        };
+        for (const cypher of [
+            'MATCH (a:X) OPTIONAL MATCH (a)-[r:R]->(:X {k: 2}) DELETE r',
+            'MATCH (a:X) OPTIONAL MATCH (a)-[:R]->(m:X {k: 3}) DETACH DELETE m',
+            'MATCH (g:Gone:Also) DETACH DELETE g'
+        ]) {
+            const read = subquery(cypher);
+            expect([cypher, /JSON_EXISTS\([\w.]+\.labels/.test(read)]).toEqual([cypher, false]);
+            expect(read).toMatch(/INSTR\(',' \|\| LTRIM\(RTRIM\(JSON_SERIALIZE\(n\d+\.labels\)/);
+        }
+        expect(
+            count(
+                subquery('MATCH (a:X) OPTIONAL MATCH (a)-[r:R]->(:X {k: 2}) DELETE r'),
+                /JSON_SERIALIZE\(n\d+\.labels\)/g
+            )
+        ).toEqual(2);
+        // A label that SQL and JSON quote is looked for as itself.
+        const label = 'it\'s "x\\';
+        const read = subquery('MATCH (g:`it\'s "x\\`) DETACH DELETE g');
+        const alias = /JSON_SERIALIZE\((n\d+\.labels)\)/.exec(read)![1];
+        expect(read).toContain(holdsLabel(alias, label));
+        // A read that deletes nothing keeps the test the index answers.
+        expect(oracle.compile('MATCH (g:Gone) RETURN g.k').sql).toContain('JSON_EXISTS(');
     });
 
     it('refuses in a DELETE that ends the statement what a DELETE over the rows refuses', () => {

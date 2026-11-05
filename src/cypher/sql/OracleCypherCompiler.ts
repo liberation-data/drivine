@@ -121,6 +121,13 @@ const NO_JSON_TABLE_TRANSFORM = 'NO_JSON_TABLE_TRANSFORM';
 /** A query that opens with hints, and those hints: Oracle reads the first hint comment of a query alone. */
 const HINTED = /^SELECT \/\*\+ (.*?) \*\//;
 
+/**
+ * A test of a column of labels, `n1.labels`, as {@link OracleCypherCompiler.hasLabel} writes it,
+ * `JSON_EXISTS(n1.labels, '$[*]?(@ == "X")')`, and the label, written as JSON writes a string and then as SQL quotes
+ * one: see {@link OracleCypherCompiler.deletedIds}.
+ */
+const INDEXED_LABEL = /JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "((?:[^"\\]|\\.)*)"\)'\)/gs;
+
 /** `text` as a regular expression matches it, each character as itself. */
 function escapedForRegExp(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1018,18 +1025,22 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     }
 
     /**
-     * With no plan that adapts (`NO_ADAPTIVE_PLAN`), as {@link walk}'s steps: Oracle (23.26) crashed the session
-     * (ORA-07445 in `qjsnmvFindOpt`, the multivalue index over labels, ORA-03113 to the client) planning `DELETE FROM
-     * <edges> WHERE eid IN (SELECT … FROM <nodes> n1 LEFT JOIN LATERAL (…) …)` of `MATCH (a:X) OPTIONAL MATCH
-     * (a)-[r:R]->(:X {k: 2}) DELETE r` again, where a transaction that deleted and read nodes of the label had rolled
-     * back (#612). So hinted, or with `NO_UNNEST`, or without the label index, it ran clean.
+     * Each test of a node's labels that the index over labels would answer ({@link hasLabel}) written by the labels' text
+     * instead ({@link holdsLabel}), in each query of the subquery, a `LATERAL`'s too. Oracle (23.26) crashed the session
+     * (ORA-07445 `[qjsnmvFindOpt()+16] [SIGSEGV]`, in the multivalue index over labels; ORA-03113 to the client)
+     * planning `DELETE FROM <edges> WHERE eid IN (SELECT … FROM <nodes> n1 LEFT JOIN LATERAL (… <nodes> n2 …) …)` of
+     * `MATCH (a:X) OPTIONAL MATCH (a)-[r:R]->(:X {k: 2}) DELETE r` again, and the `DETACH DELETE m` of `OPTIONAL MATCH
+     * (a)-[:R]->(m:X {k: 3})` alike, where transactions that deleted and read nodes of the label had rolled back (#612,
+     * liberation-data/drivine4j#595). Off the index it ran clean; with `NO_ADAPTIVE_PLAN` (already the session's) or
+     * `NO_INDEX` it crashed as often. The subquery then reads the outer node's table whole, once, and the lateral's node
+     * by its key. drivine4j's `OracleCypherCompiler.deletedIds` writes the same.
      */
     deletedIds(query: string): string {
-        const planned = super.deletedIds(query);
-        const hinted = HINTED.exec(planned);
-        return hinted
-            ? `SELECT /*+ ${hinted[1]} NO_ADAPTIVE_PLAN */${planned.slice(hinted[0].length)}`
-            : planned.replace(/^SELECT /, 'SELECT /*+ NO_ADAPTIVE_PLAN */ ');
+        return super
+            .deletedIds(query)
+            .replace(INDEXED_LABEL, (_, labels: string, label: string) =>
+                holdsLabel(labels, label.replace(/''/g, "'").replace(/\\(.)/gs, '$1'))
+            );
     }
 
     /**
