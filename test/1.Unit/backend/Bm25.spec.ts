@@ -107,4 +107,29 @@ describe('bm25Ranked', () => {
         );
         expect(sql).toContain('WHERE (REGEXP_LIKE(s.text, $_term8) OR REGEXP_LIKE(s.text, $_term9))');
     });
+
+    const oracleMatching = (text: string) =>
+        new OracleBackend(new OracleGraph()).matching(
+            { kind: 'NODE_FRAGMENT', model: new ModelRegistry().fragment(Shelf) },
+            { label: 'Shelf', properties: ['title'], text, limit: 10 }
+        );
+
+    it('should count a phrase that repeats a word on Oracle in the text with each character between words twice', () => {
+        // Two counts would take different occurrences where one begins inside another: "la la" in "la la land" (drivine4j#607).
+        const statement = oracleMatching('"la la"');
+        expect(squashed(statement.text)).toContain(
+            "SELECT s.nid, s.len, REGEXP_COUNT(REGEXP_REPLACE(s.text, '([^[:alnum:]_])', '\\1\\1'), $_term0) AS tf1 FROM"
+        );
+        expect(statement.bindings._term0).toEqual('(^|[^[:alnum:]_])la[^[:alnum:]_]+la($|[^[:alnum:]_])');
+    });
+
+    it.each([
+        ['kiw*', '(^|[^[:alnum:]_])kiw'],
+        ['b²b', '(^|[^[:alnum:]_])b²b($|[^[:alnum:]_])']
+    ])('should count %s on Oracle by its one expression', (text, bound) => {
+        // A prefix term takes no character after it, and "²" begins an occurrence that two counts would lose (drivine4j#607).
+        const statement = oracleMatching(text);
+        expect(squashed(statement.text)).toContain('SELECT s.nid, s.len, REGEXP_COUNT(s.text, $_term0) AS tf1 FROM');
+        expect(statement.bindings._term0).toEqual(bound);
+    });
 });

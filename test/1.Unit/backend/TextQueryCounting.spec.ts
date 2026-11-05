@@ -10,10 +10,8 @@ import { SqlitePatterns } from '@/connection/sqlite/SqlitePatterns';
  */
 describe('TextQuery counting', () => {
     const patterns = new SqlitePatterns();
-    const global = (pattern: string): RegExp => {
-        const re = patterns.of(pattern, '');
-        return new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
-    };
+    /** The expression as drivine_regexp_count reads it. */
+    const global = (pattern: string): RegExp => patterns.of(pattern, 'g');
     /** How often the expression matches in the text, each match after the last one ends, as the stores count. */
     const count = (pattern: string, text: string): number => [...text.matchAll(global(pattern))].length;
     const term = (query: string): string => {
@@ -102,6 +100,11 @@ describe('TextQuery counting', () => {
             expect(byOracle(query, text)).toEqual(lookahead(query, text));
         }
     );
+
+    it('should count a phrase whose first word starts a later one by how often it occurs', () => {
+        both('"kiwi kiwis"', 'kiwi kiwi kiwis kiwis kiwi kiwisx kiwi kiwis', 2);
+        both('"ki kiwi bird"', 'ki ki kiwi bird ki kiwi birds ki kiwi bird ki kiwi bird', 3);
+    });
 
     it('should count on Oracle a term holding a number that is not a digit by its one expression, losing no occurrence', () => {
         // "²" is a word's to the query, not to [[:alnum:]]: "b²b" in "b²b²bx" begins inside the first.
