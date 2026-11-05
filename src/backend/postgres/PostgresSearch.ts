@@ -2,6 +2,7 @@ import { MatchingSearch, NearestSearch } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonValue, nodeDocument, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
+import { bm25Ranked } from '@/backend/sql/Bm25';
 import { TextQuery } from '@/backend/sql/TextQuery';
 import { DrivineError } from '@/DrivineError';
 import { TargetModel } from '@/model/RelationshipModel';
@@ -14,9 +15,9 @@ import { TargetModel } from '@/model/RelationshipModel';
  * A vector search is pgvector's: exact over every node of the label that holds an embedding of the vector's size, or
  * approximate through the label's HNSW index, which holds the embeddings of its size (see PostgresSchemaGrammar). It
  * scores on Neo4j's scale: (1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean. A full-text query is the core of
- * Lucene's syntax (see TextQuery), scored by how often its terms occur as whole words, as Oracle scores one without
- * Oracle Text, then scaled by the best hit; the trigram index of a full-text index narrows it first to the nodes whose
- * text holds a scoring term's words, which changes no score.
+ * Lucene's syntax (see TextQuery), each term counted as a whole word as Oracle counts one without Oracle Text, scored
+ * by BM25 as Neo4j's index scores it (see bm25Ranked), then scaled by the best hit; the trigram index of a full-text
+ * index narrows it first to the nodes whose text holds a scoring term's words, which changes no score.
  */
 export class PostgresSearch {
     constructor(private readonly graph: PostgresGraph) {}
@@ -69,22 +70,24 @@ export class PostgresSearch {
                       .join(' OR ')})`
               ]
             : [];
-        const count = (pattern: string): string =>
-            `(SELECT count(*) FROM regexp_matches(x.text, ${bind(pattern)}, 'g'))`;
-        const occurrences = query.scored.map(count).join(' + ');
-        const conditions = [
-            ...query.required.map((it) => `${count(it)} > 0`),
-            ...query.excluded.map((it) => `${count(it)} = 0`)
-        ];
         // Narrowed by the root's every label before the scale, so the best of it is a hit the search can return.
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const labels = [search.label, ...root.labels.filter((it) => it !== search.label)];
-        const candidates =
-            `SELECT h.nid, CAST(h.hit_count AS double precision) / MAX(h.hit_count) OVER () AS score FROM (` +
-            `SELECT x.nid, ${occurrences} AS hit_count FROM (SELECT c.nid, ${text} AS text FROM ${
-                this.graph.nodes
-            } c WHERE ${[hasLabels('c', labels), ...narrowed].join(' AND ')}) x` +
-            `${conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''}) h WHERE h.hit_count > 0`;
+        const len = `length(${joinedText('c', search.properties)})`;
+        const candidates = bm25Ranked(
+            `SELECT c.nid, ${text} AS text, ${len} AS len FROM ${this.graph.nodes} c WHERE ${[
+                hasLabels('c', labels),
+                ...narrowed
+            ].join(' AND ')}`,
+            `SELECT ${len} AS len FROM ${this.graph.nodes} c WHERE ${hasLabels('c', labels)}`,
+            query,
+            {
+                count: (text, term) => `(SELECT count(*) FROM regexp_matches(${text}, ${bind(term)}, 'g'))`,
+                holds: (text, term) => `${text} ~ ${bind(term)}`,
+                ln: (value) => `ln(${value})`,
+                real: (value) => `CAST(${value} AS double precision)`
+            }
+        );
         return this.scored(target, candidates, search, bindings);
     }
 
@@ -140,7 +143,12 @@ export function holds(alias: string, property: string, dimensions?: number): str
  * the index.
  */
 export function searchedText(alias: string, properties: string[]): string {
-    return `lower(${properties.map((it) => `COALESCE(${textOf(alias, it)}, '')`).join(` || ' ' || `)})`;
+    return `lower(${joinedText(alias, properties)})`;
+}
+
+/** `searchedText` before it is lowered: what a full-text search measures a text's length by (drivine4j#604). */
+export function joinedText(alias: string, properties: string[]): string {
+    return properties.map((it) => `COALESCE(${textOf(alias, it)}, '')`).join(` || ' ' || `);
 }
 
 /** The vector bound as `$_vector`, a list of numbers, as pgvector's: of `dimensions` where given. */
