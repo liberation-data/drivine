@@ -41,6 +41,11 @@ export function indent(text: string): string {
         .join('\n');
 }
 
+/** `text` as a regular expression matches it, each character as itself. */
+export function escapedForRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** Cypher the compiler does not take: refused by name, so the caller is told what, and not that the SQL failed. */
 export function unsupported(construct: string): never {
     throw new DrivineError(`${construct} is Cypher, and is not compiled to SQL yet.`);
