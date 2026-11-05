@@ -8,8 +8,10 @@ The site at [drivine.org](https://drivine.org/), built with
   it at 240p in some browsers). `drivine-explainer.mp4` is re-encoded from the master in the private
   `liberation-data/drivine-explainer-video` repository (`video/final/drivine-graph-rag-master.mp4`): H.264 1080p30 with
   AAC sound, its index at the front (`-movflags +faststart`) so it starts before it has all downloaded, and well under
-  GitHub Pages' 100 MB a file. `drivine-explainer.vtt` is that repository's `video/final/captions.srt`, rejoined into
-  sentences and split again into captions of two lines of 42 characters at most:
+  GitHub Pages' 100 MB a file. The page plays it from HLS segments, `public/video/hls/`, which the build cuts from it
+  with ffmpeg (`scripts/segment-video.mjs`; `brew install ffmpeg`, or it plays the mp4), so a cold CDN edge fetches a
+  megabyte or two from the origin before the first frame, not all 39 MB. `drivine-explainer.vtt` is that repository's
+  `video/final/captions.srt`, rejoined into sentences and split again into captions of two lines of 42 characters at most:
   `node scripts/captions.mjs <captions.srt> public/video/drivine-explainer.vtt`. When the video ends, which it does by
   fading to black, the page shows its end card, `src/assets/video-end.jpg` (the frame at 4:25), with a Watch again
   button. A new cut replaces all three (the end card with

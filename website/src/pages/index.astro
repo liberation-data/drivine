@@ -17,6 +17,7 @@ import studioCypher from '../assets/studio-cypher.png';
 import videoPoster from '../assets/video-poster.jpg';
 import videoEnd from '../assets/video-end.jpg';
 import Share from '../components/Share.astro';
+import video from '../generated/video.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 
@@ -40,6 +41,8 @@ const image = (name: string) => `${base}images/${name}`;
 // set. It is on YouTube too (VIDEO_ID), linked under the player for sharing.
 const VIDEO = `${base}video/drivine-explainer.mp4`;
 const VIDEO_CAPTIONS = `${base}video/drivine-explainer.vtt`;
+/* Its HLS segments' playlist, where the build cut it into them (scripts/segment-video.mjs), else nothing. */
+const VIDEO_HLS = video.hls ? `${base}video/hls/index.m3u8` : '';
 const VIDEO_ID = 'uETP0EN_04E';
 // What Share passes on: drivine.org itself, or at the video. The card a link shows is the video's title card.
 const SITE = 'https://drivine.org/';
@@ -458,7 +461,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             {VIDEO && (
                 <section class="watch" id="watch">
                     <div class="wrap">
-                        <div class="player" data-video={VIDEO} data-captions={VIDEO_CAPTIONS}>
+                        <div class="player" data-video={VIDEO} data-hls={VIDEO_HLS} data-captions={VIDEO_CAPTIONS}>
                             <Image src={videoPoster} widths={[640, 800, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
                             <button type="button" class="play" aria-label="Watch · 4:26, the video: Drivine, graph RAG on any database (4 minutes 26 seconds)">
                                 <span><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="#0b2530" /></svg>Watch · 4:26</span>
@@ -735,13 +738,51 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     menu.querySelector('summary')?.focus();
                 }
             });
+            // The video plays from its HLS segments where the build made them: a cold CDN edge fetches a whole file from the
+            // origin before it sends any of it, a segment of a megabyte or two rather than the 39 MB mp4. Safari and Chrome play a
+            // playlist themselves; other browsers through hls.js, fetched once the page has loaded (warm, below) so a press
+            // doesn't wait for it. Where neither can, or hls.js fails, the mp4 plays.
+            let hlsJs: Promise<typeof import('hls.js/light').default | undefined> | undefined;
+            const loadHls = () => (hlsJs ??= import('hls.js/light').then((it) => (it.default.isSupported() ? it.default : undefined), () => undefined));
+            const nativeHls = (video: HTMLVideoElement) => video.canPlayType('application/vnd.apple.mpegurl') !== '';
+            const source = (video: HTMLVideoElement, player: HTMLElement) => {
+                const { hls, video: src } = player.dataset;
+                if (!hls || nativeHls(video)) {
+                    video.src = hls || src!;
+                    // A playlist the browser can't play after all (Chrome's own HLS is new) falls back too. Added before the
+                    // poster's own listener, it keeps this error from that, so the poster waits for the mp4's first frame.
+                    if (hls)
+                        video.addEventListener('error', (event) => {
+                            event.stopImmediatePropagation();
+                            video.src = src!;
+                            void video.play().catch(() => {});
+                        }, { once: true });
+                    return;
+                }
+                void loadHls().then((Hls) => {
+                    if (!Hls) {
+                        video.src = src!;
+                        return;
+                    }
+                    const it = new Hls();
+                    it.on(Hls.Events.ERROR, (_, data) => {
+                        if (!data.fatal) return;
+                        it.destroy();
+                        video.src = src!;
+                        void video.play().catch(() => {});
+                    });
+                    it.loadSource(hls);
+                    it.attachMedia(video);
+                    void video.play().catch(() => {});
+                });
+            };
             // The video loads only when asked for, and plays with its controls and its captions, shown from the start. At the
             // end the video fades to black, so its end card (#video-end) covers it, with a Watch again button where Watch
             // was; pressing it, or the hero's tip, starts it over and takes them away.
             document.querySelector<HTMLElement>('.watch .player')?.addEventListener('click', (event) => {
                 const player = event.currentTarget as HTMLElement;
                 const video = document.createElement('video');
-                video.src = player.dataset.video!;
+                source(video, player);
                 video.controls = true;
                 video.autoplay = true;
                 video.playsInline = true;
@@ -803,7 +844,11 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 player.prepend(video);
                 // Played from the press itself, which Safari asks of a video with sound (and iOS loads none before it). If it
                 // won't play (autoplay blocked, or no file), its own controls show: they take a press, the poster doesn't.
-                video.play().catch(show);
+                // Through hls.js the video has no source yet, and is given one in a moment, which interrupts this play with
+                // an AbortError: that one is played again once it has its source, so the poster waits for its first frame. A
+                // source that fails rejects it with a NotSupportedError, and its error event shows the controls, or, for a
+                // playlist, has the mp4 played (source, above) while the poster waits.
+                video.play().catch((error) => !['AbortError', 'NotSupportedError'].includes(error.name) && show());
             }, { once: true });
             // Each install line copies itself, and says so for a moment.
             const copied = document.querySelector<HTMLElement>('.copied-status');
@@ -967,12 +1012,19 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 run();
             };
             const idle = (window as { requestIdleCallback?: (callback: () => void) => void }).requestIdleCallback ?? ((callback) => setTimeout(callback, 200));
-            // The CDN keeps a large file at the edge near a visitor only while it's asked for there, and the first to press
-            // play after a quiet spell waits while it's fetched. One byte of the video, asked for once the page has loaded,
-            // has the edge fetch the whole file while they're still reading the hero, without each visitor downloading it.
+            // The CDN keeps a file at the edge near a visitor only ten minutes, and a cold edge fetches the whole file from its
+            // origin before it sends any of it. One byte of each of the first two segments, asked for once the page has
+            // loaded, has the edge fetch them while the visitor is still reading the hero, without each visitor downloading
+            // them; the playlist and its header are a few hundred bytes, so they're fetched whole. Without segments, a byte
+            // of the mp4 is asked for, which warms all 39 MB of it. hls.js is fetched too, where it will play.
             const warm = () => {
-                const src = document.querySelector<HTMLElement>('.watch .player')?.dataset.video;
-                if (src) void fetch(src, { headers: { Range: 'bytes=0-0' } }).catch(() => {});
+                const player = document.querySelector<HTMLElement>('.watch .player');
+                const { hls, video: src } = player?.dataset ?? {};
+                const byte = (url: string) => void fetch(url, { headers: { Range: 'bytes=0-0' } }).catch(() => {});
+                if (!hls) return src && byte(src);
+                for (const file of ['index.m3u8', 'init.mp4']) void fetch(new URL(file, new URL(hls, location.href))).catch(() => {});
+                for (const file of ['000.m4s', '001.m4s']) byte(new URL(file, new URL(hls, location.href)).href);
+                if (!nativeHls(document.createElement('video'))) void loadHls();
             };
             const landed = () => {
                 idle(drawGraph);
