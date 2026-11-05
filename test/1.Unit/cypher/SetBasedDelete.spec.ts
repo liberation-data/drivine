@@ -125,11 +125,18 @@ describe('A DELETE, compiled', () => {
                 /JSON_SERIALIZE\(n\d+\.labels\)/g
             )
         ).toEqual(2);
-        // A label that SQL and JSON quote is looked for as itself.
-        const label = 'it\'s "x\\';
-        const read = subquery('MATCH (g:`it\'s "x\\`) DETACH DELETE g');
-        const alias = /JSON_SERIALIZE\((n\d+\.labels)\)/.exec(read)![1];
-        expect(read).toContain(holdsLabel(alias, label));
+        // A label that SQL and JSON quote, or with a space, a backslash before a line break, or past ASCII, is looked for as itself.
+        for (const label of ['it\'s "x\\', 'a \\\nb é']) {
+            const read = subquery(`MATCH (g:\`${label}\`) DETACH DELETE g`);
+            const alias = /JSON_SERIALIZE\((n\d+\.labels)\)/.exec(read)![1];
+            expect(read).toContain(holdsLabel(alias, label));
+        }
+        // A string of the statement's that reads as the test is a string still.
+        const read = subquery(
+            'MATCH (g:Gone) WHERE g.s = "JSON_EXISTS(n1.labels, \'$[*]?(@ == \\"Y\\")\')" DETACH DELETE g'
+        );
+        expect([read, count(read, /JSON_EXISTS\(n1\.labels/g)]).toEqual([read, 1]);
+        expect(read).not.toContain(holdsLabel('n1.labels', 'Y'));
         // A read that deletes nothing keeps the test the index answers.
         expect(oracle.compile('MATCH (g:Gone) RETURN g.k').sql).toContain('JSON_EXISTS(');
     });
