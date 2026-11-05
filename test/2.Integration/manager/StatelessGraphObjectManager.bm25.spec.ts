@@ -101,6 +101,11 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits[0].value.id).toEqual('rare');
         expect(hits[0].score).toBeCloseTo(1, 9);
         expect(hits.every((it) => it.score > 0 && it.score <= 1)).toBe(true);
+        if (engine.type !== DatabaseType.NEO4J) {
+            // bm25Ranked's own figure, lengths in characters (Lucene's are in words): "graph" 5 times in 45 characters,
+            // against "graph" and "soup" once each in 15, over 27 texts of 857 characters, "graph" in 22 and "soup" in 1.
+            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.0912069749523818, 9);
+        }
     });
 
     it('should rank a short text above a long one that holds the term as often', async () => {
