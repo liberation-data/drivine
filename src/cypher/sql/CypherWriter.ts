@@ -1843,6 +1843,7 @@ export class CypherWriter {
         seed: string | undefined
     ): Select {
         let inner = new Select(row.scope);
+        inner.afterGrouping = row.afterGrouping;
         this.patterns(inner, patterns, metByPaths);
         if (where) {
             inner =
@@ -2384,6 +2385,7 @@ export class CypherWriter {
             unsupported('A shortest path of anything but one variable-length relationship');
         }
         const inner = new Select(select.scope);
+        inner.afterGrouping = select.afterGrouping;
         const hops: Hop[] = [];
         // Its ends named, to find the shortest between each two of them where they were not bound before it.
         const [first, last] = [pattern.nodes[0], pattern.nodes[pattern.nodes.length - 1]];
