@@ -23,7 +23,6 @@ const {
     GATHERED,
     CALLER,
     NESTING,
-    DOOMED,
     RECORD,
     MATCHED
 }: typeof Procedure = Procedure;
@@ -38,7 +37,6 @@ const VARIABLES = new Set([
     ID,
     COUNT,
     FOUND,
-    DOOMED,
     ...Array.from({ length: NESTING }, (_, i) => [
         `${SAVED}${i + 1}`,
         `${GATHERED}${i + 1}`,

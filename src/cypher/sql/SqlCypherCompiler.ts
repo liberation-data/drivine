@@ -476,6 +476,22 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * The key column `key` as a subquery gives it to an `IN` over the same table's key, `nid IN (SELECT n1.nid …)`: a
+     * store whose planner rewrites that into a wrong answer gives it in a form it can't rewrite: see Oracle's.
+     */
+    inKey(key: string): string {
+        return key;
+    }
+
+    /**
+     * The query a `DELETE` reads the ids it deletes from, `query`, a subquery of the match itself in the `DELETE`'s
+     * `IN`, as {@link planned} gives it: a store whose planner fails on such a subquery is told more: see Oracle's.
+     */
+    deletedIds(query: string): string {
+        return this.planned(query);
+    }
+
+    /**
      * A test an index answers, to stand beside the comparison of the `property`, read as {@link propertyOf} gives it,
      * with the `value`, a text or a truth value; undefined where there is none.
      */

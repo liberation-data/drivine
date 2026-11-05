@@ -7,7 +7,6 @@ DECLARE
     cy_id NUMBER;
     cy_count NUMBER;
     cy_found BOOLEAN;
-    cy_doomed JSON;
     cy_cursor SYS_REFCURSOR;
     cy_now TIMESTAMP;
     cy_saved1 JSON;
