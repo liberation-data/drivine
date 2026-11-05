@@ -1,6 +1,14 @@
 import { createHash } from 'crypto';
 import { Stamps } from '@/model/Stamps';
-import { chunked, indent, literal, MOST_ARGUMENTS, RADIANS_TO_DEGREES, RoundingMode } from '@/cypher/sql/CypherSyntax';
+import {
+    chunked,
+    escapedForRegExp,
+    indent,
+    literal,
+    MOST_ARGUMENTS,
+    RADIANS_TO_DEGREES,
+    RoundingMode
+} from '@/cypher/sql/CypherSyntax';
 import { jsonText } from '@/cypher/sql/JsonText';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { PostgresTemporalSql } from '@/cypher/sql/PostgresTemporalSql';
@@ -40,6 +48,35 @@ const MOST_PLACES = 400;
 
 /** A property read as `propertyOf` reads it, `(alias.props -> 'key')`: its row's column, and its key's literal. */
 const READ_PROPERTY = /^\(([\w.]+) -> ('(?:[^']|'')*')\)$/;
+
+/** The planner's settings a loop's statements for each row are planned with off: see `plannedAsNestedLoops`. */
+const JOIN_METHODS = ['enable_seqscan', 'enable_hashjoin', 'enable_mergejoin'];
+
+/** The procedure's variable that holds {@link JOIN_METHODS} as they were before a loop planned with them off. */
+const PLANNER = 'cy_planner';
+
+/** How a query reads the rows of a JSON list: see `plannedAsNestedLoops`. */
+const JSON_LIST = 'jsonb_array_elements(';
+
+/** The SQL of each step of `program`, and of the steps in its loops and conditions. */
+function sqlOf(program: ProcedureStep[]): string[] {
+    return program.flatMap((step): string[] => {
+        switch (step.kind) {
+            case 'Select':
+                return [`SELECT ${step.expression}${step.from}`];
+            case 'Loop':
+                return [step.query, ...sqlOf(step.body)];
+            case 'If':
+                return [step.condition, ...sqlOf(step.body)];
+            case 'Execute':
+                return [step.statement];
+            case 'Return':
+                return [step.query];
+            default:
+                return [];
+        }
+    });
+}
 
 /**
  * The characters of a text in a list that `codePoints` orders by their code points: at most 4 bytes each, 32 bits, which
@@ -610,6 +647,20 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
      * one command.
      */
     procedure(program: ProcedureStep[]): ProcedureCall {
+        const nestedLoops = program.some((it) => this.plannedAsNestedLoops(it));
+        const settings = JOIN_METHODS.map((it) => `current_setting('${it}')`).join(', ');
+        const off = JOIN_METHODS.map((it) => `set_config('${it}', 'off', true)`).join(', ');
+        const restored = JOIN_METHODS.map((it, i) => `set_config('${it}', ${PLANNER}[${i + 1}], true)`).join(', ');
+        const body = program.flatMap((step) =>
+            !this.plannedAsNestedLoops(step)
+                ? this.statements([step])
+                : [
+                      `${PLANNER} := ARRAY[${settings}];`,
+                      `PERFORM ${off};`,
+                      ...this.statements([step]),
+                      `PERFORM ${restored};`
+                  ]
+        );
         const kept = this.keptLists(program);
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} jsonb;`,
@@ -631,8 +682,9 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             `    ${MATCHED} record;`,
             ...saved.flat(),
             ...[...kept].filter((it) => it !== OUT).map((it) => `    ${it} jsonb[];`),
+            ...(nestedLoops ? [`    ${PLANNER} text[];`] : []),
             'BEGIN',
-            indent(this.statements(program).join('\n')),
+            indent(body.join('\n')),
             'END'
         ].join('\n');
         const digest = createHash('sha256').update(text).digest('hex');
@@ -717,6 +769,49 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             other,
             (it) => `(${it} #>> '{}')`,
             (it) => this.asText(it)
+        );
+    }
+
+    /**
+     * Whether `step`, a step of the procedure outside any loop, is a loop whose statements for each row are planned as
+     * nested loops over the tables' indexes: with {@link JOIN_METHODS} off while it runs, and as they were after it
+     * (#628, liberation-data/drivine4j#609). Postgres plans a statement the loop runs for each row on its first runs, and
+     * may keep that plan for all the rows after. Two of the loop's reads were planned to scan a whole table, so each row
+     * read all of it, and the loop took time in step with the square of its rows:
+     *
+     * - A read of a table by its key, where the loop adds to the table: a `MERGE` reading its pattern, a `SET` of what the
+     *   loop made, in an `ON CREATE`, a `CALL { … }` or a `FOREACH`. A table vacuumed while empty, as autovacuum leaves
+     *   one, has statistics that say it holds nothing, and its plan from the first rows, a scan of the few rows there, was
+     *   kept as the loop filled the table. `MATCH (n) MERGE (n)-[:R]->(n)` took 28.6 s over 20,000 nodes, and 0.4 s on a
+     *   table never vacuumed, which Postgres takes to have ten pages.
+     * - A read of the rows of a `CALL { … }` for one row, which `jsonb_array_elements` gives, joined to a table: Postgres
+     *   takes such a list to hold 100 rows, and below some 20,000 nodes plans to hash a scan of the whole table. A
+     *   `MATCH (n) CALL (n) { SET n.y = n.i RETURN n.i AS j } RETURN count(j)` took 17 s over 20,000 nodes just made, and
+     *   0.6 s over the same nodes once a `SET` of each had grown the table past that.
+     *
+     * So planned, each read is by an index, and the loops take 0.4 s to 0.7 s over 20,000 rows. A loop with neither read
+     * is planned as it was, and its procedure is the same text: `MATCH (n) SET n.x = 1` reads its nodes by their keys from
+     * a table it adds nothing to. A loop outside all others reads only the procedure's own rows, no table, so the settings
+     * change the plans of the statements it runs for each row alone. Set with `set_config(…, true)`, they are put back by
+     * no exception block where the loop fails: the failure aborts the transaction, or the savepoint it is rolled back to,
+     * and Postgres undoes the settings with it.
+     *
+     * A read for each row that no index answers is no faster for it: one that counted 20,000 nodes for each of 2,000 rows
+     * took 1.2 s to 2.0 s either way, and one that joined 20,000 relationships to their nodes for each row 1.7 times as
+     * long.
+     */
+    private plannedAsNestedLoops(step: ProcedureStep): boolean {
+        if (step.kind !== 'Loop') {
+            return false;
+        }
+        const statements = sqlOf(step.body);
+        const tables = [this.nodes, this.edges];
+        const inserts = (statement: string, table: string): boolean => statement.startsWith(`INSERT INTO ${table} `);
+        const reads = (statement: string, table: string): boolean =>
+            !inserts(statement, table) && new RegExp(`\\b${escapedForRegExp(table)}\\b`).test(statement);
+        const grown = tables.filter((table) => statements.some((it) => inserts(it, table)));
+        return statements.some((statement) =>
+            tables.some((it) => reads(statement, it) && (grown.includes(it) || statement.includes(JSON_LIST)))
         );
     }
 

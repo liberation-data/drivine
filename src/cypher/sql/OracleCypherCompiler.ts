@@ -5,6 +5,7 @@ import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
 import {
     DEGREES_TO_RADIANS,
+    escapedForRegExp,
     indent,
     isGivenNumber,
     literal,
@@ -130,11 +131,6 @@ const HINTED = /^SELECT \/\*\+ (.*?) \*\//;
  * one: see {@link OracleCypherCompiler.deletedIds}.
  */
 const INDEXED_LABEL = /JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "((?:[^"\\]|\\.)*)"\)'\)/gs;
-
-/** `text` as a regular expression matches it, each character as itself. */
-function escapedForRegExp(text: string): string {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /**
  * Where the `SELECT` whose `FROM` is at `from` in `query` begins: read back from there, past the brackets of its select
