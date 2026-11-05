@@ -262,6 +262,94 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    it('a CREATE or MERGE of a node bound already with an empty map of properties, as Neo4j refuses it', () => {
+        // #605 reads {} as no properties, but Neo4j (2026.10) still refuses it here: "Can't create node `a` with labels or properties here."
+        compilers.forEach(([store, compiler]) => {
+            [
+                'MATCH (a) CREATE (a {})-[:R]->(b)',
+                'MATCH (a) MERGE (a {})-[:R]->(b)',
+                'MATCH (a) FOREACH (x IN [1] | CREATE (a {})-[:R]->(b))'
+            ].forEach((cypher) => {
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([
+                    store,
+                    cypher,
+                    'a is bound already, so a CREATE or MERGE makes no node of it with labels or properties.'
+                ]);
+            });
+            compiler().compile('MATCH (a) CREATE (a)-[:R {}]->(b {})');
+        });
+    });
+
+    it('a pattern used as an expression that names a variable not bound, as Neo4j refuses it', () => {
+        // Neo4j (2026.x): 42N29 "Pattern expressions are not allowed to introduce new variables: `r`." The TCK's Pattern1 [10].
+        compilers.forEach(([store, compiler]) => {
+            [
+                ['MATCH (n) WHERE (n)-[r]->(a) RETURN n', 'r'],
+                ['MATCH (n) WHERE (n)-[r]->() RETURN n', 'r'],
+                ['MATCH (n) WHERE ()-[r]->() RETURN n', 'r'],
+                ['MATCH (n) WHERE (n)<-[r {}]-(a) RETURN n', 'r'],
+                ['MATCH (n) WHERE (n)-[r {}]-(a) RETURN n', 'r'],
+                ['MATCH (n) WHERE (n)-[r:REL*0..2]->(a {num: 5}) RETURN n', 'r'],
+                ['MATCH (n) WHERE (n)-->(a) RETURN n', 'a'],
+                ['MATCH (n) WHERE NOT (n)-[:R]->(:C)<-[s:R]-(n) RETURN n', 's'],
+                // Checked on Neo4j: within a pattern comprehension's or a COUNT { }'s WHERE, past a WITH that drops it, and
+                // in a CALL that imports it not; and in size(), before size() of a pattern is.
+                ['MATCH (n) RETURN [(n)-->(b) WHERE (b)-->(c) | b]', 'c'],
+                ['MATCH (n) WHERE COUNT { (n)-->(m) WHERE (m)-->(z) } > 0 RETURN n', 'z'],
+                ['MATCH (n)-->(m) WITH n MATCH (x) WHERE (x)-->(m) RETURN x', 'm'],
+                ['MATCH (n) CALL () { MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m', 'n'],
+                ['MATCH (n) RETURN size((n)-[r]->())', 'r']
+            ].forEach(([cypher, variable]) => {
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([
+                    store,
+                    cypher,
+                    `${variable} is not defined: a pattern used as an expression binds no new variable, as in Neo4j. ` +
+                        'Bind it in a MATCH, or test the pattern with EXISTS { … }.'
+                ]);
+            });
+            // Neo4j takes these: each variable of the pattern is bound, or the pattern names none, or binds its own.
+            [
+                'MATCH (n), (m) WHERE (n)-->(m) RETURN n',
+                'MATCH (n) WHERE (n)-->(:L) RETURN n',
+                'MATCH (n) WHERE (n)-[:R]->() RETURN n',
+                'MATCH (n) WHERE ()-->() RETURN n',
+                'MATCH (n) WITH n WHERE (n)-->() RETURN n',
+                'MATCH (n) RETURN [(n)-->(b) WHERE (b)-->() | b]',
+                'MATCH (n) WHERE EXISTS { (n)-->(a) WHERE (a)-->() } RETURN n',
+                'MATCH (n) WHERE COUNT { (n)-->(m) WHERE (m)-->(n) } > 0 RETURN n',
+                'MATCH (n) OPTIONAL MATCH (n)-->(m) WHERE (m)-->(n) RETURN n',
+                'MATCH (n) WITH collect(n) AS l MATCH (m) WHERE any(x IN l WHERE (m)-->(x)) RETURN m',
+                'MATCH (n) WITH collect(n) AS l RETURN [x IN l WHERE (x)-->() | x]',
+                'MATCH (n) UNWIND [n] AS x MATCH (m) WHERE (m)-->(x) RETURN m',
+                'MATCH (n) CALL (n) { MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m',
+                'MATCH (n) CALL { WITH n MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m',
+                'MATCH (n) RETURN CASE WHEN (n)-->() THEN 1 ELSE 0 END, (n)-->() AS has ORDER BY (n)-->()'
+            ].forEach((cypher) =>
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+        });
+    });
+
+    it('size() of a pattern, as Neo4j refuses it, for COUNT { }', () => {
+        // Neo4j (2026.x): 42I52 "... It can no longer be used inside the function size(), an alternative is to replace size() with COUNT {}." The TCK's List6 [6].
+        compilers.forEach(([store, compiler]) => {
+            [
+                'MATCH (a) RETURN size((a)-->())',
+                'MATCH (a), (b), (c) RETURN size(()--())',
+                'MATCH (a), (b), (c) RETURN size((a)<--(a {}))',
+                'MATCH (a), (b), (c) RETURN size((a)-[:REL]->(:C)<-[:REL]-(a {num: 5}))',
+                'MATCH (a), (b), (c) RETURN size(()-[:REL*0..2]->()<-[:REL]-(:A {num: 5}))'
+            ].forEach((cypher) => {
+                expect([store, cypher, refusal(compiler, cypher)]).toEqual([
+                    store,
+                    cypher,
+                    "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
+                ]);
+            });
+            compiler().compile('MATCH (a) RETURN COUNT { (a)-->() }');
+        });
+    });
+
     it('two lists compared in a statement that writes, or in the step of a reduce(), on Oracle, whose block calls no function the query declares', () => {
         // drivine4j's #349: Oracle compares two lists by a function the query declares, which a procedure's queries do not call.
         const write = 'CREATE (n:N {a: [1] < [2]})';

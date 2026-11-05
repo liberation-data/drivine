@@ -154,6 +154,8 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
         assertScannedLabels('MATCH (a:Big), (b:Big) RETURN count(CASE WHEN a = b THEN 1 END)');
         // Found by nothing but the key: the index over labels is the way in, to b, and the earlier node is read by its key.
         assertScannedLabels('MATCH (a) MATCH (b:Big) WHERE a = b RETURN count(*)', 1);
+        // An empty map of properties finds a node by nothing, as no map does (#605, drivine4j#583).
+        assertScannedLabels('MATCH (a {}) MATCH (b:Big) WHERE a = b RETURN count(*)', 1);
         assertScannedLabels('MATCH (a) WHERE EXISTS { MATCH (b:Big) WHERE a = b } RETURN count(*)', 1);
         // Nor does a subquery find the node around it, by its id or a relationship it ends there: it reads a's rows.
         assertScannedLabels('MATCH (a) WHERE EXISTS { MATCH (b:Big) WHERE id(a) = 5 AND a = b } RETURN count(*)', 1);

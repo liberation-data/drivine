@@ -25,7 +25,7 @@ import {
     Slice,
     Unary
 } from '@/cypher/ast/Expression';
-import { NodePattern, Pattern, RelationshipPattern } from '@/cypher/ast/Pattern';
+import { isMapped, NodePattern, Pattern, RelationshipPattern } from '@/cypher/ast/Pattern';
 import {
     Call,
     Clause,
@@ -3292,7 +3292,7 @@ export class CypherWriter {
     private createNode(node: NodePattern): string {
         const kind = node.variable !== undefined ? this.kinds.get(node.variable) : undefined;
         if (kind === 'NODE') {
-            if (node.labels.length > 0 || node.properties !== undefined) {
+            if (node.labels.length > 0 || isMapped(node)) {
                 throw new DrivineError(
                     `${node.variable} is bound already, so a CREATE or MERGE makes no node of it with labels or properties.`
                 );

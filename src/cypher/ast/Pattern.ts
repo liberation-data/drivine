@@ -5,6 +5,22 @@ export interface NodePattern {
     readonly variable?: string;
     readonly labels: string[];
     readonly properties?: Expression;
+    /**
+     * Whether the node is written with a map of properties that is empty, `{}`: it is read as no `properties` (#605),
+     * but a `CREATE` or `MERGE` still makes no node bound already with it, as Neo4j refuses it. Not enumerable, so it is
+     * left out wherever the tree is compared or keyed, as `(a {})` matches as `(a)` does. See {@link isMapped}.
+     */
+    readonly mapped?: boolean;
+}
+
+/** `node`, noted as written with `{}`: see {@link NodePattern.mapped}. */
+export function withEmptyMap(node: NodePattern): NodePattern {
+    return Object.defineProperty(node, 'mapped', { value: true, enumerable: false });
+}
+
+/** Whether `node` is written with a map of properties: one with entries, a parameter's, or `{}`. */
+export function isMapped(node: NodePattern): boolean {
+    return node.properties !== undefined || node.mapped === true;
 }
 
 /** Which way a relationship points, read from the node before it in the pattern. */

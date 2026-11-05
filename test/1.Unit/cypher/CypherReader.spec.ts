@@ -55,6 +55,30 @@ describe('CypherReader', () => {
         });
     });
 
+    it('reads an empty map of properties in a pattern as none, as every node and relationship meets it', () => {
+        // Read as a map, it compiled to no test at all, an empty WHERE or a dangling AND on the SQL stores (#605, drivine4j#583).
+        [
+            ['MATCH (a {}) RETURN a', 'MATCH (a) RETURN a'],
+            ['MATCH (a:X {})-[r:R {}]->(b {}) RETURN r', 'MATCH (a:X)-[r:R]->(b) RETURN r'],
+            ['MATCH (a)-[:R*1..2 {}]->(b) RETURN b', 'MATCH (a)-[:R*1..2]->(b) RETURN b'],
+            [
+                'MATCH (a) WHERE EXISTS { (a)-[:R {}]->({}) } RETURN a',
+                'MATCH (a) WHERE EXISTS { (a)-[:R]->() } RETURN a'
+            ],
+            ['MERGE (a:X {}) CREATE (a)-[:R {}]->(:Y {})', 'MERGE (a:X) CREATE (a)-[:R]->(:Y)']
+        ].forEach(([empty, without]) => {
+            const read = CypherReader.read(empty);
+            expect([empty, read]).toEqual([empty, CypherReader.read(without)]);
+            // Keyed alike too, as an order term or a grouping key reads a pattern within an expression by its text.
+            expect([empty, JSON.stringify(read)]).toEqual([empty, JSON.stringify(CypherReader.read(without))]);
+        });
+        // A map with a key, and a parameter's map, are still read as they are.
+        const properties = (CypherReader.read('MATCH (a {k: 1}), (b $p) RETURN a').clauses[0] as Match).patterns.map(
+            (it) => it.nodes[0].properties
+        );
+        expect(properties.map((it) => it?.kind)).toEqual(['MapLiteral', 'Parameter']);
+    });
+
     it('reads a relationship with its direction, alternatives and range', () => {
         const match = CypherReader.read('MATCH (a)<-[r:KNOWS|LIKES*1..3]-(b)-[*2]->(c)-[*..4]-(d)-[*]-(e) RETURN a')
             .clauses[0] as Match;
