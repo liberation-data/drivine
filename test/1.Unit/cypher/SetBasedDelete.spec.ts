@@ -108,12 +108,13 @@ describe('A DELETE, compiled', () => {
         const oracle = new OracleCypherCompiler('g');
         const subquery = (cypher: string): string => {
             const sql = oracle.compile(cypher).sql;
-            return sql.slice(sql.indexOf('IN (SELECT '));
+            return sql.slice(sql.indexOf('IN (SELECT ', sql.indexOf('DELETE FROM ')));
         };
         for (const cypher of [
             'MATCH (a:X) OPTIONAL MATCH (a)-[r:R]->(:X {k: 2}) DELETE r',
             'MATCH (a:X) OPTIONAL MATCH (a)-[:R]->(m:X {k: 3}) DETACH DELETE m',
-            'MATCH (g:Gone:Also) DETACH DELETE g'
+            'MATCH (g:Gone:Also) DETACH DELETE g',
+            'MATCH (a:X) SET a.k = 2 WITH a MATCH (g:Gone) DETACH DELETE g'
         ]) {
             const read = subquery(cypher);
             expect([cypher, /JSON_EXISTS\([\w.]+\.labels/.test(read)]).toEqual([cypher, false]);
