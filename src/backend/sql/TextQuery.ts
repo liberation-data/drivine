@@ -9,6 +9,57 @@ const SPACES = ' \t\n\u000B\u000C\r';
 
 const BOUNDARY_BEFORE = '(^|[^[:alnum:]_])';
 const BOUNDARY_AFTER = '($|[^[:alnum:]_])';
+/** What BOUNDARY_AFTER holds to, without taking the character it is: Postgres's and JavaScript's lookahead. */
+const BOUNDARY_AHEAD = '(?=$|[^[:alnum:]_])';
+/** What stands between the words of a phrase in a term's expression. */
+const BETWEEN = '[^[:alnum:]_]+';
+/** A word made only of what [[:alnum:]_] holds: letters, decimal digits and underscores. */
+const ALNUM_WORD = /^[\p{L}\p{Nd}_]*$/u;
+
+/**
+ * A term's expression ending where its last word does, the character after it held to but not taken: counted, a term
+ * written again at once still has the character before it (drivine4j#607). Taken, "kiwi kiwi kiwi" counted twice. For a
+ * store whose expressions look ahead.
+ */
+export function lookingAhead(pattern: string): string {
+    return pattern.endsWith(BOUNDARY_AFTER) ? pattern.slice(0, -BOUNDARY_AFTER.length) + BOUNDARY_AHEAD : pattern;
+}
+
+/**
+ * One character between words, as a group: for a store whose expressions don't look ahead, Oracle's. Each such character
+ * of the text written twice (`\1\1`), one is there for each, so a term's expression counts in it as `lookingAhead` counts
+ * in the text. It is the slow way, a fifth as fast as `counted`'s over 100,000 texts on Oracle, kept for the terms
+ * `counted` can't count.
+ */
+export const SEPARATOR = '([^[:alnum:]_])';
+
+/**
+ * For a store whose expressions don't look ahead, Oracle's: the term's expression ending where its last word does, and
+ * that expression holding a letter, a digit or an underscore after it. The term occurs as many times as the first matches
+ * less the second, and neither takes the character before the next, so it counts as `lookingAhead` does. Null for the
+ * second where the term is the start of a word, which may go on (drivine4j#607).
+ *
+ * Undefined where the term is a phrase that repeats a word, or whose last word starts its first: there an occurrence may
+ * begin inside another, "la la" in "la la land" or "kiwis kiwi" in "kiwis kiwis kiwi", and the two counts take different
+ * ones. Such a term is counted in the text with each SEPARATOR written twice.
+ *
+ * The pattern itself, with null for the second, where a word holds a number that isn't a digit, the "²" of "b²b": a
+ * word's to GAP but not to `[[:alnum:]]`, so an occurrence may begin at it, and neither way above counts it. The one count
+ * undercounts the term only where it is written again at once, as it did before.
+ */
+export function counted(pattern: string): [string, string | null] | undefined {
+    if (!pattern.endsWith(BOUNDARY_AFTER)) {
+        return [pattern, null];
+    }
+    const ended = pattern.slice(0, -BOUNDARY_AFTER.length);
+    const words = ended.slice(BOUNDARY_BEFORE.length).split(BETWEEN);
+    if (words.some((it) => !ALNUM_WORD.test(it))) {
+        return [pattern, null];
+    }
+    const overlaps =
+        new Set(words).size < words.length || (words.length > 1 && words[0].startsWith(words[words.length - 1]));
+    return overlaps ? undefined : [ended, `${ended}[[:alnum:]_]`];
+}
 
 /** What an operator does to the token after it. */
 const OPERATORS: Record<string, 'MUST' | 'NOT' | 'OR'> = {
@@ -261,7 +312,7 @@ function termOf(token: Token): Term | undefined {
         oracleText: prefix
             ? [...words.slice(0, -1).map((it) => `{${it}}`), `${words[words.length - 1]}%`].join(' ')
             : `{${words.join(' ')}}`,
-        pattern: BOUNDARY_BEFORE + words.join('[^[:alnum:]_]+') + (prefix ? '' : BOUNDARY_AFTER)
+        pattern: BOUNDARY_BEFORE + words.join(BETWEEN) + (prefix ? '' : BOUNDARY_AFTER)
     };
 }
 
