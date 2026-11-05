@@ -6,7 +6,7 @@ export const Procedure = {
     PARAMS: 'cy_params',
     /** The rows, a JSON list of maps, each variable a row holds at its key. */
     ROWS: 'cy_rows',
-    /** The rows a write leaves, as it makes them. */
+    /** The rows a write leaves, as it makes them: a list of the store's that keeps them, see `Kept` in {@link ProcedureStep}. */
     OUT: 'cy_out',
     /** The row a write is making, a JSON map. */
     ROW: 'cy_row',
@@ -24,8 +24,8 @@ export const Procedure = {
      */
     SAVED: 'cy_saved',
     /**
-     * The rows a `CALL { … }` that writes and returns gives, or the rows and items a `FOREACH` writes for, each one
-     * alone, followed by its depth, from 1 to `NESTING`.
+     * The rows and items a `FOREACH` writes for, each one alone, followed by its depth, from 1 to `NESTING`: those a
+     * `CALL { … }` gives are `RETURNED`.
      */
     GATHERED: 'cy_gathered',
     /**
@@ -33,6 +33,11 @@ export const Procedure = {
      * row it gives is that row with what it returns, whatever the call bound to the row's names inside it.
      */
     CALLER: 'cy_caller',
+    /**
+     * The rows a `CALL { … }` that writes and returns gives, kept as a write keeps its rows (see `Kept` in
+     * {@link ProcedureStep}), followed by its depth, from 1 to `NESTING`.
+     */
+    RETURNED: 'cy_returned',
     /** How deep `FOREACH`es and writing `CALL`s nest. */
     NESTING: 3,
     /** The record of a write's loop over the rows: its `item` is a row. */
@@ -113,6 +118,11 @@ export interface ProcedureCall {
  * - `If`: `body`, where the SQL truth value `condition` holds.
  * - `Raise`: the procedure failed, with `message`: what it wrote is undone.
  * - `Execute`: the statement `statement`, which writes; with `into`, the value of the column it returns set to that variable.
+ * - `Kept`: `list` made an empty list of the rows a write keeps, in the store's own kind of list, which `Keep` adds a row
+ *   to in a time that does not grow with the list: read as a JSON list at the end, by `SqlCypherCompiler.keptRows`. A
+ *   row appended to a JSON list copied the list, so a loop over many rows grew with their square (#624,
+ *   liberation-data/drivine4j#588).
+ * - `Keep`: the JSON `item` kept after the rows of `list`, a list `Kept` made.
  * - `Return`: the rows of `query`, whose one column is `result`, returned as the statement's rows.
  */
 export type ProcedureStep =
@@ -122,4 +132,6 @@ export type ProcedureStep =
     | { kind: 'If'; condition: string; body: ProcedureStep[] }
     | { kind: 'Raise'; message: string }
     | { kind: 'Execute'; statement: string; into?: string }
+    | { kind: 'Kept'; list: string }
+    | { kind: 'Keep'; list: string; item: string }
     | { kind: 'Return'; query: string };

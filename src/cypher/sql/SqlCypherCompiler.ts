@@ -106,6 +106,13 @@ export abstract class SqlCypherCompiler {
      */
     readonly walksReadRow: boolean = true;
 
+    /**
+     * How deep the procedure is in loops that write a `FOREACH` or a `CALL { … }` for each row alone: `ROWS` then holds
+     * that row, or the few a write of it left. A store whose planner can't tell how many rows `ROWS` holds is told
+     * there: see Oracle's `elements`.
+     */
+    rowAlone = 0;
+
     /** The functions a query of the statement calls, which it declares before it: see {@link declare}. */
     private readonly functions: string[] = [];
 
@@ -893,10 +900,36 @@ export abstract class SqlCypherCompiler {
                     return [line(this.raise(step.message))];
                 case 'Execute':
                     return [line(`${step.statement}${step.into !== undefined ? ` INTO ${step.into}` : ''};`)];
+                case 'Kept':
+                    return [line(`${step.list} := ${this.emptyKept()};`)];
+                case 'Keep':
+                    return [line(this.keep(step.list, step.item))];
                 default:
                     return this.returnRows(step.query).map(line);
             }
         });
+    }
+
+    /** The lists `program` keeps rows in, made by a `Kept` step: each is declared, of the store's type for them, where it is one. */
+    keptLists(program: ProcedureStep[], lists: Set<string> = new Set()): Set<string> {
+        for (const step of program) {
+            if (step.kind === 'Kept') {
+                lists.add(step.list);
+            } else if (step.kind === 'Loop' || step.kind === 'If') {
+                this.keptLists(step.body, lists);
+            }
+        }
+        return lists;
+    }
+
+    /** A list of rows a write keeps, empty, in a procedural language: see the `Kept` step of {@link ProcedureStep}. */
+    emptyKept(): string {
+        throw new Error('This store writes its procedure in no procedural language.');
+    }
+
+    /** The statement of a procedural language that keeps the JSON `item` after the rows of `list`: see the `Keep` step. */
+    keep(_list: string, _item: string): string {
+        throw new Error('This store writes its procedure in no procedural language.');
     }
 
     /** The statements of a procedural language that return the rows of the query `query`, whose one column is `result`: see {@link statements}. */
@@ -1249,6 +1282,9 @@ export abstract class SqlCypherCompiler {
 
     /** The JSON list `list` with the JSON `item` after its items. */
     abstract appended(list: string, item: string): string;
+
+    /** The rows kept in `list`, a list a `Kept` step made, as a JSON list. */
+    abstract keptRows(list: string): string;
 
     /** The JSON map `json` without the entries whose values are null. */
     abstract stripNulls(jsonSql: string): string;

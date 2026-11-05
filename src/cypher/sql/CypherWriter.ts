@@ -106,8 +106,22 @@ import {
 } from '@/cypher/sql/Value';
 import { columnKinds, columns, columnsOf, groupKeys, laterally, PENDING } from '@/cypher/sql/ValueColumns';
 
-const { ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND, SAVED, GATHERED, CALLER, NESTING, RECORD, MATCHED }: typeof Procedure =
-    Procedure;
+const {
+    ROWS,
+    OUT,
+    ROW,
+    VALUE,
+    ID,
+    COUNT,
+    FOUND,
+    SAVED,
+    GATHERED,
+    CALLER,
+    RETURNED,
+    NESTING,
+    RECORD,
+    MATCHED
+}: typeof Procedure = Procedure;
 
 /** What a variable a row holds is. */
 type Kind = 'NODE' | 'RELATIONSHIP' | 'VALUE' | 'NODES' | 'RELATIONSHIPS' | 'PATH';
@@ -2981,7 +2995,7 @@ export class CypherWriter {
             this.delete(clause);
             return;
         }
-        this.assign(OUT, this.sql.literalJson([]));
+        this.step({ kind: 'Kept', list: OUT });
         const r = this.alias('r');
         this.loop(
             RECORD,
@@ -2994,7 +3008,7 @@ export class CypherWriter {
                 this.writeRow(clause);
             }
         );
-        this.let(ROWS, OUT);
+        this.let(ROWS, this.sql.keptRows(OUT));
     }
 
     /** The write `clause` makes for the row in `ROW`. */
@@ -3048,7 +3062,7 @@ export class CypherWriter {
             );
         }
         const kept = `${SAVED}${++this.nesting}`;
-        const gathered = `${GATHERED}${this.nesting}`;
+        const gathered = `${RETURNED}${this.nesting}`;
         const caller = `${CALLER}${this.nesting}`;
         const before = new Map(this.kinds);
         const carriedBefore = new Map(this.carried);
@@ -3056,7 +3070,7 @@ export class CypherWriter {
         const returnedCarried = new Map<string, JsonValue>();
         this.let(kept, ROWS);
         if (returned) {
-            this.assign(gathered, this.sql.literalJson([]));
+            this.step({ kind: 'Kept', list: gathered });
         }
         // Only what the call imports is seen in it: any other name in it is a new variable, as in Cypher (#473).
         const imported = imports(call, call.query.clauses, before.keys());
@@ -3100,7 +3114,7 @@ export class CypherWriter {
                         returnedCarried.set(it, value);
                     }
                 });
-                const [g, a, b] = [this.alias('g'), this.alias('g'), this.alias('g')];
+                const b = this.alias('g');
                 const row = this.sql.comparable(
                     json(
                         this.sql.jsonObject([
@@ -3116,23 +3130,17 @@ export class CypherWriter {
                         { ordered: true }
                     )
                 );
-                const both =
-                    `SELECT 1 AS part, ${namedColumn(this.sql.itemNo(a), 'item_no')}, ${namedColumn(
-                        this.sql.item(a),
-                        'item'
-                    )} FROM ${this.sql.elements(gathered, a)} UNION ALL ` +
-                    `SELECT 2 AS part, ${namedColumn(
-                        this.sql.itemNo(b),
-                        'item_no'
-                    )}, ${row} AS item FROM ${this.sql.elements(ROWS, b)}`;
-                const all = this.sql.comparable(
-                    json(this.sql.aggregateList(`${g}.item`, `${g}.part, ${g}.item_no`), { ordered: true })
+                // Each kept in turn, as a write keeps its rows: gathered again with those before, each row copied them
+                // all (#624, liberation-data/drivine4j#588).
+                this.loop(
+                    RECORD,
+                    `SELECT ${row} AS item FROM ${this.sql.elements(ROWS, b)} ORDER BY ${this.sql.itemNo(b)}`,
+                    () => this.step({ kind: 'Keep', list: gathered, item: `${RECORD}.item` })
                 );
-                this.selectInto(gathered, all, ` FROM (${both}) ${g}`);
             }
         });
         if (returned) {
-            this.let(ROWS, gathered);
+            this.let(ROWS, this.sql.keptRows(gathered));
             this.restore(new Map([...before, ...returnedKinds]), new Map([...carriedBefore, ...returnedCarried]));
         } else {
             this.let(ROWS, kept);
@@ -3157,7 +3165,13 @@ export class CypherWriter {
             () => {
                 this.assign(ROWS, this.sql.appended(this.sql.literalJson([]), `${RECORD}.item`));
                 this.unread = undefined;
-                body();
+                // ROWS holds the one row: see SqlCypherCompiler's rowAlone.
+                this.sql.rowAlone++;
+                try {
+                    body();
+                } finally {
+                    this.sql.rowAlone--;
+                }
             }
         );
     }
@@ -3226,7 +3240,7 @@ export class CypherWriter {
 
     /** The row in `ROW` kept, as a row of what the write leaves. */
     private keep(): void {
-        this.assign(OUT, this.sql.appended(OUT, ROW));
+        this.step({ kind: 'Keep', list: OUT, item: ROW });
     }
 
     /**

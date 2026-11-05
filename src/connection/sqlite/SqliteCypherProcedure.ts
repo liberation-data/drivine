@@ -29,7 +29,7 @@ interface Step {
  * Each step has its SQL, in which each variable it reads is a numbered parameter, `?1`, and the variables bound to them
  * in turn: the parameters' object, the rows carried from clause to clause, the id a write made. A step sets a variable
  * to what its query gives, loops over a query's rows, which are read whole before the loop writes anything, writes,
- * fails the procedure, or returns rows. A variable holds the first column of a row as SQLite gives it: a whole number,
+ * fails the procedure, keeps a row in a list of rows, or returns rows. A variable holds the first column of a row as SQLite gives it: a whole number,
  * a real one, or text, bound again as it is. The steps run within a savepoint of their own: a procedure that fails is
  * rolled back to where it began, so the statement is applied whole or not at all.
  */
@@ -65,10 +65,17 @@ function undo(statements: SqliteStatements): void {
     }
 }
 
+/**
+ * The rows a write keeps, each the JSON text, or the number, a step gave: a step that reads them is given them as a JSON
+ * list (see `Procedure.values`). Each `json_insert` of a row into the list as text read and wrote the whole list again
+ * (#624, liberation-data/drivine4j#588).
+ */
+type Kept = SqliteValue[];
+
 /** A procedure as it is carried out: its variables, and the rows it has returned. */
 class Procedure {
     readonly rows: SqliteValue[] = [];
-    private readonly variables: Map<string, SqliteValue>;
+    private readonly variables: Map<string, SqliteValue | Kept>;
 
     constructor(
         private readonly statements: SqliteStatements,
@@ -100,13 +107,28 @@ class Procedure {
         this.statements.update(step.sql!, ...this.values(step));
     }
 
-    set(variable: string, value: SqliteValue): void {
+    set(variable: string, value: SqliteValue | Kept): void {
         this.variables.set(variable, value);
     }
 
-    /** The values of the variables the step reads, in the order its parameters are numbered: null for one not set. */
+    /** The rows kept in `variable`, a list a `kept` step made. */
+    kept(variable: string): Kept {
+        const kept = this.variables.get(variable);
+        if (!Array.isArray(kept)) {
+            throw new Error(`drivine_cypher keeps no rows in ${variable}.`);
+        }
+        return kept;
+    }
+
+    /**
+     * The values of the variables the step reads, in the order its parameters are numbered: null for one not set, and
+     * the rows a write keeps as a JSON list.
+     */
     private values(step: Step): SqliteValue[] {
-        return (step.variables ?? []).map((name) => this.variables.get(name) ?? null);
+        return (step.variables ?? []).map((name) => {
+            const value = this.variables.get(name) ?? null;
+            return Array.isArray(value) ? `[${value.map(rowText).join(',')}]` : value;
+        });
     }
 }
 
@@ -135,6 +157,10 @@ const STEPS: Record<string, (procedure: Procedure, step: Step) => void> = {
         } else {
             procedure.update(step);
         }
+    },
+    kept: (procedure, step) => procedure.set(step.variable!, []),
+    keep: (procedure, step) => {
+        procedure.kept(step.variable!).push(procedure.first(step));
     },
     return: (procedure, step) => {
         procedure.rows.push(...procedure.query(step));

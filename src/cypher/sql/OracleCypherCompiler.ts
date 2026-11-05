@@ -137,6 +137,39 @@ function escapedForRegExp(text: string): string {
 }
 
 /**
+ * Where the `SELECT` whose `FROM` is at `from` in `query` begins: read back from there, past the brackets of its select
+ * list and the quotes of its texts; undefined where a bracket opens before it. See `OracleCypherCompiler.oneRowPlanned`.
+ */
+function owningSelect(query: string, from: number): number | undefined {
+    let depth = 0;
+    for (let at = from - 1; at >= 0; at--) {
+        const c = query[at];
+        if (c === "'") {
+            const opened = at > 0 ? query.lastIndexOf("'", at - 1) : -1;
+            if (opened < 0) {
+                return undefined;
+            }
+            at = opened;
+        } else if (c === ')') {
+            depth++;
+        } else if (c === '(') {
+            if (depth === 0) {
+                return undefined;
+            }
+            depth--;
+        } else if (depth === 0 && selectAt(query, at)) {
+            return at;
+        }
+    }
+    return undefined;
+}
+
+/** Whether the word `SELECT` begins at `at` in `query`. */
+function selectAt(query: string, at: number): boolean {
+    return query.startsWith('SELECT ', at) && (at === 0 || !/[\p{L}\p{Nd}_]/u.test(query[at - 1]));
+}
+
+/**
  * The most characters of a text `sharedSum` binds as JSON: one of 40,001, bound as JSON beside a long value, closed the
  * session (liberation-data/drivine4j#370), where one of 12,000 three-byte characters, 36 KB, did not, so a text is
  * counted in characters, as `.length()` counts them. One as long or shorter is bound as it was.
@@ -440,6 +473,12 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * planned as before.
      */
     private readonly keyedTests = new Set<string>();
+
+    /**
+     * The aliases of the `JSON_TABLE`s that read `ROWS` where a `FOREACH` or a `CALL { … }` is written for each row alone
+     * ({@link rowAlone}): kept as text, as {@link keyedTests} are, and looked for in the query {@link planned} is given.
+     */
+    private readonly oneRow = new Set<string>();
 
     /**
      * @param graph the graph whose tables, and whose functions {@link nullsEqualName}, `eraName` and `eraDateName`, a
@@ -1097,9 +1136,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     /**
      * A list that holds a subquery is read from a lateral view first, {@link listView}: a subquery in `JSON_TABLE`'s
      * argument reads no table beside it in the `FROM`.
+     *
+     * The rows of a `FOREACH` or a `CALL { … }` written for each row alone ({@link rowAlone}) are noted ({@link oneRow}),
+     * and the query that reads them is planned for one row: see {@link oneRowPlanned}.
      */
     elements(json: string, alias: string): string {
         const items = `COLUMNS (item_no FOR ORDINALITY, item JSON PATH '$')) ${alias}`;
+        if (json === ROWS && this.rowAlone > 0) {
+            this.oneRow.add(alias);
+        }
         if (!/select/i.test(json)) {
             return `JSON_TABLE(${json}, '$[*]' ${items}`;
         }
@@ -1552,26 +1597,30 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * after: `MATCH (a:Big) MATCH (b:Big) WHERE a = b` took 7 ms, then 1,482 ms and 1,526 ms, then 7 ms over 4,000
      * nodes, so each new cursor paid the cost #606 took away twice (#614, liberation-data/drivine4j#585). The hint
      * leaves the first run's plan as it was. It is the statement's, so the outermost query holds it.
+     *
+     * A query of a procedure that reads the rows of a `FOREACH` or a `CALL { … }` written for each row alone is planned
+     * for one row of them first: see {@link oneRowPlanned}.
      */
     planned(query: string): string {
+        const estimated = this.oneRowPlanned(query);
         // A read of the graph's node or relationship table.
         const graphTable = new RegExp(
             `\\b(?:${escapedForRegExp(this.nodes)}|${escapedForRegExp(this.edges)}) \\w`,
             'g'
         );
         const hints = [
-            this.readsCompared || (query.match(graphTable) ?? []).length >= 2 ? NO_JSON_TABLE_TRANSFORM : undefined,
-            [...this.keyedTests].some((it) => query.includes(it)) ? NO_FEEDBACK : undefined
+            this.readsCompared || (estimated.match(graphTable) ?? []).length >= 2 ? NO_JSON_TABLE_TRANSFORM : undefined,
+            [...this.keyedTests].some((it) => estimated.includes(it)) ? NO_FEEDBACK : undefined
         ]
             .filter((it) => it !== undefined)
             .join(' ');
         if (hints === '') {
-            return query;
+            return estimated;
         }
-        const hinted = HINTED.exec(query);
+        const hinted = HINTED.exec(estimated);
         return hinted
-            ? `SELECT /*+ ${hinted[1]} ${hints} */${query.slice(hinted[0].length)}`
-            : query.replace(/^SELECT /, `SELECT /*+ ${hints} */ `);
+            ? `SELECT /*+ ${hinted[1]} ${hints} */${estimated.slice(hinted[0].length)}`
+            : estimated.replace(/^SELECT /, `SELECT /*+ ${hints} */ `);
     }
 
     /**
@@ -1731,6 +1780,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     /** An anonymous block, which returns its rows as an implicit result. */
     procedure(program: ProcedureStep[]): ProcedureCall {
+        const kept = this.keptLists(program);
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} JSON;`,
             `    ${GATHERED}${i + 1} JSON;`,
@@ -1742,7 +1792,8 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             // block read a value past 32 KB more than once from a JSON variable (liberation-data/drivine#308).
             `    ${PARAMS} CLOB := $${PARAMETERS_OBJECT};`,
             `    ${ROWS} JSON;`,
-            `    ${OUT} JSON;`,
+            // A list in memory, which a row is appended to in place: see keep.
+            `    ${OUT} ${kept.has(OUT) ? 'JSON_ARRAY_T' : 'JSON'};`,
             `    ${ROW} JSON;`,
             `    ${VALUE} JSON;`,
             `    ${ID} NUMBER;`,
@@ -1751,6 +1802,7 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `    ${CURSOR} SYS_REFCURSOR;`,
             `    ${OracleTemporalSql.NOW} TIMESTAMP;`,
             ...saved.flat(),
+            ...[...kept].filter((it) => it !== OUT).map((it) => `    ${it} JSON_ARRAY_T;`),
             'BEGIN',
             // The clock is read once, by a query: see OracleTemporalSql's now.
             `    SELECT ${OracleTemporalSql.CLOCK} INTO ${OracleTemporalSql.NOW} FROM DUAL;`,
@@ -1793,6 +1845,22 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `JSON_TRANSFORM(${list}, APPEND '$' = ${item})`;
     }
 
+    emptyKept(): string {
+        return 'JSON_ARRAY_T()';
+    }
+
+    /**
+     * A `JSON_ARRAY_T` is a list held in memory, which `append` adds to in place: `JSON_TRANSFORM`'s `APPEND` on a `JSON`
+     * list made the list anew for each row (#624, liberation-data/drivine4j#588).
+     */
+    keep(list: string, item: string): string {
+        return `${list}.append(${item});`;
+    }
+
+    keptRows(list: string): string {
+        return `${list}.to_json`;
+    }
+
     stripNulls(json: string): string {
         return `JSON_MERGEPATCH(JSON('{}'), ${json} RETURNING JSON)`;
     }
@@ -1803,6 +1871,39 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
 
     withoutLabel(labels: string, label: string): string {
         return `JSON_TRANSFORM(${labels}, REMOVE ${literal(`$[*]?(@ == ${quoted(label)})`)})`;
+    }
+
+    /**
+     * `query` with each query of it that reads the rows of a `FOREACH` or a `CALL { … }` written for each row alone
+     * ({@link oneRow}) told they are one row (`CARDINALITY(r 1)`), in its own query's hint, where Oracle reads it: one in
+     * the statement's outermost query left the plan as it was. Oracle estimates 8,168 rows for a `JSON_TABLE` over a
+     * variable, and joined the node table to them by a hash join over all its nodes, so a `CALL (n) { SET … RETURN n.i
+     * AS j }` read every node for each row (191 buffers a row over 10,000 nodes, 38 over 2,000), and took 20 s over
+     * 10,000 rows where it took 1 s over 2,000 (#624, liberation-data/drivine4j#588). Told of one row, Oracle reads each
+     * node by its key: 3 buffers a row, at any size.
+     */
+    private oneRowPlanned(query: string): string {
+        let text = query;
+        for (const alias of this.oneRow) {
+            const read = new RegExp(
+                `FROM JSON_TABLE\\(${escapedForRegExp(ROWS)}, '\\$\\[\\*\\]' COLUMNS \\(item_no FOR ORDINALITY, ` +
+                    `item JSON PATH '\\$'\\)\\) ${escapedForRegExp(alias)}\\b`
+            ).exec(text);
+            // An alias names one source of the statement, so one query reads it.
+            const select = read ? owningSelect(text, read.index) : undefined;
+            if (select === undefined) {
+                continue;
+            }
+            const hint = `CARDINALITY(${alias} 1)`;
+            const after = select + 'SELECT '.length;
+            if (text.startsWith('/*+ ', after)) {
+                const end = text.indexOf(' */', after);
+                text = `${text.slice(0, end)} ${hint}${text.slice(end)}`;
+            } else {
+                text = `${text.slice(0, after)}/*+ ${hint} */ ${text.slice(after)}`;
+            }
+        }
+        return text;
     }
 
     /**

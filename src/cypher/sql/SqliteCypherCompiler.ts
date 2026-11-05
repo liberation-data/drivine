@@ -22,6 +22,7 @@ const {
     SAVED,
     GATHERED,
     CALLER,
+    RETURNED,
     NESTING,
     RECORD,
     MATCHED
@@ -40,7 +41,8 @@ const VARIABLES = new Set([
     ...Array.from({ length: NESTING }, (_, i) => [
         `${SAVED}${i + 1}`,
         `${GATHERED}${i + 1}`,
-        `${CALLER}${i + 1}`
+        `${CALLER}${i + 1}`,
+        `${RETURNED}${i + 1}`
     ]).flat()
 ]);
 
@@ -736,6 +738,11 @@ export class SqliteCypherCompiler extends SqlCypherCompiler {
         return `json_insert(${list}, '$[#]', json(${item}))`;
     }
 
+    /** The function keeps the rows in a list of its own, and binds it as the JSON list it is where a step reads it: see `drivine_cypher`. */
+    keptRows(list: string): string {
+        return list;
+    }
+
     /** A merge patch onto an empty map leaves out each entry whose value is null. */
     stripNulls(json: string): string {
         return `json_patch('{}', ${json})`;
@@ -773,6 +780,10 @@ export class SqliteCypherCompiler extends SqlCypherCompiler {
                 return { op: 'raise', message: step.message };
             case 'Execute':
                 return { ...stepSql('execute', step.statement), variable: step.into ?? null };
+            case 'Kept':
+                return { op: 'kept', variable: step.list };
+            case 'Keep':
+                return { ...stepSql('keep', `SELECT ${step.item}`), variable: step.list };
             default:
                 return stepSql('return', step.query);
         }
