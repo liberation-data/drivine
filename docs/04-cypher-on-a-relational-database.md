@@ -86,6 +86,14 @@ the statement and deletes one variable, a node with `DETACH` or a relationship, 
 relationships, reads the ids from the match itself, so `MATCH (n) DETACH DELETE n` is one SQL `DELETE`. In a `FOREACH`
 or a `CALL { … }` that writes, each row is still written alone, as in Cypher.
 
+Any other write, a `CREATE`, `MERGE`, `SET` or `REMOVE`, and a `CALL { … }` that writes and returns, is a loop over its
+rows, and keeps each row it leaves in a list of the store's own that grows in place: an array of `jsonb` in PL/pgSQL, a
+`JSON_ARRAY_T` in PL/SQL, a list in Drivine's function on SQLite. It is read as one JSON list once the loop is done, so
+the loop takes time in proportion to its rows. Appended to a JSON list, each row copied the list, and ten times the rows
+took about a hundred times as long ([#624](https://github.com/liberation-data/drivine/issues/624)). On Oracle, a query
+that reads the row a `FOREACH` or a `CALL { … }` is written for is planned for one row (`CARDINALITY`): planned for the
+8,168 rows Oracle guesses a `JSON_TABLE` of a variable holds, it read every node for each row, by a hash join.
+
 ### What compiles
 
 What each statement gives on each store, compiled to SQL or not, is the shared

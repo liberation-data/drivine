@@ -610,6 +610,7 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
      * one command.
      */
     procedure(program: ProcedureStep[]): ProcedureCall {
+        const kept = this.keptLists(program);
         const saved = Array.from({ length: NESTING }, (_, i) => [
             `    ${SAVED}${i + 1} jsonb;`,
             `    ${GATHERED}${i + 1} jsonb;`,
@@ -619,7 +620,8 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             '#variable_conflict use_column',
             'DECLARE',
             `    ${ROWS} jsonb;`,
-            `    ${OUT} jsonb;`,
+            // An array, which array_append extends in place: see keep.
+            `    ${OUT} ${kept.has(OUT) ? 'jsonb[]' : 'jsonb'};`,
             `    ${ROW} jsonb;`,
             `    ${VALUE} jsonb;`,
             `    ${ID} bigint;`,
@@ -628,6 +630,7 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
             `    ${RECORD} record;`,
             `    ${MATCHED} record;`,
             ...saved.flat(),
+            ...[...kept].filter((it) => it !== OUT).map((it) => `    ${it} jsonb[];`),
             'BEGIN',
             indent(this.statements(program).join('\n')),
             'END'
@@ -670,6 +673,23 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
 
     appended(list: string, item: string): string {
         return `(${list} || jsonb_build_array(${item}))`;
+    }
+
+    emptyKept(): string {
+        return "'{}'";
+    }
+
+    /**
+     * PL/pgSQL extends a local array in place where it is assigned `array_append` of itself, so each row is a step that
+     * does not grow with the rows kept: `||` on a `jsonb` list copied the list for each (#624,
+     * liberation-data/drivine4j#588). Not by `SELECT … INTO`, which is a query, and passes the array as a copy.
+     */
+    keep(list: string, item: string): string {
+        return `${list} := array_append(${list}, CAST(${item} AS jsonb));`;
+    }
+
+    keptRows(list: string): string {
+        return `to_jsonb(${list})`;
     }
 
     stripNulls(json: string): string {
