@@ -1077,11 +1077,13 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * building the cursor (ORA-00600 `[QJSNMV_GET_MVI_MD:2]`, NJS-500 to the client), after planning, as it put the label
      * test it had rewritten onto the index's column back as it was: `MATCH (p:Person)-[r:ACTED_IN]->() WITH p,
      * collect(DISTINCT [r]) AS l, count(DISTINCT [r]) AS n MATCH (p)-[r2:ACTED_IN]->(:Movie {title: 'The Matrix'})
-     * RETURN …` (#620, liberation-data/drivine4j#320). It came while other sessions made and dropped tables with
-     * indexes of their own and emptied and filled the graph, about once in two minutes of runs, each planned anew; with
-     * the later node's test so written, never. The test of `p`'s labels, in the grouped query, was not the one: written
-     * so, it crashed as often. Such a node is mostly found from a node the `WITH` passed on, by its key, so only the label
-     * found by nothing else is read without the index.
+     * RETURN …` (#620, liberation-data/drivine4j#320); with transactions that deleted nodes of the label rolled back
+     * between runs, it crashed in the same index as `deletedIds`'s did (ORA-07445 `[qjsnmvFindOpt()+16]`). It came while
+     * other sessions made and dropped tables with indexes of their own and emptied and filled the graph, in 6 of 9
+     * fresh databases each running the statement, planned anew, for two minutes; with the later node's test so written,
+     * in none of 14. The test of `p`'s labels, in the grouped query, was not the one: with it so written alone, the crash
+     * came in 2 of 2. Such a node is mostly found from a node the `WITH` passed on, by its key, so only a node found by
+     * its label and nothing else is read without the index.
      */
     groupedLabels(labels: string, all: string[]): string {
         return all.map((it) => holdsLabel(labels, it)).join(' AND ');
