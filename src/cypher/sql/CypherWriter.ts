@@ -1035,6 +1035,12 @@ export class CypherWriter {
      */
     private readonly anchored: Set<string> = new Set();
 
+    /**
+     * The keys of the nodes a pattern found after a `WITH` that groups its rows ({@link Select.afterGrouping}): a label a
+     * condition tests of one is tested as its pattern's are, by {@link SqlCypherCompiler.groupedLabels}.
+     */
+    private readonly grouped: Set<string> = new Set();
+
     /** Each parameter's value as the JSON it is bound as, by name, as {@link parameterTree} reads it. */
     private readonly parameterTrees: Map<string, unknown> = new Map();
 
@@ -1110,7 +1116,10 @@ export class CypherWriter {
             if (subject.kind !== 'Node') {
                 throw new DrivineError('A label is tested of a node.');
             }
-            return bool(`(${this.sql.hasLabels(subject.labels, it.labels)})`);
+            const labels = this.grouped.has(subject.nid)
+                ? this.sql.groupedLabels(subject.labels, it.labels)
+                : this.sql.hasLabels(subject.labels, it.labels);
+            return bool(`(${labels})`);
         },
         ListLiteral: (it, scope) => this.listLiteral(it, scope),
         MapLiteral: (it, scope) => {
@@ -1649,6 +1658,10 @@ export class CypherWriter {
         const name = this.alias('w');
         const next = new Select(outer);
         next.walks = select.walks;
+        next.afterGrouping =
+            select.afterGrouping ||
+            clause.projection.distinct ||
+            clause.projection.items.some((it) => contains(it.expression, isAggregate));
         // A value made anew for each row is one value however often the clauses after read it: see SqlCypherCompiler.once.
         const anew = clause.projection.items.some((item) => holdsAnew(item.expression));
         const sql = anew ? this.sql.once(projected.sql) : projected.sql;
@@ -2295,11 +2308,17 @@ export class CypherWriter {
             if (node.variable !== undefined) {
                 select.bind(node.variable, value);
             }
+            if (select.afterGrouping) {
+                this.grouped.add(value.nid);
+            }
         } else {
             throw new DrivineError(`${node.variable} is not a node, and is used as one in a pattern.`);
         }
         if (node.labels.length > 0) {
-            select.labelTest(value, node.labels, this.sql.hasLabels(value.labels, node.labels));
+            const test = select.afterGrouping
+                ? this.sql.groupedLabels(value.labels, node.labels)
+                : this.sql.hasLabels(value.labels, node.labels);
+            select.labelTest(value, node.labels, test);
         }
         if (node.properties) {
             select.where.push(this.propertiesMatch(value.props, node.properties, select.scope));

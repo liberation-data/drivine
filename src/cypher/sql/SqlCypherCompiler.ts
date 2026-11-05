@@ -467,6 +467,15 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
+     * Whether the labels `labels`, a JSON list, hold each of `all`, for a node a `MATCH` finds after a `WITH` that groups
+     * its rows (see `CypherWriter.patternNode`): one read beside the grouped rows, which the query can't merge into its
+     * own. As {@link hasLabels} tests them. A store whose planner fails on that shape tests them otherwise: see Oracle's.
+     */
+    groupedLabels(labels: string, all: string[]): string {
+        return this.hasLabels(labels, all);
+    }
+
+    /**
      * Whether the key columns `a` and `b`, of two rows, hold the same key: a node equal to a node, and a test of the key
      * beside `id(a) = id(b)`. A store whose planner rewrites a join on key = key into a wrong answer compares them in a
      * form it can't rewrite: see Oracle's.
