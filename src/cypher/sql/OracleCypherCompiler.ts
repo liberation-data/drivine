@@ -1071,6 +1071,22 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return test;
     }
 
+    /**
+     * Each label by the labels' text ({@link holdsLabel}), which the index over labels can't answer, for a node a `MATCH`
+     * finds after a `WITH` that groups its rows. Answered by that index, Oracle (23.26) sometimes crashed the session
+     * building the cursor (ORA-00600 `[QJSNMV_GET_MVI_MD:2]`, NJS-500 to the client), after planning, as it put the label
+     * test it had rewritten onto the index's column back as it was: `MATCH (p:Person)-[r:ACTED_IN]->() WITH p,
+     * collect(DISTINCT [r]) AS l, count(DISTINCT [r]) AS n MATCH (p)-[r2:ACTED_IN]->(:Movie {title: 'The Matrix'})
+     * RETURN …` (#620, liberation-data/drivine4j#320). It came while other sessions made and dropped tables with
+     * indexes of their own and emptied and filled the graph, about once in two minutes of runs, each planned anew; with
+     * the later node's test so written, never. The test of `p`'s labels, in the grouped query, was not the one: written
+     * so, it crashed as often. Such a node is mostly found from a node the `WITH` passed on, by its key, so only the label
+     * found by nothing else is read without the index.
+     */
+    groupedLabels(labels: string, all: string[]): string {
+        return all.map((it) => holdsLabel(labels, it)).join(' AND ');
+    }
+
     /** A number, as the key's `NUMBER`; anything else, or a number past one, null. */
     keyValue(json: string): string {
         return `JSON_VALUE(${json}, '$' RETURNING NUMBER NULL ON ERROR)`;

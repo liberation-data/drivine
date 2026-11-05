@@ -1649,6 +1649,10 @@ export class CypherWriter {
         const name = this.alias('w');
         const next = new Select(outer);
         next.walks = select.walks;
+        next.afterGrouping =
+            select.afterGrouping ||
+            clause.projection.distinct ||
+            clause.projection.items.some((it) => contains(it.expression, isAggregate));
         // A value made anew for each row is one value however often the clauses after read it: see SqlCypherCompiler.once.
         const anew = clause.projection.items.some((item) => holdsAnew(item.expression));
         const sql = anew ? this.sql.once(projected.sql) : projected.sql;
@@ -2299,7 +2303,10 @@ export class CypherWriter {
             throw new DrivineError(`${node.variable} is not a node, and is used as one in a pattern.`);
         }
         if (node.labels.length > 0) {
-            select.labelTest(value, node.labels, this.sql.hasLabels(value.labels, node.labels));
+            const test = select.afterGrouping
+                ? this.sql.groupedLabels(value.labels, node.labels)
+                : this.sql.hasLabels(value.labels, node.labels);
+            select.labelTest(value, node.labels, test);
         }
         if (node.properties) {
             select.where.push(this.propertiesMatch(value.props, node.properties, select.scope));
