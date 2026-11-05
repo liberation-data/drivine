@@ -116,7 +116,8 @@ Notes:
 - A full-text index is a table of the indexed text beside the nodes, with an Oracle Text index over it. `loadMatching`
   reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`. The index holds what has been committed, so a search
   doesn't see its own transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or
-  with no index made, a search counts the words in the text of every node of the label.
+  with no index made, a search counts the words in the text of every node of the label and scores them by BM25, as
+  Postgres does.
 - Each session Drivine opens makes no adaptive plan (`OPTIMIZER_ADAPTIVE_PLANS = FALSE`). On tables without
   statistics, Oracle's adaptive join plan gave no rows for a read of a graph just written, where the same plan, fixed,
   gave them all ([#331](https://github.com/liberation-data/drivine/issues/331)). A statement of yours that relies on
@@ -190,7 +191,12 @@ Notes:
 - A vector index is a pgvector HNSW index over the embeddings of the label's nodes of its size; `loadNearest` is
   approximate through it, and exact with no index made. A full-text index is a trigram index over the text a search
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
-  `"phrase"`, `+must`, `-not` and a `prefix*`.
+  `"phrase"`, `+must`, `-not` and a `prefix*`. It scores by BM25, as Lucene and so Neo4j's full-text index do (`k1`
+  1.2, `b` 0.75): a term weighs as it is rare among the label's nodes, and a text's counts against its length, in
+  characters, beside the label's average. Scored by the counts alone, a common word outweighed the word a query was
+  about, and a long text won by holding more of everything: over drivine4j's docs, the top hit was Neo4j's for 6 of 21
+  queries, and is for 17. How rare a term is comes out the same narrowed; only the label's count of nodes and their
+  average length are read from every node of it, and no term is matched in that read.
 
 ### SQLite
 
@@ -266,7 +272,8 @@ Notes:
   epoch), `drivine_lower` (a Unicode `lower`), `drivine_regexp_count`, and `regexp`, which SQLite's `REGEXP` calls.
 - A range index or a uniqueness constraint is a partial index over the property's text, for the nodes of the label.
   A vector or a full-text index is recorded and not made: `loadNearest` measures every node of the label that holds an
-  embedding of the vector's size, and `loadMatching` reads every node of the label.
+  embedding of the vector's size, and `loadMatching` reads every node of the label and scores by BM25, as Postgres
+  does.
 - `matches` takes a JavaScript regular expression, matched against the whole value: `\w`, `\d` and `\b` are ASCII, as
   JavaScript reads them, where drivine4j reads them as Unicode
   ([#560](https://github.com/liberation-data/drivine/issues/560)).

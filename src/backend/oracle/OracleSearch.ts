@@ -4,6 +4,7 @@ import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { TargetModel } from '@/model/RelationshipModel';
 import { DrivineError } from '@/DrivineError';
+import { bm25Ranked } from '@/backend/sql/Bm25';
 import { TextQuery } from '@/backend/sql/TextQuery';
 
 /**
@@ -16,7 +17,8 @@ import { TextQuery } from '@/backend/sql/TextQuery';
  * size only, and without one measures only the embeddings of that size: Oracle refuses to measure two sizes against
  * each other. It scores on Neo4j's scale ((1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean): approximate through
  * the index, exact without. A full-text query is the core of Lucene's syntax (see TextQuery): Oracle Text scores
- * through the index; without one, how often each term occurs as whole words. Either is scaled by the best hit.
+ * through the index; without one, each term is counted as a whole word and the counts scored by BM25, as Neo4j's index
+ * scores them (see bm25Ranked). Either is scaled by the best hit.
  */
 export class OracleSearch {
     constructor(private readonly graph: OracleGraph) {}
@@ -82,22 +84,23 @@ export class OracleSearch {
                 `FROM ${search.table} t WHERE ${matched}) WHERE hit_count > 0`;
             return this.scored(target, candidates, search, bindings);
         }
-        // Every node of the label: how often the query's terms occur as whole words in its lower-cased text, each term
-        // bound on its own (one bound list named twice gave wrong counts on 23.26, drivine4j found).
-        const text = search.properties
-            .map((it) => `LOWER(NVL(JSON_VALUE(c.props, '$${jsonKey(it)}' RETURNING CLOB), ''))`)
-            .join(` || ' ' || `);
-        const count = (pattern: string): string => `REGEXP_COUNT(x.text, ${bind(pattern)})`;
-        const occurrences = query.scored.map(count).join(' + ');
-        const conditions = [
-            ...query.required.map((it) => `${count(it)} > 0`),
-            ...query.excluded.map((it) => `${count(it)} = 0`)
-        ];
-        const candidates = `SELECT nid, hit_count / MAX(hit_count) OVER () AS score FROM (
-    SELECT x.nid, ${occurrences} AS hit_count
-    FROM (SELECT c.nid, ${text} AS text FROM ${this.graph.nodes} c WHERE ${hasLabels('c', labels)}) x
-    ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
-) WHERE hit_count > 0`;
+        // Without Oracle Text: each term counted as a whole word in the lower-cased text, scored by BM25 (see bm25Ranked),
+        // each term bound on its own (one bound list named twice gave wrong counts on 23.26, drivine4j found).
+        const values = search.properties.map((it) => `NVL(JSON_VALUE(c.props, '$${jsonKey(it)}' RETURNING CLOB), '')`);
+        const text = values.map((it) => `LOWER(${it})`).join(` || ' ' || `);
+        const len = `NVL(LENGTH(${values.join(` || ' ' || `)}), 0)`;
+        const labelled = `${this.graph.nodes} c WHERE ${hasLabels('c', labels)}`;
+        const candidates = bm25Ranked(
+            `SELECT c.nid, ${text} AS text, ${len} AS len FROM ${labelled}`,
+            `SELECT ${len} AS len FROM ${labelled}`,
+            query,
+            {
+                count: (text, term) => `REGEXP_COUNT(${text}, ${bind(term)})`,
+                holds: (text, term) => `REGEXP_LIKE(${text}, ${bind(term)})`,
+                ln: (value) => `LN(${value})`,
+                real: (value) => value
+            }
+        );
         return this.scored(target, candidates, search, bindings);
     }
 

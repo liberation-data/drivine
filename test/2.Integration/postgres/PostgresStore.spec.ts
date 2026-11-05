@@ -352,7 +352,8 @@ describe.each(postgres)('a store on $name', (store) => {
         const exact = await nearest();
         expect(exact).toEqual(['d1', 'd2']);
         const scored = await matching('graph -relational');
-        expect(scored.map(([id]) => id)).toEqual(['d1', 'd5']);
+        // Scored by BM25 (drivine4j#604): each holds the word once, and d5's text is the shorter.
+        expect(scored.map(([id]) => id)).toEqual(['d5', 'd1']);
         expect(scored[0][1]).toEqual(1);
         expect((await matching('graph*')).map(([id]) => id).sort()).toEqual(['d1', 'd3', 'd5']);
         // A search is over a class's first label, so the indexes are over it.
