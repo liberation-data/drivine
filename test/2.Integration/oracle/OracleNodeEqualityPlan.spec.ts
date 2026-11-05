@@ -1,5 +1,5 @@
 import { DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { NO_FEEDBACK, OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { describeOnOracle, oraclePlan } from '../support/Oracle';
 import { sqlPersistenceManager, SqlStore } from '../support/SqlStores';
@@ -67,5 +67,22 @@ describeOnOracle('A node equal to a node matched before it, as Oracle plans it',
         ]);
         await assertJoined(`${knows}, (c:Person) WHERE c = q RETURN c.name`, ['Carrie']);
         await assertJoined(`${knows} MATCH (c:Person) WHERE id(c) = id(q) RETURN c.name`, ['Carrie']);
+    });
+
+    /**
+     * A statement that writes is a procedure, and Oracle takes the step that reads c by its key with its hint (#614,
+     * liberation-data/drivine4j#585).
+     */
+    it('a node read by its key in a statement that writes is found, and written', async () => {
+        const statement =
+            "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE c = q SET c.seen = true RETURN c.name";
+        const sql = new OracleCypherCompiler(GRAPH).compile(statement).sql;
+        expect([sql, sql.includes(NO_FEEDBACK)]).toEqual([sql, true]);
+        try {
+            expect([statement, await query(statement)]).toEqual([statement, ['Carrie']]);
+            expect(await query('MATCH (c:Person) WHERE c.seen = true RETURN c.name')).toEqual(['Carrie']);
+        } finally {
+            await query('MATCH (c:Person) REMOVE c.seen');
+        }
     });
 });

@@ -118,6 +118,9 @@ const SHORT_TEXT = 4000;
 /** The hint that turns Oracle's JSON table transformation off: see `OracleCypherCompiler.planned`. */
 const NO_JSON_TABLE_TRANSFORM = 'NO_JSON_TABLE_TRANSFORM';
 
+/** The hint that plans a statement without statistics feedback: see `OracleCypherCompiler.planned`. */
+export const NO_FEEDBACK = "OPT_PARAM('_optimizer_use_feedback' 'false')";
+
 /** A query that opens with hints, and those hints: Oracle reads the first hint comment of a query alone. */
 const HINTED = /^SELECT \/\*\+ (.*?) \*\//;
 
@@ -423,6 +426,13 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * the property taken out as JSON first.
      */
     private readsCompared = false;
+
+    /**
+     * Each test of a node's labels {@link keyedLabels} wrote. Kept as text, and looked for in the query {@link planned}
+     * is given, so a trial compile that writes one and is thrown away, or a step of a procedure that holds none, is
+     * planned as before.
+     */
+    private readonly keyedTests = new Set<string>();
 
     /**
      * @param graph the graph whose tables, and whose functions {@link nullsEqualName}, `eraName` and `eraDateName`, a
@@ -1040,9 +1050,14 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * grew with the square of the label's nodes (#606, liberation-data/drivine4j#578). A hint naming the key's index did
      * as well, but names the node's alias in the query block that reads it, which a statement's subqueries and `WITH`s
      * move.
+     *
+     * Each test so written is noted ({@link keyedTests}), and a query that holds one is planned without statistics
+     * feedback (see {@link planned}).
      */
     keyedLabels(labels: string, all: string[]): string {
-        return all.map((it) => holdsLabel(labels, it)).join(' AND ');
+        const test = all.map((it) => holdsLabel(labels, it)).join(' AND ');
+        this.keyedTests.add(test);
+        return test;
     }
 
     /** A number, as the key's `NUMBER`; anything else, or a number past one, null. */
@@ -1499,6 +1514,15 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
      * `a.n - a.m`, `toUpper(a.s), size(a.s)` and `a.l + b.l`. Seen on Oracle 23.26.3 (gvenzl/oracle-free 23). The hint
      * is the statement's, whichever query of it holds it, so the outermost one holds it. A query of one table reads as
      * it did, none lost a test, but where a comparison reads a property by its own path (see {@link readsCompared}).
+     *
+     * A query that tests a node's labels as {@link keyedLabels} writes them, to read it by its key, is planned without
+     * statistics feedback (`OPT_PARAM('_optimizer_use_feedback' 'false')`, {@link NO_FEEDBACK}). Oracle (23.26)
+     * estimates one row from the index over labels, and plans the keyed read on a cursor's first run; the run's feedback
+     * then corrects that one row to the label's count, and Oracle plans the next two runs again, reading every node in
+     * the label's text form and the index once for each, before it went back to the keyed plan for the fourth run and
+     * after: `MATCH (a:Big) MATCH (b:Big) WHERE a = b` took 7 ms, then 1,482 ms and 1,526 ms, then 7 ms over 4,000
+     * nodes, so each new cursor paid the cost #606 took away twice (#614, liberation-data/drivine4j#585). The hint
+     * leaves the first run's plan as it was. It is the statement's, so the outermost query holds it.
      */
     planned(query: string): string {
         // A read of the graph's node or relationship table.
@@ -1506,13 +1530,19 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             `\\b(?:${escapedForRegExp(this.nodes)}|${escapedForRegExp(this.edges)}) \\w`,
             'g'
         );
-        if ((query.match(graphTable) ?? []).length < 2 && !this.readsCompared) {
+        const hints = [
+            this.readsCompared || (query.match(graphTable) ?? []).length >= 2 ? NO_JSON_TABLE_TRANSFORM : undefined,
+            [...this.keyedTests].some((it) => query.includes(it)) ? NO_FEEDBACK : undefined
+        ]
+            .filter((it) => it !== undefined)
+            .join(' ');
+        if (hints === '') {
             return query;
         }
         const hinted = HINTED.exec(query);
         return hinted
-            ? `SELECT /*+ ${hinted[1]} ${NO_JSON_TABLE_TRANSFORM} */${query.slice(hinted[0].length)}`
-            : query.replace(/^SELECT /, `SELECT /*+ ${NO_JSON_TABLE_TRANSFORM} */ `);
+            ? `SELECT /*+ ${hinted[1]} ${hints} */${query.slice(hinted[0].length)}`
+            : query.replace(/^SELECT /, `SELECT /*+ ${hints} */ `);
     }
 
     /**
