@@ -3,3 +3,6 @@ dist
 # Generated from the libraries' docs by scripts/import-readmes.mjs.
 src/content/docs
 src/generated
+# The video's HLS segments, cut from it by scripts/segment-video.mjs.
+public/video/hls
+public/video/hls.part

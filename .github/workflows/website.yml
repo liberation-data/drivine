@@ -32,6 +32,9 @@ jobs:
                   cache-dependency-path: website/package-lock.json
             - run: npm ci
               working-directory: website
+            # The build cuts the video into HLS segments with ffmpeg (scripts/segment-video.mjs), where the runner lacks it.
+            - name: Install ffmpeg
+              run: command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg; }
             - run: npm run build
               working-directory: website
               env:
