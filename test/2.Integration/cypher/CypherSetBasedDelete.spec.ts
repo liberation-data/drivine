@@ -185,9 +185,13 @@ describe.each(stores())('A DELETE on $type', (store) => {
         expect(seen).toEqual([[1, 2], [4]]);
         expect(await ks()).toEqual([1, 2, 3, 4]);
         expect(await rs()).toEqual([1, 2, 3, 4]);
-        // Planned again after the rollback, Oracle crashed the session on this delete without NO_ADAPTIVE_PLAN (#612).
+        // Planned again after the rollback, Oracle crashed the session on these deletes where their subquery tested labels
+        // as the index over labels answers them (#612, liberation-data/drivine4j#595).
         await query('MATCH (a:CyDelete) OPTIONAL MATCH (a)-[r:R]->(:CyDelete {k: 2}) DELETE r');
         expect(await rs()).toEqual([2, 3, 4]);
+        await query('MATCH (a:CyDelete) OPTIONAL MATCH (a)-[:R]->(m:CyDelete {k: 3}) DETACH DELETE m');
+        expect(await ks()).toEqual([1, 2, 4]);
+        expect(await rs()).toEqual([4]);
     });
 
     it("should DELETE an optional match's variable where it is not null, and nothing for a match of no rows", async () => {
