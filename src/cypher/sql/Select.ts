@@ -22,8 +22,8 @@ export class Select {
 
     /**
      * Whether it reads the rows of a `WITH` that groups them, as one that aggregates or is `DISTINCT` does, or of a `WITH`
-     * that reads those: a node a pattern finds here is then tested for its labels as `SqlCypherCompiler.groupedLabels`
-     * tests them.
+     * that reads those, or is the lateral query of an `OPTIONAL MATCH` or a shortest path read beside such rows: a node a
+     * pattern finds here is then tested for its labels as `SqlCypherCompiler.groupedLabels` tests them.
      */
     afterGrouping = false;
 

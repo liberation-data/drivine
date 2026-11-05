@@ -434,15 +434,15 @@ const names = await pm.query<string>(
   such nodes keeps the index's form, and so does a node equal to one found by nothing else
   (`MATCH (a) MATCH (b:Rare) WHERE a = b`), where the index is the way in.
 - On Oracle, a node a compiled `MATCH` finds after a `WITH` that groups its rows (one that aggregates or is
-  `DISTINCT`, or a `WITH` after one) tests its labels by their text, which the index over labels can't answer. With
-  the index's form, Oracle 23.26 sometimes crashed the session building the statement's cursor (ORA-00600
-  `[QJSNMV_GET_MVI_MD:2]`, NJS-500 to the client), on `MATCH (p:Person)-[r:ACTED_IN]->() WITH p, collect(DISTINCT
-  [r]) AS l, count(DISTINCT [r]) AS n MATCH (p)-[r2:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN …`, while other
-  sessions made and dropped tables with indexes of their own
-  ([#620](https://github.com/liberation-data/drivine/issues/620),
+  `DISTINCT`, or a `WITH` after one) tests its labels by their text, which the index over labels can't answer, in its
+  pattern and in a `WHERE` such as `WHERE m:Movie`. With the index's form, Oracle 23.26 sometimes crashed the session
+  building the statement's cursor (ORA-00600 `[QJSNMV_GET_MVI_MD:2]`, NJS-500 to the client), on `MATCH
+  (p:Person)-[r:ACTED_IN]->() WITH p, collect(DISTINCT [r]) AS l, count(DISTINCT [r]) AS n MATCH
+  (p)-[r2:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN …`, while other sessions made and dropped tables with
+  indexes of their own ([#620](https://github.com/liberation-data/drivine/issues/620),
   [drivine4j#320](https://github.com/liberation-data/drivine4j/issues/320)). Such a node is mostly found by its key,
   from a node the `WITH` passed on; one found by its label alone is read from the whole node table. The nodes before
-  the `WITH`, and every other read, keep the index.
+  the `WITH`, a `WHERE`'s label test of a node the `WITH` passed on, and every other read keep the index.
 - On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
   is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
   that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for
