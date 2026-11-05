@@ -423,9 +423,12 @@ const names = await pm.query<string>(
   over labels can't answer, where the other node is found by a label, properties, a relationship or its id: Oracle
   then reads it by its primary key. With the index's form, Oracle 23.26 read that index again for each row of the
   other node, so `MATCH (a:Big) MATCH (b:Big) WHERE a = b` took 1.5 s over 4,000 nodes, growing with their square, and
-  takes about 10 ms now ([#606](https://github.com/liberation-data/drivine/issues/606)). The earlier of two such nodes
-  keeps the index's form, and so does a node equal to one found by nothing else (`MATCH (a) MATCH (b:Rare) WHERE a = b`),
-  where the index is the way in.
+  takes about 10 ms now ([#606](https://github.com/liberation-data/drivine/issues/606)). A query that holds such a
+  test carries the hint `OPT_PARAM('_optimizer_use_feedback' 'false')`: Oracle 23.26's statistics feedback otherwise
+  planned the second and third runs of a new cursor again from what the first run found, and read the node the slow
+  way, 1.5 s each over 4,000 nodes ([#614](https://github.com/liberation-data/drivine/issues/614)). The earlier of two
+  such nodes keeps the index's form, and so does a node equal to one found by nothing else
+  (`MATCH (a) MATCH (b:Rare) WHERE a = b`), where the index is the way in.
 - On Oracle, a list worked out on each row by a subquery (`keys(n)`, `[i IN range(1, k) | i]`, `[(p)-->(q) | q.name]`)
   is read from a derived table inside a lateral view. This works around an Oracle bug, seen on 23.26.3: a subquery
   that reads the row, in the select list of a lateral view that begins a subquery's `FROM`, was worked out once for

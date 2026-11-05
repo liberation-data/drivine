@@ -1,6 +1,6 @@
 import { holdsLabel as oracleHoldsLabel } from '@/backend/oracle/OracleGraph';
 import { holdsLabel as sqliteHoldsLabel } from '@/backend/sqlite/SqliteGraph';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { NO_FEEDBACK, OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
 
@@ -43,7 +43,10 @@ describe('A node equal to a node, compiled', () => {
     });
 
     it('compares the keys as they are, on Postgres and SQLite', () => {
-        for (const compiled of [sql(new PostgresCypherCompiler('g'), later), sql(new SqliteCypherCompiler('g'), later)]) {
+        for (const compiled of [
+            sql(new PostgresCypherCompiler('g'), later),
+            sql(new SqliteCypherCompiler('g'), later)
+        ]) {
             expect(compiled).toContain('n4.nid = n2.nid');
             expect(compiled).not.toContain('+ 0');
         }
@@ -88,6 +91,19 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
         labels.forEach((it) =>
             expect([where, sql.includes(oracleHoldsLabel(`${b}.labels`, it))]).toEqual([where, true])
         );
+        assertPlannedWithoutFeedback(sql, where);
+    };
+
+    /**
+     * That `sql` is planned without statistics feedback: once, in the hints of its outermost query (#614,
+     * liberation-data/drivine4j#585).
+     */
+    const assertPlannedWithoutFeedback = (sql: string, where: string = sql): void => {
+        expect([where, sql.split(NO_FEEDBACK).length - 1]).toEqual([where, 1]);
+        expect([where, new RegExp(`^SELECT /\\*\\+ [^*]*${escaped(NO_FEEDBACK)}[^*]* \\*/`).test(sql)]).toEqual([
+            where,
+            true
+        ]);
     };
 
     /** That on Oracle `statement`, which matches a label on each of `labelled` nodes, tests each through the index over labels, as before. */
@@ -99,6 +115,7 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
             labelled
         ]);
         expect([where, sql.includes('INSTR(')]).toEqual([where, false]);
+        expect([where, sql.includes('_optimizer_use_feedback')]).toEqual([where, false]);
     };
 
     it("on Oracle, a node whose key is set equal to an earlier node's tests its labels so the index can't answer them", () => {
@@ -189,8 +206,48 @@ describe('A node set equal to a node, its labels tested, compiled', () => {
         const sqlite = sql(new SqliteCypherCompiler('g'), statement);
         expect(sqlite).toContain(sqliteHoldsLabel('n1.labels', 'Big'));
         expect(sqlite).toContain(sqliteHoldsLabel('n2.labels', 'Big'));
+        [postgres, sqlite].forEach((it) => expect(it).not.toContain('_optimizer_use_feedback'));
+    });
+
+    it('on Oracle, only a query that reads a node by its key this way is planned without statistics feedback', () => {
+        // With a test of the labels as keyedLabels writes it, beside the JSON table transformation's hint, and on its own.
+        const both = oracle('MATCH (a:Big) MATCH (b:Big) WHERE a = b RETURN count(*)');
+        expect(both.startsWith(`SELECT /*+ NO_JSON_TABLE_TRANSFORM ${NO_FEEDBACK} */ `)).toEqual(true);
+        // Read by its key in one query of a UNION, or in an EXISTS subquery: the statement's outermost query holds the hint, once.
+        [
+            'MATCH (n:Small) RETURN count(*) AS c UNION ALL MATCH (a:Big) MATCH (b:Big) WHERE a = b RETURN count(*) AS c',
+            'MATCH (n:Small) RETURN count(*) AS c UNION MATCH (a:Big) MATCH (b:Big) WHERE a = b RETURN count(*) AS c',
+            'MATCH (a:Big) WHERE EXISTS { MATCH (b:Big) WHERE a = b } RETURN count(*)'
+        ].forEach((statement) => {
+            const sql = oracle(statement);
+            const where = `${statement}\n${sql}`;
+            expect([where, sql.includes('INSTR(')]).toEqual([where, true]);
+            assertPlannedWithoutFeedback(sql, where);
+        });
+        // A label in the labels' text form that keyedLabels didn't write, as a node's second label is tested.
+        [
+            'MATCH (n:Big) RETURN count(*)',
+            'MATCH (n:Big:Other) RETURN count(*)',
+            'MATCH (a:Big) MATCH (b:Big) RETURN count(*)',
+            'MATCH (x:Small)-[:R]->(a:Big) RETURN count(*)',
+            'MATCH (n:Big) WHERE id(n) = $id RETURN n',
+            'UNWIND $ids AS i MATCH (n:Item) WHERE id(n) = i RETURN count(*)'
+        ].forEach((statement) => {
+            const sql = oracle(statement, { id: 5, ids: [1, 2] });
+            const where = `${statement}\n${sql}`;
+            expect([where, sql.includes('_optimizer_use_feedback')]).toEqual([where, false]);
+        });
+        // A statement that writes is a procedure: the query of its step that reads b by its key holds the hint, once.
+        const write = oracle('MATCH (a:Big) MATCH (b:Big) WHERE a = b SET b.seen = true');
+        expect([write, write.split(NO_FEEDBACK).length - 1]).toEqual([write, 1]);
+        expect([write, new RegExp(`SELECT /\\*\\+ [^*]*${escaped(NO_FEEDBACK)}`).test(write)]).toEqual([write, true]);
     });
 });
+
+/** `text` as a regular expression matches it, each character as itself. */
+function escaped(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function sql(compiler: { compile: (cypher: string) => { sql: string } }, cypher: string): string {
     return compiler.compile(cypher).sql;

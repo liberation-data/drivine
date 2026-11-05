@@ -1,4 +1,6 @@
+import * as oracledb from 'oracledb';
 import {
+    ConnectionPropertiesFromEnv,
     DatabaseRegistry,
     PersistenceManager,
     PersistenceManagerFactory,
@@ -6,6 +8,7 @@ import {
     TransactionContextHolder
 } from '@liberation-data/drivine';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
+import { TEST_CONTAINER_PASSWORD } from '@/testing';
 
 /** Whether ORACLE_DATABASE_* configures an Oracle connection: its suites run only then. */
 export const oracleConfigured = process.env.ORACLE_DATABASE_TYPE === 'ORACLE';
@@ -49,5 +52,37 @@ export async function oraclePlan(connectionName: string, compiled: CompiledCyphe
         return lines.map((it) => it.line ?? it.LINE ?? it).join('\n');
     } finally {
         await connection.release();
+    }
+}
+
+/**
+ * The plan of the statement the session `sid` ran last, as the child cursor that ran it holds it, shown in the `format`
+ * `DBMS_XPLAN.DISPLAY_CURSOR` takes. Read as `system`, as the test user reads no `V$` view: a plan Oracle made again on
+ * a later run, from what an earlier run found (statistics feedback), is a child of its own. drivine4j's
+ * `OracleTestDatabase.lastPlan`.
+ */
+export async function oracleLastPlan(sid: string, format: string): Promise<string> {
+    const properties = ConnectionPropertiesFromEnv('ORACLE');
+    const admin = await oracledb.getConnection({
+        user: 'system',
+        password: TEST_CONTAINER_PASSWORD,
+        connectString: `${properties.host}:${properties.port ?? 1521}/${properties.databaseName}`
+    });
+    try {
+        const session = await admin.execute<[string, number]>(
+            'SELECT prev_sql_id, prev_child_number FROM v$session WHERE sid = :sid',
+            { sid: Number(sid) }
+        );
+        const [sqlId, child] = session.rows?.[0] ?? [];
+        if (sqlId === undefined) {
+            throw new Error(`No session ${sid}.`);
+        }
+        const lines = await admin.execute<[string]>(
+            'SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(:sqlId, :child, :format))',
+            { sqlId, child, format }
+        );
+        return (lines.rows ?? []).map(([line]) => line).join('\n');
+    } finally {
+        await admin.close();
     }
 }
