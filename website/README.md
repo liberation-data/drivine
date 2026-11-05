@@ -26,8 +26,9 @@ The site at [drivine.org](https://drivine.org/), built with
   with no `docs/` guide yet has its README read instead. Each `##` section is a page, and a long one a group of pages,
   one to each `###`. Change the docs by changing the libraries' `docs/`.
 - `src/pages/[...slug].md.ts`: each docs page's markdown beside it, `/jvm/testing/` also as `/jvm/testing.md`: the title
-  as its `#` heading and the body, without the sidebar, header or footer. Embabel Guide's search reads the Kotlin & Java
-  docs this way, finding the pages from the sitemap and keeping each page's URL for its links.
+  as its `#` heading and the body, without the sidebar, header or footer, each heading with its id on the page
+  (`## Testing {#testing}`). Embabel Guide's search reads the Kotlin & Java docs this way, finding the pages from the
+  sitemap and linking each result to its page and heading.
 
 ```bash
 npm install
