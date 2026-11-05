@@ -262,8 +262,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             @media (max-width: 600px) { .watch .play.again { align-items: flex-start; } .watch .play.again > span { min-height: 30px; font-size: 12px; } }
             .watch p { margin: 0; text-align: center; font-size: 16px; color: var(--muted); }
             /* Loading, while the video comes in under the poster. */
-            .watch .play:disabled { cursor: progress; }
-            .watch .play:disabled > span { transform: none; }
+            .watch .play[aria-disabled='true'] { cursor: progress; }
+            .watch .play[aria-disabled='true'] > span { transform: none; }
             /* Share, under the video and, at its end, in the end card's top corner, clear of its words and the controls. */
             .watch .watch-share { display: flex; justify-content: center; }
             .watch .player .ending-share { position: absolute; top: 16px; right: 16px; }
@@ -785,8 +785,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 // only a grey box, Firefox without even a spinner. The video loads under the poster, then takes its place.
                 const button = player.querySelector<HTMLButtonElement>('.play');
                 const label = button?.querySelector('span');
+                // aria-disabled rather than disabled, so the focus stays on it and a screen reader hears it say Loading;
+                // pressing it again does nothing, the player's listener being gone.
                 if (button && label) {
-                    button.disabled = true;
+                    button.setAttribute('aria-disabled', 'true');
                     button.removeAttribute('aria-label');
                     label.replaceChildren(label.querySelector('svg')!, 'Loading…');
                 }
@@ -799,6 +801,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 };
                 for (const name of ['loadeddata', 'playing', 'error']) video.addEventListener(name, show, { once: true });
                 player.prepend(video);
+                // Played from the press itself, which Safari asks of a video with sound (and iOS loads none before it). If it
+                // won't play (autoplay blocked, or no file), its own controls show: they take a press, the poster doesn't.
+                video.play().catch(show);
             }, { once: true });
             // Each install line copies itself, and says so for a moment.
             const copied = document.querySelector<HTMLElement>('.copied-status');
