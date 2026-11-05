@@ -10,6 +10,11 @@ const SPACES = ' \t\n\u000B\u000C\r';
 const BOUNDARY_BEFORE = '(^|[^[:alnum:]_])';
 const BOUNDARY_AFTER = '($|[^[:alnum:]_])';
 
+/** Whether a term's expression is a prefix term's: one whose last word is the start of a word, `kiw*`. */
+export function isPrefix(pattern: string): boolean {
+    return !pattern.endsWith(BOUNDARY_AFTER);
+}
+
 /** What an operator does to the token after it. */
 const OPERATORS: Record<string, 'MUST' | 'NOT' | 'OR'> = {
     AND: 'MUST',
