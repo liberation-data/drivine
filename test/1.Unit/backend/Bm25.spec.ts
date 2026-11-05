@@ -8,7 +8,7 @@ import {
     OracleGraph
 } from '@liberation-data/drivine';
 import { bm25Ranked, bm25Score, Bm25Dialect } from '@/backend/sql/Bm25';
-import { TextQuery } from '@/backend/sql/TextQuery';
+import { isPrefix, TextQuery } from '@/backend/sql/TextQuery';
 
 @NodeFragment({ labels: ['Shelf'] })
 class Shelf {
@@ -54,6 +54,17 @@ describe('bm25Ranked', () => {
         const sql = bm25Ranked('CANDIDATES', 'LABEL', TextQuery.parse('graph'), dialect);
         expect(sql).not.toContain(' w WHERE');
         expect(sql).toContain(') w) b WHERE b.score > 0');
+    });
+
+    it("should score a prefix term by k1 + 1 for each node that holds it, as Lucene's prefix query, the rest by BM25", () => {
+        const query = TextQuery.parse('kiw* melon');
+        expect(query.scored.map(isPrefix)).toEqual([true, false]);
+        const sql = bm25Ranked('CANDIDATES', 'LABEL', query, dialect);
+        expect(sql).toContain(
+            'REAL(CASE WHEN w.tf1 > 0 THEN 2.2 ELSE 0 END + LN(1 + (w.n - w.df2 + 0.5) / (w.df2 + 0.5)) * w.tf2 * 2.2 / ' +
+                '(w.tf2 + 1.2 * (0.25 + 0.75 * w.len / NULLIF(w.avglen, 0)))) AS score'
+        );
+        expect(sql).not.toContain('w.df1 + 0.5');
     });
 
     it("should score as Lucene does, with k1 1.2 and b 0.75: drivine4j's figures", () => {

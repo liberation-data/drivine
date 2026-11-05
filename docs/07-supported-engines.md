@@ -200,7 +200,9 @@ Notes:
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
   `"phrase"`, `+must`, `-not` and a `prefix*`. It scores by BM25, as Lucene and so Neo4j's full-text index do (`k1`
   1.2, `b` 0.75): a term weighs as it is rare among the label's nodes, and a text's counts against its length, in
-  characters, beside the label's average. Scored by the counts alone, a common word outweighed the word a query was
+  characters, beside the label's average. A `prefix*` adds the same to every node that holds it, however often and
+  however rare, as Lucene's prefix query does: in `kiw* melon`, a node with `kiwi` and no `melon` scores about 0.54 of
+  one with both, as on Neo4j. Scored by the counts alone, a common word outweighed the word a query was
   about, and a long text won by holding more of everything: over drivine4j's docs, the top hit was Neo4j's for 6 of 21
   queries, and is for 17. How rare a term is comes out the same narrowed; only the label's count of nodes and their
   average length are read from every node of it, and no term is matched in that read.
