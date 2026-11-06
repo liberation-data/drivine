@@ -6567,7 +6567,9 @@ export class CypherWriter {
                 }
                 node = isJsonMap(node) ? node[key] : undefined;
             }
-            return !isContainer(node) && !(typeof node === 'string' && !this.sql.indexHolds(node));
+            // Bytes are bound as their base64 text (see jsonText), which may be empty or long.
+            const text = node instanceof Uint8Array || node instanceof Int8Array ? JSON.parse(jsonText(node)) : node;
+            return !isContainer(node) && !(typeof text === 'string' && !this.sql.indexHolds(text));
         });
     }
 

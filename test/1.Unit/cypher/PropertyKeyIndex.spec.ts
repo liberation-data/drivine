@@ -183,6 +183,11 @@ describe('A property a pattern compares with a row, compiled', () => {
                 expect(oracle(ROW, rows('p1', value))).toMatch(/OR JSON_VALUE\(.*, '\$'\) IS NULL\)/);
                 expect(oracle('MATCH (a:Person {id: $s}) RETURN a.k', { s: value })).not.toContain(labelled('n1'));
             }
+            // Bytes are bound as their base64 text: none, or past 4,000 bytes of it, is such a text.
+            for (const value of [Buffer.alloc(0), Buffer.alloc(3001), new Int8Array(0)]) {
+                expect(oracle(ROW, rows('p1', value))).toMatch(/OR JSON_VALUE\(.*, '\$'\) IS NULL\)/);
+            }
+            expect(oracle(ROW, rows('p1', Buffer.alloc(3)))).not.toMatch(/OR JSON_VALUE\([^)]*\) IS NULL\)/);
         });
 
         it("reads a parameter's text through the labelled index, which no test of Oracle's did", () => {
