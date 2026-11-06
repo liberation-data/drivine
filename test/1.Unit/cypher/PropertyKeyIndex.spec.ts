@@ -196,6 +196,25 @@ describe('A property a pattern compares with a row, compiled', () => {
             expect(sql).toContain(holdsLabel('n1.labels', 'Person'));
         });
 
+        it("reads a parameter's text through the labelled index where a walk sets out from the node, or a quantified path's node is found", () => {
+            // The walk's seed, a variable-length relationship's ends.
+            const walk = oracle('MATCH (a:Person)-[:FOLLOWS*1..2]->(b:Person {id: $s}) RETURN a.k', { s: 'p1' });
+            expect(walk).toMatch(
+                /WITH w\d+ \(src, nid, depth, nids, eids\) AS \(\s*SELECT [^\n]*\n\s*FROM g_node (p\d+_n) WHERE [^\n]*/
+            );
+            const seed = /FROM g_node (p\d+_n) WHERE [^\n]*/.exec(walk)!;
+            expect(seed[0]).toContain(`${labelledValue(seed[1], 'Person', 'id')} = JSON_VALUE(JSON($_cy_s), '$')`);
+            expect(bare('MATCH (a:Person)-[:FOLLOWS*1..2]->(b:Person {id: $s}) RETURN a.k', { s: 'p1' })).not.toContain(
+                'NULL ON ERROR) END ='
+            );
+            // A node of a quantified path, tested on each step of the walk.
+            const quantified = oracle('MATCH p = ((x:Person {id: $s})-[:FOLLOWS]->(:Person)){1,2} RETURN length(p)', {
+                s: 'p1'
+            });
+            const step = /JOIN g_node (n\d+) ON n\d+\.nid = w\d+\.nid/.exec(quantified)!;
+            expect(quantified).toContain(`${labelledValue(step[1], 'Person', 'id')} = JSON_VALUE(JSON($_cy_s), '$')`);
+        });
+
         it('writes no such test for a label or property it is told of no index over, after a grouping WITH, or for a WHERE', () => {
             expect(oracle('UNWIND $rows AS row MATCH (a:Movie {id: row.s}) RETURN a.k', rows('p1'))).not.toContain(
                 'NULL ON ERROR) END ='

@@ -515,7 +515,13 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
                     'UNWIND $rows AS row MATCH (a:Scaled {id: row.s}) RETURN a.k ORDER BY a.k',
                     rowsOf(2.5, 1, 4, 0.00001, float(1), float(4))
                 ],
-                ['MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }]
+                ['MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }],
+                // A walk's seed and a quantified path's node, over the FOLLOWS that 'makes a relationship for each row' made.
+                ['MATCH (a:Person)-[:FOLLOWS*1..2]->(b:Person {id: $s}) RETURN a.k ORDER BY a.k', { s: 'p5' }],
+                [
+                    'MATCH p = ((x:Person {id: $s})-[:FOLLOWS]->(:Person)){1,2} RETURN length(p) ORDER BY length(p)',
+                    { s: 'p5' }
+                ]
             ];
             for (const [cypher, parameters] of cases) {
                 const bare = await run(new OracleCypherCompiler(GRAPH).compile(cypher, parameters));
