@@ -89,7 +89,10 @@ function oraclePlanner(store: SqlStore): Planner {
         compiled: (cypher, parameters) =>
             new OracleCypherCompiler(GRAPH, true, true, [
                 ['Person', 'id'],
-                [IMPORT_LABEL, IMPORT_ID]
+                [IMPORT_LABEL, IMPORT_ID],
+                // Named so the rows a truth value or a scaled number gives are read through the labelled test too.
+                ['Odd', 'id'],
+                ['Scaled', 'id']
             ]).compile(cypher, parameters),
         plan: async (compiled) => oraclePlan(connectionName(store), compiled, 'BASIC +PREDICATE'),
         /**
@@ -487,45 +490,74 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
                 }
             };
             const statement = 'UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN a.k ORDER BY a.k';
-            const cases: [string, Record<string, any>][] = [
+            // Each case's statement and parameters, and whether it is compiled with the labelled test: one whose rows hold a
+            // null, or a list written with a number worked out (`-7`), compares a value that may hold a null, which no index
+            // stands beside (see the Odd case above), and each such case has one beside it that is.
+            const cases: [string, Record<string, any>, boolean][] = [
                 [
                     statement,
-                    rowsOf('p5', 7, float(7), 8, true, [1, 2], null, 'nobody', '7', ['a', 'b'], [], [1], [[1, 2]], 1)
+                    rowsOf('p5', 7, float(7), 8, true, [1, 2], null, 'nobody', '7', ['a', 'b'], [], [1], [[1, 2]], 1),
+                    false
                 ],
-                [statement, rowsOf(0.1, 1.0e20, -7, float(-0), BIG, '', LONG)],
-                [statement, rowsOf(0.1, 1.0e20, -7, float(-0), BIG, float(8), 8, 7, float(7))],
-                [statement, rowsOf(float(0.1), float(1.0e20), float(-7), float(0), float(8))],
+                [
+                    statement,
+                    rowsOf('p5', 7, float(7), 8, true, [1, 2], 'nobody', '7', ['a', 'b'], [], [1], [[1, 2]], 1),
+                    true
+                ],
+                [statement, rowsOf(0.1, 1.0e20, -7, float(-0), BIG, '', LONG), true],
+                [statement, rowsOf(0.1, 1.0e20, -7, float(-0), BIG, float(8), 8, 7, float(7)), true],
+                [statement, rowsOf(float(0.1), float(1.0e20), float(-7), float(0), float(8)), true],
                 [
                     'UNWIND $ids AS id MATCH (a:Person {id: id}) RETURN a.k ORDER BY a.k',
-                    { ids: ['p5', float(7), 8, true, BIG, 0.1] }
+                    { ids: ['p5', float(7), 8, true, BIG, 0.1] },
+                    true
                 ],
                 [
                     "UNWIND ['', 'p5', 8, 7.0, 0.1, 1.0e20, -7, -0.0, 0] AS s MATCH (a:Person {id: s}) RETURN a.k ORDER BY a.k",
-                    {}
+                    {},
+                    false
+                ],
+                [
+                    "UNWIND ['', 'p5', 8, 7.0, 0.1, 1.0e20, 0] AS s MATCH (a:Person {id: s}) RETURN a.k ORDER BY a.k",
+                    {},
+                    true
                 ],
                 [
                     'UNWIND $rows AS row MATCH (a:Person {id: row.a.b}) RETURN a.k ORDER BY a.k',
-                    { rows: [{ a: { b: 'p5' } }, { a: { b: 8 } }, { a: null }, {}, { a: { c: [1] } }] }
+                    { rows: [{ a: { b: 'p5' } }, { a: { b: 8 } }, { a: null }, {}, { a: { c: [1] } }] },
+                    false
+                ],
+                [
+                    'UNWIND $rows AS row MATCH (a:Person {id: row.a.b}) RETURN a.k ORDER BY a.k',
+                    { rows: [{ a: { b: 'p5' } }, { a: { b: 8 } }, {}, { a: { c: [1] } }] },
+                    true
                 ],
                 [
                     'UNWIND $rows AS row MATCH (a:Odd {id: row.s}) RETURN a.k ORDER BY a.k',
-                    rowsOf(true, 'true', 7, '7', float(7))
+                    rowsOf(true, 'true', 7, '7', float(7)),
+                    true
                 ],
                 [
                     'UNWIND $rows AS row MATCH (a:Scaled {id: row.s}) RETURN a.k ORDER BY a.k',
-                    rowsOf(2.5, 1, 4, 0.00001, float(1), float(4))
+                    rowsOf(2.5, 1, 4, 0.00001, float(1), float(4), [1, 2.5]),
+                    true
                 ],
-                ['MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }],
+                ['MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }, true],
                 // A walk's seed and a quantified path's node, over the FOLLOWS that 'makes a relationship for each row' made.
-                ['MATCH (a:Person)-[:FOLLOWS*1..2]->(b:Person {id: $s}) RETURN a.k ORDER BY a.k', { s: 'p5' }],
+                ['MATCH (a:Person)-[:FOLLOWS*1..2]->(b:Person {id: $s}) RETURN a.k ORDER BY a.k', { s: 'p5' }, true],
                 [
                     'MATCH p = ((x:Person {id: $s})-[:FOLLOWS]->(:Person)){1,2} RETURN length(p) ORDER BY length(p)',
-                    { s: 'p5' }
+                    { s: 'p5' },
+                    true
                 ]
             ];
-            for (const [cypher, parameters] of cases) {
-                const bare = await run(new OracleCypherCompiler(GRAPH).compile(cypher, parameters));
-                const indexed = await run(planner.compiled(cypher, parameters));
+            for (const [i, [cypher, parameters, labelled]] of cases.entries()) {
+                const bareSql = new OracleCypherCompiler(GRAPH).compile(cypher, parameters);
+                const indexedSql = planner.compiled(cypher, parameters);
+                // A case meant to write the labelled test proves nothing of it where it doesn't.
+                expect([cypher, i, indexedSql.sql !== bareSql.sql]).toEqual([cypher, i, labelled]);
+                const bare = await run(bareSql);
+                const indexed = await run(indexedSql);
                 expect([cypher, indexed]).toEqual([cypher, bare]);
                 expect([cypher, bare.length > 0]).toEqual([cypher, true]);
             }
