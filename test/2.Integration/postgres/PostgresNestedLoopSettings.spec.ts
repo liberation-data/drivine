@@ -13,8 +13,8 @@ const MERGE = 'MATCH (n:CyLoop) MERGE (n)-[:CY_SELF]->(n)';
 /**
  * The planner's settings, after a procedure that set them off for a loop, are those the session or its transaction had
  * before it, and where the loop fails, those it had before the procedure: Postgres undoes `set_config(…, true)` with the
- * transaction or savepoint the failure rolls back (#628, liberation-data/drivine4j#609). drivine4j's
- * `PostgresNestedLoopSettingsTest`.
+ * transaction or savepoint the failure rolls back (#628, #646, liberation-data/drivine4j#609,
+ * liberation-data/drivine4j#631). drivine4j's `PostgresNestedLoopSettingsTest`.
  */
 describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
     "The planner's settings around a write loop on $name",
@@ -45,7 +45,9 @@ describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
             fails: boolean = false
         ): Promise<string[]> => {
             const text = new PostgresCypherCompiler(GRAPH).compile(cypher).setup.join('\n');
-            expect([text.includes("set_config('enable_seqscan', 'off', true)"), text]).toEqual([true, text]);
+            for (const setting of ['enable_seqscan', 'enable_material']) {
+                expect([text.includes(`set_config('${setting}', 'off', true)`), text]).toEqual([true, text]);
+            }
             await connection.startTransaction();
             try {
                 await sql(setup);
@@ -67,20 +69,25 @@ describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
                 }
                 const [settings] = await sql(
                     "SELECT current_setting('enable_seqscan') AS s, current_setting('enable_hashjoin') AS h, " +
-                        "current_setting('enable_mergejoin') AS m"
+                        "current_setting('enable_mergejoin') AS m, current_setting('enable_material') AS t"
                 );
-                return [settings.s, settings.h, settings.m];
+                return [settings.s, settings.h, settings.m, settings.t];
             } finally {
                 await connection.rollbackTransaction();
             }
         };
 
         it('are put back as the session had them, in its transaction', async () => {
-            expect(await settingsAfter('SET enable_hashjoin = off', MERGE)).toEqual(['on', 'off', 'on']);
+            expect(await settingsAfter('SET enable_hashjoin = off', MERGE)).toEqual(['on', 'off', 'on', 'on']);
         });
 
         it('are put back as its transaction had them', async () => {
-            expect(await settingsAfter('SET LOCAL enable_hashjoin = off', MERGE, true)).toEqual(['on', 'off', 'on']);
+            expect(await settingsAfter('SET LOCAL enable_hashjoin = off', MERGE, true)).toEqual([
+                'on',
+                'off',
+                'on',
+                'on'
+            ]);
         });
 
         it('are left as they were where the loop fails, once its savepoint is rolled back', async () => {
@@ -89,6 +96,7 @@ describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
             expect(await settingsAfter('SET LOCAL enable_hashjoin = off', failing, true, true)).toEqual([
                 'on',
                 'off',
+                'on',
                 'on'
             ]);
         });
