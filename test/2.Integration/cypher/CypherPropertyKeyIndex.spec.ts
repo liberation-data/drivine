@@ -468,6 +468,63 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
             ).toEqual([[39, 40]]);
         });
 
+        it('finds, compiled knowing the indexes, the rows it finds compiled as the connection compiles it', async () => {
+            // On Postgres the connection compiles as the planner does, and the tests above find its rows. On Oracle the
+            // connection names no index (liberation-data/drivine4j#638), so the labelled index's test is run here: no row
+            // it leaves out may be one the JSON comparison keeps, as `1` and `1.0`, or a double and a number, are.
+            if (store.type !== DatabaseType.ORACLE) {
+                return;
+            }
+            const run = async (compiled: CompiledCypher): Promise<string[]> => {
+                const connection = await DatabaseRegistry.getInstance()
+                    .connectionProvider(connectionName(store))!
+                    .connect();
+                try {
+                    const rows = await connection.query(new QuerySpecification(compiled.sql).bind(compiled.parameters));
+                    return rows.map((it) => JSON.stringify(it));
+                } finally {
+                    await connection.release();
+                }
+            };
+            const statement = 'UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN a.k ORDER BY a.k';
+            const cases: [string, Record<string, any>][] = [
+                [
+                    statement,
+                    rowsOf('p5', 7, float(7), 8, true, [1, 2], null, 'nobody', '7', ['a', 'b'], [], [1], [[1, 2]], 1)
+                ],
+                [statement, rowsOf(0.1, 1.0e20, -7, float(-0), BIG, '', LONG)],
+                [statement, rowsOf(0.1, 1.0e20, -7, float(-0), BIG, float(8), 8, 7, float(7))],
+                [statement, rowsOf(float(0.1), float(1.0e20), float(-7), float(0), float(8))],
+                [
+                    'UNWIND $ids AS id MATCH (a:Person {id: id}) RETURN a.k ORDER BY a.k',
+                    { ids: ['p5', float(7), 8, true, BIG, 0.1] }
+                ],
+                [
+                    "UNWIND ['', 'p5', 8, 7.0, 0.1, 1.0e20, -7, -0.0, 0] AS s MATCH (a:Person {id: s}) RETURN a.k ORDER BY a.k",
+                    {}
+                ],
+                [
+                    'UNWIND $rows AS row MATCH (a:Person {id: row.a.b}) RETURN a.k ORDER BY a.k',
+                    { rows: [{ a: { b: 'p5' } }, { a: { b: 8 } }, { a: null }, {}, { a: { c: [1] } }] }
+                ],
+                [
+                    'UNWIND $rows AS row MATCH (a:Odd {id: row.s}) RETURN a.k ORDER BY a.k',
+                    rowsOf(true, 'true', 7, '7', float(7))
+                ],
+                [
+                    'UNWIND $rows AS row MATCH (a:Scaled {id: row.s}) RETURN a.k ORDER BY a.k',
+                    rowsOf(2.5, 1, 4, 0.00001, float(1), float(4))
+                ],
+                ['MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }]
+            ];
+            for (const [cypher, parameters] of cases) {
+                const bare = await run(new OracleCypherCompiler(GRAPH).compile(cypher, parameters));
+                const indexed = await run(planner.compiled(cypher, parameters));
+                expect([cypher, indexed]).toEqual([cypher, bare]);
+                expect([cypher, bare.length > 0]).toEqual([cypher, true]);
+            }
+        });
+
         it("finds the node of a parameter's text through the index", async () => {
             const plan = await planner.plan(planner.compiled('MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }));
             expect(planner.probesIndex(plan) ? 'probes' : plan).toEqual('probes');

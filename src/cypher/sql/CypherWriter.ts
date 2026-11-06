@@ -7734,11 +7734,7 @@ export class CypherWriter {
         // Read only beside a text that is not null, so a number past SQL's integer beside a null text is null, and a
         // constant out of range is not worked out before any row.
         return this.sql.shared(
-            [
-                `CASE WHEN ${text} IS NOT NULL THEN ${this.sql.temporalSql.trunc}(${this.numberOf(
-                    call.arguments[index]
-                )}) END`
-            ],
+            [`CASE WHEN ${text} IS NOT NULL THEN ${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[index])}) END`],
             ([n]) =>
                 `CASE WHEN ${n} < 0 OR ${n} > ${MAX_COUNT} THEN ${this.sql.failure(outOfRange, n)} ` +
                 `ELSE CAST(${n} AS INTEGER) END`
@@ -7800,17 +7796,14 @@ export class CypherWriter {
                 : places(number, Number.isNaN(given) ? '0' : this.truncatedWhole(call.arguments[1]));
         }
         const value = this.sql.comparable(this.asJson(call.arguments[0]));
-        return this.sql.shared(
-            [value, `${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[1])})`],
-            ([x, t]) => {
-                // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
-                const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
-                return (
-                    `CASE ${toWhole}WHEN ${t} NOT BETWEEN 0 AND ${MAX_COUNT} THEN ${this.outOfPlaces(x, t)} ` +
-                    `ELSE ${places(this.sql.number(x), `CAST(${t} AS INTEGER)`)} END`
-                );
-            }
-        );
+        return this.sql.shared([value, `${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
+            // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
+            const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
+            return (
+                `CASE ${toWhole}WHEN ${t} NOT BETWEEN 0 AND ${MAX_COUNT} THEN ${this.outOfPlaces(x, t)} ` +
+                `ELSE ${places(this.sql.number(x), `CAST(${t} AS INTEGER)`)} END`
+            );
+        });
     }
 
     /**
