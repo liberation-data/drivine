@@ -47,7 +47,9 @@ const ARTICLES = [
     article('long', 'zebra and a great many other words that make this text far longer than the one before it is'),
     article('once', 'kiwi bird'),
     article('often', 'kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi'),
-    article('none', 'nothing to see')
+    article('none', 'nothing to see'),
+    article('hindi', 'एक किताब'),
+    article('area', 'an m² x here')
 ];
 
 /** A missing property is no text, and its length none. */
@@ -104,8 +106,8 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         if (engine.type !== DatabaseType.NEO4J) {
             // bm25Ranked's own figure, lengths in characters (Lucene's are in words): "graph" counted 3 times in 45
             // characters (back to back, the pattern counts every other one: drivine4j#607 moves this), against "graph" and
-            // "soup" once each in 15, over 27 texts of 857 characters, "graph" in 22 and "soup" in 1.
-            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.07864229315202613, 9);
+            // "soup" once each in 15, over 29 texts of 877 characters, "graph" in 22 and "soup" in 1.
+            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.09894838836082837, 9);
         }
     });
 
@@ -121,6 +123,13 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits.get('often')).toBeCloseTo(1, 9);
         // Ten times the count, as long again as the other's text: not ten times the score.
         expect(hits.get('once')).toBeGreaterThan(0.4);
+    });
+
+    it("should read a word as the text's expression does: its vowel signs in it, a superscript between words", async () => {
+        // drivine4j#616: split at its vowel sign, किताब was "क", which [[:alnum:]] went on from.
+        expect((await search('किताब')).map((it) => it.value.id)).toEqual(['hindi']);
+        // "²" is not in a word: "m²x" is the words "m" and "x", as Neo4j's analyzer reads it.
+        expect((await search('"m²x"')).map((it) => it.value.id)).toEqual(['area']);
     });
 
     it('should still find the nodes of a common term, and keep required and excluded terms', async () => {

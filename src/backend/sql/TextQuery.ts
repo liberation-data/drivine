@@ -1,8 +1,14 @@
 import { DrivineError } from '@/DrivineError';
 
-/** What stands between two words: a run of anything but letters, digits and underscores. */
-const GAP = /[^\p{L}\p{N}_]+/u;
-const GAP_CHAR = /^[^\p{L}\p{N}_]$/u;
+/**
+ * What stands between two words: a run of anything but letters, decimal digits and underscores, as a term's expression's
+ * `[[:alnum:]_]` reads them in the text, on Postgres and through SqlitePatterns: letters as Unicode's Alphabetic holds them,
+ * which takes in the vowel signs of Indic scripts and the letter numbers (`ⅻ`), and digits as `Nd`. Read as any letter or
+ * number, a query split a Hindi word at its vowel sign, which the text went on from, and kept "²" in a word where the text
+ * ends one at it, as Neo4j's analyzer does (drivine4j#616). Oracle's `[[:alnum:]]` holds every combining mark too.
+ */
+const GAP = /[^\p{Alphabetic}\p{Nd}_]+/u;
+const GAP_CHAR = /^[^\p{Alphabetic}\p{Nd}_]$/u;
 
 /** The characters that end a term. */
 const SPACES = ' \t\n\u000B\u000C\r';
