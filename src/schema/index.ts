@@ -15,3 +15,4 @@ export {
     LowerCopyStatements,
     loweredEntry
 } from './LowerCopyCatalog';
+export * from './ddl';

@@ -40,6 +40,7 @@ import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, schemaGrammarFor, SchemaItem } from '@/schema/SchemaGrammar';
 import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
+import { SqliteBackend } from '@/backend/sqlite/SqliteBackend';
 import { ensuredFirst, ensureStore } from '@/manager/EnsuredStore';
 import { StoreIdentity, StoreIdentityResolver } from '@/store/StoreIdentity';
 import { DrivineLogger } from '@/logger';
@@ -1106,11 +1107,14 @@ export class StatelessGraphObjectManager {
         return this.indexAdvisor.indexed();
     }
 
+    /** The schema grammar of the store, over the backend's graph on a SQL store (the default graph unless named). */
     private schemaGrammar(): SchemaGrammar {
         const backend = this.backend;
         return schemaGrammarFor(
             this.persistenceManager.type,
-            backend instanceof OracleBackend || backend instanceof PostgresBackend ? backend.graph : undefined
+            backend instanceof OracleBackend || backend instanceof PostgresBackend || backend instanceof SqliteBackend
+                ? backend.graph
+                : undefined
         );
     }
 

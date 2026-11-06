@@ -1,0 +1,184 @@
+# Neo4j's schema commands, and what a SQL store makes of each: the schema spec it is applied as, a refusal and its
+# message, or no schema command at all. Read with no store. See README.md.
+
+cases:
+  - name: "Range index"
+    description: "CREATE [RANGE] INDEX over one property or several is a range index. A name the schema API would give it is no alias."
+    steps:
+      - ddl: "CREATE RANGE INDEX IF NOT EXISTS FOR (n:ChatSession) ON (n.lastActivityAt)"
+        create: {kind: "RANGE_INDEX", label: "ChatSession", properties: ["lastActivityAt"], ifNotExists: true}
+      - ddl: "CREATE RANGE INDEX IF NOT EXISTS FOR (n:ContentElement) ON (n.root_document_id, n.ordinal)"
+        create: {kind: "RANGE_INDEX", label: "ContentElement", properties: ["root_document_id", "ordinal"], ifNotExists: true}
+      - ddl: "CREATE INDEX person_name FOR (p:Person) ON (p.name)"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], alias: "person_name"}
+      - note: "The name the schema API gives it, label, properties and kind, is no alias."
+        ddl: "CREATE INDEX Person_name_range FOR (p:Person) ON (p.name)"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}
+      - note: "Keywords are read in any case, a statement may end with a semicolon, and comments are read past."
+        ddl: "create index if not exists for (p:Person) on (p.name); // made at startup"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], ifNotExists: true}
+      - note: "Neo4j 4's BTREE index is a range index."
+        ddl: "CREATE BTREE INDEX FOR (p:Person) ON (p.name)"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}
+      - note: "Neo4j 4's ON :Label(properties), with the properties named bare."
+        ddl: "CREATE INDEX ON :Person(name, born)"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"]}
+      - note: "OPTIONS of a range index, such as its indexProvider, are read past."
+        ddl: "CREATE INDEX FOR (p:Person) ON (p.name) OPTIONS {indexProvider: 'range-1.0'}"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}
+
+  - name: "Uniqueness constraint"
+    description: "CREATE CONSTRAINT … REQUIRE … IS [NODE] UNIQUE, over one property or several, and Neo4j 4's ON … ASSERT, is a uniqueness constraint."
+    steps:
+      - ddl: "CREATE CONSTRAINT Attachment_attachmentId_unique IF NOT EXISTS FOR (node:Attachment) REQUIRE (node.attachmentId) IS UNIQUE"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "Attachment", properties: ["attachmentId"], ifNotExists: true}
+      - ddl: "CREATE CONSTRAINT FOR (p:Person) REQUIRE p.email IS UNIQUE"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}
+      - ddl: "CREATE CONSTRAINT person_key FOR (p:Person) REQUIRE (p.first, p.last) IS NODE UNIQUE"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["first", "last"], alias: "person_key"}
+      - ddl: "CREATE CONSTRAINT person_email IF NOT EXISTS ON (p:Person) ASSERT p.email IS UNIQUE"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], alias: "person_email", ifNotExists: true}
+      - ddl: "CREATE CONSTRAINT ON (p:Person) ASSERT (p.email) IS UNIQUE"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}
+      - note: "An APOC export's constraint on the nodes it imports by their id."
+        ddl: "CREATE CONSTRAINT UNIQUE_IMPORT_NAME IF NOT EXISTS FOR (node:`UNIQUE IMPORT LABEL`) REQUIRE (node.`UNIQUE IMPORT ID`) IS UNIQUE;"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "UNIQUE IMPORT LABEL", properties: ["UNIQUE IMPORT ID"], alias: "UNIQUE_IMPORT_NAME", ifNotExists: true}
+
+  - name: "Full-text index"
+    description: "CREATE FULLTEXT INDEX … ON EACH […] is a full-text index, with the analyzer its OPTIONS name; whether it is eventually consistent is read past."
+    steps:
+      - ddl: "CREATE FULLTEXT INDEX Chunk_text_fulltext IF NOT EXISTS FOR (n:Chunk) ON EACH [n.`text`]"
+        create: {kind: "FULLTEXT_INDEX", label: "Chunk", properties: ["text"], ifNotExists: true}
+      - ddl: "CREATE FULLTEXT INDEX titles FOR (n:Book) ON EACH [n.title, n.subtitle] OPTIONS {indexConfig: {`fulltext.analyzer`: 'english', `fulltext.eventually_consistent`: true}}"
+        create: {kind: "FULLTEXT_INDEX", label: "Book", properties: ["title", "subtitle"], alias: "titles", options: {analyzer: "english"}}
+
+  - name: "Vector index"
+    description: "CREATE VECTOR INDEX is a vector index of the dimensions and similarity function its OPTIONS give, the latter in any case, with their HNSW parameters and quantization; its indexProvider is read past."
+    steps:
+      - ddl: "CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON c.embedding OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}"
+        create: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], alias: "chunk_embedding", ifNotExists: true, options: {dimensions: 1536, similarity: "COSINE"}}
+      - ddl: "CREATE VECTOR INDEX FOR (c:Chunk) ON (c.embedding) OPTIONS {indexProvider: 'vector-2.0', indexConfig: {`vector.dimensions`: 3, `vector.similarity_function`: 'EUCLIDEAN', `vector.hnsw.m`: 16, `vector.hnsw.ef_construction`: 100, `vector.quantization.enabled`: false}}"
+        create: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], options: {dimensions: 3, similarity: "EUCLIDEAN", hnswM: 16, hnswEfConstruction: 100, quantizationEnabled: false}}
+      - note: "Cosine, where no similarity function is given."
+        ddl: "CREATE VECTOR INDEX FOR (c:Chunk) ON c.embedding OPTIONS {indexConfig: {`vector.dimensions`: 8}}"
+        create: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], options: {dimensions: 8, similarity: "COSINE"}}
+
+  - name: "TEXT index"
+    description: "CREATE TEXT INDEX is Neo4j's TEXT index, which the SQL stores refuse to make when it is applied."
+    steps:
+      - ddl: "CREATE TEXT INDEX FOR (p:Person) ON (p.name)"
+        create: {kind: "TEXT_INDEX", label: "Person", properties: ["name"]}
+
+  - name: "Names in backticks"
+    description: "A name, a label or a property in backticks may hold spaces, and a doubled backtick in it stands for one."
+    steps:
+      - ddl: "CREATE CONSTRAINT `the ``key`` of a thing` IF NOT EXISTS FOR (n:`A Thing`) REQUIRE (n.`the key`) IS UNIQUE"
+        create: {kind: "UNIQUENESS_CONSTRAINT", label: "A Thing", properties: ["the key"], alias: "the `key` of a thing", ifNotExists: true}
+      - ddl: "CREATE INDEX `by name` FOR (`the node`:Person) ON (`the node`.name)"
+        create: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], alias: "by name"}
+      - ddl: "DROP CONSTRAINT `the ``key`` of a thing`"
+        drop: {kind: "CONSTRAINT", name: "the `key` of a thing"}
+
+  - name: "DROP"
+    description: "DROP INDEX and DROP CONSTRAINT name the item they drop, with IF EXISTS or without."
+    steps:
+      - ddl: "DROP CONSTRAINT UNIQUE_IMPORT_NAME;"
+        drop: {kind: "CONSTRAINT", name: "UNIQUE_IMPORT_NAME"}
+      - ddl: "DROP INDEX person_name IF EXISTS"
+        drop: {kind: "INDEX", name: "person_name", ifExists: true}
+      - ddl: "drop index `by name`"
+        drop: {kind: "INDEX", name: "by name"}
+
+  - name: "Await indexes"
+    description: "db.awaitIndexes and db.awaitIndex are schema commands that wait for nothing on a SQL store, whose indexes are whole once made."
+    steps:
+      - ddl: "CALL db.awaitIndexes(300);"
+        await: true
+      - ddl: "CALL db.awaitIndexes()"
+        await: true
+      - ddl: "CALL db.awaitIndexes"
+        await: true
+      - ddl: "CALL db.awaitIndex('person_name', 300)"
+        await: true
+      - ddl: "CALL db.awaitIndexes($timeout)"
+        await: true
+
+  - name: "Drivine's own constraints"
+    description: "The uniqueness constraint of the schema marker's scope, or of the store stamp's key, by any name, is Drivine's own, and is made as Drivine makes it. No other schema is made for their labels."
+    steps:
+      - ddl: "CREATE CONSTRAINT _DrivineSchema_scope_unique IF NOT EXISTS FOR (node:_DrivineSchema) REQUIRE (node.scope) IS UNIQUE"
+        reserved: {label: "_DrivineSchema", properties: ["scope"]}
+      - ddl: "CREATE CONSTRAINT marker_scope FOR (m:_DrivineSchema) REQUIRE m.scope IS UNIQUE"
+        reserved: {label: "_DrivineSchema", properties: ["scope"]}
+      - ddl: "CREATE CONSTRAINT DrivineStore_key_unique IF NOT EXISTS FOR (node:DrivineStore) REQUIRE (node.key) IS UNIQUE"
+        reserved: {label: "DrivineStore", properties: ["key"]}
+      - ddl: "CREATE INDEX FOR (m:_DrivineSchema) ON (m.version)"
+        error: "_DrivineSchema is the label of Drivine's own nodes, and no schema is made for it but Drivine's."
+
+  - name: "Cypher that reads as a schema command"
+    description: "A statement is a schema command only where it opens with one's keywords: Cypher whose variable is named index or constraint is Cypher."
+    steps:
+      - ddl: "CREATE index = (:A)-[:R]->(:B)"
+        cypher: true
+      - ddl: "CREATE constraint = (:A)"
+        cypher: true
+      - ddl: "CREATE (index:Index {name: 'CREATE INDEX'})"
+        cypher: true
+      - ddl: "MATCH (index:Index) RETURN index"
+        cypher: true
+      - ddl: "CREATE RANGE = (:A)"
+        cypher: true
+      - ddl: "CALL db.labels()"
+        cypher: true
+      - ddl: "RETURN 'DROP INDEX x'"
+        cypher: true
+
+  - name: "Refused"
+    description: "What a SQL store cannot honour is refused by name, before the store is sent anything."
+    steps:
+      - ddl: "CREATE POINT INDEX FOR (p:Place) ON (p.location)"
+        error: "A POINT index is Neo4j's, and is not made on a SQL store."
+      - ddl: "CREATE LOOKUP INDEX node_labels FOR (n) ON EACH labels(n)"
+        error: "A LOOKUP index is Neo4j's, and is not made on a SQL store, which finds a node's labels without one."
+      - ddl: "CREATE INDEX FOR ()-[r:KNOWS]-() ON (r.since)"
+        error: "An index on relationships is not made on a SQL store: Drivine's schema is of nodes."
+      - ddl: "CREATE CONSTRAINT FOR ()-[r:KNOWS]-() REQUIRE r.id IS UNIQUE"
+        error: "A constraint on relationships is not made on a SQL store: Drivine's schema is of nodes."
+      - ddl: "CREATE CONSTRAINT FOR ()-[r:KNOWS]-() REQUIRE r.id IS RELATIONSHIP UNIQUE"
+        error: "A constraint on relationships is not made on a SQL store: Drivine's schema is of nodes."
+      - ddl: "CREATE FULLTEXT INDEX titles FOR (n:Book|Film) ON EACH [n.title]"
+        error: "A full-text index over several labels is not made on a SQL store: declare one for each label."
+      - ddl: "CREATE CONSTRAINT FOR (p:Person) REQUIRE p.name IS NOT NULL"
+        error: "A property existence constraint (IS NOT NULL) is not made on a SQL store: Drivine's schema has uniqueness constraints only."
+      - ddl: "CREATE CONSTRAINT ON (p:Person) ASSERT exists(p.name)"
+        error: "A property existence constraint (IS NOT NULL) is not made on a SQL store: Drivine's schema has uniqueness constraints only."
+      - ddl: "CREATE CONSTRAINT FOR (p:Person) REQUIRE (p.first, p.last) IS NODE KEY"
+        error: "A key constraint (IS NODE KEY) is not made on a SQL store: Drivine's schema has uniqueness constraints only."
+      - ddl: "CREATE CONSTRAINT FOR (p:Person) REQUIRE p.id IS KEY"
+        error: "A key constraint (IS NODE KEY) is not made on a SQL store: Drivine's schema has uniqueness constraints only."
+      - ddl: "CREATE CONSTRAINT FOR (p:Person) REQUIRE p.name IS :: STRING"
+        error: "A property type constraint (IS :: TYPE) is not made on a SQL store: Drivine's schema has uniqueness constraints only."
+      - ddl: "CREATE VECTOR INDEX FOR (c:Chunk) ON (c.a, c.b) OPTIONS {indexConfig: {`vector.dimensions`: 3}}"
+        error: "A vector index is over one property, and this names 2."
+      - ddl: "CREATE VECTOR INDEX FOR (c:Chunk) ON c.embedding WITH [c.lang] OPTIONS {indexConfig: {`vector.dimensions`: 3}}"
+        error: "A vector index WITH properties to filter by is not made on a SQL store."
+      - ddl: "CREATE VECTOR INDEX FOR (c:Chunk) ON c.embedding"
+        error: "A vector index on a SQL store needs `vector.dimensions` in its OPTIONS indexConfig: nothing else gives the size of its embeddings."
+      - ddl: "CREATE VECTOR INDEX FOR (c:Chunk) ON c.embedding OPTIONS {indexConfig: {`vector.dimensions`: 3, `vector.similarity_function`: 'dot'}}"
+        error: "A vector index's `vector.similarity_function` is 'cosine' or 'euclidean', not 'dot'."
+      - ddl: "DROP INDEX ON :Person(name)"
+        error: "DROP INDEX ON … is Neo4j 4's, and drops by label and properties: drop the index by its name."
+      - ddl: "CREATE INDEX $name FOR (p:Person) ON (p.name)"
+        error: "A schema item named by a parameter, $name, is not created on a SQL store: write its name."
+
+  - name: "Not well formed"
+    description: "A schema command that is not well formed is refused, saying what was expected."
+    steps:
+      - ddl: "CREATE INDEX FOR (p:Person)"
+        error: "Invalid schema command: expected ON, but found the end."
+      - ddl: "CREATE INDEX FOR (p:Person) ON (q.name)"
+        error: "The property q.… is of q, and the pattern binds p."
+      - ddl: "CREATE CONSTRAINT FOR (p:Person) REQUIRE p.email IS UNIQUE RETURN p"
+        error: "Invalid schema command: expected the end of the schema command, which runs on its own, but found 'RETURN'."
+      - ddl: "DROP INDEX"
+        error: "Invalid schema command: expected name, but found the end."

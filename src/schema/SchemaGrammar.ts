@@ -9,6 +9,7 @@ import { SqliteSchemaGrammar } from '@/backend/sqlite/SqliteSchemaGrammar';
 import { SqlGraph } from '@/backend/sql/SqlGraph';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import type { LowerCopyStatements } from '@/schema/LowerCopyCatalog';
+import type { SchemaSpec } from '@/schema/SchemaCatalog';
 import {
     FullTextIndexSpec,
     itemName,
@@ -33,6 +34,12 @@ export interface SchemaItem extends VectorTuning {
      * over the label's nodes is gone), so that `ensure` makes the rest. It is listed, found and dropped as it is.
      */
     incomplete?: boolean;
+    /**
+     * The other names the item goes by, where the store keeps them beside it (the SQL stores, in their catalog record's
+     * `details`): names Neo4j schema DDL gave it where the schema API names it otherwise, so that a `DROP` by one finds
+     * it. Absent where there are none.
+     */
+    aliases?: string[];
 }
 
 /**
@@ -100,6 +107,12 @@ export interface SchemaGrammar {
      * anything is filled in or made for it. Absent where the engine can make any.
      */
     requireConstrainable?(spec: UniquenessConstraintSpec): void;
+    /**
+     * The statement that records `aliases` as all the aliases of the item of `kind`, whose record is there (none, where
+     * empty): a list `aliases` among its catalog record's `details`, as drivine4j keeps it. Absent where the store keeps
+     * no aliases (the graph engines). Every statement that records an item again keeps its aliases.
+     */
+    aliased?(kind: SchemaSpec['kind'], item: Pick<SchemaItem, 'label' | 'properties'>, aliases: string[]): string;
 }
 
 /** Neo4j's code for an index over the schema a constraint would make its own index over. */

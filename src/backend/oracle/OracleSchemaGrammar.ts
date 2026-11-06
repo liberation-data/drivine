@@ -1,6 +1,6 @@
 import { drivine4jStep, hasLabels, jsonKey, labelledValue, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { OracleSideTable } from '@/backend/oracle/OracleSideTable';
-import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
+import { aliasesJson, CATALOG_KINDS, catalogProperties, catalogRecord, withAliases } from '@/backend/sql/SqlCatalog';
 import { SchemaSpec } from '@/schema/SchemaCatalog';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import { catalogEntries, LOWER_COPY_KIND, LowerCopyStatements } from '@/schema/LowerCopyCatalog';
@@ -376,6 +376,15 @@ END;`
         );
     }
 
+    /** Records the aliases among the item's record's details, as a merge patch: `null` takes them out. */
+    aliased(kind: Kind, item: Pick<SchemaItem, 'label' | 'properties'>, aliases: string[]): string {
+        const patch = `{"aliases": ${aliases.length ? aliasesJson(aliases) : 'null'}}`;
+        return (
+            `UPDATE ${this.graph.catalog} SET details = JSON_MERGEPATCH(details, ${sqlText(patch)}) ` +
+            `WHERE ${catalogRecord({ kind, ...item })}`
+        );
+    }
+
     /**
      * The index over the properties of every node, whatever the label: its name, and the statement that makes it. Its
      * paths are drivine4j's, so it is one index whichever library makes it, and not those this library reads a property
@@ -415,6 +424,7 @@ END;`
                     name: it.name,
                     dimensions: it.details?.dimensions,
                     similarity: it.details?.similarity,
+                    ...withAliases(it.details),
                     ...(it.incomplete === 'true' ? { incomplete: true } : {})
                 }))
         };

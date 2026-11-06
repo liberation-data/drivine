@@ -103,6 +103,11 @@ drivine-python and drivine4j run the same spec. Reads and writes compile, with v
 quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
 anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
 
+Neo4j's schema DDL (`CREATE INDEX`, `CREATE CONSTRAINT`, `DROP INDEX`, `DROP CONSTRAINT`, `CALL db.awaitIndexes`) is
+no query: given to a `PersistenceManager`, it is applied to the store's schema, as
+[Neo4j schema DDL on the SQL stores](08-schema-management.md#neo4j-schema-ddl-on-the-sql-stores) describes, and the
+compiler alone refuses it.
+
 ### How complete is it?
 
 The [openCypher TCK](https://github.com/opencypher/openCypher/tree/main/tck) is openCypher's own test suite: 3,896

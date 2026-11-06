@@ -99,6 +99,29 @@ export class ConstraintManager {
         }
     }
 
+    /**
+     * Drops the constraint, whatever its state, and ensures it again, as `ensure` does: the data is checked first, and a
+     * key held more than once is a VIOLATION, the previous constraint being dropped already. A constraint that ignores
+     * case fills the lowercased copies in again on every node of its label. The constraint made again keeps the aliases
+     * its record kept (see SchemaItem's `aliases`).
+     */
+    async recreate(
+        spec: UniquenessConstraintSpec,
+        sampleSize: number = VIOLATION_SAMPLE,
+        replaceBlockingIndex: boolean = false
+    ): Promise<EnsureResult<UniquenessConstraintSpec>> {
+        const made = madeAs(spec);
+        const aliases = (await this.list()).find(
+            (it) => it.label === made.label && same(it.properties, made.properties)
+        )?.aliases;
+        await this.drop(spec);
+        const result = await this.ensure(spec, sampleSize, replaceBlockingIndex);
+        if (aliases && result.status === 'CREATED') {
+            await new IndexManager(this.executor, this.grammar).alias(made.kind, made, aliases);
+        }
+        return result;
+    }
+
     /** `ensure`, of the constraint as it is made. */
     private async ensureMade(
         spec: UniquenessConstraintSpec,
