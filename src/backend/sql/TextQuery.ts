@@ -242,7 +242,7 @@ function phraseAt(
 
 /**
  * The token's term; undefined when it holds no word. A word still holds a field up to its first bare colon. The term is
- * the start of a word when its last character is a bare `*`.
+ * the start of a word when its last character is a bare `*` and it is not quoted.
  */
 function termOf(token: Token): Term | undefined {
     const text = token.quoted ? token.chars : token.chars.slice(token.chars.findIndex((it) => isBare(it, ':')) + 1);
@@ -255,7 +255,8 @@ function termOf(token: Token): Term | undefined {
     if (!words.length) {
         return undefined;
     }
-    const prefix = isBare(text[text.length - 1], '*');
+    // A `*` inside quotes is text, as Lucene's parser reads it: "of sou*" is the phrase "of sou" (drivine4j#622).
+    const prefix = !token.quoted && isBare(text[text.length - 1], '*');
     return {
         words,
         oracleText: prefix
