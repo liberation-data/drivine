@@ -198,5 +198,7 @@ describe('TextQuery', () => {
         expect(TextQuery.parse('"kiw*"').scored).toEqual(['(^|[^[:alnum:]_])kiw($|[^[:alnum:]_])']);
         expect(TextQuery.parse('sou*').scored).toEqual(['(^|[^[:alnum:]_])sou']);
         expect(TextQuery.parse('+kiw*').scored).toEqual(['(^|[^[:alnum:]_])kiw']);
+        expect(TextQuery.parse('"kiw*"').oracleText).toEqual('({kiw})');
+        expect(TextQuery.parse('body:"of sou*"').oracleText).toEqual('({of sou})');
     });
 });

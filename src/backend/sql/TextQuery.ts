@@ -58,9 +58,10 @@ interface Parts {
  * whole word in lower-cased text. Through an Oracle Text index it is `oracleText`.
  *
  * It reads the plain core of the Lucene syntax the graph engines take: words, a `"quoted phrase"`, `+must`, `-not` and
- * `NOT not`, a `prefix*`, and `field:word` as the word. `AND` makes the word after it one a node must hold; `OR` is the
- * default between words. Anything else is read as text. A backslash before a character that is not part of a word
- * makes that character text; before a letter, a digit or an underscore it is itself text.
+ * `NOT not`, a `prefix*` (outside quotes: inside them, as in Lucene, a `*` is text), and `field:word` as the word.
+ * `AND` makes the word after it one a node must hold; `OR` is the default between words. Anything else is read as text.
+ * A backslash before a character that is not part of a word makes that character text; before a letter, a digit or an
+ * underscore it is itself text.
  */
 export class TextQuery {
     /** Reads the query. It must name at least one term that scores. */
