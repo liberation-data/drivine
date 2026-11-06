@@ -745,8 +745,21 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             let hlsJs: Promise<typeof import('hls.js/light').default | undefined> | undefined;
             const loadHls = () => (hlsJs ??= import('hls.js/light').then((it) => (it.default.isSupported() ? it.default : undefined), () => undefined));
             const nativeHls = (video: HTMLVideoElement) => video.canPlayType('application/vnd.apple.mpegurl') !== '';
+            const byte = (url: string) => void fetch(url, { headers: { Range: 'bytes=0-0' } }).catch(() => {});
+            // Pressed, every segment has a byte asked for, so a cold edge fetches the whole video from the origin at once
+            // while the first segments play, not each only as the player reaches it (on worlds.embabel.com, one late
+            // segment at a cold edge held the video for 20 seconds). The playlist is in the browser's cache by now, from
+            // warm, below. A playlist answered with an error page is left, rather than each line of the page asked for.
+            const warmAll = (hls: string) => {
+                const at = new URL(hls, location.href);
+                void fetch(at)
+                    .then((response) => (response.ok ? response.text() : ''))
+                    .then((list) => list.split('\n').forEach((line) => line.trim() && !line.startsWith('#') && byte(new URL(line.trim(), at).href)))
+                    .catch(() => {});
+            };
             const source = (video: HTMLVideoElement, player: HTMLElement) => {
                 const { hls, video: src } = player.dataset;
+                if (hls) warmAll(hls);
                 if (!hls || nativeHls(video)) {
                     video.src = hls || src!;
                     // A playlist the browser can't play after all (Chrome's own HLS is new) falls back too. Added before the
@@ -764,7 +777,18 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         video.src = src!;
                         return;
                     }
-                    const it = new Hls();
+                    // A segment whose first byte takes over 4 seconds (hls.js waits 10 by default) is asked for again: a
+                    // fetch from a cold edge that stalls is better retried than waited out. The rest are hls.js's defaults.
+                    const it = new Hls({
+                        fragLoadPolicy: {
+                            default: {
+                                maxTimeToFirstByteMs: 4000,
+                                maxLoadTimeMs: 120000,
+                                timeoutRetry: { maxNumRetry: 4, retryDelayMs: 0, maxRetryDelayMs: 0 },
+                                errorRetry: { maxNumRetry: 6, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+                            },
+                        },
+                    });
                     it.on(Hls.Events.ERROR, (_, data) => {
                         if (!data.fatal) return;
                         it.destroy();
@@ -1020,7 +1044,6 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             const warm = () => {
                 const player = document.querySelector<HTMLElement>('.watch .player');
                 const { hls, video: src } = player?.dataset ?? {};
-                const byte = (url: string) => void fetch(url, { headers: { Range: 'bytes=0-0' } }).catch(() => {});
                 if (!hls) return src && byte(src);
                 for (const file of ['index.m3u8', 'init.mp4']) void fetch(new URL(file, new URL(hls, location.href))).catch(() => {});
                 for (const file of ['000.m4s', '001.m4s']) byte(new URL(file, new URL(hls, location.href)).href);
