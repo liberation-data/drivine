@@ -145,6 +145,39 @@ describe('A property a pattern compares with a row, compiled', () => {
             expect(list).toMatch(/OR JSON_VALUE\(.*, '\$'\) IS NULL\)/);
         });
 
+        it("plans each unwound list as a few rows in the query that reads it: a UNION's, one after a subquery, one past a text with a bracket", () => {
+            /** Each hinted alias, and the alias of the first list the query its hint opens reads: they are to be the same. */
+            const placed = (sql: string): [string, string][] =>
+                [
+                    ...sql.matchAll(
+                        /SELECT \/\*\+ CARDINALITY\((u\d+) 10\) \*\/ (?:(?!SELECT )[\s\S])*?'\$\[\*\]' COLUMNS \(item_no FOR ORDINALITY, item JSON PATH '\$'\)\) (u\d+)\b/g
+                    )
+                ].map((it) => [it[1], it[2]]);
+            const union = oracle(
+                'UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN a.k UNION ' +
+                    'UNWIND $ids AS id MATCH (a:Person {id: id}) RETURN a.k',
+                { ...rows('p1'), ids: ['p2'] }
+            );
+            expect(placed(union)).toEqual([
+                ['u1', 'u1'],
+                ['u4', 'u4']
+            ]);
+            // The outermost query reads no list: a hint there is one Oracle doesn't apply.
+            expect(union).not.toMatch(/^SELECT \/\*\+[^*]*CARDINALITY/);
+            // A subquery read before the list: the hint is the query's that reads both.
+            const after = oracle(
+                'MATCH (b:Person {id: $s}) WITH b UNWIND $ids AS id MATCH (a:Person {id: id}) RETURN a.k',
+                { s: 'p1', ids: ['p2'] }
+            );
+            expect(after.match(/CARDINALITY\((u\d+) 10\)/)?.[1]).toBe(/\) (u\d+)\n/.exec(after)?.[1]);
+            expect(after).toMatch(
+                /SELECT \/\*\+ CARDINALITY\(u\d+ 10\) \*\/ JSON\(JSON_QUERY\(JSON_SERIALIZE\(JSON_TRANSFORM\(n\d+\.props, KEEP '\$\.k'\)/
+            );
+            expect(
+                placed(oracle("UNWIND [{s: 'a)('}, {s: 'p2'}] AS row MATCH (a:Person {id: row.s}) RETURN a.k"))
+            ).toEqual([['u1', 'u1']]);
+        });
+
         it('lets through an empty text or one past 4,000 bytes, which the index holds no text for', () => {
             for (const value of ['', 'x'.repeat(5000)]) {
                 expect(oracle(ROW, rows('p1', value))).toMatch(/OR JSON_VALUE\(.*, '\$'\) IS NULL\)/);
