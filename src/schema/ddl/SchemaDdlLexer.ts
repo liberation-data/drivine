@@ -39,8 +39,22 @@ export function described(token: Token): string {
 
 const LETTER = /\p{L}/u;
 const LETTER_OR_DIGIT = /[\p{L}\p{Nd}]/u;
-const DIGIT = /[0-9]/;
+/** A decimal digit of any script, as drivine4j's `isDigit` reads one: `٣` is a 3, as `3` is. */
+const DIGIT = /\p{Nd}/u;
 const SPACE = /\s/;
+
+/**
+ * The digit as `0` to `9`. The lexer reads by UTF-16 code unit, and in the Basic Multilingual Plane each script's decimal
+ * digits are a run of ten code points, zero first, so the digit's value is how far it is from the first of its run.
+ */
+function asciiDigit(digit: string): string {
+    const code = digit.charCodeAt(0);
+    let zero = code;
+    while (DIGIT.test(String.fromCharCode(zero - 1))) {
+        zero--;
+    }
+    return String(code - zero);
+}
 
 /** Reads the text into tokens as they are asked for, so that a statement that is not DDL is read no further than its first few. */
 export class Lexer {
@@ -186,7 +200,7 @@ export class Lexer {
             }
         }
         const written = this.text.substring(start, this.at);
-        return { type: 'NUMBER', text: written, value: Number(written) };
+        return { type: 'NUMBER', text: written, value: Number(written.replace(/\p{Nd}/gu, asciiDigit)) };
     }
 
     /** Reads past the digits at the place, and says whether there were any. */

@@ -26,7 +26,11 @@ export class PersistenceManagerFactory {
      */
     private readonly schemaCommands = new Map<string, SchemaCommands>();
 
-    /** The object managers schema commands apply DDL through, made when first asked for. */
+    /**
+     * The object managers schema commands apply DDL through, made when first asked for: over the non-transactional
+     * managers, as Drivine applies schema outside any transaction, so that DDL run through a non-transactional manager
+     * inside an open one records its marker whatever the transaction does, as it makes the item.
+     */
     private objects?: GraphObjectManagerFactory;
 
     constructor(
@@ -83,7 +87,7 @@ export class PersistenceManagerFactory {
         let commands = this.schemaCommands.get(database);
         if (!commands) {
             commands = new SchemaCommands(database, type, () => {
-                this.objects ??= new GraphObjectManagerFactory(this);
+                this.objects ??= new GraphObjectManagerFactory(this, {}, 'NON_TRANSACTIONAL');
                 return this.objects;
             });
             this.schemaCommands.set(database, commands);

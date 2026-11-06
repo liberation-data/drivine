@@ -77,7 +77,8 @@ export class IndexManager {
 
     /**
      * Drops the index over the label and properties, whatever its shape, and makes it as the spec says. Destructive. An
-     * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not.
+     * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not. The
+     * index made again keeps the aliases its record kept (see SchemaItem's `aliases`).
      */
     async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         // The copies are filled in again too, where Cypher or SQL of your own, which keeps no copy, left one out of step.

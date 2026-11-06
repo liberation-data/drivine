@@ -8,7 +8,10 @@ import { SqliteSchemaGrammar } from '@/backend/sqlite/SqliteSchemaGrammar';
 import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { DatabaseRegistry } from '@/connection/DatabaseRegistry';
 import { DatabaseType } from '@/connection/DatabaseType';
+import { NonTransactionalPersistenceManager } from '@/manager/NonTransactionalPersistenceManager';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
+import { QuerySpecification } from '@/query/QuerySpecification';
+import { SchemaCommands } from '@/schema/ddl/SchemaCommands';
 import { NEO4J_SCHEMA } from '@/schema/SchemaGrammar';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 
@@ -92,5 +95,50 @@ describe('Schema commands', () => {
         expect(commands('default')).toBe(commands('users'));
         expect((commands('users') as any).database).toEqual('users');
         expect(commands('graph')).toBeUndefined();
+    });
+
+    it("are run by a factory's non-transactional manager on a SQL store, db.awaitIndexes connecting to nothing and a refusal refused as the translator refuses it, and sent as they are to a graph engine", async () => {
+        const registry = DatabaseRegistry.getInstance();
+        registry.register(provider('users', DatabaseType.POSTGRES));
+        registry.register(provider('graph', DatabaseType.NEO4J));
+        const factory = new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance());
+        const cypher = (text: string): QuerySpecification<unknown> =>
+            new QuerySpecification({ text, language: 'CYPHER' });
+        const sql = factory.get('users', 'NON_TRANSACTIONAL');
+
+        expect(await sql.query(cypher('CALL db.awaitIndexes(300)'))).toEqual([]);
+        await expect(sql.query(cypher('CREATE POINT INDEX FOR (p:Place) ON (p.at)'))).rejects.toThrow(
+            "A POINT index is Neo4j's, and is not made on a SQL store."
+        );
+        await expect(
+            factory.get('graph', 'NON_TRANSACTIONAL').query(cypher('CALL db.awaitIndexes(300)'))
+        ).rejects.toThrow('no connection in a unit test');
+    });
+
+    it('are refused by a manager made without a PersistenceManagerFactory, which has none to run them', async () => {
+        const pm = new NonTransactionalPersistenceManager(
+            provider('users', DatabaseType.POSTGRES),
+            'users',
+            DatabaseType.POSTGRES
+        );
+        await expect(
+            pm.query(new QuerySpecification({ text: 'CREATE INDEX FOR (p:Person) ON (p.name)', language: 'CYPHER' }))
+        ).rejects.toThrow('Schema DDL is run by a persistence manager a PersistenceManagerFactory made.');
+    });
+
+    it('run one at a time, a command that fails leaving the next to run', async () => {
+        const commands = new SchemaCommands('users', DatabaseType.POSTGRES, () => {
+            throw new Error('no object managers in a unit test');
+        });
+        const results = await Promise.allSettled([
+            commands.run({ type: 'NOT_DDL' }),
+            commands.run({ type: 'REFUSED', message: 'Refused as the translator refuses it.' }),
+            commands.run({ type: 'AWAIT_INDEXES' })
+        ]);
+        expect(results.map((it) => (it.status === 'rejected' ? (it.reason as Error).message : it.status))).toEqual([
+            'Not schema DDL',
+            'Refused as the translator refuses it.',
+            'fulfilled'
+        ]);
     });
 });

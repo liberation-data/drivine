@@ -428,6 +428,33 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         await schema.enforce(); // neither refused catalog was kept
         expect(await hasRange('RtLost')).toBe(false);
     });
+
+    it("should drop on remove what only the owner declares, leave what another owner's marker records, and refuse a version", async () => {
+        const own = rangeIndex('RtTag', 'slug');
+        const shared = rangeIndex('RtShared', 'slug');
+        const target = (...specs: SchemaSpec[]) =>
+            SchemaCatalog.of(...specs)
+                .named('dice')
+                .forDatabase(engine.name);
+        await manager([SchemaCatalog.of(shared).named('app')]).enforce();
+        // A manager built later, which knows the application's item by its marker alone.
+        const schema = manager([]);
+        await schema.ensure(target(own, shared));
+
+        await expect(schema.remove(target(own).withVersion('v1'))).rejects.toThrow(/cannot carry a version/);
+        await schema.remove('dice');
+        expect(await hasRange('RtTag')).toBe(true);
+
+        await schema.remove(target(own, shared));
+
+        expect(await hasRange('RtTag')).toBe(false);
+        expect(await hasRange('RtShared')).toBe(true);
+        expect((await record('dice'))?.keys ?? []).toEqual([]);
+        expect((await record('app'))!.keys).toEqual(['RANGE_INDEX:RtShared:slug:RtShared_slug_range']);
+        expect(warn.mock.calls.some(([it]) => String(it).includes("left in place, as 'app' declare(s) it"))).toBe(true);
+        await schema.enforce();
+        expect(await hasRange('RtTag')).toBe(false);
+    });
 });
 
 describe.each(allStores().filter((it) => it.type === DatabaseType.NEO4J))(

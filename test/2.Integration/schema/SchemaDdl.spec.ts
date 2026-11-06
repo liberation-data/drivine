@@ -247,6 +247,21 @@ describe.each(sqlStores())('Neo4j schema DDL on $name', (store) => {
         await ddl('DROP CONSTRAINT UNIQUE_IMPORT_NAME IF EXISTS');
     });
 
+    it('should DROP by the name the schema API gives it an item DDL ensured that is no longer there, and forget it in the ddl owner', async () => {
+        const spec = rangeIndex('Person', 'name');
+        await ddl('CREATE INDEX FOR (p:Person) ON (p.name)');
+        await gom().indexes.drop(spec);
+        expect(await find(spec)).toBeUndefined();
+        expect(await ddlKeys()).toEqual([inventoryKey(spec)]);
+
+        // Found by what DDL ensured in this process, though the store no longer holds it.
+        await ddl(`DROP INDEX ${itemName(spec)}`);
+        expect(await ddlKeys()).toEqual([]);
+        expect(await failure(async () => ddl(`DROP INDEX ${itemName(spec)}`))).toContain(
+            `no index named '${itemName(spec)}'`
+        );
+    });
+
     it('should only add an alias with IF NOT EXISTS over the item, fail without it, refuse a name another item goes by, and DROP by either name', async () => {
         const spec = rangeIndex('Person', 'name');
         await ddl('CREATE INDEX by_name FOR (p:Person) ON (p.name)');
@@ -272,6 +287,7 @@ describe.each(sqlStores())('Neo4j schema DDL on $name', (store) => {
         expect(await failure(async () => ddl('DROP INDEX pet_id'))).toContain('DROP INDEX does not drop it');
         await ddl('DROP CONSTRAINT pet_id');
         expect(await find(uniquenessConstraint('Pet', 'id'))).toBeUndefined();
+        expect(await failure(async () => ddl('DROP CONSTRAINT by_name'))).toContain('DROP CONSTRAINT does not drop it');
 
         await ddl('DROP INDEX person_by_name');
         expect(await find(spec)).toBeUndefined();
@@ -291,8 +307,26 @@ describe.each(sqlStores())('Neo4j schema DDL on $name', (store) => {
         // On Oracle a uniqueness constraint over the one property records the range index again, as served by it.
         await gom().constraints.ensure(uniquenessConstraint('Person', 'name'));
         expect(await aliases(rangeIndex('Person', 'name'))).toEqual(['by_name']);
-        await app([rangeIndex('Person', 'name')]).recreateAll();
+        await app([rangeIndex('Person', 'name'), uniquenessConstraint('Person', 'email')]).recreateAll();
         expect(await aliases(rangeIndex('Person', 'name'))).toEqual(['by_name']);
+        expect(await aliases(uniquenessConstraint('Person', 'email'))).toEqual(['person_email']);
+    });
+
+    it('should keep the aliases of a vector index recreated on drift, as of other dimensions', async () => {
+        await ddl(
+            'CREATE VECTOR INDEX chunk_embedding FOR (c:Chunk) ON c.embedding OPTIONS {indexConfig: {`vector.dimensions`: 3}}'
+        );
+        const wider = vectorIndex('Chunk', 'embedding', 4);
+        const manager = new SchemaManager(objects, {
+            catalogs: [SchemaCatalog.of(wider).named('app').forDatabase(database)],
+            recreateOnDrift: true
+        });
+
+        expect(statuses(await manager.enforce())).toEqual(['RECREATED']);
+
+        restart();
+        expect((await find(wider))?.dimensions).toEqual(4);
+        expect(await aliases(wider)).toEqual(['chunk_embedding']);
     });
 
     it("should, on a DROP of an item the application declares, forget it in the ddl owner alone and leave it in place, so the application's enforce finds it as it was", async () => {
@@ -385,6 +419,7 @@ describe.each(sqlStores())('Neo4j schema DDL on $name', (store) => {
         await ddl(
             "CREATE VECTOR INDEX chunk_embedding FOR (n:Chunk) ON n.embedding OPTIONS {indexConfig: {`vector.dimensions`: 3, `vector.similarity_function`: 'euclidean'}}"
         );
+        expect(warnings().some((it) => it.includes("made without the analyzer 'english'"))).toBe(true);
         const all = async (): Promise<string[]> =>
             [
                 ...(await gom().indexes.list('RANGE')),
@@ -471,6 +506,23 @@ describe.each(sqlStores())('Neo4j schema DDL on $name', (store) => {
         expect(await find(rangeIndex('Person', 'name'))).toBeDefined();
     });
 
+    it("should make and record DDL run through the non-transactional manager inside an open transaction, which the transaction's rollback leaves as it is", async () => {
+        const spec = rangeIndex('Person', 'name');
+        await inDrivineContext()
+            .withTransaction({ rollback: true })
+            .run(async () => ddl('CREATE INDEX FOR (p:Person) ON (p.name)'));
+
+        expect(await find(spec)).toBeDefined();
+        expect(await ddlKeys()).toEqual([inventoryKey(spec)]);
+
+        await inDrivineContext()
+            .withTransaction({ rollback: true })
+            .run(async () => ddl(`DROP INDEX ${itemName(spec)}`));
+
+        expect(await find(spec)).toBeUndefined();
+        expect(await ddlKeys()).toEqual([]);
+    });
+
     it("should drop on remove what no one else declares, leave what a startup catalog declares, and forget both in the owner's marker", async () => {
         const shared = rangeIndex('Shared', 'p');
         const own = rangeIndex('Own', 'p');
@@ -489,5 +541,17 @@ describe.each(sqlStores())('Neo4j schema DDL on $name', (store) => {
         await manager.enforce();
         expect(await find(own)).toBeUndefined();
         expect(await ddlKeys('app')).toEqual([inventoryKey(shared)]);
+    });
+
+    it('should drop on remove an item no one declares for an owner that has no marker, and write the owner none', async () => {
+        const spec = rangeIndex('Loose', 'p');
+        await gom().indexes.ensure(spec);
+
+        await new SchemaManager(objects, { catalogs: [] }).remove(
+            SchemaCatalog.of(spec).named('nobody').forDatabase(database)
+        );
+
+        expect(await find(spec)).toBeUndefined();
+        expect(await cypher('MATCH (m:_DrivineSchema) RETURN m.scope')).not.toContain('nobody');
     });
 });
