@@ -1,6 +1,19 @@
 import { CypherReader } from '@/cypher/CypherReader';
-import { CypherFloat, Expression } from '@/cypher/ast/Expression';
-import { Call, Merge, Return, SetClause, Remove, Delete, Match, Unwind, With } from '@/cypher/ast/Query';
+import { CypherFloat, Expression, PatternComprehension } from '@/cypher/ast/Expression';
+import {
+    Call,
+    Create,
+    Foreach,
+    Merge,
+    Projection,
+    Return,
+    SetClause,
+    Remove,
+    Delete,
+    Match,
+    Unwind,
+    With
+} from '@/cypher/ast/Query';
 
 /** The one item a statement's last clause, a `RETURN`, returns. */
 function returned(cypher: string): Expression {
@@ -425,5 +438,232 @@ describe('CypherReader', () => {
         expect(() => CypherReader.read('MATCH (n RETURN n')).toThrow(
             /^The statement is not Cypher, at line 1, column /
         );
+    });
+
+    it('refuses what is still not Cypher, now a keyword may name a variable, where it stops being Cypher', () => {
+        [
+            ['MATCH (n RETURN n', 'line 1, column 10'],
+            ['RETURN CASE WHEN 1 THEN 2', 'line 1, column 26'],
+            ['RETURN CASE WHEN true THEN end', 'line 1, column 31'],
+            ['MATCH (n) RETURN n ORDER', 'line 1, column 25'],
+            ['MATCH (n)\nWITH n\nRETURN n ORDER BY', 'line 3, column 18']
+        ].forEach(([cypher, at]) => {
+            expect(() => CypherReader.read(cypher)).toThrow(new RegExp(`^The statement is not Cypher, at ${at}: `));
+        });
+    });
+
+    it('reads a keyword as a variable as Neo4j takes it, and a CASE still ends at its END', () => {
+        // APOC's export names a relationship's nodes start and end (drivine4j#635).
+        const [, , end, create] = CypherReader.read(
+            'UNWIND [{start: {_id: 1}, end: {_id: 2}}] AS row MATCH (start:L {id: row.start._id}) MATCH (end:L {id: row.end._id}) CREATE (start)-[r:T]->(end)'
+        ).clauses as [Unwind, Match, Match, Create];
+        expect(end.patterns[0].nodes.map((it) => it.variable)).toEqual(['end']);
+        expect(create.patterns[0].nodes.map((it) => it.variable)).toEqual(['start', 'end']);
+        expect(returned('WITH 1 AS when, 2 AS end, 3 AS else RETURN CASE WHEN when THEN end ELSE else END')).toEqual({
+            kind: 'Case',
+            alternatives: [[variable('when'), variable('end')]],
+            otherwise: variable('else')
+        });
+        [
+            'match',
+            'MATCH',
+            'order',
+            'return',
+            'case',
+            'distinct',
+            'not',
+            'in',
+            'is',
+            'as',
+            'all',
+            'call',
+            'yield',
+            'skip',
+            'limit',
+            'union',
+            'exists'
+        ].forEach((word) => {
+            expect([word, returned(`UNWIND [1] AS ${word} RETURN ${word}`)]).toEqual([word, variable(word)]);
+        });
+        expect(returned('UNWIND [1] AS desc RETURN desc ORDER BY desc DESC')).toEqual(variable('desc'));
+        // As written, so End is another variable than end, and between backticks the same.
+        const first = (cypher: string) => (CypherReader.read(cypher).clauses[0] as Match).patterns[0].nodes[0].variable;
+        expect(first('MATCH (End) RETURN end')).toEqual('End');
+        expect(first('MATCH (`end`) RETURN end')).toEqual('end');
+        // A value stays one.
+        expect(returned('RETURN null')).toEqual(literal(null));
+        expect(returned('RETURN true')).toEqual(literal(true));
+        expect(returned('WITH true AS x RETURN NOT x')).toEqual({
+            kind: 'Unary',
+            operator: 'NOT',
+            operand: variable('x')
+        });
+    });
+
+    it('reads a keyword as a variable wherever a variable stands', () => {
+        const foreach = CypherReader.read('UNWIND [1] AS end FOREACH (end IN [1] | CREATE (:A {v: end}))').clauses[1];
+        expect((foreach as Foreach).variable).toEqual('end');
+        const call = CypherReader.read('WITH 1 AS end, 2 AS case CALL (end, case) { RETURN end + case AS e } RETURN e')
+            .clauses[1] as Call;
+        expect(call.imports).toEqual(['end', 'case']);
+        const [, set, remove] = CypherReader.read(
+            'MATCH (end) SET end.x = 1, end:L, end += {a: 1}, end = {} REMOVE end.x, end:L'
+        ).clauses as [Match, SetClause, Remove];
+        expect(set.items).toEqual([
+            { kind: 'Property', variable: 'end', key: 'x', value: literal(1) },
+            { kind: 'Labels', variable: 'end', labels: ['L'] },
+            { kind: 'Add', variable: 'end', value: { kind: 'MapLiteral', entries: [['a', literal(1)]] } },
+            { kind: 'Replace', variable: 'end', value: { kind: 'MapLiteral', entries: [] } }
+        ]);
+        expect(remove.items).toEqual([
+            { kind: 'Property', variable: 'end', key: 'x' },
+            { kind: 'Labels', variable: 'end', labels: ['L'] }
+        ]);
+        expect(returned('CALL db.labels() YIELD label AS end RETURN end')).toEqual(variable('end'));
+        const [path] = (CypherReader.read('MATCH end = (a)-[case]->(b) RETURN end').clauses[0] as Match).patterns;
+        expect([path.variable, path.relationships[0].variable]).toEqual(['end', 'case']);
+        expect(returned('WITH [1] AS l RETURN [end IN l WHERE end > 0 | end]')).toEqual({
+            kind: 'ListComprehension',
+            variable: 'end',
+            list: variable('l'),
+            where: { kind: 'Binary', operator: 'GREATER_THAN', left: variable('end'), right: literal(0) },
+            projection: variable('end')
+        });
+        expect(returned('WITH [true] AS l RETURN all(all IN l WHERE all)')).toEqual({
+            kind: 'Quantifier',
+            of: 'ALL',
+            variable: 'all',
+            list: variable('l'),
+            where: variable('all')
+        });
+        expect(returned('WITH [1] AS l RETURN reduce(end = 0, in IN l | end + in)')).toEqual({
+            kind: 'Reduce',
+            accumulator: 'end',
+            initial: literal(0),
+            variable: 'in',
+            list: variable('l'),
+            expression: { kind: 'Binary', operator: 'ADD', left: variable('end'), right: variable('in') }
+        });
+        expect(returned('MATCH (end) RETURN end {.name}')).toEqual({
+            kind: 'MapProjection',
+            variable: 'end',
+            elements: [{ kind: 'Selected', key: 'name' }]
+        });
+        expect(returned('MATCH (n), (end) RETURN n {end, case: end}')).toEqual({
+            kind: 'MapProjection',
+            variable: 'n',
+            elements: [
+                { kind: 'Variable', name: 'end' },
+                { kind: 'Entry', key: 'case', value: variable('end') }
+            ]
+        });
+        const comprehension = returned(
+            'MATCH (a) RETURN [order = (a)-[case]->(end) WHERE end.x = 1 | end.name]'
+        ) as PatternComprehension;
+        expect(comprehension.pattern.variable).toEqual('order');
+        expect(comprehension.pattern.nodes.map((it) => it.variable)).toEqual(['a', 'end']);
+        expect(comprehension.pattern.relationships.map((it) => it.variable)).toEqual(['case']);
+    });
+
+    it('reads a keyword that names a variable beside the same keyword as Neo4j reads it', () => {
+        const projection = (cypher: string): Projection => {
+            const clauses = CypherReader.read(cypher).clauses;
+            return (clauses[clauses.length - 1] as Return).projection;
+        };
+        expect(projection('UNWIND [1] AS distinct RETURN distinct')).toEqual({
+            distinct: false,
+            star: false,
+            items: [{ expression: variable('distinct'), name: 'distinct' }],
+            orderBy: []
+        });
+        expect(projection('UNWIND [1] AS distinct RETURN DISTINCT distinct')).toEqual({
+            distinct: true,
+            star: false,
+            items: [{ expression: variable('distinct'), name: 'distinct' }],
+            orderBy: []
+        });
+        expect(projection('UNWIND [1] AS desc RETURN desc ORDER BY desc DESC').orderBy).toEqual([
+            { expression: variable('desc'), descending: true }
+        ]);
+        expect(projection('UNWIND [1] AS asc RETURN asc ORDER BY asc').orderBy).toEqual([
+            { expression: variable('asc'), descending: false }
+        ]);
+        const withOrder = CypherReader.read('UNWIND [1] AS order WITH order ORDER BY order RETURN order')
+            .clauses[1] as With;
+        expect(withOrder.projection.orderBy).toEqual([{ expression: variable('order'), descending: false }]);
+        const paged = projection('UNWIND [1] AS skip WITH skip AS limit RETURN limit SKIP 0 LIMIT 1');
+        expect([paged.skip, paged.limit]).toEqual([literal(0), literal(1)]);
+        // count(distinct) is count() of DISTINCT and nothing, as it was before a keyword could name a variable.
+        expect(returned('UNWIND [1] AS x RETURN count(distinct)')).toEqual({
+            kind: 'Function',
+            name: 'count',
+            distinct: true,
+            arguments: []
+        });
+        expect(returned('UNWIND [1] AS distinct RETURN count(DISTINCT distinct)')).toEqual({
+            kind: 'Function',
+            name: 'count',
+            distinct: true,
+            arguments: [variable('distinct')]
+        });
+        const where = CypherReader.read('MATCH (where) WHERE where.x = 1 RETURN where').clauses[0] as Match;
+        expect(where.patterns[0].nodes.map((it) => it.variable)).toEqual(['where']);
+        expect(where.where).toEqual({
+            kind: 'Binary',
+            operator: 'EQUALS',
+            left: { kind: 'Property', subject: variable('where'), key: 'x' },
+            right: literal(1)
+        });
+        expect(returned('WITH 1 AS end, 0 AS then RETURN CASE end WHEN 1 THEN end ELSE then END')).toEqual({
+            kind: 'Case',
+            subject: variable('end'),
+            alternatives: [[literal(1), variable('end')]],
+            otherwise: variable('then')
+        });
+        const [exists, subquery] = projection(
+            'UNWIND [1] AS exists RETURN exists, EXISTS { MATCH (exists) } AS e'
+        ).items.map((it) => it.expression);
+        expect(exists).toEqual(variable('exists'));
+        expect(subquery).toMatchObject({ kind: 'Subquery', of: 'EXISTS' });
+        expect(
+            projection('UNWIND [[true]] AS all RETURN all, all(x IN all WHERE x) AS a').items.map((it) => it.expression)
+        ).toEqual([
+            variable('all'),
+            { kind: 'Quantifier', of: 'ALL', variable: 'x', list: variable('all'), where: variable('x') }
+        ]);
+        const union = CypherReader.read(
+            'UNWIND [1] AS union RETURN union UNION ALL UNWIND [2] AS all RETURN all AS union UNION RETURN 3 AS union'
+        );
+        expect(union.unions.map((it) => it.all)).toEqual([true, false]);
+        const allPart = union.unions[0].clauses;
+        expect((allPart[allPart.length - 1] as Return).projection.items[0].expression).toEqual(variable('all'));
+        expect(returned('UNWIND [true] AS not RETURN NOT not')).toEqual({
+            kind: 'Unary',
+            operator: 'NOT',
+            operand: variable('not')
+        });
+        expect(returned('UNWIND [1] AS is RETURN is IS NOT NULL')).toEqual({
+            kind: 'Unary',
+            operator: 'IS_NOT_NULL',
+            operand: variable('is')
+        });
+        expect(returned('UNWIND [[1]] AS in RETURN 1 IN in')).toEqual({
+            kind: 'Binary',
+            operator: 'IN',
+            left: literal(1),
+            right: variable('in')
+        });
+        const merge = CypherReader.read('MERGE (on:A) ON CREATE SET on.a = 1 ON MATCH SET on.b = 2')
+            .clauses[0] as Merge;
+        expect([merge.onCreate, merge.onMatch]).toEqual([
+            [{ kind: 'Property', variable: 'on', key: 'a', value: literal(1) }],
+            [{ kind: 'Property', variable: 'on', key: 'b', value: literal(2) }]
+        ]);
+        const clauses = CypherReader.read('MATCH (detach) DETACH DELETE detach').clauses;
+        expect(clauses[clauses.length - 1]).toEqual({
+            kind: 'Delete',
+            detach: true,
+            expressions: [variable('detach')]
+        });
     });
 });

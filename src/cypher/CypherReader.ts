@@ -953,8 +953,10 @@ function parameter(context: OC_ParameterContext): Parameter {
 
 // ----- Names and literals -----
 
+/** A variable's name: a keyword, as `end`, as it is written (drivine4j#635). */
 function name(context: OC_VariableContext): string {
-    return symbolic(context.oC_SymbolicName());
+    const symbolicName = context.oC_SymbolicName();
+    return symbolicName ? symbolic(symbolicName) : context.oC_KeywordVariable()!.getText();
 }
 
 function optionalName(context: OC_VariableContext | null | undefined): string | undefined {

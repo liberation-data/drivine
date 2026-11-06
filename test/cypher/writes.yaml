@@ -872,3 +872,13 @@ cases:
       - only: [neo4j, oracle]
         cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(n)"
         rows: [2]
+
+  - name: "Relationships as APOC's export writes them"
+    description: "apoc.export.cypher writes each batch of relationships as an UNWIND of rows that names its nodes start and end by a key of spaces, and the stores make them (drivine4j#635, drivine4j#617)."
+    steps:
+      - cypher: "UNWIND [{_id: 1, properties: {name: 'Ada'}}, {_id: 2, properties: {name: 'Bob'}}, {_id: 3, properties: {name: 'Cy'}}] AS row CREATE (n:CyWrite:`UNIQUE IMPORT LABEL` {`UNIQUE IMPORT ID`: row._id}) SET n += row.properties"
+      - cypher: "UNWIND [{start: {_id: 1}, end: {_id: 2}, properties: {since: 2020}}, {start: {_id: 2}, end: {_id: 3}, properties: {}}, {start: {_id: 3}, end: {_id: 9}, properties: {}}] AS row MATCH (start:`UNIQUE IMPORT LABEL` {`UNIQUE IMPORT ID`: row.start._id}) MATCH (end:`UNIQUE IMPORT LABEL` {`UNIQUE IMPORT ID`: row.end._id}) CREATE (start)-[r:KNOWS]->(end) SET r += row.properties"
+      - note: "A row whose node isn't there makes nothing."
+        cypher: "MATCH (a:CyWrite)-[r:KNOWS]->(b:CyWrite) RETURN [a.name, r.since, b.name] ORDER BY a.name"
+        rows: [["Ada", 2020, "Bob"], ["Bob", null, "Cy"]]
+
