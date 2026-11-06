@@ -203,7 +203,11 @@ Notes:
   characters, beside the label's average. Scored by the counts alone, a common word outweighed the word a query was
   about, and a long text won by holding more of everything: over drivine4j's docs, the top hit was Neo4j's for 6 of 21
   queries, and is for 17. How rare a term is comes out the same narrowed; only the label's count of nodes and their
-  average length are read from every node of it, and no term is matched in that read.
+  average length are read from every node of it, and no term is matched in that read. A dotted name, as
+  `org.example.models`, is words here, split at each dot, as it is on Oracle and SQLite: `example models` finds it, and
+  the name itself is the phrase of its words. Neo4j's default analyzer keeps such a name one token, which the whole name
+  finds and `example models` doesn't. drivine4j's `FullTextIndexSpec` picks another analyzer there; Drivine for
+  TypeScript doesn't take one yet.
 
 ### SQLite
 
