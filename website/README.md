@@ -20,6 +20,10 @@ The site at [drivine.org](https://drivine.org/), built with
   under the player.
 - `public/og-card.jpg`: the card a shared link to the site shows (the landing page's and every docs page's
   `og:image`), the video's poster `src/assets/video-poster.jpg` cropped to 1200x630. A new poster replaces it too.
+- `public/favicon.svg`: the tab icon on every page, `src/assets/cow-black.png` embedded as a data URI and inverted to
+  white when the browser's theme is dark. Safari doesn't take SVG tab icons and shows `public/favicon.ico`, linked
+  beside it with `sizes="32x32"` so other browsers still pick the SVG. A new cow replaces both:
+  `printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><style>@media (prefers-color-scheme:dark){image{filter:invert(1)}}</style><image width="96" height="96" href="data:image/png;base64,%s"/></svg>\n' "$(base64 -i src/assets/cow-black.png)" > public/favicon.svg`.
 - `src/components/Share.astro`: the Share buttons under the video, on its end card, in the footer, and beside each docs
   page's title (`src/components/PageTitle.astro`).
 - The docs are generated, not written here: `scripts/import-readmes.mjs` turns this repository's `docs/` into the
