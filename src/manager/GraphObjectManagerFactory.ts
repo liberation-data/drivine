@@ -3,6 +3,7 @@ import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManager';
 import { IndexAdvicePolicy } from '@/dsl/QueryIndexAdvisor';
+import { PersistenceManagerType } from '@/manager/PersistenceManagerType';
 
 /** How the managers a factory makes treat queries: DrivineModuleOptions' `query`. */
 export interface QueryOptions {
@@ -12,7 +13,8 @@ export interface QueryOptions {
 
 /**
  * Makes one object manager per database. Each runs through the database's delegating persistence manager, so it
- * takes part in a `@Transactional` method's transaction when there is one.
+ * takes part in a `@Transactional` method's transaction when there is one; or through the persistence manager of
+ * `type`, where one is given, as schema commands' are non-transactional so that no transaction takes in their marker.
  */
 export class GraphObjectManagerFactory {
     readonly registry = new ModelRegistry();
@@ -20,13 +22,14 @@ export class GraphObjectManagerFactory {
 
     constructor(
         readonly persistenceManagerFactory: PersistenceManagerFactory,
-        readonly options: QueryOptions = {}
+        readonly options: QueryOptions = {},
+        private readonly type: PersistenceManagerType = 'DELEGATING'
     ) {}
 
     get(database: string = 'default'): StatelessGraphObjectManager {
         let manager = this.managers.get(database);
         if (!manager) {
-            const persistenceManager = this.persistenceManagerFactory.get(database);
+            const persistenceManager = this.persistenceManagerFactory.get(database, this.type);
             manager = new StatelessGraphObjectManager(
                 persistenceManager,
                 backendFor(

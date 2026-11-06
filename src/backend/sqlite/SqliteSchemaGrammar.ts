@@ -1,7 +1,8 @@
 import { hasLabels, JSON_ROWS, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
-import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
+import { aliasesJson, CATALOG_KINDS, catalogProperties, catalogRecord, withAliases } from '@/backend/sql/SqlCatalog';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { SchemaSpec } from '@/schema/SchemaCatalog';
 import { catalogEntries, LOWER_COPY_KIND, LowerCopyStatements } from '@/schema/LowerCopyCatalog';
 import {
     FullTextIndexSpec,
@@ -165,6 +166,17 @@ export class SqliteSchemaGrammar implements SchemaGrammar {
     }
 
     /**
+     * Records the aliases among the item's record's details, or takes them out where there are none. `recorded` writes
+     * nothing over a record that is there, so a record written again keeps them.
+     */
+    aliased(kind: SchemaSpec['kind'], item: Pick<SchemaItem, 'label' | 'properties'>, aliases: string[]): string {
+        const details = aliases.length
+            ? `json_set(details, '$.aliases', json(${sqlText(aliasesJson(aliases))}))`
+            : `json_remove(details, '$.aliases')`;
+        return `UPDATE ${this.graph.catalog} SET details = ${details} WHERE ${catalogRecord({ kind, ...item })}`;
+    }
+
+    /**
      * The partial index over the properties of the label's nodes: each property as a statement reads it, and the test
      * of the label a statement makes, both of the table's own columns.
      */
@@ -219,7 +231,8 @@ export class SqliteSchemaGrammar implements SchemaGrammar {
                     properties: it.properties,
                     name: it.name ?? undefined,
                     dimensions: it.details?.dimensions,
-                    similarity: it.details?.similarity
+                    similarity: it.details?.similarity,
+                    ...withAliases(it.details)
                 }))
         };
     }

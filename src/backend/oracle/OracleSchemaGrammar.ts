@@ -1,6 +1,6 @@
 import { drivine4jStep, hasLabels, jsonKey, labelledValue, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { OracleSideTable } from '@/backend/oracle/OracleSideTable';
-import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
+import { aliasesJson, CATALOG_KINDS, catalogProperties, catalogRecord, withAliases } from '@/backend/sql/SqlCatalog';
 import { SchemaSpec } from '@/schema/SchemaCatalog';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import { catalogEntries, LOWER_COPY_KIND, LowerCopyStatements } from '@/schema/LowerCopyCatalog';
@@ -23,6 +23,24 @@ type Kind = keyof typeof CATALOG_KINDS;
  * understood: listed, searched through, and dropped as it was made.
  */
 const EARLIER: Record<Kind, string> = { RANGE: 'RANGE', UNIQUE: 'UNIQUE', VECTOR: 'VECTOR', FULLTEXT: 'FULLTEXT' };
+
+/** The keys of a range index's details: the name of its labelled index, or of the uniqueness constraint's index that stands for it. */
+const RANGE_DETAILS = ['labelled', 'unique'];
+
+/**
+ * A range index's details as the merge patch of a record's details that gives it them, as drivine4j writes it: each
+ * other key a range index's details hold is taken out, and the aliases the record keeps are kept.
+ */
+function rangeDetails(details: string): string {
+    const absent = RANGE_DETAILS.filter((it) => !details.includes(`"${it}"`))
+        .map((it) => `"${it}": null`)
+        .join(', ');
+    if (!absent) {
+        return details;
+    }
+    const body = details.trim().replace(/^\{/, '').replace(/\}$/, '').trim();
+    return body ? `{${body}, ${absent}}` : `{${absent}}`;
+}
 
 /** The kinds a record of `kind` is read as. */
 export function recordedAs(kind: Kind): string[] {
@@ -358,6 +376,15 @@ END;`
         );
     }
 
+    /** Records the aliases among the item's record's details, as a merge patch: `null` takes them out. */
+    aliased(kind: Kind, item: Pick<SchemaItem, 'label' | 'properties'>, aliases: string[]): string {
+        const patch = `{"aliases": ${aliases.length ? aliasesJson(aliases) : 'null'}}`;
+        return (
+            `UPDATE ${this.graph.catalog} SET details = JSON_MERGEPATCH(details, ${sqlText(patch)}) ` +
+            `WHERE ${catalogRecord({ kind, ...item })}`
+        );
+    }
+
     /**
      * The index over the properties of every node, whatever the label: its name, and the statement that makes it. Its
      * paths are drivine4j's, so it is one index whichever library makes it, and not those this library reads a property
@@ -397,6 +424,7 @@ END;`
                     name: it.name,
                     dimensions: it.details?.dimensions,
                     similarity: it.details?.similarity,
+                    ...withAliases(it.details),
                     ...(it.incomplete === 'true' ? { incomplete: true } : {})
                 }))
         };
@@ -404,7 +432,7 @@ END;`
 
     /**
      * Records the item as made, as `objectName` (none for one nothing was made for), unless it is recorded already; with
-     * `updated`, a record there already takes `details`. A MERGE doesn't read again before it inserts, so of two
+     * `updated`, a record there already takes `details`, a range index's, and keeps its aliases (see `rangeDetails`). A MERGE doesn't read again before it inserts, so of two
      * sessions recording it at once the second is refused on the catalog's key: that refusal is taken as recorded.
      */
     private recorded(
@@ -417,11 +445,12 @@ END;`
             `SELECT ${sqlText(CATALOG_KINDS[spec.kind])} AS kind, ${sqlText(spec.label)} AS label, ` +
             `${sqlText(catalogProperties(spec.properties))} AS properties FROM dual`;
         const values = [sqlText(itemName(spec)), objectName ? sqlText(objectName) : 'NULL', sqlText(details)];
+        const patch = sqlText(rangeDetails(details));
         return `BEGIN
     MERGE INTO ${this.graph.catalog} c
     USING (${key}) k
     ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)${
-        updated ? `\n    WHEN MATCHED THEN UPDATE SET c.details = ${sqlText(details)}` : ''
+        updated ? `\n    WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, ${patch})` : ''
     }
     WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
         VALUES (k.kind, k.label, k.properties, ${values.join(', ')});
@@ -431,7 +460,7 @@ END;`;
     }
 
     /**
-     * Records the range index as served by a uniqueness constraint's index, `details`, and drops the labelled index it
+     * Records the range index as served by a uniqueness constraint's index, `details`, keeping its aliases, and drops the labelled index it
      * was made with, when it was: the one its record names, and an earlier record's, which the record now made stands
      * for. The index is dropped first: a drop that fails leaves the record naming it, for the next constraint made to
      * find and drop.
@@ -439,6 +468,7 @@ END;`;
     private servedBy(spec: RangeIndexSpec, details: string): string {
         const record = catalogRecord(spec);
         const earlier = catalogRecord(spec, [EARLIER.RANGE]);
+        const patch = sqlText(rangeDetails(details));
         return `DECLARE
     v_labelled VARCHAR2(128);
 BEGIN
@@ -450,7 +480,7 @@ BEGIN
         EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || it.object_name;
     END LOOP;
     DELETE FROM ${this.graph.catalog} WHERE ${earlier};
-    UPDATE ${this.graph.catalog} SET details = ${sqlText(details)} WHERE ${record};
+    UPDATE ${this.graph.catalog} SET details = JSON_MERGEPATCH(details, ${patch}) WHERE ${record};
     COMMIT;
 END;`;
     }

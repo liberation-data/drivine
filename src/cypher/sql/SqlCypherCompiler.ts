@@ -3,6 +3,7 @@ import { DrivineError } from '@/DrivineError';
 import { bothWaysOf, selfLoopOnce } from '@/backend/sql/SqlGraph';
 import { Direction } from '@/cypher/ast/Pattern';
 import { CypherReader } from '@/cypher/CypherReader';
+import { SCHEMA_COMMAND, SchemaDdl } from '@/schema/ddl/SchemaDdl';
 import { Query, Return } from '@/cypher/ast/Query';
 import { Aggregates } from '@/cypher/sql/Aggregates';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
@@ -154,8 +155,19 @@ export abstract class SqlCypherCompiler {
         return this.temporalsOf;
     }
 
-    /** The statement `cypher`, with its parameters' values `parameters`, as SQL. */
+    /**
+     * The statement `cypher`, with its parameters' values `parameters`, as SQL. Neo4j schema DDL is no query: one a SQL
+     * store cannot honour is refused as SchemaDdl refuses it, and the rest as a schema command, which a
+     * PersistenceManager runs through the schema machinery (see SchemaCommands).
+     */
     compile(cypher: string, parameters: Record<string, any> = {}): CompiledCypher {
+        const ddl = SchemaDdl.translate(cypher);
+        if (ddl.type === 'REFUSED') {
+            throw new DrivineError(ddl.message);
+        }
+        if (ddl.type !== 'NOT_DDL') {
+            throw new DrivineError(SCHEMA_COMMAND);
+        }
         return this.compileQuery(CypherReader.read(cypher), parameters);
     }
 

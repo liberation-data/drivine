@@ -98,10 +98,15 @@ that reads the row a `FOREACH` or a `CALL { … }` is written for is planned for
 
 What each statement gives on each store, compiled to SQL or not, is the shared
 [Cypher spec](https://github.com/liberation-data/drivine-cypher-spec). This repository runs version
-[v0.21.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.21.0) of it on Neo4j, Postgres, Oracle and SQLite, and
+[v0.30.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.30.0) of it on Neo4j, Postgres, Oracle and SQLite, and
 drivine-python and drivine4j run the same spec. Reads and writes compile, with variable-length relationships and
 quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
 anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
+
+Neo4j's schema DDL (`CREATE INDEX`, `CREATE CONSTRAINT`, `DROP INDEX`, `DROP CONSTRAINT`, `CALL db.awaitIndexes`) is
+no query: given to a `PersistenceManager`, it is applied to the store's schema, as
+[Neo4j schema DDL on the SQL stores](08-schema-management.md#neo4j-schema-ddl-on-the-sql-stores) describes, and the
+compiler alone refuses it.
 
 ### How complete is it?
 

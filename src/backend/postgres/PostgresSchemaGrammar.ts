@@ -1,8 +1,9 @@
 import { hasLabels, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { embedding, holds, searchedText } from '@/backend/postgres/PostgresSearch';
-import { CATALOG_KINDS, catalogProperties, catalogRecord } from '@/backend/sql/SqlCatalog';
+import { aliasesJson, CATALOG_KINDS, catalogProperties, catalogRecord, withAliases } from '@/backend/sql/SqlCatalog';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { SchemaSpec } from '@/schema/SchemaCatalog';
 import { catalogEntries, LOWER_COPY_KIND, LowerCopyStatements } from '@/schema/LowerCopyCatalog';
 import { LowerCopies } from '@/model/LowerCopies';
 import {
@@ -185,6 +186,17 @@ export class PostgresSchemaGrammar implements SchemaGrammar {
     }
 
     /**
+     * Records the aliases among the item's record's details, or takes them out where there are none. `recorded` writes
+     * nothing over a record that is there, so a record written again keeps them.
+     */
+    aliased(kind: SchemaSpec['kind'], item: Pick<SchemaItem, 'label' | 'properties'>, aliases: string[]): string {
+        const details = aliases.length
+            ? `jsonb_set(details, '{aliases}', CAST(${sqlText(aliasesJson(aliases))} AS jsonb))`
+            : `details - 'aliases'`;
+        return `UPDATE ${this.graph.catalog} SET details = ${details} WHERE ${catalogRecord({ kind, ...item })}`;
+    }
+
+    /**
      * The partial index over the properties of the label's nodes: each property as a statement reads it, and the test
      * of the label a statement makes, both of the table's own columns.
      */
@@ -249,7 +261,8 @@ $forget$`;
                     properties: it.properties,
                     name: it.name,
                     dimensions: it.details?.dimensions,
-                    similarity: it.details?.similarity
+                    similarity: it.details?.similarity,
+                    ...withAliases(it.details)
                 }))
         };
     }

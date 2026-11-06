@@ -12,6 +12,7 @@ import {
     VectorTuning
 } from '@/schema/SchemaSpecs';
 import { DrivineLogger } from '@/logger';
+import type { SchemaSpec } from '@/schema/SchemaCatalog';
 
 const same = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it, k) => it === b[k]);
 const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it) => b.includes(it));
@@ -76,15 +77,36 @@ export class IndexManager {
 
     /**
      * Drops the index over the label and properties, whatever its shape, and makes it as the spec says. Destructive. An
-     * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not.
+     * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not. The
+     * index made again keeps the aliases its record kept (see SchemaItem's `aliases`).
      */
     async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         // The copies are filled in again too, where Cypher or SQL of your own, which keeps no copy, left one out of step.
         await fillInLowerCopies(this.copies, spec, true);
+        const made = madeAs(spec);
+        // The index made again keeps the aliases its record kept.
+        const aliases = (await this.find(made))?.aliases;
         await this.drop(spec);
-        await this.create(madeAs(spec));
+        await this.create(made);
+        if (aliases) {
+            await this.alias(made.kind, made, aliases);
+        }
         this.changed();
         return { status: 'RECREATED', spec };
+    }
+
+    /**
+     * Records `aliases` as all the aliases of the index or constraint of `kind` that is there (see SchemaItem's
+     * `aliases`): nothing, on a store that keeps none.
+     */
+    async alias(
+        kind: SchemaSpec['kind'],
+        item: Pick<SchemaItem, 'label' | 'properties'>,
+        aliases: string[]
+    ): Promise<void> {
+        if (this.grammar.aliased) {
+            await this.executor.run(this.grammar.aliased(kind, item, aliases));
+        }
     }
 
     async drop(declared: IndexSpec): Promise<void> {

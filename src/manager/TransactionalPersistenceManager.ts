@@ -7,6 +7,7 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { Cursor } from '@/cursor/Cursor';
 import { FinderOperations } from '@/manager/FinderOperations';
 import { DatabaseType } from '@/connection';
+import { refusedInTransaction } from '@/schema/ddl/SchemaDdl';
 
 export class TransactionalPersistenceManager implements PersistenceManager {
     private finderOperations: FinderOperations;
@@ -19,7 +20,15 @@ export class TransactionalPersistenceManager implements PersistenceManager {
         this.finderOperations = new FinderOperations(this);
     }
 
+    /**
+     * Runs a statement in the transaction. Neo4j schema DDL given as Cypher to Postgres, Oracle or SQLite is refused
+     * here, as Drivine applies it outside any transaction (see SchemaCommands), save `db.awaitIndexes`, which does
+     * nothing there.
+     */
     async query<T>(spec: QuerySpecification<T>): Promise<T[]> {
+        if (refusedInTransaction(this.type, spec)) {
+            return [];
+        }
         const transaction = this.currentTransactionOrThrow();
         return transaction.query(spec, this.database);
     }

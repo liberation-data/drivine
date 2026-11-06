@@ -8,14 +8,8 @@ import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManag
 import { DEFAULT_SCOPE, SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import { inventoryEntries, readInventory, RecordedInventory } from '@/schema/SchemaInventory';
 import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
-import {
-    EnsureResult,
-    IndexSpec,
-    itemName,
-    madeAs,
-    uniquenessConstraint,
-    UniquenessConstraintSpec
-} from '@/schema/SchemaSpecs';
+import { QuerySpecification } from '@/query/QuerySpecification';
+import { EnsureResult, IndexSpec, itemName, madeAs, uniquenessConstraint } from '@/schema/SchemaSpecs';
 
 export interface SchemaOptions {
     catalogs: SchemaCatalog[];
@@ -51,6 +45,29 @@ const GRAPH_TYPES = [
 /** What makes two declarations the same item: kind, label and the properties it is made over (see `madeAs`). */
 const keyOf = (spec: SchemaSpec): string =>
     `${spec.kind}:${spec.label}:${[...madeAs(spec).properties].sort().join(',')}`;
+
+/**
+ * Whether the inventory key is of an item of the spec's identity, whatever its name: of its kind and label, and of its
+ * properties in any order, as `keyOf` compares them. An item of the properties in another order is the same item on the
+ * store, so another owner's key of that order co-owns it, and the owner's own is forgotten with it.
+ */
+function recordsIdentity(key: string, declared: SchemaSpec): boolean {
+    const made = madeAs(declared);
+    const head = `${CATALOG_KINDS[made.kind]}:${made.label}:`;
+    if (!key.startsWith(head)) {
+        return false;
+    }
+    const length = made.properties.reduce((sum, it) => sum + it.length, 0) + made.properties.length - 1;
+    const rest = key.slice(head.length);
+    if (rest.length <= length || rest[length] !== ':') {
+        return false;
+    }
+    const properties = rest.slice(0, length);
+    return (
+        properties === made.properties.join(',') ||
+        properties.split(',').sort().join(',') === [...made.properties].sort().join(',')
+    );
+}
 
 /** The label of the schema markers: drivine4j's, so both read one. */
 const MARKER_LABEL = '_DrivineSchema';
@@ -233,6 +250,149 @@ export class SchemaManager {
             }
             return report;
         });
+    }
+
+    /**
+     * Takes items back from what `owner` declares, on every graph database: the counterpart of `ensure`. To target
+     * databases, give a catalog that names its owner and databases. Each item is found by its kind, label and
+     * properties, whatever its name.
+     *
+     * An item `ensure` gave the owner is forgotten, so a later `enforce` does not make it again. On each database the
+     * item is then dropped, unless a startup catalog (of any owner) or another owner's runtime items declare it, or
+     * another owner's marker there records it (declared or ensured at runtime, by whichever manager or process): it is
+     * then left in place, with a warning naming who declares it. Either way the owner's marker no longer records it. An
+     * item that is not there is forgotten all the same. The catalog must not carry a version.
+     */
+    async remove(owner: string, ...specs: SchemaSpec[]): Promise<void>;
+    async remove(catalog: SchemaCatalog): Promise<void>;
+    async remove(target: string | SchemaCatalog, ...specs: SchemaSpec[]): Promise<void> {
+        const catalog = typeof target === 'string' ? SchemaCatalog.of(...specs).named(target) : target;
+        if (catalog.version !== undefined) {
+            throw new DrivineError(
+                `Schema removed at runtime cannot carry a version (${catalog.version}): an owner's version is ` +
+                    `declared by its startup catalogs.`
+            );
+        }
+        if (!catalog.items.length) {
+            return;
+        }
+        await this.serialized(async () => {
+            const identities = new Set(catalog.items.map(keyOf));
+            const target = catalog.databases ? JSON.stringify([...new Set(catalog.databases)].sort()) : undefined;
+            for (const [key, entry] of [...this.runtime]) {
+                const sameTarget =
+                    target === undefined ||
+                    (entry.databases !== undefined && JSON.stringify([...new Set(entry.databases)].sort()) === target);
+                if (entry.owner === catalog.name && sameTarget) {
+                    identities.forEach((it) => entry.items.delete(it));
+                    if (!entry.items.size) {
+                        this.runtime.delete(key);
+                    }
+                }
+            }
+            for (const database of [...this.catalogsByDatabase([catalog]).keys()].sort()) {
+                await this.removeFromDatabase(database, catalog);
+            }
+        });
+    }
+
+    /** What `ensure` has given the owner, on any database. */
+    ensured(owner: string): SchemaSpec[] {
+        return [...this.runtime.values()].filter((it) => it.owner === owner).flatMap((it) => [...it.items.values()]);
+    }
+
+    /** `remove`, on one database: drops what no one else declares there, and takes the items out of the owner's marker. */
+    private async removeFromDatabase(database: string, catalog: SchemaCatalog): Promise<void> {
+        const owner = catalog.name;
+        const gom = this.factory.get(database);
+        const pm = gom.persistenceManager;
+        const others = this.runtimeCatalogs(this.runtime).filter((it) => it.name !== owner);
+        const elsewhere =
+            this.catalogsByDatabase([...this.options.catalogs.filter((it) => it.items.length), ...others]).get(
+                database
+            ) ?? [];
+        // What other owners' markers record, declared or ensured at runtime: an owner this manager was not given, such
+        // as an application's, whose catalogs are another manager's or another process's.
+        const scopes = (
+            await pm.query<string | null>(
+                new QuerySpecification<string | null>().withStatement({
+                    text: `MATCH (m:${MARKER_LABEL}) RETURN DISTINCT m.scope`,
+                    language: 'CYPHER'
+                })
+            )
+        ).filter((it): it is string => typeof it === 'string' && it !== owner);
+        const recordedElsewhere = new Map<string, string[]>();
+        for (const scope of scopes) {
+            recordedElsewhere.set(scope, (await this.recordedBy(gom, scope))?.keys ?? []);
+        }
+        let dropped = 0;
+        let kept = 0;
+        for (const spec of catalog.items) {
+            const declaring = [
+                ...new Set([
+                    ...elsewhere
+                        .filter((it) => it.items.some((item) => keyOf(item) === keyOf(spec)))
+                        .map((it) => it.name),
+                    ...[...recordedElsewhere]
+                        .filter(([, keys]) => keys.some((key) => recordsIdentity(key, spec)))
+                        .map(([scope]) => scope)
+                ])
+            ];
+            if (declaring.length) {
+                this.logger.warn(
+                    `${CATALOG_KINDS[spec.kind]} on ${spec.label}[${spec.properties.join(
+                        ', '
+                    )}] is removed from owner ` +
+                        `'${owner}' on '${database}' and left in place, as ${declaring
+                            .map((it) => `'${it}'`)
+                            .join(', ')} declare(s) it`
+                );
+                kept++;
+                continue;
+            }
+            if (spec.kind === 'UNIQUE') {
+                await gom.constraints.drop(spec);
+            } else {
+                await gom.indexes.drop(spec);
+            }
+            dropped++;
+        }
+        const recorded = await this.recordedBy(gom, owner);
+        const gone = new Set(
+            (recorded?.keys ?? []).filter((key) => catalog.items.some((spec) => recordsIdentity(key, spec)))
+        );
+        if (recorded && gone.size) {
+            const without = (keys: Iterable<string>): string[] => [...keys].filter((it) => !gone.has(it));
+            const version = await pm.maybeGetOne<string | null>(
+                gom.backend.schemaMarker('version').spec({ scope: owner })
+            );
+            await pm.execute(
+                gom.backend.recordSchemaMarker().spec({
+                    scope: owner,
+                    version: version ?? null,
+                    items: inventoryEntries(
+                        without(recorded.keys),
+                        new Set(without(recorded.runtime)),
+                        new Set(without(recorded.stale))
+                    )
+                })
+            );
+        }
+        this.logger.log(
+            `Schema for owner '${owner}' on '${database}': ${catalog.items.length} removed, ${dropped} dropped, ` +
+                `${kept} left in place`
+        );
+    }
+
+    /** What the owner's marker on the database records. */
+    private async recordedBy(gom: StatelessGraphObjectManager, owner: string): Promise<RecordedInventory | undefined> {
+        return readInventory(
+            gom.backend.markerItems(
+                await gom.persistenceManager.maybeGetOne<string | null>(
+                    gom.backend.schemaMarker('items').spec({ scope: owner })
+                )
+            )
+        );
     }
 
     private async serialized<T>(run: () => Promise<T>): Promise<T> {
@@ -456,15 +616,10 @@ export class SchemaManager {
         recreate: boolean
     ): Promise<EnsureResult<SchemaSpec>> {
         if (spec.kind === 'UNIQUE') {
-            if (recreate) {
-                await gom.constraints.drop(spec);
-            }
+            const constraints = gom.constraints;
+            const ensure = recreate ? constraints.recreate.bind(constraints) : constraints.ensure.bind(constraints);
             return this.judge(
-                await gom.constraints.ensure(
-                    spec as UniquenessConstraintSpec,
-                    this.options.violationSampleSize,
-                    this.options.replaceBlockingIndex === true
-                )
+                await ensure(spec, this.options.violationSampleSize, this.options.replaceBlockingIndex === true)
             );
         }
         if (recreate) {
