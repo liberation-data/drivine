@@ -187,6 +187,18 @@ Notes:
   ``n.`a name` ``), and is read as that property, as text; a property compared with `true` or `false` is compared with
   the text a JSON boolean is read as. To compare one with a number, read it as a number in SQL.
 - A number is compared as a number only where one is stored: `'7'` is not `7`, as on the graph engines.
+- A compiled `MATCH` that compares a property by `=` with a value a row holds (`UNWIND $rows AS row MATCH (n:Person
+  {id: row.id})`, `UNWIND $ids AS id MATCH (n:Person {id: id})`, or `WHERE n.id = row.id`) is read through the range
+  index or the uniqueness constraint over the property, as one compared with a text given is: beside the comparison
+  stands a test of the property's text among the texts the value can be stored as, a number's with no zeros after its
+  point and with each count of them up to 16, since `numeric` keeps the scale a product makes (`0.25 * 10` is stored
+  as `2.50`) ([#636](https://github.com/liberation-data/drivine/issues/636),
+  [drivine4j#617](https://github.com/liberation-data/drivine4j/issues/617)). Compared as JSON alone, inside a `CASE`,
+  each row read every node of the label: in drivine4j, APOC's export replay took 1.77 s for each statement of 20 rows. This holds
+  where the rows are known to hold no list or map, and no null, at the key: a parameter's, or a list written of
+  literals, maps, lists and parameters, as APOC's export writes its rows. A list's numbers may be stored at any scale,
+  so a row that may hold a list is compared as JSON alone, as before. A statement is compiled for the rows it is given
+  each time it runs, so the same statement given a list later finds it.
 - Text is ordered by the database's collation, so a page of mixed-case text may not be in the order Neo4j gives
   (`a, b, B` rather than `B, a, b`). The range indexes are made in that collation, so an order and a seek are read
   through them. Compiled Cypher orders text by its code points instead
@@ -448,6 +460,20 @@ const names = await pm.query<string>(
   way, 1.5 s each over 4,000 nodes ([#614](https://github.com/liberation-data/drivine/issues/614)). The earlier of two
   such nodes keeps the index's form, and so does a node equal to one found by nothing else
   (`MATCH (a) MATCH (b:Rare) WHERE a = b`), where the index is the way in.
+- On Oracle, a node with a label that a compiled pattern finds by a property (`MATCH (n:Person {id: $id})`, `UNWIND
+  $rows AS row MATCH (n:Person {id: row.id})`) is compared by it as JSON alone for now, and Oracle reads the label's
+  nodes to find it. The compiler can read it through the label's range index, or a uniqueness constraint over the
+  property alone, where it is told the graph has one (`OracleCypherCompiler`'s `indexedProperties`); the connection
+  doesn't tell it yet ([drivine4j#638](https://github.com/liberation-data/drivine4j/issues/638)). Told so, it compares
+  the node as JSON and, beside that, as that index reads it, so Oracle finds the node through the index; its labels
+  are tested by their text, and an `UNWIND` whose item is compared so carries the hint `CARDINALITY(<alias> 10)`, as
+  Oracle takes a list given as a value for 8,168 rows and hashed every node of the label to them. Compared as JSON alone, inside a `CASE`, even a parameter's value read every node of the
+  label, once for each row of an `UNWIND` ([#636](https://github.com/liberation-data/drivine/issues/636),
+  [drivine4j#617](https://github.com/liberation-data/drivine4j/issues/617)). A row's value that may be a list, such as
+  one worked out, is let through to the JSON comparison too, which Oracle reads no index beside; one a parameter gives,
+  or a list written of literals, maps, lists and parameters, as APOC's export writes its rows, is known to hold none
+  where it holds none. An empty text, and one past 4,000 bytes, are compared as JSON alone, as the index holds no text
+  for them. A node found after a `WITH` that groups is compared as JSON alone (below).
 - On Oracle, a node a compiled `MATCH` finds after a `WITH` that groups its rows (one that aggregates or is
   `DISTINCT`, or a `WITH` after one) tests its labels by their text, which the index over labels can't answer, in its
   pattern and in a `WHERE` such as `WHERE m:Movie`. With the index's form, Oracle 23.26 sometimes crashed the session

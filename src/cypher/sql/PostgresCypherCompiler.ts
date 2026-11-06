@@ -13,7 +13,7 @@ import { jsonText } from '@/cypher/sql/JsonText';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { PostgresTemporalSql } from '@/cypher/sql/PostgresTemporalSql';
 import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
-import { PLAIN_FLOAT, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import { IndexedProperty, PLAIN_FLOAT, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
 
@@ -48,6 +48,13 @@ const MOST_PLACES = 400;
 
 /** A property read as `propertyOf` reads it, `(alias.props -> 'key')`: its row's column, and its key's literal. */
 const READ_PROPERTY = /^\(([\w.]+) -> ('(?:[^']|'')*')\)$/;
+
+/**
+ * The most trailing zeros a stored number's text is looked for with, past the row's number's own (see
+ * `indexedEqualityOfAny`): a number past them, as one a long chain of products of numbers with zeros after their point
+ * makes, is found where the index is not read, and is missed where it is.
+ */
+export const TRAILING_ZEROS = 16;
 
 /** The planner's settings a loop's statements for each row are planned with off: see `plannedAsNestedLoops`. */
 const JOIN_METHODS = ['enable_seqscan', 'enable_hashjoin', 'enable_mergejoin', 'enable_material'];
@@ -235,9 +242,44 @@ export class PostgresCypherCompiler extends SqlCypherCompiler {
     }
 
     /** The property's text, as a range index or a uniqueness constraint reads it with `->>`, compared with the value's. */
-    indexedEquality(property: string, value: string): string | undefined {
+    indexedEquality(property: string, value: string, _of?: IndexedProperty): string | undefined {
         const read = READ_PROPERTY.exec(property);
         return read ? `(${read[1]} ->> ${read[2]}) = (${value} #>> '{}')` : undefined;
+    }
+
+    /**
+     * The property's text, as its index holds it, among the texts the `value` can be stored as: a text's or a truth
+     * value's own, and a number's with no trailing zeros and with each count of them up to {@link TRAILING_ZEROS}:
+     * `numeric` keeps the scale a sum or a product makes, so `0.25 * 10` is stored as `2.50`, and `1` finds `1.0` and
+     * `1.00` as `2.5` finds `2.50`; `jsonb` writes no number with an exponent. `= ANY` of an array is a test the index
+     * answers for each row, where a `CASE` around the comparison was not (#636, liberation-data/drivine4j#617).
+     *
+     * Only where the value is known to be no list or map (`scalar`): a list's numbers may be stored at any scale, `[1.0]`
+     * equal to `[1]`, which no list of texts holds, so a value that may be a list is compared as JSON alone, as before.
+     */
+    indexedEqualityOfAny(
+        property: string,
+        value: string,
+        _of?: IndexedProperty,
+        scalar: boolean = false
+    ): string | undefined {
+        const read = scalar ? READ_PROPERTY.exec(property) : null;
+        if (!read) {
+            return undefined;
+        }
+        return this.shared([value], ([x]) => {
+            const number = `trim_scale((${x})::numeric)::text`;
+            const zeros = (point: string): string =>
+                Array.from({ length: TRAILING_ZEROS }, (_, i) => `${number} || '${point}${'0'.repeat(i + 1)}'`).join(
+                    ', '
+                );
+            return (
+                `(${read[1]} ->> ${read[2]}) = ANY(CASE WHEN jsonb_typeof(${x}) <> 'number' THEN ARRAY[${x} #>> '{}'] ` +
+                `WHEN scale(trim_scale((${x})::numeric)) = 0 THEN ARRAY[${number}, ${zeros(
+                    '.'
+                )}] ELSE ARRAY[${number}, ${zeros('')}] END)`
+            );
+        });
     }
 
     bytewise(text: string): string {

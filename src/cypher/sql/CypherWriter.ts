@@ -85,7 +85,7 @@ import { jsonText } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Select } from '@/cypher/sql/Select';
 import { Procedure, ProcedureStep, Walk, Walked } from '@/cypher/sql/Procedure';
-import type { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import type { IndexedProperty, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { Temporal } from '@/cypher/sql/Temporal';
 import { TRUNCATION_UNITS } from '@/cypher/sql/TemporalSql';
 import { CALENDAR_FIELDS, Overrides, SELECTORS, TemporalBase, Temporals } from '@/cypher/sql/Temporals';
@@ -1057,6 +1057,22 @@ export class CypherWriter {
 
     /** Each parameter's value as the JSON it is bound as, by name, as {@link parameterTree} reads it. */
     private readonly parameterTrees: Map<string, unknown> = new Map();
+
+    /**
+     * The list each item an `UNWIND` reads is taken from, by the item's SQL, where the statement gives the whole of it: a
+     * parameter, or a list it writes out of literals, maps, lists and parameters, as APOC's export writes its rows (see
+     * {@link givenTree}). What {@link givenRowsScalar} reads.
+     */
+    private readonly unwoundGiven: Map<string, unknown> = new Map();
+
+    /**
+     * Whether an {@link equality} since this was last set false wrote a test an index answers beside its comparison: the
+     * node a pattern's properties are then compared for is found by that index, and is tested for its labels by their
+     * text, as a node read by its key is ({@link SqlCypherCompiler.keyedLabels}). On Oracle the test the index over labels
+     * answers had it read every node of the label, and the property only as a filter on each, even where the property's
+     * index was there (#636, liberation-data/drivine4j#617).
+     */
+    private indexedEmitted = false;
 
     /** The procedure's steps, in order: the steps of each loop and condition being written within it, innermost last. */
     private readonly blocks: ProcedureStep[][] = [[]];
@@ -2201,6 +2217,11 @@ export class CypherWriter {
                 `${this.sql.comparable(json(this.sql.jsonArray([x]), { ordered: true }))} END`
         );
         select.source(this.listElements(list, items, name), this.sql);
+        select.unwound.set(this.sql.item(name), name);
+        const given = this.givenTree(unwind.list);
+        if (given !== undefined) {
+            this.unwoundGiven.set(this.sql.item(name), given);
+        }
         // An item of a list of texts, or of a text, is a text; an item of a list that holds no null holds none, nor is JSON's null.
         select.bind(
             unwind.variable,
@@ -2336,12 +2357,35 @@ export class CypherWriter {
             select.labelTest(value, node.labels, test);
         }
         if (node.properties) {
-            select.where.push(this.propertiesMatch(value.props, node.properties, select.scope));
+            this.nodePropertiesMatch(select, node, value);
         }
         if (node.labels.length > 0 || node.properties) {
             this.anchor(select, value.nid);
         }
         return value;
+    }
+
+    /**
+     * The properties of `node`, found as `value`, among the conditions `select`'s rows meet. Where a test an index answers
+     * stands beside one ({@link indexedEmitted}), the node is tested for its labels by their text, as a node read by its
+     * key is, and each list an `UNWIND` of `select` reads whose item it is compared with is planned as a few rows. Not
+     * after a WITH that groups: Oracle's index expression tests the labels as the index over them does, which crashed the
+     * session there (#620, see groupedLabels).
+     */
+    private nodePropertiesMatch(select: Select, node: NodePattern, value: NodeValue): void {
+        this.indexedEmitted = false;
+        const labels = select.afterGrouping ? [] : node.labels;
+        const matched = this.propertiesMatch(value.props, node.properties!, select.scope, labels);
+        select.where.push(matched);
+        if (this.indexedEmitted && node.labels.length > 0 && select.labelled(value.nid) !== undefined) {
+            select.relabel(value.nid, (all, tested) => this.sql.keyedLabels(all, tested));
+            // An unwound list whose item is compared so is planned as a few rows: see SqlCypherCompiler.fewRows.
+            for (const [item, alias] of select.unwound) {
+                if (matched.includes(item)) {
+                    this.sql.fewRows(alias);
+                }
+            }
+        }
     }
 
     /** A relationship of a pattern, of one step, from the node whose id is `from` to the one whose is `to`. */
@@ -2472,7 +2516,7 @@ export class CypherWriter {
         return (row) =>
             [
                 ...(node.labels.length > 0 ? [this.sql.hasLabels(`${row}.labels`, node.labels)] : []),
-                ...(properties ? [this.propertiesMatch(`${row}.props`, properties, before)] : [])
+                ...(properties ? [this.propertiesMatch(`${row}.props`, properties, before, node.labels)] : [])
             ].join(' AND ');
     }
 
@@ -2577,7 +2621,9 @@ export class CypherWriter {
             conditions = [
                 ...inner.nodes.flatMap((node, i) => [
                     ...(node.labels.length > 0 ? [this.sql.hasLabels(`${rows[i]}.labels`, node.labels)] : []),
-                    ...(node.properties ? [this.propertiesMatch(`${rows[i]}.props`, node.properties, within)] : [])
+                    ...(node.properties
+                        ? [this.propertiesMatch(`${rows[i]}.props`, node.properties, within, node.labels)]
+                        : [])
                 ]),
                 ...inner.relationships.flatMap((r, i) => [
                     ...optional(this.types(`${links[i]}.type`, r.types)),
@@ -2712,8 +2758,11 @@ export class CypherWriter {
         });
     }
 
-    /** A pattern's properties: each key equal to its value, or every key of a parameter's map. */
-    private propertiesMatch(props: string, properties: Expression, scope: Scope): string {
+    /**
+     * A pattern's properties: each key equal to its value, or every key of a parameter's map. `labels` are its node's,
+     * where it is a node.
+     */
+    private propertiesMatch(props: string, properties: Expression, scope: Scope, labels: string[] = []): string {
         if (properties.kind === 'MapLiteral') {
             return properties.entries
                 .map(([key, value]) => {
@@ -2723,7 +2772,10 @@ export class CypherWriter {
                         json(this.sql.propertyOf(props, key), { flat: true }),
                         compiled,
                         value,
-                        this.scalarValued(value, scope) || this.isFlat(compiled)
+                        this.scalarValued(value, scope) || this.isFlat(compiled),
+                        true,
+                        // Not scalarValued: a text the statement works out may be one the index doesn't hold (indexHolds).
+                        { props, key, labels, scalar: this.givenRowsScalar(value, scope) }
                     );
                 })
                 .join(' AND ');
@@ -6246,14 +6298,18 @@ export class CypherWriter {
      * answers stands beside it, where the store has one: such a value's text is equal where its JSON is, and a number's
      * is not (`1` and `1.0`). `left` is `stored` where it is a property read from the store, which is SQL's null where it
      * is not there, and so needs no test of its own beside such a value. Where neither is `plain`, either may hold a
-     * null: see {@link plain}.
+     * null: see {@link plain}. A value the statement isn't given, as an unwound row's, is compared with the index's
+     * text as each of its kinds can be ({@link SqlCypherCompiler.indexedEqualityOfAny}), where it is known to be no list
+     * or map by `of`'s `scalar` or by `scalarRows`. `of` is the property's node, where a pattern names it.
      */
     private equality(
         left: Value,
         right: Value,
         written?: Expression,
         plain: boolean = true,
-        stored: boolean = true
+        stored: boolean = true,
+        of?: IndexedProperty,
+        scalarRows: boolean = false
     ): string {
         const temporal = this.temporalBinary('EQUALS', left, right);
         if (temporal?.kind === 'Bool') {
@@ -6269,8 +6325,7 @@ export class CypherWriter {
             return this.nullableEquals(a, b, (x, y) => this.sql.jsonEquals(x, y));
         }
         const given = written ? this.given(written) : undefined;
-        const indexed =
-            typeof given === 'string' || typeof given === 'boolean' ? this.sql.indexedEquality(a, b) : undefined;
+        const indexed = this.indexedTest(a, b, written, given, of, scalarRows);
         // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement is given
         // that is not null needs no test of its own where the other is a property, which is SQL's null where it is not there.
         const equal =
@@ -6287,6 +6342,32 @@ export class CypherWriter {
                           )} THEN ${this.sql.jsonEquals(x, y)} END`
                   );
         return indexed !== undefined ? `(${indexed} AND ${equal})` : equal;
+    }
+
+    /**
+     * The test an index answers that stands beside {@link equality}'s comparison of the property `a` with `b`, written as
+     * `written` and `given` as it is: a value the statement is given is known as it compiles; one it isn't, as an unwound
+     * row's, may be of any kind, and is compared with the index's text as each of its kinds can be, else the join reads
+     * every node for each row (#636, liberation-data/drivine4j#617). Noted in {@link indexedEmitted}.
+     */
+    private indexedTest(
+        a: string,
+        b: string,
+        written: Expression | undefined,
+        given: unknown,
+        of: IndexedProperty | undefined,
+        scalarRows: boolean
+    ): string | undefined {
+        const indexed =
+            (typeof given === 'string' || typeof given === 'boolean') && this.sql.indexHolds(given)
+                ? this.sql.indexedEquality(a, b, of)
+                : (given === null || given === undefined) && written !== undefined && !this.givenAsWritten(written)
+                ? this.sql.indexedEqualityOfAny(a, b, of, of?.scalar === true || scalarRows)
+                : undefined;
+        if (indexed !== undefined) {
+            this.indexedEmitted = true;
+        }
+        return indexed;
     }
 
     /**
@@ -6427,6 +6508,81 @@ export class CypherWriter {
         return SCALAR_KINDS.has(expression.kind) || (this.flatness[expression.kind]?.(expression, scope) ?? false);
     }
 
+    /**
+     * `expression` as the JSON it is, where the statement gives the whole of it: a parameter, or a literal, or a list or a
+     * map written of them (see {@link unwoundGiven}); undefined where it doesn't.
+     */
+    private givenTree(expression: Expression): unknown {
+        switch (expression.kind) {
+            case 'Parameter':
+                return this.parameterTree(expression.name);
+            case 'Literal':
+                return jsonTree(expression.value);
+            case 'ListLiteral': {
+                const items = expression.items.map((it) => this.givenTree(it));
+                return items.includes(undefined) ? undefined : items;
+            }
+            case 'MapLiteral': {
+                const entries = expression.entries.map(([key, value]): [string, unknown] => [
+                    key,
+                    this.givenTree(value)
+                ]);
+                return entries.some(([, value]) => value === undefined) ? undefined : Object.fromEntries(entries);
+            }
+            default:
+                return undefined;
+        }
+    }
+
+    /**
+     * Whether `expression` is an item unwound from a list the statement gives ({@link unwoundGiven}), as `id` of `UNWIND
+     * $ids AS id`, a key of one, as `row.s` of `UNWIND $rows AS row`, or a key of a map at one, as `row.start._id`, at
+     * which no item of the list it is bound to holds a list or a map, or a text the store's index doesn't hold
+     * ({@link SqlCypherCompiler.indexHolds}): the value is then no list or map, though it may be null (#636,
+     * liberation-data/drivine4j#617). Nor where a key is read of a list, which Neo4j refuses: Oracle's path reads the key
+     * of each of its items, so `row.a.b` of `{a: [{b: [1, 2]}]}` is `[1, 2]` there.
+     */
+    private givenRowsScalar(expression: Expression, scope: Scope): boolean {
+        // The keys, outermost first, down to the unwound item: `row.start._id` reads `_id` of `start`.
+        const keys: string[] = [];
+        let subject = expression;
+        while (subject.kind === 'Property') {
+            keys.unshift(subject.key);
+            subject = subject.subject;
+        }
+        if (subject.kind !== 'Variable') {
+            return false;
+        }
+        const bound = scope.get(subject.name);
+        if (bound?.kind !== 'Json' || !this.unwoundGiven.has(bound.sql)) {
+            return false;
+        }
+        const rows = this.unwoundGiven.get(bound.sql);
+        const items = Array.isArray(rows) ? rows : [rows];
+        return items.every((item) => {
+            let node: unknown = item;
+            for (const key of keys) {
+                if (Array.isArray(node)) {
+                    return false;
+                }
+                node = isJsonMap(node) ? node[key] : undefined;
+            }
+            return !isContainer(node) && !(typeof node === 'string' && !this.sql.indexHolds(node));
+        });
+    }
+
+    /**
+     * Whether `expression` is a value the statement gives, as {@link given} reads it, whatever it is: written, a
+     * parameter or a parameter's key.
+     */
+    private givenAsWritten(expression: Expression): boolean {
+        return (
+            expression.kind === 'Literal' ||
+            expression.kind === 'Parameter' ||
+            (expression.kind === 'Property' && expression.subject.kind === 'Parameter')
+        );
+    }
+
     /** The parameter `name`'s value as the JSON it is bound as (see {@link jsonTree}); null where it is null. */
     private parameterTree(name: string): unknown {
         if (!this.parameterTrees.has(name)) {
@@ -6518,7 +6674,15 @@ export class CypherWriter {
         const plain = this.plain(binary.left, binary.right, left, right, scope);
         const equal =
             (plain ? undefined : this.givenItemwise(binary.left, left, binary.right, right)) ??
-            this.equality(left, right, binary.right, plain, this.stored(binary.left, scope));
+            this.equality(
+                left,
+                right,
+                binary.right,
+                plain,
+                this.stored(binary.left, scope),
+                undefined,
+                this.givenRowsScalar(binary.right, scope)
+            );
         if (binary.operator === 'NOT_EQUALS') {
             return `NOT (${equal})`;
         }
@@ -7570,7 +7734,11 @@ export class CypherWriter {
         // Read only beside a text that is not null, so a number past SQL's integer beside a null text is null, and a
         // constant out of range is not worked out before any row.
         return this.sql.shared(
-            [`CASE WHEN ${text} IS NOT NULL THEN ${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[index])}) END`],
+            [
+                `CASE WHEN ${text} IS NOT NULL THEN ${this.sql.temporalSql.trunc}(${this.numberOf(
+                    call.arguments[index]
+                )}) END`
+            ],
             ([n]) =>
                 `CASE WHEN ${n} < 0 OR ${n} > ${MAX_COUNT} THEN ${this.sql.failure(outOfRange, n)} ` +
                 `ELSE CAST(${n} AS INTEGER) END`
@@ -7632,14 +7800,17 @@ export class CypherWriter {
                 : places(number, Number.isNaN(given) ? '0' : this.truncatedWhole(call.arguments[1]));
         }
         const value = this.sql.comparable(this.asJson(call.arguments[0]));
-        return this.sql.shared([value, `${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[1])})`], ([x, t]) => {
-            // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
-            const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
-            return (
-                `CASE ${toWhole}WHEN ${t} NOT BETWEEN 0 AND ${MAX_COUNT} THEN ${this.outOfPlaces(x, t)} ` +
-                `ELSE ${places(this.sql.number(x), `CAST(${t} AS INTEGER)`)} END`
-            );
-        });
+        return this.sql.shared(
+            [value, `${this.sql.temporalSql.trunc}(${this.numberOf(call.arguments[1])})`],
+            ([x, t]) => {
+                // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
+                const toWhole = whole !== undefined ? `WHEN ${t} = 0 THEN ${whole(this.sql.number(x))} ` : '';
+                return (
+                    `CASE ${toWhole}WHEN ${t} NOT BETWEEN 0 AND ${MAX_COUNT} THEN ${this.outOfPlaces(x, t)} ` +
+                    `ELSE ${places(this.sql.number(x), `CAST(${t} AS INTEGER)`)} END`
+                );
+            }
+        );
     }
 
     /**
