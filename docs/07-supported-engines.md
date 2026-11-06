@@ -175,8 +175,9 @@ Notes:
   engine gives: see [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database) to start, and
   [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
 - A write's loop over its rows that reads the node or edge table for each row, where it adds to that table or joins it to
-  the rows of a `CALL { … }`, runs with `enable_seqscan`, `enable_hashjoin` and `enable_mergejoin` off, set back after it
-  to what they were ([#628](https://github.com/liberation-data/drivine/issues/628),
+  the rows of a `CALL { … }`, runs with `enable_seqscan`, `enable_hashjoin`, `enable_mergejoin` and `enable_material`
+  off, set back after it to what they were ([#628](https://github.com/liberation-data/drivine/issues/628),
+  [#646](https://github.com/liberation-data/drivine/issues/646),
   [drivine4j#609](https://github.com/liberation-data/drivine4j/issues/609)). Postgres kept a plan made while the table
   was empty, or took a `CALL`'s one row for 100, and read the whole table for each row: `MATCH (n) MERGE (n)-[:R]->(n)`
   took 28 s over 20,000 nodes where it now takes under 1 s. The settings are set for the transaction
