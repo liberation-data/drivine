@@ -354,6 +354,15 @@ export abstract class SqlCypherCompiler {
         return `${name}.${column}`;
     }
 
+    /**
+     * The join of the node or relationship table `table`, as `row`, to the one row whose key column `key` is `id`: how a
+     * row of a write's or a list's rows reads its node or relationship back by its id. A plain `LEFT JOIN`; Postgres
+     * probes the key for each row instead, as a plain join is planned by the table's statistics (#655).
+     */
+    keyJoin(table: string, row: string, key: string, id: string): string {
+        return `LEFT JOIN ${table} ${row} ON ${row}.${key} = ${id}`;
+    }
+
     /** The item of the row `alias` of {@link elements}, as JSON. */
     item(alias: string): string {
         return `${alias}.item`;
