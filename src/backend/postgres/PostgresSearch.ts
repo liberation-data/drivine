@@ -3,7 +3,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonValue, nodeDocument, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
 import { bm25Ranked } from '@/backend/sql/Bm25';
-import { TextQuery } from '@/backend/sql/TextQuery';
+import { lookingAhead, TextQuery } from '@/backend/sql/TextQuery';
 import { DrivineError } from '@/DrivineError';
 import { TargetModel } from '@/model/RelationshipModel';
 
@@ -82,7 +82,8 @@ export class PostgresSearch {
             `SELECT ${len} AS len FROM ${this.graph.nodes} c WHERE ${hasLabels('c', labels)}`,
             query,
             {
-                count: (text, term) => `(SELECT count(*) FROM regexp_matches(${text}, ${bind(term)}, 'g'))`,
+                count: (text, term) =>
+                    `(SELECT count(*) FROM regexp_matches(${text}, ${bind(lookingAhead(term))}, 'g'))`,
                 holds: (text, term) => `${text} ~ ${bind(term)}`,
                 ln: (value) => `ln(${value})`,
                 real: (value) => `CAST(${value} AS double precision)`

@@ -175,8 +175,9 @@ Notes:
   engine gives: see [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database) to start, and
   [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
 - A write's loop over its rows that reads the node or edge table for each row, where it adds to that table or joins it to
-  the rows of a `CALL { … }`, runs with `enable_seqscan`, `enable_hashjoin` and `enable_mergejoin` off, set back after it
-  to what they were ([#628](https://github.com/liberation-data/drivine/issues/628),
+  the rows of a `CALL { … }`, runs with `enable_seqscan`, `enable_hashjoin`, `enable_mergejoin` and `enable_material`
+  off, set back after it to what they were ([#628](https://github.com/liberation-data/drivine/issues/628),
+  [#646](https://github.com/liberation-data/drivine/issues/646),
   [drivine4j#609](https://github.com/liberation-data/drivine4j/issues/609)). Postgres kept a plan made while the table
   was empty, or took a `CALL`'s one row for 100, and read the whole table for each row: `MATCH (n) MERGE (n)-[:R]->(n)`
   took 28 s over 20,000 nodes where it now takes under 1 s. The settings are set for the transaction
@@ -201,10 +202,12 @@ Notes:
   `+must`, `-not` and a `prefix*`. A word is a run of letters as Unicode's Alphabetic holds them (with the vowel signs
   of Indic scripts), decimal digits and underscores, as the text's `[[:alnum:]_]` reads it: `m²x` is the phrase `m x`.
   It scores by BM25, as Lucene and so Neo4j's full-text index do (`k1` 1.2, `b` 0.75): a term weighs as it is rare among
-  the label's nodes, and a text's counts against its length, in characters, beside the label's average. Scored by the
-  counts alone, a common word outweighed the word a query was about, and a long text won by holding more of everything:
-  over drivine4j's docs, the top hit was Neo4j's for 6 of 21 queries, and is for 17. How rare a term is comes out the
-  same narrowed; only the label's count of nodes and their average length are read from every node of it, and no term is
+  the label's nodes, and a text's counts against its length, in characters, beside the label's average. A `prefix*`
+  adds the same to every node that holds it, however often and however rare, as Lucene's prefix query does: in
+  `kiw* melon`, a node with `kiwi` and no `melon` scores about 0.54 of one with both, as on Neo4j. Scored by the counts
+  alone, a common word outweighed the word a query was about, and a long text won by holding more of everything: over
+  drivine4j's docs, the top hit was Neo4j's for 6 of 21 queries, and is for 17. How rare a term is comes out the same
+  narrowed; only the label's count of nodes and their average length are read from every node of it, and no term is
   matched in that read.
 
 ### SQLite

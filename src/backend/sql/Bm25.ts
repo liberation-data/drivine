@@ -1,4 +1,4 @@
-import { TextQuery } from '@/backend/sql/TextQuery';
+import { isPrefix, TextQuery } from '@/backend/sql/TextQuery';
 
 /** How soon a term's count stops adding to its score: Lucene's. */
 export const K1 = 1.2;
@@ -6,9 +6,20 @@ export const K1 = 1.2;
 /** How much a text's length, against the average, weighs its counts down: Lucene's. */
 export const B = 0.75;
 
+/**
+ * What a prefix term adds to the score of each node that holds it. Lucene scores a prefix query as a constant, its boost of
+ * 1, beside terms it scores by BM25 without the `k1 + 1` that `bm25Score`'s carries: on `bm25Score`'s scale that is
+ * `k1 + 1`. Measured on Neo4j, `kiw*` gave each node it found 1, and in `kiw* melon` 0.54 to those without "melon" beside 1
+ * for the one with it, as this gives (drivine4j#612).
+ */
+export const PREFIX = K1 + 1;
+
 /** How a store writes what `bm25Ranked` asks of it. */
 export interface Bm25Dialect {
-    /** How often a term occurs in a text, the term bound as a parameter. */
+    /**
+     * How often a term occurs in a text, the term bound as a parameter: each time, where it is written again at once too, so
+     * not taking the character after one (drivine4j#607).
+     */
     count(text: string, term: string): string;
     /** Whether a term occurs in a text at all, the term bound as a parameter: cheaper than `count` where the store can tell. */
     holds(text: string, term: string): string;
@@ -57,13 +68,15 @@ export function bm25Ranked(candidates: string, label: string, query: TextQuery, 
             `${figure('AVG(l.len)')} AS avglen`,
             ...tf.map((t, i) => `SUM(CASE WHEN h.${t} > 0 THEN 1 ELSE 0 END) OVER () AS ${df[i]}`)
         ].join(', ')} ` + `FROM (${counted}) h`;
-    const score = bm25Score(
-        tf.map((t, i): [string, string] => [`w.${t}`, `w.${df[i]}`]),
-        'w.n',
-        'w.len',
-        'NULLIF(w.avglen, 0)',
-        sql.ln
-    );
+    // A prefix term weighs the same for each node that holds it, as Lucene's prefix query scores it: a constant, not by how
+    // often or how rare (drivine4j#612). Every other term by BM25.
+    const score = query.scored
+        .map((term, i) =>
+            isPrefix(term)
+                ? `CASE WHEN w.${tf[i]} > 0 THEN ${PREFIX} ELSE 0 END`
+                : bm25Score([[`w.${tf[i]}`, `w.${df[i]}`]], 'w.n', 'w.len', 'NULLIF(w.avglen, 0)', sql.ln)
+        )
+        .join(' + ');
     const conditions = [...required.map((it) => `w.${it} > 0`), ...excluded.map((it) => `w.${it} = 0`)];
     const scored =
         `SELECT w.nid, ${sql.real(score)} AS score FROM (${weighed}) w` +
