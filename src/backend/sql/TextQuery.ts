@@ -124,9 +124,10 @@ interface Parts {
  * whole word in lower-cased text. Through an Oracle Text index it is `oracleText`.
  *
  * It reads the plain core of the Lucene syntax the graph engines take: words, a `"quoted phrase"`, `+must`, `-not` and
- * `NOT not`, a `prefix*`, and `field:word` as the word. `AND` makes the word after it one a node must hold; `OR` is the
- * default between words. Anything else is read as text. A backslash before a character that is not part of a word
- * makes that character text; before a letter, a digit or an underscore it is itself text.
+ * `NOT not`, a `prefix*` (outside quotes: inside them, as in Lucene, a `*` is text), and `field:word` as the word.
+ * `AND` makes the word after it one a node must hold; `OR` is the default between words. Anything else is read as text.
+ * A backslash before a character that is not part of a word makes that character text; before a letter, a digit or an
+ * underscore it is itself text.
  */
 export class TextQuery {
     /** Reads the query. It must name at least one term that scores. */
@@ -308,7 +309,7 @@ function phraseAt(
 
 /**
  * The token's term; undefined when it holds no word. A word still holds a field up to its first bare colon. The term is
- * the start of a word when its last character is a bare `*`.
+ * the start of a word when its last character is a bare `*` and it is not quoted.
  */
 function termOf(token: Token): Term | undefined {
     const text = token.quoted ? token.chars : token.chars.slice(token.chars.findIndex((it) => isBare(it, ':')) + 1);
@@ -321,7 +322,8 @@ function termOf(token: Token): Term | undefined {
     if (!words.length) {
         return undefined;
     }
-    const prefix = isBare(text[text.length - 1], '*');
+    // A `*` inside quotes is text, as Lucene's parser reads it: "of sou*" is the phrase "of sou" (drivine4j#622).
+    const prefix = !token.quoted && isBare(text[text.length - 1], '*');
     return {
         words,
         oracleText: prefix

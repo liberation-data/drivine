@@ -169,6 +169,12 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits.get('once')).toBeGreaterThan(0.4);
     });
 
+    it("should read a star inside quotes as text, as Lucene's parser does, so a phrase ending in one is the phrase without it", async () => {
+        // drivine4j#622: "of sou*" is the phrase "of sou", which "a graph of soup" doesn't hold, as on Neo4j.
+        expect((await search('"of sou*"')).map((it) => it.value.id)).toEqual([]);
+        expect((await search('"of soup*"')).map((it) => it.value.id)).toEqual(['rare']);
+    });
+
     it("should read a word as the text's expression does: its vowel signs in it, a superscript between words", async () => {
         // drivine4j#616: split at its vowel sign, किताब was "क", which [[:alnum:]] went on from.
         expect((await search('किताब')).map((it) => it.value.id)).toEqual(['hindi']);

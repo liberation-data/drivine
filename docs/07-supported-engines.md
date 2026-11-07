@@ -114,10 +114,10 @@ Notes:
   left out, not refused. `loadNearest` is approximate through it. With no index made, or one of another size than the
   vector's, it measures every node of the label whose embedding is of the vector's size, and is exact.
 - A full-text index is a table of the indexed text beside the nodes, with an Oracle Text index over it. `loadMatching`
-  reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`, a word as on Postgres. The index holds what has been
-  committed, so a search doesn't see its own transaction's writes. Oracle Text is in the regular Free image, not the
-  slim one; without it, or with no index made, a search counts the words in the text of every node of the label and
-  scores them by BM25, as Postgres does.
+  reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`, a word as on Postgres. In a phrase a `*` is text, as on
+  Neo4j: `"of sou*"` is the phrase `of sou`. The index holds what has been committed, so a search doesn't see its own
+  transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or with no index made, a
+  search counts the words in the text of every node of the label and scores them by BM25, as Postgres does.
 - Each session Drivine opens makes no adaptive plan (`OPTIMIZER_ADAPTIVE_PLANS = FALSE`). On tables without
   statistics, Oracle's adaptive join plan gave no rows for a read of a graph just written, where the same plan, fixed,
   gave them all ([#331](https://github.com/liberation-data/drivine/issues/331)). A statement of yours that relies on
@@ -201,6 +201,7 @@ Notes:
   reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a `"phrase"`,
   `+must`, `-not` and a `prefix*`. A word is a run of letters as Unicode's Alphabetic holds them (with the vowel signs
   of Indic scripts), decimal digits and underscores, as the text's `[[:alnum:]_]` reads it: `m²x` is the phrase `m x`.
+  In a phrase a `*` is text, as on Neo4j: `"of sou*"` is the phrase `of sou`.
   It scores by BM25, as Lucene and so Neo4j's full-text index do (`k1` 1.2, `b` 0.75): a term weighs as it is rare among
   the label's nodes, and a text's counts against its length, in characters, beside the label's average. A `prefix*`
   adds the same to every node that holds it, however often and however rare, as Lucene's prefix query does: in

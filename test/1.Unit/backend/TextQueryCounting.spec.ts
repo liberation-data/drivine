@@ -63,7 +63,8 @@ describe('TextQuery counting', () => {
 
     it('should count each word a prefix term starts', () => {
         both('kiw*', 'kiwi kiwis kiw akiwi', 3);
-        both('"of sou*"', 'of soup of soups', 2);
+        // A `*` inside quotes is text (drivine4j#622): "of sou*" is the phrase "of sou", which "of soup of soups" doesn't hold.
+        both('"of sou*"', 'of soup of soups', 0);
     });
 
     it('should read a word in any script as a word', () => {
