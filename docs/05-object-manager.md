@@ -322,7 +322,8 @@ more than one. The text is the engine's full-text language (Lucene on Neo4j): es
 the query's terms occur in it. It now scores by BM25, as Neo4j's index scores it (see
 [Postgres](07-supported-engines.md#postgres)): a rare term outweighs a common one, and a short text outranks a long one
 that holds a term as often. A term written again at once, `kiwi kiwi kiwi`, is counted each time, where it was counted
-every other time. The hits can come in another order, and a `threshold` can keep others.
+every other time. A `prefix*` adds the same to every hit that holds it, as on Neo4j. The hits can come in another
+order, and a `threshold` can keep others.
 
 **`topK` bounds the index too.** The scores are scaled over the hits the index yields that have every one of the
 root's labels, and each hit is held to do it, so on Neo4j, Memgraph and FalkorDB the index is asked for its best `topK`

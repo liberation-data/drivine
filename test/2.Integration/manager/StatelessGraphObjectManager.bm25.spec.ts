@@ -10,6 +10,7 @@ import {
     QuerySpecification,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
+import { B, K1, PREFIX } from '@/backend/sql/Bm25';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
@@ -37,6 +38,21 @@ class Bm25Paper {
 }
 
 const article = (id: string, body: string): Bm25Article => Object.assign(new Bm25Article(), { id, body });
+
+/** drivine4j#612's texts, measured on Neo4j: a prefix that "rare" alone holds beside "melon". */
+@NodeFragment({ labels: ['Bm25Fruit'] })
+class Bm25Fruit {
+    @NodeId() id: string;
+    @FullTextIndex() body?: string;
+}
+
+const FRUITS: Record<string, string> = {
+    one: 'kiwi',
+    three: 'kiwi kiwis kiwifruit',
+    long: 'a kiwi among a great many other words that make this text far longer than any of the others',
+    rare: 'kiwano melon',
+    other: 'nothing here'
+};
 
 /** With the twenty common ones, "graph" is in most texts, so it says little of any; "soup" is in one. */
 const ARTICLES = [
@@ -68,7 +84,14 @@ const SCORED = [DatabaseType.NEO4J, DatabaseType.POSTGRES, DatabaseType.SQLITE, 
 describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-text scoring on $type', (engine) => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
-    const specs = [fullTextIndex('Bm25Article', 'body'), fullTextIndex('Bm25Paper', ['title', 'body'])];
+    const specs = [
+        fullTextIndex('Bm25Article', 'body'),
+        fullTextIndex('Bm25Paper', ['title', 'body']),
+        fullTextIndex('Bm25Fruit', 'body')
+    ];
+    /** A text's length as the store measures it for BM25: in characters on the SQL stores, in tokens on Lucene. */
+    const length = (text: string): number =>
+        engine.type === DatabaseType.NEO4J ? text.split(' ').length : text.length;
     const search = async (text: string) => gom.loadMatching(Bm25Article, text, { topK: 50 });
     const awaitIndexes = async () => {
         if (engine.type === DatabaseType.NEO4J) {
@@ -82,8 +105,12 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
-        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper');
-        await gom.saveAll([...ARTICLES, ...PAPERS]);
+        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper', 'Bm25Fruit');
+        await gom.saveAll([
+            ...ARTICLES,
+            ...PAPERS,
+            ...Object.entries(FRUITS).map(([id, body]) => Object.assign(new Bm25Fruit(), { id, body }))
+        ]);
         // Neo4j searches through its index only; the SQL stores search without one, and Postgres compares the two below.
         if (engine.type === DatabaseType.NEO4J) {
             for (const spec of specs) {
@@ -94,7 +121,7 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
     });
 
     afterAll(async () => {
-        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper');
+        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper', 'Bm25Fruit');
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
@@ -126,6 +153,45 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits.get('often')).toBeCloseTo(1, 9);
         // Ten times the count, as long again as the other's text: not ten times the score.
         expect(hits.get('once')).toBeGreaterThan(0.4);
+    });
+
+    it("should score every node a prefix term finds alike, as Lucene's prefix query does", async () => {
+        // Lucene scores a prefix query by a constant, not by how often or how rare (drivine4j#612).
+        const hits = await search('kiw*');
+        expect(new Set(hits.map((it) => it.value.id))).toEqual(new Set(['once', 'often']));
+        hits.forEach((it) => expect(it.score).toBeCloseTo(1, 9));
+    });
+
+    it('should add the same for a prefix term beside a word to each node that holds it', async () => {
+        const hits = await search('kiw* bird');
+        expect(hits.map((it) => it.value.id)).toEqual(['once', 'often']);
+        expect(hits[1].score).toBeLessThan(hits[0].score);
+    });
+
+    it("should weigh a prefix term beside a rare word as Lucene's constant beside its BM25, as Neo4j measured", async () => {
+        const fruit = async (query: string): Promise<Map<string, number>> =>
+            new Map((await gom.loadMatching(Bm25Fruit, query, { topK: 50 })).map((it) => [it.value.id, it.score]));
+        // On Neo4j, every hit of a prefix alone scored 1 (drivine4j#612).
+        const prefix = await fruit('kiw*');
+        const whole = await fruit('kiwi*');
+        expect(new Set(prefix.keys())).toEqual(new Set(['one', 'three', 'long', 'rare']));
+        expect(new Set(whole.keys())).toEqual(new Set(['one', 'three', 'long']));
+        [...prefix.values(), ...whole.values()].forEach((it) => expect(it).toBeCloseTo(1, 6));
+        // "melon" is in "rare" alone: its BM25 beside the prefix's constant, with the lengths the store measures.
+        const lengths = Object.fromEntries(Object.entries(FRUITS).map(([id, body]) => [id, length(body)]));
+        const average = Object.values(lengths).reduce((a, b) => a + b, 0) / Object.keys(lengths).length;
+        const n = Object.keys(FRUITS).length;
+        const idf = Math.log(1 + (n - 1 + 0.5) / (1 + 0.5));
+        const melon = (idf * (K1 + 1)) / (1 + K1 * (1 - B + (B * lengths.rare) / average));
+        const expected = PREFIX / (PREFIX + melon);
+        for (const query of ['kiw* melon', '+kiw* melon']) {
+            const hits = await fruit(query);
+            expect(new Set(hits.keys())).toEqual(new Set(['one', 'three', 'long', 'rare']));
+            expect(hits.get('rare')).toBeCloseTo(1, 6);
+            ['one', 'three', 'long'].forEach((it) => expect(Math.abs(hits.get(it)! - expected)).toBeLessThan(1e-4));
+        }
+        // Neo4j gave 0.5409; the SQL stores, measuring length in characters, about 0.549.
+        expect(Math.abs(expected - 0.5409)).toBeLessThan(0.01);
     });
 
     it('should count a term written three times running three times, not every other one', async () => {
