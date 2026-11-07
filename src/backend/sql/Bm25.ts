@@ -16,7 +16,10 @@ export const PREFIX = K1 + 1;
 
 /** How a store writes what `bm25Ranked` asks of it. */
 export interface Bm25Dialect {
-    /** How often a term occurs in a text, the term bound as a parameter. */
+    /**
+     * How often a term occurs in a text, the term bound as a parameter: each time, where it is written again at once too, so
+     * not taking the character after one (drivine4j#607).
+     */
     count(text: string, term: string): string;
     /** Whether a term occurs in a text at all, the term bound as a parameter: cheaper than `count` where the store can tell. */
     holds(text: string, term: string): string;

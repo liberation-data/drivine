@@ -63,7 +63,12 @@ const ARTICLES = [
     article('long', 'zebra and a great many other words that make this text far longer than the one before it is'),
     article('once', 'kiwi bird'),
     article('often', 'kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi'),
-    article('none', 'nothing to see')
+    article('none', 'nothing to see'),
+    // As long as each other: counted three times and twice (drivine4j#607).
+    article('triple', 'okapi okapi okapi'),
+    article('apart', 'okapi lemur okapi'),
+    article('lalaland', 'la la land'),
+    article('tapirs', 'tapirs tapirs tapir')
 ];
 
 /** A missing property is no text, and its length none. */
@@ -129,10 +134,10 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits[0].score).toBeCloseTo(1, 9);
         expect(hits.every((it) => it.score > 0 && it.score <= 1)).toBe(true);
         if (engine.type !== DatabaseType.NEO4J) {
-            // bm25Ranked's own figure, lengths in characters (Lucene's are in words): "graph" counted 3 times in 45
-            // characters (back to back, the pattern counts every other one: drivine4j#607 moves this), against "graph" and
-            // "soup" once each in 15, over 27 texts of 857 characters, "graph" in 22 and "soup" in 1.
-            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.07864229315202613, 9);
+            // bm25Ranked's own figure, lengths in characters (Lucene's are in words): "graph" 5 times in 45 characters, each
+            // counted though written again at once (drivine4j#607), against "graph" and "soup" once each in 15, over 31 texts
+            // of 920 characters, "graph" in 22 and "soup" in 1.
+            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.13588906225574401, 9);
         }
     });
 
@@ -187,6 +192,18 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         }
         // Neo4j gave 0.5409; the SQL stores, measuring length in characters, about 0.549.
         expect(Math.abs(expected - 0.5409)).toBeLessThan(0.01);
+    });
+
+    it('should count a term written three times running three times, not every other one', async () => {
+        const hits = await search('okapi');
+        expect(hits.map((it) => it.value.id)).toEqual(['triple', 'apart']);
+        expect(hits[0].score).toBeGreaterThan(hits[1].score);
+    });
+
+    it('should find a phrase that repeats a word, or whose last word starts its first, where it begins again', async () => {
+        // Counted on Oracle as two counts, each counted none (drivine4j#607).
+        expect((await search('+"la la"')).map((it) => it.value.id)).toEqual(['lalaland']);
+        expect((await search('+"tapirs tapir"')).map((it) => it.value.id)).toEqual(['tapirs']);
     });
 
     it('should still find the nodes of a common term, and keep required and excluded terms', async () => {
