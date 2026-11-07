@@ -142,7 +142,9 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Drivine: graph database client for TypeScript, Python and the JVM</title>
         <meta name="description" content="Drivine is a graph database client for TypeScript, Python and the JVM: Neo4j, Memgraph, FalkorDB, Oracle, Postgres and SQLite, with Cypher on all of them." />
-        <link rel="icon" href={`${base}favicon.ico`} />
+        <!-- The SVG icon turns white on a dark browser theme; Safari doesn't take SVG tab icons and keeps the .ico. -->
+        <link rel="icon" href={`${base}favicon.ico`} sizes="32x32" />
+        <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
         <link rel="canonical" href={SITE} />
         <!-- The card LinkedIn, Slack, Discord and X show for a link to the site: the explainer's title card. -->
         <meta property="og:title" content="Drivine: graph RAG on any database" />

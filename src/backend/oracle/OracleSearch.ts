@@ -5,7 +5,7 @@ import { OracleViews } from '@/backend/oracle/OracleViews';
 import { TargetModel } from '@/model/RelationshipModel';
 import { DrivineError } from '@/DrivineError';
 import { bm25Ranked } from '@/backend/sql/Bm25';
-import { TextQuery } from '@/backend/sql/TextQuery';
+import { counted, SEPARATOR, TextQuery } from '@/backend/sql/TextQuery';
 
 /**
  * Vector and full-text search on Oracle, each as one statement returning `{value, score}` per hit, best first, as the
@@ -95,7 +95,20 @@ export class OracleSearch {
             `SELECT ${len} AS len FROM ${labelled}`,
             query,
             {
-                count: (text, term) => `REGEXP_COUNT(${text}, ${bind(term)})`,
+                // Oracle's expressions don't look ahead: the term ending where its last word does, less those a word goes on
+                // from (counted); a phrase an occurrence of which may begin inside another, in the text with each character
+                // between words written twice (SEPARATOR); a prefix term, or one with a character not measured as
+                // [[:alnum:]], by its one expression (drivine4j#607).
+                count: (text, term) => {
+                    const two = counted(term);
+                    if (two === undefined) {
+                        return `REGEXP_COUNT(REGEXP_REPLACE(${text}, '${SEPARATOR}', '\\1\\1'), ${bind(term)})`;
+                    }
+                    const [ended, continued] = two;
+                    return `REGEXP_COUNT(${text}, ${bind(ended)})${
+                        continued === null ? '' : ` - REGEXP_COUNT(${text}, ${bind(continued)})`
+                    }`;
+                },
                 holds: (text, term) => `REGEXP_LIKE(${text}, ${bind(term)})`,
                 ln: (value) => `LN(${value})`,
                 real: (value) => value

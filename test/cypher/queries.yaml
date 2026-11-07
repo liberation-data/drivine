@@ -3100,3 +3100,19 @@ cases:
         error: "toString() takes a number, a text, a truth value or a temporal value, not a map, as in Neo4j."
       - cypher: "UNWIND [1, 'a'] AS x RETURN toString(x)"
         rows: ["1", "a"]
+
+  - name: "A keyword as a variable"
+    description: "A word Cypher keeps for its clauses and operators, as end, match or case, may name a variable, as Neo4j takes it (drivine4j#635)."
+    steps:
+      - cypher: "MATCH (start:Person)-[:KNOWS]->(end) RETURN start.name, end.name ORDER BY start.name"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu"]]
+      - note: "end the variable beside END the end of a CASE."
+        cypher: "MATCH (p:Person)-[:KNOWS]->(end) RETURN CASE WHEN end.born > 1965 THEN end.name ELSE 'older' END ORDER BY p.name"
+        rows: ["Carrie", "older"]
+      - cypher: "UNWIND [1, 2] AS match WITH match AS order, match * 10 AS return RETURN order, return ORDER BY order"
+        rows: [[1, 10], [2, 20]]
+      - cypher: "MATCH (:Person {name: 'Keanu'})-[case:KNOWS]->(when) RETURN type(case), when.name"
+        rows: [["KNOWS", "Carrie"]]
+      - cypher: "MATCH (in:Person {name: 'Hugo'}) WITH in AS as, [x IN [1, 2] | x] AS is RETURN as.name, is, size(is)"
+        rows: [["Hugo", [1, 2], 2]]
+

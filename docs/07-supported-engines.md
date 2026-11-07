@@ -114,10 +114,10 @@ Notes:
   left out, not refused. `loadNearest` is approximate through it. With no index made, or one of another size than the
   vector's, it measures every node of the label whose embedding is of the vector's size, and is exact.
 - A full-text index is a table of the indexed text beside the nodes, with an Oracle Text index over it. `loadMatching`
-  reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`. The index holds what has been committed, so a search
-  doesn't see its own transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or
-  with no index made, a search counts the words in the text of every node of the label and scores them by BM25, as
-  Postgres does.
+  reads words, a `"phrase"`, `+must`, `-not` and a `prefix*`, a word as on Postgres. In a phrase a `*` is text, as on
+  Neo4j: `"of sou*"` is the phrase `of sou`. The index holds what has been committed, so a search doesn't see its own
+  transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or with no index made, a
+  search counts the words in the text of every node of the label and scores them by BM25, as Postgres does.
 - Each session Drivine opens makes no adaptive plan (`OPTIMIZER_ADAPTIVE_PLANS = FALSE`). On tables without
   statistics, Oracle's adaptive join plan gave no rows for a read of a graph just written, where the same plan, fixed,
   gave them all ([#331](https://github.com/liberation-data/drivine/issues/331)). A statement of yours that relies on
@@ -210,13 +210,21 @@ Notes:
 - `matches` takes a Postgres regular expression, matched against the whole value.
 - A vector index is a pgvector HNSW index over the embeddings of the label's nodes of its size; `loadNearest` is
   approximate through it, and exact with no index made. A full-text index is a trigram index over the text a search
-  reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a
-  `"phrase"`, `+must`, `-not` and a `prefix*`. It scores by BM25, as Lucene and so Neo4j's full-text index do (`k1`
-  1.2, `b` 0.75): a term weighs as it is rare among the label's nodes, and a text's counts against its length, in
-  characters, beside the label's average. Scored by the counts alone, a common word outweighed the word a query was
-  about, and a long text won by holding more of everything: over drivine4j's docs, the top hit was Neo4j's for 6 of 21
-  queries, and is for 17. How rare a term is comes out the same narrowed; only the label's count of nodes and their
-  average length are read from every node of it, and no term is matched in that read.
+  reads, which narrows the search; `loadMatching` scores the same with it and without it, and reads words, a `"phrase"`,
+  `+must`, `-not` and a `prefix*`. A word is a run of letters as Unicode's Alphabetic holds them (with the vowel signs
+  of Indic scripts), decimal digits and underscores, as the text's `[[:alnum:]_]` reads it: `m²x` is the phrase `m x`.
+  In a phrase a `*` is text, as on Neo4j: `"of sou*"` is the phrase `of sou`.
+  It scores by BM25, as Lucene and so Neo4j's full-text index do (`k1` 1.2, `b` 0.75): a term weighs as it is rare among
+  the label's nodes, and a text's counts against its length, in characters, beside the label's average. A `prefix*`
+  adds the same to every node that holds it, however often and however rare, as Lucene's prefix query does: in
+  `kiw* melon`, a node with `kiwi` and no `melon` scores about 0.54 of one with both, as on Neo4j. Scored by the counts
+  alone, a common word outweighed the word a query was about, and a long text won by holding more of everything: over
+  drivine4j's docs, the top hit was Neo4j's for 6 of 21 queries, and is for 17. How rare a term is comes out the same
+  narrowed; only the label's count of nodes and their average length are read from every node of it, and no term is
+  matched in that read. A dotted name, as `org.example.models`, is words here, split at
+  each dot, as it is on Oracle and SQLite: `example models` finds it, and the name itself is the phrase of its words.
+  Neo4j's default analyzer keeps such a name one token, which the whole name finds and `example models` doesn't.
+  drivine4j's `FullTextIndexSpec` picks another analyzer there; Drivine for TypeScript doesn't take one yet.
 
 ### SQLite
 
@@ -345,8 +353,8 @@ const names = await pm.query<string>(
   so ordered are walked item by item by a function the query declares, so such a comparison is refused in a statement
   that writes and in the step of a `reduce`.
 - `CALL db.labels()` and `CALL db.relationshipTypes()` compile, alone or within a query with `YIELD`, and give each
-  label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter
-  may be named by a keyword (`$limit`), as in Neo4j.
+  label and type something has now, read from the nodes and relationships; any other procedure is refused. A parameter or a
+  variable may be named by a keyword (`$limit`, `MATCH (end)`), as in Neo4j.
 - Functions of numbers (`exp`, `log`, `sin`, `atan2`, `round` by a mode …) give the floats Neo4j gives, but where Neo4j
   gives NaN or an infinity (`log(0)`, `sqrt(-1)`, `exp(1000)`) the statement fails: JSON holds neither. A float is
   written as Java writes a double, by `toString` and added to a text: `1.0E7`, `1.2E-4`.
