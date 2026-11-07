@@ -10,22 +10,23 @@ function compiled(cypher: string): string {
 
 const OFF =
     "PERFORM set_config('enable_seqscan', 'off', true), set_config('enable_hashjoin', 'off', true), " +
-    "set_config('enable_mergejoin', 'off', true);";
+    "set_config('enable_mergejoin', 'off', true), set_config('enable_material', 'off', true);";
 const SAVED =
     "cy_planner := ARRAY[current_setting('enable_seqscan'), current_setting('enable_hashjoin'), " +
-    "current_setting('enable_mergejoin')];";
+    "current_setting('enable_mergejoin'), current_setting('enable_material')];";
 const RESTORED =
     "PERFORM set_config('enable_seqscan', cy_planner[1], true), set_config('enable_hashjoin', cy_planner[2], true), " +
-    "set_config('enable_mergejoin', cy_planner[3], true);";
+    "set_config('enable_mergejoin', cy_planner[3], true), set_config('enable_material', cy_planner[4], true);";
 
 /**
  * On Postgres, a loop whose statements for each row read a table by its key where the loop adds to it, or join a table
  * to a JSON list of rows, is planned as nested loops over the indexes, and the planner's settings are put back after it
- * (#628, liberation-data/drivine4j#609): see `PostgresCypherCompiler.plannedAsNestedLoops`. Their times are
- * `CypherWriteLoopTime.spec.ts`'s. drivine4j's `PostgresNestedLoopPlanTest`.
+ * (#628, #646, liberation-data/drivine4j#609, liberation-data/drivine4j#631): see
+ * `PostgresCypherCompiler.plannedAsNestedLoops`. Their times are `CypherWriteLoopTime.spec.ts`'s. drivine4j's
+ * `PostgresNestedLoopPlanTest`.
  */
 describe('A Postgres write loop that reads a table for each row', () => {
-    it("is planned with seq scans and hash and merge joins off, for a MERGE's loop, and the settings are put back after it", () => {
+    it("is planned with seq scans, hash and merge joins and materialization off, for a MERGE's loop, and the settings are put back after it", () => {
         const text = compiled('MATCH (n:CyLoop) MERGE (n)-[:CY_SELF]->(n)');
         const lines = text.split('\n');
         expect([lines.includes('    cy_planner text[];'), text]).toEqual([true, text]);

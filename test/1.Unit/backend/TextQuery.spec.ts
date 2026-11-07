@@ -201,4 +201,16 @@ describe('TextQuery', () => {
         expect(TextQuery.parse('"kiw*"').oracleText).toEqual('({kiw})');
         expect(TextQuery.parse('body:"of sou*"').oracleText).toEqual('({of sou})');
     });
+
+    it("should read a word as Unicode's Alphabetic letters, decimal digits and underscores, as the text's expression does", () => {
+        // drivine4j#616: a vowel sign and a letter number are in a word, as [[:alnum:]] holds them; a superscript or a
+        // fraction is between words, as it is in the text and to Neo4j's analyzer.
+        expect(TextQuery.parse('किताब').scoredWords).toEqual([['किताब']]);
+        expect(TextQuery.parse('bⅻb').scoredWords).toEqual([['bⅻb']]);
+        expect(TextQuery.parse('m²x').scoredWords).toEqual([['m', 'x']]);
+        expect(TextQuery.parse('1½2').scoredWords).toEqual([['1', '2']]);
+        expect(TextQuery.parse('٣٤').scoredWords).toEqual([['٣٤']]);
+        // A backslash makes "²" text, and it is still between words.
+        expect(TextQuery.parse('m\\²x').scoredWords).toEqual([['m', 'x']]);
+    });
 });
