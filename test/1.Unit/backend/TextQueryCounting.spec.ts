@@ -121,6 +121,9 @@ describe('TextQuery counting', () => {
         expect(counted(term('किताब'))?.[1]).not.toBeNull();
         both('किताब', 'किताब किताब', 2);
         both('"एक किताब"', 'एक किताब एक किताब', 2);
+        // The vowel signs of किताब are spacing marks (Mc); the anusvara of हिंदी is a non-spacing one (Mn).
+        expect(counted(term('हिंदी'))?.[1]).not.toBeNull();
+        both('हिंदी', 'हिंदी हिंदी', 2);
         // Its next character a vowel sign, the word goes on, as it does in the text on each store: no occurrence.
         expect(byOracle('किताब', 'किताबें')).toEqual(0);
     });
