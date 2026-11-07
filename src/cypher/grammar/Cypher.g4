@@ -532,8 +532,67 @@ oC_ProcedureName
 oC_Namespace
          :  ( oC_SymbolicName '.' )* ;
 
+// drivine4j: a word Cypher keeps for its clauses and operators may name a variable, `end` or `match`, as Neo4j's Cypher
+// takes it (#635): APOC's export names a relationship's nodes `start` and `end`. TRUE, FALSE and NULL are values wherever
+// an expression may be one, as in Neo4j, so they name none here.
 oC_Variable
-        :  oC_SymbolicName ;
+        :  oC_SymbolicName
+            | oC_KeywordVariable
+            ;
+
+oC_KeywordVariable
+               :  ALL
+                | ASC
+                | ASCENDING
+                | BY
+                | CREATE
+                | DELETE
+                | DESC
+                | DESCENDING
+                | DETACH
+                | EXISTS
+                | LIMIT
+                | MATCH
+                | MERGE
+                | ON
+                | OPTIONAL
+                | ORDER
+                | REMOVE
+                | RETURN
+                | SET
+                | L_SKIP
+                | WHERE
+                | WITH
+                | UNION
+                | UNWIND
+                | AND
+                | AS
+                | CONTAINS
+                | DISTINCT
+                | ENDS
+                | IN
+                | IS
+                | NOT
+                | OR
+                | STARTS
+                | XOR
+                | CONSTRAINT
+                | DO
+                | FOR
+                | REQUIRE
+                | UNIQUE
+                | CASE
+                | WHEN
+                | THEN
+                | ELSE
+                | END
+                | MANDATORY
+                | SCALAR
+                | ADD
+                | DROP
+                | CALL
+                | YIELD
+                ;
 
 oC_Literal
        :  oC_BooleanLiteral
