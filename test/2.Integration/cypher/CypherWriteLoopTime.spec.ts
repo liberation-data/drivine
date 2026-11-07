@@ -81,10 +81,18 @@ const WRITES: Write[] = [
  * the large run must take less than {@link RATIO} times the small one, or {@link FLOOR_MS} where that is more: a ratio,
  * so a slower runner, which is slower at both, passes alike. drivine4j's `CompiledWriteLoopTimeTest`.
  *
- * On Postgres the tables are vacuumed while empty first, as autovacuum leaves a store's tables once they have been
- * emptied (#628, liberation-data/drivine4j#609): their statistics then say they have no rows. The `MERGE` read its
+ * On Postgres the edge table is vacuumed while empty first, as autovacuum leaves a store's tables once they have been
+ * emptied (#628, liberation-data/drivine4j#609): its statistics then say it has no rows. The `MERGE` read its
  * pattern by a plan PL/pgSQL made for the empty edge table, a scan of the whole table, and kept it while the loop filled
  * the table: 28.6 s over 20,000 rows, where it took 0.4 s on a table never vacuumed.
+ *
+ * The node table is analyzed just after it was emptied, not vacuumed, as an autoanalyze that runs just after the `DELETE`
+ * leaves it: its pages of dead rows taken to hold one row (#646, liberation-data/drivine4j#631,
+ * liberation-data/drivine-python#430). The `CALL`'s per-row read of its node was then planned to materialize a scan of
+ * the whole primary key index and filter it for the row's node, so it was quadratic: 72 s to 142 s over 20,000 rows in
+ * drivine-python's CI. Materialization is now off in the loop too. So that the state lasts until the `CALL`, the node
+ * table is not autovacuumed while the writes are timed: an autoanalyze of the rows the writes made, landing before it,
+ * puts the statistics right, and the test passed without the fix.
  */
 describe.each(cypherSqlStores())('A compiled write loop on $type', (store) => {
     let pm: PersistenceManager;
@@ -99,7 +107,10 @@ describe.each(cypherSqlStores())('A compiled write loop on $type', (store) => {
     /** The milliseconds each write took over `n` rows, each checked by what it gave and what it left. */
     const timed = async (n: number): Promise<number[]> => {
         await clear();
-        await vacuumed(store, pm, GRAPH);
+        if (store.type === DatabaseType.POSTGRES) {
+            await pm.execute(new QuerySpecification(`ANALYZE ${GRAPH}_node`));
+            await pm.execute(new QuerySpecification(`VACUUM ANALYZE ${GRAPH}_edge`));
+        }
         const times: number[] = [];
         for (const write of WRITES) {
             const start = process.hrtime.bigint();
@@ -122,9 +133,24 @@ describe.each(cypherSqlStores())('A compiled write loop on $type', (store) => {
         await closeGraphEngines();
     });
 
+    /** Whether the node table is autovacuumed: not while the writes are timed, so its statistics are those of its ANALYZE. */
+    const autovacuumed = async (on: boolean): Promise<void> => {
+        if (store.type === DatabaseType.POSTGRES) {
+            const option = on ? 'RESET (autovacuum_enabled)' : 'SET (autovacuum_enabled = false)';
+            await pm.execute(new QuerySpecification(`ALTER TABLE ${GRAPH}_node ${option}`));
+        }
+    };
+
     it('should take about ten times as long over ten times the rows, not a hundred', async () => {
-        const small = await timed(SMALL);
-        const large = await timed(LARGE);
+        let small: number[];
+        let large: number[];
+        await autovacuumed(false);
+        try {
+            small = await timed(SMALL);
+            large = await timed(LARGE);
+        } finally {
+            await autovacuumed(true);
+        }
         const report = WRITES.map(
             (it, i) => `${it.name} ${small[i]} ms over ${SMALL} rows, ${large[i]} ms over ${LARGE}`
         ).join('; ');
