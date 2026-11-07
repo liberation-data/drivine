@@ -92,7 +92,8 @@ describe('TextQuery', () => {
         expect(oracleText('kotlin -python')).toEqual('({kotlin}) NOT {python}');
         expect(oracleText('kotlin NOT python ! rust')).toEqual('({kotlin}) NOT {python} NOT {rust}');
         expect(oracleText('pre*')).toEqual('(pre%)');
-        expect(oracleText('"graph pre*"')).toEqual('({graph} pre%)');
+        // A `*` inside quotes is text, as Lucene's parser reads it: the phrase "graph pre" (drivine4j#622).
+        expect(oracleText('"graph pre*"')).toEqual('({graph pre})');
     });
 
     it('should read a sign after a backslash as text, neither required nor excluded', () => {
@@ -186,5 +187,30 @@ describe('TextQuery', () => {
 
     it('should read a query of many phrases that never close in one pass', () => {
         expect(TextQuery.parse('"graph '.repeat(50_000)).scored).toHaveLength(50_000);
+    });
+
+    it("should read a star inside quotes as text, as Lucene's parser does, and outside them as the start of a word", () => {
+        // drivine4j#622: Neo4j's parser hands a quoted text to its analyzer whole, which drops the `*`.
+        const phrase = '(^|[^[:alnum:]_])of[^[:alnum:]_]+sou($|[^[:alnum:]_])';
+        expect(TextQuery.parse('"of sou*"').scored).toEqual([phrase]);
+        expect(TextQuery.parse('body:"of sou*"').scored).toEqual([phrase]);
+        expect(TextQuery.parse('"of sou\\*"').scored).toEqual([phrase]);
+        expect(TextQuery.parse('"kiw*"').scored).toEqual(['(^|[^[:alnum:]_])kiw($|[^[:alnum:]_])']);
+        expect(TextQuery.parse('sou*').scored).toEqual(['(^|[^[:alnum:]_])sou']);
+        expect(TextQuery.parse('+kiw*').scored).toEqual(['(^|[^[:alnum:]_])kiw']);
+        expect(TextQuery.parse('"kiw*"').oracleText).toEqual('({kiw})');
+        expect(TextQuery.parse('body:"of sou*"').oracleText).toEqual('({of sou})');
+    });
+
+    it("should read a word as Unicode's Alphabetic letters, decimal digits and underscores, as the text's expression does", () => {
+        // drivine4j#616: a vowel sign and a letter number are in a word, as [[:alnum:]] holds them; a superscript or a
+        // fraction is between words, as it is in the text and to Neo4j's analyzer.
+        expect(TextQuery.parse('किताब').scoredWords).toEqual([['किताब']]);
+        expect(TextQuery.parse('bⅻb').scoredWords).toEqual([['bⅻb']]);
+        expect(TextQuery.parse('m²x').scoredWords).toEqual([['m', 'x']]);
+        expect(TextQuery.parse('1½2').scoredWords).toEqual([['1', '2']]);
+        expect(TextQuery.parse('٣٤').scoredWords).toEqual([['٣٤']]);
+        // A backslash makes "²" text, and it is still between words.
+        expect(TextQuery.parse('m\\²x').scoredWords).toEqual([['m', 'x']]);
     });
 });

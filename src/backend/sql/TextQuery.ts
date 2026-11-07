@@ -1,14 +1,80 @@
 import { DrivineError } from '@/DrivineError';
 
-/** What stands between two words: a run of anything but letters, digits and underscores. */
-const GAP = /[^\p{L}\p{N}_]+/u;
-const GAP_CHAR = /^[^\p{L}\p{N}_]$/u;
+/**
+ * What stands between two words: a run of anything but letters, decimal digits and underscores, as a term's expression's
+ * `[[:alnum:]_]` reads them in the text, on Postgres and through SqlitePatterns: letters as Unicode's Alphabetic holds them,
+ * which takes in the vowel signs of Indic scripts and the letter numbers (`ⅻ`), and digits as `Nd`. Read as any letter or
+ * number, a query split a Hindi word at its vowel sign, which the text went on from, and kept "²" in a word where the text
+ * ends one at it, as Neo4j's analyzer does (drivine4j#616). Oracle's `[[:alnum:]]` holds every combining mark too.
+ */
+const GAP = /[^\p{Alphabetic}\p{Nd}_]+/u;
+const GAP_CHAR = /^[^\p{Alphabetic}\p{Nd}_]$/u;
 
 /** The characters that end a term. */
 const SPACES = ' \t\n\u000B\u000C\r';
 
 const BOUNDARY_BEFORE = '(^|[^[:alnum:]_])';
 const BOUNDARY_AFTER = '($|[^[:alnum:]_])';
+/** What BOUNDARY_AFTER holds to, without taking the character it is: Postgres's and JavaScript's lookahead. */
+const BOUNDARY_AHEAD = '(?=$|[^[:alnum:]_])';
+/** What stands between the words of a phrase in a term's expression. */
+const BETWEEN = '[^[:alnum:]_]+';
+/**
+ * A word made only of what Oracle's `[[:alnum:]_]` was measured to hold: letters, decimal digits, letter numbers, combining
+ * marks and underscores.
+ */
+const ALNUM_WORD = /^[\p{L}\p{Nd}\p{Nl}\p{Mn}\p{Mc}_]*$/u;
+
+/**
+ * A term's expression ending where its last word does, the character after it held to but not taken: counted, a term
+ * written again at once still has the character before it (drivine4j#607). Taken, "kiwi kiwi kiwi" counted twice. For a
+ * store whose expressions look ahead.
+ */
+export function lookingAhead(pattern: string): string {
+    return pattern.endsWith(BOUNDARY_AFTER) ? pattern.slice(0, -BOUNDARY_AFTER.length) + BOUNDARY_AHEAD : pattern;
+}
+
+/**
+ * One character between words, as a group: for a store whose expressions don't look ahead, Oracle's. Each such character
+ * of the text written twice (`\1\1`), one is there for each, so a term's expression counts in it as `lookingAhead` counts
+ * in the text. It is the slow way, a fifth as fast as `counted`'s over 100,000 texts on Oracle, kept for the terms
+ * `counted` can't count.
+ */
+export const SEPARATOR = '([^[:alnum:]_])';
+
+/**
+ * For a store whose expressions don't look ahead, Oracle's: the term's expression ending where its last word does, and
+ * that expression holding a letter, a digit or an underscore after it. The term occurs as many times as the first matches
+ * less the second, and neither takes the character before the next, so it counts as `lookingAhead` does. Null for the
+ * second where the term is the start of a word, which may go on (drivine4j#607).
+ *
+ * Undefined where the term is a phrase that repeats a word, or whose last word starts its first: there an occurrence may
+ * begin inside another, "la la" in "la la land" or "kiwis kiwi" in "kiwis kiwis kiwi", and the two counts take different
+ * ones. Such a term is counted in the text with each SEPARATOR written twice.
+ *
+ * The pattern itself, with null for the second, where a word holds a character that is a word's to GAP but may not be to
+ * Oracle's `[[:alnum:]]`, which was measured on letters, decimal digits, letter numbers ("ⅻ") and combining marks (a Hindi
+ * vowel sign) alone: a circled letter, the "ⓐ" of "bⓐb". An occurrence may begin at it, and neither way above counts it.
+ * The one count undercounts the term only where it is written again at once, as it did before.
+ */
+export function counted(pattern: string): [string, string | null] | undefined {
+    if (!pattern.endsWith(BOUNDARY_AFTER)) {
+        return [pattern, null];
+    }
+    const ended = pattern.slice(0, -BOUNDARY_AFTER.length);
+    const words = ended.slice(BOUNDARY_BEFORE.length).split(BETWEEN);
+    if (words.some((it) => !ALNUM_WORD.test(it))) {
+        return [pattern, null];
+    }
+    const overlaps =
+        new Set(words).size < words.length || (words.length > 1 && words[0].startsWith(words[words.length - 1]));
+    return overlaps ? undefined : [ended, `${ended}[[:alnum:]_]`];
+}
+
+/** Whether a term's expression is a prefix term's: one whose last word is the start of a word, `kiw*`. */
+export function isPrefix(pattern: string): boolean {
+    return !pattern.endsWith(BOUNDARY_AFTER);
+}
 
 /** What an operator does to the token after it. */
 const OPERATORS: Record<string, 'MUST' | 'NOT' | 'OR'> = {
@@ -58,9 +124,10 @@ interface Parts {
  * whole word in lower-cased text. Through an Oracle Text index it is `oracleText`.
  *
  * It reads the plain core of the Lucene syntax the graph engines take: words, a `"quoted phrase"`, `+must`, `-not` and
- * `NOT not`, a `prefix*`, and `field:word` as the word. `AND` makes the word after it one a node must hold; `OR` is the
- * default between words. Anything else is read as text. A backslash before a character that is not part of a word
- * makes that character text; before a letter, a digit or an underscore it is itself text.
+ * `NOT not`, a `prefix*` (outside quotes: inside them, as in Lucene, a `*` is text), and `field:word` as the word.
+ * `AND` makes the word after it one a node must hold; `OR` is the default between words. Anything else is read as text.
+ * A backslash before a character that is not part of a word makes that character text; before a letter, a digit or an
+ * underscore it is itself text.
  */
 export class TextQuery {
     /** Reads the query. It must name at least one term that scores. */
@@ -242,7 +309,7 @@ function phraseAt(
 
 /**
  * The token's term; undefined when it holds no word. A word still holds a field up to its first bare colon. The term is
- * the start of a word when its last character is a bare `*`.
+ * the start of a word when its last character is a bare `*` and it is not quoted.
  */
 function termOf(token: Token): Term | undefined {
     const text = token.quoted ? token.chars : token.chars.slice(token.chars.findIndex((it) => isBare(it, ':')) + 1);
@@ -255,13 +322,14 @@ function termOf(token: Token): Term | undefined {
     if (!words.length) {
         return undefined;
     }
-    const prefix = isBare(text[text.length - 1], '*');
+    // A `*` inside quotes is text, as Lucene's parser reads it: "of sou*" is the phrase "of sou" (drivine4j#622).
+    const prefix = !token.quoted && isBare(text[text.length - 1], '*');
     return {
         words,
         oracleText: prefix
             ? [...words.slice(0, -1).map((it) => `{${it}}`), `${words[words.length - 1]}%`].join(' ')
             : `{${words.join(' ')}}`,
-        pattern: BOUNDARY_BEFORE + words.join('[^[:alnum:]_]+') + (prefix ? '' : BOUNDARY_AFTER)
+        pattern: BOUNDARY_BEFORE + words.join(BETWEEN) + (prefix ? '' : BOUNDARY_AFTER)
     };
 }
 
