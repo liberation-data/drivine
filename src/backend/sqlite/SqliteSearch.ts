@@ -4,7 +4,7 @@ import { hasLabels, jsonType, jsonValue, nodeDocument, path, SqliteGraph, textOf
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { bm25Ranked } from '@/backend/sql/Bm25';
-import { TextQuery } from '@/backend/sql/TextQuery';
+import { lookingAhead, TextQuery } from '@/backend/sql/TextQuery';
 import { DrivineError } from '@/DrivineError';
 import { TargetModel } from '@/model/RelationshipModel';
 
@@ -55,7 +55,7 @@ export class SqliteSearch {
             `SELECT ${len} AS len FROM ${labelled}`,
             query,
             {
-                count: (text, term) => `drivine_regexp_count(${text}, ${bind(term)})`,
+                count: (text, term) => `drivine_regexp_count(${text}, ${bind(lookingAhead(term))})`,
                 holds: (text, term) => `drivine_regexp_count(${text}, ${bind(term)}) > 0`,
                 ln: (value) => `drivine_math('log', ${value})`,
                 real: (value) => `CAST(${value} AS REAL)`
