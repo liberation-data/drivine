@@ -136,9 +136,10 @@ describe('bm25Ranked', () => {
 
     it.each([
         ['kiw*', '(^|[^[:alnum:]_])kiw'],
-        ['b²b', '(^|[^[:alnum:]_])b²b($|[^[:alnum:]_])']
+        ['bⓐb', '(^|[^[:alnum:]_])bⓐb($|[^[:alnum:]_])']
     ])('should count %s on Oracle by its one expression', (text, bound) => {
-        // A prefix term takes no character after it, and "²" begins an occurrence that two counts would lose (drivine4j#607).
+        // A prefix term takes no character after it, and "ⓐ", a word's to the query and not measured on Oracle, may begin an
+        // occurrence there that two counts would lose (drivine4j#607).
         const statement = oracleMatching(text);
         expect(squashed(statement.text)).toContain('SELECT s.nid, s.len, REGEXP_COUNT(s.text, $_term0) AS tf1 FROM');
         expect(statement.bindings._term0).toEqual(bound);

@@ -106,10 +106,28 @@ describe('TextQuery counting', () => {
         both('"ki kiwi bird"', 'ki ki kiwi bird ki kiwi birds ki kiwi bird ki kiwi bird', 3);
     });
 
-    it('should count on Oracle a term holding a number that is not a digit by its one expression, losing no occurrence', () => {
-        // "²" is a word's to the query, not to [[:alnum:]]: "b²b" in "b²b²bx" begins inside the first.
-        expect(counted(term('b²b'))).toEqual([term('b²b'), null]);
+    it('should count on Oracle a term with a character not measured as alnum there by its one expression', () => {
+        // A circled letter, "ⓐ", is a word's to the query, which reads it as alphabetic, and may not be to Oracle's
+        // [[:alnum:]]: an occurrence could begin inside another there, so the one count counts it.
+        expect(counted(term('bⓐb'))).toEqual([term('bⓐb'), null]);
+        // "²" is between words (drivine4j#616): "b²b" is the phrase "b b", which repeats a word, and still counts the same.
+        expect(counted(term('b²b'))).toBeUndefined();
         both('b²b', 'b²b²bx', 1);
-        expect(counted(term('bⅻb'))).toEqual([term('bⅻb'), null]);
+    });
+
+    it('should count on Oracle a word with a vowel sign written again at once each time, by its two counts', () => {
+        // A vowel sign is in a word (drivine4j#616) and a combining mark is [[:alnum:]] on Oracle, so no occurrence begins
+        // inside another: counted by the one expression, "किताब किताब" was once.
+        expect(counted(term('किताब'))?.[1]).not.toBeNull();
+        both('किताब', 'किताब किताब', 2);
+        both('"एक किताब"', 'एक किताब एक किताब', 2);
+        // Its next character a vowel sign, the word goes on, as it does in the text on each store: no occurrence.
+        expect(byOracle('किताब', 'किताबें')).toEqual(0);
+    });
+
+    it('should count on Oracle a word with a letter number written again at once each time, by its two counts', () => {
+        // "ⅻ" is [[:alnum:]] on Oracle, as measured (drivine4j#616): counted by the one expression, "bⅻb bⅻb" was once.
+        expect(counted(term('bⅻb'))?.[1]).not.toBeNull();
+        both('bⅻb', 'bⅻb bⅻb', 2);
     });
 });

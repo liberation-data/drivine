@@ -97,8 +97,8 @@ export class OracleSearch {
             {
                 // Oracle's expressions don't look ahead: the term ending where its last word does, less those a word goes on
                 // from (counted); a phrase an occurrence of which may begin inside another, in the text with each character
-                // between words written twice (SEPARATOR); a prefix term, or one holding a number that isn't a digit, by its
-                // one expression (drivine4j#607).
+                // between words written twice (SEPARATOR); a prefix term, or one with a character not measured as
+                // [[:alnum:]], by its one expression (drivine4j#607).
                 count: (text, term) => {
                     const two = counted(term);
                     if (two === undefined) {

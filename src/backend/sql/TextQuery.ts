@@ -19,8 +19,11 @@ const BOUNDARY_AFTER = '($|[^[:alnum:]_])';
 const BOUNDARY_AHEAD = '(?=$|[^[:alnum:]_])';
 /** What stands between the words of a phrase in a term's expression. */
 const BETWEEN = '[^[:alnum:]_]+';
-/** A word made only of what [[:alnum:]_] holds: letters, decimal digits and underscores. */
-const ALNUM_WORD = /^[\p{L}\p{Nd}_]*$/u;
+/**
+ * A word made only of what Oracle's `[[:alnum:]_]` was measured to hold: letters, decimal digits, letter numbers, combining
+ * marks and underscores.
+ */
+const ALNUM_WORD = /^[\p{L}\p{Nd}\p{Nl}\p{Mn}\p{Mc}_]*$/u;
 
 /**
  * A term's expression ending where its last word does, the character after it held to but not taken: counted, a term
@@ -49,9 +52,10 @@ export const SEPARATOR = '([^[:alnum:]_])';
  * begin inside another, "la la" in "la la land" or "kiwis kiwi" in "kiwis kiwis kiwi", and the two counts take different
  * ones. Such a term is counted in the text with each SEPARATOR written twice.
  *
- * The pattern itself, with null for the second, where a word holds a number that isn't a digit, the "²" of "b²b": a
- * word's to GAP but not to `[[:alnum:]]`, so an occurrence may begin at it, and neither way above counts it. The one count
- * undercounts the term only where it is written again at once, as it did before.
+ * The pattern itself, with null for the second, where a word holds a character that is a word's to GAP but may not be to
+ * Oracle's `[[:alnum:]]`, which was measured on letters, decimal digits, letter numbers ("ⅻ") and combining marks (a Hindi
+ * vowel sign) alone: a circled letter, the "ⓐ" of "bⓐb". An occurrence may begin at it, and neither way above counts it.
+ * The one count undercounts the term only where it is written again at once, as it did before.
  */
 export function counted(pattern: string): [string, string | null] | undefined {
     if (!pattern.endsWith(BOUNDARY_AFTER)) {
