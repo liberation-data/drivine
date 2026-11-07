@@ -2200,10 +2200,10 @@ export class CypherWriter {
             select.source(this.sql.elements(list.ids, name), this.sql);
             const row = this.alias(list.relationships ? 'e' : 'n');
             if (list.relationships) {
-                select.join(`LEFT JOIN ${this.sql.edges} ${row} ON ${row}.eid = ${this.sql.idOf(this.sql.item(name))}`);
+                select.join(this.sql.keyJoin(this.sql.edges, row, 'eid', this.sql.idOf(this.sql.item(name))));
                 select.bind(unwind.variable, relationshipOf(row));
             } else {
-                select.join(`LEFT JOIN ${this.sql.nodes} ${row} ON ${row}.nid = ${this.sql.idOf(this.sql.item(name))}`);
+                select.join(this.sql.keyJoin(this.sql.nodes, row, 'nid', this.sql.idOf(this.sql.item(name))));
                 select.bind(unwind.variable, nodeOf(row));
             }
             select.order.push([this.sql.itemNo(name), false]);
@@ -2753,7 +2753,7 @@ export class CypherWriter {
                     value,
                     this.sql.itemNo(u)
                 )} FROM ${this.sql.elements(ids, u)} ` +
-                `LEFT JOIN ${table} ${row} ON ${row}.${id} = ${this.sql.idOf(this.sql.item(u))}) END`
+                `${this.sql.keyJoin(table, row, id, this.sql.idOf(this.sql.item(u)))}) END`
             );
         });
     }
@@ -2977,11 +2977,11 @@ export class CypherWriter {
             const key = this.key(variable);
             if (kind === 'NODE') {
                 const n = this.alias('n');
-                select.join(`LEFT JOIN ${this.sql.nodes} ${n} ON ${n}.nid = ${this.sql.idOf(row, key)}`);
+                select.join(this.sql.keyJoin(this.sql.nodes, n, 'nid', this.sql.idOf(row, key)));
                 select.bind(variable, nodeOf(n));
             } else if (kind === 'RELATIONSHIP') {
                 const e = this.alias('e');
-                select.join(`LEFT JOIN ${this.sql.edges} ${e} ON ${e}.eid = ${this.sql.idOf(row, key)}`);
+                select.join(this.sql.keyJoin(this.sql.edges, e, 'eid', this.sql.idOf(row, key)));
                 select.bind(variable, relationshipOf(e));
             } else if (kind === 'VALUE') {
                 const was = values.get(variable);
@@ -5081,12 +5081,8 @@ export class CypherWriter {
         const [table, key, item] = relationships
             ? [this.sql.edges, 'eid', relationshipOf(row)]
             : [this.sql.nodes, 'nid', nodeOf(row)];
-        return [
-            `FROM ${this.sql.elements(ids, name)} LEFT JOIN ${table} ${row} ON ${row}.${key} = ${this.sql.idOf(
-                this.sql.item(name)
-            )}`,
-            item
-        ];
+        const joined = this.sql.keyJoin(table, row, key, this.sql.idOf(this.sql.item(name)));
+        return [`FROM ${this.sql.elements(ids, name)} ${joined}`, item];
     }
 
     private listComprehension(comprehension: ListComprehension, scope: Scope): Value {
