@@ -1006,3 +1006,20 @@ cases:
       - cypher: "MATCH (n:CyTemporal) WHERE n.day < date('0001-01-01') RETURN n.id ORDER BY n.id"
         only: [neo4j, sql]
         rows: ["a", "b"]
+
+  - name: "A node found by a moment an unwound row holds"
+    description: "A node is found by a moment it holds only where the row's moment is the same at the same offset, as moments compare: the same instant at another offset is another value (drivine4j#617)."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime('2024-03-15T10:00:00+02:00')}), (:CyTemporal {id: 'b', at: datetime('2024-03-15T08:00:00Z')})"
+      - cypher: "UNWIND [datetime('2024-03-15T10:00:00+02:00')] AS t MATCH (n:CyTemporal {at: t}) RETURN n.id"
+        rows: ["a"]
+      - cypher: "UNWIND [datetime('2024-03-15T08:00:00Z')] AS t MATCH (n:CyTemporal {at: t}) RETURN n.id"
+        rows: ["b"]
+      - note: "Rows of more than one kind: what the row holds is known only as it is read."
+        cypher: "UNWIND [{at: datetime('2024-03-15T10:00:00+02:00')}, {at: 'x'}, {at: 7}, {at: [1]}] AS row MATCH (n:CyTemporal {at: row.at}) RETURN n.id"
+        rows: ["a"]
+      - cypher: "UNWIND [{at: datetime('2024-03-15T08:00:00Z')}, {at: 'x'}] AS row MATCH (n:CyTemporal {at: row.at}) RETURN n.id"
+        rows: ["b"]
+      - note: "As a WHERE compares them."
+        cypher: "UNWIND [{at: datetime('2024-03-15T10:00:00+02:00')}, {at: 'x'}] AS row MATCH (n:CyTemporal) WHERE n.at = row.at RETURN n.id"
+        rows: ["a"]

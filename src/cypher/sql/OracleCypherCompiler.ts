@@ -1,5 +1,5 @@
 import { DrivineError } from '@/DrivineError';
-import { holdsLabel } from '@/backend/oracle/OracleGraph';
+import { holdsLabel, labelledValue } from '@/backend/oracle/OracleGraph';
 import { nullsEqualFunction, nullsEqualName } from '@/backend/oracle/OracleStoredFunctions';
 import { Stamps } from '@/model/Stamps';
 import { CypherFloat } from '@/cypher/ast/Expression';
@@ -16,7 +16,7 @@ import { extendedDoubles, jsonText } from '@/cypher/sql/JsonText';
 import { OracleTemporalSql } from '@/cypher/sql/OracleTemporalSql';
 import { PARAMETERS_OBJECT } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
-import { PLAIN_FLOAT, SHARED_ABOVE, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import { IndexedProperty, PLAIN_FLOAT, SHARED_ABOVE, SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 import { TemporalSql } from '@/cypher/sql/TemporalSql';
 import { JsonValue, NodeValue } from '@/cypher/sql/Value';
 
@@ -131,6 +131,22 @@ const HINTED = /^SELECT \/\*\+ (.*?) \*\//;
  * one: see {@link OracleCypherCompiler.deletedIds}.
  */
 const INDEXED_LABEL = /JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "((?:[^"\\]|\\.)*)"\)'\)/gs;
+
+/** `query` with `hint` among the hints of the `SELECT` at `select`, which it opens with where it holds none. */
+function hinted(query: string, select: number, hint: string): string {
+    const after = select + 'SELECT '.length;
+    if (query.startsWith('/*+ ', after)) {
+        const end = query.indexOf(' */', after);
+        return `${query.slice(0, end)} ${hint}${query.slice(end)}`;
+    }
+    return `${query.slice(0, after)}/*+ ${hint} */ ${query.slice(after)}`;
+}
+
+/**
+ * The rows {@link OracleCypherCompiler.fewRows} plans a list at: few enough that Oracle reads the node each finds through
+ * its index, as drivine4j plans them.
+ */
+const FEW_ROWS = 10;
 
 /**
  * Where the `SELECT` whose `FROM` is at `from` in `query` begins: read back from there, past the brackets of its select
@@ -285,6 +301,28 @@ function shortOrNoText(json: string, containers: boolean = true): string {
     return `${short(json)} IS NOT NULL OR NVL(${kind(json)}, 'null') ${
         containers ? "<> 'string'" : "NOT IN ('string', 'array', 'object')"
     }`;
+}
+
+/**
+ * `text` equal to the property `of` names, as the index a label of its node may have over it holds it: a range index's
+ * labelled one, or a uniqueness constraint's, which is of the same expression here (see
+ * `OracleSchemaGrammar.createUnique`). Written for each label `indexedProperties` says has an index over the property
+ * (see `OracleCypherCompiler.indexedEquality`). Undefined where it names no such label.
+ */
+function labelledEquals(
+    indexedProperties: ReadonlyArray<readonly [string, string]>,
+    of: IndexedProperty | undefined,
+    text: string
+): string | undefined {
+    if (of === undefined || of.labels.length === 0 || !of.props.endsWith('.props')) {
+        return undefined;
+    }
+    const alias = of.props.slice(0, -'.props'.length);
+    const indexed = of.labels.filter((label) => indexedProperties.some(([l, key]) => l === label && key === of.key));
+    if (indexed.length === 0) {
+        return undefined;
+    }
+    return indexed.map((label) => `${labelledValue(alias, label, of.key)} = ${text}`).join(' AND ');
 }
 
 /** Whether `given`, a value the statement gives, is a number, a truth value or a text of 1 to {@link SHORT_TEXT} bytes, which `JSON_VALUE` reads as a `VARCHAR2`. */
@@ -477,17 +515,29 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
     private readonly oneRow = new Set<string>();
 
     /**
+     * The aliases of the `JSON_TABLE`s of an `UNWIND` whose item a pattern finds a node by through its index
+     * ({@link fewRows}): kept as text, as {@link oneRow} are, and looked for in the query {@link planned} is given.
+     */
+    private readonly few = new Set<string>();
+
+    /**
      * @param graph the graph whose tables, and whose functions {@link nullsEqualName}, `eraName` and `eraDateName`, a
      * statement is compiled against
      * @param nullsEqualStored whether two values that may hold a null are compared by the function the store keeps
      * beside the graph's tables: see {@link nullsEqual}
      * @param eraStored whether a text or a timestamp whose year may be BC is renumbered by the functions the store keeps
      * beside the graph's tables, `eraName` and `eraDateName` (see `OracleStoredFunctions`): see `OracleTemporalSql.era`
+     * @param indexedProperties the labels and properties a range index or a one-property uniqueness constraint is over,
+     * each as `[label, key]`: a node a pattern finds by one is read through that index (see {@link indexedEquality}).
+     * Empty, as a statement compiled without the store's catalog is, no node is: its labels tested as the index over them
+     * answers, a property with no index of its own would read every node of the graph in place of those of the label
+     * (#636, liberation-data/drivine4j#617). The connection names none yet (liberation-data/drivine4j#638).
      */
     constructor(
         private readonly graph: string,
         private readonly nullsEqualStored: boolean = true,
-        private readonly eraStored: boolean = true
+        private readonly eraStored: boolean = true,
+        private readonly indexedProperties: ReadonlyArray<readonly [string, string]> = []
     ) {
         super(graph);
     }
@@ -863,6 +913,60 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
         return `JSON_OBJECT(${entries
             .map(([key, value]) => `${literal(key)} VALUE ${value}`)
             .join(', ')} NULL ON NULL RETURNING JSON)`;
+    }
+
+    /**
+     * The node's property read as the labelled index over its label holds it ({@link labelledValue}), equal to the
+     * `value`'s text, for each label the pattern names for it: Oracle had no such test, so even a parameter's value was
+     * compared only as JSON, inside a `CASE`, which no index answers, and a node found by a property was found by reading
+     * every node of the label (#636, liberation-data/drivine4j#617).
+     */
+    indexedEquality(_property: string, value: string, of?: IndexedProperty): string | undefined {
+        return labelledEquals(this.indexedProperties, of, `JSON_VALUE(${value}, '$')`);
+    }
+
+    /**
+     * The list `alias` an `UNWIND` reads, whose item a pattern finds a node by through its index, planned as
+     * {@link FEW_ROWS} rows (`CARDINALITY`): Oracle takes a `JSON_TABLE` to give 8,168, and hashed every node of the
+     * label to them, the property only a filter on each, though its index was there (#636, liberation-data/drivine4j#617).
+     * See {@link oneRowPlanned}.
+     */
+    fewRows(alias: string): void {
+        this.few.add(alias);
+    }
+
+    /** An empty text, and one past {@link SHORT_TEXT} bytes, which the index's `JSON_VALUE` reads as null: see {@link readShort}. */
+    indexHolds(given: unknown): boolean {
+        return readShort(given);
+    }
+
+    /**
+     * As {@link indexedEquality}, for a value of any kind: `JSON_VALUE` gives a number's text as Oracle holds the number,
+     * so `1` and `1.0` are the same text. A list has no text, and neither does the property a list is in the labelled
+     * index, which holds none: it is let through, to be compared as JSON, so no list a node holds is left out. Oracle
+     * reads no index beside that `OR`, so where the value is known to be no list or map (`scalar`) it is left out.
+     */
+    indexedEqualityOfAny(
+        _property: string,
+        value: string,
+        of?: IndexedProperty,
+        scalar: boolean = false
+    ): string | undefined {
+        if (labelledEquals(this.indexedProperties, of, value) === undefined) {
+            return undefined;
+        }
+        if (scalar) {
+            return labelledEquals(this.indexedProperties, of, `JSON_VALUE(${value}, '$')`);
+        }
+        return this.shared(
+            [value],
+            ([x]) =>
+                `(${labelledEquals(
+                    this.indexedProperties,
+                    of,
+                    `JSON_VALUE(${x}, '$')`
+                )} OR JSON_VALUE(${x}, '$') IS NULL)`
+        );
     }
 
     withEntries(json: string, entries: [string, string][]): string {
@@ -1887,17 +1991,17 @@ export class OracleCypherCompiler extends SqlCypherCompiler {
             ).exec(text);
             // An alias names one source of the statement, so one query reads it.
             const select = read ? owningSelect(text, read.index) : undefined;
-            if (select === undefined) {
-                continue;
-            }
-            const hint = `CARDINALITY(${alias} 1)`;
-            const after = select + 'SELECT '.length;
-            if (text.startsWith('/*+ ', after)) {
-                const end = text.indexOf(' */', after);
-                text = `${text.slice(0, end)} ${hint}${text.slice(end)}`;
-            } else {
-                text = `${text.slice(0, after)}/*+ ${hint} */ ${text.slice(after)}`;
-            }
+            text = select === undefined ? text : hinted(text, select, `CARDINALITY(${alias} 1)`);
+        }
+        for (const alias of this.few) {
+            // The list's JSON_TABLE, of any list: its query is the one its brackets are in.
+            const read = new RegExp(
+                `'\\$\\[\\*\\]' COLUMNS \\(item_no FOR ORDINALITY, item JSON PATH '\\$'\\)\\) ${escapedForRegExp(
+                    alias
+                )}\\b`
+            ).exec(text);
+            const select = read ? owningSelect(text, read.index + read[0].length - alias.length - 1) : undefined;
+            text = select === undefined ? text : hinted(text, select, `CARDINALITY(${alias} ${FEW_ROWS})`);
         }
         return text;
     }

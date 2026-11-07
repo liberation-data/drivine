@@ -1,4 +1,5 @@
 import { SqlitePatterns } from '@/connection/sqlite/SqlitePatterns';
+import { TextQuery } from '@/backend/sql/TextQuery';
 
 /**
  * The regular expressions of a SQLite connection, read as Java reads them, where JavaScript reads no flag group of its
@@ -42,5 +43,26 @@ describe('SqlitePatterns without flag groups of their own', () => {
         expect(() => matches('^(?:(?m)a)$', 'a\nb')).toThrow('Invalid group');
         expect(() => matches('^(?:x|(?i)a|b)\\z', 'B')).toThrow('Invalid group');
         expect(() => matches('^(?:a(?i)b|c)\\z', 'C')).toThrow('Invalid group');
+    });
+});
+
+describe("SqlitePatterns' POSIX classes", () => {
+    it("reads [:alnum:] as Unicode's Alphabetic and Nd, as Java does and as TextQuery splits a query into words", () => {
+        // drivine4j#616: a vowel sign, a letter number and an Arabic-Indic digit are in a word; a superscript and a
+        // fraction are not. Read as \p{L}\p{N}, the text and the query's words would disagree.
+        const word = new SqlitePatterns().of('^[[:alnum:]_]$', '');
+        for (const [char, inWord] of [
+            ['क', true],
+            ['ि', true],
+            ['ⅻ', true],
+            ['٣', true],
+            ['_', true],
+            ['²', false],
+            ['½', false],
+            ['-', false]
+        ] as [string, boolean][]) {
+            expect([char, word.test(char)]).toEqual([char, inWord]);
+            expect([char, TextQuery.parse(`a${char}b`).scoredWords[0].length === 1]).toEqual([char, inWord]);
+        }
     });
 });
