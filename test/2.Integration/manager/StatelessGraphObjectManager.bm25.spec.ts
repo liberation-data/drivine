@@ -54,6 +54,16 @@ const FRUITS: Record<string, string> = {
     other: 'nothing here'
 };
 
+/** Texts in Hindi, to count a word with vowel signs. */
+@NodeFragment({ labels: ['Bm25Book'] })
+class Bm25Book {
+    @NodeId() id: string;
+    @FullTextIndex() body?: string;
+}
+
+/** A Hindi word twice and once, in texts as long as each other in characters and in tokens. */
+const BOOKS: Record<string, string> = { twice: 'किताब किताब', once: 'किताब हिसाब', other: 'कुछ नहीं' };
+
 /** With the twenty common ones, "graph" is in most texts, so it says little of any; "soup" is in one. */
 const ARTICLES = [
     ...Array.from({ length: 20 }, (_, i) => article(`common${i + 1}`, 'a note on a graph and its nodes')),
@@ -64,6 +74,8 @@ const ARTICLES = [
     article('once', 'kiwi bird'),
     article('often', 'kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi kiwi'),
     article('none', 'nothing to see'),
+    article('hindi', 'एक किताब'),
+    article('area', 'an m² x here'),
     // As long as each other: counted three times and twice (drivine4j#607).
     article('triple', 'okapi okapi okapi'),
     article('apart', 'okapi lemur okapi'),
@@ -87,7 +99,8 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
     const specs = [
         fullTextIndex('Bm25Article', 'body'),
         fullTextIndex('Bm25Paper', ['title', 'body']),
-        fullTextIndex('Bm25Fruit', 'body')
+        fullTextIndex('Bm25Fruit', 'body'),
+        fullTextIndex('Bm25Book', 'body')
     ];
     /** A text's length as the store measures it for BM25: in characters on the SQL stores, in tokens on Lucene. */
     const length = (text: string): number =>
@@ -105,11 +118,12 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
-        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper', 'Bm25Fruit');
+        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper', 'Bm25Fruit', 'Bm25Book');
         await gom.saveAll([
             ...ARTICLES,
             ...PAPERS,
-            ...Object.entries(FRUITS).map(([id, body]) => Object.assign(new Bm25Fruit(), { id, body }))
+            ...Object.entries(FRUITS).map(([id, body]) => Object.assign(new Bm25Fruit(), { id, body })),
+            ...Object.entries(BOOKS).map(([id, body]) => Object.assign(new Bm25Book(), { id, body }))
         ]);
         // Neo4j searches through its index only; the SQL stores search without one, and Postgres compares the two below.
         if (engine.type === DatabaseType.NEO4J) {
@@ -121,7 +135,7 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
     });
 
     afterAll(async () => {
-        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper', 'Bm25Fruit');
+        await clearLabels(pm, engine, 'Bm25Article', 'Bm25Paper', 'Bm25Fruit', 'Bm25Book');
         for (const spec of specs) {
             await gom.indexes.drop(spec);
         }
@@ -135,9 +149,9 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits.every((it) => it.score > 0 && it.score <= 1)).toBe(true);
         if (engine.type !== DatabaseType.NEO4J) {
             // bm25Ranked's own figure, lengths in characters (Lucene's are in words): "graph" 5 times in 45 characters, each
-            // counted though written again at once (drivine4j#607), against "graph" and "soup" once each in 15, over 31 texts
-            // of 920 characters, "graph" in 22 and "soup" in 1.
-            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.13588906225574401, 9);
+            // counted though written again at once (drivine4j#607), against "graph" and "soup" once each in 15, over 33 texts
+            // of 940 characters, "graph" in 22 and "soup" in 1.
+            expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.1541609729904888, 9);
         }
     });
 
@@ -153,6 +167,13 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits.get('often')).toBeCloseTo(1, 9);
         // Ten times the count, as long again as the other's text: not ten times the score.
         expect(hits.get('once')).toBeGreaterThan(0.4);
+    });
+
+    it("should read a word as the text's expression does: its vowel signs in it, a superscript between words", async () => {
+        // drivine4j#616: split at its vowel sign, किताब was "क", which [[:alnum:]] went on from.
+        expect((await search('किताब')).map((it) => it.value.id)).toEqual(['hindi']);
+        // "²" is not in a word: "m²x" is the words "m" and "x", as Neo4j's analyzer reads it.
+        expect((await search('"m²x"')).map((it) => it.value.id)).toEqual(['area']);
     });
 
     it("should score every node a prefix term finds alike, as Lucene's prefix query does", async () => {
@@ -197,6 +218,14 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
     it('should count a term written three times running three times, not every other one', async () => {
         const hits = await search('okapi');
         expect(hits.map((it) => it.value.id)).toEqual(['triple', 'apart']);
+        expect(hits[0].score).toBeGreaterThan(hits[1].score);
+    });
+
+    it('should count a Hindi word written twice running twice, as a word of letters is', async () => {
+        // Its vowel signs are in the word, and [[:alnum:]] on Oracle: counted there by the one expression, "किताब किताब"
+        // counted once and tied with "किताब हिसाब", as long (drivine4j#607, drivine4j#616).
+        const hits = await gom.loadMatching(Bm25Book, 'किताब', { topK: 50 });
+        expect(hits.map((it) => it.value.id)).toEqual(['twice', 'once']);
         expect(hits[0].score).toBeGreaterThan(hits[1].score);
     });
 
