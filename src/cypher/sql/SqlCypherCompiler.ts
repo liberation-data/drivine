@@ -27,6 +27,21 @@ import { json, JsonValue, NodeValue } from '@/cypher/sql/Value';
 import { VariableKinds } from '@/cypher/sql/VariableKinds';
 import { CypherFloat } from '@/cypher/ast/Expression';
 
+/**
+ * A node's property a pattern compares, as {@link SqlCypherCompiler.indexedEquality} is told of it: the node's properties
+ * `props` it is read from as `propertyOf` gives it, the property's `key`, and the `labels` the pattern names for the node,
+ * which a store whose index is over a label's nodes, as Oracle's, needs to write the index's own expression (#636,
+ * liberation-data/drivine4j#617). `scalar` says the value it is compared with is known to be no list or map, as what each
+ * row of a list the statement is given holds at the key it is read from is, nor a text the index doesn't hold
+ * ({@link SqlCypherCompiler.indexHolds}): a store whose index holds no list need not then let one through.
+ */
+export interface IndexedProperty {
+    readonly props: string;
+    readonly key: string;
+    readonly labels: string[];
+    readonly scalar: boolean;
+}
+
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
 export const SHARED_ABOVE = 200;
 
@@ -366,6 +381,15 @@ export abstract class SqlCypherCompiler {
         return `${name}.${column}`;
     }
 
+    /**
+     * The join of the node or relationship table `table`, as `row`, to the one row whose key column `key` is `id`: how a
+     * row of a write's or a list's rows reads its node or relationship back by its id. A plain `LEFT JOIN`; Postgres
+     * probes the key for each row instead, as a plain join is planned by the table's statistics (#655).
+     */
+    keyJoin(table: string, row: string, key: string, id: string): string {
+        return `LEFT JOIN ${table} ${row} ON ${row}.${key} = ${id}`;
+    }
+
     /** The item of the row `alias` of {@link elements}, as JSON. */
     item(alias: string): string {
         return `${alias}.item`;
@@ -521,10 +545,43 @@ export abstract class SqlCypherCompiler {
 
     /**
      * A test an index answers, to stand beside the comparison of the `property`, read as {@link propertyOf} gives it,
-     * with the `value`, a text or a truth value; undefined where there is none.
+     * with the `value`, a text or a truth value; undefined where there is none. `of` is the property's node, where it is
+     * one a pattern names.
      */
-    indexedEquality(_property: string, _value: string): string | undefined {
+    indexedEquality(_property: string, _value: string, _of?: IndexedProperty): string | undefined {
         return undefined;
+    }
+
+    /**
+     * As {@link indexedEquality}, for a `value` whose kind isn't known as the statement compiles, as an unwound row's: a
+     * test an index answers that holds wherever the comparison could, so it leaves out no row the comparison keeps. A
+     * number's text differs where its JSON doesn't (`1` and `1.0`). `scalar` says the value is known to be no list or
+     * map (see {@link IndexedProperty.scalar}). Undefined where the store has none (#636, liberation-data/drivine4j#617).
+     */
+    indexedEqualityOfAny(
+        _property: string,
+        _value: string,
+        _of?: IndexedProperty,
+        _scalar: boolean = false
+    ): string | undefined {
+        return undefined;
+    }
+
+    /**
+     * Notes that the rows of `alias`, a list an `UNWIND` reads whose item a pattern finds a node by through an index (see
+     * {@link indexedEquality}), are few, where the store's planner is to be told: nothing here. See Oracle's.
+     */
+    fewRows(_alias: string): void {
+        return;
+    }
+
+    /**
+     * Whether the store's index holds the value `given`, a text or a truth value, as a text a test of
+     * {@link indexedEquality} finds: where it doesn't, the comparison stands alone. Oracle's reads an empty text, and one
+     * past 4,000 bytes, as null (#636).
+     */
+    indexHolds(_given: unknown): boolean {
+        return true;
     }
 
     /**
