@@ -882,3 +882,95 @@ cases:
         cypher: "MATCH (a:CyWrite)-[r:KNOWS]->(b:CyWrite) RETURN [a.name, r.since, b.name] ORDER BY a.name"
         rows: [["Ada", 2020, "Bob"], ["Bob", null, "Cy"]]
 
+  - name: "Schema: a uniqueness constraint"
+    description: "A uniqueness constraint made by Neo4j's DDL refuses a second node of its key; made again IF NOT EXISTS it gives no rows, and without it fails; dropped by its name, it refuses no more, and dropped again it fails unless IF EXISTS. The SQL stores apply the DDL through Drivine's schema machinery."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT cy_ddl_key IF EXISTS"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE CONSTRAINT cy_ddl_key IF NOT EXISTS FOR (n:CyDdl) REQUIRE n.key IS UNIQUE"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE CONSTRAINT cy_ddl_key IF NOT EXISTS FOR (n:CyDdl) REQUIRE n.key IS UNIQUE"
+        rows: []
+      - only: [neo4j, sql]
+        note: "Without IF NOT EXISTS, over a constraint that is there, the statement fails, as Neo4j fails it."
+        cypher: "CREATE CONSTRAINT cy_ddl_key FOR (n:CyDdl) REQUIRE n.key IS UNIQUE"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyDdl {key: 1})"
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyDdl {key: 1})"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyDdl) RETURN count(n)"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT cy_ddl_key"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyDdl {key: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyDdl) RETURN count(n)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT cy_ddl_key"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT cy_ddl_key IF EXISTS"
+        rows: []
+
+  - name: "Schema: a range index"
+    description: "A range index made by Neo4j's DDL is waited for by db.awaitIndexes, which gives no rows, and a query reads through it as without it; dropped by its name, it is gone."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "DROP INDEX cy_ddl_name IF EXISTS"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE INDEX cy_ddl_name IF NOT EXISTS FOR (n:CyDdl) ON (n.name)"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CALL db.awaitIndexes(300)"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyDdl {name: 'Ada'}), (:CyDdl {name: 'Bob'})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyDdl) WHERE n.name = 'Bob' RETURN n.name"
+        rows: ["Bob"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyDdl {name: $name}) RETURN n.name"
+        parameters: {name: "Ada"}
+        rows: ["Ada"]
+      - only: [neo4j, sql]
+        cypher: "DROP INDEX cy_ddl_name"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "DROP INDEX cy_ddl_name IF EXISTS"
+        rows: []
+
+  - name: "Schema: names in backticks"
+    description: "A constraint named in backticks, with spaces and a doubled backtick in its name, on a label and a property named in backticks, is made, refuses a second node of its key, and is dropped by that name."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT `cy ddl ``quoted`` key` IF EXISTS"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE CONSTRAINT `cy ddl ``quoted`` key` IF NOT EXISTS FOR (n:`CyDdl Thing`) REQUIRE (n.`the key`) IS UNIQUE"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE (:`CyDdl Thing` {`the key`: 'a'})"
+      - only: [neo4j, sql]
+        cypher: "CREATE (:`CyDdl Thing` {`the key`: 'a'})"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT `cy ddl ``quoted`` key`"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE (:`CyDdl Thing` {`the key`: 'a'})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:`CyDdl Thing`) RETURN count(n)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT `cy ddl ``quoted`` key` IF EXISTS"
+        rows: []

@@ -170,6 +170,70 @@ databases, give a catalog: `ensure(SchemaCatalog.of(spec).named('dice').forDatab
 can't carry a version, since the owner's version is its startup catalogs'. The marker is drivine4j's: either library
 keeps what the other ensured at runtime.
 
+`remove` takes items back: `schemaManager.remove('dice', spec)`, or a catalog to target databases. Each item is found
+by its kind, label and properties, whatever its name. It is forgotten among what `ensure` gave the owner, so a later
+`enforce` doesn't make it again, and taken out of the owner's marker. It is dropped, unless a startup catalog (of any
+owner) or another owner's runtime items declare it, or another owner's `_DrivineSchema` marker in the database records
+it, whichever manager or process wrote it: then it is left in place, with a warning naming who declares it. An item
+that isn't there is forgotten all the same.
+
+### Neo4j Schema DDL on the SQL Stores
+
+Postgres, Oracle and SQLite run Neo4j's schema DDL, given as Cypher (`{ text, language: 'CYPHER' }`) to a
+`PersistenceManager`, so that a schema file written for Neo4j, such as an APOC export's, replays as it is. Drivine
+reads each statement and applies it through the schema machinery, as the schema API applies a spec: the item it makes
+has the name, the expressions and the inventory entry the API gives the same spec, so a later `enforce` of an
+application that declares it finds it matching, not drifted or orphaned. The statement gives no rows. Neo4j, Memgraph
+and FalkorDB are sent the statement as it is.
+
+| DDL | Applied as |
+|---|---|
+| `CREATE [RANGE] INDEX [name] [IF NOT EXISTS] FOR (n:L) ON (n.a, n.b)`, or Neo4j 4's `ON :L(a, b)` | `rangeIndex('L', ['a', 'b'])` |
+| `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:L) REQUIRE n.p IS [NODE] UNIQUE`, `REQUIRE (n.a, n.b) IS UNIQUE`, or Neo4j 4's `ON (n:L) ASSERT n.p IS UNIQUE` | `uniquenessConstraint` |
+| `CREATE FULLTEXT INDEX … FOR (n:L) ON EACH [n.a, …]` | `fullTextIndex`. A `fulltext.analyzer` is read, and not applied, with a warning: this library's full-text indexes take none |
+| `CREATE VECTOR INDEX … FOR (n:L) ON n.p OPTIONS {indexConfig: {…}}` | `vectorIndex`: `vector.dimensions` (required), `vector.similarity_function` (`cosine` or `euclidean`, in any case), `vector.hnsw.m` and `vector.hnsw.ef_construction`, and `vector.quantization.enabled` as `neo4jVectorOptions`; `indexProvider` is ignored |
+| `CREATE TEXT INDEX …` | Neo4j's TEXT index, which the SQL stores refuse, so the statement fails |
+| `DROP INDEX name [IF EXISTS]`, `DROP CONSTRAINT name [IF EXISTS]` | `SchemaManager.remove` of the item that goes by the name |
+| `CALL db.awaitIndexes(…)`, `CALL db.awaitIndex(…)` | Nothing: an index on a SQL store is whole once it is made |
+
+A statement is read as DDL only where it opens with one of these keyword sequences, so Cypher that merely uses the
+words, such as `CREATE index = (a)-[:R]->(b)`, is Cypher. Names, labels and properties may be in backticks, with
+spaces, and a doubled backtick for one. Keywords are read in any case, and a statement may end with `;`.
+
+**Refused by name.** POINT and LOOKUP indexes; an index or constraint on relationships; one over several labels
+(`(n:A|B)`); existence (`IS NOT NULL`), key (`IS NODE KEY`, `IS KEY`) and type (`IS :: TYPE`) constraints; a vector
+index over several properties, with `WITH [...]` properties, or without `vector.dimensions`; Neo4j 4's `DROP … ON` by
+label and properties; a name, or `OPTIONS`, given as a parameter. The Cypher compiler refuses the statement with the
+same message, and one a SQL store honours as a schema command to run through a `PersistenceManager`.
+drivine-cypher-spec's `schema.yaml` pins how each statement reads, in all three libraries.
+
+**The `ddl` owner.** What DDL creates is ensured with `SchemaManager.ensure` under an owner of its own, `ddl`, never an
+application's: an ensure of DDL under the application's owner would take the place of what its catalogs declare. So
+the items are recorded in the `_DrivineSchema` marker of scope `ddl`, as ensured at runtime, and an application that
+declares the same item co-owns it. A `DROP` removes the item from the `ddl` owner and drops it, as Neo4j does, unless
+another owner records it: then the `DROP` forgets it in the `ddl` owner alone, leaves it in place, takes the dropped
+name off its aliases, and logs a warning, so the application's next `enforce` finds it as it was. The marker's and the
+store stamp's own constraints (`_DrivineSchema(scope)`, `DrivineStore(key)`), which an export of a Drivine graph
+carries, are ensured as Drivine ensures them and recorded in no inventory; any other schema for those labels is refused,
+and a `DROP` of either is refused.
+
+**Names and aliases.** The item is made under the name the schema API gives it (`Label_property_unique`, …). The DDL's
+name, where the item goes by another (as an item made over the same properties in another order does), is kept as an
+alias in the item's record in `<graph>_schema`, a list `aliases` among its `details`, as drivine4j keeps it, so that a
+`DROP` by it finds the item, in this process or a later one: an APOC export's `DROP CONSTRAINT UNIQUE_IMPORT_NAME`
+drops the constraint its schema file named so. A `DROP` looks the name up as the API's name first, then as an alias. A
+recreate (drift, a version change, `recreateAll`) carries an item's aliases over, and a record written again keeps them.
+
+`CREATE` follows Neo4j: over an item of the same kind, label and properties (in any order) that is there already,
+`IF NOT EXISTS` does nothing but add the alias (and leaves an item of another shape as it is, with a warning), and
+without it the statement fails. A name another item goes by is refused, with `IF NOT EXISTS` or without. A `DROP` of a
+name no item goes by fails, and does nothing with `IF EXISTS`; `DROP INDEX` of a constraint's name fails, as does
+`DROP CONSTRAINT` of an index's.
+
+**Transactions.** DDL is refused inside an open transaction (the transactional manager, or the delegating one within
+`@Transactional()`), save `db.awaitIndexes`, which does nothing there: Drivine applies schema on connections of its own,
+committed as they go, which the transaction's rollback would not undo. Run it outside the transaction.
+
 ### Version-Triggered Rebuild
 
 Drift detection sees only what introspection shows. Swapping an embedding model for another with the same dimensions
