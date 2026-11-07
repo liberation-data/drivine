@@ -27,6 +27,9 @@ export class Select {
      */
     afterGrouping = false;
 
+    /** The alias of each list an `UNWIND` reads here, by the SQL of the item its rows hold: see `CypherWriter.unwind`. */
+    readonly unwound: Map<string, string> = new Map();
+
     /** The order its rows are read in, where it has one: each term, and whether it descends. */
     readonly order: [string, boolean][] = [];
 
