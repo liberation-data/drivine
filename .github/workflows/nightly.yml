@@ -41,6 +41,7 @@ jobs:
                   open=$(gh issue list --repo "$repo" --label nightly --state open --json number -q '.[0].number')
                   # Writes to the issue on master, and to the summary alone elsewhere.
                   post() {
+                      echo "$1"
                       echo "$1" >> "$GITHUB_STEP_SUMMARY"
                       [ "$POST" = true ] || return 0
                       if [ "$2" = close ]; then
@@ -67,11 +68,15 @@ jobs:
                           while IFS=$'\t' read -r id name url; do
                               echo "### [$name]($url)"
                               echo
-                              echo '```'
                               # Jest's lines for a failed suite and each failed test, without the log's timestamps.
-                              gh api "repos/$repo/actions/jobs/$id/logs" | sed -E 's/^[^ ]+ //; s/\x1b\[[0-9;]*m//g' |
-                                  grep -E '^(FAIL |  ● )' | grep -v '● Console' | awk '!seen[$0]++' | head -40 || true
-                              echo '```'
+                              failing=$(gh api --allow-escape-sequences "repos/$repo/actions/jobs/$id/logs" |
+                                  sed -E 's/^[^ ]+ //; s/\x1b\[[0-9;]*m//g' | grep -E '^(FAIL |  ● )' |
+                                  grep -v '● Console' | awk '!seen[$0]++' | head -40 || true)
+                              if [ -n "$failing" ]; then
+                                  printf '```\n%s\n```\n' "$failing"
+                              else
+                                  echo "No failing test in its log: it failed in a step around the tests, or waits for jobs above."
+                              fi
                               echo
                           done
                       green=$(gh api "repos/$repo/actions/workflows/nightly.yml/runs?branch=master&status=success&per_page=1" \
