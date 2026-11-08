@@ -34,7 +34,11 @@ const SERIAL = [
     // How a write's time grows with its rows, over two runs that a parallel suite's load would slow unevenly.
     'test/2.Integration/cypher/CypherWriteLoopTime'
 ];
-const SAMPLE = 'sample';
+/**
+ * The sample app's suites, as a pattern of their paths: anchored, as Jest matches a path pattern without regard to
+ * case, and a bare `sample` would take test/2.Integration/website/LandingPageSample too, which stage 1 runs.
+ */
+const SAMPLE = `^${process.cwd()}/sample/`;
 
 const CYPHER_SPEC = 'test/2.Integration/cypher/CypherSpec';
 const WRITE_LOOP = 'test/2.Integration/cypher/CypherWriteLoopTime';
@@ -67,7 +71,7 @@ interface Stage {
 
 const parallel = (ignored: string[] = [], args: string[] = []): Stage => ({
     name: 'parallel',
-    args: ['--testPathIgnorePatterns', [...SERIAL, ...ignored, `^${process.cwd()}/${SAMPLE}/`].join('|'), ...args]
+    args: ['--testPathIgnorePatterns', [...SERIAL, ...ignored, SAMPLE].join('|'), ...args]
 });
 const schema = (paths: string[]): Stage => ({ name: 'schema', args: ['--runInBand', ...paths] });
 const sample: Stage = { name: 'sample', args: ['--runInBand', SAMPLE] };
