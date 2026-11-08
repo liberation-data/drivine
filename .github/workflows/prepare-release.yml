@@ -168,7 +168,8 @@ jobs:
                   git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
                       commit -m "Release v$VERSION"
                   git push origin "$branch"
-                  url=$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" --title "Release v$VERSION" --body-file "$body")
+                  # Labelled full-ci, so its CI runs the nightly suites too, and a release of its tree can trust that run.
+                  url=$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" --title "Release v$VERSION" --body-file "$body" --label full-ci)
                   echo "Opened $url"
                   echo "Release v$VERSION: $url" >> "$GITHUB_STEP_SUMMARY"
                   if [[ "$HAS_PR_TOKEN" != true ]]; then

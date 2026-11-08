@@ -98,8 +98,15 @@ Oracle tests skipped: set ORACLE_TESTS=true to run them
 ORACLE_TESTS=true npm test
 ```
 
-CI runs them in a job of its own, `test (Oracle)`: the whole suite with `ORACLE_TESTS=true`. Most of Oracle's tests are
-the shared suites, which run on each configured store, so there is no Oracle part to run alone.
+CI runs the whole suite with `ORACLE_TESTS=true`, and again without, each split over parallel jobs with containers of
+their own: `test (Oracle, parallel 1/3)` and so on, which `test (Oracle)` waits for. `DRIVINE_TEST_PART` names a job's
+part, and `test/run-tests.ts` says what each runs. Most of Oracle's tests are the shared suites, which run on each
+configured store, so there is no Oracle part to run alone.
+
+A pull request's run leaves out the nightly suites, `NIGHTLY` in `test/run-tests.ts`: the timings, Oracle's plans, and
+the texts past 4,000 bytes and 32 KB. They run in the full set: each night (`.github/workflows/nightly.yml`, which
+opens an issue labelled `nightly` when it fails), on each push to master, in a release's gate, and on a pull request
+labelled `full-ci`. A local `npm test` runs everything.
 
 The container is the regular image and not a slim one, which has no Oracle Text: the full-text tests then search
 without an index. A local instance (`USE_LOCAL_ORACLE=true`) needs an ordinary user in a pluggable database, as the

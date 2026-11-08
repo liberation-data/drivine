@@ -1,0 +1,88 @@
+# Each night, the full CI on master: every suite, the nightly ones a pull request leaves out among them (NIGHTLY in
+# test/run-tests.ts), on every store, and on the engines' latest images, without ci.yml's pins, so that an engine's
+# new release shows up here and not in a pull request's run. At 17:00 UTC, 03:00 in Brisbane.
+#
+# A failure opens an issue labelled `nightly`, or comments on the one open, naming the failed jobs, their failing
+# tests, and the commits since the last nightly that passed, among which is the one that broke it. A pass closes it.
+# A run on a branch other than master writes what it would say to its summary instead.
+name: Nightly
+
+on:
+    schedule:
+        - cron: '0 17 * * *'
+    workflow_dispatch:
+
+jobs:
+    ci:
+        uses: ./.github/workflows/ci.yml
+        with:
+            full: true
+
+    report:
+        needs: ci
+        if: always()
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read
+            issues: write
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+            - name: Open, update or close the nightly issue
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  RESULT: ${{ needs.ci.result }}
+                  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  POST: ${{ github.ref == 'refs/heads/master' }}
+              run: |
+                  repo="$GITHUB_REPOSITORY"
+                  open=$(gh issue list --repo "$repo" --label nightly --state open --json number -q '.[0].number')
+                  # Writes to the issue on master, and to the summary alone elsewhere.
+                  post() {
+                      echo "$1" >> "$GITHUB_STEP_SUMMARY"
+                      [ "$POST" = true ] || return 0
+                      if [ "$2" = close ]; then
+                          gh issue close "$open" --repo "$repo" --comment "$1"
+                      elif [ -n "$open" ]; then
+                          gh issue comment "$open" --repo "$repo" --body "$1"
+                      else
+                          gh label create nightly --repo "$repo" --color B60205 --description "The nightly CI failed" 2> /dev/null || true
+                          gh issue create --repo "$repo" --label nightly --title "Nightly CI fails" --body "$1"
+                      fi
+                  }
+                  # A run cancelled by hand says nothing of the tree.
+                  [ "$RESULT" != cancelled ] || exit 0
+                  if [ "$RESULT" = success ]; then
+                      [ -z "$open" ] || post "The nightly passed again on $GITHUB_SHA: $RUN_URL" close
+                      exit 0
+                  fi
+                  body=$(mktemp)
+                  {
+                      echo "The nightly on $GITHUB_SHA concluded $RESULT: $RUN_URL"
+                      echo
+                      gh api --paginate "repos/$repo/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+                          -q '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | "\(.id)\t\(.name)\t\(.html_url)"' |
+                          while IFS=$'\t' read -r id name url; do
+                              echo "### [$name]($url)"
+                              echo
+                              echo '```'
+                              # Jest's lines for a failed suite and each failed test, without the log's timestamps.
+                              gh api "repos/$repo/actions/jobs/$id/logs" | sed -E 's/^[^ ]+ //; s/\x1b\[[0-9;]*m//g' |
+                                  grep -E '^(FAIL |  ● )' | grep -v '● Console' | awk '!seen[$0]++' | head -40 || true
+                              echo '```'
+                              echo
+                          done
+                      green=$(gh api "repos/$repo/actions/workflows/nightly.yml/runs?branch=master&status=success&per_page=1" \
+                          -q '.workflow_runs[0].head_sha // empty')
+                      if [ -n "$green" ] && git cat-file -e "$green^{commit}" 2> /dev/null; then
+                          echo "### Commits since the last nightly that passed, on $green"
+                          echo
+                          git log --format='- %h %s (%an)' "$green..$GITHUB_SHA"
+                          [ -n "$(git log --format=%h "$green..$GITHUB_SHA")" ] || echo "None: the same commit passed before, so look at the images and the runners."
+                      else
+                          echo "No nightly has passed on master yet, so there are no commits to compare with."
+                      fi
+                  } > "$body"
+                  post "$(cat "$body")"
