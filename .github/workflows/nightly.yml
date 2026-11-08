@@ -38,27 +38,38 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
                   RESULT: ${{ needs.ci.result }}
+                  EVENT: ${{ github.event_name }}
                   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
                   POST: ${{ github.ref == 'refs/heads/master' }}
               run: |
                   repo="$GITHUB_REPOSITORY"
                   open=$(gh issue list --repo "$repo" --label nightly --state open --json number -q '.[0].number')
-                  # Writes to the issue on master, and to the summary alone elsewhere.
+                  # Writes to the issue on master, and to the summary alone elsewhere. An issue's body or comment holds
+                  # 65,536 characters at most, and GitHub refuses a longer one, so the issue gets the first 60,000, and the
+                  # summary the whole report.
                   post() {
                       echo "$1"
                       echo "$1" >> "$GITHUB_STEP_SUMMARY"
                       [ "$POST" = true ] || return 0
+                      local text=$1
+                      if [ "${#text}" -gt 60000 ]; then
+                          text="${text:0:60000}"$'\n\n'"Cut short, as an issue holds 65,536 characters: the run's summary has the whole report, $RUN_URL"
+                      fi
                       if [ "$2" = close ]; then
-                          gh issue close "$open" --repo "$repo" --comment "$1"
+                          gh issue close "$open" --repo "$repo" --comment "$text"
                       elif [ -n "$open" ]; then
-                          gh issue comment "$open" --repo "$repo" --body "$1"
+                          gh issue comment "$open" --repo "$repo" --body "$text"
                       else
                           gh label create nightly --repo "$repo" --color B60205 --description "The nightly CI failed" 2> /dev/null || true
-                          gh issue create --repo "$repo" --label nightly --title "Nightly CI fails" --body "$1"
+                          gh issue create --repo "$repo" --label nightly --title "Nightly CI fails" --body "$text"
                       fi
                   }
-                  # A run cancelled by hand says nothing of the tree.
-                  [ "$RESULT" != cancelled ] || exit 0
+                  # A run cancelled by hand says nothing of the tree. A scheduled run is never cancelled by hand, and a job
+                  # past its timeout-minutes can conclude cancelled, so there a cancelled run or job is a hanging test: a
+                  # failure.
+                  [ "$RESULT" != cancelled ] || [ "$EVENT" = schedule ] || exit 0
+                  picked='.conclusion == "failure" or .conclusion == "timed_out"'
+                  [ "$EVENT" != schedule ] || picked="$picked or .conclusion == \"cancelled\""
                   if [ "$RESULT" = success ]; then
                       [ -z "$open" ] || post "The nightly passed again on $GITHUB_SHA: $RUN_URL" close
                       exit 0
@@ -68,9 +79,13 @@ jobs:
                       echo "The nightly on $GITHUB_SHA concluded $RESULT: $RUN_URL"
                       echo
                       gh api --paginate "repos/$repo/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-                          -q '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | "\(.id)\t\(.name)\t\(.html_url)"' |
-                          while IFS=$'\t' read -r id name url; do
-                              echo "### [$name]($url)"
+                          -q ".jobs[] | select($picked) | \"\\(.id)\\t\\(.name)\\t\\(.conclusion)\\t\\(.html_url)\"" |
+                          while IFS=$'\t' read -r id name conclusion url; do
+                              if [ "$conclusion" = cancelled ]; then
+                                  echo "### [$name]($url), cancelled or timed out"
+                              else
+                                  echo "### [$name]($url)"
+                              fi
                               echo
                               # Jest's lines for a failed suite and each failed test, without the log's timestamps.
                               failing=$(gh api --allow-escape-sequences "repos/$repo/actions/jobs/$id/logs" |
@@ -78,6 +93,8 @@ jobs:
                                   grep -v '● Console' | awk '!seen[$0]++' | head -40 || true)
                               if [ -n "$failing" ]; then
                                   printf '```\n%s\n```\n' "$failing"
+                              elif [ "$conclusion" = cancelled ]; then
+                                  echo "No failing test in its log: it was stopped before jest's summary, at a test that hangs or past its time."
                               else
                                   echo "No failing test in its log: it failed in a step around the tests, or waits for jobs above."
                               fi
