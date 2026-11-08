@@ -12,6 +12,10 @@ on:
         - cron: '0 17 * * *'
     workflow_dispatch:
 
+# Read only, so the tests run with a token that can't write to the repository; the report job asks for what it needs.
+permissions:
+    contents: read
+
 jobs:
     ci:
         uses: ./.github/workflows/ci.yml
