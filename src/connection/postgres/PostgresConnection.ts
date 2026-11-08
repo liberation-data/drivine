@@ -1,5 +1,5 @@
 import { Connection } from '@/connection/Connection';
-import { PoolClient } from 'pg';
+import { CustomTypesConfig, PoolClient } from 'pg';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
@@ -7,7 +7,8 @@ import { PostgresCursor } from '@/connection/postgres/PostgresCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
-import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledSpecification, compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { nonFiniteTypes, TypeParsers } from '@/connection/postgres/PostgresNonFinite';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 
@@ -39,17 +40,7 @@ export class PostgresConnection implements Connection {
             given.statement.language === 'CYPHER'
                 ? compiledSpecification(given, new PostgresCypherCompiler(this.graph))
                 : undefined;
-        const finalizedSpec = cypher?.spec ?? given;
-        const compiledSpec = new PostgresSpecCompiler(finalizedSpec).compile();
-        const hrStart = process.hrtime();
-        const logger = new StatementLogger(this.sessionId());
-        for (const statement of cypher?.setup ?? []) {
-            await this.client.query(statement);
-        }
-        const result = await this.client.query(compiledSpec.statement, compiledSpec.parameters);
-        logger.log(spec, hrStart);
-        const rows = cypher ? result.rows.map((it) => it.result) : result.rows;
-        return this.resultMapper.mapQueryResults<T>(rows, finalizedSpec);
+        return this.run(spec, cypher?.spec ?? given, cypher);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<PostgresCursor<T>> {
@@ -78,5 +69,30 @@ export class PostgresConnection implements Connection {
         }
         this.client.release(err);
         return Promise.resolve();
+    }
+
+    private async run<T>(
+        spec: QuerySpecification<T>,
+        finalizedSpec: QuerySpecification<T>,
+        cypher?: CompiledSpecification<T>
+    ): Promise<any[]> {
+        const compiledSpec = new PostgresSpecCompiler(finalizedSpec).compile();
+        const hrStart = process.hrtime();
+        const logger = new StatementLogger(this.sessionId());
+        // Before anything runs: where the stand-ins can't be read, nothing is.
+        const types = cypher?.nonFinite ? nonFiniteTypes(this.client as unknown as TypeParsers) : undefined;
+        for (const statement of cypher?.setup ?? []) {
+            await this.client.query(statement);
+        }
+        const result = types
+            ? await this.client.query({
+                  text: compiledSpec.statement,
+                  values: compiledSpec.parameters,
+                  types: types as unknown as CustomTypesConfig
+              })
+            : await this.client.query(compiledSpec.statement, compiledSpec.parameters);
+        logger.log(spec, hrStart);
+        const rows = cypher ? result.rows.map((it) => it.result) : result.rows;
+        return this.resultMapper.mapQueryResults<T>(rows, finalizedSpec);
     }
 }
