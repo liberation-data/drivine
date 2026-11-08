@@ -1,0 +1,32 @@
+# One part of `npm test`, on containers of its own: the steps ci.yml's test jobs share. test/run-tests.ts says what
+# each part runs.
+name: Test a part
+description: Runs one part of npm test, as DRIVINE_TEST_PART names it.
+inputs:
+    part:
+        description: The part, as test/run-tests.ts names it.
+        required: true
+    oracle:
+        description: Whether Oracle is among the stores, as ORACLE_TESTS=true makes it.
+        required: true
+runs:
+    using: composite
+    steps:
+        - uses: actions/setup-node@v7
+          with:
+              node-version: 24
+              cache: npm
+        - shell: bash
+          run: npm ci
+        # Pulled here and not by the test setup, so the pull isn't counted against the container's startup timeout.
+        # The image is the one DrivineTestContainers names. A runner has room for it and the other four: the job that
+        # ran everything at once used 50 of its 145 GB.
+        - name: Pull the Oracle image
+          if: inputs.oracle == 'true'
+          shell: bash
+          run: docker pull gvenzl/oracle-free:23-faststart
+        - shell: bash
+          run: npm test
+          env:
+              ORACLE_TESTS: ${{ inputs.oracle }}
+              DRIVINE_TEST_PART: ${{ inputs.part }}

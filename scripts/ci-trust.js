@@ -24,6 +24,9 @@
  * - a pull_request run tested its merge ref instead, which is the same tree only when the pull request was up to date
  *   with its base. ci.yml's first job records the tree it checked out as an artifact named `ci-tree-<tree>`, and a
  *   pull_request run counts only when it recorded this tree, besides its head commit having it;
+ * - it ran the full set. A pull request's run leaves the nightly suites out, unless it is labelled `full-ci`, and then
+ *   records its tree as `ci-tree-pr-set-<tree>`, which doesn't count, at once and not once it ends. A push run is
+ *   always full;
  * - it passed: concluded success, with every job of its latest attempt concluded success. A job skipped by a
  *   condition would leave part of the tree untested and the run still green, so a skipped job means it doesn't count.
  *
@@ -45,6 +48,8 @@
 const CI = '.github/workflows/ci.yml';
 const EVENTS = ['push', 'pull_request'];
 const RECORD = 'ci-tree-';
+/** After RECORD, in the record of a run of the pull request set alone, without the nightly suites. */
+const PR_SET = 'pr-set-';
 
 /** `gh api <path>`, parsed. The token is the workflow's (GH_TOKEN), or gh's own login when run by hand. */
 function gh(path) {
@@ -97,6 +102,12 @@ function classify({ run, trees }, tree) {
     }
     if (run.head_commit?.tree_id !== tree) return { state: 'ignored', reason: `its commit ${sha} is another tree` };
     const done = run.status === 'completed';
+    if (run.event === 'pull_request' && trees.includes(`${PR_SET}${tree}`)) {
+        return {
+            state: 'ignored',
+            reason: 'it ran the pull request set alone, without the nightly suites, as one not labelled full-ci does'
+        };
+    }
     if (run.event === 'pull_request' && !trees.includes(tree)) {
         if (trees.length) {
             return { state: 'ignored', reason: `it tested its merge ref, tree ${trees[0]}, as its base had moved on` };

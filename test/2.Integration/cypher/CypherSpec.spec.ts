@@ -44,9 +44,15 @@ interface Store {
 /**
  * The stores configured in the environment: Neo4j, the default connection; Postgres; Oracle with ORACLE_TESTS=true; and
  * SQLite, a file of the tests' own.
- * On a SQL store each statement is compiled to SQL over the graph's tables.
+ * On a SQL store each statement is compiled to SQL over the graph's tables. `CYPHER_SPEC_STORES`, a list of their
+ * names, keeps those alone: CI runs the spec over two jobs (test/run-tests.ts).
  */
 function stores(): Store[] {
+    const named = process.env.CYPHER_SPEC_STORES?.split(',').map((it) => it.trim());
+    return configuredStores().filter((it) => !named || named.includes(it.name));
+}
+
+function configuredStores(): Store[] {
     return [
         ...(process.env.DATABASE_TYPE === 'NEO4J'
             ? [{ name: 'neo4j', type: DatabaseType.NEO4J, connection: 'CYPHER_NEO4J' }]

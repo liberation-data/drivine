@@ -51,7 +51,9 @@ git push origin vX.Y.Z
   - A run counts when it is from a push or a pull request (the nightly, which runs without the pins, doesn't), its
     head commit has this tree, and every job of its latest attempt concluded success. A pull request run tests the
     pull request's merge ref, not its head, so `ci.yml`'s first job records the tree it checked out as an artifact,
-    `ci-tree-<tree>`, and a pull request run counts only when it recorded this tree as well. A run of a fork's
+    `ci-tree-<tree>`, and a pull request run counts only when it recorded this tree as well. A pull request run that
+    left out the nightly suites, as one not labelled `full-ci` does, records `ci-tree-pr-set-<tree>` and doesn't
+    count; "Prepare release" labels its PR `full-ci`. A run of a fork's
     pull request is believed for the same reason: its head has this tree, so the `ci.yml` it ran is the one being
     released.
   - When one has passed, `gate` is skipped. When one is still going, as the push run on the merge commit is when
@@ -60,7 +62,7 @@ git push origin vX.Y.Z
     CI run has been re-run too, which `trust` then waits for or trusts. When none counts, or the wait runs out, or
     the API can't be asked, `gate` runs as before.
   - The run's summary links the run trusted, or says of each run it looked at why it didn't count.
-- **`gate`** runs the repository's full CI, `ci.yml`, unchanged, unless `trust` found it has already passed on this
+- **`gate`** runs the repository's full CI, `ci.yml` with `full: true`, nightly suites included, unless `trust` found it has already passed on this
   tree. A push to the default branch that releases nothing skips both, as `ci.yml` runs on that push anyway.
 - **`build`** builds the release artifacts from the checked-out ref, checks them, runs a smoke test, and uploads them
   as the run's artifact.

@@ -189,6 +189,28 @@ describe('ci-trust.js', () => {
         expect(result.text).toContain('it recorded no tree');
     });
 
+    it("doesn't trust a pull request's run of the pull request set alone, nor wait for one still going", async () => {
+        const result = await decide(
+            {
+                [runsOn(SHA)]: { workflow_runs: [] },
+                [runsOn(HEAD)]: {
+                    workflow_runs: [
+                        run(9, { event: 'pull_request', head_sha: HEAD }),
+                        run(10, { event: 'pull_request', head_sha: HEAD, status: 'in_progress', conclusion: null })
+                    ]
+                },
+                [records]: recordOn(),
+                [artifactsOf(9)]: recorded(`pr-set-${TREE}`),
+                [artifactsOf(10)]: recorded(`pr-set-${TREE}`)
+            },
+            [SHA, HEAD]
+        );
+
+        expect(result).toMatchObject({ decision: 'gate', sleeps: [] });
+        expect(result.text).toContain('it ran the pull request set alone, without the nightly suites');
+        expect(result.asked).not.toContain(jobsOf(9));
+    });
+
     it('counts neither the nightly, which drops the FalkorDB pin, nor a run of another workflow', async () => {
         const result = await decide({
             [runsOn(SHA)]: {

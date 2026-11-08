@@ -136,12 +136,15 @@ jobs:
                   tree=$(git rev-parse 'HEAD^{tree}')
                   node scripts/ci-trust.js "$GITHUB_REPOSITORY" "$tree" "$(git rev-parse HEAD)" "$PR_HEAD"
 
-    # The full CI, as it runs on master and on pull requests, unless trust found it has already passed on this tree.
-    # Skipped on a push to master that releases nothing, as ci.yml runs on that push anyway.
+    # The full CI, as it runs on master, with the nightly suites a pull request's run leaves out, unless trust found it
+    # has already passed on this tree. Skipped on a push to master that releases nothing, as ci.yml runs on that push
+    # anyway.
     gate:
         needs: [check, trust]
         if: needs.trust.outputs.trusted != 'true'
         uses: ./.github/workflows/ci.yml
+        with:
+            full: true
 
     # Runs when the gate passed, or was skipped because trust found CI had passed on this tree. A failed or cancelled
     # check, trust or gate stops it, and so does a gate skipped for any other reason (a push that releases nothing).
