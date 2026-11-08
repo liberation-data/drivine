@@ -7,7 +7,8 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { OracleCursor } from '@/connection/oracle/OracleCursor';
-import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledSpecification, compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledRows } from '@/cypher/sql/CompiledCypher';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
@@ -59,23 +60,8 @@ export class OracleConnection implements Connection {
         if (cypher && this.cypherRefusal) {
             throw new DrivineError(this.cypherRefusal, undefined, spec);
         }
-        const finalized = cypher ? await this.compiled(given) : given;
-        const compiled = new OracleSpecCompiler(finalized).compile();
-        const hrStart = process.hrtime();
-        const result = await this.connection.execute<any>(compiled.statement, compiled.parameters, {
-            ...EXECUTE_OPTIONS,
-            autoCommit: !this.inTransaction,
-            // Oracle keeps a cursor's memory while the driver keeps its statement, and a compiled Cypher statement holds
-            // megabytes of it: about 4 MB, and over 20 MB where it reads a text past 32 KB. Kept in the driver's cache, 30
-            // statements a session, a few dozen ran the instance out of PGA (ORA-04036, liberation-data/drivine4j#313).
-            // Closed, its memory goes back. Drivine's own statements, a few the same each time, are still kept.
-            keepInStmtCache: !cypher
-        });
-        new StatementLogger(this.sessionId()).log(spec, hrStart);
-        const rows = result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined);
-        // A Cypher statement that writes returns its rows in one: see OracleCypherCompiler.returnRows.
-        const returned = cypher && !result.rows ? (rows[0]?.rows ?? []).map((it: any) => ({ result: it })) : rows;
-        return this.resultMapper.mapQueryResults<T>(returned, finalized);
+        const compiled = cypher ? await this.compiled(given) : undefined;
+        return this.run(spec, compiled?.spec ?? given, compiled);
     }
 
     async openCursor<T>(spec: CursorSpecification<T>): Promise<OracleCursor<T>> {
@@ -120,9 +106,9 @@ export class OracleConnection implements Connection {
      * statement needs one and the session may call it, and compiled again to call none of those it may not: see
      * {@link OracleStoredFunctions}.
      */
-    private async compiled<T>(given: QuerySpecification<T>): Promise<QuerySpecification<T>> {
+    private async compiled<T>(given: QuerySpecification<T>): Promise<CompiledSpecification<T>> {
         const compiler = new OracleCypherCompiler(this.graph);
-        const compiled = compiledSpecification(given, compiler).spec;
+        const compiled = compiledSpecification(given, compiler);
         // Each is asked of apart: a store an earlier version made may have the one and not the others.
         const nullsEqual =
             !compiler.callsStoredNullsEqual ||
@@ -132,8 +118,40 @@ export class OracleConnection implements Connection {
         if (nullsEqual && era) {
             return compiled;
         }
-        return compiledSpecification(given, new OracleCypherCompiler(this.graph, nullsEqual, era)).spec;
+        return compiledSpecification(given, new OracleCypherCompiler(this.graph, nullsEqual, era));
     }
+
+    private async run<T>(
+        spec: QuerySpecification<T>,
+        finalized: QuerySpecification<T>,
+        cypher?: CompiledSpecification<T>
+    ): Promise<any[]> {
+        const compiled = new OracleSpecCompiler(finalized).compile();
+        const hrStart = process.hrtime();
+        const result = await this.connection.execute<any>(compiled.statement, compiled.parameters, {
+            ...EXECUTE_OPTIONS,
+            autoCommit: !this.inTransaction,
+            // Oracle keeps a cursor's memory while the driver keeps its statement, and a compiled Cypher statement holds
+            // megabytes of it: about 4 MB, and over 20 MB where it reads a text past 32 KB. Kept in the driver's cache, 30
+            // statements a session, a few dozen ran the instance out of PGA (ORA-04036, liberation-data/drivine4j#313).
+            // Closed, its memory goes back. Drivine's own statements, a few the same each time, are still kept.
+            keepInStmtCache: !cypher
+        });
+        new StatementLogger(this.sessionId()).log(spec, hrStart);
+        const rows = result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined);
+        const returned = cypher && !result.rows ? returnedRows(rows, cypher.rows) : rows;
+        return this.resultMapper.mapQueryResults<T>(returned, finalized);
+    }
+}
+
+/**
+ * The rows of a compiled Cypher statement that writes, from the rows `rows` its PL/SQL block returned in the shape
+ * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as Drivine's own compiler returns them
+ * (see OracleCypherCompiler.returnRows); `'each'`, the rows as they are, one a row in the column `RESULT`, which the
+ * result mapper takes the value of. Read as the statement says, never by a column's name.
+ */
+function returnedRows(rows: any[], shape: CompiledRows): any[] {
+    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: it }));
 }
 
 /**

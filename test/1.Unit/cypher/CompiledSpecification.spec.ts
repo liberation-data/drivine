@@ -3,6 +3,7 @@ import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
+import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
 
 /** A Cypher specification as the SQL stores run it: its statement compiled, the rest of it kept. */
 describe('compiledSpecification', () => {
@@ -44,5 +45,23 @@ describe('compiledSpecification', () => {
         expect(sql).toContain('cy_params CLOB := $_cy_params;');
         expect(sql).not.toContain('cy_params JSON');
         expect(sql).toContain("JSON_QUERY(cy_params, '$.a' RETURNING JSON)");
+    });
+
+    it.each(['MATCH (n) RETURN n.x', 'CREATE (n:A) RETURN n.x', 'RETURN 1 AS x UNION RETURN 2 AS x'])(
+        "says Drivine's own compilers hand back the rows of %s in one, given no NaN",
+        (cypher) => {
+            for (const compiler of [new OracleCypherCompiler('g'), new PostgresCypherCompiler('g')]) {
+                const compiled = compiledSpecification(new QuerySpecification(cypherStatement(cypher)), compiler);
+                expect([compiled.rows, compiled.nonFinite]).toEqual(['one', false]);
+            }
+        }
+    );
+
+    it('carries how the rows come back, and whether they may hold NaN, as the compiler says', () => {
+        const compiler = {
+            compile: () => ({ sql: 'SELECT 1', parameters: {}, setup: [], rows: 'each', nonFinite: true })
+        } as unknown as SqlCypherCompiler;
+        const compiled = compiledSpecification(new QuerySpecification(cypherStatement('RETURN 1 AS x')), compiler);
+        expect([compiled.rows, compiled.nonFinite]).toEqual(['each', true]);
     });
 });

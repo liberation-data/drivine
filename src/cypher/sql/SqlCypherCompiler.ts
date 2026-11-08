@@ -42,6 +42,12 @@ export interface IndexedProperty {
     readonly scalar: boolean;
 }
 
+/**
+ * What Drivine's own compilers say of every statement: a write on Oracle hands its rows back in one, and no statement
+ * is given NaN or an infinity, as none binds either (#344). See {@link CompiledCypher}.
+ */
+const OWN_SHAPE = { rows: 'one', nonFinite: false } as const;
+
 /** How long a value {@link SqlCypherCompiler.shared} binds may be written where it is read, in characters. */
 export const SHARED_ABOVE = 200;
 
@@ -203,7 +209,8 @@ export abstract class SqlCypherCompiler {
             return this.withFunctions({
                 sql: this.planned(writer.query(query)),
                 parameters: writer.parameters.values,
-                setup: []
+                setup: [],
+                ...OWN_SHAPE
             });
         }
         this.procedural = true;
@@ -221,7 +228,7 @@ export abstract class SqlCypherCompiler {
             )
         );
         const call = this.procedure(writer.procedure(query));
-        return { sql: call.sql, parameters: writer.parameters.values, setup: call.setup };
+        return { sql: call.sql, parameters: writer.parameters.values, setup: call.setup, ...OWN_SHAPE };
     }
 
     /** Declares `fn`, a function's whole text, for the statement to call: a query's own, before it; once, however often it is declared. */
@@ -1075,7 +1082,7 @@ export abstract class SqlCypherCompiler {
             )}\n) u\nGROUP BY ${key}`;
             sql = `SELECT d.result FROM (\n${indent(grouped)}\n) d\nORDER BY d.k`;
         }
-        return { sql: this.planned(sql), parameters: writer.parameters.values, setup: [] };
+        return { sql: this.planned(sql), parameters: writer.parameters.values, setup: [], ...OWN_SHAPE };
     }
     // ----- A store's SQL -----
 

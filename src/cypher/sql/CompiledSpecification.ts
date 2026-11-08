@@ -1,10 +1,17 @@
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import { CompiledRows } from '@/cypher/sql/CompiledCypher';
 
-/** A specification of a Cypher statement compiled to SQL, and what runs before it on the same connection. */
+/**
+ * A specification of a Cypher statement compiled to SQL, and what runs before it on the same connection; how its rows
+ * come back, and whether they may hold numbers that stand for NaN or an infinity, as the compiler said (see
+ * CompiledCypher).
+ */
 export interface CompiledSpecification<T> {
     spec: QuerySpecification<T>;
     setup: string[];
+    rows: CompiledRows;
+    nonFinite: boolean;
 }
 
 /**
@@ -26,5 +33,5 @@ export function compiledSpecification<T>(
         .limit(spec._limit)
         .bind(compiled.parameters)
         .addPostProcessors(...spec.postProcessors);
-    return { spec: Object.freeze(sql), setup: compiled.setup };
+    return { spec: Object.freeze(sql), setup: compiled.setup, rows: compiled.rows, nonFinite: compiled.nonFinite };
 }
