@@ -12,6 +12,7 @@ import { SqliteCursor } from '@/connection/sqlite/SqliteCursor';
 import { SqliteDatabase, SqliteValue, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
 import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
 import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
+import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 
 /** How long a transaction may hold the file's write lock before its end is warned of: drivine4j's five seconds. */
@@ -198,11 +199,40 @@ function bound(parameters: Record<string, SqliteValue> | SqliteValue[]): any[] {
     return Array.isArray(parameters) ? parameters : [parameters];
 }
 
-/** A row whose text values are each JSON, as the values they are. */
+/**
+ * A row whose text values are each JSON, as the values they are: NaN, which SQLite's JSON writes as {@link NAN_TEXT}, read
+ * as NaN where a value's text holds it, as drivine4j's `JdbcResultMapper.sqliteRows` reads it. A statement given no NaN
+ * can still work one out, as `∞ + -∞`.
+ */
 function jsonRow(row: Record<string, SqliteValue>): Record<string, any> {
     return Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key, typeof value === 'string' ? JSON.parse(value) : value])
+        Object.entries(row).map(([key, value]) => [key, typeof value === 'string' ? jsonValue(value) : value])
     );
+}
+
+/**
+ * The JSON `text` as the value it is, with each map of {@link NAN_TEXT} in it NaN where the text holds one. A text value
+ * that holds those characters holds each quote escaped, so only a map holds them: the look is a cheap pass over a row
+ * that holds no NaN, which most do, and {@link withNaN} takes only the exact map.
+ */
+function jsonValue(text: string): any {
+    const value = JSON.parse(text);
+    return text.includes(NAN_TEXT) ? withNaN(value) : value;
+}
+
+/** `value` with each map in it, at any depth, that is exactly NaN's, `{"$numberDouble": "NaN"}`, NaN. */
+function withNaN(value: any): any {
+    if (Array.isArray(value)) {
+        return value.map(withNaN);
+    }
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === NAN_KEY && value[NAN_KEY] === NAN_VALUE) {
+        return NaN;
+    }
+    return Object.fromEntries(keys.map((key) => [key, withNaN(value[key])]));
 }
 
 /**

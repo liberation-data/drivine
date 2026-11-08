@@ -25,6 +25,8 @@ describe('SqliteCypherFunctions', () => {
     };
     const one = (sql: string): SqliteValue => row(`SELECT ${sql}`)[0];
     const n = BigInt;
+    /** NaN as SQLite's JSON writes it, where it holds no NaN: the one map that is NaN (liberation-data/drivine4j#295). */
+    const NAN = '{"$numberDouble":"NaN"}';
     /** A test of a flag group within the expression, which JavaScript reads only as a group of its own: Node 22's does not. */
     const withScopedFlags = (() => {
         try {
@@ -106,6 +108,31 @@ describe('SqliteCypherFunctions', () => {
                 )
             ).toEqual([n(1), n(0), n(0), null, n(1)]);
         });
+
+        it('finds NaN equal to nothing, itself too, and an infinity equal to itself (liberation-data/drivine4j#295)', () => {
+            expect(
+                row(
+                    `SELECT drivine_equal('${NAN}', '${NAN}'), drivine_equal('[${NAN}]', '[${NAN}]'), drivine_equal('${NAN}', '1'), ` +
+                        `drivine_equal('{"a":${NAN}}', '{"a":${NAN}}'), drivine_equal('[${NAN},null]', '[${NAN},null]'), ` +
+                        `drivine_equal('${NAN}', 'null'), drivine_contains('{"a":${NAN}}', '{"a":${NAN}}')`
+                )
+            ).toEqual([n(0), n(0), n(0), n(0), n(0), null, n(0)]);
+            expect(
+                row(
+                    `SELECT drivine_equal('9e999', '9e999'), drivine_equal('[-9e999]', '[-9e999]'), drivine_equal('9e999', '-9e999'), ` +
+                        `drivine_equal('9e999', '9223372036854775807'), drivine_equal('-9e999', '-1e308')`
+                )
+            ).toEqual([n(1), n(1), n(0), n(0), n(0)]);
+        });
+
+        it('takes only the one map for NaN: another key, or another number, is a map as any is', () => {
+            expect(
+                row(
+                    `SELECT drivine_equal('{"$numberDouble":"NaN","b":1}', '{"$numberDouble":"NaN","b":1}'), ` +
+                        `drivine_equal('{"$numberDouble":"2.0"}', '{"$numberDouble":"2.0"}'), drivine_equal('{"$numberDouble":"Nan"}', '{"$numberDouble":"Nan"}')`
+                )
+            ).toEqual([n(1), n(1), n(1)]);
+        });
     });
 
     describe('drivine_add', () => {
@@ -131,6 +158,33 @@ describe('SqliteCypherFunctions', () => {
         it('adds a whole number already past a long whole, not by its low 64 bits (liberation-data/drivine4j#547)', () => {
             expect(row(`SELECT drivine_add('18446744073709551617', '1')`)).toEqual(['18446744073709551618']);
         });
+
+        it('adds NaN as a number, writes NaN as its map and an infinity as SQLite does, and NaN as text by its name (liberation-data/drivine4j#295)', () => {
+            expect(
+                row(
+                    `SELECT drivine_add('${NAN}', '1'), drivine_add('1.5', '${NAN}'), drivine_add('9e999', '-9e999'), drivine_add('9e999', '1'), ` +
+                        `drivine_add('1e308', '1e308'), drivine_add('-1e308', '-1e308'), drivine_add('"a"', '${NAN}'), drivine_add('${NAN}', '"b"'), ` +
+                        `drivine_add('"a"', '9e999'), drivine_add('[1]', '${NAN}'), drivine_add('${NAN}', '{}'), drivine_add('{"$numberDouble":"2.0"}', '1')`
+                )
+            ).toEqual([
+                NAN,
+                NAN,
+                NAN,
+                '9e999',
+                '9e999',
+                '-9e999',
+                '"aNaN"',
+                '"NaNb"',
+                '"aInfinity"',
+                `[1,${NAN}]`,
+                null,
+                null
+            ]);
+        });
+    });
+
+    it('drivine_canonical writes NaN as its map and an infinity as SQLite does, which JSON reads', () => {
+        expect(one(`drivine_canonical('{"b":${NAN},"a":[9e999,-9e999]}')`)).toEqual(`{"a":[9e999,-9e999],"b":${NAN}}`);
     });
 
     it("drivine_canonical puts a map's keys in order at any depth", () => {
@@ -339,6 +393,13 @@ describe('SqliteCypherFunctions', () => {
             ).toEqual('[3,10,6,9,13,5,1,12,2,14,7,16,15,11,0,4,8]');
         });
 
+        it('orders NaN after every number, the infinities too (liberation-data/drivine4j#295)', () => {
+            const lists = `[[1, ${NAN}], [1, 9e999], [1, 2.0], [1, -9e999], [1, "a"], [${NAN}], [null]]`;
+            expect(
+                one(`(SELECT json_group_array(t.key ORDER BY drivine_sort_key(t.value)) FROM json_each('${lists}') t)`)
+            ).toEqual('[4,3,2,1,0,5,6]');
+        });
+
         it('leaves any other value as it is', () => {
             expect(row(`SELECT drivine_sort_key('"x"'), drivine_sort_key(NULL), drivine_sort_key('null')`)).toEqual([
                 '"x"',
@@ -368,6 +429,16 @@ describe('SqliteCypherFunctions', () => {
                         `drivine_list_order('[1]', '{}'), drivine_list_order(NULL, '[1]')`
                 )
             ).toEqual([null, null, null, null, null, null]);
+        });
+
+        it('orders NaN with nothing, and an infinity as the double it is (liberation-data/drivine4j#295)', () => {
+            expect(
+                row(
+                    `SELECT drivine_list_order('[${NAN}]', '[${NAN}]'), drivine_list_order('[${NAN}]', '[1]'), drivine_list_order('[1]', '[${NAN}]'), ` +
+                        `drivine_list_order('[1, ${NAN}]', '[2, ${NAN}]'), drivine_list_order('[9e999]', '[1]'), ` +
+                        `drivine_list_order('[-9e999]', '[-9223372036854775808]'), drivine_list_order('[9e999]', '[9e999]')`
+                )
+            ).toEqual([null, null, null, n(-1), n(1), n(-1), n(0)]);
         });
     });
 
@@ -410,6 +481,16 @@ describe('SqliteCypherFunctions', () => {
             ).toEqual([2.5, 7, 'real', 1200, null, null]);
             expect(() => one(`drivine_round(2.25, 1, 'UNNECESSARY')`)).toThrow('Rounding necessary');
             expect(() => one(`drivine_round(2.25, 1, 'SIDEWAYS')`)).toThrow('RoundingMode.SIDEWAYS');
+        });
+
+        it('leaves an infinity as it is', () => {
+            // An infinity, which SQLite stores and a statement may work out (liberation-data/drivine4j#295), as Neo4j rounds it.
+            expect(
+                row(
+                    `SELECT drivine_round(2.345, 2, 'HALF_UP'), drivine_round(9e999, 2, 'HALF_UP'), drivine_round(-9e999, 0, 'HALF_DOWN'), ` +
+                        `drivine_round(NULL, 0, 'HALF_UP')`
+                )
+            ).toEqual([2.35, Infinity, -Infinity, null]);
         });
     });
 
