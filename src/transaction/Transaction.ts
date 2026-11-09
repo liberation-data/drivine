@@ -4,6 +4,7 @@ import * as assert from 'assert';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
+import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
 import { Cursor } from '@/cursor/Cursor';
 import { Connection } from '@/connection/Connection';
 import { TransactionOptions } from '@/transaction/Transactional';
@@ -51,7 +52,8 @@ export class Transaction {
             const results = await connection.query(spec);
             return results;
         } catch (e) {
-            throw DrivineError.withRootCause(e as Error, spec);
+            // A SQLite graph whose ids could be reused is refused as itself, as outside a transaction.
+            throw e instanceof ReusedIdsError ? e : DrivineError.withRootCause(e as Error, spec);
         }
     }
 

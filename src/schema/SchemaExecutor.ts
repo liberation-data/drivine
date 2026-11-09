@@ -8,6 +8,7 @@ import { NativeOperation } from '@/schema/SchemaGrammar';
 import { ddlContended, ddlDeadlocked, whenNotContended } from '@/manager/Contention';
 import { waitsOutBusyLock } from '@/backend/oracle/OracleSchemaGrammar';
 import { transientOverBolt } from '@/backend/CypherGrammar';
+import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
 
 /**
  * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or a SQL store turning DDL
@@ -63,7 +64,8 @@ export class SchemaExecutor {
                 : rows;
         } catch (e) {
             await connection.release(e as Error);
-            throw DrivineError.withRootCause(e as Error);
+            // A SQLite graph whose ids could be reused is refused as itself, as on a provider's first connection.
+            throw e instanceof ReusedIdsError ? e : DrivineError.withRootCause(e as Error);
         }
     }
 

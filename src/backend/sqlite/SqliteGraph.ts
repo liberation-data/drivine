@@ -1,11 +1,18 @@
 import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
+import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
 import { Stamps } from '@/model/Stamps';
 import { WriteReturns } from '@/backend/sql/WritePlan';
 import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
 
 /** SQLite takes a name of any length; this keeps one as long as the other stores' do, as drivine4j does. */
 const MAX_OBJECT_NAME = 63;
+
+/** What {@link SqliteGraph.made} gives for a store whose tables give a deleted row's id again: see ReusedIdsError. */
+export const REUSES_IDS = -1;
+
+/** What reads the file a connection has open: an empty text for a database in memory or a temporary one. */
+export const DATABASE_FILE = `SELECT file FROM pragma_database_list WHERE name = 'main'`;
 
 /** What the store's `ensuring` text opens with, so a SQLite connection knows to run it as the graph's making. */
 export const ENSURING_MARK = '/* drivine:ensure */';
@@ -29,6 +36,12 @@ export const JSON_ROWS = '/* drivine:json */';
  * Every statement that makes the store is safe to run again, so the store is made by running them all where it is not
  * all there, on a provider's first connection and before a manager's first statement. SQLite reads a table's name
  * without regard to case, so a graph called `Contracts` is the same graph as one called `contracts`, as on Postgres.
+ *
+ * A node's `nid` and a relationship's `eid` are `AUTOINCREMENT` keys, so an id is never given again once its row is
+ * deleted, as Oracle's and Postgres's identity keys are never given again: without it SQLite gives a new row the
+ * greatest key plus one, which is the key of the last row deleted when it had the greatest (liberation-data/drivine4j#713).
+ * A file whose tables were made without it, by an earlier Drivine, is refused as the store is looked for (see
+ * {@link ensure}): there is no migration, as SQLite cannot change a table's key in place.
  */
 export class SqliteGraph extends SqlGraph implements WriteFunction {
     constructor(name: string = DEFAULT_GRAPH) {
@@ -40,7 +53,7 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
         return [
             [
                 `CREATE TABLE IF NOT EXISTS ${this.nodes} (`,
-                `    nid    INTEGER PRIMARY KEY,`,
+                `    nid    INTEGER PRIMARY KEY AUTOINCREMENT,`,
                 `    labels TEXT NOT NULL,`,
                 `    props  TEXT NOT NULL,`,
                 `    stamp  TEXT`,
@@ -48,7 +61,7 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
             ].join('\n'),
             [
                 `CREATE TABLE IF NOT EXISTS ${this.edges} (`,
-                `    eid   INTEGER PRIMARY KEY,`,
+                `    eid   INTEGER PRIMARY KEY AUTOINCREMENT,`,
                 `    src   INTEGER NOT NULL REFERENCES ${this.nodes} (nid) ON DELETE CASCADE,`,
                 `    dst   INTEGER NOT NULL REFERENCES ${this.nodes} (nid) ON DELETE CASCADE,`,
                 `    type  TEXT NOT NULL,`,
@@ -75,10 +88,34 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
      * Counts what of the {@link ddl} makes is there: each table and index, by its name in any case. A user who may only
      * read the file is refused a `CREATE ... IF NOT EXISTS` even over a table that is there, so the store is looked for
      * first.
+     *
+     * The count is {@link REUSES_IDS} where the table of nodes or of relationships is there and was made without
+     * `AUTOINCREMENT`, as SQLite keeps the statement that made it: one look finds both.
      */
     get made(): string {
         const names = this.ddl.map((it) => /IF NOT EXISTS (\w+)/.exec(it)![1].toLowerCase());
-        return `SELECT COUNT(*) AS "made" FROM sqlite_master WHERE lower(name) IN (${names.map(sqlText).join(', ')})`;
+        const keyed = [this.nodes, this.edges].map((it) => sqlText(it.toLowerCase())).join(', ');
+        return (
+            `SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) IN ` +
+            `(${keyed}) AND sql NOT LIKE '%AUTOINCREMENT%') THEN ${REUSES_IDS} ELSE COUNT(*) END AS "made" ` +
+            `FROM sqlite_master WHERE lower(name) IN (${names.map(sqlText).join(', ')})`
+        );
+    }
+
+    /**
+     * Makes the store with `make`, given the {@link ddl}, unless {@link made} finds all it makes there. A store whose
+     * tables give a deleted row's id again is refused with a ReusedIdsError naming the file, before anything is made.
+     *
+     * @param run runs a statement and gives the first value of its first row
+     */
+    ensure(run: (statement: string) => unknown, make: (ddl: string[]) => void): void {
+        const found = Number(run(this.made));
+        if (found === REUSES_IDS) {
+            throw new ReusedIdsError(this.name, String(run(DATABASE_FILE) ?? ''));
+        }
+        if (found !== this.ddl.length) {
+            make(this.ddl);
+        }
     }
 
     /**
@@ -93,6 +130,22 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
     writeCall(returns: WriteReturns): string {
         return PostgresWriteStatement.sqliteCall(this.name, returns);
     }
+}
+
+/**
+ * The graph whose making the ensuring text is, read from the name of its table of nodes, or undefined for a text that
+ * is not a store's making.
+ */
+export function ensuringGraph(text: string): SqliteGraph | undefined {
+    const nodes = ensuringStatements(text)?.[0];
+    if (nodes === undefined) {
+        return undefined;
+    }
+    const name = /^CREATE TABLE IF NOT EXISTS (\w+)_node \(/.exec(nodes)?.[1];
+    if (name === undefined) {
+        throw new DrivineError('A SQLite store is made by statements that open with the making of its table of nodes.');
+    }
+    return new SqliteGraph(name);
 }
 
 /** The statements the ensuring text holds, in order, or undefined for a text that is not a store's making. */

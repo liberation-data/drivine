@@ -274,11 +274,20 @@ A SQLite store has no host, port, user or password. `:memory:` is refused: each 
 of its own. The tables are made on the first connection, when they are not there, as on Postgres.
 
 **How a graph is stored.** drivine4j's layout, so the three libraries read one file:
-`<graph>_node (nid INTEGER PRIMARY KEY, labels TEXT, props TEXT, stamp TEXT)`,
-`<graph>_edge (eid INTEGER PRIMARY KEY, src, dst REFERENCES node ON DELETE CASCADE, type, props TEXT)`, and
+`<graph>_node (nid INTEGER PRIMARY KEY AUTOINCREMENT, labels TEXT, props TEXT, stamp TEXT)`,
+`<graph>_edge (eid INTEGER PRIMARY KEY AUTOINCREMENT, src, dst REFERENCES node ON DELETE CASCADE, type, props TEXT)`, and
 `<graph>_schema`. Labels and properties are JSON text, not SQLite's binary `jsonb`. Labels are written sorted, with no
 character escaped that JSON does not require, because a label is found by its text, `"Label"`, within `labels`. The stamp
 is a column. A moment is ISO 8601 text.
+
+`nid` and `eid` are `AUTOINCREMENT` keys, so the id of a node or relationship that is deleted is never given to another,
+within a statement, a transaction or after it, as on Oracle and Postgres: an element id an application holds names the
+element it was read from or nothing. SQLite keeps the greatest id each table has given in its own table
+`sqlite_sequence`; deleting every row, as a test's cleanup does, leaves it, so ids go on from there. A file whose graph
+tables an earlier Drivine made, with `INTEGER PRIMARY KEY` alone, which gives a new row the id of the last one deleted, is
+refused on the provider's first connection and every one after it, and before an object manager's first statement over
+the graph, with a `ReusedIdsError` that names the graph and the file. There is no migration: make a new file and save
+the graph into it again.
 
 **What a transaction gives.**
 
