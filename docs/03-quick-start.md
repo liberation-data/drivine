@@ -154,6 +154,10 @@ class Onboarding {
 }
 ```
 
+Marked methods run side by side where none is running, as in `Promise.all([a.save(x), b.save(y)])` in a request, each
+start a transaction of their own: one's commit or rollback leaves the other's be. Run side by side inside a marked
+method, they join its transaction.
+
 To run a block in one transaction without a decorator:
 
 ```typescript

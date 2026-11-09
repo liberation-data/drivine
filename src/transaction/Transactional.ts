@@ -34,8 +34,24 @@ export async function runInTransaction(
     transactionOptions?: TransactionOptions,
     args: any[] = []
 ): Promise<any> {
-    const options = optionsWithDefaults(transactionOptions);
     const contextHolder = TransactionContextHolder.getInstance();
+    if (!contextHolder.currentTransaction) {
+        // A call that starts a transaction runs in a copy of the context, so the transaction is its own. Calls run side
+        // by side in one context (`Promise.all` of two transactional methods) then each have one, and the first to end
+        // doesn't commit or end the other's (liberation-data/drivine#707). What it calls in turn joins it.
+        return contextHolder.runPromiseInCopy(async () => runIn(contextHolder, fn, transactionOptions, args));
+    }
+    return runIn(contextHolder, fn, transactionOptions, args);
+}
+
+/** `fn` in the context's transaction, which it starts if there is none. */
+async function runIn(
+    contextHolder: TransactionContextHolder,
+    fn: AsyncFunction,
+    transactionOptions: TransactionOptions | undefined,
+    args: any[]
+): Promise<any> {
+    const options = optionsWithDefaults(transactionOptions);
     const transaction = contextHolder.currentTransaction || new Transaction(options, contextHolder);
     const isRoot = transaction.callStack.isEmpty();
     try {
