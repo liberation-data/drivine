@@ -98,7 +98,7 @@ that reads the row a `FOREACH` or a `CALL { … }` is written for is planned for
 
 What each statement gives on each store, compiled to SQL or not, is the shared
 [Cypher spec](https://github.com/liberation-data/drivine-cypher-spec). This repository runs version
-[v0.32.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.32.0) of it on Neo4j, Postgres, Oracle and SQLite, and
+[v0.34.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.34.0) of it on Neo4j, Postgres, Oracle and SQLite, and
 drivine-python and drivine4j run the same spec. Reads and writes compile, with variable-length relationships and
 quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
 anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`

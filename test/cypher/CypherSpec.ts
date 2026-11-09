@@ -109,7 +109,8 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
         'NaN worked out': [[[5, 6, 37], WHOLE_FLOAT_PARAMETER]],
         // toString($l) of l = [1.0, NaN, Infinity, -Infinity], whose 1.0 a SQL store binds as the whole number 1.
         'NaN and the infinities as parameters': [[[11], WHOLE_FLOAT_PARAMETER]],
-        // toInteger() of texts to the greatest and the least whole numbers, which the rows give as numbers past 2^53.
+        // toInteger() of texts to the greatest and the least whole numbers, and to ±(2^53 + 1) with blanks around it,
+        // which the rows give as numbers past 2^53.
         'toFloat() of a text, as Neo4j reads it': [[[23, 26], BEYOND_2_53]]
     },
     'writes.yaml': {
@@ -117,11 +118,6 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
     }
 };
 
-/**
- * The steps of a spec tag past what Drivine runs that a port here has yet to make pass, by file and case: the steps (from
- * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
- * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
- */
 /**
  * Whether this process's node:sqlite gives a function a text cut at its first NUL (#699): Node 24.7's does, 24.22's
  * doesn't. Asked of the driver itself, once, so the hold below is made only where it holds.
@@ -142,6 +138,11 @@ const SQLITE_CUTS_AT_NUL: boolean = (() => {
     }
 })();
 
+/**
+ * The steps of a spec tag past what Drivine runs that a port here has yet to make pass, by file and case: the steps (from
+ * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
+ * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
+ */
 export const HELD: Record<string, Record<string, Hold[]>> = {
     'queries.yaml': {
         // node:sqlite gives a function a text cut at its first NUL, so toFloat('\u0000NaN') reads an empty text (#699).
