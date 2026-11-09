@@ -264,11 +264,15 @@ function ulp(value: number): number {
 /**
  * `drivine_round(number, precision, mode)`: the number rounded to as many decimal places by the mode, as Java's
  * `BigDecimal` rounds it, as Neo4j's `round(value, precision, mode)` does: in decimal, so 2.345 is halfway between 2.34
- * and 2.35, where SQLite's binary arithmetic finds it just below. Null where the number or the precision is.
+ * and 2.35, where SQLite's binary arithmetic finds it just below. Null where the number or the precision is. An
+ * infinity, which SQLite stores and a decimal holds no value for, is itself, as Neo4j rounds it.
  */
 function round(value: SqliteValue, precision: SqliteValue, mode: SqliteValue): SqliteValue {
     if (value == null || precision == null) {
         return null;
+    }
+    if (typeof value === 'number' && Math.abs(value) === Infinity) {
+        return value;
     }
     const number =
         typeof value === 'bigint' ? SqliteDecimal.ofWhole(value) : SqliteDecimal.ofDouble(SqliteArguments.real(value));

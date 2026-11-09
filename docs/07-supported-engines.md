@@ -308,6 +308,10 @@ Notes:
 
 - A statement you write yourself is SQL; parameters are named `$name`, and a statement is bound only the ones it names.
   A statement Drivine writes whose text values are each JSON opens with `/* drivine:json */`, and is read as JSON.
+- SQLite's JSON writes an infinity as `9e999`, which reads back as the infinity, and holds no NaN: Drivine's functions,
+  and the rows of a `/* drivine:json */` statement, take the map `{"$numberDouble": "NaN"}`, exactly, as NaN, as
+  drivine4j does. So a map a statement writes so is NaN too, equal to nothing; one with another key, or another value,
+  is the map it is.
 - A predicate you write yourself is SQL over the root's row: its `props`, `labels` and `stamp`, e.g.
   `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name`, and is read
   as that property, as text, as on Postgres. SQLite's own `->>` reads `true` as `1` and a number as a number.
