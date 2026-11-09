@@ -23,6 +23,10 @@ export class Transaction {
     private readonly logger = new DrivineLogger(Transaction.name);
     private readonly connectionMutex = new Mutex();
     private _options: TransactionOptions;
+    /** The connections that have committed or rolled back: see {@link popContextWithError}. */
+    private readonly ended = new Set<Connection>();
+    /** Whether the connections have been released, so none is released twice. */
+    private released = false;
 
     constructor(options: TransactionOptions, readonly contextHolder: TransactionContextHolder) {
         this.id = shortId.rnd();
@@ -82,15 +86,22 @@ export class Transaction {
                 this.logger.verbose(
                     `Transaction: ${this.description} successful, but is marked ROLLBACK. Rolling back.`
                 );
-                await Promise.all(this.connections.map(async (it) => it.rollbackTransaction()));
+                await this.endEach(async (it) => it.rollbackTransaction());
             } else {
                 this.logger.verbose(`Committing transaction: ${this.description}.`);
-                await Promise.all(this.connections.map(async (it) => it.commitTransaction()));
+                await this.endEach(async (it) => it.commitTransaction());
             }
             await this.releaseClient();
         }
     }
 
+    /**
+     * Rolls back each connection that has not committed or rolled back yet, and then releases them all. A failure to
+     * roll one back is logged, not thrown: `e`, the error that ended the transaction, is the one its caller throws, and
+     * the other connections are still rolled back and every one released (liberation-data/drivine#561). One that has
+     * committed, as where a transaction over two databases commits the first and the second refuses its commit, is not
+     * rolled back: it can't be, and a graph engine refuses it.
+     */
     async popContextWithError(e: Error, isRoot: boolean): Promise<void> {
         // A commit that failed in popContext has popped the root's context already: it is rolled back here.
         if (!this.callStack.isEmpty()) {
@@ -98,8 +109,25 @@ export class Transaction {
         }
         if (isRoot) {
             this.logger.verbose(`Rolling back transaction: ${this.description} due to error: ${e.message}.`);
-            await Promise.all(this.connections.map(async (it) => it.rollbackTransaction()));
-            await this.releaseClient(e);
+            try {
+                await Promise.all(
+                    this.connections
+                        .filter((it) => !this.ended.has(it))
+                        .map(async (it) => {
+                            try {
+                                await it.rollbackTransaction();
+                                this.ended.add(it);
+                            } catch (failure) {
+                                const why = (failure as Error).message;
+                                this.logger.warn(
+                                    `Could not roll back a connection of transaction ${this.description}: ${why}`
+                                );
+                            }
+                        })
+                );
+            } finally {
+                await this.releaseClient(e);
+            }
         }
     }
 
@@ -136,9 +164,43 @@ export class Transaction {
         }
     }
 
+    /**
+     * Ends each connection with `end`, a commit or a rollback, all at once, and once every one has settled throws the
+     * first failure, if any. Each that ends is kept in {@link ended}, so a rollback after a failure leaves it be.
+     */
+    private async endEach(end: (connection: Connection) => Promise<void>): Promise<void> {
+        const settled = await Promise.allSettled(
+            this.connections.map(async (it) => {
+                await end(it);
+                this.ended.add(it);
+            })
+        );
+        const failed = settled.find((it): it is PromiseRejectedResult => it.status === 'rejected');
+        if (failed) {
+            throw failed.reason;
+        }
+    }
+
+    /**
+     * Releases each connection once, whatever another's release does, and ends the transaction in its context. A
+     * failure to release one is logged.
+     */
     private async releaseClient(error?: Error): Promise<void> {
+        if (this.released) {
+            return;
+        }
+        this.released = true;
         this.logger.verbose(`Releasing connection(s) for transaction: ${this.id}`);
-        await Promise.all(this.connections.map(async (it) => it.release(error)));
-        this.contextHolder.currentTransaction = undefined;
+        try {
+            const settled = await Promise.allSettled(this.connections.map(async (it) => it.release(error)));
+            for (const it of settled) {
+                if (it.status === 'rejected') {
+                    const why = (it.reason as Error)?.message ?? String(it.reason);
+                    this.logger.warn(`Could not release a connection of transaction ${this.description}: ${why}`);
+                }
+            }
+        } finally {
+            this.contextHolder.currentTransaction = undefined;
+        }
     }
 }
