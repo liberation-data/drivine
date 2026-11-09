@@ -34,6 +34,14 @@ describe('An iterator in a compiled statement parameter', () => {
             );
         });
 
+        it("in a map each query of a UNION looks into, is bound as an array's items", () => {
+            const cypher =
+                'MATCH (n) WHERE n.id IN $p.ids RETURN n.id AS id UNION MATCH (m) WHERE m.id IN $p.ids RETURN m.id AS id';
+            expect(compiler().compile(cypher, { p: { ids: letters() } }).parameters).toEqual(
+                compiler().compile(cypher, { p: { ids: ['a', 'b'] } }).parameters
+            );
+        });
+
         it("in a Set in a map, and from map.values(), is bound as an array's items", () => {
             const cypher = 'MATCH (n) WHERE n.id IN $p.ids RETURN n';
             const values = new Map([
