@@ -193,8 +193,8 @@ export abstract class SqlCypherCompiler {
     }
 
     /**
-     * The statement `query`, read already, with its parameters' values `parameters`, as SQL: a query, or a procedure
-     * where it writes.
+     * The statement `query`, read already, with its parameters' values `given`, as SQL: a query, or a procedure where
+     * it writes.
      */
     compileQuery(query: Query, given: Record<string, any>): CompiledCypher {
         // An iterator in a parameter is read once, here, so each look into the parameter sees its items.

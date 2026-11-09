@@ -1,3 +1,5 @@
+import { int } from 'neo4j-driver';
+import { CypherFloat } from '@/cypher/ast/Expression';
 import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
 import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
 import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
@@ -51,7 +53,12 @@ describe('An iterator in a compiled statement parameter', () => {
 describe('drained', () => {
     it('keeps the parameters themselves where no iterator is in them', () => {
         const ids = new Set(['a']);
-        const parameters = { p: { ids, at: new Date(0) }, bytes: Buffer.from([1]) };
+        const parameters = {
+            p: { ids, at: new Date(0), n: int(1), f: new CypherFloat(2), rows: [[1, undefined]] },
+            bytes: Buffer.from([1]),
+            driverBytes: new Int8Array([1]),
+            byId: new Map([['a', [1]]])
+        };
         expect(drained(parameters)).toBe(parameters);
     });
 
@@ -61,5 +68,13 @@ describe('drained', () => {
         expect(result).toEqual({ p: { rows: [{ t: ['a', 'b'] }] }, q: 1 });
         expect(result.q).toBe(1);
         expect(given.p.rows[0].t).not.toEqual(['a', 'b']);
+    });
+
+    it("turns an iterator in a Map's value into its items' array, as the Map's entries are written", () => {
+        expect(drained({ byId: new Map([['x', letters()]]) })).toEqual({ byId: [['x', ['a', 'b']]] });
+    });
+
+    it('turns an iterator given as a parameter itself into its items', () => {
+        expect(drained({ ids: letters() })).toEqual({ ids: ['a', 'b'] });
     });
 });
