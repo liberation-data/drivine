@@ -213,6 +213,58 @@ cases:
       - cypher: "MATCH (:CyWrite)-[r]-() RETURN r"
         rows: []
 
+  - name: "A write after a DELETE"
+    description: "What a statement makes after it deletes is made anew, with no id of what it deleted, and a read after the DELETE finds none of it."
+    steps:
+      - cypher: "CREATE (:CyWrite {num: 1}), (:CyWrite {num: 2})"
+      - note: A MERGE after a DELETE finds nothing it deleted, and makes its node with an id of its own (drivine4j#713).
+        cypher: "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a MERGE (a2:CyWrite) RETURN a2.num, old = elementId(a2)"
+        only: [neo4j, sql]
+        rows: [[null, false], [null, false]]
+      - cypher: "MATCH (a:CyWrite) RETURN count(a)"
+        rows: [1]
+      - note: So too in a later part of the statement.
+        cypher: "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a WITH collect(old) AS olds MERGE (b:CyWrite {num: 4}) RETURN b.num, elementId(b) IN olds"
+        only: [neo4j, sql]
+        rows: [[4, false]]
+      - note: And inside a FOREACH.
+        cypher: "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a FOREACH (x IN [1] | MERGE (:CyWrite {num: 5})) WITH old MATCH (b:CyWrite) RETURN b.num, old = elementId(b)"
+        only: [neo4j, sql]
+        rows: [[5, false]]
+      - note: A match after the DELETE finds none of what it deleted.
+        cypher: "MATCH (a:CyWrite) DELETE a WITH count(*) AS c OPTIONAL MATCH (b:CyWrite) RETURN c, count(b)"
+        rows: [[1, 0]]
+
+  - name: "A relationship written after a DELETE"
+    description: "A relationship a statement makes after it deletes one, or a node with its relationships, takes no id of what it deleted."
+    steps:
+      - cypher: "CREATE (a:CyWrite {k: 'a'}), (b:CyWrite {k: 'b'}) CREATE (a)-[:T {name: 'rel1'}]->(b), (a)-[:T {name: 'rel2'}]->(b)"
+      - note: A MERGE after a DELETE of relationships finds neither, and makes one (drivine4j#713).
+        cypher: "MATCH (a:CyWrite)-[t:T]->(b:CyWrite) WITH a, b, t, elementId(t) AS old DELETE t MERGE (a)-[t2:T {name: 'rel3'}]->(b) RETURN t2.name, old = elementId(t2)"
+        only: [neo4j, sql]
+        rows: [["rel3", false], ["rel3", false]]
+      - cypher: "MATCH (:CyWrite)-[t:T]->(:CyWrite) RETURN t.name"
+        rows: ["rel3"]
+      - note: A node and a relationship made after a DETACH DELETE take neither the node's id nor its relationship's.
+        cypher: "MATCH (a:CyWrite)-[t:T]->(b:CyWrite {k: 'b'}) WITH a, b, elementId(b) AS nb, elementId(t) AS nt DETACH DELETE b CREATE (a)-[s:T]->(c:CyWrite {k: 'c'}) RETURN nb = elementId(c), nt = elementId(s)"
+        only: [neo4j, sql]
+        rows: [[false, false]]
+      - cypher: "MATCH (:CyWrite {k: 'a'})-[:T]->(c:CyWrite) RETURN c.k"
+        rows: ["c"]
+
+  - name: "An id is not used again by a later statement"
+    description: "On the SQL stores, a node or relationship made after another was deleted, in a later statement, never takes the deleted one's id."
+    steps:
+      - note: The node that keeps the ids is made first, so the deleted node is the last one made, the one whose id a store that hands out the next id after the greatest would give again.
+        cypher: "CREATE (:CyWrite:CyKeep) CREATE (a:CyWrite {k: 'a'})-[:T]->(b:CyWrite {k: 'b'})"
+      - note: The deleted node's and relationship's ids are kept on the node that stays (drivine4j#713).
+        cypher: "MATCH (k:CyKeep), (a:CyWrite {k: 'a'})-[t:T]->(b:CyWrite {k: 'b'}) SET k.node = elementId(b), k.rel = elementId(t) DETACH DELETE b"
+      - cypher: "MATCH (a:CyWrite {k: 'a'}) CREATE (a)-[:T]->(:CyWrite {k: 'c'})"
+      - note: "Neo4j doesn't promise this across statements: its ids may be used again once a delete is committed. Drivine's SQL stores never hand an id out twice."
+        only: [sql]
+        cypher: "MATCH (k:CyKeep), (:CyWrite {k: 'a'})-[t:T]->(c:CyWrite {k: 'c'}) RETURN k.node = elementId(c), k.rel = elementId(t)"
+        rows: [[false, false]]
+
   - name: "Read after write"
     description: "A read later in the statement sees what the write made."
     steps:
@@ -303,6 +355,73 @@ cases:
         rows: [{id: 1}]
       - cypher: "MATCH (n:CyWrite {id: 1}) RETURN n.`__drivine.stamp`"
         rows: [null]
+
+  - name: "A key worked out at run time in a write"
+    description: "A node or a relationship a write makes, matches or merges is read by a key an expression gives, the stamp's too, and a text past 32 KB read so is read whole, over two rows (drivine4j#417)."
+    steps:
+      - note: "Graph7 [2] and [3]."
+        cypher: "CREATE (n:CyWrite {name: 'Apa'}) RETURN n['nam' + 'e']"
+        rows: ["Apa"]
+      - cypher: "CREATE (n:CyWrite {name: 'Bea'}) RETURN n[$idx]"
+        parameters: {idx: "name"}
+        rows: ["Bea"]
+      - cypher: "MATCH (n:CyWrite) WITH n, 'name' AS k SET n.copy = n[k] + '!' RETURN n.copy ORDER BY n.copy"
+        rows: ["Apa!", "Bea!"]
+      - cypher: "MERGE (n:CyWrite {name: 'Apa'}) WITH n, 'copy' AS k RETURN n[k]"
+        rows: ["Apa!"]
+      - note: "Merge6 [3]."
+        cypher: "MATCH (a:CyWrite {name: 'Apa'}), (b:CyWrite {name: 'Bea'}) MERGE (a)-[r:TYPE]->(b) ON CREATE SET r.name = 'foo'"
+      - cypher: "MATCH (:CyWrite)-[r:TYPE]->(:CyWrite) RETURN [key IN keys(r) | key + '->' + r[key]]"
+        rows: [["name->foo"]]
+      - cypher: "MATCH (:CyWrite)-[r:TYPE]->(:CyWrite) DELETE r"
+      - note: "Merge6 [6], from the node's properties, as Cypher 25 has it."
+        cypher: "MATCH (a:CyWrite {name: 'Apa'}), (b:CyWrite {name: 'Bea'}) MERGE (a)-[r:TYPE]->(b) ON CREATE SET r = properties(a)"
+      - cypher: "MATCH (:CyWrite)-[r:TYPE]->(:CyWrite) RETURN [key IN keys(r) | key + '->' + r[key]]"
+        unorderedLists: true
+        rows: [["copy->Apa!", "name->Apa"]]
+      - cypher: "MATCH (:CyWrite)-[r:TYPE]->(:CyWrite) DELETE r"
+      - note: "Merge6 [7]."
+        cypher: "MATCH (a:CyWrite {name: 'Apa'}), (b:CyWrite {name: 'Bea'}) MERGE (a)-[r:TYPE]->(b) ON CREATE SET r += {name: 'bar', name2: 'baz'}"
+      - cypher: "MATCH (:CyWrite)-[r:TYPE]->(:CyWrite) RETURN [key IN keys(r) | key + '->' + r[key]]"
+        unorderedLists: true
+        rows: [["name->bar", "name2->baz"]]
+      - cypher: "MATCH (a:CyWrite {name: 'Apa'}) MERGE (a)-[:TYPE2 {k: a['na' + 'me']}]->(c:CyWrite {made: true}) RETURN c.made"
+        rows: [true]
+      - cypher: "MATCH (:CyWrite)-[r:TYPE2]->(:CyWrite) RETURN r.k"
+        rows: ["Apa"]
+      - cypher: "UNWIND $rows AS row MERGE (n:CyWrite {id: row['i' + 'd']}) SET n.v = row[$k] RETURN [n.id, n.v] ORDER BY n.id"
+        parameters: {rows: [{id: 1, v: "a"}, {id: 2, v: "b"}], k: "v"}
+        rows: [[1, "a"], [2, "b"]]
+      - note: "The stamp is a property as any other, read by a key worked out too."
+        cypher: "CREATE (n:CyWrite $props) WITH n, '__drivine.stamp' AS k RETURN [n[k], n.`__drivine.stamp`]"
+        parameters: {props: {id: 3, "__drivine.stamp": "a:b"}}
+        rows: [["a:b", "a:b"]]
+      - cypher: "MATCH (n:CyWrite {id: 3}) WITH n, '__drivine.stamp' AS k RETURN [n[k], properties(n)[k]]"
+        rows: [["a:b", "a:b"]]
+      - cypher: "UNWIND [1, 2] AS i CREATE (:CyWrite {i: i, long: $big})"
+        parameters: {big: {$repeat: "x", times: 40000}}
+      - cypher: "MATCH (n:CyWrite) WHERE n.long IS NOT NULL WITH n, 'long' AS k RETURN [size(n[k]), n[k] = n.long, n[k] STARTS WITH 'xx'] ORDER BY n.i"
+        rows: [[40000, true, true], [40000, true, true]]
+      - cypher: "MATCH (n:CyWrite) WHERE n.long IS NOT NULL WITH n, 'long' AS k RETURN n[k] ORDER BY n.i"
+        rows: [{$repeat: "x", times: 40000}, {$repeat: "x", times: 40000}]
+      - cypher: "MATCH (n:CyWrite) WHERE n.long IS NOT NULL RETURN [k IN keys(n) | n[k]] ORDER BY n.i"
+        unorderedLists: true
+        rows: [[1, {$repeat: "x", times: 40000}], [2, {$repeat: "x", times: 40000}]]
+      - cypher: "MATCH (n:CyWrite) WHERE n.long IS NOT NULL WITH properties(n) AS m, 'long' AS k RETURN size(m[k]) ORDER BY m.i"
+        rows: [40000, 40000]
+      - cypher: "MATCH (n:CyWrite) WHERE n.long IS NOT NULL WITH n, 'long' AS k SET n.copy = n[k] RETURN size(n.copy) ORDER BY n.i"
+        rows: [40000, 40000]
+      - cypher: "UNWIND $ms AS m WITH m, 'long' AS k RETURN size(m[k])"
+        parameters: {ms: [{long: {$repeat: "x", times: 40000}}, {long: {$repeat: "y", times: 40000}}]}
+        rows: [40000, 40000]
+      - note: "A text read so beside NaN and an infinity: the node's other entries are written out with it."
+        only: [neo4j, oracle]
+        cypher: "CREATE (n:CyWrite {nan: $nan, inf: $inf, s: 'x', d: 2.0}) WITH n, 's' AS k RETURN [n[k], n['na' + 'n'], n['in' + 'f'], n['d' + '']]"
+        parameters: {nan: {$float: "NaN"}, inf: {$float: "Infinity"}}
+        rows: [["x", {$float: "NaN"}, {$float: "Infinity"}, 2.0]]
+      - note: "In a FOREACH."
+        cypher: "MATCH (n:CyWrite {name: 'Apa'}) FOREACH (k IN ['name'] | SET n.each = n[k]) RETURN n.each"
+        rows: ["Apa"]
 
   - name: "SET from COUNT and EXISTS"
     description: "COUNT { } and EXISTS { } in a SET read the row being written."
@@ -785,6 +904,10 @@ cases:
       - note: "A node OPTIONAL MATCH finds none of is null in the list that holds it."
         cypher: "OPTIONAL MATCH (x:Nope) CREATE (n:CyWrite) WITH n, [x] AS a, [n] AS b RETURN [a = b, a = a]"
         rows: [[null, null]]
+      - note: "A value of another kind than the one that holds a null is not equal to it, where a column holds values of several kinds (drivine4j#518)."
+        cypher: "UNWIND [1, [1], 'x', 1.5, true, {a: 1}] AS v CREATE (:CyWrite) RETURN [v = [null], v = {a: null}, v IN [[null]], v <> [1, null]] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false, true], [null, false, null, true], [false, false, false, true], [false, false, false, true], [false, false, false, true], [false, null, false, true]]
 
   - name: "A property stored as several kinds sorts in Cypher's order of kinds"
     description: "A property read from the store may be of any kind: ORDER BY sorts a list, then a text, a truth value, a number, and a missing property last."
@@ -1156,3 +1279,34 @@ cases:
         rows: [[1, 40001, 40001, 40001], [2, 40001, 40001, 40001]]
       - cypher: "MATCH (n:CyWrite) WHERE head([n]).t ENDS WITH 'x' RETURN count(*)"
         rows: [2]
+
+  - name: "A stored empty text searched for and measured"
+    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    steps:
+      - cypher: "CREATE (:CyWrite {k: 0, name: 'ab'}), (:CyWrite {k: 1, name: ''}), (:CyWrite {k: 2, name: 'xy'}), (:CyWrite {k: 3, name: 5})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.name STARTS WITH '' RETURN a.name ORDER BY a.k"
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.name ENDS WITH $e RETURN a.name ORDER BY a.k"
+        parameters: {e: ""}
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.name CONTAINS '' RETURN a.name ORDER BY a.k"
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE NOT a.name CONTAINS 'b' RETURN a.name ORDER BY a.k"
+        rows: ["", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite), (b:CyWrite {k: 1}) WHERE a.name STARTS WITH b.name RETURN a.name ORDER BY a.k"
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}), (b:CyWrite) WHERE a.name ENDS WITH b.name RETURN b.name ORDER BY b.k"
+        rows: [""]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.k < 3 RETURN a.name, size(a.name) ORDER BY a.k"
+        rows: [["ab", 2], ["", 0], ["xy", 2]]
+      - note: "Written by SET, as a statement that writes reads it."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}) SET a.s = size(a.name), a.c = 'ab' CONTAINS a.name RETURN [a.s, a.c]"
+        rows: [[0, true]]

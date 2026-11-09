@@ -36,7 +36,8 @@ import {
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
 import { LONG_LOCK_MILLIS } from '@/connection/sqlite/SqliteConnection';
-import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
+import { JSON_ROWS } from '@/backend/sqlite/SqliteGraph';
 
 jest.setTimeout(30_000);
 
@@ -897,7 +898,7 @@ describe('a SQLite store', () => {
          * for each, where it scans the whole table, and where it searches it by a key.
          */
         async function reads(cypher: string): Promise<string[]> {
-            const sql = new SqliteCypherCompiler(new SqliteGraph().name).compile(cypher).sql;
+            const sql = new SharedCypherCompiler('sqlite', { name: new SqliteGraph().name }).compile(cypher).sql;
             const tables = new Map(
                 [...sql.matchAll(/(\w+)_(node|edge) (\w+)/g)].map(([, , table, alias]) => [alias, table])
             );
@@ -941,7 +942,9 @@ describe('a SQLite store', () => {
                 ['a b']
             ]
         ])('should give the rows of %s', async (_, cypher, expected) => {
-            expect(new SqliteCypherCompiler(new SqliteGraph().name).compile(cypher).sql).not.toContain('CROSS JOIN');
+            expect(
+                new SharedCypherCompiler('sqlite', { name: new SqliteGraph().name }).compile(cypher).sql
+            ).not.toContain('CROSS JOIN');
             await pm.execute(
                 new QuerySpecification({
                     text: "CREATE (:SqliteStore {id: 'a'})-[:NEXT]->(:SqliteStore {id: 'b', tags: ['x', 'y']}), (:SqliteStore {id: 'c'})",
@@ -951,7 +954,100 @@ describe('a SQLite store', () => {
             const found = await pm.query<Record<string, unknown>>(
                 new QuerySpecification({ text: cypher, language: 'CYPHER' })
             );
-            expect(found.map((it) => Object.values(it).map((value) => value ?? '-').join(' ')).sort()).toEqual(expected);
+            expect(
+                found
+                    .map((it) =>
+                        Object.values(it)
+                            .map((value) => value ?? '-')
+                            .join(' ')
+                    )
+                    .sort()
+            ).toEqual(expected);
+        });
+
+        /**
+         * NaN and the infinities a statement works out, as drivine4j's tests of liberation-data/drivine4j#295 have them,
+         * given none, as they were written before a NaN or infinite parameter was bound as itself (#344). SQLite writes an
+         * infinity as `9e999`, and
+         * NaN, which its JSON holds no number for, as `{"$numberDouble": "NaN"}`, which the rows give back as NaN.
+         */
+        describe('NaN and the infinities', () => {
+            const cypher = async (text: string): Promise<any[]> =>
+                pm.query(new QuerySpecification({ text, language: 'CYPHER' }));
+
+            it('should read an infinity or NaN a sum works out, where the text it wrote was no JSON', async () => {
+                expect(await cypher('RETURN [1e308 + 1e308, -1e308 + -1e308, 1e308 * 10 + -1e308 * 10]')).toEqual([
+                    [Infinity, -Infinity, NaN]
+                ]);
+                expect(await cypher('RETURN 1e308 * 10 + -1e308 * 10')).toEqual([NaN]);
+                expect(await cypher("WITH 1e308 * 10 AS i WITH i + -i AS p RETURN [p + 1, 'a' + p, p]")).toEqual([
+                    [NaN, 'aNaN', NaN]
+                ]);
+            });
+
+            it('should give NaN worked out from stored infinities, and round an infinity to itself', async () => {
+                await cypher('CREATE (:SqliteStore:Inf {b: 1e308 * 10, c: [-1e308 * 10], k: 2})');
+                expect(await cypher('MATCH (n:Inf) RETURN [n.b + n.c[0], round(n.b)]')).toEqual([[NaN, Infinity]]);
+                expect(
+                    await cypher("WITH 1e308 * 10 AS i RETURN [round(i), round(-i), round(i, 2, 'HALF_DOWN')]")
+                ).toEqual([[Infinity, -Infinity, Infinity]]);
+            });
+
+            it('should match, compare and sort a stored infinity as Neo4j does', async () => {
+                await cypher('CREATE (:SqliteStore:Inf {b: 1e308 * 10, c: -1e308 * 10, k: 2})');
+                expect(
+                    await cypher('WITH 1e308 * 10 AS i MATCH (n:Inf {b: i}) WHERE n.c = -i AND i IN [n.b] RETURN n.k')
+                ).toEqual([2]);
+                expect(await cypher('MATCH (n:Inf) UNWIND [n.b, n.c, 1.0] AS x RETURN x ORDER BY x')).toEqual([
+                    -Infinity,
+                    1,
+                    Infinity
+                ]);
+            });
+
+            it('should sort a list that holds NaN after one that holds any number', async () => {
+                expect(
+                    await cypher('WITH 1e308 * 10 AS i UNWIND [[1, i + -i], [1, i], [1, 2.0]] AS x RETURN x ORDER BY x')
+                ).toEqual([
+                    [1, 2],
+                    [1, Infinity],
+                    [1, NaN]
+                ]);
+            });
+
+            it('should find NaN equal to nothing and in no list, and null where a list holds a null', async () => {
+                const nan = 'WITH 1e308 * 10 AS i WITH i + -i AS p';
+                expect(
+                    await cypher(`${nan} RETURN [p IN [p], p IN [p, null], 1 IN [p, null], 1 IN [p], p IN [1.0, null]]`)
+                ).toEqual([[false, null, null, false, null]]);
+                expect(
+                    await cypher(`${nan} RETURN [[p] = [p], [[p]] = [[p]], [p] IN [[p]], p = p, p <> p, p < 1, p > 1]`)
+                ).toEqual([[false, false, false, false, true, null, null]]);
+            });
+
+            it('should take a map written exactly as SQLite writes NaN for NaN, as drivine4j does, and no other', async () => {
+                // SQLite's JSON holds NaN as this map, so a map a statement writes so is NaN too: only on SQLite.
+                expect(
+                    await cypher(
+                        "RETURN [{`$numberDouble`: 'NaN'}, {`$numberDouble`: 'NaN', b: 1}, {`$numberDouble`: '2.0'}]"
+                    )
+                ).toEqual([[NaN, { $numberDouble: 'NaN', b: 1 }, { $numberDouble: '2.0' }]]);
+                expect(
+                    await cypher("WITH {`$numberDouble`: 'NaN'} AS m RETURN [m = m, [m] = [m], m + 1, m <> m]")
+                ).toEqual([[false, false, NaN, true]]);
+            });
+
+            it('should read NaN as such in the rows of a statement of JSON rows where its text holds the map', async () => {
+                const sql = `${JSON_ROWS}\nSELECT '{"$numberDouble":"NaN"}' AS a, '[1,{"x":{"$numberDouble":"NaN"}}]' AS b, '9e999' AS c, 'null' AS d, json_quote('{"$numberDouble":"NaN"}') AS e`;
+                // A text that holds the map's characters holds its quotes escaped, and is the text it is.
+                expect(await rows(pm, sql)).toEqual([
+                    { a: NaN, b: [1, { x: NaN }], c: Infinity, d: null, e: '{"$numberDouble":"NaN"}' }
+                ]);
+                // A text of plain SQL, not of JSON rows, is the text it is.
+                expect(await rows(pm, `SELECT '{"$numberDouble":"NaN"}' AS a`)).toEqual([
+                    { a: '{"$numberDouble":"NaN"}' }
+                ]);
+            });
         });
     });
 });

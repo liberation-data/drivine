@@ -14,7 +14,10 @@ export class Neo4jConnection implements Connection {
     private logger = new DrivineLogger(Neo4jConnection.name);
     private transaction?: Transaction;
 
-    constructor(readonly session: Session, readonly resultMapper: ResultMapper) {}
+    constructor(
+        readonly session: Session,
+        readonly resultMapper: ResultMapper
+    ) {}
 
     sessionId(): string {
         return (this.session as Session & { sessionId: string }).sessionId;

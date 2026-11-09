@@ -7,9 +7,9 @@ import { PostgresCursor } from '@/connection/postgres/PostgresCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
-import { CompiledSpecification, compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledSpecification, compiledSpecification } from '@/cypher/CompiledSpecification';
 import { nonFiniteTypes, TypeParsers } from '@/connection/postgres/PostgresNonFinite';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 
 const PgCursor = require('pg-cursor');
@@ -38,7 +38,7 @@ export class PostgresConnection implements Connection {
         const given = spec.finalizedCopy('SQL');
         const cypher =
             given.statement.language === 'CYPHER'
-                ? compiledSpecification(given, new PostgresCypherCompiler(this.graph))
+                ? compiledSpecification(given, new SharedCypherCompiler('postgres', { name: this.graph }))
                 : undefined;
         return this.run(spec, cypher?.spec ?? given, cypher);
     }

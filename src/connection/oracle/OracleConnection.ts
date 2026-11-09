@@ -7,9 +7,9 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { OracleCursor } from '@/connection/oracle/OracleCursor';
-import { CompiledSpecification, compiledSpecification } from '@/cypher/sql/CompiledSpecification';
-import { CompiledRows } from '@/cypher/sql/CompiledCypher';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { CompiledSpecification, compiledSpecification } from '@/cypher/CompiledSpecification';
+import { CompiledRows } from '@/cypher/CompiledCypher';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
@@ -107,7 +107,7 @@ export class OracleConnection implements Connection {
      * {@link OracleStoredFunctions}.
      */
     private async compiled<T>(given: QuerySpecification<T>): Promise<CompiledSpecification<T>> {
-        const compiler = new OracleCypherCompiler(this.graph);
+        const compiler = new SharedCypherCompiler('oracle', { name: this.graph });
         const compiled = compiledSpecification(given, compiler);
         // Each is asked of apart: a store an earlier version made may have the one and not the others.
         const nullsEqual =
@@ -118,7 +118,10 @@ export class OracleConnection implements Connection {
         if (nullsEqual && era) {
             return compiled;
         }
-        return compiledSpecification(given, new OracleCypherCompiler(this.graph, nullsEqual, era));
+        return compiledSpecification(
+            given,
+            new SharedCypherCompiler('oracle', { name: this.graph, nullsEqualStored: nullsEqual, eraStored: era })
+        );
     }
 
     private async run<T>(
@@ -146,12 +149,45 @@ export class OracleConnection implements Connection {
 
 /**
  * The rows of a compiled Cypher statement that writes, from the rows `rows` its PL/SQL block returned in the shape
- * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as Drivine's own compiler returns them
- * (see OracleCypherCompiler.returnRows); `'each'`, the rows as they are, one a row in the column `RESULT`, which the
- * result mapper takes the value of. Read as the statement says, never by a column's name.
+ * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as the shared compiler returns them
+ * with `oracleRowsAsText` (see SharedCypherCompiler), their floats read (see withFloats); `'each'`, the rows as they
+ * are, one a row in the column `RESULT`, which the result mapper takes the value of. Read as the statement says, never
+ * by a column's name.
  */
 function returnedRows(rows: any[], shape: CompiledRows): any[] {
-    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: it }));
+    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: withFloats(it) }));
+}
+
+/** Oracle's names in its extended JSON for NaN and the infinities, and the numbers they are. */
+const NON_FINITE = new Map<unknown, number>([
+    ['Nan', NaN],
+    ['Inf', Infinity],
+    ['-Inf', -Infinity]
+]);
+
+/**
+ * A row's value from the text of its rows, which Oracle writes as extended JSON so a float stays one: each map that is
+ * exactly a float, `{"$numberDouble": 2.5}`, or NaN or an infinity, `{"$numberDouble": "Nan"}` ("Inf", "-Inf"), the
+ * number it is, at any depth. A map of a user's own with that one key reads so too, as drivine4j's reader reads it.
+ */
+function withFloats(value: any): any {
+    if (Array.isArray(value)) {
+        return value.map(withFloats);
+    }
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === '$numberDouble') {
+        const number = value.$numberDouble;
+        if (typeof number === 'number') {
+            return number;
+        }
+        if (NON_FINITE.has(number)) {
+            return NON_FINITE.get(number);
+        }
+    }
+    return Object.fromEntries(keys.map((key) => [key, withFloats(value[key])]));
 }
 
 /**

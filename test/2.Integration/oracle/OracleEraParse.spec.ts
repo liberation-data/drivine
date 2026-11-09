@@ -2,7 +2,7 @@ import * as oracledb from 'oracledb';
 import { ConnectionPropertiesFromEnv, QuerySpecification } from '@liberation-data/drivine';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { TEST_CONTAINER_PASSWORD } from '@/testing';
 import { describeOnOracle } from '../support/Oracle';
 
@@ -56,7 +56,7 @@ describeOnOracle('The hard parse of temporal arithmetic on Oracle', () => {
 
     /** `cypher` compiled for a store with the era functions, as OracleConnection binds it, and whether it calls them. */
     const compiled = (cypher: string): { statement: string; parameters: any; callsEra: boolean } => {
-        const compiler = new OracleCypherCompiler(GRAPH);
+        const compiler = new SharedCypherCompiler('oracle', { name: GRAPH });
         const cypherCompiled = compiler.compile(cypher);
         return {
             ...new OracleSpecCompiler(

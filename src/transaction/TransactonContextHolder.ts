@@ -36,6 +36,11 @@ export class TransactionContextHolder {
         return this.localStorage.runPromise(fn);
     }
 
+    /** Runs `fn` in a copy of the current context, so a transaction it starts is its own: see runInTransaction. */
+    async runPromiseInCopy<T>(fn: () => Promise<T>): Promise<T> {
+        return this.localStorage.runPromiseInCopy(fn);
+    }
+
     get drivineContext(): DrivineContext | undefined {
         return this.localStorage.get<DrivineContext | undefined>(TransactionContextKeys.DRIVINE_CONTEXT);
     }

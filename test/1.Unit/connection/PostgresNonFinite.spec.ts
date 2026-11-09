@@ -3,7 +3,7 @@ import { nonFiniteOf, nonFiniteTypes, readNonFiniteJson } from '@/connection/pos
 import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { CompiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledSpecification } from '@/cypher/CompiledSpecification';
 import { compiledAs } from '../../CompiledAs';
 
 /** The numbers drivine4j's compiler writes on Postgres for NaN and the infinities, as `jsonb` writes them. */

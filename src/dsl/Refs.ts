@@ -143,8 +143,8 @@ export type Operator =
     | 'EQ_IGNORE_CASE'
     /**
      * Equals the value as the store lowercases it: what `eqIgnoreCase` on a `@CaseInsensitive` property becomes once
-     * every node has its lowercased copy, compared with the copy (see LowerCopies), which an index over the copy serves.
-     * Drivine writes it.
+     * every node has its lowercased copy, compared with the copy (see LowerCopies), which an index over the copy serves:
+     * on Oracle, but for a value that may lowercase past the 4,000 bytes the index holds. Drivine writes it.
      */
     | 'EQ_LOWERED'
     /** Contains the value as the store lowercases it: `containsIgnoreCase` on a copy, as `EQ_LOWERED` is. */

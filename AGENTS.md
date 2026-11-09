@@ -2,6 +2,10 @@
 
 This repository is Drivine for TypeScript, one of three Drivine libraries. The other two are [drivine4j](https://github.com/liberation-data/drivine4j) and [drivine-python](https://github.com/liberation-data/drivine-python). All three read and write the same stores in the same layout, so a graph written by one is loaded, stamped and checked alike by the others. [drivine4j](https://github.com/liberation-data/drivine4j) is the reference: where the libraries disagree, its behaviour is the spec unless an issue says otherwise.
 
+## The Cypher compiler is the shared module
+
+Cypher is compiled to SQL for Postgres, Oracle and SQLite by the shared compiler, `@liberation-data/drivine-cypher-compiler`: the Kotlin Multiplatform module in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec)'s `compiler/`, built for Wasm, which drivine4j runs on the JVM. `src/cypher/SharedCypherCompiler.ts` is the only code here that calls it. A bug in what a statement compiles to, or a statement it refuses, is fixed in the module, once, never here: file it there, and this library takes the fix by moving to the spec tag that releases it. What stays here is the host side the compiled SQL relies on: the connections, the row readers and the SQLite functions, which the spec's `host.yaml` pins.
+
 ## A bug found here is checked for in the other two
 
 When you find or fix a bug here, check the other two libraries for the same defect before you finish:
@@ -18,8 +22,8 @@ These are read by all three libraries. Change them here only together with the o
 
 - **The store layout:** node and edge tables on Oracle and Postgres, labels and properties on the graph engines, and the stamp each node carries.
 - **The schema marker** (`_DrivineSchema`): its version and its inventory of items, including the `runtime:` and `runtime-stale:` entries.
-- **The golden statements:** `test/1.Unit/golden/statements.json` in Drivine for TypeScript is copied byte for byte to `tests/golden/statements.json` in drivine-python. A change to a statement that the goldens pin is made in both.
-- **The Cypher spec:** what each Cypher statement gives on each store, compiled to SQL or not, lives in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec). `scripts/sync-cypher-spec.sh <tag>` copies a tagged version into `test/cypher`, unchanged; the other two libraries copy the same tag. `scripts/check-cypher-spec.sh`, run in CI, fails when a copy differs from its tag and warns when the spec has a later one. A change to what the compiler gives or refuses goes to the spec first.
+- **The golden statements:** `test/1.Unit/golden/statements.json` in Drivine for TypeScript is copied byte for byte to `tests/golden/statements.json` in drivine-python. It pins what each library writes itself: the graph engines' Cypher, the SQL the Oracle, Postgres and SQLite backends write, and the schema grammars. A change to a statement that the goldens pin is made in both. Compiled Cypher isn't among them: the module's corpus check pins that, byte for byte on every target.
+- **The Cypher spec:** what each Cypher statement gives on each store, compiled to SQL or not, lives in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec). `scripts/sync-cypher-spec.sh <tag>` copies a tagged version into `test/cypher`, unchanged; the other two libraries copy the same tag. `scripts/check-cypher-spec.sh`, run in CI, fails when a copy differs from its tag and warns when the spec has a later one. A change to what the compiler gives or refuses goes to the spec first, and is made in the module.
 
 ## Releases go out as trains
 

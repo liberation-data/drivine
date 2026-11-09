@@ -7,7 +7,7 @@ import {
     QuerySpecification,
     TransactionContextHolder
 } from '@liberation-data/drivine';
-import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
+import { CompiledCypher } from '@/cypher/CompiledCypher';
 import { TEST_CONTAINER_PASSWORD } from '@/testing';
 
 /** Whether ORACLE_DATABASE_* configures an Oracle connection: its suites run only then. */

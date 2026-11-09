@@ -1,10 +1,21 @@
-import { check, CypherCase, CypherStep } from '../../cypher/CypherSpec';
+import { check, CypherCase, CypherStep, HELD } from '../../cypher/CypherSpec';
 
 /**
  * A held step must still fail, by rows or a message not as the spec says, or as the store fails: one the runner crashes
- * on is no hold. The case is one HELD names, its step 2 held on Oracle.
+ * on is no hold. The case is one the test holds, its step 2 held on Oracle, beside what HELD holds already, which is put
+ * back after.
  */
 describe('The Cypher spec runner holds a step', () => {
+    const holds = HELD['queries.yaml'];
+
+    beforeAll(() => {
+        HELD['queries.yaml'] = { ...holds, 'NaN worked out': [{ issue: 512, steps: [2], on: ['oracle'] }] };
+    });
+
+    afterAll(() => {
+        HELD['queries.yaml'] = holds;
+    });
+
     const held = (step: CypherStep): CypherCase => ({ name: 'NaN worked out', steps: [{ cypher: 'RETURN 0' }, step] });
     const step: CypherStep = { cypher: 'RETURN 1', rows: [1] };
     const oracle = async (cypherCase: CypherCase, run: () => Promise<any[]>): Promise<void> =>

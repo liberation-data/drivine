@@ -1,5 +1,10 @@
-import { BC_BELOW } from '@/cypher/sql/TemporalSql';
 import { DrivineLogger } from '@/logger/DrivineLogger';
+
+/**
+ * The code of `1`: an ISO text whose first character's code is below it starts with `-` or `0`, as one with a year BC
+ * does, so the graph's `era` function rewrites it, and reads any other, an ordinary date, as it is.
+ */
+const BC_BELOW = 49;
 
 /** What a session's check needs of a connection: node-oracledb's `execute`. */
 export interface Executes {
@@ -15,14 +20,14 @@ export function nullsEqualName(graph: string): string {
  * The function `name`, which compares two JSON values as Cypher compares values that may hold a null: 1 where they are
  * equal, 0 where they differ, and null where a pair of their items holds a null and no pair differs. It walks the two
  * together with `JSON_ELEMENT_T`, list item by list item and map key by map key, at any depth. A query declares it with
- * `WITH FUNCTION` where the store has none (see `OracleCypherCompiler.nullsEqual`); the store keeps it, made with the
- * graph, as `CREATE OR REPLACE` of the same text (see `OracleGraph.functions`).
+ * `WITH FUNCTION` where the store has none (see the shared compiler's `OracleCypherCompiler.nullsEqual`); the store
+ * keeps it, made with the graph, as `CREATE OR REPLACE` of the same text (see `OracleGraph.functions`).
  *
  * The store's copy is part of the store layout the three Drivine libraries share (see AGENTS.md): it is
  * `CREATE OR REPLACE ` and this text with `name` as {@link nullsEqualName} gives it, the graph's name as written and then
  * `_nulls_equal`, its lines joined by `\n` with no newline after the last (the `//` comment below is not in it).
- * drivine4j's `OracleCypherCompiler.nullsEqualFunction` is the reference: changing a byte of it changes the layout for
- * all three, so it changes in all three together.
+ * The shared compiler's `OracleCypherCompiler.nullsEqualFunction` is the reference: changing a byte of it changes the
+ * layout for all three, so it changes in all three together.
  */
 export function nullsEqualFunction(name: string): string {
     return [
@@ -102,9 +107,9 @@ export function eraDateName(graph: string): string {
  *
  * The store's copy is part of the store layout the three Drivine libraries share (see AGENTS.md), as
  * {@link nullsEqualFunction}'s is: it is `CREATE OR REPLACE ` and this text with `name` as {@link eraName} gives it,
- * the graph's name as written and then `_era`, its lines joined by `\n` with no newline after the last. drivine4j's
- * `OracleCypherCompiler.eraFunction` is the reference: changing a byte of it changes the layout for all three, so it
- * changes in all three together.
+ * the graph's name as written and then `_era`, its lines joined by `\n` with no newline after the last. The shared
+ * compiler's `OracleCypherCompiler.eraFunction` is the reference: changing a byte of it changes the layout for all
+ * three, so it changes in all three together.
  */
 export function eraFunction(name: string): string {
     return [
@@ -125,8 +130,8 @@ export function eraFunction(name: string): string {
  * keeps it: the timestamp is written once, where the test and the regular expression it stands for wrote it three times.
  *
  * Part of the store layout, as {@link eraFunction} is: `CREATE OR REPLACE ` and this text with `name` as
- * {@link eraDateName} gives it, the graph's name as written and then `_era_date`. drivine4j's
- * `OracleCypherCompiler.eraDateFunction` is the reference.
+ * {@link eraDateName} gives it, the graph's name as written and then `_era_date`. The shared
+ * compiler's `OracleCypherCompiler.eraDateFunction` is the reference.
  */
 export function eraDateFunction(name: string): string {
     return [
