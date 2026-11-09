@@ -14,7 +14,8 @@ import {
     SchemaExecutor,
     SchemaGrammar,
     SchemaManager,
-    uniquenessConstraint
+    uniquenessConstraint,
+    vectorIndex
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
 
@@ -258,6 +259,40 @@ describe('SchemaManager applying an owner one of whose indexes is not built', ()
         );
         expect(made(ran)).toHaveLength(1);
         expect(recorded).toEqual([]);
+    });
+
+    it('should raise an index recreateOnDrift made again that is not built, once the owner is applied', async () => {
+        const executor = {
+            run: async (statement: string) =>
+                Promise.resolve().then(() => {
+                    if (statement === NEO4J_SCHEMA.listVectors.statement) {
+                        const config = { 'vector.dimensions': 3, 'vector.similarity_function': 'cosine' };
+                        return [{ name: 'Person_e_vector', labels: ['Person'], properties: ['e'], config }];
+                    }
+                    return statement === NEO4J_SCHEMA.indexBuild!.statement
+                        ? [{ state: 'FAILED', failureMessage: 'Out of memory.' }]
+                        : [];
+                })
+        } as unknown as SchemaExecutor;
+        const gom = {
+            indexes: new IndexManager(executor, NEO4J_SCHEMA),
+            constraints: new ConstraintManager(executor, NEO4J_SCHEMA),
+            persistenceManager: {
+                maybeGetOne: async () => Promise.resolve(null),
+                execute: async () => Promise.resolve()
+            },
+            backend: {
+                schemaMarker: () => ({ spec: () => ({}) }),
+                markerItems: () => undefined,
+                recordSchemaMarker: () => ({ spec: (it: unknown) => it })
+            }
+        };
+        const factory = { get: () => gom } as unknown as GraphObjectManagerFactory;
+        const schema = new SchemaManager(factory, { catalogs: [], recreateOnDrift: true, indexBuildTimeout: 5 });
+
+        await expect(schema.ensure('dice', vectorIndex('Person', 'e', 4))).rejects.toThrow(
+            /owner 'dice' on a found indexes not built:\n {2}- BUILD FAILED: .*Person_e_vector.*Out of memory/
+        );
     });
 
     it('should name an index still building as such, with the timeout to set', async () => {
