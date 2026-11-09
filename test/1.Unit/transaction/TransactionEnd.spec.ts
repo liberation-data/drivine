@@ -72,7 +72,36 @@ describe('A transaction ending', () => {
             transaction(holder, [connection('a', calls, ['rollback']), connection('b', calls)], true);
             const thrown = await runInTransaction(async () => Promise.resolve('done')).catch((e) => e);
             expect((thrown as Error).message).toEqual('a rollback failed');
+            expect(calls.filter((it) => it === 'a.rollback')).toHaveLength(1);
             expect(calls.filter((it) => it === 'b.rollback')).toHaveLength(1);
+            expect(calls.filter((it) => it.endsWith('release')).sort()).toEqual(['a.release', 'b.release']);
+            expect(holder.currentTransaction).toBeUndefined();
+        });
+    });
+
+    it('that failed, with a connection whose rollback rejects with no error, still throws its own error', async () => {
+        await holder.runPromise(async () => {
+            const calls: string[] = [];
+            const cause = new Error('the statement failed');
+            const a = connection('a', calls);
+            a.rollbackTransaction = async () => Promise.reject(undefined);
+            transaction(holder, [a, connection('b', calls)]);
+            const thrown = await runInTransaction(async () => Promise.reject(cause)).catch((e) => e);
+            expect(thrown).toBe(cause);
+            expect(calls.filter((it) => it.endsWith('release')).sort()).toEqual(['a.release', 'b.release']);
+            expect(holder.currentTransaction).toBeUndefined();
+        });
+    });
+
+    it('whose cursor fails to close commits nothing, rolls back each, and releases each', async () => {
+        await holder.runPromise(async () => {
+            const calls: string[] = [];
+            const tx = transaction(holder, [connection('a', calls), connection('b', calls)]);
+            tx.cursors.push({ close: async () => Promise.reject(new Error('cursor close failed')) } as any);
+            const thrown = await runInTransaction(async () => Promise.resolve('done')).catch((e) => e);
+            expect((thrown as Error).message).toEqual('cursor close failed');
+            expect(calls.filter((it) => it.endsWith('commit'))).toEqual([]);
+            expect(calls.filter((it) => it.endsWith('rollback')).sort()).toEqual(['a.rollback', 'b.rollback']);
             expect(calls.filter((it) => it.endsWith('release')).sort()).toEqual(['a.release', 'b.release']);
             expect(holder.currentTransaction).toBeUndefined();
         });

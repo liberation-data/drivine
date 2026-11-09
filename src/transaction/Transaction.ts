@@ -23,7 +23,10 @@ export class Transaction {
     private readonly logger = new DrivineLogger(Transaction.name);
     private readonly connectionMutex = new Mutex();
     private _options: TransactionOptions;
-    /** The connections that have committed or rolled back: see {@link popContextWithError}. */
+    /**
+     * The connections that have committed, or that a rollback has been asked of, so {@link popContextWithError} neither
+     * rolls back one that committed nor asks one that failed to roll back to try again.
+     */
     private readonly ended = new Set<Connection>();
     /** Whether the connections have been released, so none is released twice. */
     private released = false;
@@ -86,7 +89,8 @@ export class Transaction {
                 this.logger.verbose(
                     `Transaction: ${this.description} successful, but is marked ROLLBACK. Rolling back.`
                 );
-                await this.endEach(async (it) => it.rollbackTransaction());
+                // Each is ended once asked to roll back, so the rollback after one that fails doesn't ask it again.
+                await this.endEach(async (it) => it.rollbackTransaction().finally(() => this.ended.add(it)));
             } else {
                 this.logger.verbose(`Committing transaction: ${this.description}.`);
                 await this.endEach(async (it) => it.commitTransaction());
@@ -118,7 +122,7 @@ export class Transaction {
                                 await it.rollbackTransaction();
                                 this.ended.add(it);
                             } catch (failure) {
-                                const why = (failure as Error).message;
+                                const why = (failure as Error)?.message ?? String(failure);
                                 this.logger.warn(
                                     `Could not roll back a connection of transaction ${this.description}: ${why}`
                                 );
