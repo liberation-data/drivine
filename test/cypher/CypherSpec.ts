@@ -108,7 +108,9 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
         // fails or gives null as one by an integer zero does, where a float zero gives NaN or an infinity.
         'NaN worked out': [[[5, 6, 37], WHOLE_FLOAT_PARAMETER]],
         // toString($l) of l = [1.0, NaN, Infinity, -Infinity], whose 1.0 a SQL store binds as the whole number 1.
-        'NaN and the infinities as parameters': [[[11], WHOLE_FLOAT_PARAMETER]]
+        'NaN and the infinities as parameters': [[[11], WHOLE_FLOAT_PARAMETER]],
+        // toInteger() of texts to the greatest and the least whole numbers, which the rows give as numbers past 2^53.
+        'toFloat() of a text, as Neo4j reads it': [[[23], BEYOND_2_53]]
     },
     'writes.yaml': {
         'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]]
@@ -120,7 +122,12 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
  * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
  * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
  */
-export const HELD: Record<string, Record<string, Hold[]>> = {};
+export const HELD: Record<string, Record<string, Hold[]>> = {
+    'queries.yaml': {
+        // node:sqlite gives a function a text cut at its first NUL, so toFloat('\u0000NaN') reads an empty text (#699).
+        'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }]
+    }
+};
 
 export interface Hold {
     issue: number;
