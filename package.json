@@ -31,6 +31,9 @@
         "drivine": "codegen/cli.js"
     },
     "types": "index.d.ts",
+    "engines": {
+        "node": ">=22"
+    },
     "scripts": {
         "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && node scripts/rewrite-paths.js dist && cp package.json dist/ && cp README.md LICENSE dist/",
         "format": "npm run format:src && npm run format:test",
