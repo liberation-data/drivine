@@ -3225,12 +3225,11 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
         });
 
         it('of whole numbers past 2^53, as they are', async () => {
-            // A SQL store is given each literal as the nearest JavaScript number, the same one, so it compares them as equal
-            // (liberation-data/drivine#417). Expected as Neo4j gives them there too once #417 is fixed.
+            // Each literal is compiled as the whole number it is, not the nearest JavaScript number (#417).
             const compared = await row(
                 'RETURN [[9007199254740993] > [9007199254740992], [9007199254740992] < [9007199254740993]]'
             );
-            expect(compared).toEqual(store.type === DatabaseType.NEO4J ? [true, true] : [false, false]);
+            expect(compared).toEqual([true, true]);
         });
 
         it("in an aggregate's argument, beside a walk, against a long literal, and out of an unwound map", async () => {
