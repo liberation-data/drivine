@@ -352,8 +352,7 @@ cases:
           }
         rows:
           - {all: true, none: false, single: true, xor: true, case: "two", power: 8.0, negated: -3, abs: 2.5, trimmed: "a", lower: "ab", unordered: null}
-      - note: "A key or an index an expression gives: Oracle reads no key so (see the Oracle case below)."
-        except: [oracle]
+      - note: "A key or an index an expression gives."
         cypher: "WITH {a: 2} AS m, [1, 3] AS xs, 'a' AS k, 1 AS i RETURN [m[k], xs[i]]"
         rows: [[2, 3]]
 
@@ -906,6 +905,49 @@ cases:
         except: [oracle]
         cypher: "RETURN [split('abc', ''), split('', ',')]"
         rows: [[["a", "b", "c"], [""]]]
+
+  - name: "The empty text searched for and measured"
+    description: "Every text starts with, ends with and holds the empty text, and the empty text holds no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN ['ab' STARTS WITH '', 'ab' ENDS WITH '', 'ab' CONTAINS '', '' STARTS WITH '', '' ENDS WITH '', '' CONTAINS '']"
+        rows: [[true, true, true, true, true, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN ['' STARTS WITH 'a', '' ENDS WITH 'b', '' CONTAINS 'b', NOT ('' CONTAINS 'b')]"
+        rows: [[false, false, false, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [$t STARTS WITH $e, $t ENDS WITH $e, $t CONTAINS $e, $e STARTS WITH $t, $e ENDS WITH $t, $e CONTAINS $t]"
+        parameters: {t: "ab", e: ""}
+        rows: [[true, true, true, false, false, false]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND ['ab', ''] AS x RETURN x, x STARTS WITH '', x CONTAINS 'b', 'ab' ENDS WITH x, size(x) ORDER BY x"
+        rows: [["", true, false, true, 0], ["ab", true, true, true, 2]]
+      - note: "A text past 32 KB is searched as a CLOB."
+        only: [neo4j, sql]
+        cypher: "RETURN [$long STARTS WITH $e, $long ENDS WITH $e, $long CONTAINS $e, $e CONTAINS $long, $e STARTS WITH $long]"
+        parameters: {e: "", long: {$repeat: "x", times: 40000}}
+        rows: [[true, true, true, false, false]]
+      - note: "Beside a value long enough to be bound, as a stored text beside one is."
+        only: [neo4j, sql]
+        cypher: "UNWIND ['', 'b'] AS x RETURN [toUpper(trim(coalesce($p.q, 'ab'))) ENDS WITH x, x CONTAINS toLower(trim(coalesce($p.q, 'b')))] ORDER BY x"
+        parameters: {p: {q: null}}
+        rows: [[true, false], [false, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [size(''), size($e), isEmpty(''), isEmpty($e)]"
+        parameters: {e: ""}
+        rows: [[0, 0, true, true]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND ['', 'a'] AS x RETURN collect(size(x))"
+        rows: [[0, 1]]
+      - note: "A null, a missing property or a value of another kind beside the empty text is still null; a list's size is its own."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [null STARTS WITH '', '' STARTS WITH null, $p.q ENDS WITH $e, $e CONTAINS $p.q, p.nope STARTS WITH '', '' ENDS WITH p.nope, 5 STARTS WITH $e, $e CONTAINS 5, size(null), size(p.nope), isEmpty(p.nope), size(['']), size([])]"
+        parameters: {e: "", p: {q: null}}
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, 1, 0]]
+      - note: "A text of spaces is no empty text on Oracle."
+        only: [neo4j, sql]
+        cypher: "RETURN ['  ' STARTS WITH '', '' CONTAINS ' ', '  ' ENDS WITH ' ', size('  '), isEmpty(' ')]"
+        rows: [[true, false, true, 2, false]]
 
   - name: "Round to a fractional or negative precision"
     description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."
@@ -2444,12 +2486,122 @@ cases:
         cypher: "MATCH p = (a:Person)-[:KNOWS*1..2]->(b) RETURN p"
         error: "A path is not a value drivine gives the same on each store: use nodes(p), relationships(p) and length(p)."
 
-  - name: "Computed index on Oracle"
-    description: "On Oracle, a computed list index works but a computed map key gives null."
+  - name: "A key worked out at run time"
+    description: "A map, a node or a relationship read by a key an expression gives reads the entry at that key, whatever the key holds; a key it doesn't hold, a null key, a null map and an empty one read null (drivine4j#417)."
     steps:
-      - only: [oracle]
-        cypher: "WITH {a: 1} AS m, 'a' AS k, [5, 6] AS xs, 1 AS i RETURN [m[k], xs[i]]"
-        rows: [[null, 6]]
+      - cypher: "WITH {a: 1} AS m, 'a' AS k, [5, 6] AS xs, 1 AS i RETURN [m[k], xs[i]]"
+        rows: [[1, 6]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN p['na' + 'me']"
+        rows: ["Keanu"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'born' AS k RETURN p[k]"
+        rows: [1964]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN p[$k]"
+        parameters: {k: "born"}
+        rows: [1964]
+      - cypher: "WITH {name: 'Apa'} AS m, 'name' AS k RETURN m[k]"
+        rows: ["Apa"]
+      - cypher: "WITH $expr AS expr, $idx AS idx RETURN expr[idx]"
+        parameters: {expr: {name: "Apa"}, idx: "name"}
+        rows: ["Apa"]
+      - cypher: "WITH $expr AS expr, $idx AS idx RETURN expr[toString(idx)]"
+        parameters: {expr: {name: "Apa"}, idx: "name"}
+        rows: ["Apa"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [k IN keys(p) | p[k]]"
+        unorderedLists: true
+        rows: [["Keanu", 1964]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN [key IN keys(r) | key + '->' + r[key]]"
+        rows: [["role->Trinity"]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix'}) UNWIND keys(r) AS k RETURN [k, r[k]]"
+        rows: [["role", "Trinity"]]
+      - note: "Keys that a JSON path would read otherwise, as written: a quote, a dot, a $, a space, brackets, a backslash, a number's digits and unicode."
+        cypher: "WITH {`it's`: 1, `a.b`: 2, `$x`: 3, `a b`: 4, `[0]`: 5, `ключ`: 6, `\"q\"`: 7, `a\\b`: 8, `0`: 9} AS m UNWIND keys(m) AS k RETURN [k, m[k]] ORDER BY k"
+        rows: [["\"q\"", 7], ["$x", 3], ["0", 9], ["[0]", 5], ["a b", 4], ["a.b", 2], ["a\\b", 8], ["it's", 1], ["ключ", 6]]
+      - cypher: "WITH $m AS m UNWIND keys(m) AS k RETURN [k, m[k]] ORDER BY k"
+        parameters: {m: {"it's": 1, "a.b": 2, "$x": 3, "a b": 4, "[0]": 5, "ключ": 6, "\"q\"": 7, "a\\b": 8}}
+        rows: [["\"q\"", 7], ["$x", 3], ["[0]", 5], ["a b", 4], ["a.b", 2], ["a\\b", 8], ["it's", 1], ["ключ", 6]]
+      - note: "An empty key."
+        cypher: "WITH $m AS m, $k AS k, $j AS j RETURN [m[k], m[j]]"
+        parameters: {m: {"": 9, "a": 1}, k: "", j: "a"}
+        rows: [[9, 1]]
+      - note: "An empty key the statement is compiled for, a parameter's: Oracle reads no empty key by its path."
+        except: [oracle]
+        cypher: "WITH $m AS m RETURN m[$k]"
+        parameters: {m: {"": 9}, k: ""}
+        rows: [9]
+      - note: "Map2 [5]: a key is matched case and all."
+        cypher: "WITH {name: 'Mats', Name: 'Pontus'} AS m RETURN [m['na' + 'me'], m['Na' + 'me'], m['nA' + 'Me']]"
+        rows: [["Mats", "Pontus", null]]
+      - cypher: "WITH {null: 'Mats', NULL: 'Pontus'} AS m, 'null' AS a, 'NULL' AS b RETURN [m[a], m[b]]"
+        rows: [["Mats", "Pontus"]]
+      - cypher: "WITH {a: {b: 1}, l: [1, 2], f: 1.5, t: true, z: null, s: 'x'} AS m UNWIND ['a', 'l', 'f', 't', 'z', 's'] AS k RETURN [k, m[k], m[k] IS NULL] ORDER BY k"
+        rows: [["a", {b: 1}, false], ["f", 1.5, false], ["l", [1, 2], false], ["s", "x", false], ["t", true, false], ["z", null, true]]
+      - cypher: "WITH {a: {b: 1}} AS m, 'a' AS k, 'b' AS j RETURN [m[k][j], m[k].b]"
+        rows: [[1, 1]]
+      - cypher: "WITH {d: date('2020-01-02'), f: 2.0} AS m, 'd' AS k, 'f' AS j RETURN [toString(m[k]), m[j]]"
+        rows: [["2020-01-02", 2.0]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [p['bo' + 'rn'] + 1, size(p['na' + 'me'])]"
+        rows: [[1965, 5]]
+      - cypher: "WITH {a: 1} AS m RETURN [m['no' + 'pe'], m[null], m[$k]]"
+        parameters: {k: null}
+        rows: [[null, null, null]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'nope' AS k, null AS j RETURN [p[k], p[j]]"
+        rows: [[null, null]]
+      - cypher: "WITH null AS m, 'x' AS k RETURN m[k]"
+        rows: [null]
+      - note: "An empty map."
+        cypher: "WITH $m AS m, 'a' AS k RETURN m[k]"
+        parameters: {m: {}}
+        rows: [null]
+      - note: "Only a map's entries are read: a list read by a text is null on a SQL store, and not its items' entries. Neo4j fails."
+        only: [sql]
+        cypher: "UNWIND [[{a: 1}], {a: 2}] AS x WITH x, 'a' AS k RETURN x[k]"
+        unordered: true
+        rows: [null, 2]
+      - cypher: "OPTIONAL MATCH (x:Nobody) WITH x, 'name' AS k RETURN x[k]"
+        rows: [null]
+      - cypher: "MATCH (p:Person) WITH p, 'name' AS k WHERE p[k] = 'Keanu' RETURN p.born"
+        rows: [1964]
+      - note: "The label test is kept beside the read, in a WHERE too: a Code has no name either, and would be counted."
+        cypher: "MATCH (m:Movie) WITH m, 'name' AS k WHERE m[k] IS NULL RETURN count(*)"
+        rows: [3]
+      - cypher: "MATCH (p:Person) WHERE p.born IS NOT NULL WITH p, 'born' AS k RETURN p.name ORDER BY p[k] DESC"
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (m:Movie) WITH m, 'released' AS k RETURN m[k] > 2000 AS late, count(*) ORDER BY late"
+        rows: [[false, 2], [true, 1]]
+      - cypher: "MATCH (p:Person) WITH collect(p) AS ps, 'name' AS k RETURN [x IN ps | x[k]]"
+        unorderedLists: true
+        rows: [["Keanu", "Carrie", "Laurence", "Hugo"]]
+      - cypher: "UNWIND ['title', 'released'] AS k MATCH (m:Movie {title: 'The Matrix'}) RETURN [k, m[k]] ORDER BY k"
+        rows: [["released", 1999], ["title", "The Matrix"]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) CALL (p) { WITH 'name' AS k RETURN p[k] AS v } RETURN v"
+        rows: ["Keanu"]
+      - cypher: "WITH [{a: 1}] AS l, 'a' AS k RETURN l[0][k]"
+        rows: [1]
+      - note: "A relationship or a node a map holds, read so, is that, compared by identity: neither KNOWS relationship has a property."
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() WITH {x: r1} AS m, r1, r2, 'x' AS k RETURN [m[k] = r1, m[k] = r2]"
+        rows: [[true, false]]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) WITH {x: a} AS m, a, b, 'x' AS k RETURN [m[k] = a, m[k] = b, m[k].name]"
+        rows: [[true, false, "Keanu"]]
+      - note: "An entry read so, divided or taken % by an integer zero, or an integer zero read so dividing or taking % a float, fails, as a number read at run time does: Neo4j works out no entry as it plans (drivine4j#686)."
+        only: [neo4j, sql]
+        cypher: "WITH {x: 3.0} AS m, 'x' AS k RETURN m[k] / 0"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {x: 5.0} AS m, 'x' AS k RETURN m[k] % 0"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {z: 0} AS m, 'z' AS k RETURN 1.0 / m[k]"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {z: 0} AS m, 'z' AS k RETURN 5.0 % m[k]"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'born' AS k RETURN p[k] % 0"
+        error: true
+      - note: "An entry that is a float zero is a float still: taken % by it is NaN."
+        only: [neo4j, oracle]
+        cypher: "WITH {f: 0.0} AS m, 'f' AS k RETURN [5 % m[k], 5.0 % m[k]]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
 
   - name: "reduce reads the row"
     description: "reduce() reads the row's variables and the parameters."
@@ -3470,8 +3622,8 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('NaN'), toFloat('Infinity'), toFloat('-Infinity'), toFloat('+Infinity'), toFloat(' NaN '), toFloat('-NaN'), toFloat('Infinityx')]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "NaN"}, null]]
-      - note: "Other spellings than Java's give null; Oracle reads them as NaN or an infinity (drivine4j#551). So does FalkorDB."
-        only: [neo4j, memgraph, postgres, sqlite]
+      - note: "Other spellings than Java's give null (drivine4j#551). FalkorDB reads them as NaN or an infinity."
+        only: [neo4j, memgraph, sql]
         cypher: "RETURN [toFloat('nan'), toFloat('inf'), toFloat('INFINITY')]"
         rows: [[null, null, null]]
       - note: "Memgraph gives null for each text toFloat reads as NaN or an infinity."
@@ -3483,6 +3635,171 @@ cases:
         cypher: "RETURN [toFloat($s), toString(toFloat($s)), toFloat($s) IN [toFloat($s)]]"
         parameters: {s: "Infinity"}
         rows: [[{$float: "Infinity"}, "Infinity", true]]
+
+  - name: "toFloat() of a text, as Neo4j reads it"
+    description: "Neo4j reads a text first as Java's Double.parseDouble does, on the text with U+0000 to the space taken off its ends, and else as a number written in Cypher, with Cypher's spaces and comments around it. Each step leaves out the SQL stores that don't read it so yet (drivine4j#696)."
+    steps:
+      - note: "Nor do other cases and shortenings of Java's names, or a name with more after it, give NaN or an infinity (drivine4j#551)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('NAN'), toFloat('Inf'), toFloat('INF'), toFloat('infinity'), toFloat('+inf'), toFloat('-inf'), toFloat('Infinityx'), toFloat('NaNd'), toFloat('Infinityd'), toFloat('- Infinity')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null]]
+      - note: "So such a spelling divided or taken % by an integer zero is null, as null is, where NaN fails (drivine4j#551, drivine4j#559)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('nan') / 0, toFloat('inf') % 0, toFloat('INFINITY') / 0]"
+        rows: [[null, null, null]]
+      - note: "Java's names are read with Java's spaces around them, and a sign before them."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('+NaN'), toFloat('\\tInfinity\\n'), toFloat(' -Infinity'), toFloat('Infinity ')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}]]
+      - note: "And with the other characters up to a space around them, which Java takes off too."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('\\u0001NaN'), toFloat('Infinity\\u001F'), toFloat('\\u001C-Infinity\\u000E')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
+      - note: "Unicode's other spaces around a name leave it no name, given in the statement."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('\\u00A0NaN'), toFloat('\\u3000Infinity'), toFloat('NaN\\u00A0'), toFloat('\\u3000-Infinity')]"
+        rows: [[null, null, null, null]]
+      - note: "Nor read from a list."
+        only: [neo4j, sql]
+        cypher: "UNWIND ['\\u00A0NaN', '\\u3000Infinity', 'NaN\\u00A0', '\\u3000-Infinity'] AS s RETURN toFloat(s)"
+        rows: [null, null, null, null]
+      - note: "U+0000 is among the characters Java takes off (drivine4j#693). Postgres fails, as its JSON holds no U+0000."
+        only: [neo4j, oracle, sqlite]
+        cypher: "RETURN [toFloat('\\u0000NaN'), toFloat('Infinity\\u0000'), toFloat('\\u0000-Infinity\\u0000')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
+      - note: "A line break that ends a text is no space Java takes off a name (drivine4j#693)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('NaN\\u2028'), toFloat('Infinity\\u0085'), toFloat('-Infinity\\u2029')]"
+        rows: [[null, null, null]]
+      - note: "A decimal may end in a type's letter, as Java reads one. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('1d'), toFloat('1f'), toFloat('1.5F'), toFloat('1.5D')]"
+        rows: [[1.0, 1.0, 1.5, 1.5]]
+      - note: "Though not after a space, beside a _, or after a space Java does not take off."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1.5 F'), toFloat('1_000d'), toFloat('\\u00A01d')]"
+        rows: [[null, null, null]]
+      - note: "A hexadecimal float is read as Java reads one, with its power of 2. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('0x1p3'), toFloat('0X1.8P1'), toFloat('0x1p3d'), toFloat('0x.8p1'), toFloat('0x1.p1'), toFloat('-0x1p-2'), toFloat('0x1p+3'), toFloat('0x1P3F')]"
+        rows: [[8.0, 3.0, 8.0, 1.0, 2.0, -0.25, 8.0, 8.0]]
+      - note: "At the ends of a double's range, and rounded as Java rounds it, though its digits run past a double's. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('0x1.fffffffffffffp1023'), toFloat('0x0.0000000000001p-1022'), toFloat('0x1p-1074'), toFloat('0x1.8p-1074'), toFloat('0x1p-1075'), toFloat('0x1p1024'), toFloat('0x1.00000000000008p0'), toFloat('0x1.00000000000008000001p0'), toFloat('0x1.000000000000080000000000000000000001p0'), toFloat('0x123456789abcdef0123456789abcdef0p-100'), toFloat('0x0p99999999999'), toFloat('0x1p99999999999')]"
+        rows: [[1.7976931348623157e308, 4.9e-324, 4.9e-324, 9.9e-324, 0.0, {$float: "Infinity"}, 1.0, 1.0000000000000002, 1.0000000000000002, 1.9088743537777778e7, 0.0, {$float: "Infinity"}]]
+      - note: "A hexadecimal float with no power, no digits, or a _ in it is no number."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('0xp1'), toFloat('0x1.8'), toFloat('0x1_0p3'), toFloat('0x1p1_0'), toFloat('\\u00A00x1p3')]"
+        rows: [[null, null, null, null, null]]
+      - note: "Else a text is read as Cypher writes a number, with a _ between digits. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('1_000'), toFloat('1_000.5'), toFloat('1.0_5'), toFloat('1e1_0'), toFloat('1_0e1'), toFloat('.5_0'), toFloat('1_2.5e1_0'), toFloat('1e-1_0'), toFloat('1e+1_0'), toFloat('-1_000')]"
+        rows: [[1000.0, 1000.5, 1.05, 1.0e10, 100.0, 0.5, 1.25e11, 1.0e-10, 1.0e10, -1000.0]]
+      - note: "But not a _ at an end, two together, or after a 0 that starts a whole number, or a whole number past a long's range so written."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1_e5'), toFloat('_1'), toFloat('1_'), toFloat('1__0'), toFloat('0_1'), toFloat('9_223_372_036_854_775_808')]"
+        rows: [[null, null, null, null, null, null]]
+      - note: "A whole number in hexadecimal or octal, as Cypher writes one, to a long's ends. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('0x10'), toFloat('0xFF'), toFloat('0xff'), toFloat('-0x10'), toFloat(' 0x10 '), toFloat('0x1_0'), toFloat('0x_10'), toFloat('0x10d'), toFloat('0x7FFFFFFFFFFFFFFF'), toFloat('-0x8000000000000000'), toFloat('0x00000000000000000000010'), toFloat('0o17'), toFloat('0o1_7'), toFloat('0o_17'), toFloat('-0o17'), toFloat('0o777777777777777777777'), toFloat('-0o1000000000000000000000'), toFloat('0o0000000000000000000000000017')]"
+        rows: [[16.0, 255.0, 255.0, -16.0, 16.0, 16.0, 16.0, 269.0, 9.223372036854776e18, -9.223372036854776e18, 16.0, 15.0, 15.0, 15.0, -15.0, 9.223372036854776e18, -9.223372036854776e18, 15.0]]
+      - note: "Not with a +, a capital X or O, no digits, a digit of another base, two _ together, or past a long's range."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('+0x10'), toFloat('0X10'), toFloat('0x'), toFloat('0xg'), toFloat('0x1__0'), toFloat('0x8000000000000000'), toFloat('0xFFFFFFFFFFFFFFFF'), toFloat('0x10000000000000000'), toFloat('0O17'), toFloat('0o8'), toFloat('0b101'), toFloat('0o'), toFloat('0o7777777777777777777777'), toFloat('0o1000000000000000000000')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "A number Cypher writes may have Cypher's spaces around it, Unicode's among them, which Java takes no part of (drivine4j#693, drivine4j#692). Oracle gives null (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toFloat('\\u00A01.5'), toFloat('1.5\\u00A0'), toFloat('\\u20031.5'), toFloat('\\u30001.5'), toFloat('\\u00851.5'), toFloat('\\u20281.5'), toFloat('\\u16801.5'), toFloat('\\u20001.5'), toFloat('\\u200A1.5'), toFloat('\\u20291.5'), toFloat('\\u202F1.5'), toFloat('\\u205F1.5'), toFloat('\\u20071.5'), toFloat('\\u20011.5'), toFloat('1.5\\u3000'), toFloat('1.5\\u0085'), toFloat('\\u001C1.5'), toFloat('\\u00A0.5'), toFloat('\\u00A0123456789012345678')]"
+        rows: [[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 0.5, 1.2345678901234568e17]]
+      - note: "So written, a float past a double's range is an infinity or 0.0, and Cypher's exponents are read too (drivine4j#693). Oracle gives null (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toFloat('\\u00A01E3'), toFloat('\\u00A01e-3'), toFloat('\\u00A01e+3'), toFloat('\\u00A01e400'), toFloat('\\u00A0-1e400'), toFloat('\\u00A01e-400'), toFloat('\\u00A0-0'), toFloat('\\u00A01e-999'), toFloat('\\u00A01e5000000000')]"
+        rows: [[1000.0, 0.001, 1000.0, {$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0, 0.0, {$float: "Infinity"}]]
+      - note: "And such an infinity is one in the statement too: less itself it is NaN, and its text Java's name (drivine4j#692). Oracle gives null (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toFloat('\\u00A01e400') - toFloat('\\u00A01e400'), toString(toFloat('\\u00A0-1e400'))]"
+        rows: [[{$float: "NaN"}, "-Infinity"]]
+      - note: "And Cypher's whole numbers and a _ between digits. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('\\u00A01_000'), toFloat('\\u00A00x10'), toFloat('\\u00A0-0o17'), toFloat('0x10\\u00A0'), toFloat('1_0e400'), toFloat('\\u00A0\\u001C1_0')]"
+        rows: [[1000.0, 16.0, -15.0, 16.0, {$float: "Infinity"}, 10.0]]
+      - note: "A text given as a parameter, or read from a list, is read alike. Oracle gives null (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "UNWIND [$a, $b, $c, $d] AS s RETURN [toFloat(s), toFloat($a), toFloat($b)]"
+        parameters: {a: "\u00A01.5", b: "\u00A0+1.5", c: "\u00A01e400", d: "\u3000-1e3"}
+        rows: [[1.5, 1.5, null], [null, 1.5, null], [{$float: "Infinity"}, 1.5, null], [-1000.0, 1.5, null]]
+      - note: "toInteger reads a text so too, a float cut to a whole number, and one past a long's range at its ends (drivine4j#693). Oracle and Postgres give null (drivine4j#696)."
+        only: [neo4j, sqlite]
+        cypher: "UNWIND [$a, $b, $c, $d, $e, $f, $g] AS s RETURN toInteger(s)"
+        parameters: {a: "\u00A01.5", b: "1.5\u00A0", c: "\u00A01e400", d: "\u00A0-1e400", e: "\u00A0123456789012345678", f: "\u3000-1e3", g: "\u00A01e-3"}
+        rows: [1, 1, 9223372036854775807, -9223372036854775808, 123456789012345678, -1000, 0]
+      - note: "And no number from what Cypher does not write (drivine4j#693)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [$a, $b, $c] AS s RETURN toInteger(s)"
+        parameters: {a: "\u00A0+1.5", b: "\u00A05.", c: "\u00A09223372036854775808"}
+        rows: [null, null, null]
+      - note: "Nor from what Cypher does not write before a line break that ends a text (drivine4j#693). Oracle and Postgres give null for the last (drivine4j#696)."
+        only: [neo4j, sqlite]
+        cypher: "RETURN [toFloat('5.\\u0085'), toFloat('+1.5\\u2028'), toInteger('+5\\u2028'), toInteger('5.\\u0085'), toInteger('5\\u2028')]"
+        rows: [[null, null, null, null, 5]]
+      - note: "toInteger reads a whole number with ASCII's spaces around it as itself, past a double's precision (drivine4j#693). Oracle gives null for the last (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toInteger('\\t9007199254740993'), toInteger('9007199254740993\\n'), toInteger('\\u000B-9007199254740993\\r')]"
+        rows: [[9007199254740993, 9007199254740993, -9007199254740993]]
+      - note: "Spaces and comments may come between a minus and a number Cypher writes, and comments around it. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('- 1.5'), toFloat('-\\u00A01.5'), toFloat('- 0x10'), toFloat('- 0o17'), toFloat('-/*c*/1'), toFloat('/*a*/-1'), toFloat('-//x\\n1'), toFloat('1//x'), toFloat('/*a*/1'), toFloat('1 /*a*/'), toFloat('/*a\\nb*/1_0'), toFloat('1_0 //x\\n'), toFloat('1_0\\u0085//x')]"
+        rows: [[-1.5, -1.5, -16.0, -15.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0]]
+      - note: "Characters Unicode does not call spaces, and a + Cypher does not write, leave a text no number."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('\\uFEFF1.5'), toFloat('\\u200B1.5'), toFloat('\\u180E1.5'), toFloat('\\u007F1.5'), toFloat('\\u00801.5'), toFloat('\\u009F1.5'), toFloat('\\u00A0'), toFloat('\\u00A0+1.5'), toFloat('\\u00A05.'), toFloat('\\u00A09223372036854775808')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null]]
+      - note: "Nor does more than a number. Oracle reads '1+1' as 1.0 (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toFloat('1+1')]"
+        rows: [[null]]
+      - note: "Nor do other texts with more than a number, an unclosed comment, or Java's spaces beside Unicode's."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('(1)'), toFloat('--1'), toFloat('- -1'), toFloat('-(1)'), toFloat('1 2'), toFloat('1/**/0'), toFloat('/*'), toFloat('1/*'), toFloat('/**/'), toFloat('0x1F/*'), toFloat('1_0;'), toFloat('1_0//x\\ny'), toFloat('\\u00A0\\u00011_0'), toFloat('\\u0001\\u00A01_0'), toFloat('\\u000E\\u00A01_0'), toFloat('\\u00A01.5\\u000E'), toFloat('-\\u0001 1.5')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "Java takes the characters up to a space off a text's ends. Oracle gives null for those that are not ASCII's spaces, and Postgres and SQLite for those that are not Cypher's either (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('\\u000B1.5\\u000C'), toFloat('\\u000D3\\u000D'), toFloat('\\u001F2\\u0001'), toFloat('\\u001C1.5'), toFloat('\\u00011.5'), toFloat('\\u000E1.5'), toFloat('1.5\\u000E'), toFloat('\\u001F1_0')]"
+        rows: [[1.5, 3.0, 2.0, 1.5, 1.5, 1.5, 1.5, 10.0]]
+      - note: "A decimal as Java writes one, with no digits before or after its point, a sign, a + in its power, and 0s first."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('.5'), toFloat('5.'), toFloat('+.5'), toFloat('-.5e1'), toFloat('1.5e+3'), toFloat('1E2'), toFloat('+1'), toFloat('00012'), toFloat('017'), toFloat('  1.5  '), toFloat('1E+3'), toFloat('1.5e00000000000000000003')]"
+        rows: [[0.5, 5.0, 0.5, -5.0, 1500.0, 100.0, 1.0, 12.0, 17.0, 1.5, 1000.0, 1500.0]]
+      - note: "And not one with no digits in its power or before it, two points, a comma, or digits of another script."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e'), toFloat('e1'), toFloat('1e+'), toFloat('.'), toFloat('+'), toFloat('1.2.3'), toFloat('1,5'), toFloat(''), toFloat('  '), toFloat('1.5e'), toFloat('\\uFF11'), toFloat('\\u0663'), toFloat('\\u221E')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "A decimal past a double's range is an infinity, or 0.0, and one past a long's a float."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e400'), toFloat('-1e400'), toFloat('1e-400'), toFloat('1.7976931348623157e308'), toFloat('1.7976931348623159e308'), toFloat('4.9e-324'), toFloat('2e-324'), toFloat('9223372036854775807'), toFloat('9223372036854775808'), toFloat('-9223372036854775809'), toFloat('9007199254740993'), toFloat('123456789012345678901234567890')]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 1.7976931348623157e308, {$float: "Infinity"}, 4.9e-324, 0.0, 9.223372036854776e18, 9.223372036854776e18, -9.223372036854776e18, 9.007199254740992e15, 1.2345678901234568e29]]
+      - note: "So is one with an exponent past a long's."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e5000000000'), toFloat('-1e5000000000'), toFloat('1e-5000000000'), toFloat('1e-999')]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0]]
+      - note: "Such an infinity is equal to one given."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e400') = $inf, toFloat('-1e5000000000') = $ninf, toFloat('1e400') = $ninf, toFloat('1.7976931348623159e308') = $inf, toFloat('-1.7976931348623159e308') = $ninf]"
+        parameters: {inf: {$float: "Infinity"}, ninf: {$float: "-Infinity"}}
+        rows: [[true, true, false, true, true]]
+      - note: "And one that rounds to 0.0 is equal to it."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('2e-324') = 0.0, toFloat('-1e-330') = 0.0, toFloat('3e-324') > 0.0]"
+        rows: [[true, true, true]]
+      - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"
+        parameters: {a: "nan", b: "0x10", c: "1_000", d: "1d", e: "\u00A0NaN", f: "0x1p3"}
+        rows: [[null, 16.0, 1000.0, 1.0, null, 8.0]]
+      - note: "A minus zero read is a negative zero; Postgres, Oracle and SQLite keep none (drivine4j#552)."
+        only: [neo4j]
+        cypher: "RETURN [1.0 / toFloat('-0'), 1.0 / toFloat('-0.0'), 1.0 / toFloat('-0x0p0')]"
+        rows: [[{$float: "-Infinity"}, {$float: "-Infinity"}, {$float: "-Infinity"}]]
 
   - name: "Round by a mode"
     description: "round(value, precision, mode) rounds in decimal by one of Java's rounding modes, as Neo4j does, so 2.345 is halfway; a null gives null."
@@ -3615,6 +3932,56 @@ cases:
       - note: "A null comparison keeps no row, nor does a false one."
         cypher: "UNWIND [[1, null], [2, null], [3]] AS l WITH l WHERE l = [1, null] OR l = [3] RETURN l"
         rows: [[3]]
+
+  - name: "Values of two kinds in one column, compared with one that holds a null"
+    description: "A number, a text, a truth value or a map is not equal to a list, and a list or a number not to a map, where the column also holds the other kind; a list beside a list is compared item by item."
+    steps:
+      - cypher: "CALL { RETURN 1 AS v UNION ALL RETURN [1] AS v } RETURN v, v = [null] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, false], [[1], null]]
+      - cypher: "CALL { RETURN [1] AS v UNION ALL RETURN 1 AS v } RETURN v, v = [null] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[[1], null], [1, false]]
+      - cypher: "CALL { RETURN 1 AS v UNION ALL RETURN [1] AS v } RETURN v, [v <> [null], [null] = v, v IN [[null]], v IN [[1], [null]]] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, [true, false, false, false]], [[1], [null, null, null, true]]]
+      - cypher: "CALL { RETURN {a: 1} AS v UNION ALL RETURN 'x' AS v } RETURN v, [v = [null], v = {a: null}, v <> {a: null}, v IN [{a: null}]] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[{a: 1}, [false, null, null, null]], ["x", [false, false, true, false]]]
+      - cypher: "UNWIND [1, [1], 'x', {a: 1}] AS v RETURN v = [null] AS r"
+        only: [neo4j, sql]
+        rows: [false, null, false, false]
+      - cypher: "UNWIND [1, 1.5, 'x', true, null, {a: 1}, {a: null}, [1], [null], [1, 2], [[1]], [1, [1]], [[null]]] AS v RETURN [v = [null], v = [1, null], v = {a: null}, v = [[null]], v = [1, [null]], v = {a: [null]}, v <> [null], [null] = v, v IN [[null]], v IN [[1, null]], v IN [{a: null}]] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false, false, false, false, true, false, false, false, false], [false, false, false, false, false, false, true, false, false, false, false], [false, false, false, false, false, false, true, false, false, false, false], [false, false, false, false, false, false, true, false, false, false, false], [null, null, null, null, null, null, null, null, null, null, null], [false, false, null, false, false, false, true, false, false, false, null], [false, false, null, false, false, null, true, false, false, false, null], [null, false, false, false, false, false, null, null, null, false, false], [null, false, false, null, false, false, null, null, null, false, false], [false, null, false, false, false, false, true, false, false, null, false], [null, false, false, null, false, false, null, null, null, false, false], [false, null, false, false, null, false, true, false, false, null, false], [null, false, false, null, false, false, null, null, null, false, false]]
+      - note: "Both of open kind."
+        cypher: "UNWIND [1, [1], 'x', {a: 1}] AS a UNWIND [[null], {a: null}] AS b RETURN a = b AS r"
+        only: [neo4j, sql]
+        rows: [false, false, null, false, false, false, false, null]
+      - note: "One that holds a null in a list whose items are of several kinds."
+        cypher: "UNWIND [[1, 'x', true], [1, [1]], [{a: 1}, [null]], []] AS l RETURN [[null] IN l, {a: null} IN l] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false], [null, false], [null, null], [false, false]]
+      - cypher: "UNWIND [{a: 1}, {a: [1]}, {a: 'x'}, {a: {b: 1}}] AS m RETURN [m.a = [null], m.a = {b: null}, m.a IN [[null]]] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false], [null, false, null], [false, false, false], [false, null, false]]
+      - note: "A property that is a text on one node and a number on another."
+        cypher: "MATCH (c:Code) RETURN c.code, [c.code = [null], c.code <> [1, null], c.code IN [[null]], c.code = {a: null}] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [["7", [false, true, false, false]], [7, [false, true, false, false]]]
+      - note: "A float, a date, a moment and a duration are not equal to a list either, nor 1.0 to a list or a map: a list beside a list is compared item by item, where 1 is equal to 1.0."
+        cypher: "UNWIND [1.0, date('2020-01-01'), datetime('2020-01-01T00:00Z'), duration('P1D'), [1.0, null]] AS v RETURN [v = [null], v = [1, null], v = {a: null}] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false], [false, false, false], [false, false, false], [false, false, false], [false, null, false]]
+      - note: "In the step of a reduce."
+        cypher: "UNWIND [1, [1], 'x', {a: 1}, 1.5, true] AS v RETURN reduce(acc = [], x IN [[null], {a: null}] | acc + [v = x]) AS r"
+        only: [neo4j, sql]
+        rows: [[false, false], [null, false], [false, false], [false, null], [false, false], [false, false]]
 
   - name: "Values that hold a null, compared in the step of a reduce"
     description: "The step of a reduce() compares lists and maps that hold a null item by item, as a query does."
