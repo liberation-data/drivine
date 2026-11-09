@@ -44,6 +44,8 @@ const MARKED = `CiMarked${run}`;
 const ANEW = `CiAnew${run}`;
 const RACE = `CiRace${run}`;
 const REDONE = `CiRedone${run}`;
+const LONG = `CiLong${run}`;
+const LONG_LATE = `CiLongLate${run}`;
 
 /** An account looked up by email whatever its case, its display name kept under another name, a flat bag beside them. */
 @NodeFragment({ labels: ['CiAccount'] })
@@ -94,6 +96,20 @@ class CiAnew {
 /** Written by Cypher of the test's own, which keeps no copy unless it sets one. */
 @NodeFragment({ labels: [REDONE] })
 class CiRedone {
+    @NodeId() id: string;
+    @CaseInsensitive() email?: string;
+}
+
+/** Saved with a text past what Oracle reads a text as, through a save of Drivine's. */
+@NodeFragment({ labels: [LONG] })
+class CiLong {
+    @NodeId() id: string;
+    @CaseInsensitive() email?: string;
+}
+
+/** Saved with a long text before there were copies, by a statement of the test's own. */
+@NodeFragment({ labels: [LONG_LATE] })
+class CiLongLate {
     @NodeId() id: string;
     @CaseInsensitive() email?: string;
 }
@@ -237,7 +253,9 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         await gom.indexes.drop(rangeIndex(LATE, 'email', { ignoreCase: true }));
         await gom.indexes.drop(rangeIndex(MARKED, 'email', { ignoreCase: true }));
         await gom.indexes.drop(rangeIndex(REDONE, 'email', { ignoreCase: true }));
-        await clearLabels(pm, engine, 'CiAccount', 'CiPlain', LATE, MEMBER, MARKED, ANEW, REDONE);
+        await gom.indexes.drop(rangeIndex(LONG, 'email', { ignoreCase: true }));
+        await gom.indexes.drop(rangeIndex(LONG_LATE, 'email', { ignoreCase: true }));
+        await clearLabels(pm, engine, 'CiAccount', 'CiPlain', LATE, MEMBER, MARKED, ANEW, REDONE, LONG, LONG_LATE);
         // This run's marker, and no other suite's.
         await pm.execute(
             new QuerySpecification(
@@ -460,6 +478,102 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         expect(await found('BOB@x.com')).toEqual(['c2']);
         expect(await copy('c1')).toBeUndefined();
         expect(await found('cat@x.com')).toEqual([]);
+    });
+
+    it('should save a text of 40,001 characters with its copy, and find it by eqIgnoreCase once the index is there', async () => {
+        if (falkor) {
+            // FalkorDB finds no node by eqIgnoreCase on a text this long, as drivine4j's contract notes.
+            return;
+        }
+        const index = rangeIndex(LONG, 'email', { ignoreCase: true });
+        await gom.indexes.drop(index);
+        const long = 'Ab'.repeat(20_000) + 'C';
+        const node = (id: string, email: string): CiLong => Object.assign(new CiLong(), { id, email });
+        await gom.saveAll([node('g1', long), node('g2', 'Ann@X.com'), node('g3', long + 'd'), node('g4', 'Ab')]);
+        const copy = async (id: string): Promise<string | undefined> =>
+            (await stored(pm, engine, LONG, id))['__drivine.lower.email'];
+        expect(await copy('g1')).toEqual(long.toLowerCase());
+        // Saved again as an empty text, the copy goes on Oracle, which keeps an empty text as null; elsewhere it is empty.
+        await gom.save(node('g4', ''));
+        if (engine.type === DatabaseType.ORACLE) {
+            expect(await copy('g4')).toBeUndefined();
+        } else {
+            expect(await copy('g4')).toBeFalsy();
+        }
+
+        // Neo4j cannot hold a text this long in a range index: the index fails, and the lookup reads the label's nodes.
+        await gom.indexes.ensure(index).catch(() => undefined);
+        try {
+            const found = async (email: string): Promise<string[]> =>
+                (await gom.loadAll(CiLong, (q) => ({ where: q.email.eqIgnoreCase(email) }))).map((it) => it.id);
+            expect(await found(long.toUpperCase())).toEqual(['g1']);
+            expect(await found('ann@x.COM')).toEqual(['g2']);
+            expect(await found(long.slice(0, -1))).toEqual([]);
+            expect((await gom.load(CiLong, 'g1'))!.email).toEqual(long);
+        } finally {
+            // Dropped, so that a failed index on Neo4j is not waited for by a test after this one.
+            await gom.indexes.drop(index);
+        }
+    });
+
+    it('should fill in the copy of a node saved before with a text of 5,000 bytes on ensure, and find it', async () => {
+        if (falkor) {
+            // FalkorDB finds no node by eqIgnoreCase on a text this long, as drivine4j's contract notes.
+            return;
+        }
+        const index = rangeIndex(LONG_LATE, 'email', { ignoreCase: true });
+        await gom.indexes.drop(index);
+        const long = 'Ab'.repeat(2_500);
+        // 2,800 characters of 4,200 bytes: past what Oracle reads a text as, though fewer than 4,000 characters.
+        // Only its ASCII is lowercased, as Memgraph's toLower lowercases nothing else.
+        const wide = 'éA'.repeat(1_400);
+        await bypassing(pm, engine, LONG_LATE, { id: 'l1', email: long });
+        await bypassing(pm, engine, LONG_LATE, { id: 'l2', email: 'Bob@X.com' });
+        await bypassing(pm, engine, LONG_LATE, { id: 'l3', email: '' });
+        await bypassing(pm, engine, LONG_LATE, { id: 'l4', email: '', '__drivine.lower.email': 'stale' });
+        await bypassing(pm, engine, LONG_LATE, { id: 'l5', email: wide });
+        const copy = async (id: string): Promise<string | undefined> =>
+            (await stored(pm, engine, LONG_LATE, id))['__drivine.lower.email'];
+        expect(await copy('l1')).toBeUndefined();
+
+        await gom.indexes.ensure(index);
+        expect(await copy('l1')).toEqual(long.toLowerCase());
+        expect(await copy('l2')).toEqual('bob@x.com');
+        // The copy of an empty text is empty, or on Oracle, which keeps an empty text as null, there is none.
+        expect(await copy('l3')).toBeFalsy();
+        expect(await copy('l4')).toBeFalsy();
+        if (engine.type === DatabaseType.ORACLE) {
+            expect(await copy('l4')).toBeUndefined();
+        }
+        expect(await copy('l5')).toEqual(wide.toLowerCase());
+        expect(await recordOf(pm, engine, LONG_LATE)).toHaveLength(1);
+        const found = async (email: string): Promise<string[]> =>
+            (await gom.loadAll(CiLongLate, (q) => ({ where: q.email.eqIgnoreCase(email) }))).map((it) => it.id);
+        expect(await found(long.toUpperCase())).toEqual(['l1']);
+        expect(await found('BOB@x.com')).toEqual(['l2']);
+        expect(await found(wide)).toEqual(['l5']);
+        // Filled in again, the copies stay as the properties are.
+        await (gom as any).lowerCopies().fillIn(LONG_LATE, ['email'], true);
+        expect(await copy('l1')).toEqual(long.toLowerCase());
+        expect(await copy('l4')).toBeFalsy();
+        expect(await copy('l5')).toEqual(wide.toLowerCase());
+    });
+
+    it('should have Neo4j refuse to save a text of 40,001 characters under the index over the copy', async () => {
+        if (engine.type !== DatabaseType.NEO4J) {
+            return;
+        }
+        const index = rangeIndex(LONG, 'email', { ignoreCase: true });
+        await gom.indexes.drop(index);
+        await clearLabels(pm, engine, LONG);
+        await gom.indexes.ensure(index);
+        try {
+            await expect(
+                gom.save(Object.assign(new CiLong(), { id: 'g1', email: 'Ab'.repeat(20_000) + 'C' }))
+            ).rejects.toThrow(/is too large for the index/);
+        } finally {
+            await gom.indexes.drop(index);
+        }
     });
 
     it('should keep the record of each of managers recording at once, and record each once', async () => {

@@ -128,15 +128,17 @@ export class OracleSchemaGrammar implements SchemaGrammar {
      * The lowercased copies on Oracle, as drivine4j's `OracleLowerCopies` writes them: a property of the node's JSON,
      * filled in by an update of the label's nodes that Oracle lowercases with `LOWER`, and removed where the property has
      * no value, which an empty text is on Oracle; recorded as a row of the graph's catalog, of kind `LOWER_COPY`. The
-     * number of nodes written is handed back as a row, from a block of its own.
+     * number of nodes written is handed back as a row, from a block of its own. The property and its copy are read as
+     * CLOBs, so a text past the 4,000 bytes `JSON_VALUE` reads by default has its copy too; each is compared with a space
+     * after it, which makes a missing copy, a null and an empty text alike.
      */
     get lowerCopies(): LowerCopyStatements {
         const graph = this.graph;
         return {
             fill(label: string, property: string, batch: number): string {
                 const path = `'$.${drivine4jStep(LowerCopies.of(property))}'`;
-                const value = `JSON_VALUE(n.props, '$.${drivine4jStep(property)}')`;
-                const copy = `JSON_VALUE(n.props, ${path})`;
+                const value = `JSON_VALUE(n.props, '$.${drivine4jStep(property)}' RETURNING CLOB)`;
+                const copy = `JSON_VALUE(n.props, ${path} RETURNING CLOB)`;
                 return `DECLARE
     v_written NUMBER;
     v_result  SYS_REFCURSOR;
@@ -144,7 +146,7 @@ BEGIN
     UPDATE ${graph.nodes} n
     SET n.props = JSON_TRANSFORM(n.props, SET ${path} = LOWER(${value}) REMOVE ON NULL)
     WHERE ${hasLabels('n', [label])}
-      AND DECODE(${copy}, LOWER(${value}), 1, 0) = 0
+      AND DBMS_LOB.COMPARE(${copy} || ' ', LOWER(${value}) || ' ') <> 0
       AND ROWNUM <= ${batch};
     v_written := SQL%ROWCOUNT;
     OPEN v_result FOR SELECT v_written AS "written" FROM dual;
