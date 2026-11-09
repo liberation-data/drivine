@@ -8,10 +8,8 @@ import {
     StatelessGraphObjectManager,
     uniquenessConstraint
 } from '@liberation-data/drivine';
-import { CypherFloat } from '@/cypher/ast/Expression';
-import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
+import { CompiledCypher } from '@/cypher/CompiledCypher';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { oraclePlan } from '../support/Oracle';
 import { cypherSqlStores, sqlPersistenceManager, SqlStore } from '../support/SqlStores';
@@ -28,8 +26,13 @@ const IMPORTED = 2000;
 const BIG = BigInt('9007199254740993');
 const LONG = 'x'.repeat(5000);
 
-/** A float, as the JVM binds a double: a JavaScript number that is whole is bound as a whole number. */
-const float = (value: number): CypherFloat => new CypherFloat(value);
+/**
+ * A float, as the JVM binds a double. A JavaScript number can't hold a whole float apart from a whole number, and the
+ * shared compiler binds a whole one as a whole number, so `float(7)` is bound as 7 here: it stands for drivine4j's
+ * double, and finds the same rows, as 7.0 = 7 in Cypher. The spec's steps of a whole float parameter are skipped alike
+ * (`WHOLE_FLOAT_PARAMETER` in test/cypher/CypherSpec.ts).
+ */
+const float = (value: number): number => value;
 
 /** How a store's plan for a compiled statement is made and read, where the suite reads it. */
 interface Planner {
@@ -52,7 +55,8 @@ function connectionName(store: SqlStore): string {
 
 function postgresPlanner(store: SqlStore): Planner {
     return {
-        compiled: (cypher, parameters) => new PostgresCypherCompiler(GRAPH).compile(cypher, parameters),
+        compiled: (cypher, parameters) =>
+            new SharedCypherCompiler('postgres', { name: GRAPH }).compile(cypher, parameters),
         /** The plan with no hash or merge join, as `CypherIdKeyPlan.spec.ts` takes it: over a graph this small Postgres might hash every node to the rows. */
         async plan(compiled: CompiledCypher): Promise<string> {
             const connection = await DatabaseRegistry.getInstance()
@@ -87,13 +91,16 @@ function oraclePlanner(store: SqlStore): Planner {
          * check stays so.
          */
         compiled: (cypher, parameters) =>
-            new OracleCypherCompiler(GRAPH, true, true, [
-                ['Person', 'id'],
-                [IMPORT_LABEL, IMPORT_ID],
-                // Named so the rows a truth value or a scaled number gives are read through the labelled test too.
-                ['Odd', 'id'],
-                ['Scaled', 'id']
-            ]).compile(cypher, parameters),
+            new SharedCypherCompiler('oracle', {
+                name: GRAPH,
+                indexedProperties: [
+                    ['Person', 'id'],
+                    [IMPORT_LABEL, IMPORT_ID],
+                    // Named so the rows a truth value or a scaled number gives are read through the labelled test too.
+                    ['Odd', 'id'],
+                    ['Scaled', 'id']
+                ]
+            }).compile(cypher, parameters),
         plan: async (compiled) => oraclePlan(connectionName(store), compiled, 'BASIC +PREDICATE'),
         /**
          * The uniqueness constraint's index read by its key, and neither the index over labels, which reads every node of
@@ -552,7 +559,7 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
                 ]
             ];
             for (const [i, [cypher, parameters, labelled]] of cases.entries()) {
-                const bareSql = new OracleCypherCompiler(GRAPH).compile(cypher, parameters);
+                const bareSql = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(cypher, parameters);
                 const indexedSql = planner.compiled(cypher, parameters);
                 // A case meant to write the labelled test proves nothing of it where it doesn't.
                 expect([cypher, i, indexedSql.sql !== bareSql.sql]).toEqual([cypher, i, labelled]);

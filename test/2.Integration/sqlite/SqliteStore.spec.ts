@@ -36,7 +36,7 @@ import {
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
 import { LONG_LOCK_MILLIS } from '@/connection/sqlite/SqliteConnection';
-import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { JSON_ROWS } from '@/backend/sqlite/SqliteGraph';
 
 jest.setTimeout(30_000);
@@ -898,7 +898,7 @@ describe('a SQLite store', () => {
          * for each, where it scans the whole table, and where it searches it by a key.
          */
         async function reads(cypher: string): Promise<string[]> {
-            const sql = new SqliteCypherCompiler(new SqliteGraph().name).compile(cypher).sql;
+            const sql = new SharedCypherCompiler('sqlite', { name: new SqliteGraph().name }).compile(cypher).sql;
             const tables = new Map(
                 [...sql.matchAll(/(\w+)_(node|edge) (\w+)/g)].map(([, , table, alias]) => [alias, table])
             );
@@ -942,7 +942,9 @@ describe('a SQLite store', () => {
                 ['a b']
             ]
         ])('should give the rows of %s', async (_, cypher, expected) => {
-            expect(new SqliteCypherCompiler(new SqliteGraph().name).compile(cypher).sql).not.toContain('CROSS JOIN');
+            expect(
+                new SharedCypherCompiler('sqlite', { name: new SqliteGraph().name }).compile(cypher).sql
+            ).not.toContain('CROSS JOIN');
             await pm.execute(
                 new QuerySpecification({
                     text: "CREATE (:SqliteStore {id: 'a'})-[:NEXT]->(:SqliteStore {id: 'b', tags: ['x', 'y']}), (:SqliteStore {id: 'c'})",
@@ -952,7 +954,15 @@ describe('a SQLite store', () => {
             const found = await pm.query<Record<string, unknown>>(
                 new QuerySpecification({ text: cypher, language: 'CYPHER' })
             );
-            expect(found.map((it) => Object.values(it).map((value) => value ?? '-').join(' ')).sort()).toEqual(expected);
+            expect(
+                found
+                    .map((it) =>
+                        Object.values(it)
+                            .map((value) => value ?? '-')
+                            .join(' ')
+                    )
+                    .sort()
+            ).toEqual(expected);
         });
 
         /**

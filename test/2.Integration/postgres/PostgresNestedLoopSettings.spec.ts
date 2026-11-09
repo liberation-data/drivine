@@ -1,5 +1,5 @@
 import { Connection, DatabaseRegistry, DatabaseType, QuerySpecification } from '@liberation-data/drivine';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
@@ -44,7 +44,7 @@ describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
             nodes: boolean = false,
             fails: boolean = false
         ): Promise<string[]> => {
-            const text = new PostgresCypherCompiler(GRAPH).compile(cypher).setup.join('\n');
+            const text = new SharedCypherCompiler('postgres', { name: GRAPH }).compile(cypher).setup.join('\n');
             for (const setting of ['enable_seqscan', 'enable_material']) {
                 expect([text.includes(`set_config('${setting}', 'off', true)`), text]).toEqual([true, text]);
             }

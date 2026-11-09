@@ -2,7 +2,7 @@ import * as oracledb from 'oracledb';
 import { ConnectionPropertiesFromEnv, QuerySpecification } from '@liberation-data/drivine';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { TEST_CONTAINER_PASSWORD } from '@/testing';
 import { describeOnOracle } from '../support/Oracle';
 
@@ -111,7 +111,7 @@ describeOnOracle('a list of zoned values on Oracle', () => {
      * writes is rolled back.
      */
     const rows = async (cypher: string, seconds: number = 10): Promise<string[]> => {
-        const cypherCompiled = new OracleCypherCompiler(GRAPH).compile(cypher);
+        const cypherCompiled = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(cypher);
         // Its parameters bound as OracleConnection binds them: a write reads them from one, `$_cy_params`.
         const compiled = new OracleSpecCompiler(
             new QuerySpecification(cypherCompiled.sql).bind(cypherCompiled.parameters).finalizedCopy('SQL')

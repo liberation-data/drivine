@@ -1,6 +1,5 @@
 import neo4j from 'neo4j-driver';
 import { DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
-import { CypherFloat } from '@/cypher/ast/Expression';
 import {
     clearLabels,
     closeGraphEngines,
@@ -19,14 +18,21 @@ function stores(): GraphEngine[] {
     return [...graphEngines().filter((it) => it.type === DatabaseType.NEO4J), ...cypherSqlStores()];
 }
 
+/** A float, as drivine4j binds a double: the test's own mark, as Drivine has no type of its own for one. */
+class Float {
+    constructor(readonly value: number) {}
+}
+
 /**
  * A value as the store takes it. Neo4j keeps a whole number apart from a float, and its driver sends a JavaScript number
- * as a float, so a whole number is sent as an integer and a {@link CypherFloat} as the number it is. A SQL store binds
- * every value as JSON, where a {@link CypherFloat} is written with its fraction.
+ * as a float, so a whole number is sent as an integer and a {@link Float} as the number it is. A SQL store is given a
+ * {@link Float} as the JavaScript number too, which the shared compiler binds as a whole number where it is one: a
+ * JavaScript number can't hold a whole float apart from it, as the spec's steps of a whole float parameter are skipped
+ * for (`WHOLE_FLOAT_PARAMETER` in test/cypher/CypherSpec.ts).
  */
 function given(store: GraphEngine, value: any): any {
-    if (value instanceof CypherFloat) {
-        return store.type === DatabaseType.NEO4J ? value.value : value;
+    if (value instanceof Float) {
+        return value.value;
     }
     if (typeof value === 'number' && Number.isInteger(value) && store.type === DatabaseType.NEO4J) {
         return neo4j.int(value);
@@ -40,7 +46,7 @@ function given(store: GraphEngine, value: any): any {
     return value;
 }
 
-const float = (value: number): CypherFloat => new CypherFloat(value);
+const float = (value: number): Float => new Float(value);
 
 /**
  * A write that takes a value from an item of an unwound parameter writes it as it is given, on every store. On Oracle
@@ -170,7 +176,7 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
         const [five] = await query('RETURN toString($f)', { f: float(5) });
         expect(await query('UNWIND $items AS t WITH t.f AS f RETURN toString(f)', items)).toEqual([five, '-0.5']);
         expect(await query('MATCH (n:CyUnwoundMade) RETURN toString(n.f) ORDER BY n.id')).toEqual([five, '-0.5']);
-        // Oracle reads that parameter as the number 5, so the checks above can't fail there: a float the statement makes
+        // A SQL store is given that parameter as the number 5, so the checks above can't fail there: a float the statement makes
         // itself stays one on every store, and so must its value of an unwound item.
         expect(await query('UNWIND [{f: 5.0}, {f: -0.5}] AS t WITH t.f AS f RETURN toString(f)')).toEqual([
             '5.0',
@@ -341,11 +347,11 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
             { id: 20, f: 6 }
         ]);
         // A JavaScript number does not tell 5.0 from 5, so the store's text of each tells whether it is still a float:
-        // as the store writes the same float given as a parameter of its own. Oracle reads a whole float bound as JSON
-        // text as a number, `5`, an unwound item's as any other parameter's.
+        // as the store writes the same float given as a parameter of its own. Only Neo4j is given a float: a SQL store is
+        // given the whole number 5 (see {@link given}), an unwound item's as any other parameter's.
         await query('CREATE (:CyUnwound {id: 30, f: $f})', { f: float(5) });
         const [five] = await query('MATCH (n:CyUnwound {id: 30}) RETURN toString(n.f)');
-        expect(five).toEqual(store.type === DatabaseType.ORACLE ? '5' : '5.0');
+        expect(five).toEqual(store.type === DatabaseType.NEO4J ? '5.0' : '5');
         const whole = (text: string): string => (five === '5' ? text.replace('.0', '') : text);
         expect(
             await query(

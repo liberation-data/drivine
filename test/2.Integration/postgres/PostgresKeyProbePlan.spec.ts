@@ -6,7 +6,7 @@ import {
     QuerySpecification
 } from '@liberation-data/drivine';
 import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { sqlPersistenceManager, sqlStores } from '../support/SqlStores';
 
@@ -102,7 +102,7 @@ describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
 
         /** The plans of the statements `cypher` compiles to, `compiled` from its text, run on a connection of its own. */
         const plans = async (cypher: string, compiled: (sql: string) => string): Promise<string[]> => {
-            const statement = new PostgresCypherCompiler(GRAPH).compile(cypher);
+            const statement = new SharedCypherCompiler('postgres', { name: GRAPH }).compile(cypher);
             const properties = ConnectionPropertiesFromEnv(store.name);
             const client = new Client({
                 host: properties.host,

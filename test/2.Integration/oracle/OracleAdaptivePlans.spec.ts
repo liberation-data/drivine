@@ -5,7 +5,7 @@ import {
     DatabaseRegistry,
     QuerySpecification
 } from '@liberation-data/drivine';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { loadSpec, trimIndent } from '../../cypher/CypherSpec';
 import { describeOnOracle } from '../support/Oracle';
 
@@ -14,7 +14,7 @@ jest.setTimeout(120_000);
 const GRAPH = 'drivine_adaptive_plans';
 
 /** The compiled read that found no rows in the Cypher suite (liberation-data/drivine#331). */
-const READ = new OracleCypherCompiler(GRAPH).compile(
+const READ = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(
     "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(m) RETURN m.title"
 ).sql;
 
