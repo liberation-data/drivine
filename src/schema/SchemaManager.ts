@@ -595,7 +595,9 @@ export class SchemaManager {
     private async ensureSingleton(gom: StatelessGraphObjectManager, owner: string): Promise<void> {
         await gom.persistenceManager.execute(gom.backend.pruneSchemaMarkers().spec({ scope: owner }));
         // The label is Drivine's, so a plain index on the key (made by hand, on Neo4j) is replaced by the constraint.
-        await gom.constraints.ensure(uniquenessConstraint(MARKER_LABEL, 'scope'), undefined, true);
+        // The range index FalkorDB makes for it first is waited on within indexBuildTimeout, and logged under WARN.
+        const build = { timeout: this.options.indexBuildTimeout, mode: this.options.mode };
+        await gom.constraints.withBuild(build).ensure(uniquenessConstraint(MARKER_LABEL, 'scope'), undefined, true);
     }
 
     /** Warns of what the owner's marker recorded that is not `kept` and no other owner declares. */

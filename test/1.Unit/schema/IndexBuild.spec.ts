@@ -317,6 +317,47 @@ describe('SchemaManager applying an owner one of whose indexes is not built', ()
         expect(constrained).toBe(true);
         expect(recorded).toEqual([]);
     });
+
+    it("should wait for the range index of a versioned owner's marker on FalkorDB as the options say", async () => {
+        DatabaseRegistry.tearDown();
+        DatabaseRegistry.getInstance().register({ name: 'a', type: DatabaseType.FALKORDB } as ConnectionProvider);
+        let constrained = false;
+        const executor = {
+            run: async (statement: any, bindings?: Record<string, any>) =>
+                Promise.resolve().then(() => {
+                    constrained ||= statement?.native === 'CONSTRAINT_CREATE';
+                    if (statement === FALKORDB_SCHEMA.indexBuild!.statement) {
+                        const building = bindings?.label === '_DrivineSchema';
+                        return [{ status: building ? '[Indexing] 0/20: UNDER CONSTRUCTION' : 'OPERATIONAL' }];
+                    }
+                    return statement === FALKORDB_SCHEMA.listUniques.statement && constrained
+                        ? [{ label: '_DrivineSchema', properties: ['scope'], status: 'OPERATIONAL' }]
+                        : [];
+                })
+        } as unknown as SchemaExecutor;
+        const gom = {
+            indexes: new IndexManager(executor, FALKORDB_SCHEMA),
+            constraints: new ConstraintManager(executor, FALKORDB_SCHEMA),
+            persistenceManager: {
+                maybeGetOne: async () => Promise.resolve(null),
+                execute: async () => Promise.resolve()
+            },
+            backend: {
+                pruneSchemaMarkers: () => ({ spec: () => ({}) }),
+                schemaMarker: () => ({ spec: () => ({}) }),
+                markerItems: () => undefined,
+                recordSchemaMarker: () => ({ spec: (it: unknown) => it })
+            }
+        };
+        const factory = { get: () => gom } as unknown as GraphObjectManagerFactory;
+        const catalogs = [SchemaCatalog.of(rangeIndex('Person', 'email')).named('dice').withVersion('1')];
+
+        await expect(new SchemaManager(factory, { catalogs, indexBuildTimeout: 5 }).enforce()).rejects.toThrow(
+            /FalkorDB had not built the RANGE index \S+ on _DrivineSchema\(scope\) after 5 ms/
+        );
+        await new SchemaManager(factory, { catalogs, indexBuildTimeout: 5, mode: 'WARN' }).enforce();
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/on _DrivineSchema\(scope\) after 5 ms/));
+    });
 });
 
 describe('An error reading the state of an index being built', () => {
