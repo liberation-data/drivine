@@ -218,6 +218,15 @@ describe('@CaseInsensitive', () => {
             const patch = oracle.patchOne(account.model as any);
             expect(patch.text).toMatch(/IF v_changed THEN lower_node\(v_root, \$x_lower\d+\); END IF;/);
         });
+
+        it("should have Oracle's block read and write the copy as a CLOB, so a text past 32 KB has its copy too", () => {
+            const text = new OracleBackend(new OracleGraph()).save(account, object, {}, false, registry).text;
+            expect(text).toContain('        v CLOB;\n');
+            expect(text).toContain('THEN v := LOWER(o.get_clob(k)); END IF;');
+            // Oracle keeps an empty text as null, so an empty property has no copy.
+            expect(text).toContain('IF v IS NULL OR LENGTH(v) = 0 THEN');
+            expect(text).not.toContain('VARCHAR2(32767)');
+        });
     });
 
     describe('the lookup', () => {
@@ -286,6 +295,27 @@ describe('@CaseInsensitive', () => {
             expect(postgres.renderQuery(loweredQuery(fn, account, filled), account).where).toContain(
                 `(n.props ->> '__drivine.lower.email') = lower(CAST($_q0 AS text))`
             );
+        });
+
+        it("should compare Oracle's copy as a CLOB, and not through its index, for a value that may lowercase past 4,000 bytes", () => {
+            const oracle = new OracleBackend(new OracleGraph());
+            const lowered = (length: number): { where?: string; labelsTested?: string[] } =>
+                oracle.renderQuery(
+                    loweredQuery((q: any) => ({ where: q.email.eqIgnoreCase('a'.repeat(length)) }), account, filled),
+                    account,
+                    [{ label: 'CiAccount', properties: ['__drivine.lower.email'] }]
+                );
+            const long = lowered(1_334);
+            expect(long.where).toContain(
+                `DBMS_LOB.COMPARE(JSON_VALUE(n.props, '$."__drivine.lower.email"' RETURNING CLOB), LOWER(TO_CLOB($_q0))) = 0`
+            );
+            expect(long.where).not.toContain('CASE WHEN');
+            expect(long.labelsTested ?? []).toEqual([]);
+            const short = lowered(1_333);
+            expect(short.where).toMatch(
+                /END = LOWER\(\$_q0\) AND JSON_VALUE\(n\.props, '\$\."__drivine\.lower\.email"'\) = LOWER\(\$_q1\)$/
+            );
+            expect(short.labelsTested).toEqual(['CiAccount']);
         });
     });
 
@@ -465,6 +495,21 @@ describe('@CaseInsensitive', () => {
             await catalog.filledIn('Account', 'email');
             await new Promise((resolve) => setImmediate(resolve));
             expect(await catalog.filledIn('Account', 'email')).toBe(true);
+        });
+
+        it("should have Oracle's fill read the property and its copy as CLOBs, so a text past 4,000 bytes has its copy too", () => {
+            const fill = schemaGrammarFor(DatabaseType.ORACLE, new OracleGraph()).lowerCopies!.fill(
+                'CiAccount',
+                'email',
+                10_000
+            );
+            expect(fill).toContain(
+                `SET n.props = JSON_TRANSFORM(n.props, SET '$."__drivine.lower.email"' = LOWER(JSON_VALUE(n.props, '$.email' RETURNING CLOB)) REMOVE ON NULL)`
+            );
+            expect(fill).toContain(
+                `AND DBMS_LOB.COMPARE(JSON_VALUE(n.props, '$."__drivine.lower.email"' RETURNING CLOB) || ' ', LOWER(JSON_VALUE(n.props, '$.email' RETURNING CLOB)) || ' ') <> 0`
+            );
+            expect(fill).toContain('AND ROWNUM <= 10000');
         });
 
         it("should keep a SQL store's record in its catalog, as drivine4j does", () => {
