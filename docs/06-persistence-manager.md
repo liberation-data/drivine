@@ -36,9 +36,9 @@ export class UserService {
 ```
 
 A transaction spans every database the method touches. A method called outside a request (a job, `onModuleInit`, a
-script) starts its own. To run a block in one transaction without a decorator, use
-`inDrivineContext().withTransaction().run(async () => …)`; `withTransaction({ rollback: true })` rolls it back
-at the end, as tests do.
+script) starts its own, and so does each of two run side by side where none is running, as in `Promise.all`. To run a
+block in one transaction without a decorator, use `inDrivineContext().withTransaction().run(async () => …)`;
+`withTransaction({ rollback: true })` rolls it back at the end, as tests do.
 
 ### Cursors
 
