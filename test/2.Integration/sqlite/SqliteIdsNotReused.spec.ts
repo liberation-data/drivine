@@ -239,6 +239,41 @@ describe('a SQLite graph', () => {
             await expect(gom.count(Person)).rejects.toBeInstanceOf(ReusedIdsError);
         });
 
+        it('should be refused where the name of its graph holds the word AUTOINCREMENT', async () => {
+            const provider = new SqliteConnectionProvider(
+                'earlier',
+                DatabaseType.SQLITE,
+                earlierFile('autoincrement'),
+                {
+                    graph: 'autoincrement'
+                }
+            );
+            try {
+                await expect(provider.connect()).rejects.toBeInstanceOf(ReusedIdsError);
+            } finally {
+                await provider.end();
+            }
+        });
+
+        it('should be refused as itself where its making is run as a statement outside a transaction', async () => {
+            DatabaseRegistry.getInstance()
+                .builder()
+                .withProperties({
+                    databaseType: DatabaseType.SQLITE,
+                    host: '',
+                    databaseName: earlierFile('drivine'),
+                    defaultGraphPath: 'fresh'
+                })
+                .register('earlier-statement');
+            const other = new PersistenceManagerFactory(
+                DatabaseRegistry.getInstance(),
+                TransactionContextHolder.getInstance()
+            ).get('earlier-statement', 'NON_TRANSACTIONAL');
+            await expect(
+                other.execute(new QuerySpecification(new SqliteGraph('drivine').ensuring))
+            ).rejects.toBeInstanceOf(ReusedIdsError);
+        });
+
         it('should refuse first connections asked for together alike, and close each', async () => {
             const at = earlierFile('drivine');
             const provider = new SqliteConnectionProvider('earlier', DatabaseType.SQLITE, at);

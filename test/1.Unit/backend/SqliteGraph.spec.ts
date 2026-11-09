@@ -34,10 +34,11 @@ describe('SqliteGraph', () => {
     });
 
     it('should look for each table and index in any case before it makes them', () => {
-        // drivine4j's look, which gives -1 for tables an earlier Drivine made, whose ids could be reused (#713).
+        // drivine4j's look, which gives -1 for tables an earlier Drivine made, whose ids could be reused (#713), but for
+        // the KEY before AUTOINCREMENT, as drivine-python's, so a graph whose name holds the word is not taken for new.
         expect(new SqliteGraph('Contracts').made).toEqual(
             `SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) IN ` +
-                `('contracts_node', 'contracts_edge') AND sql NOT LIKE '%AUTOINCREMENT%') THEN -1 ELSE COUNT(*) END ` +
+                `('contracts_node', 'contracts_edge') AND sql NOT LIKE '%KEY AUTOINCREMENT%') THEN -1 ELSE COUNT(*) END ` +
                 `AS "made" FROM sqlite_master WHERE lower(name) IN ('contracts_node', 'contracts_edge', ` +
                 `'contracts_schema', 'contracts_edge_src', 'contracts_edge_dst')`
         );
