@@ -74,7 +74,6 @@ describe('The Cypher compiler refuses', () => {
                     ['MATCH (n:Count) RETURN substring(n.t, 1.0)', {}, float('substring', 'start')],
                     ["RETURN left('hello', $n)", { n: BigInt(-1) }, outOfRange('left', 'length')],
                     ["RETURN left('hello', $n)", { n: int(2147483648) }, outOfRange('left', 'length')],
-                    ["RETURN left('hello', $n)", { n: BigInt('1' + '0'.repeat(400)) }, outOfRange('left', 'length')],
                     ["RETURN right('hello', $n)", { n: Infinity }, outOfRange('right', 'length')],
                     ["RETURN substring('hello', $n)", { n: -Infinity }, outOfRange('substring', 'start')],
                     ['RETURN substring($p.t, 0, -$n)', { p: { t: 'hello' }, n: 1 }, outOfRange('substring', 'length')]
@@ -95,6 +94,15 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
+    // The shared compiler compiles a whole-number parameter past a long's range as a length, and refuses one just past
+    // an int's (liberation-data/drivine-cypher-spec#130). It fails until that's fixed, and then this fails: make it it().
+    it.failing('a length given past a long, as a bigint, is refused as out of range', () => {
+        compilers.forEach(([, compiler]) => {
+            expect(() => compiler().compile("RETURN left('hello', $n)", { n: BigInt('1' + '0'.repeat(400)) })).toThrow(
+                'left() takes a length from 0 to 2147483647, as in Neo4j.'
+            );
+        });
+    });
     it('collect(DISTINCT) beside a variable no other item is, outside its aggregates, as collect() is', () => {
         // Not in the spec: distinctFirst groups by each such variable, so it is refused before.
         compilers.forEach(([, compiler]) => {

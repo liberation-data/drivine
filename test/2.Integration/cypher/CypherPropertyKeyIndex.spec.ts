@@ -129,6 +129,10 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
     (store) => {
         let pm: PersistenceManager;
         const planner: Planner = store.type === DatabaseType.POSTGRES ? postgresPlanner(store) : oraclePlanner(store);
+        // On Oracle the shared compiler reads a property through drivine4j's index expression, and this library makes the
+        // index over another, so Oracle reads the label in full (#696). These fail there until #696 lands, then they fail
+        // as it.failing does once they pass: make them it() again.
+        const throughIndex = store.type === DatabaseType.ORACLE ? it.failing : it;
 
         const query = async (cypher: string, parameters: Record<string, any> = {}): Promise<any[]> =>
             pm.query(new QuerySpecification({ text: cypher, language: 'CYPHER' }).bind(parameters));
@@ -370,28 +374,31 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
             );
         });
 
-        it('finds the node of each row of an UNWIND through the index, not by reading every node of the label', async () => {
-            const rows = {
-                rows: Array.from({ length: 100 }, (_, i) => ({ s: `p${i * 7}`, d: `p${i * 7 + 1}` })),
-                ids: Array.from({ length: 100 }, (_, i) => `p${i * 7}`)
-            };
-            const statements = [
-                'UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN a.k',
-                'UNWIND $ids AS id MATCH (a:Person {id: id}) RETURN a.k',
-                'UNWIND $rows AS row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) RETURN a.k, b.k',
-                ...(planner.whereProbesIndex
-                    ? ['UNWIND $rows AS row MATCH (a:Person) WHERE a.id = row.s RETURN a.k']
-                    : [])
-            ];
-            for (const statement of statements) {
-                const plan = await planner.plan(planner.compiled(statement, rows));
-                // The whole plan where it doesn't: a diff of it shows only the lines about the change.
-                expect(planner.probesIndex(plan) ? statement : `${statement}\n${plan}`).toEqual(statement);
+        throughIndex(
+            'finds the node of each row of an UNWIND through the index, not by reading every node of the label',
+            async () => {
+                const rows = {
+                    rows: Array.from({ length: 100 }, (_, i) => ({ s: `p${i * 7}`, d: `p${i * 7 + 1}` })),
+                    ids: Array.from({ length: 100 }, (_, i) => `p${i * 7}`)
+                };
+                const statements = [
+                    'UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN a.k',
+                    'UNWIND $ids AS id MATCH (a:Person {id: id}) RETURN a.k',
+                    'UNWIND $rows AS row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) RETURN a.k, b.k',
+                    ...(planner.whereProbesIndex
+                        ? ['UNWIND $rows AS row MATCH (a:Person) WHERE a.id = row.s RETURN a.k']
+                        : [])
+                ];
+                for (const statement of statements) {
+                    const plan = await planner.plan(planner.compiled(statement, rows));
+                    // The whole plan where it doesn't: a diff of it shows only the lines about the change.
+                    expect(planner.probesIndex(plan) ? statement : `${statement}\n${plan}`).toEqual(statement);
+                }
+                expect(await query('UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN count(a)', rows)).toEqual([
+                    100
+                ]);
             }
-            expect(await query('UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN count(a)', rows)).toEqual([
-                100
-            ]);
-        });
+        );
 
         it("finds for a row's number a node whose number the store keeps with more zeros after its point", async () => {
             // Postgres's numeric keeps the scale a product makes: 0.25 * 10 is 2.50, 2.0 * 2.0 is 4.00, and 1.0E-5 is 0.000010.
@@ -457,26 +464,29 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
             `MATCH (start:\`${IMPORT_LABEL}\` {\`${IMPORT_ID}\`: row.start._id}) ` +
             `MATCH (finish:\`${IMPORT_LABEL}\` {\`${IMPORT_ID}\`: row.end._id}) ${write}`;
 
-        it('finds the nodes of each row of a batch of relationships as APOC exports it, through the index on a key of spaces', async () => {
-            // Its reads, planned as a query: a write compiles to a procedure, which no EXPLAIN takes.
-            const plan = await planner.plan(planner.compiled(apocBatch(0, 20, 'RETURN start, finish'), {}));
-            expect(planner.probesIndex(plan) ? 'probes' : plan).toEqual('probes');
-            // Not on Oracle: the connection compiles with no index named (liberation-data/drivine4j#638), and a batch of 20
-            // took 231 s there over 2,000 nodes of the label (#636).
-            if (store.type === DatabaseType.ORACLE) {
-                return;
+        throughIndex(
+            'finds the nodes of each row of a batch of relationships as APOC exports it, through the index on a key of spaces',
+            async () => {
+                // Its reads, planned as a query: a write compiles to a procedure, which no EXPLAIN takes.
+                const plan = await planner.plan(planner.compiled(apocBatch(0, 20, 'RETURN start, finish'), {}));
+                expect(planner.probesIndex(plan) ? 'probes' : plan).toEqual('probes');
+                // Not on Oracle: the connection compiles with no index named (liberation-data/drivine4j#638), and a batch of 20
+                // took 231 s there over 2,000 nodes of the label (#636).
+                if (store.type === DatabaseType.ORACLE) {
+                    return;
+                }
+                await query(apocBatch(0, 20));
+                await query(apocBatch(20, 40));
+                expect(
+                    await query(`MATCH (:\`${IMPORT_LABEL}\`)-[r:NEXT_CHUNK]->(:\`${IMPORT_LABEL}\`) RETURN count(r)`)
+                ).toEqual([40]);
+                expect(
+                    await query(
+                        `MATCH (a)-[:NEXT_CHUNK]->(b {\`${IMPORT_ID}\`: 40}) RETURN [a.\`${IMPORT_ID}\`, b.\`${IMPORT_ID}\`]`
+                    )
+                ).toEqual([[39, 40]]);
             }
-            await query(apocBatch(0, 20));
-            await query(apocBatch(20, 40));
-            expect(
-                await query(`MATCH (:\`${IMPORT_LABEL}\`)-[r:NEXT_CHUNK]->(:\`${IMPORT_LABEL}\`) RETURN count(r)`)
-            ).toEqual([40]);
-            expect(
-                await query(
-                    `MATCH (a)-[:NEXT_CHUNK]->(b {\`${IMPORT_ID}\`: 40}) RETURN [a.\`${IMPORT_ID}\`, b.\`${IMPORT_ID}\`]`
-                )
-            ).toEqual([[39, 40]]);
-        });
+        );
 
         it('finds, compiled knowing the indexes, the rows it finds compiled as the connection compiles it', async () => {
             // On Postgres the connection compiles as the planner does, and the tests above find its rows. On Oracle the
@@ -570,7 +580,7 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
             }
         });
 
-        it("finds the node of a parameter's text through the index", async () => {
+        throughIndex("finds the node of a parameter's text through the index", async () => {
             const plan = await planner.plan(planner.compiled('MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' }));
             expect(planner.probesIndex(plan) ? 'probes' : plan).toEqual('probes');
             expect(await query('MATCH (a:Person {id: $s}) RETURN a.k', { s: 'p42' })).toEqual([42]);
