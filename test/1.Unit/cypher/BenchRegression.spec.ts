@@ -8,8 +8,9 @@ const { LIMIT, judge, regressions, summary }: Record<string, any> = require(
 );
 
 /** The bench's numbers, as scripts/bench-compiler.js writes them with `--json`: warm medians by store, in ms. */
-function numbers(medians: Record<string, number>, version: string = '0.32.0') {
+function numbers(medians: Record<string, number>, version: string = '0.32.0', machine: string = 'AMD EPYC 7763 x4') {
     return {
+        machine,
         compiler: { name: '@liberation-data/drivine-cypher-compiler', version },
         stores: Object.fromEntries(
             Object.entries(medians).map(([store, warmMedianMs]) => [
@@ -91,5 +92,13 @@ describe('The nightly check of the compiler bench (scripts/bench-regression.js)'
         const text = summary(before, judge(before, bench(tonight)));
         expect(text).toContain('| oracle | none | 5.000 |  |');
         expect(text).toContain('The compiler is 0.32.0 tonight, and was 0.31.0.');
+        expect(text).not.toContain('The machine is');
+    });
+
+    it('says the machine changed', () => {
+        const tonight = numbers({ postgres: 0.25 }, '0.32.0', 'Intel Xeon 8370C x4');
+        const text = summary(BASELINE, judge(BASELINE, bench(tonight)));
+        expect(text).toContain('The machine is Intel Xeon 8370C x4 tonight, and was AMD EPYC 7763 x4.');
+        expect(text).not.toContain('The compiler is');
     });
 });

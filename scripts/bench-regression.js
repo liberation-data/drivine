@@ -13,6 +13,9 @@
  *
  * There are no absolute ceilings for the warm compile: shared runners differ too much from run to run. A regression it
  * fails on is compared with again each night until a nightly passes, and a nightly that passes is the next baseline.
+ * The summary says when the compiler's version or the machine differs from the last nightly's. A slowdown that is
+ * accepted is recorded as the baseline by running the nightly by hand with `record-bench`, which gives this no file
+ * of the last nightly's.
  */
 const childProcess = require('child_process');
 const fs = require('fs');
@@ -65,6 +68,10 @@ function summary(baseline, verdict) {
             `The compiler is ${verdict.numbers.compiler?.version} tonight, and was ${baseline.compiler?.version}.`,
             ''
         );
+    }
+    // A runner of another kind can be slower by itself, which a rerun on it doesn't filter out.
+    if (baseline.machine !== verdict.numbers.machine) {
+        lines.push(`The machine is ${verdict.numbers.machine} tonight, and was ${baseline.machine}.`, '');
     }
     const header = ['Store', 'Last nightly, ms', 'Tonight, ms', 'Rise'];
     const rows = Object.entries(verdict.numbers.stores).map(([store, it]) => {

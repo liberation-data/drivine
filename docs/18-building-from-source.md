@@ -45,4 +45,7 @@ CI's `compiler bench` job runs it on every pull request, with fewer runs and rou
 summary; it fails only on the cold load's budget. The warm compile has no ceiling, as shared runners are too noisy for
 one: instead the nightly's `compiler bench against the last nightly` job (`scripts/bench-regression.js`) compares each
 store's warm median with the last nightly's on master that passed, and fails when one rose by more than half, in a run
-and in a rerun. The first night, with nothing to compare with, it records its numbers and passes.
+and in a rerun. The first night, with nothing to compare with, it records its numbers and passes. Its summary says
+when the compiler's version or the runner's machine changed since then. A slowdown that is accepted never passes that
+check, so run the nightly by hand with `record-bench` ticked: it records that night's numbers, without comparing them,
+as the next baseline once the nightly passes.
