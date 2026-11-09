@@ -122,10 +122,32 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
  * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
  * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
  */
+/**
+ * Whether this process's node:sqlite gives a function a text cut at its first NUL (#699): Node 24.7's does, 24.22's
+ * doesn't. Asked of the driver itself, once, so the hold below is made only where it holds.
+ */
+const SQLITE_CUTS_AT_NUL: boolean = (() => {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { DatabaseSync }: any = require('node:sqlite');
+        const db = new DatabaseSync(':memory:');
+        try {
+            db.function('cy_length', (text: unknown) => (typeof text === 'string' ? text.length : -1));
+            return Number(Object.values(db.prepare("SELECT cy_length(char(0) || 'a') AS n").get())[0]) !== 2;
+        } finally {
+            db.close();
+        }
+    } catch {
+        return false;
+    }
+})();
+
 export const HELD: Record<string, Record<string, Hold[]>> = {
     'queries.yaml': {
         // node:sqlite gives a function a text cut at its first NUL, so toFloat('\u0000NaN') reads an empty text (#699).
-        'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }]
+        ...(SQLITE_CUTS_AT_NUL
+            ? { 'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }] }
+            : {})
     }
 };
 
