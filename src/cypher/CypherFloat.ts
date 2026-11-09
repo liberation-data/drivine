@@ -2,11 +2,13 @@ import { javaDouble } from '@/connection/sqlite/JavaDouble';
 
 /**
  * A float, bound to a Cypher statement as one even where it is a whole number. A JavaScript number can't tell `5.0` from
- * `5`, so Drivine binds a whole number as an integer, as Neo4j's types and the SQL stores do: `toString($f)` of `f = 5`
- * gives `'5'`. Bind `cypherFloat(5)` where it is a float, and it gives `'5.0'` on every store, as drivine4j's double does.
+ * `5`, so a SQL store binds a whole number as an integer: `toString($f)` of `f = 5` gives `'5'` there. Bind
+ * `cypherFloat(5)` where it is a float, and it gives `'5.0'` on the SQL stores, Neo4j, Memgraph and Neptune, as
+ * drivine4j's double does.
  *
  * On a SQL store it is compiled as a float (the shared compiler's `{"$float": …}`). A graph engine is given the number
- * itself: Neo4j's driver sends a JavaScript number as a float, and FalkorDB's client writes it as it writes any number.
+ * itself: Neo4j's driver sends any JavaScript number as a float, so `5` is `5.0` there with or without it. FalkorDB's
+ * client writes the number into the statement as JavaScript writes it, so a whole one is still an integer there, `5`.
  */
 export class CypherFloat {
     constructor(readonly value: number) {}

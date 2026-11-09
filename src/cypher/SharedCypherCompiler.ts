@@ -2,6 +2,7 @@ import { isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
 import { CypherFloat } from '@/cypher/CypherFloat';
+import { DrivineLogger } from '@/logger/DrivineLogger';
 
 /** The stores the shared compiler compiles Cypher for. */
 export type SharedStore = 'postgres' | 'oracle' | 'sqlite';
@@ -59,6 +60,8 @@ export class SharedCypherCompiler implements CypherCompiler {
     /** Whether the last statement compiled calls the graph's stored `era` function (Oracle). */
     callsStoredEra = false;
 
+    private readonly logger = new DrivineLogger(SharedCypherCompiler.name);
+
     constructor(
         private readonly store: SharedStore,
         private readonly graph: SharedGraph
@@ -74,6 +77,10 @@ export class SharedCypherCompiler implements CypherCompiler {
         }
         if ('error' in answer) {
             throw new DrivineError(`The Cypher compiler can't read the request: ${answer.error}`);
+        }
+        // What it warns of, such as a RETURN of several items, logged as drivine4j logs it.
+        for (const warning of answer.warnings ?? []) {
+            this.logger.warn(warning);
         }
         this.callsStoredNullsEqual = answer.storedFunctions?.nullsEqual ?? false;
         this.callsStoredEra = answer.storedFunctions?.era ?? false;
@@ -109,6 +116,7 @@ interface Answer {
     sql: string;
     parameters: Record<string, any>;
     setup?: string[];
+    warnings?: string[];
     nonFinite?: boolean;
     storedFunctions?: { nullsEqual?: boolean; era?: boolean };
 }
@@ -165,9 +173,11 @@ const LONG_RANGE = 2 ** 63;
  *
  * - a JavaScript number that is whole, from -2^63 to below 2^63, is an integer, written as its digits; one with a
  *   fraction a float, written as JSON writes it (`2.5`, `1e-7`). A whole one past a long's range, NaN and the
- *   infinities are floats too, written `{"$float": "<text>"}`, which JSON has no plain form of. -0 is written `-0`.
+ *   infinities are floats too, written `{"$float": "<text>"}`, which JSON has no plain form of. -0, a whole number,
+ *   is the integer 0.
  * - a `bigint` and the Neo4j driver's `Integer` are their digits, unquoted: a whole number however large.
- * - a {@link CypherFloat} is a float, `{"$float": "<text>"}`, even where it is whole: `cypherFloat(5)` is 5.0.
+ * - a {@link CypherFloat} is a float, `{"$float": "<text>"}`, even where it is whole: `cypherFloat(5)` is 5.0, and
+ *   `cypherFloat(-0)` is -0.0, `{"$float": "-0"}`.
  * - a `Date` is `{"$temporal": "DATE_TIME", "text": <its toISOString()>}`, as Drivine binds it.
  * - bytes (`Buffer`, `Uint8Array`, `Int8Array`) are `{"$bytes": "<base64>"}`.
  * - any other iterable (a `Set`, a `Map`'s entries, a generator) is the list of its items; a map is its entries in

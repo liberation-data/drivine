@@ -1,5 +1,6 @@
 import neo4j from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
+import { DrivineLogger } from '@/logger/DrivineLogger';
 import { parametersJson, SharedCypherCompiler, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { CypherFloat, cypherFloat } from '@liberation-data/drivine';
 import { withFloatsAsNumbers } from '@/cypher/CypherFloat';
@@ -158,6 +159,20 @@ describe('SharedCypherCompiler', () => {
         const inline = new SharedCypherCompiler('oracle', { name: 'g', eraStored: false });
         expect(inline.compile(cypher).sql).not.toContain('_era');
         expect(inline.callsStoredEra).toBe(false);
+    });
+
+    it.each(STORES)('logs what the compiler warns of, as a warning, on %s', (store) => {
+        const warned = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        try {
+            const compiler = new SharedCypherCompiler(store, { name: 'g' });
+            compiler.compile('RETURN 1 AS x');
+            expect(warned).not.toHaveBeenCalled();
+            compiler.compile('RETURN 1 AS a, 2 AS b');
+            expect(warned).toHaveBeenCalledTimes(1);
+            expect(warned.mock.calls[0][0]).toContain('The statement returns 2 items (a, b).');
+        } finally {
+            warned.mockRestore();
+        }
     });
 });
 

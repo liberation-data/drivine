@@ -45,20 +45,21 @@ MERGE (n:Person {name: $name})   // with name null: fails, where 3.x made a node
 
 ### A whole float parameter is bound as a whole number: `cypherFloat()`
 
-A JavaScript number can't tell `5.0` from `5`, so Drivine binds a whole number as an integer, as Neo4j's driver does
-for an integer Neo4j type. On 3.x, Drivine's own compiler typed some values from the statement around them, so a whole
-float written by `CREATE (n {f: $f})` read back on Postgres and SQLite as `5.0`. With the shared compiler it reads back
-as `5` on every SQL store. Where a parameter is a float, say so:
+A JavaScript number can't tell `5.0` from `5`, so Drivine binds a whole number as an integer on a SQL store. On 3.x,
+Drivine's own compiler typed some values from the statement around them, so a whole float written by
+`CREATE (n {f: $f})` read back on Postgres and SQLite as `5.0`. With the shared compiler it reads back as `5` on every
+SQL store. Where a parameter is a float, say so:
 
 ```ts
 import { cypherFloat } from '@liberation-data/drivine';
 
 await pm.query(new QuerySpecification('CREATE (:Reading {value: $v})').bind({ v: cypherFloat(5) }));
-// toString(n.value) is '5.0' on every store, as drivine4j's double gives it.
+// toString(n.value) is '5.0' on the SQL stores, Neo4j, Memgraph and Neptune, as drivine4j's double gives it.
 ```
 
-`cypherFloat(x)` is a float on a SQL store. A graph engine is given the number itself, which Neo4j's driver sends as a
-float.
+`cypherFloat(x)` is a float on a SQL store. A graph engine is given the number itself: Neo4j's driver sends any number
+as a float, `5` too, and FalkorDB's client writes it into the statement as JavaScript writes it, so a whole one is still
+an integer on FalkorDB.
 
 ### A SQLite map of exactly `{"$numberDouble": "NaN"}` is NaN
 

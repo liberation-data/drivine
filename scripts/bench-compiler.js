@@ -43,6 +43,10 @@ const os = require('os');
 const path = require('path');
 const { performance } = require('perf_hooks');
 
+// The compiler's warnings, as a RETURN of several items, logged at WARN, are left out: a log line in the timed compile
+// would be timed with it, and one in a cold process's output would be read as its numbers. Its processes inherit it.
+process.env.DRIVINE_LOG_LEVEL = 'ERROR';
+
 const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const SPEC = path.join(ROOT, 'test', 'cypher');
