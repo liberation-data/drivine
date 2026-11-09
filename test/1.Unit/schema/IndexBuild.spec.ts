@@ -201,7 +201,7 @@ describe('SchemaManager applying an owner one of whose indexes is not built', ()
         recorded: unknown[];
     }
 
-    function manager(state: string, mode?: 'WARN'): Managed {
+    function manager(state: string, mode?: 'WARN', catalogs: SchemaCatalog[] = []): Managed {
         const { executor, ran }: Store = store([state], { failure: 'Property value is too large to index.' });
         const recorded: unknown[] = [];
         const gom = {
@@ -218,7 +218,7 @@ describe('SchemaManager applying an owner one of whose indexes is not built', ()
             }
         };
         const factory = { get: () => gom } as unknown as GraphObjectManagerFactory;
-        return { schema: new SchemaManager(factory, { catalogs: [], mode, indexBuildTimeout: 5 }), ran, recorded };
+        return { schema: new SchemaManager(factory, { catalogs, mode, indexBuildTimeout: 5 }), ran, recorded };
     }
 
     const made = (ran: Store['ran']): string[] =>
@@ -246,6 +246,17 @@ describe('SchemaManager applying an owner one of whose indexes is not built', ()
             )
         );
         expect(made(ran)).toHaveLength(2);
+        expect(recorded).toEqual([]);
+    });
+
+    it('should raise an index recreateAll made again that is not built, leaving the marker', async () => {
+        const owner = SchemaCatalog.of(rangeIndex('Person', 'email')).named('dice');
+        const { schema, ran, recorded }: Managed = manager('FAILED', undefined, [owner]);
+
+        await expect(schema.recreateAll()).rejects.toThrow(
+            /owner 'dice' on a found indexes not built:\n {2}- BUILD FAILED: .*Person_email_range/
+        );
+        expect(made(ran)).toHaveLength(1);
         expect(recorded).toEqual([]);
     });
 

@@ -107,8 +107,8 @@ export class IndexManager {
      *
      * On an engine that builds an index in the background (Neo4j, FalkorDB), returns once the index, made here or found
      * there, is built, waiting at most the build's `timeout`. A build that failed, or did not end in time, throws a
-     * DrivineError naming the index and giving the engine's reason, unless the build's mode is WARN, which logs it. The
-     * index is left as it is.
+     * DrivineError naming the index and giving the engine's reason, unless the build's `unbuilt` is given, which is
+     * handed it, or its mode is WARN, which logs it. The index is left as it is.
      */
     async ensure<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         const made = madeAs(spec);
