@@ -4,10 +4,11 @@ The site at [drivine.org](https://drivine.org/), built with
 [Starlight](https://starlight.astro.build) and published by `.github/workflows/website.yml`.
 
 - `src/pages/index.astro`: the landing page.
-- `public/video/`: the landing page's explainer, played from the site itself rather than YouTube's embed (which served
-  it at 240p in some browsers). `drivine-explainer.mp4` is re-encoded from the master in the private
-  `liberation-data/drivine-explainer-video` repository (`video/final/drivine-graph-rag-master.mp4`): H.264 1080p30 with
-  AAC sound, its index at the front (`-movflags +faststart`) so it starts before it has all downloaded, and well under
+- `public/video/`: the landing page's explainer. The page plays it in YouTube's embed while `PLAY_ON_YOUTUBE` in
+  `src/pages/index.astro` is true, and from these files when it's false (YouTube served it at 240p in some browsers for
+  its first weeks; it plays 1080p now). They're built and served either way. `drivine-explainer.mp4` is re-encoded from
+  the master in the private `liberation-data/drivine-explainer-video` repository
+  (`video/final/drivine-graph-rag-master.mp4`): H.264 1080p30 with AAC sound, its index at the front (`-movflags +faststart`) so it starts before it has all downloaded, and well under
   GitHub Pages' 100 MB a file. The page plays it from HLS segments, `public/video/hls/`, which the build cuts from it
   with ffmpeg (`scripts/segment-video.mjs`; `brew install ffmpeg`, or it plays the mp4), so a cold CDN edge fetches a
   megabyte or two from the origin before the first frame, not all 39 MB. `drivine-explainer.vtt` is that repository's
