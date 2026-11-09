@@ -16,8 +16,8 @@ The tests' datasources are in `.env.test`. Put overrides in `.env.test.local`, w
 (`@liberation-data/drivine-cypher-compiler`), against Drivine's own in `src/cypher/sql`, on Postgres, Oracle and
 SQLite: the cold load and first compile in fresh Node processes, and the warm compile's median and p99 over the
 statements of the Cypher spec in `test/cypher`. It compiles only, so it needs no database. The package isn't on npm
-yet, so give it its `.tgz` (`npm pack` of the spec's `compiler/build/npm`), or the directory it is installed in, after
-building:
+yet, so give it its `.tgz` (in the spec's `compiler`, `./gradlew npmPackage`, then `npm pack` of `build/npm`), or the
+directory it is installed in, after building Drivine:
 
 ```bash
 npm run build

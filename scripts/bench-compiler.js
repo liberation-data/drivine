@@ -176,12 +176,15 @@ function packageDirectory(given) {
     const into = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-wasm-compiler-'));
     process.on('exit', () => fs.rmSync(into, { recursive: true, force: true }));
     fs.writeFileSync(path.join(into, 'package.json'), '{"private": true}');
-    childProcess.execFileSync('npm', ['install', '--save', '--no-audit', '--no-fund', '--silent', resolved], {
+    childProcess.execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent', resolved], {
         cwd: into,
         stdio: 'inherit'
     });
-    // The one dependency npm wrote (`--save`, whatever the user's npm config says): the package, under its own name.
-    const [name] = Object.keys(JSON.parse(fs.readFileSync(path.join(into, 'package.json'), 'utf8')).dependencies);
+    // The package's name, from its own package.json in the .tgz: so where npm's config puts the dependency (none,
+    // devDependencies ...) doesn't matter, and a package built before or after its rename is found alike.
+    const { name } = JSON.parse(
+        childProcess.execFileSync('tar', ['-xOzf', resolved, 'package/package.json'], { encoding: 'utf8' })
+    );
     return path.join(into, 'node_modules', name);
 }
 
