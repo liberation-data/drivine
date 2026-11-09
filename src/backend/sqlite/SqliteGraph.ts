@@ -214,7 +214,7 @@ export function jsonType(alias: string, property: string): string {
  * anything else as its JSON (`'7'`, `'1.50'`, `'true'`), and null as SQL's null. SQLite's own `->>` gives a JSON value
  * as the SQL value it is, 7 as an integer and `true` as 1, so it is read so only for a string.
  */
-export function propertyText(props: string, at: string): string {
+function propertyText(props: string, at: string): string {
     return `(CASE json_type(${props}, ${at}) WHEN 'text' THEN ${props} ->> ${at} WHEN 'null' THEN NULL ELSE ${props} -> ${at} END)`;
 }
 

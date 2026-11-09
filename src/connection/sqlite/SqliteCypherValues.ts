@@ -1,4 +1,4 @@
-import { javaDouble } from '@/cypher/sql/JsonText';
+import { javaDouble } from '@/connection/sqlite/JavaDouble';
 import { byCodePoints } from '@/backend/sqlite/ExactJson';
 
 /**
@@ -19,6 +19,12 @@ export type JsonValue = null | boolean | string | JsonNumber | JsonValue[] | Map
  * Cypher's values as a compiled statement holds them on SQLite, the JSON text of each, and what Cypher does with them
  * that SQLite's JSON functions do not: compare them, and add them, as drivine4j's `SqliteCypherValues`. A text a
  * function is given that is SQL's null, or JSON's, is no value.
+ *
+ * An infinity is the number SQLite writes for one, `9.0e+999`, which reads as the double it is. NaN, which SQLite's JSON
+ * holds as no number, is {@link NAN_TEXT}, as drivine4j's statements given NaN write it: a number equal to nothing and
+ * ordered with nothing. Only that one map is NaN, so a map a user writes so is NaN too, as drivine4j compares a map to
+ * its tag whole: a map with another key beside it, or another value, as Extended JSON's `{"$numberDouble": "2.0"}`, is
+ * a map as any is.
  */
 export const SqliteCypherValues = {
     /** The JSON text `text` read, or undefined where it is null, JSON's null, or holds no value. */
@@ -30,7 +36,10 @@ export const SqliteCypherValues = {
         return value === null ? undefined : value;
     },
 
-    /** `value` as JSON text, as Jackson writes it: a double as Java writes one, `1.0E7`. */
+    /**
+     * `value` as JSON text, as Jackson writes it: a double as Java writes one, `1.0E7`, an infinity as SQLite writes
+     * one, {@link INFINITY}, and NaN as {@link NAN_TEXT}.
+     */
     write(value: JsonValue): string {
         if (value === null) {
             return 'null';
@@ -42,7 +51,7 @@ export const SqliteCypherValues = {
             return quoted(value);
         }
         if (value instanceof JsonNumber) {
-            return asText(value);
+            return nonFiniteText(value) ?? asText(value);
         }
         if (Array.isArray(value)) {
             return `[${value.map((it) => SqliteCypherValues.write(it)).join(',')}]`;
@@ -56,17 +65,17 @@ export const SqliteCypherValues = {
      * values in any order, and nothing to a value of another kind.
      */
     equal(a: JsonValue, b: JsonValue): boolean {
+        if (isNaNMap(a) || isNaNMap(b)) {
+            return false;
+        }
         if (isNumber(a) && isNumber(b)) {
             return numberOrder(a, b) === 0;
         }
         if (Array.isArray(a) && Array.isArray(b)) {
-            return a.length === b.length && a.every((it, i) => SqliteCypherValues.equal(it, b[i]));
+            return listsEqual(a, b);
         }
         if (a instanceof Map && b instanceof Map) {
-            return (
-                a.size === b.size &&
-                [...a].every(([key, value]) => b.has(key) && SqliteCypherValues.equal(value, b.get(key)!))
-            );
+            return mapsEqual(a, b);
         }
         return (a === null || typeof a !== 'object') && a === b;
     },
@@ -80,6 +89,9 @@ export const SqliteCypherValues = {
     compare(a: JsonValue, b: JsonValue): boolean | undefined {
         if (a === null || b === null) {
             return undefined;
+        }
+        if (isNaNMap(a) || isNaNMap(b)) {
+            return false;
         }
         if (Array.isArray(a) && Array.isArray(b)) {
             return a.length !== b.length ? false : all(a.map((it, i) => [it, b[i]]));
@@ -103,14 +115,13 @@ export const SqliteCypherValues = {
     },
 
     /**
-     * `a + b`, as Cypher adds two values: numbers summed, a whole number where both are; lists joined, or an item put at
-     * a list's end or start; a text and a text or a number written one after the other. Undefined for any other two.
+     * `a + b`, as Cypher adds two values: numbers summed, a whole number where both are, NaN among them; lists joined, or
+     * an item put at a list's end or start; a text and a text or a number written one after the other, NaN as `NaN`.
+     * Undefined for any other two.
      */
     add(a: JsonValue, b: JsonValue): JsonValue | undefined {
-        if (isNumber(a) && isNumber(b)) {
-            return typeof a.value === 'bigint' && typeof b.value === 'bigint'
-                ? new JsonNumber(a.value + b.value)
-                : new JsonNumber(double(a) + double(b));
+        if (isNumeric(a) && isNumeric(b)) {
+            return sum(a, b);
         }
         if (Array.isArray(a)) {
             return Array.isArray(b) ? [...a, ...b] : [...a, b];
@@ -118,8 +129,8 @@ export const SqliteCypherValues = {
         if (Array.isArray(b)) {
             return [a, ...b];
         }
-        if ((typeof a === 'string' || isNumber(a)) && (typeof b === 'string' || isNumber(b))) {
-            return asText(a) + asText(b);
+        if ((typeof a === 'string' || isNumeric(a)) && (typeof b === 'string' || isNumeric(b))) {
+            return addedText(a) + addedText(b);
         }
         return undefined;
     },
@@ -140,11 +151,11 @@ export const SqliteCypherValues = {
      * Where `a` comes beside `b` as Cypher orders two values in a comparison (`<`, `>=` …): -1 before, 0 equal, 1 after.
      * A list beside a list item by item, the first pair that is not equal deciding, and a list that the other starts with
      * first; a number beside a number, a text beside a text by its code points, and a truth value beside a truth value.
-     * Undefined where they are not ordered: a null, values of two kinds, or two maps that differ, which Cypher orders and
-     * the compiler does not yet.
+     * Undefined where they are not ordered: a null, NaN, values of two kinds, or two maps that differ, which Cypher
+     * orders and the compiler does not yet.
      */
     order(a: JsonValue, b: JsonValue): number | undefined {
-        if (a === null || b === null) {
+        if (a === null || b === null || isNaNMap(a) || isNaNMap(b)) {
             return undefined;
         }
         if ((Array.isArray(a) && Array.isArray(b)) || (a instanceof Map && b instanceof Map)) {
@@ -157,8 +168,9 @@ export const SqliteCypherValues = {
      * The JSON text `text` as text that orders, as SQLite orders text, as Cypher orders lists, where it is a list: item
      * by item, a list that begins another first, and items of different kinds as Cypher orders kinds (a map, a list, a
      * text, a truth value, a number, then null last). Each item is its kind's rank, then itself: a number by the bits of
-     * its double, so their text orders as the numbers do; a text up to a mark below any character; a list its own items,
-     * then its end, which comes before any item. Null where the value is no value; a value that is no list, its text.
+     * its double, so their text orders as the numbers do, NaN after them all; a text up to a mark below any character; a
+     * list its own items, then its end, which comes before any item. Null where the value is no value; a value that is no
+     * list, its text.
      */
     sortKey(text: string): string | null {
         const value = SqliteCypherValues.read(text);
@@ -173,6 +185,71 @@ export const SqliteCypherValues = {
         return out.join('');
     }
 };
+
+/**
+ * NaN as SQLite's JSON text writes it, where its JSON holds no NaN: the map drivine4j's statements given NaN write, and
+ * the one map that is NaN.
+ */
+export const NAN_TEXT = '{"$numberDouble":"NaN"}';
+
+/** The key and the value of the map that is NaN: see {@link NAN_TEXT}. */
+export const NAN_KEY = '$numberDouble';
+export const NAN_VALUE = 'NaN';
+
+/**
+ * An infinity as SQLite reads it, as it reads `9.0e+999`, which its JSON writes for one: a number past any double's,
+ * which JSON.parse reads as the infinity too. Java's `Infinity` SQLite reads as JSON5, and JSON.parse refuses.
+ */
+const INFINITY = '9e999';
+
+/** NaN, as {@link NAN_TEXT} writes it. */
+function nan(): Map<string, JsonValue> {
+    return new Map([[NAN_KEY, NAN_VALUE]]);
+}
+
+/** Whether `value` is NaN: the map of {@link NAN_TEXT}, and no other. */
+function isNaNMap(value: JsonValue): value is Map<string, JsonValue> {
+    return value instanceof Map && value.size === 1 && value.get(NAN_KEY) === NAN_VALUE;
+}
+
+/** Whether `value` is a number, NaN among them. */
+function isNumeric(value: JsonValue): value is JsonNumber | Map<string, JsonValue> {
+    return isNumber(value) || isNaNMap(value);
+}
+
+/** The JSON text of the number `value` where it is NaN or an infinity, as SQLite's JSON writes each; else undefined. */
+function nonFiniteText(value: JsonNumber): string | undefined {
+    if (typeof value.value === 'bigint' || Number.isFinite(value.value)) {
+        return undefined;
+    }
+    return Number.isNaN(value.value) ? NAN_TEXT : value.value > 0 ? INFINITY : `-${INFINITY}`;
+}
+
+/** The text `value`, a text or a number, is put together with another as: NaN and an infinity as Java writes them. */
+function addedText(value: string | JsonNumber | Map<string, JsonValue>): string {
+    return value instanceof Map ? NAN_VALUE : asText(value);
+}
+
+/** Whether the lists `a` and `b` are of equal items in the same order: see {@link SqliteCypherValues.equal}. */
+function listsEqual(a: JsonValue[], b: JsonValue[]): boolean {
+    return a.length === b.length && a.every((it, i) => SqliteCypherValues.equal(it, b[i]));
+}
+
+/** Whether the maps `a` and `b` are of the same keys with equal values: see {@link SqliteCypherValues.equal}. */
+function mapsEqual(a: Map<string, JsonValue>, b: Map<string, JsonValue>): boolean {
+    return (
+        a.size === b.size && [...a].every(([key, value]) => b.has(key) && SqliteCypherValues.equal(value, b.get(key)!))
+    );
+}
+
+/** The sum of the numbers `a` and `b`: a whole number where both are, else a double, and NaN as its map. */
+function sum(a: JsonNumber | Map<string, JsonValue>, b: JsonNumber | Map<string, JsonValue>): JsonValue {
+    if (isNumber(a) && isNumber(b) && typeof a.value === 'bigint' && typeof b.value === 'bigint') {
+        return new JsonNumber(a.value + b.value);
+    }
+    const summed = double(a) + double(b);
+    return Number.isNaN(summed) ? nan() : new JsonNumber(summed);
+}
 
 /** Whether `a` and `b`, pairs, are all equal: false where a pair is not, else undefined where a pair is unknown. */
 function all(pairs: [JsonValue, JsonValue][]): boolean | undefined {
@@ -227,8 +304,9 @@ function isNumber(value: JsonValue): value is JsonNumber {
     return value instanceof JsonNumber;
 }
 
-function double(value: JsonNumber): number {
-    return Number(value.value);
+/** `value`, a number, as a double: NaN for NaN's map. */
+function double(value: JsonNumber | Map<string, JsonValue>): number {
+    return value instanceof Map ? NaN : Number(value.value);
 }
 
 /** A number or a text as Jackson's `asText` writes it: a double as Java writes one. */
@@ -274,7 +352,10 @@ function keyOfList(list: JsonValue[], out: string[]): void {
 }
 
 function keyOfItem(item: JsonValue, out: string[]): void {
-    if (item instanceof Map) {
+    if (isNaNMap(item)) {
+        // NaN is a number, whose bits come after every other's, an infinity's too.
+        out.push('5', keyOfNumber(NaN));
+    } else if (item instanceof Map) {
         out.push('1');
         keyOfText(SqliteCypherValues.write(SqliteCypherValues.canonical(item)), out);
     } else if (Array.isArray(item)) {

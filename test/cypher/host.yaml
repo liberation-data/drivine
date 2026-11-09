@@ -219,6 +219,196 @@ cases:
         args: [null]
         result: null
 
+  - name: "regexp"
+    description: "regexp(pattern, text), which SQLite calls for its operator text REGEXP pattern, the pattern first, is 1 where the pattern, a regular expression as Java writes one, matches somewhere in the text, and 0 where it matches nowhere; null where either is null. Compiled SQL's patterns are written only with what every library's regular expressions read alike, and these steps pin it: ^ is the text's start and \\z its end, not before a line break that ends it; a class is written out, with \\t, \\n, \\f, \\r, \\xNN and \\uNNNN and ranges of them; [0-9] is ASCII's digits alone; a backslash makes a character of the syntax itself; groups, (?:\u2026), alternatives, ?, * and + and {m,n} repeat as Java's do; and a leading (?i) in =~'s group, (?:(?i)\u2026), matches ASCII's letters in either case. What the hosts read otherwise, compiled SQL does not lean on: see README.md."
+    pairs:
+      queries.yaml: ["toFloat() of a text, as Neo4j reads it", "Regular expressions and more functions"]
+      temporal.yaml: ["Comparing moments", "Offset without a colon"]
+    steps:
+      - note: "The pattern first, then the text."
+        function: "regexp"
+        args: ['b', 'abc']
+        result: 1
+      - function: "regexp"
+        args: ['abc', 'b']
+        result: 0
+      - function: "regexp"
+        args: [null, 'a']
+        result: null
+      - function: "regexp"
+        args: ['a', null]
+        result: null
+      - note: "^ is the text's start, not a line's."
+        function: "regexp"
+        args: ['^b', "a\nb"]
+        result: 0
+      - note: "\\z is the text's end."
+        function: "regexp"
+        args: ['^a\z', 'a']
+        result: 1
+      - note: "Not before a line break that ends the text, where Java's $ matches."
+        function: "regexp"
+        args: ['^a\z', "a\n"]
+        result: 0
+      - function: "regexp"
+        args: ['^a\z', "a\r\n"]
+        result: 0
+      - function: "regexp"
+        args: ['^a\z', "a\u2028"]
+        result: 0
+      - function: "regexp"
+        args: ['^a\z', 'ab']
+        result: 0
+      - note: "=~'s group around a user's pattern: the whole of the text matches one of its alternatives."
+        function: "regexp"
+        args: ['^(?:a|bc)\z', 'bc']
+        result: 1
+      - function: "regexp"
+        args: ['^(?:a|bc)\z', 'abc']
+        result: 0
+      - note: "A leading (?i) in it matches in either case."
+        function: "regexp"
+        args: ['^(?:(?i)keanu)\z', 'Keanu']
+        result: 1
+      - function: "regexp"
+        args: ['^(?:(?i)kea)\z', 'Keanu']
+        result: 0
+      - function: "regexp"
+        args: ['^(?:(?i)[ck].*)\z', 'Carrie']
+        result: 1
+      - note: "ASCII's spaces, by their escapes, and no other."
+        function: "regexp"
+        args: ['^[\t\n\x0B\f\r ]*1[\t\n\x0B\f\r ]*\z', "\t\n\x0b\f\r 1 \r\n"]
+        result: 1
+      - function: "regexp"
+        args: ['^[\t\n\x0B\f\r ]*1\z', "\u00a01"]
+        result: 0
+      - function: "regexp"
+        args: ['^[\t\n\x0B\f\r ]*1\z', "\x1c1"]
+        result: 0
+      - note: "A range of \\xNN escapes: what Java's String.trim takes off, U+0001 to the space here."
+        function: "regexp"
+        args: ['^[\x00-\x20]*[+-]?NaN[\x00-\x20]*\z', "\x01-NaN\x1f "]
+        result: 1
+      - function: "regexp"
+        args: ['^[\x00-\x20]*[+-]?NaN[\x00-\x20]*\z', "\x21NaN"]
+        result: 0
+      - function: "regexp"
+        args: ['^[\x00-\x20]*[+-]?NaN[\x00-\x20]*\z', "NaN\u00a0"]
+        result: 0
+      - note: "\\uNNNN escapes and ranges of them: Cypher's spaces, as compiled SQL writes them, each in, and characters beside them out."
+        function: "regexp"
+        args: ['^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*1[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*\z', "\x09\x0d\x1c\x20\x851"]
+        result: 1
+      - function: "regexp"
+        args: ['^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*1[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*\z', "\u00a0\u1680\u2000\u200a1\u2028\u2029\u202f\u205f\u3000"]
+        result: 1
+      - function: "regexp"
+        args: ['^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*1\z', "\ufeff1"]
+        result: 0
+      - function: "regexp"
+        args: ['^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*1\z', "\u200b1"]
+        result: 0
+      - function: "regexp"
+        args: ['^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*1\z', "\u180e1"]
+        result: 0
+      - function: "regexp"
+        args: ['^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028-\u2029\u202f\u205f\u3000]*1\z', "\x1b1"]
+        result: 0
+      - note: "[0-9] is ASCII's digits, not another script's."
+        function: "regexp"
+        args: ['^-?[0-9]{4}-[0-9]{2}-[0-9]{2}\z', '-0044-03-15']
+        result: 1
+      - function: "regexp"
+        args: ['^[0-9]{4}\z', "\uff12\uff10\uff12\uff14"]
+        result: 0
+      - function: "regexp"
+        args: ['^[0-9]{4}\z', "\u0662\u0660\u0662\u0664"]
+        result: 0
+      - note: "A date's pattern, as compiled SQL tells a kind by it, ends at the text's end."
+        function: "regexp"
+        args: ['^-?[0-9]{4}-[0-9]{2}-[0-9]{2}\z', "2024-03-15\n"]
+        result: 0
+      - function: "regexp"
+        args: ['^[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})\z', '10:15:00.5-0530']
+        result: 1
+      - function: "regexp"
+        args: ['^[0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?(Z|[+-][0-9]{2}:?[0-9]{2})\z', '10:15x00Z']
+        result: 0
+      - note: "{m,n} repeats as many as it says, and a backslash makes a character of the syntax itself."
+        function: "regexp"
+        args: ['^(0|[1-9][0-9]{0,2})\z', '1000']
+        result: 0
+      - function: "regexp"
+        args: ['^\+?Infinity\z', '+Infinity']
+        result: 1
+      - function: "regexp"
+        args: ['^[0-9]+\.?[0-9]*\z', '1x5']
+        result: 0
+
+  - name: "drivine_regex_group"
+    description: "drivine_regex_group(text, pattern, group) is the text the group of that number matches where the pattern first matches in the text, as Postgres's regexp_match gives it; null where the pattern matches nowhere, or the group takes no part, or the text is null. The pattern is written as regexp's are, and \\z is the text's end."
+    pairs:
+      temporal.yaml: ["Fields of a duration", "Offset without a colon"]
+    steps:
+      - function: "drivine_regex_group"
+        args: ['10:15-0530', '(Z|[+-][0-9]{2}:?[0-9]{2})\z', 1]
+        result: '-0530'
+      - function: "drivine_regex_group"
+        args: ['2024-03-15T10:30:00Z', '(Z|[+-][0-9]{2}:?[0-9]{2})\z', 1]
+        result: 'Z'
+      - note: "Not before a line break that ends the text."
+        function: "drivine_regex_group"
+        args: ["10:15-0530\n", '(Z|[+-][0-9]{2}:?[0-9]{2})\z', 1]
+        result: null
+      - function: "drivine_regex_group"
+        args: ['P1Y2M3DT4H5M6S', '^(-?)P((-?[0-9.]+)Y)?((-?[0-9.]+)M)?((-?[0-9.]+)W)?((-?[0-9.]+)D)?', 3]
+        result: '1'
+      - function: "drivine_regex_group"
+        args: ['P1Y2M3DT4H5M6S', '^(-?)P((-?[0-9.]+)Y)?((-?[0-9.]+)M)?((-?[0-9.]+)W)?((-?[0-9.]+)D)?', 9]
+        result: '3'
+      - note: "A group that takes no part."
+        function: "drivine_regex_group"
+        args: ['P1Y2M3DT4H5M6S', '^(-?)P((-?[0-9.]+)Y)?((-?[0-9.]+)M)?((-?[0-9.]+)W)?((-?[0-9.]+)D)?', 7]
+        result: null
+      - function: "drivine_regex_group"
+        args: ['P1Y2M3DT4H5M6.5S', 'T((-?[0-9.]+)H)?((-?[0-9.]+)M)?((-?[0-9.]+)S)?\z', 6]
+        result: '6.5'
+      - function: "drivine_regex_group"
+        args: ["P1DT4H\n", 'T((-?[0-9.]+)H)?((-?[0-9.]+)M)?((-?[0-9.]+)S)?\z', 2]
+        result: null
+      - function: "drivine_regex_group"
+        args: [null, '(Z|[+-][0-9]{2}:?[0-9]{2})\z', 1]
+        result: null
+
+  - name: "drivine_regexp_replace"
+    description: "drivine_regexp_replace(text, pattern, replacement) is the text with each match of the pattern replaced, a backslash and a digit in the replacement naming a group, as Postgres's and Oracle's name one; null where any is null. The pattern is written as regexp's are, and \\z is the text's end."
+    pairs:
+      temporal.yaml: ["Offset without a colon", "Zero offset is UTC"]
+    steps:
+      - function: "drivine_regexp_replace"
+        args: ['+00:00', '^[+-]00:?00\z', 'Z']
+        result: 'Z'
+      - function: "drivine_regexp_replace"
+        args: ['-0000', '^[+-]00:?00\z', 'Z']
+        result: 'Z'
+      - function: "drivine_regexp_replace"
+        args: ['+02:00', '^[+-]00:?00\z', 'Z']
+        result: '+02:00'
+      - note: "Not before a line break that ends the text."
+        function: "drivine_regexp_replace"
+        args: ["+00:00\n", '^[+-]00:?00\z', 'Z']
+        result: "+00:00\n"
+      - function: "drivine_regexp_replace"
+        args: ['-0530', '^([+-][0-9]{2})([0-9]{2})\z', '\1:\2']
+        result: '-05:30'
+      - function: "drivine_regexp_replace"
+        args: ['-05:30', '^([+-][0-9]{2})([0-9]{2})\z', '\1:\2']
+        result: '-05:30'
+      - function: "drivine_regexp_replace"
+        args: [null, '^[+-]00:?00\z', 'Z']
+        result: null
+
   - name: "Postgres rows of a statement given NaN or an infinity"
     description: "Postgres's jsonb holds neither NaN nor an infinity, so a statement given one (nonFinite) writes stand-in numbers past any double's: NaN is exactly 2e309 + 0.5, a number at or past 1e309 is an infinity, and one at or below -1e309 the negative infinity. They are read as such only in the rows of a statement given one; elsewhere a column is read as JSON is. The tag SQLite writes for NaN is a map on Postgres."
     pairs:

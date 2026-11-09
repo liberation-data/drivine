@@ -1,8 +1,6 @@
 import { DatabaseRegistry, DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
-import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
-import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
+import { CompiledCypher } from '@/cypher/CompiledCypher';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { oraclePlan } from '../support/Oracle';
 import { cypherSqlStores, sqlPersistenceManager, SqlStore } from '../support/SqlStores';
@@ -48,7 +46,8 @@ function connectionName(store: SqlStore): string {
 function sqlitePlanner(pm: PersistenceManager): Planner {
     return {
         item: ':Item',
-        compiled: (cypher, parameters) => new SqliteCypherCompiler(GRAPH).compile(cypher, parameters),
+        compiled: (cypher, parameters) =>
+            new SharedCypherCompiler('sqlite', { name: GRAPH }).compile(cypher, parameters),
         /** A line for each table or rows the plan reads, each led by the table it reads. */
         async plan(compiled: CompiledCypher): Promise<string> {
             const tables = new Map(
@@ -84,7 +83,8 @@ function postgresPlanner(pm: PersistenceManager, store: SqlStore): Planner {
     const key = (table: string): string => (table === 'node' ? 'nid' : 'eid');
     return {
         item: ':Item',
-        compiled: (cypher, parameters) => new PostgresCypherCompiler(GRAPH).compile(cypher, parameters),
+        compiled: (cypher, parameters) =>
+            new SharedCypherCompiler('postgres', { name: GRAPH }).compile(cypher, parameters),
         /**
          * The plan of `compiled` with no hash or merge join. Over a graph this small, Postgres reads every node once and
          * joins them to a hundred ids by a hash of the key, where it reads each node by the key over a larger one:
@@ -155,10 +155,13 @@ function oraclePlanner(pm: PersistenceManager, store: SqlStore): Planner {
             );
     };
     const scansAny = (plan: string, table: string): boolean =>
-        new RegExp(`TABLE ACCESS (STORAGE )?FULL\\s*\\|\\s*${GRAPH.toUpperCase()}_${table.toUpperCase()}\\b`).test(plan);
+        new RegExp(`TABLE ACCESS (STORAGE )?FULL\\s*\\|\\s*${GRAPH.toUpperCase()}_${table.toUpperCase()}\\b`).test(
+            plan
+        );
     return {
         item: '',
-        compiled: (cypher, parameters) => new OracleCypherCompiler(GRAPH).compile(cypher, parameters),
+        compiled: (cypher, parameters) =>
+            new SharedCypherCompiler('oracle', { name: GRAPH }).compile(cypher, parameters),
         /** The plan Oracle makes for `compiled`, its values written in as literals, explained and read on one session. */
         plan: async (compiled) => oraclePlan(connectionName(store), compiled, 'BASIC +PREDICATE'),
         /**

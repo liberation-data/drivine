@@ -1,8 +1,8 @@
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { CompiledSpecification } from '@/cypher/sql/CompiledSpecification';
-import { CompiledRows } from '@/cypher/sql/CompiledCypher';
+import { CompiledSpecification } from '@/cypher/CompiledSpecification';
+import { CompiledRows } from '@/cypher/CompiledCypher';
 import { compiledAs } from '../../CompiledAs';
 
 /** A session whose every statement gives `result`, as node-oracledb gives it. */
@@ -22,12 +22,12 @@ const block = (rows: CompiledRows): CompiledSpecification<unknown> => ({
 });
 
 /**
- * An implicit result of Drivine's own compiler: one row, its column `rows:json` the rows as JSON text, a CLOB read as
- * text (see OracleCypherCompiler.returnRows).
+ * An implicit result of the shared compiler with `oracleRowsAsText`: one row, its column `rows:json` the rows as JSON
+ * text, a CLOB read as text.
  */
 const ONE = { implicitResults: [[{ 'rows:json': '[1, {"a": [2, "x"]}, null]' }]] };
 
-/** An implicit result of drivine4j's compiler: a row for each, in a JSON column `result`, which Oracle names `RESULT`. */
+/** An implicit result of the shared compiler otherwise: a row for each, in a JSON column `result`, which Oracle names `RESULT`. */
 const EACH = { implicitResults: [[{ RESULT: 1 }, { RESULT: { a: [2, 'x'] } }, { RESULT: null }]] };
 
 /**
@@ -71,13 +71,38 @@ describe('The rows of a compiled Oracle write', () => {
         expect(it.execute.mock.calls[0][2].keepInStmtCache).toBe(false);
     });
 
-    it("should read a Cypher write compiled by Drivine's own compiler as 'one'", async () => {
+    it("should read a Cypher write compiled by the shared compiler as 'one', its rows as text", async () => {
         const it = session(ONE);
         const rows = await connection(it).query(
             new QuerySpecification({ text: 'CREATE (n:T) RETURN n.x AS x', language: 'CYPHER' })
         );
-        expect(it.execute.mock.calls.at(-1)[0]).toContain('DBMS_SQL.RETURN_RESULT');
+        expect(it.execute.mock.calls.at(-1)[0]).toContain('AS "rows:json"');
         expect(rows).toEqual([1, { a: [2, 'x'] }, null]);
+    });
+
+    it("should read a float, NaN and the infinities of Oracle's extended JSON in a write's rows, at any depth", async () => {
+        const floats = {
+            implicitResults: [
+                [
+                    {
+                        'rows:json':
+                            '[{"$numberDouble": 2}, [{"$numberDouble": 2.5}, {"$numberDouble": "Nan"}], ' +
+                            '{"k": {"$numberDouble": "Inf"}, "l": {"$numberDouble": "-Inf"}}, ' +
+                            '{"$numberDouble": "x"}, {"$numberDouble": "constructor"}, {"$numberDouble": 1, "y": 2}, "2026-01-02T03:04:05.123Z"]'
+                    }
+                ]
+            ]
+        };
+        const rows = await compiledAs(connection(session(floats)), block('one'));
+        expect(rows).toEqual([
+            2,
+            [2.5, NaN],
+            { k: Infinity, l: -Infinity },
+            { $numberDouble: 'x' },
+            { $numberDouble: 'constructor' },
+            { $numberDouble: 1, y: 2 },
+            '2026-01-02T03:04:05.123Z'
+        ]);
     });
 
     it("should hand back a SQL block's implicit result as it is, whatever its columns are named", async () => {

@@ -4,6 +4,7 @@ export * from './annotation';
 export * from './backend';
 export * from './connection';
 export * from './context';
+export * from './cypher';
 export * from './cursor';
 export * from './dsl';
 export * from './logger';

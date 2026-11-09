@@ -1,4 +1,4 @@
-import { javaDouble } from '@/cypher/sql/JsonText';
+import { javaDouble } from '@/connection/sqlite/JavaDouble';
 
 /** How a decimal is rounded to fewer places: Java's `RoundingMode`, by its name. */
 export type RoundingMode = 'UP' | 'DOWN' | 'CEILING' | 'FLOOR' | 'HALF_UP' | 'HALF_DOWN' | 'HALF_EVEN' | 'UNNECESSARY';

@@ -1,8 +1,11 @@
 import { DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
-import { NO_FEEDBACK, OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { describeOnOracle, oraclePlan } from '../support/Oracle';
 import { sqlPersistenceManager, SqlStore } from '../support/SqlStores';
+
+/** The hint that plans a statement without statistics feedback, as the shared compiler writes it (drivine4j's `OracleCypherCompiler.planned`). */
+const NO_FEEDBACK = "OPT_PARAM('_optimizer_use_feedback' 'false')";
 
 jest.setTimeout(120_000);
 
@@ -25,7 +28,7 @@ describeOnOracle('A node equal to a node matched before it, as Oracle plans it',
 
     /** That `statement` gives `expected`, and that Oracle keeps the join of the later of the two nodes compared. */
     const assertJoined = async (statement: string, expected: any[]): Promise<void> => {
-        const compiled = new OracleCypherCompiler(GRAPH).compile(statement);
+        const compiled = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(statement);
         const compared = /\b(n(\d+))\.nid = (n(\d+))\.nid\b/.exec(compiled.sql);
         expect([statement, compiled.sql, compared !== null]).toEqual([statement, compiled.sql, true]);
         const [, a, an, b, bn] = compared!;
@@ -62,9 +65,10 @@ describeOnOracle('A node equal to a node matched before it, as Oracle plans it',
         await assertJoined("MATCH (p {name: 'Keanu'})<-[:KNOWS]-(q) MATCH (c:Person) WHERE c = q RETURN c.name", [
             'Laurence'
         ]);
-        await assertJoined("MATCH (p:Person {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE c = q RETURN c.name", [
-            'Carrie'
-        ]);
+        await assertJoined(
+            "MATCH (p:Person {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE c = q RETURN c.name",
+            ['Carrie']
+        );
         await assertJoined(`${knows}, (c:Person) WHERE c = q RETURN c.name`, ['Carrie']);
         await assertJoined(`${knows} MATCH (c:Person) WHERE id(c) = id(q) RETURN c.name`, ['Carrie']);
     });
@@ -76,7 +80,7 @@ describeOnOracle('A node equal to a node matched before it, as Oracle plans it',
     it('a node read by its key in a statement that writes is found, and written', async () => {
         const statement =
             "MATCH (p {name: 'Keanu'})-[:KNOWS]->(q) MATCH (c:Person) WHERE c = q SET c.seen = true RETURN c.name";
-        const sql = new OracleCypherCompiler(GRAPH).compile(statement).sql;
+        const sql = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(statement).sql;
         expect([sql, sql.includes(NO_FEEDBACK)]).toEqual([sql, true]);
         try {
             expect([statement, await query(statement)]).toEqual([statement, ['Carrie']]);

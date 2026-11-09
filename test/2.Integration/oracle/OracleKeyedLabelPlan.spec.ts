@@ -1,8 +1,11 @@
 import { DatabaseRegistry, DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
-import { NO_FEEDBACK, OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { closeGraphEngines } from '../support/GraphEngines';
 import { describeOnOracle, oracleLastPlan, oraclePlan } from '../support/Oracle';
 import { sqlPersistenceManager, SqlStore } from '../support/SqlStores';
+
+/** The hint that plans a statement without statistics feedback, as the shared compiler writes it (drivine4j's `OracleCypherCompiler.planned`). */
+const NO_FEEDBACK = "OPT_PARAM('_optimizer_use_feedback' 'false')";
 
 jest.setTimeout(300_000);
 
@@ -45,7 +48,7 @@ describeOnOracle('A node with a label set equal to a node found before it, as Or
 
     /** That `statement` counts `expected`, and that Oracle reads `b`, the later of the two nodes compared, by its primary key, and keeps its join. */
     const assertReadByKey = async (statement: string, expected: number): Promise<void> => {
-        const compiled = new OracleCypherCompiler(GRAPH).compile(statement);
+        const compiled = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(statement);
         const later = laterCompared(compiled.sql);
         const plan = await oraclePlan(`${STORE.name}_${GRAPH}`, compiled, 'BASIC +PREDICATE +OUTLINE');
         expect([
@@ -120,7 +123,7 @@ describeOnOracle('A node with a label set equal to a node found before it, as Or
                 ['MATCH (a:Big:Other) MATCH (b:Big:Other) WHERE a = b RETURN count(*)', NODES],
                 ['MATCH (x:Small)-[:R]->(a:Big) MATCH (b:Big) WHERE a = b RETURN count(*)', NODES / 2]
             ] as const) {
-                const sql = new OracleCypherCompiler(GRAPH).compile(statement).sql;
+                const sql = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(statement).sql;
                 expect([statement, sql.includes(NO_FEEDBACK)]).toEqual([statement, true]);
                 const b = laterCompared(sql);
                 // A new cursor: statistics gathered again invalidate the one an earlier test, or statement, ran.

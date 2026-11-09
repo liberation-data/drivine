@@ -5,12 +5,23 @@
 # A failure opens an issue labelled `nightly`, or comments on the one open, naming the failed jobs, their failing
 # tests, and the commits since the last nightly that passed, among which is the one that broke it. A pass closes it.
 # A run on a branch other than master writes what it would say to its summary instead.
+#
+# compiler-bench compares the shared Cypher compiler's warm compile and each store's first compile with the last
+# nightly's on master that passed (scripts/bench-regression.js), and fails when a store's warm median or first compile
+# rose by more than half, in a run and its rerun.
+# Its numbers are the run's `compiler-bench` artifact, which the next night compares with. A slowdown that is accepted
+# never passes that, so run the nightly by hand with `record-bench` to record that night's numbers without comparing.
 name: Nightly
 
 on:
     schedule:
         - cron: '0 17 * * *'
     workflow_dispatch:
+        inputs:
+            record-bench:
+                description: Record the compiler bench's numbers as the next baseline, without comparing them with the last nightly's.
+                type: boolean
+                default: false
 
 # Read only, so the tests run with a token that can't write to the repository; the report job asks for what it needs.
 permissions:
@@ -22,8 +33,66 @@ jobs:
         with:
             full: true
 
+    # The bench at its default runs and rounds, against the last nightly's numbers: see scripts/bench-regression.js.
+    # Without them (the first night, theirs have expired, or a run by hand with `record-bench`), it records tonight's and
+    # passes.
+    compiler-bench:
+        name: compiler bench against the last nightly
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        permissions:
+            contents: read
+            actions: read
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+                  cache: npm
+            - run: npm ci
+            - run: npm run build
+            - name: Find the last nightly's numbers
+              id: last
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  RECORD: ${{ inputs.record-bench }}
+              run: |
+                  if [ "$RECORD" = true ]; then
+                      echo "Run with record-bench: tonight's numbers are recorded, and not compared with the last nightly's."
+                      exit 0
+                  fi
+                  run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/nightly.yml/runs?branch=master&status=success&per_page=1" \
+                      -q '.workflow_runs[0].id // empty')
+                  found=0
+                  if [ -n "$run" ]; then
+                      found=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=compiler-bench" \
+                          -q '[.artifacts[] | select(.expired | not)] | length')
+                  fi
+                  if [ "$found" -gt 0 ]; then
+                      echo "run=$run" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "No numbers left by a nightly that passed on master${run:+: the last, run $run, has none}."
+                  fi
+            - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              if: steps.last.outputs.run != ''
+              with:
+                  name: compiler-bench
+                  path: last-nightly
+                  run-id: ${{ steps.last.outputs.run }}
+                  github-token: ${{ github.token }}
+            - name: Bench the compiler against the last nightly
+              run: node scripts/bench-regression.js last-nightly/compiler-bench.json compiler-bench.json
+            # Not uploaded when it failed, so a regression is compared with the same numbers again until a nightly passes.
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: compiler-bench
+                  path: compiler-bench.json
+                  if-no-files-found: error
+                  # Overwritten when the run is re-run, as an artifact's name is unique within a run.
+                  overwrite: true
+
     report:
-        needs: ci
+        needs: [ci, compiler-bench]
         if: always()
         runs-on: ubuntu-latest
         permissions:
@@ -37,7 +106,8 @@ jobs:
             - name: Open, update or close the nightly issue
               env:
                   GH_TOKEN: ${{ github.token }}
-                  RESULT: ${{ needs.ci.result }}
+                  # Failed when either failed, then cancelled when either was.
+                  RESULT: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || 'success' }}
                   EVENT: ${{ github.event_name }}
                   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
                   POST: ${{ github.ref == 'refs/heads/master' }}
@@ -87,9 +157,10 @@ jobs:
                                   echo "### [$name]($url)"
                               fi
                               echo
-                              # Jest's lines for a failed suite and each failed test, without the log's timestamps.
+                              # Jest's lines for a failed suite and each failed test, and the compiler bench's for a
+                              # regression or its load over budget, without the log's timestamps.
                               failing=$(gh api --allow-escape-sequences "repos/$repo/actions/jobs/$id/logs" |
-                                  sed -E 's/^[^ ]+ //; s/\x1b\[[0-9;]*m//g' | grep -E '^(FAIL |  ● )' |
+                                  sed -E 's/^[^ ]+ //; s/\x1b\[[0-9;]*m//g' | grep -E '^(FAIL |  ● |\*\*(Regressed|Over budget):\*\*)' |
                                   grep -v '● Console' | awk '!seen[$0]++' | head -40 || true)
                               if [ -n "$failing" ]; then
                                   printf '```\n%s\n```\n' "$failing"

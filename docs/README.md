@@ -20,3 +20,4 @@ The Drivine for TypeScript guide, a file per section. It is also on [drivine.org
 - [Feedback](17-feedback.md)
 - [Building from Source](18-building-from-source.md)
 - [License](19-license.md)
+- [Upgrading to 4.0](20-upgrading-to-4.md)

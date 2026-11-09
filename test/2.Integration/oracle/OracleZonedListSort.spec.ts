@@ -2,7 +2,7 @@ import * as oracledb from 'oracledb';
 import { ConnectionPropertiesFromEnv, QuerySpecification } from '@liberation-data/drivine';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { TEST_CONTAINER_PASSWORD } from '@/testing';
 import { describeOnOracle } from '../support/Oracle';
 
@@ -107,11 +107,11 @@ describeOnOracle('a list of zoned values on Oracle', () => {
      * The first column of each row `cypher`, compiled for Oracle, gives, as JSON text; failing where they take past
      * `seconds`, which is short of the 21 seconds the parse of a `JSON_TABLE` over liberation-data/drivine4j#331's list
      * took, and far past the 15 to 200 milliseconds each of these statements takes, so a loaded machine does not fail them.
-     * A statement that writes is a block that hands its rows back in one, as OracleConnection reads them, and what it
+     * A statement that writes is a block that hands its rows back as the compiler says, as OracleConnection reads them, and what it
      * writes is rolled back.
      */
     const rows = async (cypher: string, seconds: number = 10): Promise<string[]> => {
-        const cypherCompiled = new OracleCypherCompiler(GRAPH).compile(cypher);
+        const cypherCompiled = new SharedCypherCompiler('oracle', { name: GRAPH }).compile(cypher);
         // Its parameters bound as OracleConnection binds them: a write reads them from one, `$_cy_params`.
         const compiled = new OracleSpecCompiler(
             new QuerySpecification(cypherCompiled.sql).bind(cypherCompiled.parameters).finalizedCopy('SQL')
@@ -130,9 +130,16 @@ describeOnOracle('a list of zoned values on Oracle', () => {
             const result = await Promise.race([running, deadline]);
             if (result !== undefined) {
                 const written = result.rows ? undefined : (result.implicitResults?.[0] as any[][] | undefined);
-                return (written ? JSON.parse(written[0][0]) : (result.rows ?? []).map((it) => it[0])).map((it: any) =>
-                    JSON.stringify(it)
-                );
+                // A write hands back a row for each, as the compiler says (CompiledRows), each its value in one column.
+                const value = (it: any): any => (typeof it === 'string' ? JSON.parse(it) : it);
+                const each = cypherCompiled.rows === 'each';
+                return (
+                    written
+                        ? each
+                            ? written.map((it) => value(it[0]))
+                            : JSON.parse(written[0][0])
+                        : (result.rows ?? []).map((it) => it[0])
+                ).map((it: any) => JSON.stringify(it));
             }
             running.catch(() => undefined);
             try {

@@ -1,52 +1,71 @@
 /**
- * Measures the shared Cypher compiler, built as Wasm (`@liberation-data/drivine-cypher-compiler`), against Drivine's
- * own compiler in src/cypher/sql, on Postgres, Oracle and SQLite: the cold load and first compile, each in a fresh Node
- * process, and the warm compile over the statements of the Cypher spec in test/cypher. Only compiling: no store is
- * started. See #685.
+ * Measures the shared Cypher compiler (`@liberation-data/drivine-cypher-compiler`, the drivine-cypher-spec module built
+ * for Wasm) as Drivine runs it, on Postgres, Oracle and SQLite: through the built `dist/cypher/SharedCypherCompiler.js`,
+ * which writes each request and reads each answer as a connection's compile does. Only compiling: no store is started.
+ * See #685.
  *
  *     npm run build
- *     DRIVINE_WASM_COMPILER=<the package's .tgz, or a directory it is installed in> node scripts/bench-compiler.js
+ *     npm run bench:compiler [-- --json <file>]
  *
- * The package isn't on npm yet, so it is no dependency here: given its `.tgz`, the script installs it, and the
- * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry), removed when it ends. A run cut
- * short by a signal leaves it behind, as `drivine-wasm-compiler-*` in the system's temporary directory. Given a
- * directory, the script requires it as it is, so `@js-joda/core` must resolve from there: `npm install <tgz>` into a
- * directory of its own, and give `<that directory>/node_modules/@liberation-data/drivine-cypher-compiler` (or
- * `.../node_modules/@drivine/cypher-compiler`, the name of a package built before drivine-cypher-spec#121, such as
- * 0.32.0). With neither, the script says so and is skipped.
+ * Each cold number is timed in a fresh Node process that has loaded Drivine (`dist/index.js`) already, over several
+ * such processes. Together they are what an application pays on its first SQL statements:
+ * - Load: the package's require, resolved as SharedCypherCompiler resolves it, and its first `compile`, of a request
+ *   that names no store (`{}`, which the compiler answers with an error). That is when the package reads and
+ *   instantiates its Wasm module, with none of a store's compile work, so it is the same for every store.
+ * - First compile: the store's first compile, of `RETURN 1`, through SharedCypherCompiler, the module started.
+ * - Next compile: the compile after it, in the same process, of the spec's first statement that compiles on the store.
+ * - Warm compile: each statement of the spec in `test/cypher` that compiles on the store, over several rounds after a
+ *   warm-up, each timed from a new SharedCypherCompiler to the CompiledCypher, as a connection compiles. The parameters
+ *   are the spec's, as its runner binds them on a SQL store (test/2.Integration/cypher/CypherSpec.spec.ts).
+ * - Refused: the statements the compiler refuses, which the spec has refused or doesn't run on the store. A request
+ *   error is a request the compiler can't read, so a fault in how Drivine writes it, not a refusal.
  *
- * - Cold load: `require` of the compiler and its first compile, of `RETURN 1`, which for the Wasm compiler is when it
- *   reads and instantiates the module (its entry loads on first compile). Drivine's own is its module, from `dist`.
- * - First compile: the next compile, of the spec's first statement both compilers compile on the store.
- * - Warm compile: each statement both compilers compile on the store, over several rounds after a warm-up, the two
- *   compilers in turn, alternating which goes first. Drivine's own is timed from a new compiler to the SQL, as a
- *   connection compiles; the Wasm compiler from the request's text to the answer read with `JSON.parse`.
+ * It fails (exits 1) when the median load, in a store's cold processes, is over 150 ms: #685's budget, which is for the
+ * load alone, as a store's first compile differs from store to store. Beside the warm medians it prints the pre-switch
+ * numbers of #685, Drivine's own compiler (src/cypher/sql, since deleted) on an Apple M2 Max, for reference only:
+ * they're of another machine and a compiler that is gone, so they are not enforced. Oracle's warm compile is over 1.5x
+ * of them until liberation-data/drivine-cypher-spec#122. A regression of the warm compile or of a store's first compile
+ * is caught by the nightly instead (scripts/bench-regression.js), against the previous night's numbers.
  *
- * Environment: DRIVINE_BENCH_COLD_RUNS (10), DRIVINE_BENCH_WARMUP_ROUNDS (3), DRIVINE_BENCH_ROUNDS (10).
+ * The compiler is the installed dependency, unless DRIVINE_WASM_COMPILER names another: a candidate build, timed before
+ * it is published. Given its `.tgz` (in drivine-cypher-spec's `compiler`, `./gradlew npmPackage`, then `npm pack` of
+ * `build/npm`), the script installs it, and the `@js-joda/core` it needs, into a temporary directory (which takes the
+ * npm registry), removed when it ends; a run cut short by a signal leaves it behind, as `drivine-wasm-compiler-*` in the
+ * system's temporary directory. Given a directory, the package installed there, the script requires it as it is, so
+ * `@js-joda/core` must resolve from there. Either way, Drivine's own require of the package is pointed at it.
+ *
+ * Options: `--json <file>` writes the numbers as JSON too, for scripts/bench-regression.js. On GitHub Actions the
+ * tables are appended to $GITHUB_STEP_SUMMARY.
+ *
+ * Environment: DRIVINE_BENCH_COLD_RUNS (10), DRIVINE_BENCH_WARMUP_ROUNDS (3), DRIVINE_BENCH_ROUNDS (10),
+ * DRIVINE_WASM_COMPILER (the installed dependency).
  */
 const childProcess = require('child_process');
 const fs = require('fs');
+const Module = require('module');
 const os = require('os');
 const path = require('path');
 const { performance } = require('perf_hooks');
 
+// The compiler's warnings, as a RETURN of several items, logged at WARN, are left out: a log line in the timed compile
+// would be timed with it, and one in a cold process's output would be read as its numbers. Its processes inherit it.
+process.env.DRIVINE_LOG_LEVEL = 'ERROR';
+
 const ROOT = path.join(__dirname, '..');
+const DIST = path.join(ROOT, 'dist');
 const SPEC = path.join(ROOT, 'test', 'cypher');
+const PACKAGE = '@liberation-data/drivine-cypher-compiler';
 // schema.yaml's statements are schema DDL, which is read apart from the compiler (SchemaDdl), and so not compiled.
 const FILES = ['queries.yaml', 'writes.yaml', 'temporal.yaml', 'refusals.yaml'];
-const GRAPH = 'g';
-const COMPILERS = {
-    postgres: ['PostgresCypherCompiler', () => []],
-    // Oracle's graph as a connection compiles for it: with the stored functions, and no index named.
-    oracle: ['OracleCypherCompiler', () => [true, true, []]],
-    sqlite: ['SqliteCypherCompiler', () => []]
-};
-const STORES = Object.keys(COMPILERS);
-const WASM_GRAPH = {
-    postgres: { name: GRAPH },
-    oracle: { name: GRAPH, nullsEqualStored: true, eraStored: true, indexedProperties: [] },
-    sqlite: { name: GRAPH }
-};
+// The graph as each connection first compiles for it: on Oracle, with its stored functions and no index named.
+const GRAPH = { name: 'g' };
+const STORES = ['postgres', 'oracle', 'sqlite'];
+// #685's budget for the load, in ms: the package's require and the start of its Wasm module, before a store's compile.
+const LOAD_BUDGET = 150;
+// #685's pre-switch warm medians, in ms: Drivine's own compiler, on an Apple M2 Max with Node 24.7. For reference only.
+const PRE_SWITCH = { postgres: 0.204, oracle: 0.218, sqlite: 0.214 };
+// What SharedCypherCompiler says when the compiler can't read a request, as against a refusal.
+const REQUEST_ERROR = "The Cypher compiler can't read the request";
 
 function count(name, fallback) {
     const value = Number(process.env[name] ?? fallback);
@@ -56,45 +75,50 @@ function count(name, fallback) {
     return value;
 }
 
-/** Drivine's own compiler for `store`, from the built `dist`. */
-function ownCompiler(store) {
-    const [name, args] = COMPILERS[store];
-    const Compiler = require(path.join(ROOT, 'dist', 'cypher', 'sql', name))[name];
-    return (cypher, parameters) => new Compiler(GRAPH, ...args()).compile(cypher, parameters).sql;
+/** Points every require of the compiler's package, Drivine's among them, at the package in `packageDir`. */
+function useCompiler(packageDir) {
+    const main = require.resolve(packageDir);
+    const resolve = Module._resolveFilename;
+    Module._resolveFilename = function (request, ...rest) {
+        return request === PACKAGE ? main : resolve.call(this, request, ...rest);
+    };
 }
 
-/** The Wasm compiler's `compile`, of `request` (JSON text) to the answer, read. */
-function wasmCompiler(packageDir) {
-    const { compile } = require(packageDir);
-    return (request) => JSON.parse(compile(request));
+const fromDist = (file) => require(path.join(DIST, file));
+
+/** A compile of `statement` on `store`, as a connection compiles it: a new compiler, to the CompiledCypher. */
+function compile(store, statement) {
+    const { SharedCypherCompiler } = fromDist('cypher/SharedCypherCompiler.js');
+    return new SharedCypherCompiler(store, GRAPH).compile(statement.cypher, statement.parameters);
 }
 
-/** The request of `cypher` for the Wasm compiler on `store`, its parameters given as JSON text. */
-function request(store, cypher, parametersJson) {
-    const text = JSON.stringify({ store, graph: WASM_GRAPH[store], cypher, parameters: {} });
-    return text.replace(/"parameters":\{\}\}$/, () => `"parameters":${parametersJson}}`);
-}
-
-// Run in a fresh process: `--cold <own|wasm> <store> <statement JSON> [<package directory>]` prints the cold load and
-// first compile, in milliseconds. It ends by itself, not with `process.exit`, which on macOS can cut off what it wrote
-// to a pipe.
+// Run in a fresh process: `--cold <store> <statement index> [<package directory>]` prints the load, the store's first
+// compile and the next, in milliseconds. It ends by itself, not with `process.exit`, which on macOS can cut off what it
+// wrote to a pipe.
 function cold() {
-    const [, , , which, store, statementJson, packageDir] = process.argv;
-    const statement = JSON.parse(statementJson);
-    const started = performance.now();
-    let compiled;
-    if (which === 'own') {
-        const compile = ownCompiler(store);
-        compile('RETURN 1', {});
-        compiled = () => compile(statement.cypher, statement.ownParameters);
-    } else {
-        const compile = wasmCompiler(packageDir);
-        compile(request(store, 'RETURN 1', '{}'));
-        compiled = () => compile(statement.request);
+    const [, , , store, index, packageDir] = process.argv;
+    if (packageDir) useCompiler(packageDir);
+    const statement = statements(store)[Number(index)];
+    fromDist('index.js');
+    const { sharedCompilerLoaded } = fromDist('cypher/SharedCypherCompiler.js');
+    if (sharedCompilerLoaded()) {
+        throw new Error('Loading Drivine loaded the compiler, so its load would not be timed.');
     }
+    // Required from SharedCypherCompiler's own file, so it resolves to the module Drivine's require then finds cached.
+    const requireAsDrivine = Module.createRequire(path.join(DIST, 'cypher', 'SharedCypherCompiler.js'));
+    const started = performance.now();
+    // A request that names no store: the compiler answers it with an error, which doesn't matter here, after starting
+    // its Wasm module.
+    requireAsDrivine(PACKAGE).compile('{}');
     const loaded = performance.now();
-    compiled();
-    console.log(JSON.stringify({ load: loaded - started, first: performance.now() - loaded }));
+    compile(store, { cypher: 'RETURN 1', parameters: {} });
+    const first = performance.now();
+    compile(store, statement);
+    const next = performance.now();
+    if (!sharedCompilerLoaded()) {
+        throw new Error("Drivine's compile didn't load the compiler, so its first compile would not be timed.");
+    }
+    console.log(JSON.stringify({ load: loaded - started, first: first - loaded, next: next - first }));
 }
 
 // As test/cypher/CypherSpec.ts reads the spec, which a script run from `dist` can't import: the groups of stores, and
@@ -112,62 +136,34 @@ function trimIndent(text) {
     return lines.map((it) => it.substring(Math.min(indent, it.length))).join('\n');
 }
 
-const repeated = (value) => {
-    const keys = value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
-    return keys.length === 2 && keys.includes('$repeat') && keys.includes('times');
-};
-const floatTagged = (value) => {
-    const keys = value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
-    return keys.length === 1 && keys[0] === '$float';
-};
-
-/** A parameter's value for Drivine's own compiler, as CypherSpec's `valuesFor(value, Number)` gives it. */
-function ownValue(value) {
+/** A parameter's value as the spec's runner binds it on a SQL store: CypherSpec's `valuesFor(value, Number)`. */
+function valueFor(value) {
     if (typeof value === 'bigint') return Number(value);
-    if (Array.isArray(value)) return value.map(ownValue);
-    if (repeated(value)) return String(value.$repeat).repeat(Number(value.times));
-    if (floatTagged(value)) return Number(value.$float);
+    if (Array.isArray(value)) return value.map(valueFor);
     if (value !== null && typeof value === 'object') {
-        return Object.fromEntries(Object.entries(value).map(([key, it]) => [key, ownValue(it)]));
+        const keys = Object.keys(value);
+        if (keys.length === 2 && keys.includes('$repeat') && keys.includes('times')) {
+            return String(value.$repeat).repeat(Number(value.times));
+        }
+        if (keys.length === 1 && keys[0] === '$float') return Number(value.$float);
+        return Object.fromEntries(keys.map((key) => [key, valueFor(value[key])]));
     }
     return value;
 }
 
-/**
- * A parameter's value as JSON text for the Wasm compiler, tagged as its README says: a whole number (a `bigint`, as the
- * spec is read) as a JSON integer, a float as `{"$float": …}`, and a map with a key that starts with `$` in `{"$map": …}`.
- */
-function wasmValue(value) {
-    if (typeof value === 'bigint') return value.toString();
-    if (typeof value === 'number') return JSON.stringify({ $float: String(value) });
-    if (Array.isArray(value)) return `[${value.map(wasmValue).join(',')}]`;
-    if (repeated(value)) return JSON.stringify(String(value.$repeat).repeat(Number(value.times)));
-    if (floatTagged(value)) return JSON.stringify({ $float: String(value.$float) });
-    if (value !== null && typeof value === 'object') {
-        const entries = Object.entries(value);
-        const map = `{${entries.map(([key, it]) => `${JSON.stringify(key)}:${wasmValue(it)}`).join(',')}}`;
-        return entries.some(([key]) => key.startsWith('$')) ? `{"$map":${map}}` : map;
-    }
-    return JSON.stringify(value);
-}
-
-/** Every statement of the spec that runs on `store`, with its parameters for each compiler. */
+/** Every statement of the spec that runs on `store`, with its parameters. */
 function statements(store) {
     const { parse } = require('yaml');
     return FILES.flatMap((file) =>
         parse(fs.readFileSync(path.join(SPEC, file), 'utf8'), { intAsBigInt: true }).cases.flatMap((cypherCase) =>
             cypherCase.steps
                 .filter((step) => runsOn(step, store))
-                .map((step) => ({
-                    cypher: trimIndent(step.cypher),
-                    ownParameters: ownValue(step.parameters ?? {}),
-                    wasmParameters: wasmValue(step.parameters ?? {})
-                }))
+                .map((step) => ({ cypher: trimIndent(step.cypher), parameters: valueFor(step.parameters ?? {}) }))
         )
     );
 }
 
-/** The Wasm package's directory: the directory given, or the `.tgz` given installed into a temporary one. */
+/** The package's directory: DRIVINE_WASM_COMPILER's directory, or its `.tgz` installed into a temporary one. */
 function packageDirectory(given) {
     const resolved = path.resolve(given.replace(/^~(?=$|\/)/, os.homedir()));
     if (fs.statSync(resolved).isDirectory()) {
@@ -181,7 +177,7 @@ function packageDirectory(given) {
         stdio: 'inherit'
     });
     // The package's name, from its own package.json in the .tgz: so where npm's config puts the dependency (none,
-    // devDependencies ...) doesn't matter, and a package built before or after its rename is found alike.
+    // devDependencies ...) doesn't matter.
     const { name } = JSON.parse(
         childProcess.execFileSync('tar', ['-xOzf', resolved, 'package/package.json'], { encoding: 'utf8' })
     );
@@ -200,170 +196,170 @@ function median(values) {
 }
 const ms = (value) => value.toFixed(value < 1 ? 3 : 1);
 
+/** The value of option `name`, given as `--name <value>`, if it is. */
+function option(name) {
+    const at = process.argv.indexOf(`--${name}`);
+    if (at === -1) return undefined;
+    const value = process.argv[at + 1];
+    if (value === undefined || value.startsWith('--')) throw new Error(`--${name} takes a value.`);
+    return value;
+}
+
+/** The statements of the spec on `store`, which of them compile, how many are refused, and the request errors. */
+function tally(store) {
+    const { DrivineError } = fromDist('DrivineError.js');
+    const all = statements(store);
+    const result = { all, compiled: [], refused: 0, errors: [] };
+    all.forEach((statement, index) => {
+        try {
+            compile(store, statement);
+            result.compiled.push({ ...statement, index });
+        } catch (e) {
+            if (e instanceof DrivineError && !e.message.startsWith(REQUEST_ERROR)) {
+                result.refused++;
+            } else {
+                result.errors.push(`${e?.message ?? e}: \`${statement.cypher.replace(/\s+/g, ' ').slice(0, 80)}\``);
+            }
+        }
+    });
+    return result;
+}
+
 function main() {
-    const given = process.argv[2] ?? process.env.DRIVINE_WASM_COMPILER;
-    if (!given) {
-        console.log(
-            'Skipped: give the Wasm compiler as DRIVINE_WASM_COMPILER (or the first argument), its .tgz or the directory' +
-                ' it is installed in. See the top of scripts/bench-compiler.js.'
-        );
-        return;
-    }
-    if (!fs.existsSync(path.join(ROOT, 'dist', 'cypher', 'sql', 'PostgresCypherCompiler.js'))) {
+    const json = option('json');
+    if (!fs.existsSync(path.join(DIST, 'cypher', 'SharedCypherCompiler.js'))) {
         throw new Error('Drivine is not built: run `npm run build` first.');
     }
     const coldRuns = count('DRIVINE_BENCH_COLD_RUNS', 10);
     const warmupRounds = count('DRIVINE_BENCH_WARMUP_ROUNDS', 3);
     const rounds = count('DRIVINE_BENCH_ROUNDS', 10);
-    const packageDir = packageDirectory(given);
+    const given = process.env.DRIVINE_WASM_COMPILER;
+    const packageDir = given ? packageDirectory(given) : path.dirname(require.resolve(PACKAGE));
+    if (given) useCompiler(packageDir);
     const { name, version } = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+    const spec = fs.readFileSync(path.join(SPEC, 'VERSION'), 'utf8').trim();
     const cpus = os.cpus();
-    console.log(
+    const machine =
         `Node ${process.version}, ${os.platform()} ${os.release()} ${os.arch()}, ${cpus[0]?.model} x${cpus.length},` +
-            ` ${Math.round(os.totalmem() / 2 ** 30)} GiB; ${name} ${version}; spec ${fs
-                .readFileSync(path.join(SPEC, 'VERSION'), 'utf8')
-                .trim()}`
+        ` ${Math.round(os.totalmem() / 2 ** 30)} GiB`;
+    const out = [];
+    const say = (line = '') => {
+        console.log(line);
+        out.push(line);
+    };
+    say('### The shared Cypher compiler, as Drivine runs it');
+    say();
+    say(`${machine}; ${name} ${version}${given ? ', from DRIVINE_WASM_COMPILER' : ''}; spec ${spec}.`);
+    say(
+        `Cold: ${coldRuns} fresh processes each, median (min-max). Warm: ${rounds} rounds after ${warmupRounds} of warm-up.`
     );
-    console.log(
-        `Cold: ${coldRuns} fresh processes each, median (min-max). Warm: ${rounds} rounds after ${warmupRounds} of warm-up.\n`
-    );
+    say();
 
-    const own = Object.fromEntries(STORES.map((store) => [store, ownCompiler(store)]));
-    const wasm = wasmCompiler(packageDir);
+    const results = {};
     const rows = [];
-    const refused = [];
-    const slowest = [];
+    const counts = [];
+    const errors = [];
     for (const store of STORES) {
-        const all = statements(store);
-        const both = [];
-        const tally = { ownRefused: 0, wasmRefused: 0, ownOnly: 0, wasmOnly: 0, wasmErrors: 0, sameSql: 0 };
-        for (const statement of all) {
-            statement.request = request(store, statement.cypher, statement.wasmParameters);
-            let ownSql;
-            try {
-                ownSql = own[store](statement.cypher, statement.ownParameters);
-            } catch (e) {
-                // A refusal, or a statement the spec has fail as Cypher: either way, no SQL to time.
-            }
-            const answer = wasm(statement.request);
-            // An error is a request the compiler can't read, so a fault here, not a refusal.
-            if (answer.error !== undefined) tally.wasmErrors++;
-            if (ownSql === undefined) tally.ownRefused++;
-            if (answer.sql === undefined) tally.wasmRefused++;
-            if (ownSql === undefined && answer.sql !== undefined) tally.ownOnly++;
-            if (ownSql !== undefined && answer.sql === undefined) tally.wasmOnly++;
-            if (ownSql !== undefined && answer.sql !== undefined) {
-                both.push(statement);
-                if (ownSql === answer.sql) tally.sameSql++;
-            }
-        }
-        refused.push({ store, all: all.length, both: both.length, ...tally });
-        if (both.length === 0) {
-            throw new Error(
-                `No statement of the spec compiles on ${store} with both compilers, so there is nothing to time.`
-            );
+        const { all, compiled, refused, errors: failed } = tally(store);
+        counts.push([store, all.length, compiled.length, refused, failed.length]);
+        errors.push(...failed.map((it) => `${store}: ${it}`));
+        if (compiled.length === 0) {
+            throw new Error(`No statement of the spec compiles on ${store}, so there is nothing to time.`);
         }
 
-        const cold = { own: [], wasm: [] };
+        const runs = [];
         for (let run = 0; run < coldRuns; run++) {
-            for (const which of ['own', 'wasm']) {
-                const output = childProcess.execFileSync(
-                    process.execPath,
-                    [__filename, '--cold', which, store, JSON.stringify(both[0]), packageDir],
-                    { encoding: 'utf8' }
-                );
-                cold[which].push(JSON.parse(output));
-            }
+            const args = [__filename, '--cold', store, String(compiled[0].index), ...(given ? [packageDir] : [])];
+            runs.push(JSON.parse(childProcess.execFileSync(process.execPath, args, { encoding: 'utf8' })));
         }
 
-        const warm = { own: [], wasm: [] };
-        const time = {
-            own: (it) => {
-                const started = performance.now();
-                own[store](it.cypher, it.ownParameters);
-                return performance.now() - started;
-            },
-            wasm: (it) => {
-                const started = performance.now();
-                wasm(it.request);
-                return performance.now() - started;
-            }
-        };
+        const warm = [];
         for (let round = 0; round < warmupRounds + rounds; round++) {
-            const order = round % 2 === 0 ? ['own', 'wasm'] : ['wasm', 'own'];
-            for (const statement of both) {
-                for (const which of order) {
-                    const took = time[which](statement);
-                    if (round >= warmupRounds) {
-                        warm[which].push(took);
-                        (statement[which] ??= []).push(took);
-                    }
-                }
+            for (const statement of compiled) {
+                const started = performance.now();
+                compile(store, statement);
+                const took = performance.now() - started;
+                if (round >= warmupRounds) warm.push(took);
             }
         }
-        for (const [which, label] of [
-            ['own', 'TS (src/cypher/sql)'],
-            ['wasm', 'Wasm']
-        ]) {
-            const spread = (key) => {
-                const values = cold[which].map((it) => it[key]);
-                return `${ms(median(values))} (${ms(Math.min(...values))}-${ms(Math.max(...values))})`;
-            };
-            const sorted = warm[which].sort((a, b) => a - b);
-            rows.push([store, label, spread('load'), spread('first'), ms(median(sorted)), ms(quantile(sorted, 0.99))]);
-        }
-        const ratio = median(warm.wasm) / median(warm.own);
-        rows.push([store, 'Wasm / TS, warm median', '', '', `${ratio.toFixed(2)}x`, '']);
-        // The statements the Wasm compiler is slowest at beside Drivine's own, by each one's median.
-        both.forEach((it) => (it.ratio = median(it.wasm) / median(it.own)));
-        slowest.push(
-            ...[...both]
-                .sort((a, b) => b.ratio - a.ratio)
-                .slice(0, 3)
-                .map((it) => [
-                    store,
-                    `${it.ratio.toFixed(1)}x`,
-                    ms(median(it.own)),
-                    ms(median(it.wasm)),
-                    `\`${it.cypher.replace(/\s+/g, ' ').slice(0, 80)}\``
-                ])
-        );
+        const sorted = warm.sort((a, b) => a - b);
+        const load = runs.map((it) => it.load);
+        const first = runs.map((it) => it.first);
+        const next = runs.map((it) => it.next);
+        const spread = (values) => `${ms(median(values))} (${ms(Math.min(...values))}-${ms(Math.max(...values))})`;
+        const numbers = {
+            loadMs: median(load),
+            firstCompileMs: median(first),
+            nextCompileMs: median(next),
+            warmMedianMs: median(sorted),
+            warmP99Ms: quantile(sorted, 0.99),
+            statements: all.length,
+            compiled: compiled.length,
+            refused,
+            requestErrors: failed.length
+        };
+        results[store] = numbers;
+        rows.push([
+            store,
+            spread(load),
+            spread(first),
+            spread(next),
+            ms(numbers.warmMedianMs),
+            ms(numbers.warmP99Ms),
+            ms(PRE_SWITCH[store]),
+            `${(numbers.warmMedianMs / PRE_SWITCH[store]).toFixed(2)}x`
+        ]);
     }
 
     const table = (header, body) =>
         [header, header.map(() => '---'), ...body].map((row) => `| ${row.join(' | ')} |`).join('\n');
-    console.log(
-        table(['Store', 'Compiler', 'Cold load, ms', 'First compile, ms', 'Warm median, ms', 'Warm p99, ms'], rows)
-    );
-    console.log();
-    console.log(
+    say(
         table(
             [
                 'Store',
-                'Statements',
-                'TS refused',
-                'Wasm refused',
-                'Only TS refused',
-                'Only Wasm refused',
-                'Wasm request errors',
-                'Both compile',
-                'Same SQL'
+                'Load, ms',
+                'First compile, ms',
+                'Next compile, ms',
+                'Warm median, ms',
+                'Warm p99, ms',
+                'Pre-switch warm median, ms',
+                'Against pre-switch'
             ],
-            refused.map((it) => [
-                it.store,
-                it.all,
-                it.ownRefused,
-                it.wasmRefused,
-                it.ownOnly,
-                it.wasmOnly,
-                it.wasmErrors,
-                it.both,
-                it.sameSql
-            ])
+            rows
         )
     );
-    console.log();
-    console.log(table(['Store', 'Wasm / TS', 'TS median, ms', 'Wasm median, ms', 'Slowest beside TS'], slowest));
+    say();
+    say(table(['Store', 'Statements', 'Compiled', 'Refused', 'Request errors'], counts));
+    say();
+    say(
+        "The pre-switch warm medians are #685's, of Drivine's own compiler (since deleted) on an Apple M2 Max: for" +
+            ' reference only, not enforced, as they are of another machine and a compiler that is gone. Oracle compiles' +
+            " over 1.5x of them warm until liberation-data/drivine-cypher-spec#122. The load is the package's require" +
+            " and the start of its Wasm module, the same work on every store; the first compile is the store's first" +
+            " (`RETURN 1`), and the next the spec's first statement that compiles on it. Only the load has a budget" +
+            ` here, ${LOAD_BUDGET} ms; the nightly catches a regression of the warm compile and of the first compile.`
+    );
+    if (errors.length > 0) {
+        say();
+        say("Request errors, requests the compiler couldn't read: a fault in how Drivine writes them.");
+        errors.forEach((it) => say(`- ${it}`));
+    }
+    const over = STORES.filter((store) => results[store].loadMs > LOAD_BUDGET);
+    say();
+    say(
+        over.length === 0
+            ? `The load is within its budget of ${LOAD_BUDGET} ms in every store's processes.`
+            : `**Over budget:** the median load, in the processes of ${over.join(', ')}, is over ${LOAD_BUDGET} ms.`
+    );
+
+    if (json) {
+        const numbers = { machine, compiler: { name, version }, spec, coldRuns, warmupRounds, rounds, stores: results };
+        fs.writeFileSync(json, `${JSON.stringify(numbers, null, 4)}\n`);
+    }
+    if (process.env.GITHUB_STEP_SUMMARY) {
+        fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${out.join('\n')}\n`);
+    }
+    if (over.length > 0) process.exitCode = 1;
 }
 
 if (process.argv[2] === '--cold') {

@@ -86,6 +86,31 @@ jobs:
             - name: The built package loads
               run: node -e 'require("./dist/index.js"); require("./dist/testing/index.js")'
 
+    # The shared Cypher compiler as Drivine runs it (scripts/bench-compiler.js), compiling only, with no store: its
+    # tables go to the job's summary. It fails only when the median load, the package's require and the start of its
+    # Wasm module before any store's compile, is over #685's budget, 150 ms; a store's first compile and the warm
+    # compile have no ceiling on a shared runner, and nightly.yml catches their regressions instead. Fewer runs and
+    # rounds than the bench's defaults keep the job short: the medians move by a few per cent between runs, and the load
+    # sits well under its budget.
+    compiler-bench:
+        name: compiler bench
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+                  cache: npm
+            - run: npm ci
+            - run: npm run build
+            - name: Bench the compiler
+              run: npm run bench:compiler
+              env:
+                  DRIVINE_BENCH_COLD_RUNS: 5
+                  DRIVINE_BENCH_WARMUP_ROUNDS: 1
+                  DRIVINE_BENCH_ROUNDS: 3
+
     # `npm test` without Oracle, as it runs locally by default, in parts: test/run-tests.ts says what each runs. The
     # parts of a pull request's run hold every suite but the nightly ones once; a full run's add those. The parts are
     # picked by the same test as `tree`'s record: a full run is a push, a call with `full`, or a pull request labelled

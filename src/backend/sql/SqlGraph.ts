@@ -47,7 +47,7 @@ export abstract class SqlGraph {
      * `dst` as stored. A read joins on `a` with an equality, which a store can index, where an OR across the two
      * directions left Postgres reading every relationship of the type for a node's neighbours, and Oracle's and
      * SQLite's recursive cascade reading every relationship at each step (#588). It is read with {@link selfLoopOnce}.
-     * The same rows as compiled Cypher's (`SqlCypherCompiler.bothWays`).
+     * The same rows as compiled Cypher's (the shared compiler's `SqlCypherCompiler.bothWays`).
      */
     bothWays(): string {
         return bothWaysOf(this.edges);
@@ -80,8 +80,8 @@ export abstract class SqlGraph {
     }
 }
 
-/** {@link SqlGraph.bothWays} of the relationship table `edges`, which compiled Cypher reads too. */
-export function bothWaysOf(edges: string): string {
+/** {@link SqlGraph.bothWays} of the relationship table `edges`. */
+function bothWaysOf(edges: string): string {
     return (
         `(SELECT eid, src, dst, type, props, src AS a, dst AS b, 0 AS back FROM ${edges}` +
         ` UNION ALL SELECT eid, src, dst, type, props, dst AS a, src AS b, 1 AS back FROM ${edges})`

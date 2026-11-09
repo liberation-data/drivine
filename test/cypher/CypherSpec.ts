@@ -78,19 +78,6 @@ const WHOLE_FLOAT_PARAMETER: Skip = {
     holds: (step) => wholeFloat(step.parameters)
 };
 
-/**
- * A text past 32 KB read through a function of a node, as `head([n]).t`: the SQL Drivine's own compiler writes for it on
- * Oracle can make Oracle close the session (drivine4j#531), now and then, so the statement that fails is this one or
- * whichever runs next on the connection, another case's: with step 2 alone skipped, step 3 still closed it, and the
- * next case failed. A hold can't catch a failure that moves, so each step that reads one so is skipped there until the
- * shared compiler, whose SQL Oracle keeps the session for, runs it (#686).
- */
-const ORACLE_CLOSES_SESSION: Skip = {
-    why: 'a long text read through a function of a node, which can make Oracle close the session (#686)',
-    on: ['oracle'],
-    holds: (step) => /head\(\[n\]\)\.t/.test(step.cypher)
-};
-
 function wholeFloat(value: any): boolean {
     if (typeof value === 'number') {
         return Number.isInteger(value);
@@ -101,8 +88,7 @@ function wholeFloat(value: any): boolean {
 /**
  * The steps a store here does not run, by file, case and step (from 1), and why. Nothing else is skipped: a store that
  * differs says so with `except` in the spec. The spec's README names the steps beyond 2^53 as those such a library
- * skips; the whole float parameter's is skipped for the same cause, what a JavaScript number cannot hold. The one other
- * is a step whose failure on Oracle moves to the next statement, which no hold can catch: {@link ORACLE_CLOSES_SESSION}.
+ * skips; the whole float parameter's is skipped for the same cause, what a JavaScript number cannot hold.
  */
 const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
     'queries.yaml': {
@@ -118,168 +104,55 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
         // toString($f) of f = 2.0 gives "2", where Cypher gives "2.0": so does toString($f) of f = -2.0, toString($seven) of
         // seven = 1.0e+7, and toString($f * 2).
         'A float parameter with no fraction': [[[1, 3, 4, 7], WHOLE_FLOAT_PARAMETER]],
-        // $x / $z of x = 3.0 and z = 0.0, which a SQL store binds as the integer 0, so it fails or gives null as a division
-        // by an integer zero does, where a float zero gives an infinity.
-        'NaN worked out': [[[5], WHOLE_FLOAT_PARAMETER]]
+        // A division or a remainder by a float parameter of 0.0 (z or f), which a SQL store binds as the integer 0, so it
+        // fails or gives null as one by an integer zero does, where a float zero gives NaN or an infinity.
+        'NaN worked out': [[[5, 6, 37], WHOLE_FLOAT_PARAMETER]],
+        // toString($l) of l = [1.0, NaN, Infinity, -Infinity], whose 1.0 a SQL store binds as the whole number 1.
+        'NaN and the infinities as parameters': [[[11], WHOLE_FLOAT_PARAMETER]],
+        // toInteger() of texts to the greatest and the least whole numbers, and to ±(2^53 + 1) with blanks around it,
+        // which the rows give as numbers past 2^53.
+        'toFloat() of a text, as Neo4j reads it': [[[23, 26], BEYOND_2_53]]
     },
     'writes.yaml': {
-        'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]],
-        'A long text a function gives a property of': [[[2, 3], ORACLE_CLOSES_SESSION]]
+        'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]]
     }
 };
+
+/**
+ * Whether this process's node:sqlite gives a function a text cut at its first NUL (#699): Node 24.7's does, 24.22's
+ * doesn't. Asked of the driver itself, once, so the hold below is made only where it holds.
+ */
+const SQLITE_CUTS_AT_NUL: boolean = (() => {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { DatabaseSync }: any = require('node:sqlite');
+        const db = new DatabaseSync(':memory:');
+        try {
+            db.function('cy_length', (text: unknown) => (typeof text === 'string' ? text.length : -1));
+            return Number(Object.values(db.prepare("SELECT cy_length(char(0) || 'a') AS n").get())[0]) !== 2;
+        } finally {
+            db.close();
+        }
+    } catch {
+        return false;
+    }
+})();
 
 /**
  * The steps of a spec tag past what Drivine runs that a port here has yet to make pass, by file and case: the steps (from
  * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
  * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
  */
-const HELD: Record<string, Record<string, Hold[]>> = {
+export const HELD: Record<string, Record<string, Hold[]>> = {
     'queries.yaml': {
-        // A NaN or infinite parameter is bound as null (step 6 gives null on every store, and step 11 runs on Postgres only).
-        'NaN and the infinities as parameters': [
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26], on: ['postgres'] },
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 24, 25, 26], on: ['oracle'] },
-            // drivine4j holds the case on SQLite too, for liberation-data/drivine4j#295.
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 24, 25, 26], on: ['sqlite'] },
-            // Steps the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
-            { issue: 686, steps: [17, 19, 21, 23], on: ['postgres', 'oracle', 'sqlite'] }
-        ],
-        // Postgres works float arithmetic out as numeric, so 0.0 / 0.0 fails, and SQLite's gives null (#536, which covers
-        // SQLite too). toFloat reads no NaN or infinity by Java's names on either (#573). Oracle holds NaN equal to NaN
-        // (#512). Step 5 is skipped on the SQL stores (SKIPPED). The steps the spec added or changed at v0.31.0 and v0.32.0
-        // are held for #686 alone.
-        'NaN worked out': [
-            { issue: 536, steps: [1, 2, 3, 4], on: ['postgres'] },
-            { issue: 536, steps: [1, 2, 4], on: ['sqlite'] },
-            { issue: 573, steps: [86, 88, 89], on: ['postgres', 'sqlite'] },
-            { issue: 512, steps: [2, 3, 88], on: ['oracle'] },
-            // Cases the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
-            {
-                issue: 686,
-                steps: [
-                    6, 7, 10, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 35, 36,
-                    38, 39, 40, 41, 42, 56, 57, 58, 59, 64, 65, 67, 69, 70, 71, 74, 75, 76, 77, 78, 79, 80, 81, 83, 84,
-                    85
-                ],
-                on: ['oracle']
-            },
-            {
-                issue: 686,
-                steps: [
-                    6, 7, 8, 9, 21, 22, 27, 28, 29, 34, 37, 38, 39, 40, 57, 58, 59, 60, 61, 63, 64, 65, 66, 67, 69, 70,
-                    71, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85
-                ],
-                on: ['postgres']
-            },
-            {
-                issue: 686,
-                steps: [
-                    6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-                    32, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 56, 57, 58, 59, 61, 64,
-                    65, 66, 67, 69, 70, 71, 74, 75, 76, 77, 78, 79, 80, 81, 83, 84, 85
-                ],
-                on: ['sqlite']
-            }
-        ],
-        // toString(0.0 / 0.0) and the infinities: the division fails on Postgres, and gives null on SQLite.
-        'Floats written as text': [{ issue: 536, steps: [5], on: ['postgres', 'sqlite'] }],
-        // A float the statement makes, not a written one, is taken as a start or length and cut toward zero.
-        'Start and length of a text function': [{ issue: 538, steps: [6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }],
-        // Oracle gives every row the first row's path after the WITH.
-        'A path a WITH passes on': [{ issue: 556, steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 16], on: ['oracle'] }],
-        // A float literal past a double's range is read as an infinity, not refused. Postgres fails on each step of its
-        // own, reading the infinity as JSON (`CAST('Infinity' AS jsonb)`), which is all the spec asks of it, and SQLite
-        // on step 1. Step 4, too small to tell from 0, passes.
-        'Float bounds': [
-            { issue: 508, steps: [1, 2, 3], on: ['oracle'] },
-            { issue: 508, steps: [2, 3], on: ['sqlite'] }
-        ],
-        // Cases the spec added or changed at v0.31.0 and v0.32.0, from drivine4j's fixes, which the shared compiler passes:
-        // Drivine's own compiler is not ported to them, as compiler fixes are made once in the module (#686).
-        'A null in a map and a missing key are one null': [
-            { issue: 686, steps: [32, 33, 34], on: ['oracle', 'sqlite'] },
-            { issue: 686, steps: [24, 25, 26, 27, 28, 29, 30, 32, 33, 34], on: ['postgres'] }
-        ],
-        "A sum past a long's range, as text": [{ issue: 686, steps: [1], on: ['oracle'] }],
-        'DISTINCT in a CALL': [
-            { issue: 686, steps: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 21, 22, 23, 24], on: ['oracle'] },
-            { issue: 686, steps: [21, 22, 23, 24], on: ['postgres', 'sqlite'] }
-        ],
-        'EXISTS { } over UNWIND': [
-            {
-                issue: 686,
-                steps: [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
-                on: ['oracle']
-            }
-        ],
-        'Item of a quoted variable': [{ issue: 686, steps: [1, 2, 3, 4], on: ['postgres', 'oracle', 'sqlite'] }],
-        'NaN and the infinities worked out, then worked with': [
-            { issue: 686, steps: [1, 2], on: ['postgres', 'oracle', 'sqlite'] }
-        ],
-        'Remainder of floats': [
-            { issue: 686, steps: [4, 5], on: ['oracle'] },
-            { issue: 686, steps: [4], on: ['postgres', 'sqlite'] }
-        ],
-        'keys()': [{ issue: 686, steps: [4, 5, 6], on: ['postgres', 'oracle', 'sqlite'] }],
-        "range() over the row's value in a subquery": [{ issue: 686, steps: [16, 17], on: ['oracle'] }]
-    },
-    'writes.yaml': {
-        'NaN and the infinities written': [
-            { issue: 344, steps: [4], on: ['postgres'] },
-            { issue: 344, steps: [1, 2, 3], on: ['oracle'] },
-            { issue: 344, steps: [1, 2, 5], on: ['sqlite'] },
-            // The infinities summed: Oracle stores neither, bound as null (#344). SQLite's sum() and avg() of both give 0
-            // and null (#579), and it too stores the -Infinity of step 6 as null until #344's port lands. Step 6 has no
-            // rows or error to check, so passes.
-            { issue: 344, steps: [7], on: ['oracle'] },
-            { issue: 579, steps: [7], on: ['sqlite'] },
-            // Cases the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
-            { issue: 686, steps: [8], on: ['oracle', 'sqlite'] }
-        ],
-        // A MERGE of a null property makes the element, on every run (#569), so the counts after are off too. Oracle's
-        // NaN, bound as null, does the same (#569), and is written as null by ON CREATE SET, ON MATCH SET and in a
-        // list (#344). Steps 3 and 11 have no rows or error to check, so pass.
-        'MERGE of a null or NaN property': [
-            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 13], on: ['postgres'] },
-            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 12, 13], on: ['sqlite'] },
-            { issue: 569, steps: [1, 2, 4, 5, 6, 8, 9, 10, 12, 13], on: ['oracle'] },
-            { issue: 344, steps: [14, 15, 16], on: ['oracle'] },
-            // Cases the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
-            { issue: 686, steps: [20], on: ['oracle'] }
-        ],
-        // Cases the spec added or changed at v0.31.0 and v0.32.0, from drivine4j's fixes, which the shared compiler passes:
-        // Drivine's own compiler is not ported to them, as compiler fixes are made once in the module (#686).
-        'NaN and the infinities given to SET and MERGE': [
-            { issue: 686, steps: [2, 3, 6, 8], on: ['postgres'] },
-            { issue: 686, steps: [4, 5, 7, 8], on: ['sqlite'] }
-        ],
-        'NaN and the infinities worked out and written': [
-            { issue: 686, steps: [1, 2, 3, 4], on: ['oracle'] },
-            { issue: 686, steps: [5, 6, 7, 8, 9], on: ['sqlite'] }
-        ],
-        'NaN worked out from stored infinities': [
-            { issue: 686, steps: [2, 3, 4, 5, 6, 7, 8, 9], on: ['oracle'] },
-            { issue: 686, steps: [2, 3, 4, 5, 6, 7, 8, 10, 11, 12], on: ['sqlite'] }
-        ],
-        'SET and MERGE with EXISTS { } over UNWIND': [{ issue: 686, steps: [2, 3, 4, 5], on: ['oracle'] }]
-    },
-    'refusals.yaml': {
-        // A float literal past a double's range is read as an infinity, not refused.
-        'Float too large': [{ issue: 508, steps: 'all', on: ['sql'] }],
-        // A float the statement makes, not a written one, is not refused.
-        'Start or length of a text function': [{ issue: 538, steps: [6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }],
-        // Refusals the spec added at v0.31.0 and v0.32.0, from drivine4j's fixes, which the shared compiler gives: Drivine's
-        // own compiler is not ported to them, as compiler fixes are made once in the module (#686).
-        "Pattern in a WITH's WHERE naming a variable the WITH drops": [
-            { issue: 686, steps: [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], on: ['sql'] }
-        ],
-        'Two items of one name': [{ issue: 686, steps: 'all', on: ['sql'] }],
-        'Variable before a WITH that groups, in its WHERE': [{ issue: 686, steps: [8, 9, 10], on: ['sql'] }],
-        'Temporal map field of a text worked out': [{ issue: 686, steps: 'all', on: ['sql'] }]
+        // node:sqlite gives a function a text cut at its first NUL, so toFloat('\u0000NaN') reads an empty text (#699).
+        ...(SQLITE_CUTS_AT_NUL
+            ? { 'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }] }
+            : {})
     }
 };
 
-interface Hold {
+export interface Hold {
     issue: number;
     steps: number[] | 'all';
     on: string[];
