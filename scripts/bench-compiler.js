@@ -7,9 +7,10 @@
  *     DRIVINE_WASM_COMPILER=<the package's .tgz, or a directory it is installed in> node scripts/bench-compiler.js
  *
  * The package isn't on npm yet, so it is no dependency here: given its `.tgz`, the script installs it, and the
- * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry). Given a directory, the script
- * requires it as it is, so `@js-joda/core` must resolve from there: `npm install <tgz>` into a directory of its own, and
- * give `<that directory>/node_modules/@drivine/cypher-compiler`. With neither, the script says so and is skipped.
+ * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry), removed when it ends. Given a
+ * directory, the script requires it as it is, so `@js-joda/core` must resolve from there: `npm install <tgz>` into a
+ * directory of its own, and give `<that directory>/node_modules/@drivine/cypher-compiler`. With neither, the script
+ * says so and is skipped.
  *
  * - Cold load: `require` of the compiler and its first compile, of `RETURN 1`, which for the Wasm compiler is when it
  *   reads and instantiates the module (its entry loads on first compile). Drivine's own is its module, from `dist`.
@@ -85,7 +86,7 @@ if (process.argv[2] === '--cold') {
     } else {
         const compile = wasmCompiler(packageDir);
         compile(request(store, 'RETURN 1', '{}'));
-        compiled = () => compile(request(store, statement.cypher, statement.wasmParameters));
+        compiled = () => compile(statement.request);
     }
     const loaded = performance.now();
     compiled();
@@ -170,6 +171,7 @@ function packageDirectory(given) {
         return resolved;
     }
     const into = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-wasm-compiler-'));
+    process.on('exit', () => fs.rmSync(into, { recursive: true, force: true }));
     fs.writeFileSync(path.join(into, 'package.json'), '{"private": true}');
     childProcess.execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent', resolved], {
         cwd: into,
@@ -182,11 +184,12 @@ function quantile(sorted, q) {
     return sorted[Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1)];
 }
 
-const median = (values) =>
-    quantile(
-        [...values].sort((a, b) => a - b),
-        0.5
-    );
+// The middle value, or the mean of the two middle ones: with an even count, the nearest-rank median is the lower one.
+function median(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = sorted.length >> 1;
+    return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
 const ms = (value) => value.toFixed(value < 1 ? 3 : 1);
 
 function main() {
@@ -294,16 +297,9 @@ function main() {
                 return `${ms(median(values))} (${ms(Math.min(...values))}-${ms(Math.max(...values))})`;
             };
             const sorted = warm[which].sort((a, b) => a - b);
-            rows.push([
-                store,
-                label,
-                spread('load'),
-                spread('first'),
-                ms(quantile(sorted, 0.5)),
-                ms(quantile(sorted, 0.99))
-            ]);
+            rows.push([store, label, spread('load'), spread('first'), ms(median(sorted)), ms(quantile(sorted, 0.99))]);
         }
-        const ratio = quantile(warm.wasm, 0.5) / quantile(warm.own, 0.5);
+        const ratio = median(warm.wasm) / median(warm.own);
         rows.push([store, 'Wasm / TS, warm median', '', '', `${ratio.toFixed(2)}x`, '']);
         // The statements the Wasm compiler is slowest at beside Drivine's own, by each one's median.
         both.forEach((it) => (it.ratio = median(it.wasm) / median(it.own)));
