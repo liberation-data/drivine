@@ -1,7 +1,8 @@
 /**
- * Measures the shared Cypher compiler, built as Wasm (`@liberation-data/drivine-cypher-compiler`), against Drivine's own compiler in
- * src/cypher/sql, on Postgres, Oracle and SQLite: the cold load and first compile, each in a fresh Node process, and the
- * warm compile over the statements of the Cypher spec in test/cypher. Only compiling: no store is started. See #685.
+ * Measures the shared Cypher compiler, built as Wasm (`@liberation-data/drivine-cypher-compiler`), against Drivine's
+ * own compiler in src/cypher/sql, on Postgres, Oracle and SQLite: the cold load and first compile, each in a fresh Node
+ * process, and the warm compile over the statements of the Cypher spec in test/cypher. Only compiling: no store is
+ * started. See #685.
  *
  *     npm run build
  *     DRIVINE_WASM_COMPILER=<the package's .tgz, or a directory it is installed in> node scripts/bench-compiler.js
