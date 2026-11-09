@@ -154,7 +154,35 @@ export class OracleConnection implements Connection {
  * result mapper takes the value of. Read as the statement says, never by a column's name.
  */
 function returnedRows(rows: any[], shape: CompiledRows): any[] {
-    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: it }));
+    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: withFloats(it) }));
+}
+
+/** Oracle's names in its extended JSON for NaN and the infinities, and the numbers they are. */
+const NON_FINITE: Record<string, number> = { Nan: NaN, Inf: Infinity, '-Inf': -Infinity };
+
+/**
+ * A row's value from the text of its rows, which Oracle writes as extended JSON so a float stays one: each map that is
+ * exactly a float, `{"$numberDouble": 2.5}`, or NaN or an infinity, `{"$numberDouble": "Nan"}` ("Inf", "-Inf"), the
+ * number it is, at any depth. A map of a user's own with that one key reads so too, as drivine4j's reader reads it.
+ */
+function withFloats(value: any): any {
+    if (Array.isArray(value)) {
+        return value.map(withFloats);
+    }
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === '$numberDouble') {
+        const number = value.$numberDouble;
+        if (typeof number === 'number') {
+            return number;
+        }
+        if (typeof number === 'string' && number in NON_FINITE) {
+            return NON_FINITE[number];
+        }
+    }
+    return Object.fromEntries(keys.map((key) => [key, withFloats(value[key])]));
 }
 
 /**

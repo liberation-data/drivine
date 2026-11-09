@@ -125,10 +125,10 @@ describe('SharedCypherCompiler', () => {
         );
     });
 
-    it('says a write on Oracle hands back a row for each, and on Postgres and SQLite rows as any statement', () => {
+    it("says a write's rows come back in one row on every store, Oracle's as text (oracleRowsAsText)", () => {
         const rows = (store: SharedStore): string =>
             new SharedCypherCompiler(store, { name: 'g' }).compile('CREATE (n:A) RETURN n.x').rows;
-        expect(STORES.map(rows)).toEqual(['one', 'each', 'one']);
+        expect(STORES.map(rows)).toEqual(['one', 'one', 'one']);
     });
 
     it('says whether it was given NaN or an infinity', () => {

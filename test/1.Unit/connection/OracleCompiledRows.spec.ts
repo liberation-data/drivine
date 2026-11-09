@@ -71,13 +71,37 @@ describe('The rows of a compiled Oracle write', () => {
         expect(it.execute.mock.calls[0][2].keepInStmtCache).toBe(false);
     });
 
-    it("should read a Cypher write compiled by the shared compiler as 'each'", async () => {
-        const it = session(EACH);
+    it("should read a Cypher write compiled by the shared compiler as 'one', its rows as text", async () => {
+        const it = session(ONE);
         const rows = await connection(it).query(
             new QuerySpecification({ text: 'CREATE (n:T) RETURN n.x AS x', language: 'CYPHER' })
         );
-        expect(it.execute.mock.calls.at(-1)[0]).toContain('DBMS_SQL.RETURN_RESULT');
+        expect(it.execute.mock.calls.at(-1)[0]).toContain('AS "rows:json"');
         expect(rows).toEqual([1, { a: [2, 'x'] }, null]);
+    });
+
+    it("should read a float, NaN and the infinities of Oracle's extended JSON in a write's rows, at any depth", async () => {
+        const floats = {
+            implicitResults: [
+                [
+                    {
+                        'rows:json':
+                            '[{"$numberDouble": 2}, [{"$numberDouble": 2.5}, {"$numberDouble": "Nan"}], ' +
+                            '{"k": {"$numberDouble": "Inf"}, "l": {"$numberDouble": "-Inf"}}, ' +
+                            '{"$numberDouble": "x"}, {"$numberDouble": 1, "y": 2}, "2026-01-02T03:04:05.123Z"]'
+                    }
+                ]
+            ]
+        };
+        const rows = await compiledAs(connection(session(floats)), block('one'));
+        expect(rows).toEqual([
+            2,
+            [2.5, NaN],
+            { k: Infinity, l: -Infinity },
+            { $numberDouble: 'x' },
+            { $numberDouble: 1, y: 2 },
+            '2026-01-02T03:04:05.123Z'
+        ]);
     });
 
     it("should hand back a SQL block's implicit result as it is, whatever its columns are named", async () => {

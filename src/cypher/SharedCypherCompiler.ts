@@ -81,8 +81,8 @@ export class SharedCypherCompiler implements CypherCompiler {
             sql: answer.sql,
             parameters: counts(decoded(answer.parameters), parameters),
             setup: answer.setup ?? [],
-            // The shared compiler's writes on Oracle return a row for each, as a PL/SQL block's cursor.
-            rows: this.store === 'oracle' ? 'each' : 'one',
+            // On Oracle a write's rows come back in one row, as text (`oracleRowsAsText`): see graphJson.
+            rows: 'one',
             nonFinite: answer.nonFinite ?? false
         };
     }
@@ -95,6 +95,10 @@ function graphJson(store: SharedStore, graph: SharedGraph): Record<string, any> 
     }
     return {
         name: graph.name,
+        // A write's rows in one row, as JSON text in the column `rows:json`, not a row each in a JSON column: in
+        // node-oracledb's thin mode, an implicit result's JSON column gives only the rows it prefetched, and some values
+        // fail with NJS-126 (oracle/node-oracledb#1795). Drop it once a release of node-oracledb reads them all.
+        oracleRowsAsText: true,
         nullsEqualStored: graph.nullsEqualStored ?? true,
         eraStored: graph.eraStored ?? true,
         indexedProperties: (graph.indexedProperties ?? []).map(([label, property]) => [label, property])

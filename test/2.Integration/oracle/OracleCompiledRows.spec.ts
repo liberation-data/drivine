@@ -60,8 +60,9 @@ describeOnOracle("The rows of a compiled Oracle write in drivine4j's shape", () 
      * A canary for oracle/node-oracledb#1795: in thin mode an implicit result with a JSON column gives only the rows the
      * driver prefetched, 2 by default, and no error. Fixed on node-oracledb's main (16346adb7f, 2026-11-03), in no
      * release yet. When this fails because all 10 rows came back, the driver has the fix: check NJS-126 (OSON version
-     * 2) on that release, then Drivine can read drivine4j's shape and needn't ask the compiler for its own
-     * (liberation-data/drivine#673). Until then, Drivine's own compiler returns a write's rows in one ('one').
+     * 2) on that release, then raise Drivine's node-oracledb to it and drop `oracleRowsAsText` from
+     * SharedCypherCompiler, so a write's rows come back a row each ('each'), as drivine4j reads them
+     * (liberation-data/drivine#684). Until then, the shared compiler returns them in one row, as text ('one').
      */
     it('should give only the prefetched rows of more, on a node-oracledb without the fix for #1795', async () => {
         // Fewer than all, the first of them: as many as were prefetched, whatever prefetchRows is set to.

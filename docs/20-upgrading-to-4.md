@@ -96,6 +96,14 @@ worked out from stored infinities" and "NaN and the infinities given to SET and 
 
 - **Paths:** a path a `WITH` passes on gives each row's own nodes and relationships, where 3.x gave every row the first
   row's (#556).
+- **A write's rows:** a statement that writes and returns rows gives them back in one row, as JSON text, as 3.x did.
+  node-oracledb's thin mode reads only the first rows of the shape drivine4j reads, a row each
+  (oracle/node-oracledb#1795), so Drivine asks the compiler for this one until a release of the driver reads them all
+  (#684). The whole of a write's result is then held in memory at once, so a write that returns very many rows is
+  bounded by that. A read returns its rows as any query does.
+- **Floats in a write's rows:** Oracle writes that text as extended JSON, so a float stays a float there, NaN and the
+  infinities too. A map of your own whose one key is `$numberDouble` reads back, in a write's rows, as the float it
+  names.
 
 ## Whole numbers past 2^53
 
