@@ -1,5 +1,5 @@
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { SqlCypherCompiler } from '@/cypher/sql/SqlCypherCompiler';
+import type { CypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { CompiledRows } from '@/cypher/sql/CompiledCypher';
 
 /**
@@ -21,7 +21,7 @@ export interface CompiledSpecification<T> {
  */
 export function compiledSpecification<T>(
     spec: QuerySpecification<T>,
-    compiler: SqlCypherCompiler
+    compiler: CypherCompiler
 ): CompiledSpecification<T> {
     const parameters = Array.isArray(spec.parameters)
         ? Object.fromEntries(spec.parameters.map((it, i) => [String(i + 1), it]))
