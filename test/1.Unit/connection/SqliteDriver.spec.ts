@@ -1,9 +1,11 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { DrivineError } from '@/DrivineError';
 import {
     FULL_FLOATS_PROBE,
     openSqlite,
+    refuseCompiledCypherOn,
     ROUNDED_FLOATS_WARNING,
     RoundedFloats,
     SqliteDatabase,
@@ -35,6 +37,18 @@ describe('a SQLite version', () => {
         expect(sqliteOlderThan('3.44.9', [3, 45, 0])).toBe(true);
         expect(sqliteOlderThan('3.45.0', [3, 45, 0])).toBe(false);
         expect(sqliteOlderThan('3.46.1', [3, 45, 0])).toBe(false);
+    });
+
+    it('should refuse compiled Cypher before 3.53, naming the SQLite, its Node and a Node to use', () => {
+        expect(() => refuseCompiledCypherOn('3.52.9', '24.15.0')).toThrow(
+            'Compiled Cypher needs SQLite 3.53 or later; this is SQLite 3.52.9, which Node 24.15.0 bundles. Use a ' +
+                'Node release that bundles 3.53 or later: 22.23.4, 24.16.0, 26.1.0 or a later one of each line.'
+        );
+        expect(() => refuseCompiledCypherOn('3.46.1')).toThrow(DrivineError);
+        expect(() => refuseCompiledCypherOn('3.50.4')).toThrow(/this is SQLite 3\.50\.4/);
+        for (const version of ['3.53.0', '3.53.4', '3.54.0', '3.100.0']) {
+            expect(() => refuseCompiledCypherOn(version)).not.toThrow();
+        }
     });
 });
 

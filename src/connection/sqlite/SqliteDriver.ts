@@ -27,8 +27,35 @@ export interface SqliteDatabase {
     ): void;
 }
 
-/** The least SQLite a store runs on: drivine4j's, for `json_group_array(… ORDER BY …)` and `->>`. */
+/** The least SQLite a store opens on, for plain SQL and the object manager: `json_group_array(… ORDER BY …)` and `->>`. */
 const MINIMUM_SQLITE = [3, 45, 0];
+
+/**
+ * The least SQLite compiled Cypher runs on. Before 3.53 it is wrong or refused: a float it computes is written to 15
+ * digits, 3.49 refuses a CALL that groups by an imported variable, and before 3.47 `-> -1`, which `last()` and a
+ * negative index compile to, is refused (drivine4j#565).
+ */
+export const MINIMUM_COMPILED_CYPHER_SQLITE = [3, 53, 0];
+
+/** The SQLite `db` runs on, as `sqlite_version()` gives it. */
+export function sqliteVersionOf(db: SqliteDatabase): string {
+    return String(db.prepare('SELECT sqlite_version() AS v').get()!.v);
+}
+
+/**
+ * Refuses compiled Cypher on SQLite `version`, the one Node `node` bundles, when it is older than
+ * MINIMUM_COMPILED_CYPHER_SQLITE. Plain SQL is not refused.
+ */
+export function refuseCompiledCypherOn(version: string, node: string = process.versions.node): void {
+    if (sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE)) {
+        const minimum = MINIMUM_COMPILED_CYPHER_SQLITE.slice(0, 2).join('.');
+        throw new DrivineError(
+            `Compiled Cypher needs SQLite ${minimum} or later; this is SQLite ${version}, which Node ${node} ` +
+                `bundles. Use a Node release that bundles ${minimum} or later: 22.23.4, 24.16.0, 26.1.0 or a later ` +
+                `one of each line. Plain SQL runs on SQLite 3.45 or later.`
+        );
+    }
+}
 
 /**
  * What a SQLite that writes a float it computes in JSON to 17 significant digits, which read back as it, gives for
@@ -140,7 +167,7 @@ export function openSqlite(path: string): SqliteDatabase {
         // SQLite's message, as for a folder that is not there, does not name the file.
         throw new DrivineError(`Could not open the SQLite file '${path}': ${(e as Error).message}.`, e as Error);
     }
-    const version = String(db.prepare('SELECT sqlite_version() AS v').get()!.v);
+    const version = sqliteVersionOf(db);
     if (sqliteOlderThan(version, MINIMUM_SQLITE)) {
         db.close();
         throw new DrivineError(

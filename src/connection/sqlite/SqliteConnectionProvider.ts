@@ -4,7 +4,7 @@ import { ConnectionProvider } from '@/connection/ConnectionProvider';
 import { FirstConnection } from '@/connection/FirstConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 import { SqliteConnection } from '@/connection/sqlite/SqliteConnection';
-import { openSqlite, SqliteDatabase, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
+import { openSqlite, SqliteDatabase, sqliteVersionOf, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
 import { SqliteFunctions } from '@/connection/sqlite/SqliteFunctions';
 import { SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
@@ -25,7 +25,10 @@ export interface SqliteOptions {
 
 /**
  * Connections to the SQLite file at `path`, each opened as Drivine's statements want it, with the functions they call
- * registered on it (see SqliteFunctions). SQLite 3.45 or later, through Node's own driver, `node:sqlite`.
+ * registered on it (see SqliteFunctions), through Node's own driver, `node:sqlite`, and the SQLite that Node bundles.
+ * Compiled Cypher needs SQLite 3.53 or later, and is refused before it: there a float it computes is written to 15
+ * digits, and `last()`, a negative index and a CALL that groups by an imported variable are refused. Plain SQL and the
+ * object manager run on SQLite 3.45 or later.
  *
  * - The journal is a write-ahead log, so readers do not wait for the writer, nor the writer for them.
  * - Foreign keys are enforced, so a node's relationships go with it.
@@ -41,6 +44,8 @@ export class SqliteConnectionProvider implements ConnectionProvider {
     private readonly idle: SqliteDatabase[] = [];
     /** Whether the provider has ended since it last connected: a connection given back then is closed. */
     private ended = false;
+    /** The SQLite the provider's connections run on, asked of the first it opens. */
+    private sqlite?: string;
     private readonly firstConnection = new FirstConnection(
         () => `graph '${this.graphName}' on ${this.type} file '${this.path}'`
     );
@@ -81,6 +86,7 @@ export class SqliteConnectionProvider implements ConnectionProvider {
     }
 
     private connection(db: SqliteDatabase): SqliteConnection {
+        this.sqlite ??= sqliteVersionOf(db);
         return new SqliteConnection(
             db,
             new PostgresResultMapper(),
@@ -92,7 +98,8 @@ export class SqliteConnectionProvider implements ConnectionProvider {
                     this.idle.push(it);
                 }
             },
-            this.graphName
+            this.graphName,
+            this.sqlite
         );
     }
 
