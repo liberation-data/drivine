@@ -6,8 +6,9 @@
 # tests, and the commits since the last nightly that passed, among which is the one that broke it. A pass closes it.
 # A run on a branch other than master writes what it would say to its summary instead.
 #
-# compiler-bench compares the shared Cypher compiler's warm compile with the last nightly's on master that passed
-# (scripts/bench-regression.js), and fails when a store's warm median rose by more than half, in a run and its rerun.
+# compiler-bench compares the shared Cypher compiler's warm compile and each store's first compile with the last
+# nightly's on master that passed (scripts/bench-regression.js), and fails when a store's warm median or first compile
+# rose by more than half, in a run and its rerun.
 # Its numbers are the run's `compiler-bench` artifact, which the next night compares with. A slowdown that is accepted
 # never passes that, so run the nightly by hand with `record-bench` to record that night's numbers without comparing.
 name: Nightly

@@ -7,21 +7,26 @@
  *     npm run build
  *     npm run bench:compiler [-- --json <file>]
  *
- * - Cold load: in a fresh Node process that has loaded Drivine (`dist/index.js`) already, the compiler's first compile,
- *   of `RETURN 1`. That is when SharedCypherCompiler requires the package, and when the package reads and instantiates
- *   its Wasm module, so it is what an application pays on its first SQL statement.
- * - First compile: the next compile, in the same process, of the spec's first statement that compiles on the store.
+ * Each cold number is timed in a fresh Node process that has loaded Drivine (`dist/index.js`) already, over several
+ * such processes. Together they are what an application pays on its first SQL statements:
+ * - Load: the package's require, resolved as SharedCypherCompiler resolves it, and its first `compile`, of a request
+ *   that names no store (`{}`, which the compiler answers with an error). That is when the package reads and
+ *   instantiates its Wasm module, with none of a store's compile work, so it is the same for every store.
+ * - First compile: the store's first compile, of `RETURN 1`, through SharedCypherCompiler, the module started.
+ * - Next compile: the compile after it, in the same process, of the spec's first statement that compiles on the store.
  * - Warm compile: each statement of the spec in `test/cypher` that compiles on the store, over several rounds after a
  *   warm-up, each timed from a new SharedCypherCompiler to the CompiledCypher, as a connection compiles. The parameters
  *   are the spec's, as its runner binds them on a SQL store (test/2.Integration/cypher/CypherSpec.spec.ts).
  * - Refused: the statements the compiler refuses, which the spec has refused or doesn't run on the store. A request
  *   error is a request the compiler can't read, so a fault in how Drivine writes it, not a refusal.
  *
- * It fails (exits 1) when a store's median cold load is over 150 ms, #685's budget. Beside the warm medians it prints
+ * It fails (exits 1) when the median load, in a store's cold processes, is over 150 ms: #685's budget, which is for the
+ * load alone, as a store's first compile differs from store to store. Beside the warm medians it prints
  * the pre-switch numbers of #685, Drivine's own compiler (src/cypher/sql, since deleted) on an Apple M2 Max, for
  * reference only: they're of another machine and a compiler that is gone, so they are not enforced. Oracle's warm
- * compile is over 1.5x of them until liberation-data/drivine-cypher-spec#122. A regression of the warm compile is
- * caught by the nightly instead (scripts/bench-regression.js), against the previous night's numbers.
+ * compile is over 1.5x of them until liberation-data/drivine-cypher-spec#122. A regression of the warm compile or of
+ * a store's first compile is caught by the nightly instead (scripts/bench-regression.js), against the previous night's
+ * numbers.
  *
  * The compiler is the installed dependency, unless DRIVINE_WASM_COMPILER names another: a candidate build, timed before
  * it is published. Given its `.tgz` (in drivine-cypher-spec's `compiler`, `./gradlew npmPackage`, then `npm pack` of
@@ -56,7 +61,7 @@ const FILES = ['queries.yaml', 'writes.yaml', 'temporal.yaml', 'refusals.yaml'];
 // The graph as each connection first compiles for it: on Oracle, with its stored functions and no index named.
 const GRAPH = { name: 'g' };
 const STORES = ['postgres', 'oracle', 'sqlite'];
-// #685's budget for the cold load, in ms.
+// #685's budget for the load, in ms: the package's require and the start of its Wasm module, before any store's compile.
 const LOAD_BUDGET = 150;
 // #685's pre-switch warm medians, in ms: Drivine's own compiler, on an Apple M2 Max with Node 24.7. For reference only.
 const PRE_SWITCH = { postgres: 0.204, oracle: 0.218, sqlite: 0.214 };
@@ -88,22 +93,33 @@ function compile(store, statement) {
     return new SharedCypherCompiler(store, GRAPH).compile(statement.cypher, statement.parameters);
 }
 
-// Run in a fresh process: `--cold <store> <statement index> [<package directory>]` prints the cold load and first
-// compile, in milliseconds. It ends by itself, not with `process.exit`, which on macOS can cut off what it wrote to a
-// pipe.
+// Run in a fresh process: `--cold <store> <statement index> [<package directory>]` prints the load, the store's first
+// compile and the next, in milliseconds. It ends by itself, not with `process.exit`, which on macOS can cut off what it
+// wrote to a pipe.
 function cold() {
     const [, , , store, index, packageDir] = process.argv;
     if (packageDir) useCompiler(packageDir);
     const statement = statements(store)[Number(index)];
     fromDist('index.js');
-    if (fromDist('cypher/SharedCypherCompiler.js').sharedCompilerLoaded()) {
+    const { sharedCompilerLoaded } = fromDist('cypher/SharedCypherCompiler.js');
+    if (sharedCompilerLoaded()) {
         throw new Error('Loading Drivine loaded the compiler, so its load would not be timed.');
     }
+    // Required from SharedCypherCompiler's own file, so it resolves to the module Drivine's require then finds cached.
+    const requireAsDrivine = Module.createRequire(path.join(DIST, 'cypher', 'SharedCypherCompiler.js'));
     const started = performance.now();
-    compile(store, { cypher: 'RETURN 1', parameters: {} });
+    // A request that names no store: the compiler answers it with an error, which doesn't matter here, after starting
+    // its Wasm module.
+    requireAsDrivine(PACKAGE).compile('{}');
     const loaded = performance.now();
+    compile(store, { cypher: 'RETURN 1', parameters: {} });
+    const first = performance.now();
     compile(store, statement);
-    console.log(JSON.stringify({ load: loaded - started, first: performance.now() - loaded }));
+    const next = performance.now();
+    if (!sharedCompilerLoaded()) {
+        throw new Error("Drivine's compile didn't load the compiler, so its first compile would not be timed.");
+    }
+    console.log(JSON.stringify({ load: loaded - started, first: first - loaded, next: next - first }));
 }
 
 // As test/cypher/CypherSpec.ts reads the spec, which a script run from `dist` can't import: the groups of stores, and
@@ -270,10 +286,12 @@ function main() {
         const sorted = warm.sort((a, b) => a - b);
         const load = runs.map((it) => it.load);
         const first = runs.map((it) => it.first);
+        const next = runs.map((it) => it.next);
         const spread = (values) => `${ms(median(values))} (${ms(Math.min(...values))}-${ms(Math.max(...values))})`;
         const numbers = {
-            coldLoadMs: median(load),
+            loadMs: median(load),
             firstCompileMs: median(first),
+            nextCompileMs: median(next),
             warmMedianMs: median(sorted),
             warmP99Ms: quantile(sorted, 0.99),
             statements: all.length,
@@ -286,6 +304,7 @@ function main() {
             store,
             spread(load),
             spread(first),
+            spread(next),
             ms(numbers.warmMedianMs),
             ms(numbers.warmP99Ms),
             ms(PRE_SWITCH[store]),
@@ -299,8 +318,9 @@ function main() {
         table(
             [
                 'Store',
-                'Cold load, ms',
+                'Load, ms',
                 'First compile, ms',
+                'Next compile, ms',
                 'Warm median, ms',
                 'Warm p99, ms',
                 'Pre-switch warm median, ms',
@@ -315,20 +335,22 @@ function main() {
     say(
         "The pre-switch warm medians are #685's, of Drivine's own compiler (since deleted) on an Apple M2 Max: for" +
             ' reference only, not enforced, as they are of another machine and a compiler that is gone. Oracle compiles' +
-            ' over 1.5x of them warm until liberation-data/drivine-cypher-spec#122. Only the cold load has a budget' +
-            ` here, ${LOAD_BUDGET} ms; the nightly catches a regression of the warm compile.`
+            " over 1.5x of them warm until liberation-data/drivine-cypher-spec#122. The load is the package's require" +
+            " and the start of its Wasm module, the same work on every store; the first compile is the store's first" +
+            " (`RETURN 1`), and the next the spec's first statement that compiles on it. Only the load has a budget" +
+            ` here, ${LOAD_BUDGET} ms; the nightly catches a regression of the warm compile and of the first compile.`
     );
     if (errors.length > 0) {
         say();
         say("Request errors, requests the compiler couldn't read: a fault in how Drivine writes them.");
         errors.forEach((it) => say(`- ${it}`));
     }
-    const over = STORES.filter((store) => results[store].coldLoadMs > LOAD_BUDGET);
+    const over = STORES.filter((store) => results[store].loadMs > LOAD_BUDGET);
     say();
     say(
         over.length === 0
-            ? `The cold load is within its budget of ${LOAD_BUDGET} ms on every store.`
-            : `**Over budget:** the median cold load on ${over.join(', ')} is over ${LOAD_BUDGET} ms.`
+            ? `The load is within its budget of ${LOAD_BUDGET} ms in every store's processes.`
+            : `**Over budget:** the median load, in the processes of ${over.join(', ')}, is over ${LOAD_BUDGET} ms.`
     );
 
     if (json) {
