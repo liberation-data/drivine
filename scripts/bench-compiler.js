@@ -10,8 +10,9 @@
  * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry), removed when it ends. A run cut
  * short by a signal leaves it behind, as `drivine-wasm-compiler-*` in the system's temporary directory. Given a
  * directory, the script requires it as it is, so `@js-joda/core` must resolve from there: `npm install <tgz>` into a
- * directory of its own, and give `<that directory>/node_modules/@liberation-data/drivine-cypher-compiler`. With neither, the script
- * says so and is skipped.
+ * directory of its own, and give `<that directory>/node_modules/@liberation-data/drivine-cypher-compiler` (or
+ * `.../node_modules/@drivine/cypher-compiler`, the name of a package built before drivine-cypher-spec#121, such as
+ * 0.32.0). With neither, the script says so and is skipped.
  *
  * - Cold load: `require` of the compiler and its first compile, of `RETURN 1`, which for the Wasm compiler is when it
  *   reads and instantiates the module (its entry loads on first compile). Drivine's own is its module, from `dist`.
@@ -174,11 +175,11 @@ function packageDirectory(given) {
     const into = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-wasm-compiler-'));
     process.on('exit', () => fs.rmSync(into, { recursive: true, force: true }));
     fs.writeFileSync(path.join(into, 'package.json'), '{"private": true}');
-    childProcess.execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent', resolved], {
+    childProcess.execFileSync('npm', ['install', '--save', '--no-audit', '--no-fund', '--silent', resolved], {
         cwd: into,
         stdio: 'inherit'
     });
-    // The one dependency npm wrote: the package, under whatever name it has.
+    // The one dependency npm wrote (`--save`, whatever the user's npm config says): the package, under its own name.
     const [name] = Object.keys(JSON.parse(fs.readFileSync(path.join(into, 'package.json'), 'utf8')).dependencies);
     return path.join(into, 'node_modules', name);
 }
