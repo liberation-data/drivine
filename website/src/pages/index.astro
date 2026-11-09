@@ -36,14 +36,16 @@ const ts = `${base}ts/`;
 const py = `${base}py/`;
 const jvm = `${base}jvm/`;
 const image = (name: string) => `${base}images/${name}`;
-// The explainer, played from our own copy so every browser gets the full 1080p from the first frame: YouTube's embed
-// served it at 240p in Chrome and Firefox, whatever the connection. The section and the hero's tip show while VIDEO is
-// set. It is on YouTube too (VIDEO_ID), linked under the player for sharing.
+// The explainer. The section and the hero's tip show while VIDEO is set. It is on YouTube too (VIDEO_ID).
 const VIDEO = `${base}video/drivine-explainer.mp4`;
 const VIDEO_CAPTIONS = `${base}video/drivine-explainer.vtt`;
 /* Its HLS segments' playlist, where the build cut it into them (scripts/segment-video.mjs), else nothing. */
 const VIDEO_HLS = video.hls ? `${base}video/hls/index.m3u8` : '';
 const VIDEO_ID = 'uETP0EN_04E';
+// Played in YouTube's embed while this is true, else from our own copy (VIDEO, VIDEO_HLS), which is still built and
+// served. YouTube's embed served the explainer at 240p in Chrome and Firefox for its first weeks (#546), but plays it
+// at 1080p now it has views; our own copy costs bandwidth and gives every browser 1080p from the first frame.
+const PLAY_ON_YOUTUBE = true;
 // What Share passes on: drivine.org itself, or at the video. The card a link shows is the video's title card.
 const SITE = 'https://drivine.org/';
 const VIDEO_SHARE = new URL('#watch', SITE).href;
@@ -254,7 +256,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .watch { padding: 0 32px 96px; scroll-margin-top: 24px; }
             .watch .wrap { max-width: 1040px; display: flex; flex-direction: column; gap: 18px; }
             .watch .player { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: var(--abyss); box-shadow: 0 24px 60px rgba(2, 28, 38, 0.25); }
-            .watch .player img, .watch .player video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
+            .watch .player img, .watch .player video, .watch .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: cover; }
             /* Whole in fullscreen, on a screen of any shape. */
             .watch .player video { object-fit: contain; }
             /* The whole poster plays; the pill in its corner says so, clear of the title. */
@@ -463,7 +465,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             {VIDEO && (
                 <section class="watch" id="watch">
                     <div class="wrap">
-                        <div class="player" data-video={VIDEO} data-hls={VIDEO_HLS} data-captions={VIDEO_CAPTIONS}>
+                        <div class="player" data-video={VIDEO} data-hls={VIDEO_HLS} data-captions={VIDEO_CAPTIONS} data-youtube={PLAY_ON_YOUTUBE ? VIDEO_ID : undefined}>
                             <Image src={videoPoster} widths={[640, 800, 1040, 1600]} sizes="(max-width: 1104px) 100vw, 1040px" alt="" />
                             <button type="button" class="play" aria-label="Watch · 4:26, the video: Drivine, graph RAG on any database (4 minutes 26 seconds)">
                                 <span><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="#0b2530" /></svg>Watch · 4:26</span>
@@ -477,7 +479,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         </template>
                         <p>
                             Drivine in four and a half minutes: graph RAG on any database. With captions.
-                            {VIDEO_ID && <> <a href={`https://youtu.be/${VIDEO_ID}`}>Also on YouTube</a>.</>}
+                            {VIDEO_ID && !PLAY_ON_YOUTUBE && <> <a href={`https://youtu.be/${VIDEO_ID}`}>Also on YouTube</a>.</>}
                         </p>
                         <div class="watch-share"><Share label="Share the video" url={VIDEO_SHARE} text={SHARE_TEXT} /></div>
                         {/* Moved over the end card when the video ends, and back out of sight when it plays again. */}
@@ -805,8 +807,19 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             // The video loads only when asked for, and plays with its controls and its captions, shown from the start. At the
             // end the video fades to black, so its end card (#video-end) covers it, with a Watch again button where Watch
             // was; pressing it, or the hero's tip, starts it over and takes them away.
+            // Played on YouTube (data-youtube), the press loads YouTube's embed, from its no-cookie domain, in the poster's place.
             document.querySelector<HTMLElement>('.watch .player')?.addEventListener('click', (event) => {
                 const player = event.currentTarget as HTMLElement;
+                if (player.dataset.youtube) {
+                    const frame = document.createElement('iframe');
+                    frame.src = `https://www.youtube-nocookie.com/embed/${player.dataset.youtube}?autoplay=1&rel=0&cc_load_policy=1`;
+                    frame.title = 'Drivine: graph RAG on any database';
+                    frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+                    frame.allowFullscreen = true;
+                    player.replaceChildren(frame);
+                    frame.focus({ preventScroll: true });
+                    return;
+                }
                 const video = document.createElement('video');
                 source(video, player);
                 video.controls = true;
@@ -1045,7 +1058,8 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             // of the mp4 is asked for, which warms all 39 MB of it. hls.js is fetched too, where it will play.
             const warm = () => {
                 const player = document.querySelector<HTMLElement>('.watch .player');
-                const { hls, video: src } = player?.dataset ?? {};
+                const { hls, video: src, youtube } = player?.dataset ?? {};
+                if (youtube) return;
                 if (!hls) return src && byte(src);
                 for (const file of ['index.m3u8', 'init.mp4']) void fetch(new URL(file, new URL(hls, location.href))).catch(() => {});
                 for (const file of ['000.m4s', '001.m4s']) byte(new URL(file, new URL(hls, location.href)).href);
