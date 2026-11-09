@@ -7,7 +7,7 @@ import { PostgresCursor } from '@/connection/postgres/PostgresCursor';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
-import { CompiledSpecification, compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledSpecification, compiledSpecification } from '@/cypher/CompiledSpecification';
 import { nonFiniteTypes, TypeParsers } from '@/connection/postgres/PostgresNonFinite';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';

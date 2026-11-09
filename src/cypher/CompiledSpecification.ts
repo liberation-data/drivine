@@ -1,6 +1,6 @@
 import { QuerySpecification } from '@/query/QuerySpecification';
 import type { CypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { CompiledRows } from '@/cypher/sql/CompiledCypher';
+import { CompiledRows } from '@/cypher/CompiledCypher';
 
 /**
  * A specification of a Cypher statement compiled to SQL, and what runs before it on the same connection; how its rows

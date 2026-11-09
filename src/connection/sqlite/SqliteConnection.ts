@@ -9,7 +9,7 @@ import { ensuringGraph, JSON_ROWS, SqliteGraph } from '@/backend/sqlite/SqliteGr
 import { SqliteSpecCompiler } from '@/connection/sqlite/SqliteSpecCompiler';
 import { SqliteCursor } from '@/connection/sqlite/SqliteCursor';
 import { SqliteDatabase, SqliteValue, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
-import { compiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';

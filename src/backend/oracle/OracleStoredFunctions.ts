@@ -1,5 +1,10 @@
-import { BC_BELOW } from '@/cypher/sql/TemporalSql';
 import { DrivineLogger } from '@/logger/DrivineLogger';
+
+/**
+ * The code of `1`: an ISO text whose first character's code is below it starts with `-` or `0`, as one with a year BC
+ * does, so the graph's `era` function rewrites it, and reads any other, an ordinary date, as it is.
+ */
+const BC_BELOW = 49;
 
 /** What a session's check needs of a connection: node-oracledb's `execute`. */
 export interface Executes {

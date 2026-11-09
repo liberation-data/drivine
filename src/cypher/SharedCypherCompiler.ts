@@ -1,6 +1,6 @@
 import { isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
-import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
+import { CompiledCypher } from '@/cypher/CompiledCypher';
 
 /** The stores the shared compiler compiles Cypher for. */
 export type SharedStore = 'postgres' | 'oracle' | 'sqlite';

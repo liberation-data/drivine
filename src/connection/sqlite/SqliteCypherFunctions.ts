@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { javaDouble } from '@/cypher/sql/JsonText';
+import { javaDouble } from '@/connection/sqlite/JavaDouble';
 import { SqliteArguments } from '@/connection/sqlite/SqliteArguments';
 import { JsonValue, SqliteCypherValues } from '@/connection/sqlite/SqliteCypherValues';
 import { roundingMode, SqliteDecimal } from '@/connection/sqlite/SqliteDecimal';

@@ -1,4 +1,4 @@
-import { javaDouble } from '@/cypher/sql/JsonText';
+import { javaDouble } from '@/connection/sqlite/JavaDouble';
 import { SqliteStatements } from '@/backend/sqlite/SqliteStatements';
 import { SqliteArguments } from '@/connection/sqlite/SqliteArguments';
 import type { SqliteDatabase, SqliteValue } from '@/connection/sqlite/SqliteDriver';

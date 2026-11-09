@@ -1,4 +1,4 @@
-import { javaDouble } from '@/cypher/sql/JsonText';
+import { javaDouble } from '@/connection/sqlite/JavaDouble';
 import { byCodePoints } from '@/backend/sqlite/ExactJson';
 
 /**
