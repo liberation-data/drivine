@@ -1,6 +1,7 @@
 import { isInt } from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
+import { CypherFloat } from '@/cypher/CypherFloat';
 
 /** The stores the shared compiler compiles Cypher for. */
 export type SharedStore = 'postgres' | 'oracle' | 'sqlite';
@@ -162,6 +163,7 @@ const LONG_RANGE = 2 ** 63;
  *   written as JSON writes it (`2.5`, `1e-7`). A whole one from 2^63, NaN and the infinities are floats too, written
  *   `{"$float": "<text>"}`, which JSON has no plain form of.
  * - a `bigint` and the Neo4j driver's `Integer` are their digits, unquoted: a whole number however large.
+ * - a {@link CypherFloat} is a float, `{"$float": "<text>"}`, even where it is whole: `cypherFloat(5)` is 5.0.
  * - a `Date` is `{"$temporal": "DATE_TIME", "text": <its toISOString()>}`, as Drivine binds it.
  * - bytes (`Buffer`, `Uint8Array`, `Int8Array`) are `{"$bytes": "<base64>"}`.
  * - any other iterable (a `Set`, a `Map`'s entries, a generator) is the list of its items; a map is its entries in
@@ -198,6 +200,9 @@ function number(value: number): string {
 
 /** A `Date`, bytes, a list or another iterable, or a map. */
 function composite(value: object): string {
+    if (value instanceof CypherFloat) {
+        return float(value.value);
+    }
     if (value instanceof Date) {
         return Number.isNaN(value.getTime())
             ? 'null'

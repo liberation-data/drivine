@@ -1,5 +1,6 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { withFloatsAsNumbers } from '@/cypher/CypherFloat';
 const assert = require('assert');
 
 export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
@@ -14,10 +15,10 @@ export class Neo4jSpecCompiler extends QuerySpecificationCompiler {
 
     formattedParams(): any {
         if (Array.isArray(this.spec.parameters)) {
-            const mapped = this.spec.parameters.map((it, index) => ({ [index + 1]: it }));
+            const mapped = this.spec.parameters.map((it, index) => ({ [index + 1]: withFloatsAsNumbers(it) }));
             return Object.assign({}, ...mapped);
         } else {
-            return this.spec.parameters;
+            return withFloatsAsNumbers(this.spec.parameters);
         }
     }
 }

@@ -1,5 +1,11 @@
 import neo4j from 'neo4j-driver';
-import { DatabaseType, PersistenceManager, QuerySpecification } from '@liberation-data/drivine';
+import {
+    CypherFloat,
+    cypherFloat,
+    DatabaseType,
+    PersistenceManager,
+    QuerySpecification
+} from '@liberation-data/drivine';
 import {
     clearLabels,
     closeGraphEngines,
@@ -18,21 +24,14 @@ function stores(): GraphEngine[] {
     return [...graphEngines().filter((it) => it.type === DatabaseType.NEO4J), ...cypherSqlStores()];
 }
 
-/** A float, as drivine4j binds a double: the test's own mark, as Drivine has no type of its own for one. */
-class Float {
-    constructor(readonly value: number) {}
-}
-
 /**
- * A value as the store takes it. Neo4j keeps a whole number apart from a float, and its driver sends a JavaScript number
- * as a float, so a whole number is sent as an integer and a {@link Float} as the number it is. A SQL store is given a
- * {@link Float} as the JavaScript number too, which the shared compiler binds as a whole number where it is one: a
- * JavaScript number can't hold a whole float apart from it, as the spec's steps of a whole float parameter are skipped
- * for (`WHOLE_FLOAT_PARAMETER` in test/cypher/CypherSpec.ts).
+ * A value as the store takes it. Neo4j keeps a whole number apart from a float, so a whole number is sent there as an
+ * integer. A float is given as a {@link CypherFloat} on every store, as drivine4j binds a double: Drivine sends Neo4j its
+ * number, which the driver sends as a float, and a SQL store's compiled statement binds it as a float.
  */
 function given(store: GraphEngine, value: any): any {
-    if (value instanceof Float) {
-        return value.value;
+    if (value instanceof CypherFloat) {
+        return value;
     }
     if (typeof value === 'number' && Number.isInteger(value) && store.type === DatabaseType.NEO4J) {
         return neo4j.int(value);
@@ -46,7 +45,7 @@ function given(store: GraphEngine, value: any): any {
     return value;
 }
 
-const float = (value: number): Float => new Float(value);
+const float = (value: number): CypherFloat => cypherFloat(value);
 
 /**
  * A write that takes a value from an item of an unwound parameter writes it as it is given, on every store. On Oracle
@@ -176,8 +175,7 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
         const [five] = await query('RETURN toString($f)', { f: float(5) });
         expect(await query('UNWIND $items AS t WITH t.f AS f RETURN toString(f)', items)).toEqual([five, '-0.5']);
         expect(await query('MATCH (n:CyUnwoundMade) RETURN toString(n.f) ORDER BY n.id')).toEqual([five, '-0.5']);
-        // A SQL store is given that parameter as the number 5, so the checks above can't fail there: a float the statement makes
-        // itself stays one on every store, and so must its value of an unwound item.
+        // A float the statement makes itself stays one on every store too, and so must its value of an unwound item.
         expect(await query('UNWIND [{f: 5.0}, {f: -0.5}] AS t WITH t.f AS f RETURN toString(f)')).toEqual([
             '5.0',
             '-0.5'
@@ -346,21 +344,18 @@ describe.each(stores())('A write from an unwound parameter on $type', (store) =>
             { id: 12, f: -0.5, m: 'v' },
             { id: 20, f: 6 }
         ]);
-        // A JavaScript number does not tell 5.0 from 5, so the store's text of each tells whether it is still a float:
-        // as the store writes the same float given as a parameter of its own. Only Neo4j is given a float: a SQL store is
-        // given the whole number 5 (see {@link given}), an unwound item's as any other parameter's.
+        // A JavaScript number does not tell 5.0 from 5, so the store's text of each tells whether it is still a float: a
+        // float given as a CypherFloat is written as one on every store, as a parameter of its own and as an unwound item's.
         await query('CREATE (:CyUnwound {id: 30, f: $f})', { f: float(5) });
-        const [five] = await query('MATCH (n:CyUnwound {id: 30}) RETURN toString(n.f)');
-        expect(five).toEqual(store.type === DatabaseType.NEO4J ? '5.0' : '5');
-        const whole = (text: string): string => (five === '5' ? text.replace('.0', '') : text);
+        expect(await query('MATCH (n:CyUnwound {id: 30}) RETURN toString(n.f)')).toEqual(['5.0']);
         expect(
             await query(
                 'MATCH (n:CyUnwound) WHERE n.id IN [1, 11, 20] RETURN [toString(n.f), toString(n.f2), toString(n.g)] ORDER BY n.id'
             )
         ).toEqual([
-            [whole('5.0'), whole('5.0'), whole('7.0')],
-            [whole('5.0'), null, null],
-            [whole('6.0'), null, null]
+            ['5.0', '5.0', '7.0'],
+            ['5.0', null, null],
+            ['6.0', null, null]
         ]);
     });
 });

@@ -1,4 +1,5 @@
 import { DrivineError } from '@/DrivineError';
+import { CypherFloat } from '@/cypher/CypherFloat';
 
 const PLAIN_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -33,6 +34,9 @@ export class FalkorDbParameterCoercer {
         }
         if (value instanceof Date) {
             return toFixedWidthIso(value);
+        }
+        if (value instanceof CypherFloat) {
+            return this.coerceValue(value.value);
         }
         switch (typeof value) {
             case 'number':

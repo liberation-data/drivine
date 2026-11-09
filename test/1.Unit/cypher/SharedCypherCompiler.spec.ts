@@ -1,6 +1,11 @@
 import neo4j from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
 import { parametersJson, SharedCypherCompiler, SharedStore } from '@/cypher/SharedCypherCompiler';
+import { CypherFloat, cypherFloat } from '@liberation-data/drivine';
+import { withFloatsAsNumbers } from '@/cypher/CypherFloat';
+import { Neo4jSpecCompiler } from '@/connection/neo4j/Neo4jSpecCompiler';
+import { FalkorDbParameterCoercer } from '@/connection/falkordb/FalkorDbParameterCoercer';
+import { QuerySpecification } from '@/query/QuerySpecification';
 
 const STORES: SharedStore[] = ['postgres', 'oracle', 'sqlite'];
 
@@ -44,6 +49,57 @@ describe('parametersJson', () => {
         expect(parametersJson({ d: new Date(0), x: new Date(NaN) })).toEqual(
             '{"d":{"$temporal":"DATE_TIME","text":"1970-01-01T00:00:00.000Z"},"x":null}'
         );
+    });
+
+    it('writes a CypherFloat as a float, whole or not, in a list or a map too', () => {
+        expect(parametersJson({ f: cypherFloat(5), l: [cypherFloat(2.5), 3], m: { k: cypherFloat(-0) } })).toEqual(
+            '{"f":{"$float":"5"},"l":[{"$float":"2.5"},3],"m":{"k":{"$float":"0"}}}'
+        );
+    });
+});
+
+describe('cypherFloat', () => {
+    it('is exported from the package, and writes its value as the JVM writes a double', () => {
+        expect(cypherFloat(5)).toBeInstanceOf(CypherFloat);
+        expect([String(cypherFloat(5)), String(cypherFloat(2.5)), String(cypherFloat(1e21))]).toEqual([
+            '5.0',
+            '2.5',
+            '1e+21'
+        ]);
+    });
+
+    it('binds a whole float on a SQL store as one, where a JavaScript number binds a whole number', () => {
+        const compiled = (f: any) =>
+            new SharedCypherCompiler('postgres', { name: 'g' }).compile('RETURN toString($f)', { f });
+        expect(compiled(cypherFloat(5)).parameters).toEqual({ _cy_f: '5.0' });
+        expect(compiled(5).parameters).toEqual({ _cy_f: '5' });
+    });
+
+    it('is given to a graph engine as the number it holds, at any depth, and nothing else is changed', () => {
+        const at = new Date(0);
+        expect(
+            withFloatsAsNumbers({
+                f: cypherFloat(5),
+                l: [cypherFloat(1), 'x'],
+                m: { k: cypherFloat(2) },
+                at,
+                i: neo4j.int(3)
+            })
+        ).toEqual({
+            f: 5,
+            l: [1, 'x'],
+            m: { k: 2 },
+            at,
+            i: neo4j.int(3)
+        });
+        const spec = new QuerySpecification({ text: 'RETURN $f', language: 'CYPHER' }).bind({ f: cypherFloat(5) });
+        expect(new Neo4jSpecCompiler(spec).formattedParams()).toEqual({ f: 5 });
+        const positional = new QuerySpecification({ text: 'RETURN $1', language: 'CYPHER' }).bind([cypherFloat(5)]);
+        expect(new Neo4jSpecCompiler(positional).formattedParams()).toEqual({ 1: 5 });
+        expect(new FalkorDbParameterCoercer().coerce({ f: cypherFloat(5), l: [cypherFloat(2.5)] })).toEqual({
+            f: 5,
+            l: [2.5]
+        });
     });
 });
 
