@@ -112,7 +112,8 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
      * The comparison of the root's property `name` with text as the expression of a range index or a uniqueness
      * constraint of one of the root's labels that begins with the property, the first label with one: undefined where
      * there is none, or where the comparison isn't `eq`, `gt`, `gte`, `lt`, `lte` or an equality with a lowercased copy
-     * (see LowerCopies), with text of at most 4,000 bytes.
+     * (see LowerCopies), with text of at most 4,000 bytes; nor for an equality with a copy by a value that may lowercase
+     * past that ({@link pastText}), which the index doesn't hold.
      *
      * It is written beside the JSON test, which still decides: the expression is the property as text, so it holds of
      * every node the test holds of, and of a number written as the same text too. It is null for a node without the
@@ -125,7 +126,12 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
         const lowered = test.operator === 'EQ_LOWERED';
         const operator = lowered ? '=' : SQL_OPERATORS[test.operator as keyof typeof SQL_OPERATORS];
         const value = this.storable(test.value);
-        if (!operator || typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 4000) {
+        if (
+            !operator ||
+            typeof value !== 'string' ||
+            Buffer.byteLength(value, 'utf8') > 4000 ||
+            (lowered && pastText(value))
+        ) {
             return undefined;
         }
         const label = this.root.labels.find((it) =>
@@ -171,6 +177,15 @@ export class OracleQueryRenderer extends SqlQueryRenderer {
                 return `NOT ${present}`;
             case 'IS_NOT_NULL':
                 return present;
+            // A copy that long reads as null as text, so it is compared as a CLOB: see pastText.
+            case 'EQ_LOWERED':
+                if (pastText(test.value)) {
+                    return (
+                        `DBMS_LOB.COMPARE(JSON_VALUE(${column}, '$${k}' RETURNING CLOB), ` +
+                        `LOWER(TO_CLOB(${this.bind(String(test.value))}))) = 0`
+                    );
+                }
+                return this.compareText(test.operator, test.value, `JSON_VALUE(${column}, '$${k}')`);
             default:
                 return this.compareText(test.operator, test.value, `JSON_VALUE(${column}, '$${k}')`);
         }
@@ -264,3 +279,12 @@ const PATH_OPERATORS = { EQ: '==', NEQ: '!=', GT: '>', GTE: '>=', LT: '<', LTE: 
 
 /** The comparisons an index answers, as SQL writes them. */
 const SQL_OPERATORS = { EQ: '=', GT: '>', GTE: '>=', LT: '<', LTE: '<=' };
+
+/**
+ * Whether `value`, lowercased, may be past the 4,000 bytes `JSON_VALUE` reads a text as, and an index over it holds: a
+ * character takes three bytes at most. A copy that long reads as null, so an equality with it is compared as a CLOB.
+ * drivine4j's `OraclePredicates.pastText` decides the same.
+ */
+function pastText(value: unknown): boolean {
+    return typeof value === 'string' && value.length * 3 > 4000;
+}

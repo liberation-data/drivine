@@ -532,8 +532,8 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
 /**
  * `lower_node`: writes on the node the lowercased copy of each property `p_keys`, a JSON array, names, from what it
  * holds, and removes the copy of one that holds nothing, which an empty text is on Oracle. Oracle lowercases it, as it
- * lowercases what a lookup compares the copy with: see LowerCopies. It is called once a write's change is told, so the
- * copies are no part of it.
+ * lowercases what a lookup compares the copy with: see LowerCopies. It is read and written as a CLOB, so a text past
+ * what a VARCHAR2 holds has its copy too. It is called once a write's change is told, so the copies are no part of it.
  */
 function lowerNode(nodes: string): string {
     return `    -- Writes the lowercased copy of each property p_keys names from what the node holds, and removes the copy of one
@@ -543,16 +543,16 @@ function lowerNode(nodes: string): string {
         o JSON_OBJECT_T;
         lowered JSON_ARRAY_T := JSON_ARRAY_T.parse(p_keys);
         k VARCHAR2(4000);
-        v VARCHAR2(32767);
+        v CLOB;
     BEGIN
         SELECT JSON_SERIALIZE(props RETURNING CLOB) INTO held FROM ${nodes} WHERE nid = p;
         o := JSON_OBJECT_T.parse(held);
         FOR i IN 0 .. lowered.get_size - 1 LOOP
             k := lowered.get_string(i);
             v := NULL;
-            IF o.has(k) AND NOT o.get(k).is_null THEN v := LOWER(o.get_string(k)); END IF;
+            IF o.has(k) AND NOT o.get(k).is_null THEN v := LOWER(o.get_clob(k)); END IF;
             -- Oracle keeps an empty text as null, so an empty property has no copy.
-            IF v IS NULL THEN o.remove('${LowerCopies.PREFIX}' || k);
+            IF v IS NULL OR LENGTH(v) = 0 THEN o.remove('${LowerCopies.PREFIX}' || k);
             ELSE o.put('${LowerCopies.PREFIX}' || k, v); END IF;
         END LOOP;
         -- An object type's methods are PL/SQL's: called in SQL, they are refused (ORA-40573).
