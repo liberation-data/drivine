@@ -10,7 +10,7 @@ The same models, queries and DSL run on each graph store. Switch the engine with
 | Oracle 23.9 or later | `ORACLE` | yes | full | vector, Oracle Text |
 | Amazon Neptune | `NEPTUNE` | no: `PersistenceManager` only | full | no |
 | Postgres 14 or later | `POSTGRES` | yes | full | vector (pgvector), full-text |
-| SQLite 3.45 or later | `SQLITE` | yes | one writer at a time | vector and full-text, by reading every node |
+| SQLite 3.53.2 or later (3.45 without Cypher) | `SQLITE` | yes | one writer at a time | vector and full-text, by reading every node |
 
 ### Neo4j
 
@@ -237,28 +237,45 @@ Notes:
 
 SQLite keeps a graph in a file, with no server: the same tables as Oracle and Postgres, so a file drivine4j or
 drivine-python wrote is read and written here, and the other way round. Drivine opens it through Node's own driver,
-`node:sqlite`, in Node 22.13 or later, which brings SQLite 3.45 or later; nothing else is installed. Node 22 and 24 print
+`node:sqlite`, in Node 22.13 or later; nothing else is installed. Node 22 and 24 print
 an `ExperimentalWarning` the first time `node:sqlite` is loaded. Models, the DSL and the object manager are the same as on
 the graph engines; `PersistenceManager` runs plain SQL, with cursors and transactions, and Cypher, compiled to SQLite's
 SQL as drivine4j compiles it (a cursor runs SQL alone). What Cypher does that SQLite's JSON functions don't, Drivine's
 functions registered on each connection do.
 
+**Which SQLite.** From Drivine 4.0.1, compiled Cypher needs SQLite 3.53.2 or later. On an older one it is wrong or
+refused: a float it computes is written to 15 digits (3.53.0 and 3.53.1 still write 15), 3.49 refuses a `CALL` that
+groups by a variable it imports, and SQLite before 3.47 refuses the `-> -1` that `last()` and a negative list index
+compile to. So a Cypher statement is refused there, with a `DrivineError` that names the SQLite and the Node that
+bundles it, before it is compiled. Plain SQL, the schema manager and the object manager, which write SQL, run on SQLite
+3.45 or later. The SQLite is the one Node bundles, unless Node was built against the system's:
+
+| Node line | `node:sqlite` without a flag from | SQLite before 3.53.2 | 3.53.2 or later from |
+| --- | --- | --- | --- |
+| 22 | 22.13.0 | 3.47.2 (22.13.0) to 3.51.3 (22.23.3) | 22.23.4 (3.53.4) |
+| 23 | 23.4.0 | 3.47.1 to 3.49.1 | none |
+| 24 | 24.0.0 | 3.49.1 (24.0.0) to 3.53.1 (24.18.1) | 24.19.0 (3.53.3) |
+| 25 | 25.0.0 | 3.50.4 to 3.51.3 | none |
+| 26 | 26.0.0 | 3.51.3 (26.0.0) to 3.53.1 (26.3.1) | 26.4.0 (3.53.2) |
+
 **Which Node.** The SQLite comes with Node, so use a Node whose SQLite writes a float it computes in JSON to 17
-significant digits, which read back as it: `json_quote(0.1 + 0.2)` is `0.30000000000000004`. SQLite 3.53 does so by
-default, but a build may still write 15 (one Python's 3.53.1 does), so Drivine asks SQLite rather than reading its
-version. Node 22.23.4, 24.22.2 and 26.13, for example, were measured to write 17. A SQLite that writes 15 significant
-digits, as every one before 3.53 does, rounds what it computes, and every value compiled Cypher gives is JSON: `0.1 +
-0.2` comes back as `0.3`, `1.0/3` as `0.333333333333333`, a value passed through `WITH` and multiplied back as
-`0.999999999999999` where `1.0` is wanted, and a computed float a statement `SET`s is stored rounded. Parameters,
-stored values and Drivine's own functions, such as `pi()`, keep their digits. Drivine detects this at run time: when it
-first opens a file, it asks SQLite for `json_quote(0.1 + 0.2)`, and warns once where the answer is rounded; it runs all
-the same. The warning is a Node process warning, so it shows whatever `DRIVINE_LOG_LEVEL` is, and its code is
-`DRIVINE_SQLITE_ROUNDED_FLOATS`. `node --disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` (or the same in
-`NODE_OPTIONS`) silences it alone, and `node --no-warnings` with every other process warning.
+significant digits, which read back as it: `json_quote(0.1 + 0.2)` is `0.30000000000000004`. SQLite 3.53.2 does so by
+default (3.53.0 and 3.53.1 still write 15), but a build may still write 15, so Drivine asks SQLite rather than reading
+its version. Node 22.23.4, 24.22.2 and 26.13, for example, were measured to write 17. A SQLite that writes 15
+significant digits, as a build of 3.53.2 may and every one before 3.53.2 does, rounds what it computes, and every value
+compiled Cypher gives is JSON: `0.1 + 0.2` comes back as `0.3`, `1.0/3` as `0.333333333333333`, a value passed through
+`WITH` and multiplied back as `0.999999999999999` where `1.0` is wanted, and a computed float a statement `SET`s is
+stored rounded. Parameters, stored values and Drivine's own functions, such as `pi()`, keep their digits. Drivine
+detects this at run time: when it first opens a file, it asks SQLite for `json_quote(0.1 + 0.2)`, and warns once where
+the answer is rounded and compiled Cypher is not refused; it runs all the same. The warning is a Node process warning,
+so it shows whatever `DRIVINE_LOG_LEVEL` is, and its code is `DRIVINE_SQLITE_ROUNDED_FLOATS`.
+`node --disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` (or the same in `NODE_OPTIONS`) silences it alone, and
+`node --no-warnings` with every other process warning.
 
 | Node, measured | SQLite | `json_quote(0.1 + 0.2)` |
 | --- | --- | --- |
-| 24.7.0 | 3.50.4 | `0.3`, warned of |
+| 24.7.0 | 3.50.4 | `0.3`; compiled Cypher is refused, so not warned of |
+| 24.16.0 | 3.53.0 | `0.3`; compiled Cypher is refused, so not warned of |
 | 22.23.4 | 3.53.4 | `0.30000000000000004` |
 | 24.22.2 | 3.53.4 | `0.30000000000000004` |
 | 26.13.0 | 3.54.0 | `0.30000000000000004` |

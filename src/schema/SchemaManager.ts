@@ -8,7 +8,6 @@ import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManag
 import { DEFAULT_SCOPE, SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import { inventoryEntries, readInventory, RecordedInventory } from '@/schema/SchemaInventory';
 import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
-import { QuerySpecification } from '@/query/QuerySpecification';
 import { EnsureResult, IndexSpec, itemName, madeAs, uniquenessConstraint } from '@/schema/SchemaSpecs';
 
 export interface SchemaOptions {
@@ -313,14 +312,9 @@ export class SchemaManager {
             ) ?? [];
         // What other owners' markers record, declared or ensured at runtime: an owner this manager was not given, such
         // as an application's, whose catalogs are another manager's or another process's.
-        const scopes = (
-            await pm.query<string | null>(
-                new QuerySpecification<string | null>().withStatement({
-                    text: `MATCH (m:${MARKER_LABEL}) RETURN DISTINCT m.scope`,
-                    language: 'CYPHER'
-                })
-            )
-        ).filter((it): it is string => typeof it === 'string' && it !== owner);
+        const scopes = (await pm.query<string | null>(gom.backend.schemaScopes().spec())).filter(
+            (it): it is string => typeof it === 'string' && it !== owner
+        );
         const recordedElsewhere = new Map<string, string[]>();
         for (const scope of scopes) {
             recordedElsewhere.set(scope, (await this.recordedBy(gom, scope))?.keys ?? []);
