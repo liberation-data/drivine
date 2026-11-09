@@ -1,0 +1,302 @@
+# What each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, which the SQL
+# calls, and how it reads a column of a statement's rows. Read with no store: on an in-memory SQLite and pure functions. Each
+# case pairs its steps with the store cases whose compiled statements rely on them. See README.md.
+
+cases:
+  - name: "drivine_equal"
+    description: "drivine_equal(a, b) compares two JSON values as Cypher does: 1 or 0, or null where either is no value or a null in them decides. NaN, as SQLite's JSON writes it, is equal to nothing, itself included, in a list or a map too; an infinity, as SQLite's JSON writes it, is equal to itself. A map that is not exactly the tag of NaN is a map."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities"]
+      queries.yaml: ["NaN and the infinities as parameters"]
+    steps:
+      - function: "drivine_equal"
+        args: ['{"$numberDouble":"NaN"}', '{"$numberDouble":"NaN"}']
+        result: 0
+      - function: "drivine_equal"
+        args: ['{"$numberDouble":"NaN"}', '1.0']
+        result: 0
+      - function: "drivine_equal"
+        args: ['[1.0,{"$numberDouble":"NaN"}]', '[1.0,{"$numberDouble":"NaN"}]']
+        result: 0
+      - function: "drivine_equal"
+        args: ['{"x":{"$numberDouble":"NaN"}}', '{"x":{"$numberDouble":"NaN"}}']
+        result: 0
+      - note: "The pair with NaN is false, which decides before the pair with null."
+        function: "drivine_equal"
+        args: ['[{"$numberDouble":"NaN"},null]', '[{"$numberDouble":"NaN"},null]']
+        result: 0
+      - function: "drivine_equal"
+        args: ['[1,null]', '[1,null]']
+        result: null
+      - function: "drivine_equal"
+        args: ['{"$numberDouble":"NaN"}', '"NaN"']
+        result: 0
+      - function: "drivine_equal"
+        args: ['9e999', '9e999']
+        result: 1
+      - function: "drivine_equal"
+        args: ['9e999', '-9e999']
+        result: 0
+      - function: "drivine_equal"
+        args: ['9e999', '1e308']
+        result: 0
+      - function: "drivine_equal"
+        args: ['1', '1.0']
+        result: 1
+      - note: "Not the tag: another text than NaN."
+        function: "drivine_equal"
+        args: ['{"$numberDouble":"2.0"}', '{"$numberDouble":"2.0"}']
+        result: 1
+      - note: "Not the tag: another key beside it."
+        function: "drivine_equal"
+        args: ['{"$numberDouble":"NaN","x":1}', '{"x":1,"$numberDouble":"NaN"}']
+        result: 1
+      - function: "drivine_equal"
+        args: [null, '1']
+        result: null
+      - function: "drivine_equal"
+        args: ['null', '1']
+        result: null
+
+  - name: "drivine_add"
+    description: "drivine_add(a, b) is Cypher's a + b of two JSON values, as JSON text: NaN, as SQLite's JSON writes it, adds as a number, a sum of floats past a double's range is an infinity, written 9e999, and infinities of both signs sum to NaN; a text put together with NaN or an infinity writes it as Java does. Null where Cypher adds no such two, a map that is not exactly the tag of NaN among them."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities", "NaN and the infinities written"]
+    steps:
+      - function: "drivine_add"
+        args: ['{"$numberDouble":"NaN"}', '1']
+        result: '{"$numberDouble":"NaN"}'
+      - function: "drivine_add"
+        args: ['1.5', '{"$numberDouble":"NaN"}']
+        result: '{"$numberDouble":"NaN"}'
+      - function: "drivine_add"
+        args: ['9e999', '-9e999']
+        result: '{"$numberDouble":"NaN"}'
+      - function: "drivine_add"
+        args: ['9e999', '1']
+        result: '9e999'
+      - function: "drivine_add"
+        args: ['1e308', '1e308']
+        result: '9e999'
+      - function: "drivine_add"
+        args: ['-1e308', '-1e308']
+        result: '-9e999'
+      - function: "drivine_add"
+        args: ['"a"', '{"$numberDouble":"NaN"}']
+        result: '"aNaN"'
+      - function: "drivine_add"
+        args: ['{"$numberDouble":"NaN"}', '"a"']
+        result: '"NaNa"'
+      - function: "drivine_add"
+        args: ['"a"', '9e999']
+        result: '"aInfinity"'
+      - function: "drivine_add"
+        args: ['[1]', '{"$numberDouble":"NaN"}']
+        result: '[1,{"$numberDouble":"NaN"}]'
+      - function: "drivine_add"
+        args: ['1', '2']
+        result: '3'
+      - function: "drivine_add"
+        args: ['1', '2.5']
+        result: '3.5'
+      - note: "Not the tag: a map, which is added to no number."
+        function: "drivine_add"
+        args: ['{"$numberDouble":"2.0"}', '1']
+        result: null
+      - note: "Not the tag: another key beside it."
+        function: "drivine_add"
+        args: ['{"$numberDouble":"NaN","x":1}', '1']
+        result: null
+      - function: "drivine_add"
+        args: [null, '1']
+        result: null
+
+  - name: "drivine_list_order"
+    description: "drivine_list_order(a, b) is where the JSON list a comes beside the JSON list b in a comparison (<, >= …): -1, 0 or 1, by the first pair of items not equal, or by their sizes; null where either is no list, or where the pair that decides is not ordered, as a pair with NaN is not. An infinity is ordered as the float it is."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities"]
+      queries.yaml: ["NaN and the infinities as parameters"]
+    steps:
+      - function: "drivine_list_order"
+        args: ['[{"$numberDouble":"NaN"},1]', '[{"$numberDouble":"NaN"},2]']
+        result: null
+      - function: "drivine_list_order"
+        args: ['[{"$numberDouble":"NaN"}]', '[{"$numberDouble":"NaN"}]']
+        result: null
+      - function: "drivine_list_order"
+        args: ['[1,{"$numberDouble":"NaN"}]', '[2,{"$numberDouble":"NaN"}]']
+        result: -1
+      - function: "drivine_list_order"
+        args: ['[9e999]', '[1e308]']
+        result: 1
+      - function: "drivine_list_order"
+        args: ['[-9e999]', '[9e999]']
+        result: -1
+      - function: "drivine_list_order"
+        args: ['[1]', '[1,2]']
+        result: -1
+      - note: "Not the tag: two maps, equal."
+        function: "drivine_list_order"
+        args: ['[{"$numberDouble":"2.0"}]', '[{"$numberDouble":"2.0"}]']
+        result: 0
+      - function: "drivine_list_order"
+        args: ['1', '[1]']
+        result: null
+
+  - name: "drivine_sort_key"
+    description: "drivine_sort_key(list) is a text that orders, as SQLite orders text, as Cypher orders the JSON list: item by item, a list that another begins with first, and items of different kinds as Cypher orders kinds, a map, a list, a text, a truth value, a number, then null. NaN, as SQLite's JSON writes it, is a number, after every other, an infinity's too. A map that is not exactly the tag of NaN is a map. The text itself is each library's own: only its order is pinned. Of a value that is no list, it is the JSON text given; of null, null."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities"]
+      queries.yaml: ["NaN and the infinities as parameters"]
+    steps:
+      - function: "drivine_sort_key"
+        ascending:
+          - '[]'
+          - '[{"$numberDouble":"2.0"}]'
+          - '[{"$numberDouble":"NaN","x":1}]'
+          - '[[1]]'
+          - '["a"]'
+          - '[true]'
+          - '[-9e999]'
+          - '[-2.5]'
+          - '[1.0]'
+          - '[1.0,{"$numberDouble":"NaN"}]'
+          - '[1.5]'
+          - '[9e999]'
+          - '[{"$numberDouble":"NaN"}]'
+          - '[null]'
+      - function: "drivine_sort_key"
+        args: ['{"$numberDouble":"NaN"}']
+        result: '{"$numberDouble":"NaN"}'
+      - function: "drivine_sort_key"
+        args: ['1.5']
+        result: '1.5'
+      - function: "drivine_sort_key"
+        args: [null]
+        result: null
+
+  - name: "drivine_round"
+    description: "drivine_round(number, precision, mode) rounds a SQL number to as many decimal places by the rounding mode, in decimal, as Neo4j's round(value, precision, mode) does; an infinity, which SQLite stores, is itself. Null where the number or the precision is."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities"]
+    steps:
+      - function: "drivine_round"
+        args: [{$float: "Infinity"}, 2, "HALF_DOWN"]
+        result: {$float: "Infinity"}
+      - function: "drivine_round"
+        args: [{$float: "-Infinity"}, 0, "UP"]
+        result: {$float: "-Infinity"}
+      - note: "Halfway in decimal, where SQLite's binary arithmetic finds it just below."
+        function: "drivine_round"
+        args: [2.345, 2, "HALF_UP"]
+        result: 2.35
+      - function: "drivine_round"
+        args: [2.5, 0, "HALF_EVEN"]
+        result: 2.0
+      - function: "drivine_round"
+        args: [5, 1, "UP"]
+        result: 5.0
+      - function: "drivine_round"
+        args: [null, 2, "UP"]
+        result: null
+      - function: "drivine_round"
+        args: [2.5, null, "UP"]
+        result: null
+
+  - name: "drivine_float_text"
+    description: "drivine_float_text(real) is the text of a SQL float as Java writes a double, as toString() gives it: an infinity, which SQLite stores, as Infinity or -Infinity. Null of null."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities"]
+      queries.yaml: ["NaN and the infinities as parameters"]
+    steps:
+      - function: "drivine_float_text"
+        args: [{$float: "Infinity"}]
+        result: "Infinity"
+      - function: "drivine_float_text"
+        args: [{$float: "-Infinity"}]
+        result: "-Infinity"
+      - function: "drivine_float_text"
+        args: [null]
+        result: null
+
+  - name: "Postgres rows of a statement given NaN or an infinity"
+    description: "Postgres's jsonb holds neither NaN nor an infinity, so a statement given one (nonFinite) writes stand-in numbers past any double's: NaN is exactly 2e309 + 0.5, a number at or past 1e309 is an infinity, and one at or below -1e309 the negative infinity. They are read as such only in the rows of a statement given one; elsewhere a column is read as JSON is. The tag SQLite writes for NaN is a map on Postgres."
+    pairs:
+      queries.yaml: ["NaN and the infinities as parameters", "Floats written as text"]
+    steps:
+      - read: {store: "postgres", nonFinite: true, column: ["2", {$repeat: "0", times: 309}, ".5"]}
+        value: {$float: "NaN"}
+      - read: {store: "postgres", nonFinite: true, column: ["1", {$repeat: "0", times: 309}, ".5"]}
+        value: {$float: "Infinity"}
+      - read: {store: "postgres", nonFinite: true, column: ["-1", {$repeat: "0", times: 309}, ".5"]}
+        value: {$float: "-Infinity"}
+      - read: {store: "postgres", nonFinite: true, column: ["[", "2", {$repeat: "0", times: 309}, ".5, 1.5, 2, ", "-1", {$repeat: "0", times: 309}, ".5]"]}
+        value: [{$float: "NaN"}, 1.5, 2, {$float: "-Infinity"}]
+      - read: {store: "postgres", nonFinite: true, column: ['{"x": ', "2", {$repeat: "0", times: 309}, ".5}"]}
+        value: {x: {$float: "NaN"}}
+      - note: "Near miss: just below the stand-in for NaN, and past 1e309, so an infinity."
+        read: {store: "postgres", nonFinite: true, column: ["2", {$repeat: "0", times: 309}, ".4"]}
+        value: {$float: "Infinity"}
+      - note: "Near miss: just past the stand-in for NaN."
+        read: {store: "postgres", nonFinite: true, column: ["2", {$repeat: "0", times: 309}, ".6"]}
+        value: {$float: "Infinity"}
+      - note: "Near miss: the negative of the stand-in for NaN is no NaN."
+        read: {store: "postgres", nonFinite: true, column: ["-2", {$repeat: "0", times: 309}, ".5"]}
+        value: {$float: "-Infinity"}
+      - note: "Exactly 1e309, where the infinities begin."
+        read: {store: "postgres", nonFinite: true, column: ["1", {$repeat: "0", times: 309}]}
+        value: {$float: "Infinity"}
+      - note: "Exactly -1e309, where the negative infinities begin."
+        read: {store: "postgres", nonFinite: true, column: ["-1", {$repeat: "0", times: 309}]}
+        value: {$float: "-Infinity"}
+      - note: "Near miss: below 1e309, and within a double's range."
+        read: {store: "postgres", nonFinite: true, column: ["1", {$repeat: "0", times: 308}]}
+        value: 1.0E308
+      - read: {store: "postgres", nonFinite: true, column: "1.5"}
+        value: 1.5
+      - read: {store: "postgres", nonFinite: true, column: "2"}
+        value: 2
+      - note: "The tag SQLite writes for NaN is a map on Postgres."
+        read: {store: "postgres", nonFinite: true, column: '{"$numberDouble": "NaN"}'}
+        value: {$numberDouble: "NaN"}
+      - note: "A whole number past a long's range is a float whose fraction jsonb dropped, as it writes 1e20."
+        read: {store: "postgres", nonFinite: false, column: "100000000000000000000"}
+        value: 1.0E20
+      - read: {store: "postgres", nonFinite: true, column: "100000000000000000000"}
+        value: 1.0E20
+      - note: "Not given NaN or an infinity, the stand-in is no NaN: it is read as a JSON number past a double's range is."
+        read: {store: "postgres", nonFinite: false, column: ["2", {$repeat: "0", times: 309}, ".5"]}
+        value: {$float: "Infinity"}
+
+  - name: "SQLite rows that hold NaN"
+    description: "SQLite's JSON holds no NaN, so a statement writes it as the tag {\"$numberDouble\":\"NaN\"}, exactly: one key, the text NaN. The tag in a JSON column of a compiled statement's rows is read as NaN, in a list or a map too, where the statement was given NaN or an infinity (nonFinite) and where the column's text holds the tag, as it does where a statement given neither works NaN out. A map with another key, or another text, is the map it is. An infinity, written 9e999, is read as the infinity."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities", "NaN and the infinities written"]
+      queries.yaml: ["NaN and the infinities as parameters"]
+    steps:
+      - read: {store: "sqlite", nonFinite: true, column: '{"$numberDouble":"NaN"}'}
+        value: {$float: "NaN"}
+      - read: {store: "sqlite", nonFinite: false, column: '{"$numberDouble":"NaN"}'}
+        value: {$float: "NaN"}
+      - read: {store: "sqlite", nonFinite: false, column: '[1.5,{"$numberDouble":"NaN"}]'}
+        value: [1.5, {$float: "NaN"}]
+      - read: {store: "sqlite", nonFinite: false, column: '{"a":{"$numberDouble":"NaN"},"b":[9e999,-9e999]}'}
+        value: {a: {$float: "NaN"}, b: [{$float: "Infinity"}, {$float: "-Infinity"}]}
+      - note: "Not the tag: another text than NaN."
+        read: {store: "sqlite", nonFinite: true, column: '{"$numberDouble":"2.0"}'}
+        value: {$numberDouble: "2.0"}
+      - note: "Not the tag: another text than NaN."
+        read: {store: "sqlite", nonFinite: false, column: '[{"$numberDouble":"2.0"},{"$numberDouble":"NaN"}]'}
+        value: [{$numberDouble: "2.0"}, {$float: "NaN"}]
+      - note: "Not the tag: another key beside it."
+        read: {store: "sqlite", nonFinite: true, column: '{"$numberDouble":"NaN","x":1}'}
+        value: {$numberDouble: "NaN", x: 1}
+      - note: "Not the tag: another key beside it."
+        read: {store: "sqlite", nonFinite: false, column: '{"$numberDouble":"NaN","x":1}'}
+        value: {$numberDouble: "NaN", x: 1}
+      - read: {store: "sqlite", nonFinite: true, column: '9e999'}
+        value: {$float: "Infinity"}
+      - read: {store: "sqlite", nonFinite: false, column: '[9e999,-9e999]'}
+        value: [{$float: "Infinity"}, {$float: "-Infinity"}]
+      - read: {store: "sqlite", nonFinite: false, column: '[1,2.0,"NaN"]'}
+        value: [1, 2.0, "NaN"]
