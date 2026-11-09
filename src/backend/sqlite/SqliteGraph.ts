@@ -90,9 +90,9 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
      * first.
      *
      * The count is {@link REUSES_IDS} where the table of nodes or of relationships is there and was made without
-     * `AUTOINCREMENT`, as SQLite keeps the statement that made it: one look finds both. drivine4j's text, but for the
-     * `KEY` before `AUTOINCREMENT`, as drivine-python's, so that a graph whose name holds the word is not taken for one
-     * made with it.
+     * `AUTOINCREMENT`, as SQLite keeps the statement that made it: one look finds both. It is drivine4j's and
+     * drivine-python's text: it looks for `KEY AUTOINCREMENT`, so that a graph whose name holds the word is not taken
+     * for one made with it.
      */
     get made(): string {
         const names = this.ddl.map((it) => /IF NOT EXISTS (\w+)/.exec(it)![1].toLowerCase());
