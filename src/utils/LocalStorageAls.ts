@@ -28,6 +28,10 @@ export class LocalStorageAls implements LocalStorage {
         return result as any;
     }
 
+    async runPromiseInCopy<T>(fn: () => Promise<T>): Promise<T> {
+        return this.asyncLocalStorage.run(new Map(this.asyncLocalStorage.getStore() ?? []), fn);
+    }
+
     isInsideRun(): boolean {
         return this.asyncLocalStorage.getStore() !== undefined;
     }
