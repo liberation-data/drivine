@@ -53,7 +53,8 @@ export function cypherParameters(spec: QuerySpecification<unknown>): Record<stri
  * `parameters`, with each iterator in a value turned into the array of its items: a generator or `map.values()`, at any
  * depth in a list, a map, a `Map` or a `Set`. An iterator gives its items only once, and a statement may be compiled
  * more than once (on Oracle, again to call none of the store's functions the session may not), so a later compile
- * would bind the list as empty (drivine#408, drivine#662). A value with no iterator in it is kept as it is.
+ * would bind the list as empty (drivine#408, drivine#662). Another iterable that is not an array, a `Set`, a `Map` or
+ * bytes is its items' array too, as it may give them only once. A value with none of these in it is kept as it is.
  */
 export function drained(parameters: Record<string, any>): Record<string, any> {
     return mapDrained(parameters) as Record<string, any>;
@@ -76,7 +77,15 @@ function drainedValue(value: any): unknown {
     }
     const items = Array.from(iterable);
     const drainedItems = items.map(drainedValue);
-    return drainedItems.some((it, i) => it !== items[i]) ? drainedItems : value;
+    return !givesItemsAgain(value) || drainedItems.some((it, i) => it !== items[i]) ? drainedItems : value;
+}
+
+/**
+ * Whether `value`, an iterable, is a collection, which gives its items again: another, as one handing out the one
+ * iterator it holds, may not.
+ */
+function givesItemsAgain(value: object): boolean {
+    return Array.isArray(value) || value instanceof Set || value instanceof Map || ArrayBuffer.isView(value);
 }
 
 /** The map `value`, with each iterator in it the array of its items; `value` itself where none is. */

@@ -58,6 +58,14 @@ describe('An iterator in a compiled statement parameter', () => {
             );
         });
 
+        it("in an iterable that hands out the one iterator it holds, is bound as an array's items", () => {
+            const cypher = 'MATCH (n) WHERE n.id IN $p.ids RETURN n';
+            const once = letters();
+            expect(bound(store, cypher, { p: { ids: { [Symbol.iterator]: () => once } } })).toEqual(
+                bound(store, cypher, { p: { ids: ['a', 'b'] } })
+            );
+        });
+
         it("is bound as its items by a second compile of the statement's parameters, too", () => {
             const cypher = 'MATCH (n) WHERE n.id IN $p.ids RETURN n';
             const spec = new QuerySpecification(cypherStatement(cypher)).bind({ p: { ids: letters() } });
@@ -100,6 +108,19 @@ describe('drained', () => {
 
     it("turns an iterator in a Map's value into its items' array, as the Map's entries are written", () => {
         expect(drained({ byId: new Map([['x', letters()]]) })).toEqual({ byId: [['x', ['a', 'b']]] });
+    });
+
+    it('turns an iterator that yields iterators into the arrays of their items', () => {
+        function* rows(): Generator<Generator<string>> {
+            yield letters();
+            yield letters();
+        }
+        expect(drained({ rows: rows() })).toEqual({
+            rows: [
+                ['a', 'b'],
+                ['a', 'b']
+            ]
+        });
     });
 
     it('turns an iterator given as a parameter itself into its items', () => {
