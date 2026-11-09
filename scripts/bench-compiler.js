@@ -21,12 +21,11 @@
  *   error is a request the compiler can't read, so a fault in how Drivine writes it, not a refusal.
  *
  * It fails (exits 1) when the median load, in a store's cold processes, is over 150 ms: #685's budget, which is for the
- * load alone, as a store's first compile differs from store to store. Beside the warm medians it prints
- * the pre-switch numbers of #685, Drivine's own compiler (src/cypher/sql, since deleted) on an Apple M2 Max, for
- * reference only: they're of another machine and a compiler that is gone, so they are not enforced. Oracle's warm
- * compile is over 1.5x of them until liberation-data/drivine-cypher-spec#122. A regression of the warm compile or of
- * a store's first compile is caught by the nightly instead (scripts/bench-regression.js), against the previous night's
- * numbers.
+ * load alone, as a store's first compile differs from store to store. Beside the warm medians it prints the pre-switch
+ * numbers of #685, Drivine's own compiler (src/cypher/sql, since deleted) on an Apple M2 Max, for reference only:
+ * they're of another machine and a compiler that is gone, so they are not enforced. Oracle's warm compile is over 1.5x
+ * of them until liberation-data/drivine-cypher-spec#122. A regression of the warm compile or of a store's first compile
+ * is caught by the nightly instead (scripts/bench-regression.js), against the previous night's numbers.
  *
  * The compiler is the installed dependency, unless DRIVINE_WASM_COMPILER names another: a candidate build, timed before
  * it is published. Given its `.tgz` (in drivine-cypher-spec's `compiler`, `./gradlew npmPackage`, then `npm pack` of
@@ -61,7 +60,7 @@ const FILES = ['queries.yaml', 'writes.yaml', 'temporal.yaml', 'refusals.yaml'];
 // The graph as each connection first compiles for it: on Oracle, with its stored functions and no index named.
 const GRAPH = { name: 'g' };
 const STORES = ['postgres', 'oracle', 'sqlite'];
-// #685's budget for the load, in ms: the package's require and the start of its Wasm module, before any store's compile.
+// #685's budget for the load, in ms: the package's require and the start of its Wasm module, before a store's compile.
 const LOAD_BUDGET = 150;
 // #685's pre-switch warm medians, in ms: Drivine's own compiler, on an Apple M2 Max with Node 24.7. For reference only.
 const PRE_SWITCH = { postgres: 0.204, oracle: 0.218, sqlite: 0.214 };

@@ -143,9 +143,13 @@ describe('The nightly check of the compiler bench (scripts/bench-regression.js)'
         const text = summary(before, verdict);
         expect(text).toContain('| postgres | first compile | none | 70.000 |  |');
         expect(text).toContain('| postgres | warm median | 0.250 | 0.250 | 1.00x |');
+        // Their warm medians are still compared.
+        expect(regressions(before, numbers({ ...BASELINE_MEDIANS, oracle: 0.9 }))).toEqual([
+            { store: 'oracle', measure: 'warmMedianMs', before: 0.5, after: 0.9, ratio: 1.8 }
+        ]);
         expect(text).toContain(
-            "The last nightly's numbers have no postgres's first compile, oracle's first compile, sqlite's first" +
-                " compile, so tonight's are recorded, and not compared."
+            "The last nightly's numbers have no first compile on postgres, oracle, sqlite, so tonight's are recorded," +
+                ' and not compared.'
         );
     });
 
@@ -171,6 +175,9 @@ describe('The nightly check of the compiler bench (scripts/bench-regression.js)'
         const text = summary(before, judge(before, bench(tonight)));
         expect(text).toContain('| oracle | warm median | none | 5.000 |  |');
         expect(text).toContain('| oracle | first compile | none | 20.000 |  |');
+        expect(text).toContain(
+            "The last nightly's numbers have no warm median on oracle, and no first compile on oracle, so tonight's"
+        );
         expect(text).toContain('The compiler is 0.32.0 tonight, and was 0.31.0.');
         expect(text).not.toContain('The machine is');
     });

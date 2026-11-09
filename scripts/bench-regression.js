@@ -5,9 +5,9 @@
  *     node scripts/bench-regression.js <the last nightly's numbers, compiler-bench.json> <tonight's, to write>
  *
  * It runs the bench (scripts/bench-compiler.js, which needs `npm run build`) and compares each store's warm median and
- * first compile (MEASURES) with the last nightly's. It fails (exits 1) when one rose by more than half (LIMIT), and only
- * when one still has after one more run of the bench: a shared runner is noisy, and a second run filters most of it.
- * Without the last nightly's numbers (the first night, or theirs have expired), it records tonight's and passes; a
+ * first compile (MEASURES) with the last nightly's. It fails (exits 1) when one rose by more than half (LIMIT), and
+ * only when one still has after one more run of the bench: a shared runner is noisy, and a second run filters most of
+ * it. Without the last nightly's numbers (the first night, or theirs have expired), it records tonight's and passes; a
  * measure the last nightly's numbers haven't, such as the first compile before the bench timed it apart from the load,
  * is recorded and not compared that night. The bench's own budget, the load, fails it too, as it fails the bench. It
  * writes the numbers of the run it judged by to the second file, which nightly.yml uploads for the next night, and
@@ -98,23 +98,22 @@ function summary(baseline, verdict) {
         lines.push(`The machine is ${verdict.numbers.machine} tonight, and was ${baseline.machine}.`, '');
     }
     const header = ['Store', 'Measure', 'Last nightly, ms', 'Tonight, ms', 'Rise'];
-    const unmatched = [];
+    // The stores each measure has no number of the last nightly's for, by what the summary calls it.
+    const unmatched = new Map();
     const rows = Object.entries(verdict.numbers.stores).flatMap(([store, it]) =>
         Object.entries(MEASURES).map(([measure, called]) => {
             const was = before(baseline, store, measure);
             if (was === undefined) {
-                unmatched.push(`${store}'s ${called}`);
+                unmatched.set(called, [...(unmatched.get(called) ?? []), store]);
                 return [store, called, 'none', ms(it[measure]), ''];
             }
             return [store, called, ms(was), ms(it[measure]), `${(it[measure] / was).toFixed(2)}x`];
         })
     );
     lines.push(...[header, header.map(() => '---'), ...rows].map((row) => `| ${row.join(' | ')} |`), '');
-    if (unmatched.length > 0) {
-        lines.push(
-            `The last nightly's numbers have no ${unmatched.join(', ')}, so tonight's are recorded, and not compared.`,
-            ''
-        );
+    if (unmatched.size > 0) {
+        const missing = [...unmatched].map(([called, stores]) => `${called} on ${stores.join(', ')}`).join(', and no ');
+        lines.push(`The last nightly's numbers have no ${missing}, so tonight's are recorded, and not compared.`, '');
     }
     const named = (found) =>
         found.map((it) => `${it.store}'s ${MEASURES[it.measure]} (${it.ratio.toFixed(2)}x)`).join(', ');
