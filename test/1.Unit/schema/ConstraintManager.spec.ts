@@ -17,6 +17,15 @@ const inTheWay = (): Error =>
 
 const rangeRow = (name: string, ...properties: string[]) => ({ name, labels: ['Person'], properties });
 
+/** The executor, answering FalkorDB's index build as OPERATIONAL: the range index a constraint needs first is built. */
+const indexBuilt = (executor: SchemaExecutor): SchemaExecutor =>
+    ({
+        run: async (statement: any, bindings?: Record<string, any>) =>
+            statement === FALKORDB_SCHEMA.indexBuild!.statement
+                ? [{ status: 'OPERATIONAL' }]
+                : executor.run(statement, bindings)
+    }) as unknown as SchemaExecutor;
+
 /**
  * A Neo4j that refuses the constraint for an index in the way of it until DROP INDEX has run, and answers the query for
  * keys held more than once with `conflicts`, or fails it when that is an error. Given `refusedAfterDrop`, it refuses
@@ -174,7 +183,7 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
         } as unknown as SchemaExecutor;
         const dropped = () => ran.some((it: any) => it?.native === 'CONSTRAINT_DROP');
         const read = () => ran.filter((it) => typeof it === 'string' && it.includes('holders > 1'));
-        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), ran, dropped, read };
+        return { constraints: new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA), ran, dropped, read };
     }
 
     it('should wait for the constraint to be built', async () => {
@@ -194,7 +203,7 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
                     return typeof statement === 'string' && statement.includes('holders > 1') ? [repeated] : [];
                 })
         } as unknown as SchemaExecutor;
-        expect(await new ConstraintManager(executor, FALKORDB_SCHEMA).ensure(spec, 0)).toEqual({
+        expect(await new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA).ensure(spec, 0)).toEqual({
             status: 'VIOLATION',
             spec,
             sample: []
@@ -214,7 +223,7 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
                     return typeof statement === 'string' && statement.includes('holders > 1') ? [repeated] : [];
                 })
         } as unknown as SchemaExecutor;
-        expect(await new ConstraintManager(executor, FALKORDB_SCHEMA).ensure(spec, 0)).toEqual({
+        expect(await new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA).ensure(spec, 0)).toEqual({
             status: 'VIOLATION',
             spec,
             sample: []
@@ -305,7 +314,12 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
         } as unknown as SchemaExecutor;
         const count = (native: string) => ran.filter((it: any) => it?.native === native).length;
         const listingsRun = () => ran.filter((it) => it === FALKORDB_SCHEMA.listUniques.statement).length;
-        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), ran, count, listings: listingsRun };
+        return {
+            constraints: new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA),
+            ran,
+            count,
+            listings: listingsRun
+        };
     }
 
     it('should wait on a constraint already UNDER CONSTRUCTION, and match it once built', async () => {
@@ -396,7 +410,7 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
             run: async (statement: unknown) => Promise.resolve().then(() => answer(statement))
         } as unknown as SchemaExecutor;
         const count = (native: string) => ran.filter((it: any) => it?.native === native).length;
-        return { constraints: new ConstraintManager(executor, FALKORDB_SCHEMA), count };
+        return { constraints: new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA), count };
     }
 
     it('should make again a failed build another process dropped first', async () => {
@@ -425,7 +439,9 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
                         : [];
                 })
         } as unknown as SchemaExecutor;
-        await expect(new ConstraintManager(executor, FALKORDB_SCHEMA).ensure(spec)).rejects.toBe(noSuchConstraint);
+        await expect(new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA).ensure(spec)).rejects.toBe(
+            noSuchConstraint
+        );
     });
 
     it('should drop a constraint whose build failed, which list leaves out', async () => {
@@ -440,7 +456,7 @@ describe('ConstraintManager on FalkorDB, which builds a constraint in the backgr
                 );
             }
         } as unknown as SchemaExecutor;
-        const constraints = new ConstraintManager(executor, FALKORDB_SCHEMA);
+        const constraints = new ConstraintManager(indexBuilt(executor), FALKORDB_SCHEMA);
         expect(await constraints.list()).toEqual([]);
         await constraints.drop(spec);
         expect(ran).toContainEqual({ native: 'CONSTRAINT_DROP', label: 'Person', properties: ['email'] });
