@@ -17,7 +17,7 @@ import {
     unsupported,
     writes
 } from '@/cypher/sql/CypherSyntax';
-import { javaDouble, jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
+import { drained, javaDouble, jsonText, LONG_RANGE } from '@/cypher/sql/JsonText';
 import { Parameters } from '@/cypher/sql/Parameters';
 import { Procedure, ProcedureCall, ProcedureStep, Steps, Walk, Walked } from '@/cypher/sql/Procedure';
 import { Temporal } from '@/cypher/sql/Temporal';
@@ -196,7 +196,9 @@ export abstract class SqlCypherCompiler {
      * The statement `query`, read already, with its parameters' values `parameters`, as SQL: a query, or a procedure
      * where it writes.
      */
-    compileQuery(query: Query, parameters: Record<string, any>): CompiledCypher {
+    compileQuery(query: Query, given: Record<string, any>): CompiledCypher {
+        // An iterator in a parameter is read once, here, so each look into the parameter sees its items.
+        const parameters = drained(given);
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
         VariableKinds.check(query);
         // An aggregate in a WHERE too.

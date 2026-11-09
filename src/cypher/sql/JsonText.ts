@@ -185,3 +185,40 @@ function objectText(value: any, wholeFloats: WholeFloats): string {
     const entries = Object.entries(value).filter(([, item]) => item !== undefined);
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${jsonText(item, wholeFloats)}`).join(',')}}`;
 }
+
+/**
+ * `parameters`, with each iterator in a value turned into the array of its items: a generator or `map.values()`, at any
+ * depth in a list or a map. An iterator gives its items only once, and a compiler reads a parameter more than once,
+ * looking into it (see `CypherWriter`'s `jsonTree`) before {@link jsonText} binds it, so the bound list would be empty
+ * (drivine#408, drivine#662). A value with no iterator in it is kept as it is.
+ */
+export function drained(parameters: Record<string, any>): Record<string, any> {
+    return mapDrained(parameters) as Record<string, any>;
+}
+
+/** `value`, with each iterator in it the array of its items, as {@link drained}; `value` itself where none is. */
+function drainedValue(value: any): unknown {
+    if (value === null || typeof value !== 'object' || value instanceof Uint8Array || value instanceof Int8Array) {
+        return value;
+    }
+    if (writtenAsMap(value)) {
+        return mapDrained(value);
+    }
+    if (typeof value[Symbol.iterator] !== 'function') {
+        return value;
+    }
+    const iterable = value as Iterable<unknown>;
+    if ((iterable[Symbol.iterator]() as unknown) === iterable) {
+        return Array.from(iterable, drainedValue);
+    }
+    const items = Array.from(iterable);
+    const drainedItems = items.map(drainedValue);
+    return drainedItems.some((it, i) => it !== items[i]) ? drainedItems : value;
+}
+
+/** The map `value`, with each iterator in it the array of its items; `value` itself where none is. */
+function mapDrained(value: Record<string, unknown>): Record<string, unknown> {
+    const entries = Object.entries(value);
+    const drainedEntries = entries.map(([key, item]) => [key, drainedValue(item)] as const);
+    return drainedEntries.some(([, item], i) => item !== entries[i][1]) ? Object.fromEntries(drainedEntries) : value;
+}
