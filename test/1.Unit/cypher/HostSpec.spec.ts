@@ -7,7 +7,6 @@ import { SqliteFunctions } from '@/connection/sqlite/SqliteFunctions';
 import { SqliteConnection } from '@/connection/sqlite/SqliteConnection';
 import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
-import { JSON_ROWS } from '@/backend/sqlite/SqliteGraph';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
 import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
@@ -48,6 +47,11 @@ const SHAPES = [
     ['read', 'value']
 ];
 const READ = ['store', 'nonFinite', 'column'];
+/** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for its operator `text REGEXP pattern`. */
+const FUNCTION = /^(?:drivine_[a-z_]+|regexp)$/;
+const REGEXP_OPERATOR = /\bREGEXP\b/i;
+/** SQL's quoted texts and names: a quote inside one is written twice, so splits it into two that touch, each matched here. */
+const QUOTED = /'[^']*'|"[^"]*"/g;
 
 /**
  * What of a case fails here until an issue lands, and is checked to fail until it does: a hold whose steps or pairs
@@ -148,15 +152,61 @@ describe('The host.yaml runner', () => {
         expect(() => paired(reading)).toThrow(/compiles on postgres with nonFinite true/);
     });
 
-    it('should fail a hold whose steps pass', async () => {
+    it('should call regexp with the pattern first, and pair it by SQL that holds the REGEXP operator', async () => {
+        const regexp = { 'queries.yaml': ['Regular expressions and more functions'] };
+        const steps = [
+            { function: 'regexp', args: ['b', 'abc'], result: BigInt(1) },
+            { function: 'regexp', args: ['abc', 'b'], result: BigInt(0) },
+            { function: 'regexp', args: [null, 'a'], result: null }
+        ];
+        for (const step of steps) {
+            await checkStep(step, 'regexp');
+        }
+        paired({ name: 'regexp', pairs: regexp, steps });
+        await expect(checkStep({ ...steps[1], result: BigInt(1) }, 'regexp')).rejects.toThrow();
+        expect(() =>
+            paired({ name: 'regexp', pairs: { 'queries.yaml': ['Returning nodes and properties'] }, steps })
+        ).toThrow(/compiles on SQLite to SQL that calls regexp/);
+        await expect(checkStep({ ...steps[0], function: 'regexpx' }, 'regexp')).rejects.toThrow(
+            /no function of Drivine's/
+        );
+    });
+
+    it('should pair regexp by the REGEXP operator, not by a text or a name that says regexp', () => {
+        expect(holdsRegexp("SELECT ('x' ->> '$') REGEXP '^a\\z'")).toBe(true);
+        expect(holdsRegexp("SELECT 'x' not regexp 'a'")).toBe(true);
+        expect(holdsRegexp("SELECT json_quote('a REGEXP b')")).toBe(false);
+        expect(holdsRegexp('SELECT json_object(\'regexp\', 1) AS "regexp"')).toBe(false);
+        expect(holdsRegexp("SELECT drivine_regexp_count('a', 'b')")).toBe(false);
+        expect(holdsRegexp('SELECT \'it\'\'s REGEXP\', "a""REGEXP"')).toBe(false);
+        expect(holdsRegexp(`SELECT '${'x'.repeat(200_000)}' REGEXP 'a'`)).toBe(true);
+    });
+
+    it('should fail a hold whose steps pass, and not hide the runner failing otherwise than the spec says', async () => {
         await expect(held(1, 'a held step', () => undefined)).rejects.toThrow(/held for #1, and passes/);
-        await held(1, 'a held step', () => {
-            throw new Error('fails');
-        });
+        await held(1, 'a held step', async () => checkStep({ ...add, result: '4' }, 'add'));
+        await held(1, 'a held step', async () =>
+            checkStep({ function: 'drivine_nothing', args: ['1'], result: '1' }, 'x')
+        );
+        await expect(held(1, 'a held step', async () => checkStep({ ...add, reslt: '3' }, 'add'))).rejects.toThrow(
+            /a step has the keys/
+        );
+        await expect(
+            held(1, 'a held step', () => {
+                throw new TypeError('a crash');
+            })
+        ).rejects.toThrow(/a crash/);
     });
 });
 
-/** Runs `check`, which must fail where `issue` holds it: one held that passes fails, so its hold is taken off. */
+/** A step or a pairs check that gives, or fails, otherwise than the spec says. */
+class Mismatch extends Error {}
+
+/**
+ * Runs `check`, which must fail where `issue` holds it: one held that passes fails, so its hold is taken off. Held only
+ * where it fails as the spec says it does not: anything else the runner throws is thrown on, so that a hold does not hide
+ * the runner's own crash.
+ */
 async function held(issue: number | undefined, where: string, check: () => Promise<void> | void): Promise<void> {
     if (issue === undefined) {
         await check();
@@ -166,8 +216,10 @@ async function held(issue: number | undefined, where: string, check: () => Promi
     try {
         await check();
         passed = true;
-    } catch {
-        // As held.
+    } catch (e) {
+        if (!(e instanceof Mismatch || (e as any)?.matcherResult !== undefined)) {
+            throw e;
+        }
     }
     if (passed) {
         throw new Error(`${where} is held for #${issue}, and passes: take the hold off (HELD).`);
@@ -199,7 +251,7 @@ async function checkStep(step: Record<string, any>, where: string): Promise<void
 /** The step's function, called with its `args`, gives its `result`; or, called on each of its `ascending`, ascends. */
 function checkFunction(db: SqliteDatabase, step: Record<string, any>, where: string): void {
     const name: string = step.function;
-    if (!/^drivine_[a-z_]+$/.test(name)) {
+    if (!FUNCTION.test(name)) {
         throw new Error(`${where}: no function of Drivine's`);
     }
     if ('ascending' in step) {
@@ -222,10 +274,15 @@ function checkFunction(db: SqliteDatabase, step: Record<string, any>, where: str
 
 /** The one value `sql` gives, run with `args`: a whole number as a bigint, so one SQLite holds as an integer is told from a real. */
 function call(db: SqliteDatabase, sql: string, args: SqliteValue[]): SqliteValue {
-    const statement = db.prepare(sql);
-    statement.setReadBigInts(true);
-    statement.setReturnArrays(true);
-    return (statement.get(...(args as any[])) as unknown as SqliteValue[])[0];
+    try {
+        const statement = db.prepare(sql);
+        statement.setReadBigInts(true);
+        statement.setReturnArrays(true);
+        return (statement.get(...(args as any[])) as unknown as SqliteValue[])[0];
+    } catch (e) {
+        // The function fails, where the spec gives what it gives.
+        throw new Mismatch(`${sql}: ${(e as Error).message}`);
+    }
 }
 
 /** The read's column, of a compiled statement's rows on its store, reads as `value`, as a connection gives it. */
@@ -247,8 +304,8 @@ function column(value: any): string {
 }
 
 /**
- * The rows a connection to `store` gives for a compiled statement whose one column holds `text`: on SQLite, a statement
- * Drivine writes, each text value read as JSON, on an in-memory database; on Postgres, a client that hands the text to
+ * The rows a connection to `store` gives for a compiled statement whose one column holds `text`, as it reads a compiled
+ * Cypher statement's: on SQLite, each text value read as JSON, on an in-memory database; on Postgres, a client that hands the text to
  * the type parser the statement runs with, `jsonb`'s, as `pg` does.
  */
 async function rowsOf(store: string, text: string, nonFinite: boolean, where: string): Promise<any[]> {
@@ -256,10 +313,13 @@ async function rowsOf(store: string, text: string, nonFinite: boolean, where: st
         const db = openSqlite(':memory:');
         try {
             const connection = new SqliteConnection(db, new PostgresResultMapper(), 0, () => undefined);
-            const rows = await connection.query(
-                new QuerySpecification({ text: `${JSON_ROWS}\nSELECT ? AS result`, language: 'SQL' }).bind([text])
-            );
-            return rows.map((it) => it.result);
+            const compiled: CompiledSpecification<unknown> = {
+                spec: new QuerySpecification({ text: 'SELECT ? AS result', language: 'SQL' }).bind([text]),
+                setup: [],
+                rows: 'one',
+                nonFinite
+            };
+            return compiledAs(connection, compiled);
         } finally {
             db.close();
         }
@@ -321,8 +381,9 @@ function paired(hostCase: HostCase): void {
         ));
     const functions = [...new Set(hostCase.steps.map((it) => it.function).filter(Boolean))];
     for (const name of functions) {
-        if (!onSqlite().some((it) => it.sql.includes(`${name}(`))) {
-            throw new Error(`${hostCase.name}: no step of its pairs compiles on SQLite to SQL that calls ${name}`);
+        const calls = name === 'regexp' ? holdsRegexp : (sql: string) => sql.includes(`${name}(`);
+        if (!onSqlite().some((it) => calls(it.sql))) {
+            throw new Mismatch(`${hostCase.name}: no step of its pairs compiles on SQLite to SQL that calls ${name}`);
         }
     }
     const reads = hostCase.steps.filter((it) => it.read).map((it) => it.read as Read);
@@ -341,9 +402,16 @@ function paired(hostCase: HostCase): void {
             throw new Error(`${hostCase.name}: no compiler for ${store}`);
         }
         if (!statements.some((it) => String(it.nonFinite) === nonFinite)) {
-            throw new Error(`${hostCase.name}: no step of its pairs compiles on ${store} with nonFinite ${nonFinite}`);
+            throw new Mismatch(
+                `${hostCase.name}: no step of its pairs compiles on ${store} with nonFinite ${nonFinite}`
+            );
         }
     }
+}
+
+/** Whether `sql` holds SQLite's `REGEXP` operator, outside its quoted texts and names. */
+function holdsRegexp(sql: string): boolean {
+    return REGEXP_OPERATOR.test(sql.replace(QUOTED, ' '));
 }
 
 function withoutNote(step: Record<string, any>): Record<string, any> {
