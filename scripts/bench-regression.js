@@ -9,14 +9,15 @@
  * when one still has after one more run of the bench: a shared runner is noisy, and a second run filters most of it.
  * Without the last nightly's numbers (the first night, or theirs have expired), it records tonight's and passes; a
  * measure the last nightly's numbers haven't, such as the first compile before the bench timed it apart from the load,
- * is recorded and not compared that night. The bench's own budget, the load, fails it too, as it fails the bench. It writes the numbers of the run it judged by to the second file, which
- * nightly.yml uploads for the next night, and appends what it found to $GITHUB_STEP_SUMMARY on GitHub Actions.
+ * is recorded and not compared that night. The bench's own budget, the load, fails it too, as it fails the bench. It
+ * writes the numbers of the run it judged by to the second file, which nightly.yml uploads for the next night, and
+ * appends what it found to $GITHUB_STEP_SUMMARY on GitHub Actions.
  *
- * There are no absolute ceilings for the warm compile: shared runners differ too much from run to run. A regression it
- * fails on is compared with again each night until a nightly passes, and a nightly that passes is the next baseline.
- * The summary says when the compiler's version or the machine differs from the last nightly's. A slowdown that is
- * accepted is recorded as the baseline by running the nightly by hand with `record-bench`, which gives this no file
- * of the last nightly's.
+ * There are no absolute ceilings for the warm compile or the first compile: shared runners differ too much from run to
+ * run. A regression it fails on is compared with again each night until a nightly passes, and a nightly that passes is
+ * the next baseline. The summary says when the compiler's version or the machine differs from the last nightly's. A
+ * slowdown that is accepted is recorded as the baseline by running the nightly by hand with `record-bench`, which gives
+ * this no file of the last nightly's.
  */
 const childProcess = require('child_process');
 const fs = require('fs');
