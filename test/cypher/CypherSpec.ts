@@ -110,7 +110,7 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
         // toString($l) of l = [1.0, NaN, Infinity, -Infinity], whose 1.0 a SQL store binds as the whole number 1.
         'NaN and the infinities as parameters': [[[11], WHOLE_FLOAT_PARAMETER]],
         // toInteger() of texts to the greatest and the least whole numbers, which the rows give as numbers past 2^53.
-        'toFloat() of a text, as Neo4j reads it': [[[23], BEYOND_2_53]]
+        'toFloat() of a text, as Neo4j reads it': [[[23, 26], BEYOND_2_53]]
     },
     'writes.yaml': {
         'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]]
