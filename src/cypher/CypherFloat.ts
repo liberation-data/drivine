@@ -1,3 +1,5 @@
+import { javaDouble } from '@/connection/sqlite/JavaDouble';
+
 /**
  * A float, bound to a Cypher statement as one even where it is a whole number. A JavaScript number can't tell `5.0` from
  * `5`, so Drivine binds a whole number as an integer, as Neo4j's types and the SQL stores do: `toString($f)` of `f = 5`
@@ -11,8 +13,7 @@ export class CypherFloat {
 
     /** As the JVM writes a double: `5.0`, `2.5`, `1.0E20`. */
     toString(): string {
-        const text = String(this.value);
-        return Number.isInteger(this.value) && !/e/i.test(text) ? `${text}.0` : text;
+        return javaDouble(this.value);
     }
 }
 

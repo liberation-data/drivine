@@ -63,7 +63,7 @@ const NEGATIVE_INFINITE: Decimal = { ...INFINITE, sign: -1 };
 
 /**
  * The double the number written `text`, in the rows of a statement given NaN or an infinity, stands for: NaN where it is
- * exactly the number that stands for NaN, and an infinity where it is past any double's, as drivine4j's
+ * exactly the number that stands for NaN, and an infinity where it is past any double's, as the shared compiler's
  * `PostgresCypherCompiler.read` reads it, comparing decimals; undefined for any other, which is the number it is.
  */
 export function nonFiniteOf(text: string): number | undefined {

@@ -75,17 +75,18 @@ text, are in its [README](https://github.com/liberation-data/drivine-cypher-spec
 
 ## NaN and the infinities
 
-On 3.x a NaN or infinite parameter was bound as null (#344), Postgres worked float arithmetic out as `numeric` (#536),
-so `0.1 + 0.2` gave `0.3` and `0.0 / 0.0` failed, and `toFloat('NaN')` gave null (#573). They now give what Neo4j
-gives, on every SQL store:
+On 3.x a NaN or infinite parameter was bound as null (#344), a float divided by a float zero failed on Postgres and
+gave null on SQLite (#536), and `toFloat('NaN')` gave null (#573). They now give what Neo4j gives, on every SQL store:
 
 ```cypher
 RETURN 0.0 / 0.0, 1.0 / 0.0, $nan = $nan, toFloat('Infinity')   // NaN, Infinity, false, Infinity
 ```
 
 - **Parameters:** a NaN or infinite parameter is bound, compared, added and written as itself (#344).
-- **Arithmetic:** float arithmetic is a double's on Postgres (#536); NaN is equal to nothing, itself included, on
-  Oracle (#512); `sum()` and `avg()` of both infinities give NaN on SQLite (#579).
+- **Arithmetic:** a number divided or taken `%` by a float zero gives NaN or an infinity, as in Java, on Postgres and
+  SQLite (#536); NaN is equal to nothing, itself included, on Oracle (#512); `sum()` and `avg()` of both infinities
+  give NaN on SQLite (#579). Postgres still works float arithmetic out in exact decimal, so `0.1 + 0.2` is `0.3` there
+  ([Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)).
 - **Text:** `toFloat()` reads `NaN`, `Infinity` and `-Infinity` as Java does (#573).
 - **Storage:** a NaN or an infinity a statement writes is kept, and read back as itself.
 

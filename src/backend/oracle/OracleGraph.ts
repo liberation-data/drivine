@@ -65,9 +65,9 @@ export class OracleGraph extends SqlGraph {
 
     /**
      * The function a compiled Cypher statement compares two values that may hold a null by, list item by list item and
-     * map key by map key (see `OracleCypherCompiler.nullsEqual`): a statement that writes is a PL/SQL block, whose
-     * queries call no function of its own, so the store keeps it. drivine4j and drivine-python make it byte for byte
-     * alike.
+     * map key by map key (see the shared compiler's `OracleCypherCompiler.nullsEqual`): a statement that writes is a
+     * PL/SQL block, whose queries call no function of its own, so the store keeps it. drivine4j and drivine-python make
+     * it byte for byte alike.
      */
     get nullsEqual(): string {
         return nullsEqualName(this.name);

@@ -6,6 +6,7 @@ import { withFloatsAsNumbers } from '@/cypher/CypherFloat';
 import { Neo4jSpecCompiler } from '@/connection/neo4j/Neo4jSpecCompiler';
 import { FalkorDbParameterCoercer } from '@/connection/falkordb/FalkorDbParameterCoercer';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { CompiledCypher } from '@/cypher/CompiledCypher';
 
 const STORES: SharedStore[] = ['postgres', 'oracle', 'sqlite'];
 
@@ -40,6 +41,9 @@ describe('parametersJson', () => {
 
     it("writes a whole JavaScript number past a whole number's range, NaN and the infinities as floats", () => {
         // The Neo4j driver sends 1e20 as a float (liberation-data/drivine#378).
+        expect(parametersJson({ min: -(2 ** 63), max: 2 ** 63 })).toEqual(
+            '{"min":-9223372036854775808,"max":{"$float":"9223372036854776000"}}'
+        );
         expect(parametersJson({ x: 1e20, n: NaN, i: -Infinity, y: 2.5, w: 3, z: -0 })).toEqual(
             '{"x":{"$float":"100000000000000000000"},"n":{"$float":"NaN"},"i":{"$float":"-Infinity"},"y":2.5,"w":3,"z":0}'
         );
@@ -53,7 +57,7 @@ describe('parametersJson', () => {
 
     it('writes a CypherFloat as a float, whole or not, in a list or a map too', () => {
         expect(parametersJson({ f: cypherFloat(5), l: [cypherFloat(2.5), 3], m: { k: cypherFloat(-0) } })).toEqual(
-            '{"f":{"$float":"5"},"l":[{"$float":"2.5"},3],"m":{"k":{"$float":"0"}}}'
+            '{"f":{"$float":"5"},"l":[{"$float":"2.5"},3],"m":{"k":{"$float":"-0"}}}'
         );
     });
 });
@@ -61,10 +65,15 @@ describe('parametersJson', () => {
 describe('cypherFloat', () => {
     it('is exported from the package, and writes its value as the JVM writes a double', () => {
         expect(cypherFloat(5)).toBeInstanceOf(CypherFloat);
-        expect([String(cypherFloat(5)), String(cypherFloat(2.5)), String(cypherFloat(1e21))]).toEqual([
+        expect([5, 2.5, 1e20, 1e21, 1.2e-4, -0, NaN, -Infinity].map((it) => String(cypherFloat(it)))).toEqual([
             '5.0',
             '2.5',
-            '1e+21'
+            '1.0E20',
+            '1.0E21',
+            '1.2E-4',
+            '-0.0',
+            'NaN',
+            '-Infinity'
         ]);
     });
 
@@ -73,6 +82,8 @@ describe('cypherFloat', () => {
             new SharedCypherCompiler('postgres', { name: 'g' }).compile('RETURN toString($f)', { f });
         expect(compiled(cypherFloat(5)).parameters).toEqual({ _cy_f: '5.0' });
         expect(compiled(5).parameters).toEqual({ _cy_f: '5' });
+        const sqlite = new SharedCypherCompiler('sqlite', { name: 'g' }).compile('RETURN $f', { f: cypherFloat(-0) });
+        expect(sqlite.parameters).toEqual({ _cy_f: '-0.0' });
     });
 
     it('is given to a graph engine as the number it holds, at any depth, and nothing else is changed', () => {
@@ -147,5 +158,62 @@ describe('SharedCypherCompiler', () => {
         const inline = new SharedCypherCompiler('oracle', { name: 'g', eraStored: false });
         expect(inline.compile(cypher).sql).not.toContain('_era');
         expect(inline.callsStoredEra).toBe(false);
+    });
+});
+
+/** A compile of a statement by a package that answers `answer` to each request, loaded afresh for the compile. */
+function answered(answer: string, parameters: Record<string, any> = {}): () => CompiledCypher {
+    return () => {
+        let compiled: CompiledCypher | undefined;
+        jest.isolateModules(() => {
+            jest.doMock('@liberation-data/drivine-cypher-compiler', () => ({ compile: () => answer }));
+            const shared: typeof import('@/cypher/SharedCypherCompiler') = require('@/cypher/SharedCypherCompiler');
+            compiled = new shared.SharedCypherCompiler('postgres', { name: 'g' }).compile('RETURN 1', parameters);
+        });
+        return compiled!;
+    };
+}
+
+describe("The shared compiler's answer", () => {
+    afterEach(() => jest.dontMock('@liberation-data/drivine-cypher-compiler'));
+
+    it('throws a refusal as it is, and a request the compiler could not read as such, each a DrivineError', () => {
+        // A DrivineError of the module loaded afresh, so known by its class's name.
+        const thrown = (compile: () => unknown): [string, string] => {
+            try {
+                compile();
+            } catch (e: any) {
+                return [e.constructor.name, e.message];
+            }
+            return ['', ''];
+        };
+        expect(thrown(answered('{"refusal":"No."}'))).toEqual(['DrivineError', 'No.']);
+        expect(thrown(answered('{"error":"Unexpected JSON token"}'))).toEqual([
+            'DrivineError',
+            "The Cypher compiler can't read the request: Unexpected JSON token"
+        ]);
+    });
+
+    it('reads a float and a decimal it binds, at any depth, a whole number past 2^53 as a bigint, and no setup as none', () => {
+        const compiled = answered(
+            '{"sql":"SELECT 1","parameters":{"f":{"$float":"2.0"},"d":[{"$decimal":"2.50"}],' +
+                '"m":{"k":{"$float":"NaN"},"$float":"x","y":1},"big":9007199254740993}}'
+        )();
+        expect(compiled.parameters).toEqual({
+            f: 2,
+            d: ['2.50'],
+            m: { k: NaN, $float: 'x', y: 1 },
+            big: BigInt('9007199254740993')
+        });
+        expect(compiled.setup).toEqual([]);
+        expect(compiled.nonFinite).toBe(false);
+    });
+
+    it('leaves a count bound to null as null, where it was given as a bigint', () => {
+        const compiled = answered('{"sql":"SELECT 1","parameters":{"_cyn_s":null,"_cyn_l":3}}', {
+            s: BigInt(1),
+            l: neo4j.int(3)
+        })();
+        expect(compiled.parameters).toEqual({ _cyn_s: null, _cyn_l: BigInt(3) });
     });
 });

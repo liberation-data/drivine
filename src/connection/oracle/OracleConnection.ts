@@ -149,16 +149,21 @@ export class OracleConnection implements Connection {
 
 /**
  * The rows of a compiled Cypher statement that writes, from the rows `rows` its PL/SQL block returned in the shape
- * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as Drivine's own compiler returns them
- * (see OracleCypherCompiler.returnRows); `'each'`, the rows as they are, one a row in the column `RESULT`, which the
- * result mapper takes the value of. Read as the statement says, never by a column's name.
+ * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as the shared compiler returns them
+ * with `oracleRowsAsText` (see SharedCypherCompiler), their floats read (see withFloats); `'each'`, the rows as they
+ * are, one a row in the column `RESULT`, which the result mapper takes the value of. Read as the statement says, never
+ * by a column's name.
  */
 function returnedRows(rows: any[], shape: CompiledRows): any[] {
     return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: withFloats(it) }));
 }
 
 /** Oracle's names in its extended JSON for NaN and the infinities, and the numbers they are. */
-const NON_FINITE: Record<string, number> = { Nan: NaN, Inf: Infinity, '-Inf': -Infinity };
+const NON_FINITE = new Map<unknown, number>([
+    ['Nan', NaN],
+    ['Inf', Infinity],
+    ['-Inf', -Infinity]
+]);
 
 /**
  * A row's value from the text of its rows, which Oracle writes as extended JSON so a float stays one: each map that is
@@ -178,8 +183,8 @@ function withFloats(value: any): any {
         if (typeof number === 'number') {
             return number;
         }
-        if (typeof number === 'string' && number in NON_FINITE) {
-            return NON_FINITE[number];
+        if (NON_FINITE.has(number)) {
+            return NON_FINITE.get(number);
         }
     }
     return Object.fromEntries(keys.map((key) => [key, withFloats(value[key])]));

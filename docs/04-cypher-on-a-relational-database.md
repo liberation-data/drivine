@@ -98,7 +98,7 @@ that reads the row a `FOREACH` or a `CALL { … }` is written for is planned for
 
 What each statement gives on each store, compiled to SQL or not, is the shared
 [Cypher spec](https://github.com/liberation-data/drivine-cypher-spec). This repository runs version
-[v0.30.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.30.0) of it on Neo4j, Postgres, Oracle and SQLite, and
+[v0.32.0](https://github.com/liberation-data/drivine-cypher-spec/tree/v0.32.0) of it on Neo4j, Postgres, Oracle and SQLite, and
 drivine-python and drivine4j run the same spec. Reads and writes compile, with variable-length relationships and
 quantified path patterns among them. Cypher the compiler doesn't take is refused by name before the store is sent
 anything, e.g. `A path variable in CREATE or MERGE is Cypher, and is not compiled to SQL yet.`
@@ -114,8 +114,8 @@ The [openCypher TCK](https://github.com/opencypher/openCypher/tree/main/tck) is 
 scenarios, each a graph, a query, and the rows or the error the query must give.
 [drivine4j](https://github.com/liberation-data/drivine4j) runs all of them through its compiler on each store. The
 scores below are measured on drivine4j, as its [TCK.md](https://github.com/liberation-data/drivine4j/blob/main/TCK.md)
-gives them for `main` on 31 October 2026. Drivine for TypeScript's compiler follows it through the shared spec above;
-where drivine4j is ahead, the port is an open issue here.
+gives them for `main` on 31 October 2026. Drivine for TypeScript compiles Cypher with the same shared compiler, so a
+statement gives the same SQL here.
 
 | store | scenarios passed | of all 3,896 | leaving out the 356 refused on purpose |
 |---|---:|---:|---:|

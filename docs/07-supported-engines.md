@@ -333,7 +333,8 @@ Notes:
 ### Cypher on Oracle and Postgres
 
 A Cypher statement given to a `PersistenceManager` on Oracle or Postgres is compiled to SQL over the graph's tables, so
-a statement written for a graph engine runs there and gives the same rows. The compiler is drivine4j's, ported: what a
+a statement written for a graph engine runs there and gives the same rows. The compiler is the one drivine4j runs, the shared
+[`@liberation-data/drivine-cypher-compiler`](https://www.npmjs.com/package/@liberation-data/drivine-cypher-compiler): what a
 statement gives on each store, compiled or not, is the shared
 [Cypher spec](https://github.com/liberation-data/drivine-cypher-spec), which Drivine's tests run on Neo4j, Postgres
 and Oracle. To get started, see [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database).
@@ -491,7 +492,7 @@ const names = await pm.query<string>(
 - On Oracle, a node with a label that a compiled pattern finds by a property (`MATCH (n:Person {id: $id})`, `UNWIND
   $rows AS row MATCH (n:Person {id: row.id})`) is compared by it as JSON alone for now, and Oracle reads the label's
   nodes to find it. The compiler can read it through the label's range index, or a uniqueness constraint over the
-  property alone, where it is told the graph has one (`OracleCypherCompiler`'s `indexedProperties`); the connection
+  property alone, where it is told the graph has one (the shared compiler's `indexedProperties`); the connection
   doesn't tell it yet ([drivine4j#638](https://github.com/liberation-data/drivine4j/issues/638)). Told so, it compares
   the node as JSON and, beside that, as that index reads it, so Oracle finds the node through the index; its labels
   are tested by their text, and an `UNWIND` whose item is compared so carries the hint `CARDINALITY(<alias> 10)`, as

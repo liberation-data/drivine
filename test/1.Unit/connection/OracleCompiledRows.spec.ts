@@ -22,12 +22,12 @@ const block = (rows: CompiledRows): CompiledSpecification<unknown> => ({
 });
 
 /**
- * An implicit result of Drivine's own compiler: one row, its column `rows:json` the rows as JSON text, a CLOB read as
- * text (see OracleCypherCompiler.returnRows).
+ * An implicit result of the shared compiler with `oracleRowsAsText`: one row, its column `rows:json` the rows as JSON
+ * text, a CLOB read as text.
  */
 const ONE = { implicitResults: [[{ 'rows:json': '[1, {"a": [2, "x"]}, null]' }]] };
 
-/** An implicit result of drivine4j's compiler: a row for each, in a JSON column `result`, which Oracle names `RESULT`. */
+/** An implicit result of the shared compiler otherwise: a row for each, in a JSON column `result`, which Oracle names `RESULT`. */
 const EACH = { implicitResults: [[{ RESULT: 1 }, { RESULT: { a: [2, 'x'] } }, { RESULT: null }]] };
 
 /**
@@ -88,7 +88,7 @@ describe('The rows of a compiled Oracle write', () => {
                         'rows:json':
                             '[{"$numberDouble": 2}, [{"$numberDouble": 2.5}, {"$numberDouble": "Nan"}], ' +
                             '{"k": {"$numberDouble": "Inf"}, "l": {"$numberDouble": "-Inf"}}, ' +
-                            '{"$numberDouble": "x"}, {"$numberDouble": 1, "y": 2}, "2026-01-02T03:04:05.123Z"]'
+                            '{"$numberDouble": "x"}, {"$numberDouble": "constructor"}, {"$numberDouble": 1, "y": 2}, "2026-01-02T03:04:05.123Z"]'
                     }
                 ]
             ]
@@ -99,6 +99,7 @@ describe('The rows of a compiled Oracle write', () => {
             [2.5, NaN],
             { k: Infinity, l: -Infinity },
             { $numberDouble: 'x' },
+            { $numberDouble: 'constructor' },
             { $numberDouble: 1, y: 2 },
             '2026-01-02T03:04:05.123Z'
         ]);

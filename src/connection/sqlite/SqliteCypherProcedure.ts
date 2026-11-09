@@ -9,7 +9,7 @@ const PARAMS = 'cy_params';
 /** The savepoint a procedure runs within. */
 const SAVEPOINT = 'drivine_cypher';
 
-/** A step of a procedure, as `SqliteCypherCompiler.procedure` writes it. */
+/** A step of a procedure, as the shared compiler's `SqliteCypherCompiler.procedure` writes it. */
 interface Step {
     op: string;
     sql?: string;
@@ -22,9 +22,9 @@ interface Step {
 
 /**
  * `drivine_cypher(steps, parameters)`: carries out the procedure a Cypher statement that writes compiles to (see
- * `SqliteCypherCompiler.procedure`), as Postgres runs its PL/pgSQL and Oracle its PL/SQL, step by step on the connection
- * the statement runs on, in its transaction, and gives back the rows it returns as a JSON list, as drivine4j's
- * `SqliteCypherFunction` does.
+ * the shared compiler's `SqliteCypherCompiler.procedure`), as Postgres runs its PL/pgSQL and Oracle its PL/SQL, step by
+ * step on the connection the statement runs on, in its transaction, and gives back the rows it returns as a JSON list,
+ * as drivine4j's `SqliteCypherFunction` does.
  *
  * Each step has its SQL, in which each variable it reads is a numbered parameter, `?1`, and the variables bound to them
  * in turn: the parameters' object, the rows carried from clause to clause, the id a write made. A step sets a variable

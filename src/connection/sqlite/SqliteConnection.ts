@@ -19,7 +19,7 @@ export const LONG_LOCK_MILLIS = 5_000;
 
 /**
  * A connection to a SQLite file, through Node's own synchronous driver. A Cypher statement is compiled to SQL over the
- * graph's tables (see SqliteCypherCompiler), so a statement written for a graph engine runs here and gives the same rows:
+ * graph's tables by the shared compiler, so a statement written for a graph engine runs here and gives the same rows:
  * one value a row, from the compiled statement's one column, read as JSON.
  *
  * - A transaction takes the file's write lock as it begins (`BEGIN IMMEDIATE`), so one that reads and then writes is

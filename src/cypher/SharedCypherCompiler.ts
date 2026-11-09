@@ -163,9 +163,9 @@ const LONG_RANGE = 2 ** 63;
  * A statement's parameters as the tagged JSON the shared compiler reads (its README, "drivine4j's own calls"), keeping
  * what plain JSON loses of the kinds the compiled SQL depends on:
  *
- * - a JavaScript number that is whole, below 2^63, is an integer, written as its digits; one with a fraction a float,
- *   written as JSON writes it (`2.5`, `1e-7`). A whole one from 2^63, NaN and the infinities are floats too, written
- *   `{"$float": "<text>"}`, which JSON has no plain form of.
+ * - a JavaScript number that is whole, from -2^63 to below 2^63, is an integer, written as its digits; one with a
+ *   fraction a float, written as JSON writes it (`2.5`, `1e-7`). A whole one past a long's range, NaN and the
+ *   infinities are floats too, written `{"$float": "<text>"}`, which JSON has no plain form of. -0 is written `-0`.
  * - a `bigint` and the Neo4j driver's `Integer` are their digits, unquoted: a whole number however large.
  * - a {@link CypherFloat} is a float, `{"$float": "<text>"}`, even where it is whole: `cypherFloat(5)` is 5.0.
  * - a `Date` is `{"$temporal": "DATE_TIME", "text": <its toISOString()>}`, as Drivine binds it.
@@ -194,9 +194,9 @@ function written(value: any): string {
     return typeof value === 'object' ? composite(value) : 'null';
 }
 
-/** A JavaScript number: a whole one below 2^63 an integer, one with a fraction a float, and the rest tagged floats. */
+/** A JavaScript number: a whole one in a long's range an integer, one with a fraction a float, else a tagged float. */
 function number(value: number): string {
-    if (Number.isInteger(value) && Math.abs(value) < LONG_RANGE) {
+    if (Number.isInteger(value) && value >= -LONG_RANGE && value < LONG_RANGE) {
         return Object.is(value, -0) ? '0' : String(BigInt(value));
     }
     return Number.isFinite(value) && !Number.isInteger(value) ? JSON.stringify(value) : float(value);
@@ -228,5 +228,5 @@ function composite(value: object): string {
 }
 
 function float(value: number): string {
-    return `{"$float":${JSON.stringify(String(value))}}`;
+    return `{"$float":${JSON.stringify(Object.is(value, -0) ? '-0' : String(value))}}`;
 }
