@@ -1,6 +1,6 @@
 import { DatabaseRegistry, QuerySpecification } from '@liberation-data/drivine';
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
-import { CompiledRows } from '@/cypher/sql/CompiledCypher';
+import { CompiledRows } from '@/cypher/CompiledCypher';
 import { compiledAs } from '../../CompiledAs';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
 

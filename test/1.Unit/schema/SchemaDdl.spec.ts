@@ -1,7 +1,5 @@
 import { DatabaseType } from '@/connection/DatabaseType';
-import { OracleCypherCompiler } from '@/cypher/sql/OracleCypherCompiler';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
-import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
+import { SharedCypherCompiler, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { refusedInTransaction, SchemaDdl, SchemaDdlResult, schemaDdlOf } from '@/schema/ddl';
 import {
@@ -284,17 +282,16 @@ describe('SchemaDdl', () => {
     });
 
     it('lets the SQL compilers refuse a schema command, as the translator does or as no query', () => {
-        [new PostgresCypherCompiler('g'), new OracleCypherCompiler('g'), new SqliteCypherCompiler('g')].forEach(
-            (compiler) => {
-                expect(() => compiler.compile('CREATE POINT INDEX FOR (p:Place) ON (p.location)')).toThrow(
-                    "A POINT index is Neo4j's, and is not made on a SQL store."
-                );
-                expect(() => compiler.compile('CREATE INDEX FOR (p:Person) ON (p.name)')).toThrow(
-                    /^The statement is a schema command/
-                );
-                compiler.compile('CREATE (index:Index) RETURN index');
-            }
-        );
+        (['postgres', 'oracle', 'sqlite'] as SharedStore[]).forEach((store) => {
+            const compiler = new SharedCypherCompiler(store, { name: 'g' });
+            expect(() => compiler.compile('CREATE POINT INDEX FOR (p:Place) ON (p.location)')).toThrow(
+                "A POINT index is Neo4j's, and is not made on a SQL store."
+            );
+            expect(() => compiler.compile('CREATE INDEX FOR (p:Person) ON (p.name)')).toThrow(
+                /^The statement is a schema command/
+            );
+            compiler.compile('CREATE (index:Index) RETURN index');
+        });
     });
 
     it('takes Cypher alone on a SQL store for schema DDL, and leaves it to a graph engine', () => {

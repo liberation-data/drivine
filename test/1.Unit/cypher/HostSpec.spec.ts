@@ -8,9 +8,9 @@ import { SqliteConnection } from '@/connection/sqlite/SqliteConnection';
 import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
+import { CompiledCypher } from '@/cypher/CompiledCypher';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { CompiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import { CompiledSpecification } from '@/cypher/CompiledSpecification';
 import { loadSpec, runsOn, valuesFor } from '../../cypher/CypherSpec';
 import { compiledAs } from '../../CompiledAs';
 

@@ -1,5 +1,5 @@
-import * as Compiled from '@/cypher/sql/CompiledSpecification';
-import { CompiledSpecification } from '@/cypher/sql/CompiledSpecification';
+import * as Compiled from '@/cypher/CompiledSpecification';
+import { CompiledSpecification } from '@/cypher/CompiledSpecification';
 import { Connection } from '@/connection/Connection';
 import { QuerySpecification } from '@/query/QuerySpecification';
 

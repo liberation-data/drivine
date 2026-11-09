@@ -1,8 +1,8 @@
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
-import { CompiledSpecification } from '@/cypher/sql/CompiledSpecification';
-import { CompiledRows } from '@/cypher/sql/CompiledCypher';
+import { CompiledSpecification } from '@/cypher/CompiledSpecification';
+import { CompiledRows } from '@/cypher/CompiledCypher';
 import { compiledAs } from '../../CompiledAs';
 
 /** A session whose every statement gives `result`, as node-oracledb gives it. */

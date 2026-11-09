@@ -120,9 +120,9 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
  * 1), or every step of the case, the stores or groups they are held on, and the issue whose port makes them pass. Each is
  * run, and fails as the issue says it does; one that passes fails, so that its hold is taken out when its port lands.
  */
-const HELD: Record<string, Record<string, Hold[]>> = {};
+export const HELD: Record<string, Record<string, Hold[]>> = {};
 
-interface Hold {
+export interface Hold {
     issue: number;
     steps: number[] | 'all';
     on: string[];
