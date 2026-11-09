@@ -264,6 +264,48 @@ describe('SchemaManager applying an owner one of whose indexes is not built', ()
         expect(warn).toHaveBeenCalledWith(expect.stringMatching(/BUILD FAILED: .*Person_email_range.*too large/));
         expect(recorded).toHaveLength(1);
     });
+
+    it('should collect the range index a FalkorDB constraint needs first, make the constraint, then raise it', async () => {
+        DatabaseRegistry.tearDown();
+        DatabaseRegistry.getInstance().register({ name: 'a', type: DatabaseType.FALKORDB } as ConnectionProvider);
+        let constrained = false;
+        const executor = {
+            run: async (statement: any) =>
+                Promise.resolve().then(() => {
+                    if (statement?.native === 'CONSTRAINT_CREATE') {
+                        constrained = true;
+                    }
+                    if (statement === FALKORDB_SCHEMA.indexBuild!.statement) {
+                        return [{ status: '[Indexing] 0/20000: UNDER CONSTRUCTION' }];
+                    }
+                    return statement === FALKORDB_SCHEMA.listUniques.statement && constrained
+                        ? [{ label: 'Person', properties: ['email'], status: 'OPERATIONAL' }]
+                        : [];
+                })
+        } as unknown as SchemaExecutor;
+        const recorded: unknown[] = [];
+        const gom = {
+            indexes: new IndexManager(executor, FALKORDB_SCHEMA),
+            constraints: new ConstraintManager(executor, FALKORDB_SCHEMA),
+            persistenceManager: {
+                maybeGetOne: async () => Promise.resolve(null),
+                execute: async (it: unknown) => Promise.resolve(void recorded.push(it))
+            },
+            backend: {
+                schemaMarker: () => ({ spec: () => ({}) }),
+                markerItems: () => undefined,
+                recordSchemaMarker: () => ({ spec: (it: unknown) => it })
+            }
+        };
+        const factory = { get: () => gom } as unknown as GraphObjectManagerFactory;
+        const schema = new SchemaManager(factory, { catalogs: [], indexBuildTimeout: 5 });
+
+        await expect(schema.ensure('dice', uniquenessConstraint('Person', 'email'))).rejects.toThrow(
+            /STILL BUILDING: FalkorDB had not built the RANGE index Person_email_range .* after 5 ms/
+        );
+        expect(constrained).toBe(true);
+        expect(recorded).toEqual([]);
+    });
 });
 
 describe('An error reading the state of an index being built', () => {
