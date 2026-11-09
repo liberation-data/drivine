@@ -325,7 +325,7 @@ async function rowsOf(store: string, text: string, nonFinite: boolean, where: st
                 rows: 'one',
                 nonFinite
             };
-            return compiledAs(connection, compiled);
+            return await compiledAs(connection, compiled);
         } finally {
             db.close();
         }

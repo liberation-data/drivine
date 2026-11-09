@@ -82,8 +82,8 @@ const WHOLE_FLOAT_PARAMETER: Skip = {
  * A text past 32 KB read through a function of a node, as `head([n]).t`: the SQL Drivine's own compiler writes for it on
  * Oracle can make Oracle close the session (drivine4j#531), now and then, so the statement that fails is this one or
  * whichever runs next on the connection, another case's: with step 2 alone skipped, step 3 still closed it, and the
- * next case failed. A hold can't catch a failure that moves, so the step is skipped
- * there until the shared compiler, whose SQL Oracle keeps the session for, runs it (#686).
+ * next case failed. A hold can't catch a failure that moves, so each step that reads one so is skipped there until the
+ * shared compiler, whose SQL Oracle keeps the session for, runs it (#686).
  */
 const ORACLE_CLOSES_SESSION: Skip = {
     why: 'a long text read through a function of a node, which can make Oracle close the session (#686)',
@@ -137,45 +137,46 @@ const HELD: Record<string, Record<string, Hold[]>> = {
     'queries.yaml': {
         // A NaN or infinite parameter is bound as null (step 6 gives null on every store, and step 11 runs on Postgres only).
         'NaN and the infinities as parameters': [
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], on: ['postgres'] },
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['oracle'] },
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26], on: ['postgres'] },
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 24, 25, 26], on: ['oracle'] },
             // drivine4j holds the case on SQLite too, for liberation-data/drivine4j#295.
-            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19], on: ['sqlite'] },
-            // Cases the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
-            { issue: 686, steps: [21, 23, 24, 25, 26], on: ['postgres', 'oracle', 'sqlite'] }
+            { issue: 344, steps: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13, 14, 15, 24, 25, 26], on: ['sqlite'] },
+            // Steps the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
+            { issue: 686, steps: [17, 19, 21, 23], on: ['postgres', 'oracle', 'sqlite'] }
         ],
-        // Postgres works float arithmetic out as numeric, so a division or % by zero fails, and SQLite's gives null (#536,
-        // which covers SQLite too). toFloat reads no NaN or infinity by Java's names there (#573). Oracle holds NaN equal
-        // to NaN (#512). Step 5 is skipped on the SQL stores (SKIPPED).
+        // Postgres works float arithmetic out as numeric, so 0.0 / 0.0 fails, and SQLite's gives null (#536, which covers
+        // SQLite too). toFloat reads no NaN or infinity by Java's names on either (#573). Oracle holds NaN equal to NaN
+        // (#512). Step 5 is skipped on the SQL stores (SKIPPED). The steps the spec added or changed at v0.31.0 and v0.32.0
+        // are held for #686 alone.
         'NaN worked out': [
-            { issue: 536, steps: [1, 2, 3, 4, 6], on: ['postgres'] },
-            { issue: 536, steps: [1, 2, 4, 6, 13], on: ['sqlite'] },
-            { issue: 573, steps: [16, 18, 19], on: ['sqlite'] },
-            { issue: 512, steps: [2, 3], on: ['oracle'] },
+            { issue: 536, steps: [1, 2, 3, 4], on: ['postgres'] },
+            { issue: 536, steps: [1, 2, 4], on: ['sqlite'] },
+            { issue: 573, steps: [86, 88, 89], on: ['postgres', 'sqlite'] },
+            { issue: 512, steps: [2, 3, 88], on: ['oracle'] },
             // Cases the spec added or changed at v0.31.0 and v0.32.0, which the shared compiler passes.
             {
                 issue: 686,
                 steps: [
                     6, 7, 10, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 35, 36,
                     38, 39, 40, 41, 42, 56, 57, 58, 59, 64, 65, 67, 69, 70, 71, 74, 75, 76, 77, 78, 79, 80, 81, 83, 84,
-                    85, 88
+                    85
                 ],
                 on: ['oracle']
             },
             {
                 issue: 686,
                 steps: [
-                    7, 8, 9, 21, 22, 27, 28, 29, 34, 37, 38, 39, 40, 57, 58, 59, 60, 61, 63, 64, 65, 66, 67, 69, 70, 71,
-                    73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 88, 89
+                    6, 7, 8, 9, 21, 22, 27, 28, 29, 34, 37, 38, 39, 40, 57, 58, 59, 60, 61, 63, 64, 65, 66, 67, 69, 70,
+                    71, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85
                 ],
                 on: ['postgres']
             },
             {
                 issue: 686,
                 steps: [
-                    7, 8, 9, 10, 11, 12, 14, 15, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 35, 36, 38, 39,
-                    40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 56, 57, 58, 59, 61, 64, 65, 66, 67, 69, 70,
-                    71, 74, 75, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 88, 89
+                    6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+                    32, 35, 36, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 56, 57, 58, 59, 61, 64,
+                    65, 66, 67, 69, 70, 71, 74, 75, 76, 77, 78, 79, 80, 81, 83, 84, 85
                 ],
                 on: ['sqlite']
             }
