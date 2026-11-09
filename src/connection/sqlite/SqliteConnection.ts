@@ -5,8 +5,7 @@ import { ResultMapper } from '@/mapper/ResultMapper';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
-import { DrivineError } from '@/DrivineError';
-import { ensuringStatements, JSON_ROWS } from '@/backend/sqlite/SqliteGraph';
+import { ensuringGraph, JSON_ROWS, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { SqliteSpecCompiler } from '@/connection/sqlite/SqliteSpecCompiler';
 import { SqliteCursor } from '@/connection/sqlite/SqliteCursor';
 import { SqliteDatabase, SqliteValue, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
@@ -66,7 +65,7 @@ export class SqliteConnection implements Connection {
         const given = spec.finalizedCopy('SQL');
         const cypher = given.statement.language === 'CYPHER' ? this.compiled(given) : undefined;
         const finalizedSpec = cypher ?? given;
-        const ensuring = ensuringStatements(finalizedSpec.statement.text);
+        const ensuring = ensuringGraph(finalizedSpec.statement.text);
         if (ensuring) {
             await this.waitingOutLocks(() => ensure(this.db, ensuring, this.inTransaction));
             return [];
@@ -206,31 +205,27 @@ function jsonRow(row: Record<string, SqliteValue>): Record<string, any> {
 }
 
 /**
- * Makes the store: counts what of the statements make is there, and runs each, in one transaction, unless all of it is.
- * A user who may only read the file is refused even a `CREATE ... IF NOT EXISTS` over a table that is there, so it is
- * looked for first. Inside a transaction it is made in that transaction. Two processes that each find it missing make it one after the other.
+ * Makes the graph's store: counts what of its statements make is there, and runs each, in one transaction, unless all
+ * of it is. A user who may only read the file is refused even a `CREATE ... IF NOT EXISTS` over a table that is there,
+ * so it is looked for first. A store whose tables give a deleted row's id again is refused (see SqliteGraph.ensure).
+ * Inside a transaction it is made in that transaction. Two processes that each find it missing make it one after the other.
  */
-function ensure(db: SqliteDatabase, statements: string[], inTransaction: boolean): void {
-    const names = statements.map((it) => /IF NOT EXISTS (\w+)/i.exec(it)?.[1]?.toLowerCase()).filter(Boolean);
-    if (names.length !== statements.length) {
-        throw new DrivineError('A SQLite store is made by statements that each make a table or an index if not there.');
-    }
-    const made = db
-        .prepare(`SELECT COUNT(*) AS made FROM sqlite_master WHERE lower(name) IN (${names.map(() => '?').join(', ')})`)
-        .get(...names)!.made;
-    if (Number(made) === statements.length) {
-        return;
-    }
-    if (inTransaction) {
-        statements.forEach((it) => db.exec(it));
-        return;
-    }
-    db.exec('BEGIN IMMEDIATE');
-    try {
-        statements.forEach((it) => db.exec(it));
-        db.exec('COMMIT');
-    } catch (e) {
-        db.exec('ROLLBACK');
-        throw e;
-    }
+function ensure(db: SqliteDatabase, graph: SqliteGraph, inTransaction: boolean): void {
+    graph.ensure(
+        (statement) => Object.values(db.prepare(statement).get() ?? {})[0],
+        (statements) => {
+            if (inTransaction) {
+                statements.forEach((it) => db.exec(it));
+                return;
+            }
+            db.exec('BEGIN IMMEDIATE');
+            try {
+                statements.forEach((it) => db.exec(it));
+                db.exec('COMMIT');
+            } catch (e) {
+                db.exec('ROLLBACK');
+                throw e;
+            }
+        }
+    );
 }
