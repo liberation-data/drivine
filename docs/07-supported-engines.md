@@ -426,6 +426,10 @@ const names = await pm.query<string>(
   aggregate's result too (`head(collect(n.t)) CONTAINS $x`), whose aggregates are worked out first
   ([#414](https://github.com/liberation-data/drivine/issues/414)). A property such a function reads is read from the
   properties by its own path, which costs about a quarter more on short texts, and a `+` that may put texts together costs about a tenth more, as drivine4j measured.
+  A text literal past 4,000 bytes is written as CLOBs put together, where Oracle refused it as one literal (ORA-01704,
+  [drivine4j#419](https://github.com/liberation-data/drivine4j/issues/419)). `size()` of a text past 4,000 bytes counts a
+  character past U+FFFF as two, as `LENGTH` of a CLOB counts UTF-16 units, where a shorter text's counts characters
+  ([drivine4j#729](https://github.com/liberation-data/drivine4j/issues/729)).
 - On Oracle, two texts are compared (`=`, `<>`, `<`, `>=`, `IN` …) as `VARCHAR2`s, and as CLOBs with `DBMS_LOB.COMPARE`
   where either is past 4,000 bytes ([#469](https://github.com/liberation-data/drivine/issues/469)). As JSON, `=` of a
   text past about 32 KB was refused (ORA-40180), even `n.bio = 'abc'` where one node's bio was that long, and `<` of
