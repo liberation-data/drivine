@@ -71,8 +71,8 @@ describe('The rows of a compiled Oracle write', () => {
         expect(it.execute.mock.calls[0][2].keepInStmtCache).toBe(false);
     });
 
-    it("should read a Cypher write compiled by Drivine's own compiler as 'one'", async () => {
-        const it = session(ONE);
+    it("should read a Cypher write compiled by the shared compiler as 'each'", async () => {
+        const it = session(EACH);
         const rows = await connection(it).query(
             new QuerySpecification({ text: 'CREATE (n:T) RETURN n.x AS x', language: 'CYPHER' })
         );

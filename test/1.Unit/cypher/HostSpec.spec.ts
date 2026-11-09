@@ -9,8 +9,7 @@ import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CompiledCypher } from '@/cypher/sql/CompiledCypher';
-import { SqliteCypherCompiler } from '@/cypher/sql/SqliteCypherCompiler';
-import { PostgresCypherCompiler } from '@/cypher/sql/PostgresCypherCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { CompiledSpecification } from '@/cypher/sql/CompiledSpecification';
 import { loadSpec, runsOn, valuesFor } from '../../cypher/CypherSpec';
 import { compiledAs } from '../../CompiledAs';
@@ -23,7 +22,7 @@ import { compiledAs } from '../../CompiledAs';
  * one of them compiles on SQLite to SQL that calls each function its steps call, and one compiles on each store its
  * steps read with the `nonFinite` each read step says. The three libraries read the same file.
  *
- * Until Drivine for TypeScript compiles with the shared compiler, some of it can't pass here: see {@link HELD}.
+ * A case or step that can't pass yet is held: see {@link HELD}.
  */
 
 interface HostCase {
@@ -66,20 +65,7 @@ interface Hold {
     pairs?: boolean;
 }
 
-const HELD: Record<string, Hold[]> = {
-    // NaN, as SQLite's JSON writes it, and the infinities, in the functions and the rows: #675, held for the switch.
-    drivine_equal: [{ issue: 675, steps: [1, 3, 4, 5] }],
-    drivine_add: [{ issue: 675, steps: [1, 2, 3, 4, 5, 6, 7, 8] }],
-    drivine_list_order: [{ issue: 675, steps: [1, 2] }],
-    drivine_sort_key: [{ issue: 675, steps: [1] }],
-    drivine_round: [{ issue: 675, steps: [1, 2] }],
-    'SQLite rows that hold NaN': [
-        { issue: 675, steps: [1, 2, 3, 4, 6] },
-        // Drivine's own compiler never says a statement was given NaN or an infinity: the shared one does (#686).
-        { issue: 686, pairs: true }
-    ],
-    'Postgres rows of a statement given NaN or an infinity': [{ issue: 686, pairs: true }]
-};
+const HELD: Record<string, Hold[]> = {};
 
 const spec: HostCase[] = parse(fs.readFileSync(path.join(__dirname, '../../cypher/host.yaml'), 'utf8'), {
     intAsBigInt: true
@@ -383,7 +369,7 @@ function paired(hostCase: HostCase): void {
     let sqlite: CompiledCypher[] | undefined;
     const onSqlite = () =>
         (sqlite ??= compiled('sqlite', (cypher, parameters) =>
-            new SqliteCypherCompiler('g').compile(cypher, parameters)
+            new SharedCypherCompiler('sqlite', { name: 'g' }).compile(cypher, parameters)
         ));
     const functions = [...new Set(hostCase.steps.map((it) => it.function).filter(Boolean))];
     for (const name of functions) {
@@ -401,7 +387,7 @@ function paired(hostCase: HostCase): void {
                 ? onSqlite()
                 : store === 'postgres'
                 ? compiled('postgres', (cypher, parameters) =>
-                      new PostgresCypherCompiler('g').compile(cypher, parameters)
+                      new SharedCypherCompiler('postgres', { name: 'g' }).compile(cypher, parameters)
                   )
                 : undefined;
         if (!statements) {
