@@ -7,7 +7,7 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { OracleCursor } from '@/connection/oracle/OracleCursor';
-import { CompiledSpecification, compiledSpecification } from '@/cypher/CompiledSpecification';
+import { CompiledSpecification, compiledSpecification, cypherParameters } from '@/cypher/CompiledSpecification';
 import { CompiledRows } from '@/cypher/CompiledCypher';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
@@ -107,8 +107,10 @@ export class OracleConnection implements Connection {
      * {@link OracleStoredFunctions}.
      */
     private async compiled<T>(given: QuerySpecification<T>): Promise<CompiledSpecification<T>> {
+        // Read once, for both compiles: an iterator in them gives its items only once (#662).
+        const parameters = cypherParameters(given);
         const compiler = new SharedCypherCompiler('oracle', { name: this.graph });
-        const compiled = compiledSpecification(given, compiler);
+        const compiled = compiledSpecification(given, compiler, parameters);
         // Each is asked of apart: a store an earlier version made may have the one and not the others.
         const nullsEqual =
             !compiler.callsStoredNullsEqual ||
@@ -120,7 +122,8 @@ export class OracleConnection implements Connection {
         }
         return compiledSpecification(
             given,
-            new SharedCypherCompiler('oracle', { name: this.graph, nullsEqualStored: nullsEqual, eraStored: era })
+            new SharedCypherCompiler('oracle', { name: this.graph, nullsEqualStored: nullsEqual, eraStored: era }),
+            parameters
         );
     }
 

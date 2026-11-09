@@ -65,6 +65,25 @@ describe('OracleConnection', () => {
         expect(run[1]).toContain('cy_nulls_equal(');
     });
 
+    it('should bind an iterator in a parameter as its items when it compiles again, as the first compile does (#662)', async () => {
+        function* ids(): Generator<string> {
+            yield 'a';
+            yield 'b';
+        }
+        const text = 'WITH [null] AS a, $p.ids AS b RETURN [a = b, b]';
+        const bound = async (items: Iterable<string>): Promise<unknown> => {
+            const it = session(904);
+            await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', graph(), 'db|me').query(
+                cypher(text).bind({ p: { ids: items } })
+            );
+            const run = it.execute.mock.calls;
+            expect(run).toHaveLength(2);
+            expect(run[1][0]).toContain('cy_nulls_equal(');
+            return run[1][1];
+        };
+        expect(await bound(ids())).toEqual(await bound(['a', 'b']));
+    });
+
     it.each([
         ['both', 'found', 'found', true, true],
         ['nulls_equal alone', 'found', 904, true, false],

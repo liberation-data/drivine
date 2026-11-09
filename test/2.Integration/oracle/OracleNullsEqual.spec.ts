@@ -188,6 +188,19 @@ describeOnOracle('The function an Oracle graph compares values that may hold a n
         ).toEqual([[false, '-0044-03-16']]);
         // A read declares the function itself.
         expect(await cypher(pm, READ)).toEqual([['null', 'null']]);
+        // An iterator in a parameter is bound as its items by the compile again, not as the list the first left (#662).
+        function* ids(): Generator<string> {
+            yield 'a';
+            yield 'b';
+        }
+        expect(
+            await pm.query(
+                new QuerySpecification({
+                    text: 'CREATE (n:CyWrite) WITH n, [null] AS a, $p.ids AS b RETURN [a = b, b]',
+                    language: 'CYPHER'
+                }).bind({ p: { ids: ids() } })
+            )
+        ).toEqual([[false, ['a', 'b']]]);
         const connection = await session();
         try {
             await new OracleGraph(graph).ensure(connection);
