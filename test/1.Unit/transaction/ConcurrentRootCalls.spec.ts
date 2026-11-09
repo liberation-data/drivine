@@ -111,4 +111,8 @@ describe('Transactional calls in one Drivine context', () => {
         });
         expect(log).toEqual(['c1.start', 'c1.query', 'c1.rollback', 'c1.release']);
     });
+
+    it('made outside any Drivine context still fail, as they did before calls ran in a copy of it', async () => {
+        await expect(runInTransaction(async () => Promise.resolve('done'))).rejects.toThrow(/outside "run" method/);
+    });
 });

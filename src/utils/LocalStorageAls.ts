@@ -29,7 +29,9 @@ export class LocalStorageAls implements LocalStorage {
     }
 
     async runPromiseInCopy<T>(fn: () => Promise<T>): Promise<T> {
-        return this.asyncLocalStorage.run(new Map(this.asyncLocalStorage.getStore() ?? []), fn);
+        const store = this.asyncLocalStorage.getStore();
+        // Outside a run there is nothing to copy: `fn` runs there, so a write to the store still fails as outside a run.
+        return store ? this.asyncLocalStorage.run(new Map(store), fn) : fn();
     }
 
     isInsideRun(): boolean {
