@@ -112,6 +112,17 @@ describe('An index made on an engine that builds it in the background', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringMatching(/had not built .* after 5 ms: it is POPULATING/));
     });
 
+    it('should be waited for, by its name, when recreate makes it again', async () => {
+        const { executor, ran }: Store = store(['POPULATING', 'FAILED'], { held: 'theirs' });
+        await expect(new IndexManager(executor, NEO4J_SCHEMA).recreate(spec)).rejects.toThrow(
+            'Neo4j failed to build the RANGE index Person_email_range on Person(email)'
+        );
+        expect(builds(ran, NEO4J_SCHEMA).map((it) => it.bindings.name)).toEqual([
+            'Person_email_range',
+            'Person_email_range'
+        ]);
+    });
+
     it('should wait, by its own name, for a matching index another process made, which may still be building', async () => {
         const { executor, ran }: Store = store(['POPULATING', 'ONLINE'], { held: 'theirs' });
         expect((await new IndexManager(executor, NEO4J_SCHEMA).ensure(spec)).status).toEqual('ALREADY_MATCHING');

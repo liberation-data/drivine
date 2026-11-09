@@ -229,5 +229,15 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.FALKORDB))(
             expect((await gom().indexes.recreate(specs[0])).status).toEqual('RECREATED');
             expect(await status(specs[0].label)).toEqual(['OPERATIONAL']);
         });
+
+        it('should wait for each index it makes on a label that holds a built one already', async () => {
+            // FalkorDB lists one status for all of a label's indexes: a second one made there turns it back.
+            const label = specs[0].label;
+            for (const spec of [rangeIndex(label, 'text'), fullTextIndex(label, 'text'), vectorIndex(label, 'e', 4)]) {
+                specs.push(spec);
+                expect((await gom().indexes.ensure(spec)).status).toEqual('CREATED');
+                expect(await status(label)).toEqual(['OPERATIONAL']);
+            }
+        });
     }
 );
