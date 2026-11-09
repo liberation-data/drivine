@@ -6,8 +6,9 @@ That is the compiler drivine4j runs: the Kotlin Multiplatform module in
 [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec/tree/main/compiler), built for Wasm. 3.x
 had a compiler of its own. Each fix in drivine4j's was ported to it by hand, and it had drifted: the Cypher spec held
 565 of its steps on 3.x, 149 on Postgres, 226 on Oracle and 190 on SQLite, which it gave otherwise than Neo4j. Now the
-compiled SQL is drivine4j's, byte for byte, and a statement gives the same rows in either library. A compiler fix lands
-once, in the module, and reaches this library with the next version of the package.
+compiled SQL is drivine4j's, byte for byte, but for the shape of an Oracle write's rows ([Oracle](#oracle)), and a
+statement gives the same rows in either library. A compiler fix lands once, in the module, and reaches this library
+with the next version of the package.
 
 Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there. On a SQL
 store, most statements give what they gave before. What changes is below, the breaking changes first. Each links to

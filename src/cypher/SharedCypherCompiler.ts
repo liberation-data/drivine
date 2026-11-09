@@ -49,8 +49,8 @@ export function sharedCompilerLoaded(): boolean {
 
 /**
  * Cypher compiled to SQL over a graph's tables by the shared compiler, the Kotlin Multiplatform module of
- * drivine-cypher-spec, built for Wasm: the compiler drivine4j and drivine-python run, so a statement gives the same SQL
- * in each library, byte for byte, and a compiler fix lands once, in the module. A compiler compiles one statement at a
+ * drivine-cypher-spec, built for Wasm: the compiler drivine4j runs, so a statement gives the same SQL in both, byte for
+ * byte, but for an Oracle write's rows (see graphJson), and a compiler fix lands once, in the module. A compiler compiles one statement at a
  * time; after it, {@link callsStoredNullsEqual} and {@link callsStoredEra} say which of an Oracle graph's stored
  * functions the last statement calls.
  */
