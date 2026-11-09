@@ -434,6 +434,10 @@ await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.co
   in a load, a count, a `deleteAll`, a grouped read and a patch's condition, on the root's own fields. Until then, and
   for an empty value or a related node's field, they lowercase the property, as for any field: the same answer, without
   the index. A manager knows at once what it recorded, and reads what another recorded at least once a minute.
+- **A long text.** On Oracle the copy is written whole, as a CLOB, however long the text, but an index over it holds no
+  copy past 4,000 bytes. So a lookup by a value that may lowercase past that, one of more than 1,333 characters,
+  compares the copy as a CLOB on every node of the label instead of reading the index. Neo4j refuses to save a text too
+  large for its range index over the copy.
 - <a id="cypher-of-your-own"></a>**Cypher of your own keeps no copy, on any store.** Drivine runs a statement you send
   as written on the graph engines, and on Oracle, Postgres and SQLite compiles it to SQL and adds nothing to it. So a
   `SET`, `CREATE`, `MERGE` or `REMOVE` of the property leaves the copy as it was, or leaves the node without one, and so

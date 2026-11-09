@@ -502,7 +502,8 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         }
 
         // Neo4j cannot hold a text this long in a range index: the index fails, and the lookup reads the label's nodes.
-        await gom.indexes.ensure(index).catch(() => undefined);
+        const ensured = gom.indexes.ensure(index);
+        await (engine.type === DatabaseType.NEO4J ? ensured.catch(() => undefined) : ensured);
         try {
             const found = async (email: string): Promise<string[]> =>
                 (await gom.loadAll(CiLong, (q) => ({ where: q.email.eqIgnoreCase(email) }))).map((it) => it.id);
@@ -552,6 +553,9 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         expect(await found(long.toUpperCase())).toEqual(['l1']);
         expect(await found('BOB@x.com')).toEqual(['l2']);
         expect(await found(wide)).toEqual(['l5']);
+        // The lookup reads the copy: a node written afterwards by a statement of the test's own, with none, is passed by.
+        await bypassing(pm, engine, LONG_LATE, { id: 'l6', email: long });
+        expect(await found(long.toUpperCase())).toEqual(['l1']);
         // Filled in again, the copies stay as the properties are.
         await (gom as any).lowerCopies().fillIn(LONG_LATE, ['email'], true);
         expect(await copy('l1')).toEqual(long.toLowerCase());
