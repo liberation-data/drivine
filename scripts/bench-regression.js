@@ -60,7 +60,10 @@ const ms = (value) => value.toFixed(3);
 function summary(baseline, verdict) {
     const lines = ['### The warm compile against the last nightly', ''];
     if (verdict.outcome === 'no-baseline') {
-        lines.push("No nightly before this one left its numbers, so tonight's are recorded, and nothing is compared.");
+        lines.push(
+            'There are no numbers of a nightly to compare with (none left any, or the run is by hand with record-bench),' +
+                " so tonight's are recorded, and nothing is compared."
+        );
         return lines.join('\n');
     }
     if (baseline.compiler?.version !== verdict.numbers.compiler?.version) {

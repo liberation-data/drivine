@@ -87,6 +87,8 @@ jobs:
                   name: compiler-bench
                   path: compiler-bench.json
                   if-no-files-found: error
+                  # Overwritten when the run is re-run, as an artifact's name is unique within a run.
+                  overwrite: true
 
     report:
         needs: [ci, compiler-bench]
