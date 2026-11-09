@@ -76,17 +76,15 @@ export interface SchemaGrammar {
     /** Where a uniqueness constraint is built in the background, the ones listed while still being built. */
     listBuildingUniques?: { statement: string; read: (rows: any[]) => SchemaItem[] };
     /**
-     * Where the statement making an index returns while the engine still builds it in the background, how one is waited
-     * for by its name, `$name`: the statement that waits for it to be built, and the statement giving its state then,
-     * read as `IndexState` (undefined when there is none of that name). Neo4j makes an index POPULATING, and checks no
-     * key's size while it is: a write of a key too large for it fails the index's build, or, committed as it comes
-     * ONLINE, fails once it is in the log and stops the database. Absent where an index is whole once made (the SQL stores, Memgraph), and on FalkorDB,
-     * which builds one in the background (UNDER CONSTRUCTION) but bounds no key's size, so that no write fails on it.
+     * Where the statement making an index returns while the engine still builds it in the background, the statement
+     * giving the build's state, bound to the index's `$name` and `$label`, and how it is read (see IndexState): polled
+     * until the index is built. Neo4j makes an index POPULATING, and checks no key's size while it is: a write of a key
+     * too large for it fails the index's build, or, committed as it comes ONLINE, fails once it is in the log and stops
+     * the database. FalkorDB lists a label's indexes UNDER CONSTRUCTION while it builds one, and answers a query from
+     * what the index holds so far (FalkorDB/FalkorDB#3382). Absent where an index is whole once made (the SQL stores,
+     * and Memgraph, which builds it inside its CREATE INDEX).
      */
-    readonly awaitIndex?: {
-        statement: string;
-        state: { statement: string; read: (rows: any[]) => IndexState | undefined };
-    };
+    readonly indexBuild?: { statement: string; read: (rows: any[]) => IndexState | undefined };
     listVectors: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listFullTexts: { statement: string; read: (rows: any[]) => SchemaItem[] };
     createRange(spec: RangeIndexSpec): string[];
@@ -161,14 +159,15 @@ function cypherConflicts(elementId: string): (spec: UniquenessConstraintSpec, li
     };
 }
 
-/** What an engine reports of the build of an index: its state, and why it failed where it did. */
+/**
+ * What an engine reports of the build of an index: whether it is built, still being built or failed, the engine's own
+ * word for it, and why it failed where the engine says.
+ */
 export interface IndexState {
-    state: string;
+    state: 'BUILT' | 'BUILDING' | 'FAILED';
+    status: string;
     failureMessage?: string;
 }
-
-/** How long Drivine waits for an index it made to be built, in seconds. */
-export const INDEX_BUILD_TIMEOUT_SECONDS = 60;
 
 /** A command for the engine's driver, rather than a Cypher statement. */
 export interface NativeOperation {
@@ -182,17 +181,18 @@ const props = (spec: { properties: string[] }): string => spec.properties.map((i
 
 export const NEO4J_SCHEMA: SchemaGrammar = {
     conflicts: cypherConflicts('elementId'),
-    // The timeout is written in, as Neo4j takes no float for it, which a number bound from JavaScript is.
-    awaitIndex: {
-        statement: `CALL db.awaitIndex($name, ${INDEX_BUILD_TIMEOUT_SECONDS})`,
-        state: {
-            statement:
-                'SHOW INDEXES YIELD name, state, failureMessage WHERE name = $name ' +
-                'RETURN {state: state, failureMessage: failureMessage}',
-            read: (rows) =>
-                rows.length
-                    ? { state: String(rows[0].state), failureMessage: rows[0].failureMessage ?? undefined }
-                    : undefined
+    indexBuild: {
+        statement:
+            'SHOW INDEXES YIELD name, state, failureMessage WHERE name = $name ' +
+            'RETURN {state: state, failureMessage: failureMessage}',
+        // None of the name is no index to wait for: the index is listed once its CREATE INDEX returns.
+        read: (rows) => {
+            if (!rows.length) {
+                return undefined;
+            }
+            const status = String(rows[0].state);
+            const state = status === 'ONLINE' ? 'BUILT' : status === 'FAILED' ? 'FAILED' : 'BUILDING';
+            return { state, status, failureMessage: rows[0].failureMessage || undefined };
         }
     },
     listVectors: {
@@ -386,6 +386,18 @@ export const FALKORDB_SCHEMA: SchemaGrammar = {
     },
     rangesPerProperty: true,
     uniqueNeedsRange: true,
+    // One status for all of a label's indexes, `[Indexing] 0/20000: UNDER CONSTRUCTION` while it builds any of them,
+    // then OPERATIONAL. An index just made may not be listed yet: it is still to be built.
+    indexBuild: {
+        statement:
+            "CALL db.indexes() YIELD label, status, entitytype WHERE entitytype = 'NODE' AND label = $label " +
+            'RETURN {status: status}',
+        read: (rows) => {
+            const status = rows.length ? String(rows[0].status) : 'not listed yet';
+            const state = /FAILED/i.test(status) ? 'FAILED' : status === 'OPERATIONAL' ? 'BUILT' : 'BUILDING';
+            return { state, status };
+        }
+    },
     listVectors: {
         statement:
             "CALL db.indexes() YIELD label, properties, types, options, entitytype WHERE entitytype = 'NODE' " +

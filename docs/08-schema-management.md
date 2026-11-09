@@ -19,7 +19,20 @@ A uniqueness constraint can name the property its nodes are identified by, for a
 `uniquenessConstraint('ChatSession', 'sessionId', { nodeIdProperty: 'id' })`. It plays no part in what is made. A
 catalog read from fragments sets it from the `@NodeId`.
 
-Schema statements run outside any transaction. `ensure` returns a result whose `status` is:
+Schema statements run outside any transaction. On Neo4j and FalkorDB, which build an index in the background, `ensure`
+and `recreate` return only once the index is built: one made, or a matching one found there, as one another process
+made a moment ago. On Neo4j a write of a value too large for an index still being built fails the build, or, committed
+just as the index comes online, stops the database; a FalkorDB index still being built answers queries with only the
+rows it holds so far. Waiting fixes that for the indexes Drivine's `ensure` makes and finds, but an index made some other
+way can still give partial rows on FalkorDB until it is `OPERATIONAL`. The wait is at most `indexBuildTimeout` (60
+seconds unless set; see the options below). An index whose build failed is an error with the engine's reason (drop it,
+and ensure it again once the data is put right), and so is one still being built when the time is up, which is left
+building. The schema manager's `FAIL_FAST` mode, the default, throws either; `WARN` logs it, naming the index, and
+carries on. `gom.indexes` throws either, unless given `withBuild({ timeout, mode })`. Neo4j's `CREATE CONSTRAINT`
+returns once its index is built, so a constraint is not waited on; FalkorDB's is (see below), and so is the range index
+it needs first.
+
+`ensure` returns a result whose `status` is:
 
 | Status | Meaning |
 |---|---|
@@ -121,7 +134,8 @@ the default from target ES2022). A spec for a label no fragment maps, and one gi
 
 | Option | Meaning |
 |---|---|
-| `mode` | `FAIL_FAST` (the default) throws on drift, a violation or an index in the way of a constraint; `WARN` logs it and carries on. |
+| `mode` | `FAIL_FAST` (the default) throws on drift, a violation, an index in the way of a constraint, or an index whose build failed or did not end within `indexBuildTimeout`; `WARN` logs it and carries on. |
+| `indexBuildTimeout` | How long, in milliseconds, an index Neo4j or FalkorDB builds in the background is waited on to be built. Defaults to 60,000. |
 | `recreateOnDrift` | Destructive: replace an item whose shape drifted. |
 | `recreateOnStartup` | Destructive: drop and make every declared item on every startup. |
 | `replaceBlockingIndex` | Destructive: drop a plain index in the way of a uniqueness constraint (Neo4j) and make the constraint in its place. |
@@ -153,7 +167,7 @@ all known at runtime gives it `schema: { catalogs: [] }`.
 The items join what that owner's catalogs declared, for the life of the manager, and are applied as `enforce` applies
 the owner's:
 
-- **Under the same options.** `mode`, `recreateOnDrift`, `replaceBlockingIndex` and `violationSampleSize` apply. Only
+- **Under the same options.** `mode`, `indexBuildTimeout`, `recreateOnDrift`, `replaceBlockingIndex` and `violationSampleSize` apply. Only
   the items given are applied, and the results come back by database. `ensure` leaves a change of the owner's version
   to `enforce`, and `recreateOnStartup` doesn't apply to it.
 - **In the owner's inventory.** The owner's `_DrivineSchema` marker records them as ensured at runtime. A later

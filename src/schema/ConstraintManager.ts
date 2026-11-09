@@ -3,14 +3,13 @@ import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import {
     EnsureResult,
-    itemName,
     lowercased,
     madeAs,
     rangeIndex,
     UniquenessConstraintSpec,
     ViolatingKey
 } from '@/schema/SchemaSpecs';
-import { awaitIndexBuilt, IndexManager } from '@/schema/IndexManager';
+import { IndexBuildOptions, IndexManager } from '@/schema/IndexManager';
 import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
 import { DrivineLogger } from '@/logger';
 
@@ -36,13 +35,21 @@ export class ConstraintManager {
      * @param changed told once this has made or dropped a constraint, as the object manager's list is then stale.
      * @param copies fills in the lowercased copies a constraint that ignores case is made over; without it, such a
      * constraint is refused.
+     * @param build how the range index FalkorDB needs first is waited on to be built (see IndexManager's `ensure`).
+     * Neo4j's CREATE CONSTRAINT returns once the constraint's own index is ONLINE, so it is not waited on.
      */
     constructor(
         private readonly executor: SchemaExecutor,
         private readonly grammar: SchemaGrammar,
         private readonly changed: () => void = () => undefined,
-        private readonly copies?: LowerCopyFiller
+        private readonly copies?: LowerCopyFiller,
+        private readonly build: IndexBuildOptions = {}
     ) {}
+
+    /** This manager, waiting on the build of the index FalkorDB needs first as `build` says. */
+    withBuild(build: IndexBuildOptions): ConstraintManager {
+        return new ConstraintManager(this.executor, this.grammar, this.changed, this.copies, build);
+    }
 
     async list(): Promise<SchemaItem[]> {
         return this.grammar.listUniques.read(await this.executor.run(this.grammar.listUniques.statement));
@@ -136,7 +143,7 @@ export class ConstraintManager {
         if (sample.length) {
             return { status: 'VIOLATION', spec, sample };
         }
-        const indexes = new IndexManager(this.executor, this.grammar, this.changed);
+        const indexes = new IndexManager(this.executor, this.grammar, this.changed, undefined, this.build);
         if (this.grammar.uniqueNeedsRange) {
             await indexes.ensure(rangeIndex(spec.label, spec.properties));
         }
@@ -251,12 +258,10 @@ export class ConstraintManager {
         }
     }
 
-    /** Makes the constraint, and waits for the index Neo4j builds for it, named as it is, as for any index made. */
     private async create(spec: UniquenessConstraintSpec): Promise<void> {
         for (const statement of this.grammar.createUnique(spec)) {
             await this.executor.run(statement);
         }
-        await awaitIndexBuilt(this.executor, this.grammar, itemName(spec));
     }
 
     /** The plain range index over the constraint's label and properties, in their order, that is in the way of it. */

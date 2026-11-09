@@ -1,5 +1,5 @@
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
-import { INDEX_BUILD_TIMEOUT_SECONDS, SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import { DrivineError } from '@/DrivineError';
 import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
 import {
@@ -35,38 +35,21 @@ function shapeOf(found: SchemaItem): SchemaItemShape {
     };
 }
 
-/**
- * Waits, where the engine builds an index in the background (see SchemaGrammar's `awaitIndex`), for the index named
- * `name` to be built, so that a write after the item is made finds it whole. Throws when its build failed, naming the
- * index and the engine's reason, or when it is still not built after INDEX_BUILD_TIMEOUT_SECONDS. Returns at once where
- * the engine holds no index of that name.
- */
-export async function awaitIndexBuilt(executor: SchemaExecutor, grammar: SchemaGrammar, name: string): Promise<void> {
-    const awaiting = grammar.awaitIndex;
-    if (!awaiting) {
-        return;
-    }
-    let failure: Error | undefined;
-    try {
-        await executor.run(awaiting.statement, { name });
-    } catch (e) {
-        failure = e as Error;
-    }
-    const found = awaiting.state.read(await executor.run(awaiting.state.statement, { name }));
-    if (found?.state === 'FAILED') {
-        throw new DrivineError(
-            `${grammar.engine} failed to build the index ${name}: ${found.failureMessage || 'it gives no reason'}. ` +
-                'Drop it, and make it again once what failed it is put right.',
-            failure
-        );
-    }
-    if (failure && found) {
-        throw new DrivineError(
-            `${grammar.engine} had not built the index ${name} after ${INDEX_BUILD_TIMEOUT_SECONDS} s ` +
-                `(it is ${found.state}): ${failure.message}`,
-            failure
-        );
-    }
+/** How long, in milliseconds, an index is waited on to be built, unless IndexBuildOptions says otherwise. */
+export const INDEX_BUILD_TIMEOUT = 60_000;
+
+/** How often, in milliseconds, the state of an index being built is read. */
+const INDEX_BUILD_POLL = 200;
+
+/** How an index the engine builds in the background is waited on (see IndexManager's `ensure`). */
+export interface IndexBuildOptions {
+    /** How long, in milliseconds, to wait for the build. Defaults to INDEX_BUILD_TIMEOUT, 60 s. */
+    timeout?: number;
+    /**
+     * FAIL_FAST (default) throws for a build that failed or did not end in time; WARN logs it, naming the index and the
+     * engine's reason, and carries on, as SchemaManager's mode says.
+     */
+    mode?: 'FAIL_FAST' | 'WARN';
 }
 
 export class IndexManager {
@@ -76,13 +59,20 @@ export class IndexManager {
      * @param changed told once this has made or dropped an index, as the object manager's index list is then stale.
      * @param copies fills in the lowercased copies an index that ignores case is made over; without it, such an index is
      * refused.
+     * @param build how an index the engine builds in the background is waited on.
      */
     constructor(
         private readonly executor: SchemaExecutor,
         private readonly grammar: SchemaGrammar,
         private readonly changed: () => void = () => undefined,
-        private readonly copies?: LowerCopyFiller
+        private readonly copies?: LowerCopyFiller,
+        private readonly build: IndexBuildOptions = {}
     ) {}
+
+    /** This manager, waiting on a build as `build` says. */
+    withBuild(build: IndexBuildOptions): IndexManager {
+        return new IndexManager(this.executor, this.grammar, this.changed, this.copies, build);
+    }
 
     /** The indexes of a kind the engine holds. */
     async list(kind: IndexSpec['kind'] = 'RANGE'): Promise<SchemaItem[]> {
@@ -101,6 +91,11 @@ export class IndexManager {
      * none, recording that they all have them, whatever the result. Where the index isn't there yet, the copies are
      * filled in again even where recorded, as by `recreate`: those a field kept before it lost `@CaseInsensitive` went
      * out of step meanwhile.
+     *
+     * On an engine that builds an index in the background (Neo4j, FalkorDB), returns once the index, made here or found
+     * there, is built, waiting at most the build's `timeout`. A build that failed, or did not end in time, throws a
+     * DrivineError naming the index and giving the engine's reason, unless the build's mode is WARN, which logs it. The
+     * index is left as it is.
      */
     async ensure<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         const made = madeAs(spec);
@@ -173,9 +168,12 @@ export class IndexManager {
             return { status: 'CREATED', spec };
         }
         if (found) {
-            return this.matches(spec, found)
-                ? { status: 'ALREADY_MATCHING', spec }
-                : { status: 'DRIFT', spec, found: shapeOf(found) };
+            if (!this.matches(spec, found)) {
+                return { status: 'DRIFT', spec, found: shapeOf(found) };
+            }
+            // Another process may have made it a moment ago, and Neo4j may still be building it, or have failed to.
+            await this.awaitBuilt(spec, found.name ?? itemName(spec));
+            return { status: 'ALREADY_MATCHING', spec };
         }
         await this.create(spec);
         this.changed();
@@ -218,7 +216,54 @@ export class IndexManager {
         for (const statement of this.statements(missing, 'create')) {
             await this.executor.run(statement);
         }
-        await awaitIndexBuilt(this.executor, this.grammar, itemName(missing));
+        await this.awaitBuilt(missing, itemName(missing));
+    }
+
+    /**
+     * Reads the state of the index `name` of the spec, where the engine builds it in the background (see SchemaGrammar's
+     * `indexBuild`), until it is built: Neo4j's index answers a write it can't hold by stopping the database once it is
+     * ONLINE, and FalkorDB's answers a query from what it holds so far. A build that failed, or is still going after the
+     * timeout, is thrown, or logged under WARN.
+     */
+    private async awaitBuilt(spec: IndexSpec, name: string): Promise<void> {
+        const build = this.grammar.indexBuild;
+        if (!build) {
+            return;
+        }
+        const timeout = this.build.timeout ?? INDEX_BUILD_TIMEOUT;
+        const deadline = Date.now() + timeout;
+        const index = `the ${spec.kind} index ${name} on ${spec.label}(${spec.properties.join(', ')})`;
+        for (;;) {
+            const found = build.read(await this.executor.run(build.statement, { name, label: spec.label }));
+            if (!found || found.state === 'BUILT') {
+                return;
+            }
+            if (found.state === 'FAILED') {
+                const reason = (found.failureMessage || found.status).trim().replace(/\.$/, '');
+                this.buildFailed(
+                    `${this.grammar.engine} failed to build ${index}: ${reason}. Drop it, and ensure it again once ` +
+                        'what failed it is put right.'
+                );
+                return;
+            }
+            const left = deadline - Date.now();
+            if (left <= 0) {
+                this.buildFailed(
+                    `${this.grammar.engine} had not built ${index} after ${timeout} ms: it is ${found.status}.`
+                );
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, Math.min(INDEX_BUILD_POLL, left)));
+        }
+    }
+
+    /** Throws the failure of a build, or, under WARN, logs it and carries on. */
+    private buildFailed(message: string): void {
+        if (this.build.mode === 'WARN') {
+            this.logger.warn(message);
+            return;
+        }
+        throw new DrivineError(message);
     }
 
     /**

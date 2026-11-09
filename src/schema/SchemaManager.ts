@@ -12,8 +12,16 @@ import { EnsureResult, IndexSpec, itemName, madeAs, uniquenessConstraint } from 
 
 export interface SchemaOptions {
     catalogs: SchemaCatalog[];
-    /** FAIL_FAST (default) throws on drift, a violation or an index in the way; WARN logs it and carries on. */
+    /**
+     * FAIL_FAST (default) throws on drift, a violation, an index in the way, or an index whose build failed or did not
+     * end within `indexBuildTimeout`; WARN logs it and carries on.
+     */
     mode?: 'FAIL_FAST' | 'WARN';
+    /**
+     * How long, in milliseconds, an index that Neo4j or FalkorDB builds in the background is waited on to be built.
+     * Defaults to 60 s.
+     */
+    indexBuildTimeout?: number;
     /** Destructive: replace an item whose shape drifted, rather than reporting it. */
     recreateOnDrift?: boolean;
     /** Destructive: drop and make every declared item on every enforce. */
@@ -609,19 +617,21 @@ export class SchemaManager {
         spec: SchemaSpec,
         recreate: boolean
     ): Promise<EnsureResult<SchemaSpec>> {
+        const build = { timeout: this.options.indexBuildTimeout, mode: this.options.mode };
         if (spec.kind === 'UNIQUE') {
-            const constraints = gom.constraints;
+            const constraints = gom.constraints.withBuild(build);
             const ensure = recreate ? constraints.recreate.bind(constraints) : constraints.ensure.bind(constraints);
             return this.judge(
                 await ensure(spec, this.options.violationSampleSize, this.options.replaceBlockingIndex === true)
             );
         }
+        const indexes = gom.indexes.withBuild(build);
         if (recreate) {
-            return gom.indexes.recreate(spec as IndexSpec);
+            return indexes.recreate(spec as IndexSpec);
         }
-        const result = await gom.indexes.ensure(spec as IndexSpec);
+        const result = await indexes.ensure(spec as IndexSpec);
         if (result.status === 'DRIFT' && this.options.recreateOnDrift) {
-            return gom.indexes.recreate(spec as IndexSpec);
+            return indexes.recreate(spec as IndexSpec);
         }
         return this.judge(result);
     }
