@@ -20,12 +20,13 @@ the spec's cases that pin it, in [drivine-cypher-spec](https://github.com/libera
 
 The shared compiler's Wasm build needs WasmGC, which Node has from 22. Drivine 4.0 is tested on Node 24.
 
-### Compiled Cypher on SQLite needs SQLite 3.53
+### From 4.0.1, compiled Cypher on SQLite needs SQLite 3.53.2
 
-A Cypher statement on a SQLite store is refused, with a `DrivineError`, where the SQLite is older than 3.53: there a
-float it computes is written to 15 digits, 3.49 refuses a `CALL` that groups by a variable it imports, and before 3.47
-`last()` and a negative list index are refused. The SQLite is the one Node bundles: Node 22.23.4, 24.16.0 and 26.1.0
-are the first of their lines to bundle 3.53. Plain SQL and the object manager still run on SQLite 3.45 or later. See
+From 4.0.1, a Cypher statement on a SQLite store is refused, with a `DrivineError`, where the SQLite is older than
+3.53.2: there a float it computes is written to 15 digits, 3.49 refuses a `CALL` that groups by a variable it imports,
+and before 3.47 `last()` and a negative list index are refused. 4.0.0 compiled it there all the same. The SQLite is the
+one Node bundles: Node 22.23.4, 24.19.0 and 26.4.0 are the first of their lines to bundle 3.53.2 or later. Plain SQL,
+the schema manager and the object manager still run on SQLite 3.45 or later. See
 [SQLite](07-supported-engines.md#sqlite).
 
 ### Statements Neo4j refuses are refused

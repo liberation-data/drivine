@@ -4,13 +4,15 @@ import * as path from 'path';
 import { DrivineError } from '@/DrivineError';
 import {
     FULL_FLOATS_PROBE,
+    MINIMUM_COMPILED_CYPHER_SQLITE,
     openSqlite,
     refuseCompiledCypherOn,
     ROUNDED_FLOATS_WARNING,
     RoundedFloats,
     SqliteDatabase,
     sqliteOlderThan,
-    sqliteVersion
+    sqliteVersion,
+    sqliteVersionOf
 } from '@/connection/sqlite/SqliteDriver';
 
 describe('a SQLite version', () => {
@@ -39,20 +41,26 @@ describe('a SQLite version', () => {
         expect(sqliteOlderThan('3.46.1', [3, 45, 0])).toBe(false);
     });
 
-    it('should refuse compiled Cypher before 3.53, naming the SQLite, its Node and a Node to use', () => {
-        expect(() => refuseCompiledCypherOn('3.52.9', '24.15.0')).toThrow(
-            'Compiled Cypher needs SQLite 3.53 or later; this is SQLite 3.52.9, which Node 24.15.0 bundles. Use a ' +
-                'Node release that bundles 3.53 or later: 22.23.4, 24.16.0, 26.1.0 or a later one of each line.'
+    it('should refuse compiled Cypher before 3.53.2, naming the SQLite, its Node and a Node to use', () => {
+        expect(() => refuseCompiledCypherOn('3.53.0', '24.16.0')).toThrow(
+            'Compiled Cypher needs SQLite 3.53.2 or later; this is SQLite 3.53.0, which Node 24.16.0 bundles. Use a ' +
+                'Node release that bundles 3.53.2 or later: 22.23.4, 24.19.0, 26.4.0 or a later one of each line.'
         );
         expect(() => refuseCompiledCypherOn('3.46.1')).toThrow(DrivineError);
         expect(() => refuseCompiledCypherOn('3.50.4')).toThrow(/this is SQLite 3\.50\.4/);
-        for (const version of ['3.53.0', '3.53.4', '3.54.0', '3.100.0']) {
+        expect(() => refuseCompiledCypherOn('3.53.1')).toThrow(/this is SQLite 3\.53\.1/);
+        expect(() => refuseCompiledCypherOn('3.52.9')).toThrow(/this is SQLite 3\.52\.9/);
+        for (const version of ['3.53.2', '3.53.4', '3.53.2.1', '3.54.0', '3.100.0']) {
             expect(() => refuseCompiledCypherOn(version)).not.toThrow();
         }
     });
 });
 
 describe('RoundedFloats', () => {
+    /** Whether opening a file warns of SQLite `version`, which gave `probe`: one compiled Cypher is not refused on. */
+    const warned = (version: string, probe: string): boolean =>
+        probe !== FULL_FLOATS_PROBE && !sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE);
+
     const ROUNDED = () => '0.3';
     const FULL = () => '0.30000000000000004';
 
@@ -127,7 +135,7 @@ describe('RoundedFloats', () => {
                     const rounded = emitted.mock.calls.filter(
                         ([, options]) => (options as { code?: string })?.code === ROUNDED_FLOATS_WARNING
                     );
-                    expect(rounded).toHaveLength(probe === FULL_FLOATS_PROBE ? 0 : 1);
+                    expect(rounded).toHaveLength(warned(sqliteVersionOf(db), probe) ? 1 : 0);
                     if (process.getuid?.() !== 0) {
                         expect(() => db.exec('INSERT INTO t VALUES (1)')).toThrow(/readonly/);
                     }
@@ -161,11 +169,12 @@ describe('RoundedFloats', () => {
         try {
             const opened = [openSqlite(path.join(folder, 'a.db')), openSqlite(path.join(folder, 'b.db'))];
             const probe = String(opened[0].prepare('SELECT json_quote(0.1 + 0.2) AS q').get()!.q);
+            const version = sqliteVersionOf(opened[0]);
             opened.forEach((db) => db.close());
             const rounded = emitted.mock.calls.filter(
                 ([, options]) => (options as { code?: string })?.code === ROUNDED_FLOATS_WARNING
             );
-            expect(rounded).toHaveLength(probe === FULL_FLOATS_PROBE ? 0 : 1);
+            expect(rounded).toHaveLength(warned(version, probe) ? 1 : 0);
         } finally {
             emitted.mockRestore();
             fs.rmSync(folder, { recursive: true, force: true });

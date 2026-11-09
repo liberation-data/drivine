@@ -37,7 +37,7 @@ export const LONG_LOCK_MILLIS = 5_000;
  * - A statement Drivine writes whose text values are each JSON opens with `/* drivine:json *\/`, and each of its text
  *   values is read as the JSON it is; a statement written by hand is read as it is.
  * - The graph's `ensuring` text, many statements, makes the store when it is not all there (see SqliteGraph).
- * - A Cypher statement is refused on a SQLite before 3.53, where compiled Cypher is wrong or refused (see
+ * - A Cypher statement is refused on a SQLite before 3.53.2, where compiled Cypher is wrong or refused (see
  *   refuseCompiledCypherOn); plain SQL runs all the same.
  */
 export class SqliteConnection implements Connection {
@@ -161,7 +161,7 @@ export class SqliteConnection implements Connection {
 
     /**
      * The Cypher statement of `spec` compiled to SQL over the graph's tables, as a specification of that SQL, which opens
-     * with `/* drivine:json *\/`: each of its text values is JSON. Refused on a SQLite before 3.53.
+     * with `/* drivine:json *\/`: each of its text values is JSON. Refused on a SQLite before 3.53.2.
      */
     private compiled<T>(spec: QuerySpecification<T>): QuerySpecification<T> {
         refuseCompiledCypherOn(this.sqlite);

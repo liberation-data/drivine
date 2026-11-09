@@ -145,6 +145,12 @@ export interface GraphBackend {
      */
     schemaMarker(property: 'version' | 'items'): GraphStatement;
 
+    /**
+     * The scope of every schema marker, once each. In the store's own language, not Cypher, so a SQLite whose compiled
+     * Cypher is refused still removes schema (see refuseCompiledCypherOn).
+     */
+    schemaScopes(): GraphStatement;
+
     /** The inventory keys a marker's stored `items` holds; undefined for none recorded (a marker that predates them). */
     markerItems(stored: string | null | undefined): string[] | undefined;
 

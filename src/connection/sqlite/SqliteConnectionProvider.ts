@@ -26,9 +26,9 @@ export interface SqliteOptions {
 /**
  * Connections to the SQLite file at `path`, each opened as Drivine's statements want it, with the functions they call
  * registered on it (see SqliteFunctions), through Node's own driver, `node:sqlite`, and the SQLite that Node bundles.
- * Compiled Cypher needs SQLite 3.53 or later, and is refused before it: there a float it computes is written to 15
- * digits, and `last()`, a negative index and a CALL that groups by an imported variable are refused. Plain SQL and the
- * object manager run on SQLite 3.45 or later.
+ * Compiled Cypher needs SQLite 3.53.2 or later, and is refused before it: there a float it computes is written to 15
+ * digits, and `last()`, a negative index and a CALL that groups by an imported variable are refused. Plain SQL, the
+ * schema manager and the object manager run on SQLite 3.45 or later.
  *
  * - The journal is a write-ahead log, so readers do not wait for the writer, nor the writer for them.
  * - Foreign keys are enforced, so a node's relationships go with it.

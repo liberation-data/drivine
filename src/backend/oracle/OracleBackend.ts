@@ -326,6 +326,13 @@ END;`);
         );
     }
 
+    schemaScopes(): GraphStatement {
+        return new GraphStatement(
+            `SELECT DISTINCT JSON_VALUE(n.props, '$.scope') AS "scope" FROM ${this.graph.nodes} n ` +
+                `WHERE ${hasLabels('n', [SCHEMA_MARKER])}`
+        );
+    }
+
     /** The inventory behind its mark: stripped here, as SQL would make an empty one null. */
     markerItems(stored: string | null | undefined): string[] | undefined {
         if (stored == null || !stored.startsWith(ITEMS_MARK)) {

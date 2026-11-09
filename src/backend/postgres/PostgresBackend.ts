@@ -322,6 +322,14 @@ export class PostgresBackend implements GraphBackend {
         );
     }
 
+    schemaScopes(): GraphStatement {
+        return new PostgresStatement(
+            `SELECT DISTINCT ${textOf('n', 'scope')} AS "scope" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [
+                SCHEMA_MARKER
+            ])}`
+        );
+    }
+
     /** Postgres keeps an empty string apart from null, so an inventory is kept as it is, as drivine4j keeps it. */
     markerItems(stored: string | null | undefined): string[] | undefined {
         return stored == null ? undefined : stored === '' ? [] : stored.split('\n');
