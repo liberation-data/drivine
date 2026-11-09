@@ -570,6 +570,8 @@ describe.each(allStores())('@CaseInsensitive on $type', (engine) => {
         const index = rangeIndex(LONG, 'email', { ignoreCase: true });
         await gom.indexes.drop(index);
         await clearLabels(pm, engine, LONG);
+        // ensure returns once the index is ONLINE. Neo4j checks no key's size while an index is POPULATING, and a key
+        // too large for it, committed as it comes online, stops the database every suite shares.
         await gom.indexes.ensure(index);
         try {
             await expect(

@@ -3,13 +3,14 @@ import { SchemaExecutor } from '@/schema/SchemaExecutor';
 import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
 import {
     EnsureResult,
+    itemName,
     lowercased,
     madeAs,
     rangeIndex,
     UniquenessConstraintSpec,
     ViolatingKey
 } from '@/schema/SchemaSpecs';
-import { IndexManager } from '@/schema/IndexManager';
+import { awaitIndexBuilt, IndexManager } from '@/schema/IndexManager';
 import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
 import { DrivineLogger } from '@/logger';
 
@@ -250,10 +251,12 @@ export class ConstraintManager {
         }
     }
 
+    /** Makes the constraint, and waits for the index Neo4j builds for it, named as it is, as for any index made. */
     private async create(spec: UniquenessConstraintSpec): Promise<void> {
         for (const statement of this.grammar.createUnique(spec)) {
             await this.executor.run(statement);
         }
+        await awaitIndexBuilt(this.executor, this.grammar, itemName(spec));
     }
 
     /** The plain range index over the constraint's label and properties, in their order, that is in the way of it. */

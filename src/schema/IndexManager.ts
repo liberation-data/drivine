@@ -1,5 +1,6 @@
 import { SchemaExecutor } from '@/schema/SchemaExecutor';
-import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { INDEX_BUILD_TIMEOUT_SECONDS, SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import { DrivineError } from '@/DrivineError';
 import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
 import {
     EnsureResult,
@@ -32,6 +33,40 @@ function shapeOf(found: SchemaItem): SchemaItemShape {
         quantizationEnabled: found.quantizationEnabled,
         efRuntime: found.efRuntime
     };
+}
+
+/**
+ * Waits, where the engine builds an index in the background (see SchemaGrammar's `awaitIndex`), for the index named
+ * `name` to be built, so that a write after the item is made finds it whole. Throws when its build failed, naming the
+ * index and the engine's reason, or when it is still not built after INDEX_BUILD_TIMEOUT_SECONDS. Returns at once where
+ * the engine holds no index of that name.
+ */
+export async function awaitIndexBuilt(executor: SchemaExecutor, grammar: SchemaGrammar, name: string): Promise<void> {
+    const awaiting = grammar.awaitIndex;
+    if (!awaiting) {
+        return;
+    }
+    let failure: Error | undefined;
+    try {
+        await executor.run(awaiting.statement, { name });
+    } catch (e) {
+        failure = e as Error;
+    }
+    const found = awaiting.state.read(await executor.run(awaiting.state.statement, { name }));
+    if (found?.state === 'FAILED') {
+        throw new DrivineError(
+            `${grammar.engine} failed to build the index ${name}: ${found.failureMessage || 'it gives no reason'}. ` +
+                'Drop it, and make it again once what failed it is put right.',
+            failure
+        );
+    }
+    if (failure && found) {
+        throw new DrivineError(
+            `${grammar.engine} had not built the index ${name} after ${INDEX_BUILD_TIMEOUT_SECONDS} s ` +
+                `(it is ${found.state}): ${failure.message}`,
+            failure
+        );
+    }
 }
 
 export class IndexManager {
@@ -183,6 +218,7 @@ export class IndexManager {
         for (const statement of this.statements(missing, 'create')) {
             await this.executor.run(statement);
         }
+        await awaitIndexBuilt(this.executor, this.grammar, itemName(missing));
     }
 
     /**

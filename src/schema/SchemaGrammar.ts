@@ -75,6 +75,18 @@ export interface SchemaGrammar {
     listFailedUniques?: { statement: string; read: (rows: any[]) => SchemaItem[] };
     /** Where a uniqueness constraint is built in the background, the ones listed while still being built. */
     listBuildingUniques?: { statement: string; read: (rows: any[]) => SchemaItem[] };
+    /**
+     * Where the statement making an index returns while the engine still builds it in the background, how one is waited
+     * for by its name, `$name`: the statement that waits for it to be built, and the statement giving its state then,
+     * read as `IndexState` (undefined when there is none of that name). Neo4j makes an index POPULATING, and checks no
+     * key's size while it is: a write of a key too large for it fails the index's build, or, committed as it comes
+     * ONLINE, fails once it is in the log and stops the database. Absent where an index is whole once made (the SQL stores, Memgraph), and on FalkorDB,
+     * which builds one in the background (UNDER CONSTRUCTION) but bounds no key's size, so that no write fails on it.
+     */
+    readonly awaitIndex?: {
+        statement: string;
+        state: { statement: string; read: (rows: any[]) => IndexState | undefined };
+    };
     listVectors: { statement: string; read: (rows: any[]) => SchemaItem[] };
     listFullTexts: { statement: string; read: (rows: any[]) => SchemaItem[] };
     createRange(spec: RangeIndexSpec): string[];
@@ -149,6 +161,15 @@ function cypherConflicts(elementId: string): (spec: UniquenessConstraintSpec, li
     };
 }
 
+/** What an engine reports of the build of an index: its state, and why it failed where it did. */
+export interface IndexState {
+    state: string;
+    failureMessage?: string;
+}
+
+/** How long Drivine waits for an index it made to be built, in seconds. */
+export const INDEX_BUILD_TIMEOUT_SECONDS = 60;
+
 /** A command for the engine's driver, rather than a Cypher statement. */
 export interface NativeOperation {
     native: 'CONSTRAINT_CREATE' | 'CONSTRAINT_DROP';
@@ -161,6 +182,19 @@ const props = (spec: { properties: string[] }): string => spec.properties.map((i
 
 export const NEO4J_SCHEMA: SchemaGrammar = {
     conflicts: cypherConflicts('elementId'),
+    // The timeout is written in, as Neo4j takes no float for it, which a number bound from JavaScript is.
+    awaitIndex: {
+        statement: `CALL db.awaitIndex($name, ${INDEX_BUILD_TIMEOUT_SECONDS})`,
+        state: {
+            statement:
+                'SHOW INDEXES YIELD name, state, failureMessage WHERE name = $name ' +
+                'RETURN {state: state, failureMessage: failureMessage}',
+            read: (rows) =>
+                rows.length
+                    ? { state: String(rows[0].state), failureMessage: rows[0].failureMessage ?? undefined }
+                    : undefined
+        }
+    },
     listVectors: {
         statement:
             "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options WHERE type = 'VECTOR' AND entityType = 'NODE' " +
