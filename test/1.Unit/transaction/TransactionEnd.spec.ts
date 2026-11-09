@@ -93,6 +93,24 @@ describe('A transaction ending', () => {
         });
     });
 
+    it('whose commit rejects with no error rolls back the connection that did not commit, and releases each', async () => {
+        await holder.runPromise(async () => {
+            const calls: string[] = [];
+            const b = connection('b', calls);
+            b.commitTransaction = async () => Promise.reject(undefined);
+            transaction(holder, [connection('a', calls), b]);
+            const thrown = await runInTransaction(async () => Promise.resolve('done')).then(
+                () => 'resolved',
+                (e) => e
+            );
+            expect(thrown).toBeUndefined();
+            expect(calls).toContain('b.rollback');
+            expect(calls).not.toContain('a.rollback');
+            expect(calls.filter((it) => it.endsWith('release')).sort()).toEqual(['a.release', 'b.release']);
+            expect(holder.currentTransaction).toBeUndefined();
+        });
+    });
+
     it('whose cursor fails to close commits nothing, rolls back each, and releases each', async () => {
         await holder.runPromise(async () => {
             const calls: string[] = [];

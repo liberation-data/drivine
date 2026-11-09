@@ -112,7 +112,9 @@ export class Transaction {
             this.callStack.pop();
         }
         if (isRoot) {
-            this.logger.verbose(`Rolling back transaction: ${this.description} due to error: ${e.message}.`);
+            // A commit or rollback can reject with no error, so `e` may be undefined.
+            const cause = (e as Error | undefined)?.message ?? String(e);
+            this.logger.verbose(`Rolling back transaction: ${this.description} due to error: ${cause}.`);
             try {
                 await Promise.all(
                     this.connections
