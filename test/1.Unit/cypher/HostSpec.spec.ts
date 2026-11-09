@@ -179,7 +179,13 @@ describe('The host.yaml runner', () => {
         expect(holdsRegexp('SELECT json_object(\'regexp\', 1) AS "regexp"')).toBe(false);
         expect(holdsRegexp("SELECT drivine_regexp_count('a', 'b')")).toBe(false);
         expect(holdsRegexp('SELECT \'it\'\'s REGEXP\', "a""REGEXP"')).toBe(false);
+        // A backslash escapes nothing in SQL's quoted texts.
+        expect(holdsRegexp("SELECT 'a\\' REGEXP 'b'")).toBe(true);
+    });
+
+    it('should pass over a long quoted text, or one of many doubled quotes, without overflowing the stack', () => {
         expect(holdsRegexp(`SELECT '${'x'.repeat(200_000)}' REGEXP 'a'`)).toBe(true);
+        expect(holdsRegexp(`SELECT '${"''".repeat(100_000)} REGEXP'`)).toBe(false);
     });
 
     it('should fail a hold whose steps pass, and not hide the runner failing otherwise than the spec says', async () => {
