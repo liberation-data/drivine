@@ -7,7 +7,8 @@
  *     DRIVINE_WASM_COMPILER=<the package's .tgz, or a directory it is installed in> node scripts/bench-compiler.js
  *
  * The package isn't on npm yet, so it is no dependency here: given its `.tgz`, the script installs it, and the
- * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry), removed when it ends. Given a
+ * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry), removed when it ends. A run cut
+ * short by a signal leaves it behind, as `drivine-wasm-compiler-*` in the system's temporary directory. Given a
  * directory, the script requires it as it is, so `@js-joda/core` must resolve from there: `npm install <tgz>` into a
  * directory of its own, and give `<that directory>/node_modules/@drivine/cypher-compiler`. With neither, the script
  * says so and is skipped.
@@ -73,8 +74,9 @@ function request(store, cypher, parametersJson) {
 }
 
 // Run in a fresh process: `--cold <own|wasm> <store> <statement JSON> [<package directory>]` prints the cold load and
-// first compile, in milliseconds.
-if (process.argv[2] === '--cold') {
+// first compile, in milliseconds. It ends by itself, not with `process.exit`, which on macOS can cut off what it wrote
+// to a pipe.
+function cold() {
     const [, , , which, store, statementJson, packageDir] = process.argv;
     const statement = JSON.parse(statementJson);
     const started = performance.now();
@@ -91,7 +93,6 @@ if (process.argv[2] === '--cold') {
     const loaded = performance.now();
     compiled();
     console.log(JSON.stringify({ load: loaded - started, first: performance.now() - loaded }));
-    process.exit(0);
 }
 
 // As test/cypher/CypherSpec.ts reads the spec, which a script run from `dist` can't import: the groups of stores, and
@@ -250,6 +251,11 @@ function main() {
             }
         }
         refused.push({ store, all: all.length, both: both.length, ...tally });
+        if (both.length === 0) {
+            throw new Error(
+                `No statement of the spec compiles on ${store} with both compilers, so there is nothing to time.`
+            );
+        }
 
         const cold = { own: [], wasm: [] };
         for (let run = 0; run < coldRuns; run++) {
@@ -353,4 +359,8 @@ function main() {
     console.log(table(['Store', 'Wasm / TS', 'TS median, ms', 'Wasm median, ms', 'Slowest beside TS'], slowest));
 }
 
-main();
+if (process.argv[2] === '--cold') {
+    cold();
+} else {
+    main();
+}
