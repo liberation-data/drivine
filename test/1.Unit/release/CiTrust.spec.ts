@@ -211,7 +211,7 @@ describe('ci-trust.js', () => {
         expect(result.asked).not.toContain(jobsOf(9));
     });
 
-    it('counts neither the nightly, which drops the FalkorDB pin, nor a run of another workflow', async () => {
+    it('counts neither the nightly, which runs another FalkorDB image, nor a run of another workflow', async () => {
         const result = await decide({
             [runsOn(SHA)]: {
                 workflow_runs: [run(7, { event: 'schedule' }), run(8, { path: '.github/workflows/release.yml' })]

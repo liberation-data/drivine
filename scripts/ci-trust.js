@@ -17,8 +17,8 @@
  * Trees are compared, not commits: a squash merge of a pull request that is up to date with master has the same tree
  * as the pull request's merge ref, which its pull_request run tested. A run counts when:
  *
- * - it is a ci.yml run in this repository, from a push or a pull request. The nightly (schedule) runs without the
- *   FalkorDB pin, and a workflow_call run is some other workflow's, so neither counts;
+ * - it is a ci.yml run in this repository, from a push or a pull request. The nightly (schedule) runs ghcr.io's
+ *   FalkorDB image in place of Docker Hub's, and a workflow_call run is some other workflow's, so neither counts;
  * - its own commit, head_commit, which GitHub reports and nothing in the run can change, has this tree. A push run
  *   tested that commit, so that is all it needs;
  * - a pull_request run tested its merge ref instead, which is the same tree only when the pull request was up to date
