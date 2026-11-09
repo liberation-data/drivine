@@ -1,5 +1,5 @@
 /**
- * Measures the shared Cypher compiler, built as Wasm (`@drivine/cypher-compiler`), against Drivine's own compiler in
+ * Measures the shared Cypher compiler, built as Wasm (`@liberation-data/drivine-cypher-compiler`), against Drivine's own compiler in
  * src/cypher/sql, on Postgres, Oracle and SQLite: the cold load and first compile, each in a fresh Node process, and the
  * warm compile over the statements of the Cypher spec in test/cypher. Only compiling: no store is started. See #685.
  *
@@ -10,7 +10,7 @@
  * `@js-joda/core` it needs, into a temporary directory (which takes the npm registry), removed when it ends. A run cut
  * short by a signal leaves it behind, as `drivine-wasm-compiler-*` in the system's temporary directory. Given a
  * directory, the script requires it as it is, so `@js-joda/core` must resolve from there: `npm install <tgz>` into a
- * directory of its own, and give `<that directory>/node_modules/@drivine/cypher-compiler`. With neither, the script
+ * directory of its own, and give `<that directory>/node_modules/@liberation-data/drivine-cypher-compiler`. With neither, the script
  * says so and is skipped.
  *
  * - Cold load: `require` of the compiler and its first compile, of `RETURN 1`, which for the Wasm compiler is when it
@@ -178,7 +178,9 @@ function packageDirectory(given) {
         cwd: into,
         stdio: 'inherit'
     });
-    return path.join(into, 'node_modules', '@drivine', 'cypher-compiler');
+    // The one dependency npm wrote: the package, under whatever name it has.
+    const [name] = Object.keys(JSON.parse(fs.readFileSync(path.join(into, 'package.json'), 'utf8')).dependencies);
+    return path.join(into, 'node_modules', name);
 }
 
 function quantile(sorted, q) {
@@ -209,11 +211,11 @@ function main() {
     const warmupRounds = count('DRIVINE_BENCH_WARMUP_ROUNDS', 3);
     const rounds = count('DRIVINE_BENCH_ROUNDS', 10);
     const packageDir = packageDirectory(given);
-    const version = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8')).version;
+    const { name, version } = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
     const cpus = os.cpus();
     console.log(
         `Node ${process.version}, ${os.platform()} ${os.release()} ${os.arch()}, ${cpus[0]?.model} x${cpus.length},` +
-            ` ${Math.round(os.totalmem() / 2 ** 30)} GiB; @drivine/cypher-compiler ${version}; spec ${fs
+            ` ${Math.round(os.totalmem() / 2 ** 30)} GiB; ${name} ${version}; spec ${fs
                 .readFileSync(path.join(SPEC, 'VERSION'), 'utf8')
                 .trim()}`
     );
