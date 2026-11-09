@@ -27,8 +27,14 @@ rows it holds so far. Waiting fixes that for the indexes Drivine's `ensure` make
 way can still give partial rows on FalkorDB until it is `OPERATIONAL`. The wait is at most `indexBuildTimeout` (60
 seconds unless set; see the options below). An index whose build failed is an error with the engine's reason (drop it,
 and ensure it again once the data is put right), and so is one still being built when the time is up, which is left
-building. The schema manager's `FAIL_FAST` mode, the default, throws either; `WARN` logs it, naming the index, and
-carries on. `gom.indexes` throws either, unless given `withBuild({ timeout, mode })`. Neo4j's `CREATE CONSTRAINT`
+building. Applied by the schema manager (`enforce`, `recreateAll`, `ensure`), it is a problem of its owner: under
+`FAIL_FAST`, the default, it fails the owner once the owner's other items are applied, listing each such
+index as `BUILD FAILED` or `STILL BUILDING`, and the owner's marker is not recorded, so the next `enforce` applies its
+items and waits again. Under `WARN` it is logged so, naming the index and giving the engine's reason, and the rest goes
+on; the item is reported as what was done (`CREATED`, `ALREADY_MATCHING` or `RECREATED`), the index is left as it is,
+to finish building or to stay failed, and it is waited for again on the next apply. An error reading the index's state
+(a connection lost) is thrown as it is. Where a constraint's index covers the properties already, Neo4j makes no other
+and there is nothing to wait for. `gom.indexes` throws either, unless given `withBuild({ timeout, mode })`. Neo4j's `CREATE CONSTRAINT`
 returns once its index is built, so a constraint is not waited on; FalkorDB's is (see below), and so is the range index
 it needs first.
 

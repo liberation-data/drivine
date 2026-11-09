@@ -185,7 +185,8 @@ export const NEO4J_SCHEMA: SchemaGrammar = {
         statement:
             'SHOW INDEXES YIELD name, state, failureMessage WHERE name = $name ' +
             'RETURN {state: state, failureMessage: failureMessage}',
-        // None of the name is no index to wait for: the index is listed once its CREATE INDEX returns.
+        // None of the name is no index to wait for: the index is listed once its CREATE INDEX returns, and where a
+        // constraint's index covers the properties already, CREATE INDEX IF NOT EXISTS makes none.
         read: (rows) => {
             if (!rows.length) {
                 return undefined;

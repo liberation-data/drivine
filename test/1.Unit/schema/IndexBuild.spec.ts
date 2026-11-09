@@ -1,13 +1,19 @@
 import {
+    ConnectionProvider,
     ConstraintManager,
+    DatabaseRegistry,
+    DatabaseType,
     DrivineError,
+    GraphObjectManagerFactory,
     FALKORDB_SCHEMA,
     IndexManager,
     MEMGRAPH_SCHEMA,
     NEO4J_SCHEMA,
     rangeIndex,
+    SchemaCatalog,
     SchemaExecutor,
     SchemaGrammar,
+    SchemaManager,
     uniquenessConstraint
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
@@ -179,5 +185,98 @@ describe('An index made on an engine that builds it in the background', () => {
         const { executor, ran }: Store = store(['POPULATING']);
         await new IndexManager(executor, MEMGRAPH_SCHEMA).ensure(spec);
         expect(ran.some((it) => it.statement.includes('SHOW INDEXES YIELD name, state'))).toBe(false);
+    });
+});
+
+describe('SchemaManager applying an owner one of whose indexes is not built', () => {
+    let warn: jest.SpyInstance;
+
+    /**
+     * A Neo4j database `a` where every index made reports its build as `state`, and whose marker writes are collected
+     * in `recorded`.
+     */
+    interface Managed {
+        schema: SchemaManager;
+        ran: Store['ran'];
+        recorded: unknown[];
+    }
+
+    function manager(state: string, mode?: 'WARN'): Managed {
+        const { executor, ran }: Store = store([state], { failure: 'Property value is too large to index.' });
+        const recorded: unknown[] = [];
+        const gom = {
+            indexes: new IndexManager(executor, NEO4J_SCHEMA),
+            constraints: new ConstraintManager(executor, NEO4J_SCHEMA),
+            persistenceManager: {
+                maybeGetOne: async () => Promise.resolve(null),
+                execute: async (it: unknown) => Promise.resolve(void recorded.push(it))
+            },
+            backend: {
+                schemaMarker: () => ({ spec: () => ({}) }),
+                markerItems: () => undefined,
+                recordSchemaMarker: () => ({ spec: (it: unknown) => it })
+            }
+        };
+        const factory = { get: () => gom } as unknown as GraphObjectManagerFactory;
+        return { schema: new SchemaManager(factory, { catalogs: [], mode, indexBuildTimeout: 5 }), ran, recorded };
+    }
+
+    const made = (ran: Store['ran']): string[] =>
+        ran.filter((it) => it.statement.startsWith('CREATE')).map((it) => it.statement);
+
+    beforeEach(() => {
+        DatabaseRegistry.tearDown();
+        DatabaseRegistry.getInstance().register({ name: 'a', type: DatabaseType.NEO4J } as ConnectionProvider);
+        warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => warn.mockRestore());
+    afterAll(() => DatabaseRegistry.tearDown());
+
+    it("should apply the owner's other items first under FAIL_FAST, then raise every one, leaving the marker", async () => {
+        const { schema, ran, recorded }: Managed = manager('FAILED');
+        const owner = SchemaCatalog.of(rangeIndex('Person', 'email'), rangeIndex('Person', 'name')).named('dice');
+
+        await expect(schema.ensure(owner)).rejects.toThrow(
+            new RegExp(
+                "owner 'dice' on a found indexes not built:\\n" +
+                    '  - BUILD FAILED: Neo4j failed to build the RANGE index Person_email_range .*\\n' +
+                    '  - BUILD FAILED: Neo4j failed to build the RANGE index Person_name_range .*\\n' +
+                    'Resolve them, set indexBuildTimeout longer'
+            )
+        );
+        expect(made(ran)).toHaveLength(2);
+        expect(recorded).toEqual([]);
+    });
+
+    it('should name an index still building as such, with the timeout to set', async () => {
+        const { schema }: Managed = manager('POPULATING');
+        await expect(schema.ensure('dice', rangeIndex('Person', 'email'))).rejects.toThrow(
+            /STILL BUILDING: Neo4j had not built .* after 5 ms: it is POPULATING\. It is left to be built/
+        );
+    });
+
+    it('should report each item as what was done under WARN, log it, and record the marker', async () => {
+        const { schema, recorded }: Managed = manager('FAILED', 'WARN');
+        const report = await schema.ensure('dice', rangeIndex('Person', 'email'));
+
+        expect(report.get('a')!.map((it) => it.status)).toEqual(['CREATED']);
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/BUILD FAILED: .*Person_email_range.*too large/));
+        expect(recorded).toHaveLength(1);
+    });
+});
+
+describe('An error reading the state of an index being built', () => {
+    it('should be thrown as it is, under WARN too, not taken for a failed build', async () => {
+        const lost = new Error('Connection lost');
+        const executor = {
+            run: async (statement: string) =>
+                statement === NEO4J_SCHEMA.indexBuild!.statement ? Promise.reject(lost) : Promise.resolve([])
+        } as unknown as SchemaExecutor;
+        const unbuilt = jest.fn();
+        const indexes = new IndexManager(executor, NEO4J_SCHEMA);
+        await expect(indexes.withBuild({ mode: 'WARN' }).ensure(rangeIndex('Person', 'email'))).rejects.toBe(lost);
+        await expect(indexes.withBuild({ unbuilt }).ensure(rangeIndex('Person', 'email'))).rejects.toBe(lost);
+        expect(unbuilt).not.toHaveBeenCalled();
     });
 });

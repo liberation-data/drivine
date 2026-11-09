@@ -8,6 +8,7 @@ import { StatelessGraphObjectManager } from '@/manager/StatelessGraphObjectManag
 import { DEFAULT_SCOPE, SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import { inventoryEntries, readInventory, RecordedInventory } from '@/schema/SchemaInventory';
 import { VectorAnnotationCheck } from '@/schema/VectorAnnotationCheck';
+import { UnbuiltIndex } from '@/schema/IndexManager';
 import { EnsureResult, IndexSpec, itemName, madeAs, uniquenessConstraint } from '@/schema/SchemaSpecs';
 
 export interface SchemaOptions {
@@ -524,12 +525,14 @@ export class SchemaManager {
         }
         const ordered = [...given.filter((it) => it.kind !== 'UNIQUE'), ...given.filter((it) => it.kind === 'UNIQUE')];
         const results: EnsureResult<SchemaSpec>[] = [];
+        const unbuilt: UnbuiltIndex[] = [];
         for (const spec of ordered) {
             // A runtime item marked stale missed its owner's recreate, and is recreated now.
             const key = inventoryKey(spec);
             const recreate = forced || ((recreateOwner || stale.has(key)) && !plan.coOwned.has(key));
-            results.push(await this.ensureItem(gom, spec, recreate));
+            results.push(await this.ensureItem(gom, spec, recreate, (it) => unbuilt.push(it)));
         }
+        this.reportUnbuilt(database, owner, unbuilt);
         const runtimeOnly = plan.runtimeOnly.get(owner) ?? new Set<string>();
         const marked = staleAfter(stale, carried, runtimeOnly, new Set(given.map(inventoryKey)), {
             forced,
@@ -612,12 +615,40 @@ export class SchemaManager {
         }
     }
 
+    /**
+     * Raises, under FAIL_FAST, the owner's indexes that are not built, once its other items are applied, so that its
+     * marker is not recorded and the next enforce applies them all and waits again; under WARN, logs them. Each
+     * one's item is reported as what was done.
+     */
+    private reportUnbuilt(database: string, owner: string, unbuilt: UnbuiltIndex[]): void {
+        const problems = unbuilt.map((it) =>
+            it.stillBuilding
+                ? `  - STILL BUILDING: ${it.message} It is left to be built, and waited for again on the next enforce.`
+                : `  - BUILD FAILED: ${it.message}`
+        );
+        if (!problems.length) {
+            return;
+        }
+        if (this.options.mode === 'WARN') {
+            problems.forEach((it) => this.logger.warn(it));
+            return;
+        }
+        throw new DrivineError(
+            `Schema application for owner '${owner}' on ${database} found indexes not built:\n` +
+                problems.map((it) => `${it}\n`).join('') +
+                'Resolve them, set indexBuildTimeout longer for an index still being built, or set mode WARN to ' +
+                'continue with warnings.'
+        );
+    }
+
+    /** Ensures or recreates the item, handing `unbuilt` an index of it that is not built. */
     private async ensureItem(
         gom: StatelessGraphObjectManager,
         spec: SchemaSpec,
-        recreate: boolean
+        recreate: boolean,
+        unbuilt: (index: UnbuiltIndex) => void
     ): Promise<EnsureResult<SchemaSpec>> {
-        const build = { timeout: this.options.indexBuildTimeout, mode: this.options.mode };
+        const build = { timeout: this.options.indexBuildTimeout, unbuilt };
         if (spec.kind === 'UNIQUE') {
             const constraints = gom.constraints.withBuild(build);
             const ensure = recreate ? constraints.recreate.bind(constraints) : constraints.ensure.bind(constraints);

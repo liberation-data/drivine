@@ -10,6 +10,7 @@ import {
     rangeIndex,
     SchemaManager,
     TransactionContextHolder,
+    uniquenessConstraint,
     vectorIndex
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
@@ -26,6 +27,7 @@ jest.setTimeout(180_000);
 
 const SEEDED = 'IbSeeded';
 const FAILED = 'IbFailed';
+const COVERED = 'IbCovered';
 const NODES = 20_000;
 
 /** A factory of object managers over the registered databases. */
@@ -69,6 +71,7 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
         const gom = () => factory.get(engine.name);
         const index = rangeIndex(SEEDED, 'text');
         const failing = rangeIndex(FAILED, 's');
+        const unique = uniquenessConstraint(COVERED, 'p');
         const all: IndexSpec[] = [
             index,
             rangeIndex(SEEDED, 'k'),
@@ -84,10 +87,11 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             );
 
         const tidy = async (): Promise<void> => {
-            for (const spec of [...all, failing]) {
+            for (const spec of [...all, failing, rangeIndex(COVERED, 'p')]) {
                 await gom().indexes.drop(spec);
             }
-            await clearLabels(gom().persistenceManager, engine, SEEDED, FAILED, '_DrivineSchema');
+            await gom().constraints.drop(unique);
+            await clearLabels(gom().persistenceManager, engine, SEEDED, FAILED, COVERED, '_DrivineSchema');
         };
 
         let warn: jest.SpyInstance;
@@ -157,6 +161,16 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             await expect(strict.ensure('build', index)).rejects.toThrow(
                 new RegExp(`had not built the RANGE index ${SEEDED}_text_range .*after 5 ms`)
             );
+        });
+
+        it("should wait for nothing where a uniqueness constraint's index covers the properties already", async () => {
+            // CREATE INDEX IF NOT EXISTS then makes nothing, so no index of the name is listed to wait for.
+            expect((await gom().constraints.ensure(unique, 0)).status).toEqual('CREATED');
+
+            const report = await new SchemaManager(factory, { catalogs: [] }).ensure('build', rangeIndex(COVERED, 'p'));
+
+            expect([...report.values()].flat().map((it) => it.status)).toEqual(['CREATED']);
+            expect(await state(`${COVERED}_p_range`)).toEqual([]);
         });
 
         it("should raise a build that failed, naming the index and giving Neo4j's reason, and log it under WARN", async () => {

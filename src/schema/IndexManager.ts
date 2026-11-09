@@ -50,6 +50,19 @@ export interface IndexBuildOptions {
      * engine's reason, and carries on, as SchemaManager's mode says.
      */
     mode?: 'FAIL_FAST' | 'WARN';
+    /**
+     * Given, an index whose build failed or did not end in time is handed to it, neither thrown nor logged, and `ensure`
+     * goes on: SchemaManager collects them, to raise them for their owner once its other items are applied.
+     */
+    unbuilt?: (index: UnbuiltIndex) => void;
+}
+
+/** An index made or found that is not built: its build failed, or it is `stillBuilding` when the wait ran out. */
+export interface UnbuiltIndex {
+    spec: IndexSpec;
+    stillBuilding: boolean;
+    /** Names the index and gives the engine's reason. */
+    message: string;
 }
 
 export class IndexManager {
@@ -241,6 +254,8 @@ export class IndexManager {
             if (found.state === 'FAILED') {
                 const reason = (found.failureMessage || found.status).trim().replace(/\.$/, '');
                 this.buildFailed(
+                    spec,
+                    false,
                     `${this.grammar.engine} failed to build ${index}: ${reason}. Drop it, and ensure it again once ` +
                         'what failed it is put right.'
                 );
@@ -249,6 +264,8 @@ export class IndexManager {
             const left = deadline - Date.now();
             if (left <= 0) {
                 this.buildFailed(
+                    spec,
+                    true,
                     `${this.grammar.engine} had not built ${index} after ${timeout} ms: it is ${found.status}.`
                 );
                 return;
@@ -257,8 +274,15 @@ export class IndexManager {
         }
     }
 
-    /** Throws the failure of a build, or, under WARN, logs it and carries on. */
-    private buildFailed(message: string): void {
+    /**
+     * Throws the failure of a build, or hands it to the build's `unbuilt`, or, under WARN, logs it, and carries on. An
+     * error reading the state is not this: it is thrown as it is, not taken for a failed build.
+     */
+    private buildFailed(spec: IndexSpec, stillBuilding: boolean, message: string): void {
+        if (this.build.unbuilt) {
+            this.build.unbuilt({ spec, stillBuilding, message });
+            return;
+        }
         if (this.build.mode === 'WARN') {
             this.logger.warn(message);
             return;
