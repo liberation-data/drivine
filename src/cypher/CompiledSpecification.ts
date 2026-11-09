@@ -71,11 +71,8 @@ function drainedValue(value: any): unknown {
     if (typeof value[Symbol.iterator] !== 'function') {
         return value;
     }
-    const iterable = value as Iterable<unknown>;
-    if ((iterable[Symbol.iterator]() as unknown) === iterable) {
-        return Array.from(iterable, drainedValue);
-    }
-    const items = Array.from(iterable);
+    // Asked for its iterator once, as a compile reads it: an iterable may hand out only one.
+    const items = Array.from(value as Iterable<unknown>);
     const drainedItems = items.map(drainedValue);
     return !givesItemsAgain(value) || drainedItems.some((it, i) => it !== items[i]) ? drainedItems : value;
 }

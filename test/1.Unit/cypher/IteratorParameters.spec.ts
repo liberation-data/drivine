@@ -93,6 +93,7 @@ describe('drained', () => {
             p: { ids, at: new Date(0), n: int(1), f: new CypherFloat(2), rows: [[1, undefined]] },
             bytes: Buffer.from([1]),
             driverBytes: new Int8Array([1]),
+            floats: new Float64Array([1.5]),
             byId: new Map([['a', [1]]])
         };
         expect(drained(parameters)).toBe(parameters);
@@ -121,6 +122,19 @@ describe('drained', () => {
                 ['a', 'b']
             ]
         });
+    });
+
+    it('asks an iterable for its iterator once, so one that refuses a second is drained as a compile reads it', () => {
+        let asked = 0;
+        const once = {
+            [Symbol.iterator]: (): Iterator<string> => {
+                if (asked++ > 0) {
+                    throw new Error('asked again');
+                }
+                return letters();
+            }
+        };
+        expect(drained({ ids: once })).toEqual({ ids: ['a', 'b'] });
     });
 
     it('turns an iterator given as a parameter itself into its items', () => {
