@@ -31,8 +31,9 @@ a compiler that is gone, so they aren't enforced. Oracle's warm compile is over 
 [drivine-cypher-spec#122](https://github.com/liberation-data/drivine-cypher-spec/issues/122).
 
 To time a candidate build of the compiler before it is published, name its `.tgz` (in the spec's `compiler`,
-`./gradlew npmPackage`, then `npm pack` of `build/npm`), or a directory it is installed in, as `DRIVINE_WASM_COMPILER`.
-Drivine's own require of the package is pointed at it:
+`./gradlew npmPackage`, then `npm pack` of `build/npm`), or the package's directory where it is installed (such as
+`node_modules/@liberation-data/drivine-cypher-compiler`, from which `@js-joda/core` resolves), as
+`DRIVINE_WASM_COMPILER`. Drivine's own require of the package is pointed at it:
 
 ```bash
 DRIVINE_WASM_COMPILER=path/to/liberation-data-drivine-cypher-compiler-<version>.tgz npm run bench:compiler
