@@ -5,7 +5,7 @@ Drivine for TypeScript 4.0 compiles Cypher to SQL, for Postgres, Oracle and SQLi
 That is the compiler drivine4j runs: the Kotlin Multiplatform module in
 [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec/tree/main/compiler), built for Wasm. 3.x
 had a compiler of its own. Each fix in drivine4j's was ported to it by hand, and it had drifted: the Cypher spec held
-381 of its steps on 3.x, 109 on Postgres, 150 on Oracle and 122 on SQLite, which it gave otherwise than Neo4j. Now the
+565 of its steps on 3.x, 149 on Postgres, 226 on Oracle and 190 on SQLite, which it gave otherwise than Neo4j. Now the
 compiled SQL is drivine4j's, byte for byte, and a statement gives the same rows in either library. A compiler fix lands
 once, in the module, and reaches this library with the next version of the package.
 
@@ -42,6 +42,22 @@ on Neo4j, where 3.x made a new one on each run (#569; the spec's "MERGE of a nul
 ```cypher
 MERGE (n:Person {name: $name})   // with name null: fails, where 3.x made a node each time
 ```
+
+A parameter bound to `undefined` is not bound, as the Neo4j driver leaves it out, so a statement that names it is
+refused with "The statement has a parameter $name, and no value is bound to it.", as Neo4j refuses it. 3.x bound it as
+null. Bind `null` where a value may be missing:
+
+```ts
+new QuerySpecification('MATCH (n:Person) WHERE n.name = $name RETURN n').bind({ name: user.name ?? null });
+```
+
+A statement that would write NaN or an infinity, where the store's JSON holds no such number, is refused rather than
+store another value in its place, where 3.x bound the parameter as null and stored null (#344). Postgres's `jsonb` holds
+neither: a write given NaN or an infinity fails with "A statement that writes is given NaN or an infinity, which
+Postgres's `jsonb` holds as no number: it would store another value in its place." SQLite's JSON holds an infinity but
+no NaN: a write given NaN fails so, and one that works NaN out fails as it runs. Oracle stores both (the spec's "NaN and
+the infinities written", "NaN and the infinities given to SET and MERGE" and "NaN and the infinities worked out and
+written").
 
 ### A whole float parameter is bound as a whole number: `cypherFloat()`
 
@@ -83,13 +99,15 @@ gave null on SQLite (#536), and `toFloat('NaN')` gave null (#573). They now give
 RETURN 0.0 / 0.0, 1.0 / 0.0, $nan = $nan, toFloat('Infinity')   // NaN, Infinity, false, Infinity
 ```
 
-- **Parameters:** a NaN or infinite parameter is bound, compared, added and written as itself (#344).
+- **Parameters:** a NaN or infinite parameter is bound, compared and added as itself (#344), and written as itself
+  where the store holds it: see the breaking change above.
 - **Arithmetic:** a number divided or taken `%` by a float zero gives NaN or an infinity, as in Java, on Postgres and
   SQLite (#536); NaN is equal to nothing, itself included, on Oracle (#512); `sum()` and `avg()` of both infinities
   give NaN on SQLite (#579). Postgres still works float arithmetic out in exact decimal, so `0.1 + 0.2` is `0.3` there
   ([Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)).
 - **Text:** `toFloat()` reads `NaN`, `Infinity` and `-Infinity` as Java does (#573).
-- **Storage:** a NaN or an infinity a statement writes is kept, and read back as itself.
+- **Storage:** a NaN or an infinity a statement writes is kept, and read back as itself, on Oracle, and an infinity on
+  SQLite.
 
 The spec's cases: "NaN and the infinities as parameters", "NaN worked out", "NaN and the infinities written", "NaN
 worked out from stored infinities" and "NaN and the infinities given to SET and MERGE".

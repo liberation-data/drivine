@@ -967,7 +967,8 @@ describe('a SQLite store', () => {
 
         /**
          * NaN and the infinities a statement works out, as drivine4j's tests of liberation-data/drivine4j#295 have them,
-         * given none: a NaN or infinite parameter is bound as null as yet (#344). SQLite writes an infinity as `9e999`, and
+         * given none, as they were written before a NaN or infinite parameter was bound as itself (#344). SQLite writes an
+         * infinity as `9e999`, and
          * NaN, which its JSON holds no number for, as `{"$numberDouble": "NaN"}`, which the rows give back as NaN.
          */
         describe('NaN and the infinities', () => {

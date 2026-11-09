@@ -137,6 +137,32 @@ describe('SharedCypherCompiler', () => {
         );
     });
 
+    it.each(STORES)(
+        'refuses a statement naming a parameter bound to undefined on %s, as Neo4j, and takes one bound to null',
+        (store) => {
+            // The Neo4j driver leaves an undefined parameter out, where Drivine 3.x bound it as null (docs/20-upgrading-to-4.md).
+            const compiler = new SharedCypherCompiler(store, { name: 'g' });
+            const cypher = 'MATCH (n:P) WHERE n.name = $name RETURN n';
+            expect(() => compiler.compile(cypher, { name: undefined })).toThrow(
+                'The statement has a parameter $name, and no value is bound to it.'
+            );
+            expect(() => compiler.compile(cypher, { name: null })).not.toThrow();
+        }
+    );
+
+    it('refuses a write given NaN or an infinity on Postgres, and NaN on SQLite, and takes either on Oracle', () => {
+        const write = (store: SharedStore, p: number) => () =>
+            new SharedCypherCompiler(store, { name: 'g' }).compile('CREATE (n:A {a: $p})', { p });
+        expect(write('postgres', Infinity)).toThrow(
+            "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number"
+        );
+        expect(write('sqlite', NaN)).toThrow(
+            "A statement that writes is given NaN, which SQLite's JSON holds as no number"
+        );
+        expect(write('sqlite', Infinity)).not.toThrow();
+        expect(write('oracle', NaN)).not.toThrow();
+    });
+
     it("says a write's rows come back in one row on every store, Oracle's as text (oracleRowsAsText)", () => {
         const rows = (store: SharedStore): string =>
             new SharedCypherCompiler(store, { name: 'g' }).compile('CREATE (n:A) RETURN n.x').rows;
