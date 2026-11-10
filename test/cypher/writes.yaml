@@ -27,6 +27,14 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN properties(n)"
         rows: [{name: "Ada", age: 36}]
 
+  - name: "coalesce() of one argument in a write"
+    description: "coalesce() of one argument sets and returns that argument, null where it is null."
+    steps:
+      - cypher: "CREATE (n:CyWrite {a: 1, t: 'x'}) SET n.b = coalesce(n.a), n.c = coalesce(n.missing), n.u = toUpper(coalesce(n.t)) RETURN [coalesce(n.b), n.c IS NULL, n.u]"
+        rows: [[1, true, "X"]]
+      - cypher: "MATCH (n:CyWrite) RETURN properties(n)"
+        rows: [{a: 1, t: "x", b: 1, u: "X"}]
+
   - name: "A null in a written row and a missing key are one null"
     description: "A write's rows, read after it, group a map's null and a missing key as one null, and keep it once by DISTINCT."
     steps:
@@ -787,6 +795,85 @@ cases:
         except: [oracle]
         cypher: "MATCH (n:Long) RETURN size(n.u)"
         rows: [4000]
+
+  - name: "A write that compiles to a long statement"
+    description: "A statement that writes runs whatever the length of what it compiles to: 561 MERGEs, which compile to over a megabyte of SQL on SQLite, past the 1,000,000 bytes of a statement a connection of xerial's sqlite-jdbc takes (drivine4j#427, as the openCypher TCK's Create4 [2], 731 nodes made by one statement, does)."
+    steps:
+      - cypher: |
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite) MERGE (:CyWrite)
+          MERGE (n:CyWrite) RETURN count(n)
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [1]
 
   - name: "A float with no fraction"
     description: "A float that is a whole number, such as 2.0, is written and read back as a float, from a parameter nested or past 32 KB too, and toString() of it keeps its fraction."
