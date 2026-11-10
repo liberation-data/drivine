@@ -195,12 +195,14 @@ export class DrivineTestContainers {
             byType.set(type, [...(byType.get(type) ?? []), prefix]);
         }
         const started = new Map<DatabaseType, StartedTestContainer>();
+        const ran = new Map<DatabaseType, string>();
         try {
             await Promise.all(
                 [...byType].map(async ([type, prefixes]) => {
-                    const container = await DrivineTestContainers.startFor(type, prefixes, env);
-                    if (container) {
-                        started.set(type, container);
+                    const result = await DrivineTestContainers.startFor(type, prefixes, env);
+                    if (result) {
+                        started.set(type, result.container);
+                        ran.set(type, result.ran);
                     }
                 })
             );
@@ -208,14 +210,14 @@ export class DrivineTestContainers {
             await Promise.all([...started.values()].map(async (it) => it.stop()));
             throw e;
         }
-        return new DrivineTestContainers(started);
+        return new DrivineTestContainers(started, ran);
     }
 
     private static async startFor(
         type: DatabaseType,
         prefixes: string[],
         env: Environment
-    ): Promise<StartedTestContainer | undefined> {
+    ): Promise<{ container: StartedTestContainer; ran: string } | undefined> {
         const spec = TEST_CONTAINER_SPECS[type];
         const names = prefixes.map((it) => (it === '' ? 'default' : it.slice(0, -1))).join(', ');
         if (!spec) {
@@ -234,11 +236,12 @@ export class DrivineTestContainers {
         DrivineTestContainers.logger.log(`${type} (${names}): starting ${image}${moving ? ', pulled afresh' : ''}`);
         const container = spec.container(image, first);
         const started = await (moving ? container.withPullPolicy(PullPolicy.alwaysPull()) : container).start();
-        DrivineTestContainers.logger.log(`${type} (${names}): ${image} is ${await DrivineTestContainers.ran(image)}`);
+        const ran = `${image} is ${await DrivineTestContainers.ran(image)}`;
+        DrivineTestContainers.logger.log(`${type} (${names}): ${ran}`);
         for (const prefix of prefixes) {
             DrivineTestContainers.rewrite(prefix, spec.connection(started, first), env);
         }
-        return started;
+        return { container: started, ran };
     }
 
     /**
@@ -277,7 +280,15 @@ export class DrivineTestContainers {
         }
     }
 
-    private constructor(readonly started: Map<DatabaseType, StartedTestContainer>) {}
+    /**
+     * @param started each type's container.
+     * @param ran what each type's container ran: its image and that image's digest, or its local id. The log says it too,
+     * but only at INFO, which `DRIVINE_LOG_LEVEL` hides by default, so a test runner prints this for the run's log.
+     */
+    private constructor(
+        readonly started: Map<DatabaseType, StartedTestContainer>,
+        readonly ran: Map<DatabaseType, string>
+    ) {}
 
     /** Stops every container this started. */
     async stop(): Promise<void> {

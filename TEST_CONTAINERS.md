@@ -68,8 +68,9 @@ release that changes what Drivine reads or writes shows up at once. To hold an e
 An image of a moving tag, `latest`, no tag, or a tag with no digit in it (`edge`), is pulled each time its container
 starts, so a copy pulled long ago can't stand in for today's `latest`; an image of a version, a digest or a local image
 id is pulled only where it is missing. An image of a moving tag that is only on your machine, built and not pushed,
-can't be pulled: give it a version tag. Each container's log line says the digest of the image it ran, or its local id
-where it has none.
+can't be pulled: give it a version tag. `npm test` prints the digest of the image each container ran, or its local id
+where it has none, whatever `DRIVINE_LOG_LEVEL` is (`neo4j:latest is neo4j@sha256:…`). `DrivineTestContainers.start()`
+keeps the same in its result's `ran`, for a runner of your own to print, and logs it at `INFO`.
 
 CI runs FalkorDB's `latest` too. Its nightly run takes `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's,
 with `FALKORDB_TEST_IMAGE` in [`ci.yml`](.github/workflows/ci.yml): Docker Hub's `latest` is whichever release FalkorDB

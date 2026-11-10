@@ -119,6 +119,10 @@ async function main(): Promise<number> {
     const run = stages(process.env.DRIVINE_TEST_PART);
     loadTestEnvironment();
     const containers = await DrivineTestContainers.start();
+    // What each container ran, digest and all, whatever DRIVINE_LOG_LEVEL is, so a failing run's log says it (#702).
+    for (const [type, ran] of containers.ran) {
+        process.stdout.write(`${type}: ${ran}\n`);
+    }
     try {
         await seedTestData();
         process.env[CONTAINERS_STARTED] = 'true';

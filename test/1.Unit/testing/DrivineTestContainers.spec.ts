@@ -200,6 +200,14 @@ describe('DrivineTestContainers', () => {
                 }
             });
 
+            it('keeps what each container ran, for a runner to print whatever DRIVINE_LOG_LEVEL hides', async () => {
+                const containers = await DrivineTestContainers.start({ DATABASE_TYPE: 'FALKORDB' });
+                expect([...containers.ran]).toEqual([
+                    [DatabaseType.FALKORDB, 'falkordb/falkordb:latest is falkordb/falkordb@sha256:abc']
+                ]);
+                await containers.stop();
+            });
+
             it('starts the container all the same where the runtime cannot say what the image is', async () => {
                 inspect.mockRejectedValue(new Error('no such image'));
                 const env: Environment = { DATABASE_TYPE: 'FALKORDB' };
