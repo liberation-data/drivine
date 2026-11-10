@@ -279,4 +279,9 @@ and an item two catalogs declare is never recreated by one of them alone.
 | Range | named, composite | label-property | per label | an index over the JSON property | a partial index over the label's nodes |
 | Uniqueness | `REQUIRE … IS UNIQUE` | `ASSERT … IS UNIQUE` | `GRAPH.CONSTRAINT`, with its backing index, polled while it builds | a unique index for the label's nodes | a unique partial index over the label's nodes |
 
+**Index builds on Postgres.** A session that builds an index in parallel keeps a shared memory segment in `/dev/shm` for
+as long as it lives, which in a container's 64 MB can leave too little for a later HNSW build. So the session an index
+or a uniqueness constraint is built on is closed after it, out of its pool, whether the build passed or failed
+([#641](https://github.com/liberation-data/drivine/issues/641)).
+
 Neptune has no schema management.
