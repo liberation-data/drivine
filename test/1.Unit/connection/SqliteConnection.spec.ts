@@ -128,6 +128,9 @@ describe('compiled Cypher on a SQLite connection', () => {
         try {
             const version = String((await db.query(new QuerySpecification('SELECT sqlite_version() AS v')))[0].v);
             if (sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE)) {
+                await expect(db.query(new QuerySpecification(cypherStatement(cypher)))).rejects.toThrow(
+                    `this is SQLite ${version}`
+                );
                 return;
             }
             expect(await db.query(new QuerySpecification(cypherStatement(cypher)))).toEqual([1]);
