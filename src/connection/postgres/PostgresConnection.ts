@@ -17,6 +17,9 @@ const PgCursor = require('pg-cursor');
 export class PostgresConnection implements Connection {
     private logger = new DrivineLogger(PostgresConnection.name);
 
+    /** Whether {@link release} closes the session for good rather than giving it back to the pool: see {@link buildingIndex}. */
+    private evicting = false;
+
     /**
      * @param graph the graph a Cypher statement is compiled against: its tables are `<graph>_node` and `<graph>_edge`
      */
@@ -63,11 +66,25 @@ export class PostgresConnection implements Connection {
         await this.client.query(`ROLLBACK`);
     }
 
+    /**
+     * Marks the session as one an index build runs on, so {@link release} closes it for good rather than giving it back
+     * to the pool, whether the build passed or failed (liberation-data/drivine#641). A backend that has run anything in
+     * parallel, as a `CREATE INDEX` over a table past `min_parallel_table_scan_size` is, keeps a dynamic shared memory
+     * segment for as long as it lives, and the pool keeps it alive: enough of them left too little of a 64 MB `/dev/shm`
+     * for an HNSW build, which asks for nearly all of `maintenance_work_mem` as one segment. Closed, the session's segment
+     * goes with it, and the build keeps its parallel workers. The pool is always Drivine's own, and a schema statement's
+     * session is always its own, never a transaction's, so it can always be closed.
+     */
+    buildingIndex(): void {
+        this.evicting = true;
+    }
+
     async release(err?: Error): Promise<void> {
         if (err) {
             this.logger.warn(`Closing session with error: ${err}`);
         }
-        this.client.release(err);
+        // node-postgres closes a client released with an error, or with true, rather than pooling it.
+        this.client.release(err ?? (this.evicting || undefined));
         return Promise.resolve();
     }
 

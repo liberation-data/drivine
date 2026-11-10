@@ -9,7 +9,14 @@ import {
 import { FirstConnection } from '@/connection/FirstConnection';
 import { OracleGraph } from '@/backend/oracle';
 import { OracleSchemaGrammar } from '@/backend/oracle/OracleSchemaGrammar';
+import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
+import { PostgresSchemaGrammar } from '@/backend/postgres/PostgresSchemaGrammar';
+import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
+import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
+import { DrivineLogger } from '@/logger';
+import { rangeIndex, vectorIndex } from '@/schema/SchemaSpecs';
 import { error, Neo4jError } from 'neo4j-driver';
+import { PoolClient } from 'pg';
 
 describe('SchemaExecutor', () => {
     /** A provider whose first statement fails with the code given and whose later ones succeed. */
@@ -155,5 +162,84 @@ describe('SchemaExecutor', () => {
         ]);
         await expect(new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)')).rejects.toThrow(/ORA-01408/);
         expect(runs()).toEqual(1);
+    });
+
+    /**
+     * A Postgres statement that builds an index runs on a session closed for good after, rather than pooled, whether it
+     * passed or failed: the backend keeps the shared memory a parallel build had for as long as it lives (#641,
+     * liberation-data/drivine4j#626). A drop builds nothing, and the session of any other statement goes back.
+     */
+    describe('on Postgres', () => {
+        const grammar = new PostgresSchemaGrammar(new PostgresGraph('g'));
+        const range = rangeIndex('Chunk', 'a');
+
+        /** The arguments the session of each statement run was released with, by a Postgres provider over a fake pool. */
+        const releasedWith = async (statements: string[], failing?: Error): Promise<unknown[][]> => {
+            const release = jest.fn();
+            const client = {
+                query: async () => (failing ? Promise.reject(failing) : Promise.resolve({ rows: [] })),
+                release
+            } as unknown as PoolClient;
+            const provider = {
+                name: 'postgres',
+                type: DatabaseType.POSTGRES,
+                connect: async () => Promise.resolve(new PostgresConnection(client, new PostgresResultMapper(), 'g'))
+            } as unknown as ConnectionProvider;
+            for (const statement of statements) {
+                await new SchemaExecutor(provider).run(statement).catch(() => undefined);
+            }
+            return release.mock.calls;
+        };
+
+        const creates = (statements: string[]): string[] =>
+            statements.filter((it) => /^CREATE (UNIQUE )?INDEX/.test(it));
+
+        it('should close the session a CREATE INDEX or a CREATE UNIQUE INDEX ran on', async () => {
+            const builds = [
+                ...creates(grammar.createRange(range)),
+                ...creates(grammar.createUnique(uniquenessConstraint('Chunk', 'b'))),
+                ...creates(grammar.createVector(vectorIndex('Chunk', 'embedding', 4))),
+                'create unique index x on y (z)',
+                '  CREATE\n  INDEX x ON y (z)'
+            ];
+            expect(builds.length).toEqual(5);
+            expect(await releasedWith(builds)).toEqual(builds.map(() => [true]));
+        });
+
+        it('should close the session a CREATE INDEX failed on, released with its error', async () => {
+            const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+            const failure = new Error('could not resize shared memory segment: No space left on device');
+            expect(await releasedWith(creates(grammar.createRange(range)), failure)).toEqual([[failure]]);
+            warn.mockRestore();
+        });
+
+        it('should give back to the pool the session of a DROP INDEX, or of any other statement', async () => {
+            const others = [
+                ...grammar.dropRange(range),
+                'DROP INDEX IF EXISTS g_ix_chunk_a',
+                'CREATE EXTENSION IF NOT EXISTS vector',
+                grammar.createRange(range)[1],
+                'CREATE TABLE created_index (x int)',
+                'SELECT 1 AS "CREATE INDEX"'
+            ];
+            expect(await releasedWith(others)).toEqual(others.map(() => [undefined]));
+        });
+    });
+
+    it('should mark no session for an index build on another store', async () => {
+        const buildingIndex = jest.fn();
+        const provider = {
+            name: 'oracle',
+            type: DatabaseType.ORACLE,
+            connect: async () =>
+                Promise.resolve({
+                    query: async () => Promise.resolve([]),
+                    release: async () => Promise.resolve(),
+                    buildingIndex
+                })
+        } as unknown as ConnectionProvider;
+        await new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)');
+        await new SchemaExecutor(provider).run('CREATE UNIQUE INDEX x ON y (z)');
+        expect(buildingIndex).not.toHaveBeenCalled();
     });
 });
