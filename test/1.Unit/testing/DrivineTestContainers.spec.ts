@@ -111,6 +111,7 @@ describe('DrivineTestContainers', () => {
             const before = { ...env };
             const containers = await DrivineTestContainers.start(env);
             expect(containers.started.size).toBe(0);
+            expect(containers.ran.size).toBe(0);
             expect(env).toEqual(before);
             await containers.stop();
         });
@@ -213,6 +214,9 @@ describe('DrivineTestContainers', () => {
                 const env: Environment = { DATABASE_TYPE: 'FALKORDB' };
                 const containers = await DrivineTestContainers.start(env);
                 expect(containers.started.size).toBe(1);
+                expect(containers.ran.get(DatabaseType.FALKORDB)).toBe(
+                    "falkordb/falkordb:latest is of a digest the container runtime didn't give (no such image)"
+                );
                 expect(env.DATABASE_PORT).toBe('16379');
                 await containers.stop();
             });

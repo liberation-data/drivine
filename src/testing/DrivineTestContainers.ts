@@ -282,7 +282,8 @@ export class DrivineTestContainers {
 
     /**
      * @param started each type's container.
-     * @param ran what each type's container ran: its image and that image's digest, or its local id. The log says it too,
+     * @param ran what each type's container ran: its image and that image's digest, or its local id, or that the runtime
+     * couldn't say; nothing for a type that started no container. The log says it too,
      * but only at INFO, which `DRIVINE_LOG_LEVEL` hides by default, so a test runner prints this for the run's log.
      */
     private constructor(
