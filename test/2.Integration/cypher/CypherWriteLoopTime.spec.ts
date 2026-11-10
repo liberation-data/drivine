@@ -31,7 +31,12 @@ const vacuumed = async (store: SqlStore, pm: PersistenceManager, graph: string):
     }
 };
 
-/** A write timed, what it gives for `n` rows where it gives any, and the read that counts what it left. */
+/**
+ * A write timed, what it gives for `n` rows where it gives any, and the read that counts what it left. A self-loop is
+ * counted from its one node, `(n)-[r]->(n)`, which joins the node table once: `(:CyLoop)-[r]->(:CyLoop)` joins it twice,
+ * and on Postgres, with the node table's statistics stale on purpose, that was planned as a scan of every node for each
+ * node: 655 s over 20,000 rows, untimed (#680).
+ */
 interface Write {
     name: string;
     cypher: string;
@@ -62,7 +67,7 @@ const WRITES: Write[] = [
     {
         name: 'MERGE',
         cypher: 'MATCH (n:CyLoop) MERGE (n)-[:CY_SELF]->(n)',
-        check: 'MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) RETURN count(r)',
+        check: 'MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)',
         left: (n) => n
     },
     {
@@ -168,22 +173,22 @@ const KEYED_WRITES: [name: string, cypher: string, check: string][] = [
     [
         'MERGE ON CREATE SET',
         'MATCH (n:CyLoop) MERGE (n)-[r:CY_SELF]->(n) ON CREATE SET r.w = n.i',
-        'MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) WHERE r.w IS NOT NULL RETURN count(r)'
+        'MATCH (n:CyLoop)-[r:CY_SELF]->(n) WHERE r.w IS NOT NULL RETURN count(r)'
     ],
     [
         'CALL MERGE',
         'MATCH (n:CyLoop) CALL (n) { MERGE (n)-[:CY_SELF]->(n) } RETURN count(n)',
-        'MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) RETURN count(r)'
+        'MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)'
     ],
     [
         'CALL CREATE SET',
         'MATCH (n:CyLoop) CALL (n) { CREATE (n)-[r:CY_SELF]->(n) SET r.w = n.i } RETURN count(n)',
-        'MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) WHERE r.w IS NOT NULL RETURN count(r)'
+        'MATCH (n:CyLoop)-[r:CY_SELF]->(n) WHERE r.w IS NOT NULL RETURN count(r)'
     ],
     [
         'FOREACH CREATE SET',
         'MATCH (n:CyLoop) FOREACH (x IN [1] | CREATE (n)-[r:CY_SELF]->(n) SET r.w = x)',
-        'MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) WHERE r.w = 1 RETURN count(r)'
+        'MATCH (n:CyLoop)-[r:CY_SELF]->(n) WHERE r.w = 1 RETURN count(r)'
     ],
     [
         'CALL RETURN',

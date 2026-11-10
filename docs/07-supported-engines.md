@@ -189,6 +189,17 @@ Notes:
   statistics, and where they said the table was empty while it still had pages, as an `ANALYZE` just after a `DELETE`
   leaves them, each row was compared with every row of the table: a `FOREACH` over 20,000 nodes took 19 s where it now
   takes under 1 s. The probe is a scan of the key's index whatever the statistics say.
+- After a graph is emptied by `DELETE` and loaded again, analyze its tables before reading it:
+
+  ```sql
+  ANALYZE <graph>_node, <graph>_edge;
+  ```
+
+  An `ANALYZE` (or an autoanalyze) that ran while the node table was empty leaves statistics that say it holds no rows
+  over the pages its deleted rows left, and a read that joins it twice is then planned as a scan of every node for each
+  node: `MATCH (:A)-[r:R]->(:A) RETURN count(r)` took 470 s over 20,000 nodes, and 18 ms once the table was analyzed
+  ([#680](https://github.com/liberation-data/drivine/issues/680)). Autoanalyze puts it right on its own within about a
+  minute with Postgres's default settings; a read planned before then is slow until it ends.
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`,
   e.g. `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name` (or
   ``n.`a name` ``), and is read as that property, as text; a property compared with `true` or `false` is compared with
