@@ -9,6 +9,7 @@ import { ddlContended, ddlDeadlocked, whenNotContended } from '@/manager/Content
 import { waitsOutBusyLock } from '@/backend/oracle/OracleSchemaGrammar';
 import { transientOverBolt } from '@/backend/CypherGrammar';
 import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
+import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 
 /**
  * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or a SQL store turning DDL
@@ -27,6 +28,9 @@ function contended(failure: unknown, waitedOutBusy: boolean): boolean {
     }
     return false;
 }
+
+/** A Postgres statement that builds an index, as PostgresSchemaGrammar writes one: a uniqueness constraint's too. */
+const INDEX_BUILD = /^\s*CREATE\s+(UNIQUE\s+)?INDEX\b/i;
 
 /**
  * Runs schema statements on a connection of their own, in auto-commit: schema DDL can't run inside a data transaction.
@@ -56,6 +60,9 @@ export class SchemaExecutor {
             return this.native(statement);
         }
         const connection = await this.provider.connect();
+        if (connection instanceof PostgresConnection && INDEX_BUILD.test(statement)) {
+            connection.buildingIndex();
+        }
         try {
             const rows = await connection.query(new QuerySpecification(statement).bind(bindings));
             await connection.release();
