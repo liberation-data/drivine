@@ -161,7 +161,7 @@ describe('DrivineTestContainers', () => {
                 await containers.stop();
             });
 
-            it('runs the default image where FALKORDB_TEST_IMAGE is blank, as CI leaves it, pulled afresh', async () => {
+            it('runs the default image where FALKORDB_TEST_IMAGE is blank, pulled afresh', async () => {
                 const containers = await DrivineTestContainers.start({
                     DATABASE_TYPE: 'FALKORDB',
                     FALKORDB_TEST_IMAGE: ''

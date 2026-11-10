@@ -72,11 +72,14 @@ can't be pulled: give it a version tag. `npm test` prints the digest of the imag
 where it has none, whatever `DRIVINE_LOG_LEVEL` is (`neo4j:latest is neo4j@sha256:…`). `DrivineTestContainers.start()`
 keeps the same in its result's `ran`, for a runner of your own to print, and logs it at `INFO`.
 
-CI runs FalkorDB's `latest` too. Its nightly run takes `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's,
-with `FALKORDB_TEST_IMAGE` in [`ci.yml`](.github/workflows/ci.yml): Docker Hub's `latest` is whichever release FalkorDB
-pushed last, and that was once an older line's backport, `v4.22.3` after `6.0.3`, which has no `=~`
+CI holds FalkorDB at the last release that passes, with `FALKORDB_TEST_IMAGE` in
+[`ci.yml`](.github/workflows/ci.yml): a run from a push, a pull request or the release gate takes
+`falkordb/falkordb:6.0.3`, as 6.0.4 makes a relationship twice where one `FOREACH` body `MERGE`s it twice
+([#717](https://github.com/liberation-data/drivine/issues/717)). CI's nightly run leaves the pin out, so it shows when
+the pin can go, and runs `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's: Docker Hub's `latest` is whichever
+release FalkorDB pushed last, and that was once an older line's backport, `v4.22.3` after `6.0.3`, which has no `=~`
 ([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)), while ghcr.io's is FalkorDB's newest
-release. Should a FalkorDB release break a pull request's run, CI pins the last good one there until FalkorDB fixes it.
+release. A FalkorDB release that breaks a pull request's run is pinned the same way until FalkorDB fixes it.
 
 ## The Cypher spec
 

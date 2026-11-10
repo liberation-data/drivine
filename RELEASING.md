@@ -48,9 +48,8 @@ git push origin vX.Y.Z
   (`git rev-parse HEAD^{tree}` of the commit the run checked out), so that `gate` needn't run CI again. Trees are
   compared, not commits: a squash merge of a release PR that was up to date with the default branch has the tree its
   pull request run tested. `scripts/ci-trust.js` does it, reading the GitHub API with `actions: read`.
-  - A run counts when it is from a push or a pull request (the nightly, which runs ghcr.io's FalkorDB image in place of
-    Docker Hub's, doesn't), its head commit has this tree, and every job of its latest attempt concluded success. A
-    pull request run tests the
+  - A run counts when it is from a push or a pull request (the nightly, which runs without the pins, doesn't), its
+    head commit has this tree, and every job of its latest attempt concluded success. A pull request run tests the
     pull request's merge ref, not its head, so `ci.yml`'s first job records the tree it checked out as an artifact,
     `ci-tree-<tree>`, and a pull request run counts only when it recorded this tree as well. A pull request run that
     left out the nightly suites, as one not labelled `full-ci` does, records `ci-tree-pr-set-<tree>` and doesn't
