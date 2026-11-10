@@ -277,6 +277,9 @@ cases:
         error: "substring() takes a text, a start and a length."
       - cypher: "RETURN replace('abc', 'a')"
         error: "replace() takes a text, what to replace, and what with."
+      - note: "Neo4j refuses it too, when it plans the statement."
+        cypher: "RETURN coalesce()"
+        error: "coalesce() takes at least one argument."
 
   - name: "Start or length of a text function"
     description: "substring(), left() and right() refuse a float the statement writes or makes, even a whole one, and a given start or length out of range beside a given text."

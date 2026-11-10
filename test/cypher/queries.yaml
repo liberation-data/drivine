@@ -340,6 +340,37 @@ cases:
         unorderedLists: true
         rows: [{avg: 1997.0, latest: 2003, distinct: ["Neo", "Trinity"]}]
 
+  - name: "coalesce() of one argument"
+    description: "coalesce() of one argument is that argument, null where it is null: a property missing or held, null written, a value of each kind, and within an expression. Of none it is refused."
+    steps:
+      - cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN coalesce(p.missing) IS NULL"
+        rows: [true, true, true, true]
+      - cypher: "MATCH (p:Person) RETURN coalesce(p.name) AS n ORDER BY n"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN coalesce(p.born)"
+        rows: [1967, null, 1964, 1961]
+      - cypher: "RETURN coalesce(null)"
+        rows: [null]
+      - note: "Within an expression, as its operand, a function's argument and a condition."
+        cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN [coalesce(p.born) + 1, toUpper(coalesce(p.name)), size(coalesce(p.name)), coalesce(p.missing) IS NULL]"
+        rows: [[1968, "CARRIE", 6, true], [null, "HUGO", 4, true], [1965, "KEANU", 5, true], [1962, "LAURENCE", 8, true]]
+      - cypher: "MATCH (p:Person) WHERE coalesce(p.born) > 1962 RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu"]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(:Movie {title: 'Johnny Mnemonic'}) RETURN coalesce(r.role)"
+        rows: ["Johnny"]
+      - cypher: "MATCH (p:Person) RETURN coalesce(max(p.born))"
+        rows: [1967]
+      - note: "As a grouping key, and kept once by DISTINCT."
+        cypher: "MATCH (p:Person) RETURN coalesce(p.missing) AS m, count(*) AS c"
+        rows: [[null, 4]]
+      - cypher: "MATCH (p:Person) RETURN DISTINCT coalesce(p.missing)"
+        rows: [null]
+      - cypher: "RETURN [coalesce($x), coalesce([1, null]), coalesce({a: 1}).a, coalesce(date('2024-03-15')).year, coalesce([date('2024-03-15')])[0].month]"
+        parameters: {x: "y"}
+        rows: [["y", [1, null], 1, 2024, 3]]
+      - cypher: "RETURN coalesce()"
+        error: true
+
   - name: "Quantifiers, CASE and powers"
     description: "Quantifiers, XOR, simple CASE, powers, negation and text functions give the values Neo4j gives."
     steps:
@@ -1253,6 +1284,17 @@ cases:
         rows: [1]
       - cypher: "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL MATCH (p)-[:KNOWS]->(f) RETURN f }"
         rows: [1]
+
+  - name: "A CALL that gives more than 50 columns"
+    description: "A CALL gives every column it returns, however many: 60 values, and 13 nodes. On SQLite a CALL's rows are gathered as a JSON map each, which a function of no more than 100 arguments builds, a key and a value for each column (drivine4j#375)."
+    steps:
+      - cypher: "UNWIND [1, 2] AS x CALL (x) { RETURN x + 1 AS c1, x + 2 AS c2, x + 3 AS c3, x + 4 AS c4, x + 5 AS c5, x + 6 AS c6, x + 7 AS c7, x + 8 AS c8, x + 9 AS c9, x + 10 AS c10, x + 11 AS c11, x + 12 AS c12, x + 13 AS c13, x + 14 AS c14, x + 15 AS c15, x + 16 AS c16, x + 17 AS c17, x + 18 AS c18, x + 19 AS c19, x + 20 AS c20, x + 21 AS c21, x + 22 AS c22, x + 23 AS c23, x + 24 AS c24, x + 25 AS c25, x + 26 AS c26, x + 27 AS c27, x + 28 AS c28, x + 29 AS c29, x + 30 AS c30, x + 31 AS c31, x + 32 AS c32, x + 33 AS c33, x + 34 AS c34, x + 35 AS c35, x + 36 AS c36, x + 37 AS c37, x + 38 AS c38, x + 39 AS c39, x + 40 AS c40, x + 41 AS c41, x + 42 AS c42, x + 43 AS c43, x + 44 AS c44, x + 45 AS c45, x + 46 AS c46, x + 47 AS c47, x + 48 AS c48, x + 49 AS c49, x + 50 AS c50, x + 51 AS c51, x + 52 AS c52, x + 53 AS c53, x + 54 AS c54, x + 55 AS c55, x + 56 AS c56, x + 57 AS c57, x + 58 AS c58, x + 59 AS c59, x + 60 AS c60 } RETURN x, c1, c30, c60 ORDER BY x"
+        rows: [[1, 2, 31, 61], [2, 3, 32, 62]]
+      - cypher: "CALL { RETURN 1 AS c1, 2 AS c2, 3 AS c3, 4 AS c4, 5 AS c5, 6 AS c6, 7 AS c7, 8 AS c8, 9 AS c9, 10 AS c10, 11 AS c11, 12 AS c12, 13 AS c13, 14 AS c14, 15 AS c15, 16 AS c16, 17 AS c17, 18 AS c18, 19 AS c19, 20 AS c20, 21 AS c21, 22 AS c22, 23 AS c23, 24 AS c24, 25 AS c25, 26 AS c26, 27 AS c27, 28 AS c28, 29 AS c29, 30 AS c30, 31 AS c31, 32 AS c32, 33 AS c33, 34 AS c34, 35 AS c35, 36 AS c36, 37 AS c37, 38 AS c38, 39 AS c39, 40 AS c40, 41 AS c41, 42 AS c42, 43 AS c43, 44 AS c44, 45 AS c45, 46 AS c46, 47 AS c47, 48 AS c48, 49 AS c49, 50 AS c50, 51 AS c51, 52 AS c52, 53 AS c53, 54 AS c54, 55 AS c55, 56 AS c56, 57 AS c57, 58 AS c58, 59 AS c59, 60 AS c60 } RETURN c1, c50, c51, c60"
+        rows: [[1, 50, 51, 60]]
+      - note: "A node is gathered as four columns: 13 of them are 52."
+        cypher: "MATCH (p:Person {name: 'Carrie'}) CALL (p) { MATCH (p)-[:KNOWS]-(f) RETURN f AS f1, f AS f2, f AS f3, f AS f4, f AS f5, f AS f6, f AS f7, f AS f8, f AS f9, f AS f10, f AS f11, f AS f12, f AS f13 } RETURN f1.name, f13"
+        rows: [["Keanu", {name: "Keanu", born: 1964}]]
 
   - name: "DISTINCT in a CALL"
     description: "A CALL runs for each row on its own, so a DISTINCT in it keeps the rows of that one row distinct: an imported value is still itself (drivine4j#502)."
