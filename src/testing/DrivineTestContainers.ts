@@ -1,4 +1,11 @@
-import { GenericContainer, StartedTestContainer, Wait } from 'testcontainers';
+import {
+    GenericContainer,
+    getContainerRuntimeClient,
+    ImageName,
+    PullPolicy,
+    StartedTestContainer,
+    Wait
+} from 'testcontainers';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineLogger } from '@/logger';
 
@@ -130,7 +137,9 @@ const TYPE_KEY = /^(?:(.+)_)?DATABASE_TYPE$/;
  * instance of your own. `<TYPE>_TEST_IMAGE` picks another image.
  *
  * Neo4j, Memgraph and FalkorDB run their `latest` images, as drivine4j's containers do, so a new engine release reaches
- * your tests as soon as it is out. Pin one with `<TYPE>_TEST_IMAGE` to hold it back.
+ * your tests as soon as it is out. Pin one with `<TYPE>_TEST_IMAGE` to hold it back. An image of a moving tag, such as
+ * `latest`, is pulled each time a container starts ({@link movingTag}), and each container's log says the image's digest,
+ * or its local id where it has none.
  */
 export class DrivineTestContainers {
     private static readonly logger = new DrivineLogger(DrivineTestContainers.name);
@@ -147,6 +156,22 @@ export class DrivineTestContainers {
     static image(type: DatabaseType, env: Environment = process.env): string | undefined {
         const spec = TEST_CONTAINER_SPECS[type];
         return spec && (env[`${type}_TEST_IMAGE`] || spec.image);
+    }
+
+    /**
+     * Whether the image is named by a tag that moves: `latest`, no tag at all (which is `latest`), or a tag with no
+     * version in it, no digit (`edge`, `nightly`). Such an image is pulled each time a container starts, so a copy the
+     * machine pulled long ago can't stand in for today's (#702: a cached `falkordb/falkordb:latest` was FalkorDB 4.22.3 a
+     * week after `latest` had moved to 6.0.4). An image of a version, or of a digest, is pulled only where it is missing,
+     * and so is an image named by its local id, 64 hex digits, which ImageName reads as a name with no tag.
+     */
+    static movingTag(image: string): boolean {
+        const name = ImageName.fromString(image);
+        return (
+            name.digest === undefined &&
+            !/^[0-9a-f]{64}$/i.test(image) &&
+            (name.tag === 'latest' || !/\d/.test(name.tag))
+        );
     }
 
     /** The prefix of each datasource configured in the environment, '' for the default one, with its type. */
@@ -170,12 +195,14 @@ export class DrivineTestContainers {
             byType.set(type, [...(byType.get(type) ?? []), prefix]);
         }
         const started = new Map<DatabaseType, StartedTestContainer>();
+        const ran = new Map<DatabaseType, string>();
         try {
             await Promise.all(
                 [...byType].map(async ([type, prefixes]) => {
-                    const container = await DrivineTestContainers.startFor(type, prefixes, env);
-                    if (container) {
-                        started.set(type, container);
+                    const result = await DrivineTestContainers.startFor(type, prefixes, env);
+                    if (result) {
+                        started.set(type, result.container);
+                        ran.set(type, result.ran);
                     }
                 })
             );
@@ -183,14 +210,14 @@ export class DrivineTestContainers {
             await Promise.all([...started.values()].map(async (it) => it.stop()));
             throw e;
         }
-        return new DrivineTestContainers(started);
+        return new DrivineTestContainers(started, ran);
     }
 
     private static async startFor(
         type: DatabaseType,
         prefixes: string[],
         env: Environment
-    ): Promise<StartedTestContainer | undefined> {
+    ): Promise<{ container: StartedTestContainer; ran: string } | undefined> {
         const spec = TEST_CONTAINER_SPECS[type];
         const names = prefixes.map((it) => (it === '' ? 'default' : it.slice(0, -1))).join(', ');
         if (!spec) {
@@ -205,12 +232,29 @@ export class DrivineTestContainers {
         }
         const image = DrivineTestContainers.image(type, env) ?? spec.image;
         const first = DrivineTestContainers.settingsOf(prefixes[0], env);
-        DrivineTestContainers.logger.log(`${type} (${names}): starting ${image}`);
-        const started = await spec.container(image, first).start();
+        const moving = DrivineTestContainers.movingTag(image);
+        DrivineTestContainers.logger.log(`${type} (${names}): starting ${image}${moving ? ', pulled afresh' : ''}`);
+        const container = spec.container(image, first);
+        const started = await (moving ? container.withPullPolicy(PullPolicy.alwaysPull()) : container).start();
+        const ran = `${image} is ${await DrivineTestContainers.ran(image)}`;
+        DrivineTestContainers.logger.log(`${type} (${names}): ${ran}`);
         for (const prefix of prefixes) {
             DrivineTestContainers.rewrite(prefix, spec.connection(started, first), env);
         }
-        return started;
+        return { container: started, ran };
+    }
+
+    /**
+     * What the image a container ran is, by its digest in the registry it came from, or by its local id where it has
+     * none: so a failing run says what it ran, `latest` or not. Never fails the start: a runtime that can't say is said.
+     */
+    private static async ran(image: string): Promise<string> {
+        try {
+            const info = await (await getContainerRuntimeClient()).image.inspect(ImageName.fromString(image));
+            return info.RepoDigests?.[0] ?? info.Id;
+        } catch (e) {
+            return `of a digest the container runtime didn't give (${e instanceof Error ? e.message : String(e)})`;
+        }
     }
 
     private static settingsOf(prefix: string, env: Environment): Environment {
@@ -236,7 +280,16 @@ export class DrivineTestContainers {
         }
     }
 
-    private constructor(readonly started: Map<DatabaseType, StartedTestContainer>) {}
+    /**
+     * @param started each type's container.
+     * @param ran what each type's container ran: its image and that image's digest, or its local id, or that the runtime
+     * couldn't say; nothing for a type that started no container. The log says it too,
+     * but only at INFO, which `DRIVINE_LOG_LEVEL` hides by default, so a test runner prints this for the run's log.
+     */
+    private constructor(
+        readonly started: Map<DatabaseType, StartedTestContainer>,
+        readonly ran: Map<DatabaseType, string>
+    ) {}
 
     /** Stops every container this started. */
     async stop(): Promise<void> {

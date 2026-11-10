@@ -65,13 +65,21 @@ engine release reaches the tests as soon as it is out. Drivine's own suite runs 
 release that changes what Drivine reads or writes shows up at once. To hold an engine back, pin it with
 `<TYPE>_TEST_IMAGE`, for instance `MEMGRAPH_TEST_IMAGE=memgraph/memgraph:3.14.0`.
 
-CI holds FalkorDB at a release that passes, with `FALKORDB_TEST_IMAGE` in
-[`ci.yml`](.github/workflows/ci.yml): Docker Hub's `falkordb/falkordb:latest` is sometimes a 4.x patch release, which
-has no `=~` ([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)). CI's nightly run leaves the
-pin out, so it shows when the pin can move or go, and runs `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's
-`latest`: Docker Hub's is whichever release FalkorDB pushed last, and that can be an older line's backport, as `v4.22.3`
-took it after `6.0.3`, while ghcr.io's is FalkorDB's newest release. Once Docker Hub's `latest` follows FalkorDB's
-newest line again, the nightly can go back to it.
+An image of a moving tag, `latest`, no tag, or a tag with no digit in it (`edge`), is pulled each time its container
+starts, so a copy pulled long ago can't stand in for today's `latest`; an image of a version, a digest or a local image
+id is pulled only where it is missing. An image of a moving tag that is only on your machine, built and not pushed,
+can't be pulled: give it a version tag. `npm test` prints the digest of the image each container ran, or its local id
+where it has none, whatever `DRIVINE_LOG_LEVEL` is (`neo4j:latest is neo4j@sha256:…`). `DrivineTestContainers.start()`
+keeps the same in its result's `ran`, for a runner of your own to print, and logs it at `INFO`.
+
+CI holds FalkorDB at the last release that passes, with `FALKORDB_TEST_IMAGE` in
+[`ci.yml`](.github/workflows/ci.yml): a run from a push, a pull request or the release gate takes
+`falkordb/falkordb:6.0.3`, as 6.0.4 makes a relationship twice where one `FOREACH` body `MERGE`s it twice
+([#717](https://github.com/liberation-data/drivine/issues/717)). CI's nightly run leaves the pin out, so it shows when
+the pin can go, and runs `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's: Docker Hub's `latest` is whichever
+release FalkorDB pushed last, and that was once an older line's backport, `v4.22.3` after `6.0.3`, which has no `=~`
+([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)), while ghcr.io's is FalkorDB's newest
+release. A FalkorDB release that breaks a pull request's run is pinned the same way until FalkorDB fixes it.
 
 ## The Cypher spec
 

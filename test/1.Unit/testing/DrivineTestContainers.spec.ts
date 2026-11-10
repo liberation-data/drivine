@@ -1,5 +1,12 @@
 import { DatabaseType } from '@liberation-data/drivine';
-import { DrivineTestContainers, Environment } from '@/testing';
+import { getContainerRuntimeClient, ImageName, PullPolicy, StartedTestContainer } from 'testcontainers';
+import { DrivineLogger } from '@/logger';
+import { DrivineTestContainers, Environment, TEST_CONTAINER_SPECS, TestContainerSpec } from '@/testing';
+
+jest.mock('testcontainers', () => ({
+    ...jest.requireActual('testcontainers'),
+    getContainerRuntimeClient: jest.fn()
+}));
 
 describe('DrivineTestContainers', () => {
     describe('datasources', () => {
@@ -18,7 +25,9 @@ describe('DrivineTestContainers', () => {
         });
 
         it('passes over a type that is declared but unset, or blank', () => {
-            expect(DrivineTestContainers.datasources({ DATABASE_TYPE: undefined, ORACLE_DATABASE_TYPE: '' })).toEqual([]);
+            expect(DrivineTestContainers.datasources({ DATABASE_TYPE: undefined, ORACLE_DATABASE_TYPE: '' })).toEqual(
+                []
+            );
         });
     });
 
@@ -61,6 +70,34 @@ describe('DrivineTestContainers', () => {
         });
     });
 
+    describe('movingTag', () => {
+        it('is true for latest, for no tag (a registry port is no tag), and for a tag with no version in it', () => {
+            for (const image of [
+                'falkordb/falkordb:latest',
+                'ghcr.io/falkordb/falkordb:latest',
+                'neo4j',
+                'localhost:5000/falkordb',
+                'memgraph/memgraph:edge'
+            ]) {
+                expect([image, DrivineTestContainers.movingTag(image)]).toEqual([image, true]);
+            }
+        });
+
+        it('is false for a version, a digest and an image id, which are pulled only where they are missing', () => {
+            for (const image of [
+                'falkordb/falkordb:6.0.3',
+                'pgvector/pgvector:pg16',
+                'gvenzl/oracle-free:23-faststart',
+                'neo4j:5.26-community',
+                `falkordb/falkordb@sha256:${'a'.repeat(64)}`,
+                // An image's local id, which ImageName reads as a name with no tag, and which no registry has to pull.
+                '0123456789abcdef'.repeat(4)
+            ]) {
+                expect([image, DrivineTestContainers.movingTag(image)]).toEqual([image, false]);
+            }
+        });
+    });
+
     describe('start', () => {
         it('starts nothing, and changes nothing, for local datasources and types without a container', async () => {
             const env: Environment = {
@@ -74,8 +111,115 @@ describe('DrivineTestContainers', () => {
             const before = { ...env };
             const containers = await DrivineTestContainers.start(env);
             expect(containers.started.size).toBe(0);
+            expect(containers.ran.size).toBe(0);
             expect(env).toEqual(before);
             await containers.stop();
+        });
+
+        describe('a container, without a container runtime', () => {
+            const falkordb = TEST_CONTAINER_SPECS[DatabaseType.FALKORDB]!;
+            const inspect = jest.fn();
+            const withPullPolicy = jest.fn();
+            let ran: string[];
+
+            beforeEach(() => {
+                ran = [];
+                const started = {
+                    getHost: () => 'localhost',
+                    getMappedPort: () => 16379,
+                    stop: async () => Promise.resolve()
+                } as unknown as StartedTestContainer;
+                const container = { withPullPolicy, start: async () => Promise.resolve(started) };
+                withPullPolicy.mockReset().mockReturnValue(container);
+                inspect
+                    .mockReset()
+                    .mockResolvedValue({ Id: 'sha256:local', RepoDigests: ['falkordb/falkordb@sha256:abc'] });
+                jest.mocked(getContainerRuntimeClient).mockResolvedValue({ image: { inspect } } as never);
+                TEST_CONTAINER_SPECS[DatabaseType.FALKORDB] = {
+                    ...falkordb,
+                    container: (image: string) => {
+                        ran.push(image);
+                        return container;
+                    }
+                } as unknown as TestContainerSpec;
+            });
+
+            afterEach(() => {
+                TEST_CONTAINER_SPECS[DatabaseType.FALKORDB] = falkordb;
+            });
+
+            it('pulls an image of a moving tag afresh, and inspects that image, its registry and all', async () => {
+                const env: Environment = {
+                    DATABASE_TYPE: 'FALKORDB',
+                    FALKORDB_TEST_IMAGE: 'ghcr.io/falkordb/falkordb:latest'
+                };
+                const containers = await DrivineTestContainers.start(env);
+                expect(ran).toEqual(['ghcr.io/falkordb/falkordb:latest']);
+                expect(withPullPolicy).toHaveBeenCalledWith(PullPolicy.alwaysPull());
+                expect(inspect).toHaveBeenCalledWith(ImageName.fromString('ghcr.io/falkordb/falkordb:latest'));
+                expect(env.DATABASE_PORT).toBe('16379');
+                await containers.stop();
+            });
+
+            it('runs the default image where FALKORDB_TEST_IMAGE is blank, pulled afresh', async () => {
+                const containers = await DrivineTestContainers.start({
+                    DATABASE_TYPE: 'FALKORDB',
+                    FALKORDB_TEST_IMAGE: ''
+                });
+                expect(ran).toEqual(['falkordb/falkordb:latest']);
+                expect(withPullPolicy).toHaveBeenCalledWith(PullPolicy.alwaysPull());
+                await containers.stop();
+            });
+
+            it('leaves a pinned image to the default pull policy', async () => {
+                const env: Environment = { DATABASE_TYPE: 'FALKORDB', FALKORDB_TEST_IMAGE: 'falkordb/falkordb:6.0.4' };
+                const containers = await DrivineTestContainers.start(env);
+                expect(ran).toEqual(['falkordb/falkordb:6.0.4']);
+                expect(withPullPolicy).not.toHaveBeenCalled();
+                await containers.stop();
+            });
+
+            it("logs the image's digest, and its local id where it has none, as an image built and not pushed", async () => {
+                const log = jest.spyOn(DrivineLogger.prototype, 'log').mockImplementation(() => undefined);
+                try {
+                    let containers = await DrivineTestContainers.start({ DATABASE_TYPE: 'FALKORDB' });
+                    await containers.stop();
+                    inspect.mockResolvedValue({ Id: 'sha256:local', RepoDigests: [] });
+                    containers = await DrivineTestContainers.start({
+                        DATABASE_TYPE: 'FALKORDB',
+                        FALKORDB_TEST_IMAGE: 'mine/falkordb:6.0.4'
+                    });
+                    await containers.stop();
+                    expect(log.mock.calls.map(([message]) => message as string)).toEqual([
+                        'FALKORDB (default): starting falkordb/falkordb:latest, pulled afresh',
+                        'FALKORDB (default): falkordb/falkordb:latest is falkordb/falkordb@sha256:abc',
+                        'FALKORDB (default): starting mine/falkordb:6.0.4',
+                        'FALKORDB (default): mine/falkordb:6.0.4 is sha256:local'
+                    ]);
+                } finally {
+                    log.mockRestore();
+                }
+            });
+
+            it('keeps what each container ran, for a runner to print whatever DRIVINE_LOG_LEVEL hides', async () => {
+                const containers = await DrivineTestContainers.start({ DATABASE_TYPE: 'FALKORDB' });
+                expect([...containers.ran]).toEqual([
+                    [DatabaseType.FALKORDB, 'falkordb/falkordb:latest is falkordb/falkordb@sha256:abc']
+                ]);
+                await containers.stop();
+            });
+
+            it('starts the container all the same where the runtime cannot say what the image is', async () => {
+                inspect.mockRejectedValue(new Error('no such image'));
+                const env: Environment = { DATABASE_TYPE: 'FALKORDB' };
+                const containers = await DrivineTestContainers.start(env);
+                expect(containers.started.size).toBe(1);
+                expect(containers.ran.get(DatabaseType.FALKORDB)).toBe(
+                    "falkordb/falkordb:latest is of a digest the container runtime didn't give (no such image)"
+                );
+                expect(env.DATABASE_PORT).toBe('16379');
+                await containers.stop();
+            });
         });
     });
 });

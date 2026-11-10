@@ -28,14 +28,16 @@ concurrency:
     group: ${{ github.workflow == 'CI' && github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-{0}-{1}', github.workflow, github.run_id) }}
     cancel-in-progress: true
 
-# FalkorDB is held at a release that passes: a pull request's run takes falkordb/falkordb:6.0.3. The nightly run
-# (nightly.yml, whose schedule this sees as its event) takes
-# ghcr.io/falkordb/falkordb:latest, FalkorDB's newest release, and not the falkordb/falkordb:latest DrivineTestContainers
-# names: Docker Hub's latest is whichever release FalkorDB pushed last, and that can be an older line's backport, as
-# v4.22.3 took it after 6.0.3 (no =~, FalkorDB/FalkorDB#3551). Drop the nightly's ghcr.io image once Docker Hub's
-# latest follows FalkorDB's newest line again; move the pin, or drop it, once the nightly passes.
+# FalkorDB is held at the last release that passes: a run from a push, a pull request or the release gate takes
+# falkordb/falkordb:6.0.3, as 6.0.4 makes a relationship twice where one FOREACH body MERGEs it twice, which a save of a
+# nested view does (#717). The nightly run (nightly.yml, scheduled or by hand, whose name this sees as its workflow)
+# leaves the pin out, so it shows when the pin can go, and takes ghcr.io/falkordb/falkordb:latest, FalkorDB's newest
+# release: Docker Hub's latest is whichever release FalkorDB pushed last, and that was once an older line's backport,
+# v4.22.3 after 6.0.3 (FalkorDB/FalkorDB#3551). Without the pin, those runs take latest, which DrivineTestContainers
+# pulls afresh each run (#702). Unpin once a FalkorDB release fixes #717; drop the nightly's ghcr.io image once Docker
+# Hub's latest follows the newest line.
 env:
-    FALKORDB_TEST_IMAGE: ${{ github.event_name == 'schedule' && 'ghcr.io/falkordb/falkordb:latest' || 'falkordb/falkordb:6.0.3' }}
+    FALKORDB_TEST_IMAGE: ${{ github.workflow == 'Nightly' && 'ghcr.io/falkordb/falkordb:latest' || 'falkordb/falkordb:6.0.3' }}
 
 jobs:
     # Records the git tree this run tests, as an artifact named ci-tree-<tree>, so a release of the same tree can trust
