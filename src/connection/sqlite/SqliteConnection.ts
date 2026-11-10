@@ -8,7 +8,13 @@ import { DrivineLogger } from '@/logger';
 import { ensuringGraph, JSON_ROWS, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { SqliteSpecCompiler } from '@/connection/sqlite/SqliteSpecCompiler';
 import { SqliteCursor } from '@/connection/sqlite/SqliteCursor';
-import { SqliteDatabase, SqliteValue, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
+import {
+    refuseCompiledCypherOn,
+    SqliteDatabase,
+    SqliteValue,
+    sqliteVersionOf,
+    waitingOutLocks
+} from '@/connection/sqlite/SqliteDriver';
 import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
@@ -31,6 +37,8 @@ export const LONG_LOCK_MILLIS = 5_000;
  * - A statement Drivine writes whose text values are each JSON opens with `/* drivine:json *\/`, and each of its text
  *   values is read as the JSON it is; a statement written by hand is read as it is.
  * - The graph's `ensuring` text, many statements, makes the store when it is not all there (see SqliteGraph).
+ * - A Cypher statement is refused on a SQLite before 3.53.2, where compiled Cypher is wrong or refused (see
+ *   refuseCompiledCypherOn); plain SQL runs all the same.
  */
 export class SqliteConnection implements Connection {
     private readonly logger = new DrivineLogger(SqliteConnection.name);
@@ -44,13 +52,15 @@ export class SqliteConnection implements Connection {
      * @param busyTimeoutMillis how long a statement waits for a locked file before it is turned away
      * @param handBack gives the connection back to its provider, or closes it when it failed
      * @param graph the graph a Cypher statement is compiled against: its tables are `<graph>_node` and `<graph>_edge`
+     * @param sqlite the SQLite `db` runs on, as `sqlite_version()` gives it: asked of `db` when not given
      */
     constructor(
         readonly db: SqliteDatabase,
         readonly resultMapper: ResultMapper,
         private readonly busyTimeoutMillis: number,
         private readonly handBack: (db: SqliteDatabase, failed: boolean) => void,
-        private readonly graph: string = DEFAULT_GRAPH
+        private readonly graph: string = DEFAULT_GRAPH,
+        private readonly sqlite: string = sqliteVersionOf(db)
     ) {}
 
     sessionId(): string {
@@ -151,9 +161,10 @@ export class SqliteConnection implements Connection {
 
     /**
      * The Cypher statement of `spec` compiled to SQL over the graph's tables, as a specification of that SQL, which opens
-     * with `/* drivine:json *\/`: each of its text values is JSON.
+     * with `/* drivine:json *\/`: each of its text values is JSON. Refused on a SQLite before 3.53.2.
      */
     private compiled<T>(spec: QuerySpecification<T>): QuerySpecification<T> {
+        refuseCompiledCypherOn(this.sqlite);
         const compiled = compiledSpecification(spec, new SharedCypherCompiler('sqlite', { name: this.graph })).spec;
         return Object.freeze(
             new QuerySpecification<T>()

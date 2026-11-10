@@ -27,13 +27,41 @@ export interface SqliteDatabase {
     ): void;
 }
 
-/** The least SQLite a store runs on: drivine4j's, for `json_group_array(… ORDER BY …)` and `->>`. */
+/** The least SQLite a store opens on, for plain SQL and the object manager: `json_group_array(… ORDER BY …)` and `->>`. */
 const MINIMUM_SQLITE = [3, 45, 0];
 
 /**
+ * The least SQLite compiled Cypher runs on, as drivine4j's. Before 3.53.2 it is wrong or refused: a float it computes is
+ * written to 15 digits (as 3.53.0 and 3.53.1 still write it, in Node 24.16.0 for one), 3.49 refuses a CALL that groups
+ * by an imported variable, and before 3.47 `-> -1`, which `last()` and a negative index compile to, is refused
+ * (drivine4j#565).
+ */
+export const MINIMUM_COMPILED_CYPHER_SQLITE = [3, 53, 2];
+
+/** The SQLite `db` runs on, as `sqlite_version()` gives it. */
+export function sqliteVersionOf(db: SqliteDatabase): string {
+    return String(db.prepare('SELECT sqlite_version() AS v').get()!.v);
+}
+
+/**
+ * Refuses compiled Cypher on SQLite `version`, the one Node `node` bundles, when it is older than
+ * MINIMUM_COMPILED_CYPHER_SQLITE. Plain SQL is not refused.
+ */
+export function refuseCompiledCypherOn(version: string, node: string = process.versions.node): void {
+    if (sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE)) {
+        const minimum = MINIMUM_COMPILED_CYPHER_SQLITE.join('.');
+        throw new DrivineError(
+            `Compiled Cypher needs SQLite ${minimum} or later; this is SQLite ${version}, which Node ${node} ` +
+                `bundles. Use a Node release that bundles ${minimum} or later: 22.23.4, 24.19.0, 26.4.0 or a later ` +
+                `one of each line. Plain SQL runs on SQLite 3.45 or later.`
+        );
+    }
+}
+
+/**
  * What a SQLite that writes a float it computes in JSON to 17 significant digits, which read back as it, gives for
- * `json_quote(0.1 + 0.2)`. One that writes 15 gives `0.3`. SQLite 3.53 writes 17 by default, but a build may keep 15,
- * as 3.53.1 does in one Python's, so it is asked, not told by its version.
+ * `json_quote(0.1 + 0.2)`. One that writes 15 gives `0.3`. SQLite 3.53.2 writes 17 by default, but a build may keep 15,
+ * so it is asked, not told by its version.
  */
 export const FULL_FLOATS_PROBE = '0.30000000000000004';
 
@@ -68,8 +96,8 @@ export type EmitWarning = (message: string, options: { code: string }) => void;
 
 /**
  * Warns, once, where the SQLite Node bundles writes a float it computes in JSON to fewer than 17 significant digits, as
- * SQLite before 3.53 writes 15: compiled Cypher gives each value as JSON, so a float it computes comes back rounded, and
- * one it writes is stored rounded. Values bound or read from the store keep their digits. It is told by how SQLite
+ * a build of 3.53.2 or later may (before 3.53.2 compiled Cypher is refused, so `openSqlite` does not ask): compiled
+ * Cypher gives each value as JSON, so a float it computes comes back rounded, and one it writes is stored rounded. Values bound or read from the store keep their digits. It is told by how SQLite
  * writes `0.1 + 0.2` (see FULL_FLOATS_PROBE), not by its version, which is only named. The SQLite comes with Node, so
  * the warning names Nodes measured to bring one that writes 17. It is a Node process warning, shown whatever Drivine's
  * log level, and silenced by `--disable-warning=DRIVINE_SQLITE_ROUNDED_FLOATS` or `--no-warnings`.
@@ -140,14 +168,17 @@ export function openSqlite(path: string): SqliteDatabase {
         // SQLite's message, as for a folder that is not there, does not name the file.
         throw new DrivineError(`Could not open the SQLite file '${path}': ${(e as Error).message}.`, e as Error);
     }
-    const version = String(db.prepare('SELECT sqlite_version() AS v').get()!.v);
+    const version = sqliteVersionOf(db);
     if (sqliteOlderThan(version, MINIMUM_SQLITE)) {
         db.close();
         throw new DrivineError(
             `A SQLite store needs SQLite ${MINIMUM_SQLITE.slice(0, 2).join('.')} or later; this Node's is ${version}.`
         );
     }
-    roundedFloats.warnOnce(version, () => String(db.prepare(FLOATS_PROBE_SQL).get()!.q));
+    // Below the least SQLite compiled Cypher runs on it is refused, which says why: no warning of its floats as well.
+    if (!sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE)) {
+        roundedFloats.warnOnce(version, () => String(db.prepare(FLOATS_PROBE_SQL).get()!.q));
+    }
     return db;
 }
 

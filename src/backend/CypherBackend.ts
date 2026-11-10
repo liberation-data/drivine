@@ -336,6 +336,10 @@ export class CypherBackend implements GraphBackend {
         );
     }
 
+    schemaScopes(): GraphStatement {
+        return new GraphStatement(`MATCH (m:${SCHEMA_MARKER}) RETURN DISTINCT m.scope`);
+    }
+
     markerItems(stored: string | null | undefined): string[] | undefined {
         return stored == null ? undefined : stored === '' ? [] : stored.split('\n');
     }
