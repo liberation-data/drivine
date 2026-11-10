@@ -15,6 +15,8 @@ import {
     sqliteVersionOf
 } from '@/connection/sqlite/SqliteDriver';
 import { SqliteFunctions } from '@/connection/sqlite/SqliteFunctions';
+import { SqliteSpecCompiler } from '@/connection/sqlite/SqliteSpecCompiler';
+import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
@@ -103,6 +105,37 @@ describe('compiled Cypher on a SQLite connection', () => {
         } finally {
             await first.release();
             await second.release();
+            await provider.end();
+            emitted.mockRestore();
+        }
+    });
+
+    it("should bind a long write's steps at $_cy_program as the text the compiler gives, and run it whole", async () => {
+        const emitted = jest.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+        // 561 MERGEs, whose steps written into the statement would make it longer than SQLite takes (spec#140).
+        const cypher = `${Array(561).fill('MERGE (:LongWrite)').join(' ')} RETURN 1`;
+        const compiled = new SharedCypherCompiler('sqlite', { name: 'drivine' }).compile(cypher);
+        expect(compiled.sql).toContain('drivine_cypher($_cy_program, ');
+        const program = compiled.parameters._cy_program;
+        expect(typeof program).toEqual('string');
+        expect(JSON.parse(program).steps.length).toBeGreaterThan(0);
+        const bound = new SqliteSpecCompiler(
+            new QuerySpecification({ text: compiled.sql, language: 'SQL' }).bind(compiled.parameters)
+        ).formattedParams() as Record<string, unknown>;
+        expect(bound._cy_program).toBe(program);
+        const provider = new SqliteConnectionProvider('lite', DatabaseType.SQLITE, path.join(folder, 'long.db'));
+        const db = await provider.connect();
+        try {
+            const version = String((await db.query(new QuerySpecification('SELECT sqlite_version() AS v')))[0].v);
+            if (sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE)) {
+                return;
+            }
+            expect(await db.query(new QuerySpecification(cypherStatement(cypher)))).toEqual([1]);
+            expect(
+                await db.query(new QuerySpecification(cypherStatement('MATCH (n:LongWrite) RETURN count(n)')))
+            ).toEqual([1]);
+        } finally {
+            await db.release();
             await provider.end();
             emitted.mockRestore();
         }
