@@ -106,6 +106,10 @@ function graphJson(store: SharedStore, graph: SharedGraph): Record<string, any> 
         // node-oracledb's thin mode, an implicit result's JSON column gives only the rows it prefetched, and some values
         // fail with NJS-126 (oracle/node-oracledb#1795). Drop it once a release of node-oracledb reads them all.
         oracleRowsAsText: true,
+        // Each value a statement returns encoded again, JSON_TRANSFORM(value, KEEP '$'): a document updated in place comes
+        // back as OSON version 2, which node-oracledb's thin mode can't read (NJS-126, oracle/node-oracledb#1796,
+        // liberation-data/drivine-cypher-spec#165). oracleRowsAsText covers a write's rows; this covers reads too.
+        oracleReencodeJson: true,
         nullsEqualStored: graph.nullsEqualStored ?? true,
         eraStored: graph.eraStored ?? true,
         indexedProperties: (graph.indexedProperties ?? []).map(([label, property]) => [label, property])
