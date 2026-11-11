@@ -10,8 +10,8 @@ compiled SQL is drivine4j's, byte for byte, but for the shape of an Oracle write
 statement gives the same rows in either library. A compiler fix lands once, in the module, and reaches this library
 with the next version of the package.
 
-Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there (from 5.0,
-but for `loadMatching`: see [Upgrading to 5.0](21-upgrading-to-5.md)). On a SQL
+Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there, but from 5.0
+for `loadMatching` (see [Upgrading to 5.0](21-upgrading-to-5.md)). On a SQL
 store, most statements give what they gave before. What changes is below, the breaking changes first. Each links to
 the spec's cases that pin it, in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec).
 
@@ -136,8 +136,8 @@ too.
 ## Loading and speed
 
 The compiler is required on the first statement compiled for a SQL store, and its Wasm module started on that
-statement's compile: about 50 to 65 ms, once a process. An application on a graph engine alone doesn't load it, but,
-from 5.0, for `loadMatching`, on the first.
+statement's compile: about 50 to 65 ms, once a process. An application on a graph engine alone doesn't load it, but from 5.0
+loads it for `loadMatching`, on the first.
 
 After that, a statement compiles in about a quarter of a millisecond, at the median, on Postgres and SQLite, much as on
 3.x. On Oracle it takes about twice 3.x's time, at the median, as the shared compiler writes some of Oracle's temporal
