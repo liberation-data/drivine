@@ -94,6 +94,20 @@ describe('Full-text search from the shared module', () => {
         }
     );
 
+    it.each([NEO4J_GRAMMAR, MEMGRAPH_GRAMMAR, FALKORDB_GRAMMAR])(
+        'should write the index limit on $engine as a whole number in the statement, never bound, however large',
+        (grammar) => {
+            // A JS number goes over Bolt as a float, which the engines refuse as a LIMIT: so the limit is written, not bound.
+            const statement = new CypherBackend(grammar).matching(shelf, { ...search('graph'), limit: 123_456_789 });
+            expect(Object.keys(statement.bindings)).toEqual(['_cy_ft1']);
+            const limits = [...statement.text.matchAll(/LIMIT (\S+)/g)].map((it) => it[1]);
+            expect(limits.length).toBeGreaterThan(0);
+            for (const limit of limits) expect(limit).toMatch(/^[0-9]+$/);
+            // The index is asked for ten times the hits where the root has labels beyond the first: 1,234,567,890, whole.
+            expect(statement.text).not.toMatch(/1234567890\.|1\.23456789/);
+        }
+    );
+
     it('should look the full-text index up in the catalog as the module does, on the stores that record it', () => {
         const postgres = new PostgresBackend(graphs.postgres).fullTextIndex('Shelf', ['title']);
         const lookup = fullTextIndexLookup('postgres', graphs.postgres.name, 'Shelf', ['title'])!;
