@@ -1,7 +1,14 @@
 import { Direction } from '@/annotation/Metadata';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
-import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
+import {
+    CascadeDepthCheck,
+    FullTextIndexLookup,
+    GraphBackend,
+    MatchingSearch,
+    NearestSearch,
+    Page
+} from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGroups } from '@/backend/postgres/PostgresGroups';
 import { hasLabels, nodeDocument, numberOf, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
@@ -16,6 +23,7 @@ import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
+import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
 import { selfLoopOnce, sqlText } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
@@ -173,17 +181,28 @@ export class PostgresBackend implements GraphBackend {
     }
 
     /**
-     * Whether a search index was made, which is over the node table: the size of the embeddings a vector index holds,
-     * and the name of a full-text index. One row, or none when the index was not made, or was dropped by hand.
+     * Whether a vector index was made, which is over the node table: the size of the embeddings it holds. One row, or
+     * none when the index was not made, or was dropped by hand.
      */
-    searchIndexTable(kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]): GraphStatement {
-        const made = kind === 'VECTOR' ? `details ->> 'dimensions'` : 'object_name';
+    vectorIndexTable(label: string, property: string): GraphStatement {
         return new PostgresStatement(
-            `SELECT ${made} AS "table" FROM ${this.graph.catalog} WHERE kind = CAST($kind AS text) ` +
+            `SELECT details ->> 'dimensions' AS "table" FROM ${this.graph.catalog} WHERE kind = CAST($kind AS text) ` +
                 `AND label = CAST($label AS text) AND properties = CAST($properties AS text) ` +
                 `AND object_name IS NOT NULL AND to_regclass(object_name) IS NOT NULL`,
-            { kind: CATALOG_KINDS[kind], label, properties: catalogProperties(properties) }
+            { kind: CATALOG_KINDS.VECTOR, label, properties: catalogProperties([property]) }
         );
+    }
+
+    /**
+     * Whether the full-text index's trigram index was made, by the shared module's lookup of the catalog: a row where it
+     * is, none where it was not made, or was dropped by hand. The search narrows the nodes it counts by it.
+     */
+    fullTextIndex(label: string, properties: string[]): FullTextIndexLookup {
+        const lookup = fullTextIndexLookup('postgres', this.graph.name, label, properties)!;
+        return {
+            statement: new PostgresStatement(lookup.statement, lookup.parameters),
+            found: (rows) => ({ trigram: rows.length > 0 })
+        };
     }
 
     nearest(target: TargetModel, search: NearestSearch): GraphStatement {

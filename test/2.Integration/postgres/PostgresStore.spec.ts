@@ -361,18 +361,20 @@ describe.each(postgres)('a store on $name', (store) => {
         const texts = fullTextIndex('PgStore', 'body');
         await gom.indexes.ensure(vectors);
         await gom.indexes.ensure(texts);
-        const made = async (kind: 'VECTOR' | 'FULLTEXT', property: string): Promise<any> => {
-            const statement = new PostgresBackend(graph).searchIndexTable(kind, 'PgStore', [property]);
-            return pm.maybeGetOne<any>(statement.spec());
+        const backend = new PostgresBackend(graph);
+        const trigram = async (): Promise<boolean | undefined> => {
+            const lookup = backend.fullTextIndex('PgStore', ['body']);
+            return lookup.found(await pm.query<any>(lookup.statement.spec())).trigram;
         };
-        expect(await made('VECTOR', 'embedding')).toEqual('3');
-        expect(await made('FULLTEXT', 'body')).toEqual(graph.objectName('t', ['PgStore', 'body']));
+        expect(await pm.maybeGetOne<any>(backend.vectorIndexTable('PgStore', 'embedding').spec())).toEqual('3');
+        expect(await trigram()).toBe(true);
         expect(await nearest()).toEqual(exact);
         // A vector of another size than the index's is measured without it, against the embeddings of its own size.
         expect((await gom.loadNearest(Doc, [1, 0], { topK: 2 })).map((it) => it.value.id)).toEqual(['d5']);
         expect(await matching('graph -relational')).toEqual(scored);
         await gom.indexes.drop(vectors);
         await gom.indexes.drop(texts);
+        expect(await trigram()).toBe(false);
     });
 
     it('should compare, seek and patch a boolean and a date as a save stores them: as JSON text', async () => {

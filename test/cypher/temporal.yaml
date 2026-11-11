@@ -844,6 +844,35 @@ cases:
         cypher: "UNWIND [datetime('2024-03-15T09:00:00Z'), datetime('2024-03-15T10:00:00+02:00'), datetime('2024-03-15T08:30:00Z')] AS t WITH t ORDER BY t WITH collect(t) AS ts RETURN [head(ts).hour, last(ts).hour]"
         rows: [[10, 9]]
 
+  - name: "Zoned kind in an unwound list and in a map"
+    description: "A zoned value taken from an unwound list of lists by head(), last() or an index, and one a map holds, sorts, compares and gives min() and max() as the moment it is, whatever its offset."
+    steps:
+      - cypher: "UNWIND [[datetime('2024-03-15T10:00:00+02:00')], [datetime('2024-03-15T09:00:00Z')]] AS ts RETURN ts[0].hour ORDER BY head(ts)"
+        rows: [10, 9]
+      - cypher: "UNWIND [[datetime('2024-03-15T10:00:00+02:00')], [datetime('2024-03-15T09:00:00Z')]] AS ts RETURN ts[0].hour ORDER BY ts[0]"
+        rows: [10, 9]
+      - cypher: "UNWIND [[datetime('2024-03-15T10:00:00+02:00')], [datetime('2024-03-15T09:00:00Z')]] AS ts RETURN ts[0].hour ORDER BY last(ts)"
+        rows: [10, 9]
+      - cypher: "UNWIND [{t: datetime('2024-03-15T10:00:00+02:00')}, {t: datetime('2024-03-15T09:00:00Z')}] AS m RETURN m.t.hour ORDER BY m.t"
+        rows: [10, 9]
+      - cypher: "UNWIND [{t: datetime('2024-03-15T10:00:00+02:00')}, {t: datetime('2024-03-15T09:00:00Z')}] AS m RETURN m.t.hour ORDER BY m['t'] DESC"
+        rows: [9, 10]
+      - cypher: "UNWIND [{t: datetime('2024-03-15T10:00:00+02:00')}, {t: datetime('2024-03-15T09:00:00Z')}] AS m RETURN [max(m.t).hour, min(m.t).hour]"
+        rows: [[9, 10]]
+      - note: "A null entry after any moment; a map bound by a WITH, and one taken from a list by its place."
+        cypher: "UNWIND [{t: datetime('2024-03-15T10:00:00+02:00')}, {t: null}, {t: datetime('2024-03-15T09:00:00Z')}] AS m RETURN m.t.hour ORDER BY m.t"
+        rows: [10, 9, null]
+      - cypher: "WITH {t: datetime('2024-03-15T10:00:00+02:00')} AS a, {t: datetime('2024-03-15T09:00:00Z')} AS b RETURN [a.t < b.t, a['t'] > b['t'], [a, b][0].t < [a, b][1].t]"
+        rows: [[true, false, true]]
+      - cypher: "WITH [{t: datetime('2024-03-15T10:00:00+02:00')}, {t: datetime('2024-03-15T09:00:00Z')}] AS ms UNWIND [1, 0] AS i RETURN i ORDER BY ms[i].t"
+        rows: [0, 1]
+      - note: "Maps collected, and one taken from them by head() and last()."
+        cypher: "UNWIND [{t: datetime('2024-03-15T10:00:00+02:00')}, {t: datetime('2024-03-15T09:00:00Z')}] AS m WITH collect(m) AS ms RETURN [head(ms).t < last(ms).t, head(ms).t.hour]"
+        rows: [[true, 10]]
+      - note: "Maps a write carries on, read from the row it makes."
+        cypher: "WITH {t: datetime('2024-03-15T10:00:00+02:00')} AS a, {t: datetime('2024-03-15T09:00:00Z')} AS b CREATE (:CyTemporal {id: 'w'}) RETURN [a.t < b.t, a.t.hour]"
+        rows: [[true, 10]]
+
   - name: "Zoned kind through quantifiers, reduce and writes"
     description: "A zoned value keeps its kind in a quantifier, reduce, a pattern comprehension and a statement that writes."
     steps:
@@ -959,6 +988,74 @@ cases:
       - cypher: "RETURN [[date('2024-01-01')] < ['2024-01-02'], ['2024-01-02'] > [date('2024-01-01')], [duration('P1D')] < ['P2D'], [localdatetime('2024-01-01T10:00')] <= ['2024-01-01T10:00']]"
         except: [memgraph, falkordb, neptune]
         rows: [[null, null, null, null]]
+
+  - name: "A temporal value beside a text that spells it"
+    description: "A temporal value is not equal to a text, nor in a list of texts, though its ISO text would be; a list of them is not equal to a list of texts; nor is it ordered beside one."
+    steps:
+      - cypher: "RETURN [date('2024-01-01') = '2024-01-01', date('2024-01-01') <> '2024-01-01', date('2024-01-01') IN ['2024-01-01'], '2024-01-01' IN [date('2024-01-01')]]"
+        rows: [[false, true, false, false]]
+      - note: "Of each kind, the text written as it is and as the value's ISO text. Memgraph has no time()."
+        except: [memgraph]
+        cypher: |
+          RETURN [duration('P1D') = 'P1D', duration('P1D') <> 'P1D', localdatetime('2024-01-01T10:00') = '2024-01-01T10:00',
+                  localdatetime('2024-01-01T10:00') = '2024-01-01T10:00:00', datetime('2024-01-01T10:00Z') = '2024-01-01T10:00Z',
+                  datetime('2024-01-01T10:00Z') = '2024-01-01T10:00:00Z', localtime('10:00') = '10:00:00', time('10:00Z') = '10:00:00Z']
+        rows: [[false, true, false, false, false, false, false, false]]
+      - cypher: "RETURN [[date('2024-01-01')] = ['2024-01-01'], [date('2024-01-01')] <> ['2024-01-01'], [duration('P1D')] = ['P1D'], [datetime('2024-01-01T10:00:00Z')] = ['2024-01-01T10:00:00Z']]"
+        rows: [[false, true, false, false]]
+      - note: "Item by item: a temporal value and a text at the same place."
+        cypher: "RETURN [[date('2024-01-01'), 'x'] = ['2024-01-01', 'x'], [1, date('2024-01-01')] = [1, '2024-01-01'], ['2024-01-01', date('2024-01-02')] = [date('2024-01-01'), '2024-01-02'], [date('2024-01-01'), 'x'] = [date('2024-01-01'), 'x']]"
+        rows: [[false, false, false, true]]
+      - note: "Bound by a WITH, and an item taken from such a list."
+        cypher: "WITH [date('2024-01-01')] AS ds, ['2024-01-01'] AS ss RETURN [ds = ss, ds <> ss, ss = ds, date('2024-01-01') IN ss, '2024-01-01' IN ds, ds[0] = ss[0]]"
+        rows: [[false, true, false, false, false, false]]
+      - note: "A text given as a parameter, and a list of them."
+        cypher: "RETURN [date('2024-01-01') = $d, $d = date('2024-01-01'), $d IN [date('2024-01-01')], [date('2024-01-01')] = $l, date('2024-01-01') IN $l]"
+        parameters: {d: "2024-01-01", l: ["2024-01-01"]}
+        rows: [[false, false, false, false, false]]
+      - note: "A list given as a parameter that holds a null, compared item by item."
+        cypher: "WITH [date('2024-01-01'), null] AS ds RETURN [[date('2024-01-01'), null] = $l, $l = [date('2024-01-01'), null], ds = $l]"
+        parameters: {l: ["2024-01-01", null]}
+        rows: [[false, false, false]]
+      - note: "A list of lists of them, beside lists of texts, and of maps that hold their texts at their kind's name."
+        cypher: |
+          WITH [[date('2024-01-01')]] AS dss
+          RETURN [dss = [['2024-01-01']], [[date('2024-01-01')]] = $ll, [[date('2024-01-01'), null]] = $ln, [date('2024-01-01')] IN [['2024-01-01']],
+                  ['2024-01-01'] IN dss, [[date('2024-01-01')]] = $lm, [date('2024-01-01')] IN [[{date: '2024-01-01'}]], [date('2024-01-01')] IN dss]
+        parameters: {ll: [["2024-01-01"]], ln: [["2024-01-01", null]], lm: [[{date: "2024-01-01"}]]}
+        rows: [[false, false, false, false, false, false, false, true]]
+      - note: "Nor is it equal to a map that holds its text at its kind's name, written or given."
+        cypher: "WITH date('2024-01-01') AS d, [date('2024-01-01')] AS ds RETURN [{date: '2024-01-01'} IN ds, $m IN ds, ds = $l, d IN $l]"
+        parameters: {m: {date: "2024-01-01"}, l: [{date: "2024-01-01"}]}
+        rows: [[false, false, false, false]]
+      - note: "A text the statement works out, and the text a simple CASE compares."
+        cypher: "RETURN [date('2024-01-01') = toString(date('2024-01-01')), toString(date('2024-01-01')) = date('2024-01-01'), CASE date('2024-01-01') WHEN '2024-01-01' THEN 'text' WHEN date('2024-01-01') THEN 'date' END]"
+        rows: [[false, false, "date"]]
+      - note: "Null is compared with nothing: the comparison is null, unless another pair of items differs."
+        cypher: |
+          RETURN [date('2024-01-01') = null, date(null) = '2024-01-01', date('2024-01-01') <> null, date(null) <> '2024-01-01',
+                  date('2024-01-01') IN ['2024-01-01', null], date(null) IN ['2024-01-01'], [date('2024-01-01'), null] = ['2024-01-01', null],
+                  [date('2024-01-01'), null] = ['x', 'y']]
+        rows: [[null, null, null, null, null, null, false, false]]
+      - note: "A list written with a null, compared item by item with a text given as a parameter."
+        cypher: "RETURN [$d IN [date('2024-01-01'), null], date('2024-01-01') IN [$d, null]]"
+        parameters: {d: "2024-01-01"}
+        rows: [[null, null]]
+      - note: "A temporal value is equal to no value of another kind, a temporal value of another kind among them."
+        cypher: "RETURN [date('2024-01-01') = localdatetime('2024-01-01T00:00'), datetime('2024-01-01T00:00Z') = localdatetime('2024-01-01T00:00'), date('2024-01-01') = 1, date('2024-01-01') = ['2024-01-01']]"
+        rows: [[false, false, false, false]]
+      - note: "Nor is it ordered beside a text. Memgraph refuses to order values of two kinds; as in the case before, the other engines aren't pinned."
+        except: [memgraph, falkordb, neptune]
+        cypher: "RETURN [date('2024-01-01') < '2024-01-02', '2024-01-02' > date('2024-01-01'), localdatetime('2024-01-01T10:00') <= '2024-01-01T10:00:00']"
+        rows: [[null, null, null]]
+      - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-01-01')})"
+      - note: "A temporal value read from the store is its ISO text on a SQL store, which can't tell it from a text that spells it."
+        cypher: "MATCH (n:CyTemporal) RETURN n.day = '2024-01-01'"
+        only: [sql]
+        rows: [true]
+      - cypher: "MATCH (n:CyTemporal) RETURN n.day = '2024-01-01'"
+        only: [neo4j]
+        rows: [false]
 
   - name: "Years before 1"
     description: "A year is numbered astronomically, as ISO 8601 numbers it: 0000 is 1 BC and -0044 is 45 BC, read, made, worked out, truncated, written and read back."

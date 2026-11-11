@@ -30,16 +30,12 @@ describe('OracleSearch', () => {
     });
 
     it("should look for a vector index made for embeddings of the vector's size only", () => {
-        const sized = backend.searchIndexTable('VECTOR', 'SizedNote', ['embedding'], 3);
+        const sized = backend.vectorIndexTable('SizedNote', 'embedding', 3);
         expect(sized.text).toMatch(/ AND JSON_VALUE\(details, '\$\.dimensions' RETURNING NUMBER\) = \$dimensions$/);
         expect(sized.bindings).toEqual(expect.objectContaining({ dimensions: 3 }));
-        // A full-text index has no size, and a vector index looked for without one is any made.
-        for (const statement of [
-            backend.searchIndexTable('FULLTEXT', 'SizedNote', ['text'], 3),
-            backend.searchIndexTable('VECTOR', 'SizedNote', ['embedding'])
-        ]) {
-            expect(statement.text).not.toContain('dimensions');
-            expect(statement.bindings).not.toHaveProperty('dimensions');
-        }
+        // A vector index looked for without a size is any made.
+        const any = backend.vectorIndexTable('SizedNote', 'embedding');
+        expect(any.text).not.toContain('dimensions');
+        expect(any.bindings).not.toHaveProperty('dimensions');
     });
 });

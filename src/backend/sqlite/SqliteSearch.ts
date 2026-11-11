@@ -1,11 +1,9 @@
-import { MatchingSearch, NearestSearch } from '@/backend/GraphBackend';
+import { MatchingSearch, NearestSearch, searchedLabels } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import { hasLabels, jsonType, jsonValue, nodeDocument, path, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
+import { hasLabels, jsonType, jsonValue, nodeDocument, path, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
 import { sqlText } from '@/backend/sql/SqlGraph';
-import { bm25Ranked } from '@/backend/sql/Bm25';
-import { lookingAhead, TextQuery } from '@/backend/sql/TextQuery';
-import { DrivineError } from '@/DrivineError';
+import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
 import { TargetModel } from '@/model/RelationshipModel';
 
 /**
@@ -14,9 +12,10 @@ import { TargetModel } from '@/model/RelationshipModel';
  *
  * SQLite has no vector index and a full-text index is not made yet, so a search measures every node it may find. A
  * vector search scores, by `drivine_similarity`, each node of the label that holds an embedding of the vector's size,
- * on Neo4j's scale: (1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean. A full-text query is the core of Lucene's
- * syntax (see TextQuery), each term counted as a whole word by `drivine_regexp_count`, as on Postgres and Oracle, and
- * scored by BM25 as Neo4j's index scores it (see bm25Ranked), then scaled by the best hit.
+ * on Neo4j's scale: (1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean. A full-text search's candidates are the
+ * shared module's (`fullTextSearch`): the core of Lucene's syntax, each term counted as a whole word by
+ * `drivine_regexp_count` (see SqlitePatterns), as on Postgres and Oracle, its text lowered by `drivine_lower`, and scored
+ * by BM25 as Neo4j's index scores it, by `drivine_math`, then scaled by the best hit.
  */
 export class SqliteSearch {
     constructor(private readonly graph: SqliteGraph) {}
@@ -35,33 +34,12 @@ export class SqliteSearch {
     }
 
     matching(target: TargetModel, search: MatchingSearch): GraphStatement {
-        if (search.text === undefined) {
-            throw new DrivineError('A full-text search on SQLite is written with its text.');
-        }
-        const query = TextQuery.parse(search.text);
-        const bindings: Record<string, any> = {};
-        const bind = (value: string): string => {
-            const name = `_term${Object.keys(bindings).length}`;
-            bindings[name] = value;
-            return `CAST($${name} AS TEXT)`;
-        };
-        // Narrowed by the root's every label before the scale, so the best of it is a hit the search can return.
-        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const labels = [search.label, ...root.labels.filter((it) => it !== search.label)];
-        const len = `length(${joinedText('c', search.properties)})`;
-        const labelled = `${this.graph.nodes} c WHERE ${hasLabels('c', labels)}`;
-        const candidates = bm25Ranked(
-            `SELECT c.nid, ${searchedText('c', search.properties)} AS text, ${len} AS len FROM ${labelled}`,
-            `SELECT ${len} AS len FROM ${labelled}`,
-            query,
-            {
-                count: (text, term) => `drivine_regexp_count(${text}, ${bind(lookingAhead(term))})`,
-                holds: (text, term) => `drivine_regexp_count(${text}, ${bind(term)}) > 0`,
-                ln: (value) => `drivine_math('log', ${value})`,
-                real: (value) => `CAST(${value} AS REAL)`
-            }
-        );
-        return this.scored(target, candidates, search, bindings);
+        const ranked = fullTextSearch('sqlite', this.graph.name, {
+            labels: searchedLabels(target, search.label),
+            properties: search.properties,
+            query: search.text
+        });
+        return this.scored(target, ranked.statement, search, ranked.parameters);
     }
 
     private scored(
@@ -90,17 +68,4 @@ export class SqliteSearch {
             bindings
         );
     }
-}
-
-/**
- * The text a full-text search reads of the row `alias`: its properties, each as text, a space between them, in lower
- * case, by `drivine_lower`: SQLite's own `lower` lowers only ASCII.
- */
-export function searchedText(alias: string, properties: string[]): string {
-    return `drivine_lower(${joinedText(alias, properties)})`;
-}
-
-/** `searchedText` before it is lowered: what a full-text search measures a text's length by (drivine4j#604). */
-export function joinedText(alias: string, properties: string[]): string {
-    return properties.map((it) => `COALESCE(${textOf(alias, it)}, '')`).join(` || ' ' || `);
 }

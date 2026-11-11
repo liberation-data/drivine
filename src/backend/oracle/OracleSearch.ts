@@ -1,11 +1,9 @@
-import { MatchingSearch, NearestSearch } from '@/backend/GraphBackend';
+import { MatchingSearch, NearestSearch, searchedLabels } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { TargetModel } from '@/model/RelationshipModel';
-import { DrivineError } from '@/DrivineError';
-import { bm25Ranked } from '@/backend/sql/Bm25';
-import { counted, SEPARATOR, TextQuery } from '@/backend/sql/TextQuery';
+import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
 
 /**
  * Vector and full-text search on Oracle, each as one statement returning `{value, score}` per hit, best first, as the
@@ -16,9 +14,10 @@ import { counted, SEPARATOR, TextQuery } from '@/backend/sql/TextQuery';
  * otherwise reads every node of the label. A vector search goes through an index made for embeddings of the vector's
  * size only, and without one measures only the embeddings of that size: Oracle refuses to measure two sizes against
  * each other. It scores on Neo4j's scale ((1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean): approximate through
- * the index, exact without. A full-text query is the core of Lucene's syntax (see TextQuery): Oracle Text scores
- * through the index; without one, each term is counted as a whole word and the counts scored by BM25, as Neo4j's index
- * scores them (see bm25Ranked). Either is scaled by the best hit.
+ * the index, exact without. A full-text search's candidates are the shared module's (`fullTextSearch`), its query the
+ * core of Lucene's syntax: Oracle Text scores through the index, each property's score added, and sees only what has
+ * been committed; without one, each term is counted as a whole word and the counts scored by BM25, as Neo4j's index
+ * scores them. Either is scaled by the best hit.
  */
 export class OracleSearch {
     constructor(private readonly graph: OracleGraph) {}
@@ -52,69 +51,13 @@ export class OracleSearch {
     }
 
     matching(target: TargetModel, search: MatchingSearch): GraphStatement {
-        if (search.text === undefined) {
-            throw new DrivineError('A full-text search on Oracle is written with its text.');
-        }
-        const query = TextQuery.parse(search.text);
-        const bindings: Record<string, any> = {};
-        const bind = (value: string): string => {
-            const name = `_term${Object.keys(bindings).length}`;
-            bindings[name] = value;
-            return `$${name}`;
-        };
-        // Narrowed by the root's every label before the scale, so the best of it is a hit the search can return.
-        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const labels = [search.label, ...root.labels.filter((it) => it !== search.label)];
-        if (search.table) {
-            // Through Oracle Text: each property's score added, then scaled by the best. The index holds what has been
-            // committed, so a search does not see what its own transaction wrote.
-            const text = bind(query.oracleText);
-            const contains = search.properties.map(
-                (it, i) => `JSON_TEXTCONTAINS(t.doc, '$${jsonKey(it)}', ${text}, ${i + 1})`
-            );
-            const scores = search.properties.map((_, i) => `SCORE(${i + 1})`).join(' + ');
-            const matched =
-                labels.length > 1
-                    ? `(${contains.join(' OR ')}) AND t.nid IN (SELECT c.nid FROM ${
-                          this.graph.nodes
-                      } c WHERE ${hasLabels('c', labels)})`
-                    : contains.join(' OR ');
-            const candidates =
-                `SELECT nid, hit_count / MAX(hit_count) OVER () AS score FROM (SELECT t.nid, ${scores} AS hit_count ` +
-                `FROM ${search.table} t WHERE ${matched}) WHERE hit_count > 0`;
-            return this.scored(target, candidates, search, bindings);
-        }
-        // Without Oracle Text: each term counted as a whole word in the lower-cased text, scored by BM25 (see bm25Ranked),
-        // each term bound on its own (one bound list named twice gave wrong counts on 23.26, drivine4j found).
-        const values = search.properties.map((it) => `NVL(JSON_VALUE(c.props, '$${jsonKey(it)}' RETURNING CLOB), '')`);
-        const text = values.map((it) => `LOWER(${it})`).join(` || ' ' || `);
-        const len = `NVL(LENGTH(${values.join(` || ' ' || `)}), 0)`;
-        const labelled = `${this.graph.nodes} c WHERE ${hasLabels('c', labels)}`;
-        const candidates = bm25Ranked(
-            `SELECT c.nid, ${text} AS text, ${len} AS len FROM ${labelled}`,
-            `SELECT ${len} AS len FROM ${labelled}`,
-            query,
-            {
-                // Oracle's expressions don't look ahead: the term ending where its last word does, less those a word goes on
-                // from (counted); a phrase an occurrence of which may begin inside another, in the text with each character
-                // between words written twice (SEPARATOR); a prefix term, or one with a character not measured as
-                // [[:alnum:]], by its one expression (drivine4j#607).
-                count: (text, term) => {
-                    const two = counted(term);
-                    if (two === undefined) {
-                        return `REGEXP_COUNT(REGEXP_REPLACE(${text}, '${SEPARATOR}', '\\1\\1'), ${bind(term)})`;
-                    }
-                    const [ended, continued] = two;
-                    return `REGEXP_COUNT(${text}, ${bind(ended)})${
-                        continued === null ? '' : ` - REGEXP_COUNT(${text}, ${bind(continued)})`
-                    }`;
-                },
-                holds: (text, term) => `REGEXP_LIKE(${text}, ${bind(term)})`,
-                ln: (value) => `LN(${value})`,
-                real: (value) => value
-            }
-        );
-        return this.scored(target, candidates, search, bindings);
+        const ranked = fullTextSearch('oracle', this.graph.name, {
+            labels: searchedLabels(target, search.label),
+            properties: search.properties,
+            query: search.text,
+            index: search.index
+        });
+        return this.scored(target, ranked.statement, search, ranked.parameters);
     }
 
     private scored(

@@ -10,7 +10,8 @@ compiled SQL is drivine4j's, byte for byte, but for the shape of an Oracle write
 statement gives the same rows in either library. A compiler fix lands once, in the module, and reaches this library
 with the next version of the package.
 
-Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there. On a SQL
+Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there, but for
+`loadMatching` (see [Full-text search](#from-401-full-text-search-is-the-shared-compilers)). On a SQL
 store, most statements give what they gave before. What changes is below, the breaking changes first. Each links to
 the spec's cases that pin it, in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec).
 
@@ -93,6 +94,19 @@ SQLite's JSON has no NaN, so a NaN is written as the map `{"$numberDouble": "NaN
 (#675). A map a user stores that is exactly that, one key and that text, now reads, compares and adds as NaN. Any other
 map, with another key or another text, is the map it is.
 
+### From 4.0.1, full-text search is the shared compiler's
+
+From 4.0.1, `loadMatching` on every store runs the shared compiler's full-text search, as drivine4j does: the query read,
+BM25, each SQL store's ranked candidates and each graph engine's index call. On Neo4j, Memgraph and FalkorDB the
+compiler is loaded on the first `loadMatching`. What changes is:
+
+- **Oracle:** a full-text index Drivine for TypeScript 3.2 or earlier made, which its schema catalog records as
+  `FULLTEXT`, is no longer searched through Oracle Text, and a search scores by BM25 over every node of the label.
+  Make it again with `gom.indexes.recreate(spec)`.
+- **Exports:** `fullTextIndexLimit` and `MEMGRAPH_TEXT_SEARCH_LIMIT_CAP` are removed, a `CypherGrammar` gives
+  `searchStore` in place of `fullTextSearch`, a `GraphBackend`'s `searchIndexTable` is `vectorIndexTable` and
+  `fullTextIndex`, and a `MatchingSearch` gives its `text` always, and `index` in place of `table`.
+
 ### Drivine's own compiler is gone
 
 `PostgresCypherCompiler`, `OracleCypherCompiler`, `SqliteCypherCompiler`, `SqlCypherCompiler`, `CypherReader` and the
@@ -144,7 +158,8 @@ too.
 ## Loading and speed
 
 The compiler is required on the first statement compiled for a SQL store, and its Wasm module started on that
-statement's compile: about 50 to 65 ms, once a process. An application on a graph engine alone never loads it.
+statement's compile: about 50 to 65 ms, once a process. An application on a graph engine alone loads it only for
+`loadMatching`, on the first.
 
 After that, a statement compiles in about a quarter of a millisecond, at the median, on Postgres and SQLite, much as on
 3.x. On Oracle it takes about twice 3.x's time, at the median, as the shared compiler writes some of Oracle's temporal

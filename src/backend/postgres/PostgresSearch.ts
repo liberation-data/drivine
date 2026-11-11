@@ -1,10 +1,8 @@
-import { MatchingSearch, NearestSearch } from '@/backend/GraphBackend';
+import { MatchingSearch, NearestSearch, searchedLabels } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonValue, nodeDocument, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
-import { bm25Ranked } from '@/backend/sql/Bm25';
-import { lookingAhead, TextQuery } from '@/backend/sql/TextQuery';
-import { DrivineError } from '@/DrivineError';
+import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
 import { TargetModel } from '@/model/RelationshipModel';
 
 /**
@@ -14,10 +12,11 @@ import { TargetModel } from '@/model/RelationshipModel';
  *
  * A vector search is pgvector's: exact over every node of the label that holds an embedding of the vector's size, or
  * approximate through the label's HNSW index, which holds the embeddings of its size (see PostgresSchemaGrammar). It
- * scores on Neo4j's scale: (1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean. A full-text query is the core of
- * Lucene's syntax (see TextQuery), each term counted as a whole word as Oracle counts one without Oracle Text, scored
- * by BM25 as Neo4j's index scores it (see bm25Ranked), then scaled by the best hit; the trigram index of a full-text
- * index narrows it first to the nodes whose text holds a scoring term's words, which changes no score.
+ * scores on Neo4j's scale: (1 + cos) / 2 for cosine, 1 / (1 + d²) for euclidean. A full-text search's candidates are
+ * the shared module's (`fullTextSearch`): the core of Lucene's syntax, each term counted as a whole word as Oracle
+ * counts one without Oracle Text, scored by BM25 as Neo4j's index scores it, then scaled by the best hit; the trigram
+ * index of a full-text index narrows them first to the nodes whose text holds a scoring term's words, which changes no
+ * score.
  */
 export class PostgresSearch {
     constructor(private readonly graph: PostgresGraph) {}
@@ -49,47 +48,13 @@ export class PostgresSearch {
     }
 
     matching(target: TargetModel, search: MatchingSearch): GraphStatement {
-        if (search.text === undefined) {
-            throw new DrivineError('A full-text search on Postgres is written with its text.');
-        }
-        const query = TextQuery.parse(search.text);
-        const bindings: Record<string, any> = {};
-        const bind = (value: string): string => {
-            const name = `_term${Object.keys(bindings).length}`;
-            bindings[name] = value;
-            return `CAST($${name} AS text)`;
-        };
-        const text = searchedText('c', search.properties);
-        // A node that matches a term holds each of its words: what the trigram index answers is whether it holds them.
-        const narrowed = search.table
-            ? [
-                  `(${query.scoredWords
-                      .map(
-                          (words) => `(${words.map((it) => `${text} LIKE ${bind(`%${likeText(it)}%`)}`).join(' AND ')})`
-                      )
-                      .join(' OR ')})`
-              ]
-            : [];
-        // Narrowed by the root's every label before the scale, so the best of it is a hit the search can return.
-        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const labels = [search.label, ...root.labels.filter((it) => it !== search.label)];
-        const len = `length(${joinedText('c', search.properties)})`;
-        const candidates = bm25Ranked(
-            `SELECT c.nid, ${text} AS text, ${len} AS len FROM ${this.graph.nodes} c WHERE ${[
-                hasLabels('c', labels),
-                ...narrowed
-            ].join(' AND ')}`,
-            `SELECT ${len} AS len FROM ${this.graph.nodes} c WHERE ${hasLabels('c', labels)}`,
-            query,
-            {
-                count: (text, term) =>
-                    `(SELECT count(*) FROM regexp_matches(${text}, ${bind(lookingAhead(term))}, 'g'))`,
-                holds: (text, term) => `${text} ~ ${bind(term)}`,
-                ln: (value) => `ln(${value})`,
-                real: (value) => `CAST(${value} AS double precision)`
-            }
-        );
-        return this.scored(target, candidates, search, bindings);
+        const ranked = fullTextSearch('postgres', this.graph.name, {
+            labels: searchedLabels(target, search.label),
+            properties: search.properties,
+            query: search.text,
+            index: search.index
+        });
+        return this.scored(target, ranked.statement, search, ranked.parameters);
     }
 
     private scored(
@@ -139,9 +104,9 @@ export function holds(alias: string, property: string, dimensions?: number): str
 }
 
 /**
- * The text a full-text search reads of the row `alias`: its properties, each as text, a space between them, in lower
- * case. The expression of a full-text index too (with an empty alias), so a statement that reads it so is answered by
- * the index.
+ * The text a full-text search reads of the row `alias`, as the shared module's search writes it: its properties, each as
+ * text, a space between them, in lower case. The expression of a full-text index's trigram index (with an empty alias),
+ * so the search's narrowing by it is answered by the index.
  */
 export function searchedText(alias: string, properties: string[]): string {
     return `lower(${joinedText(alias, properties)})`;
@@ -155,9 +120,4 @@ export function joinedText(alias: string, properties: string[]): string {
 /** The vector bound as `$_vector`, a list of numbers, as pgvector's: of `dimensions` where given. */
 function vector(dimensions?: number): string {
     return `CAST(CAST($_vector AS float8[]) AS vector${dimensions ? `(${dimensions})` : ''})`;
-}
-
-/** A word as text a `LIKE` pattern matches as it is: its own `%`, `_` and backslash taken as themselves. */
-function likeText(word: string): string {
-    return word.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }

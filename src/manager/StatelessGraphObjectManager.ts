@@ -46,6 +46,7 @@ import { StoreIdentity, StoreIdentityResolver } from '@/store/StoreIdentity';
 import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
+import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
 
 /**
@@ -373,7 +374,7 @@ export class StatelessGraphObjectManager {
         const label = options.partitionLabel ?? root.labels[0];
         const statement = this.backend.nearest(target, {
             label,
-            table: await this.searchTable('VECTOR', label, [property], vector.length),
+            table: await this.vectorTable(label, property, vector.length),
             property,
             similarity,
             where: filter.where,
@@ -433,14 +434,14 @@ export class StatelessGraphObjectManager {
             label: root.labels[0],
             properties: chosen,
             text,
-            table: await this.searchTable('FULLTEXT', root.labels[0], chosen),
+            index: await this.fullTextIndex(root.labels[0], chosen),
             where: filter.where,
             threshold: options.threshold !== undefined,
             limit: options.topK,
             depth: options.depth
         });
         const rows = await this.persistenceManager.query<{ value: any; score: number }>(
-            statement.spec({ ...filter.bindings, _text: text, _threshold: options.threshold })
+            statement.spec({ ...filter.bindings, _threshold: options.threshold })
         );
         return rows.map((row) => ({
             value:
@@ -745,22 +746,23 @@ export class StatelessGraphObjectManager {
     }
 
     /**
-     * The table a store keeps a search index in, where it keeps one and the index was made: for a vector search by a
-     * vector of `dimensions`, made for embeddings of that size.
+     * The table a store keeps a vector index in, where it keeps one and the index was made for embeddings of the size
+     * `dimensions`, the size of the vector searched for.
      */
-    private async searchTable(
-        kind: 'VECTOR' | 'FULLTEXT',
-        label: string,
-        properties: string[],
-        dimensions?: number
-    ): Promise<string | undefined> {
-        if (!this.backend.searchIndexTable) {
+    private async vectorTable(label: string, property: string, dimensions: number): Promise<string | undefined> {
+        if (!this.backend.vectorIndexTable) {
             return undefined;
         }
         const rows = await this.persistenceManager.query<string>(
-            this.backend.searchIndexTable(kind, label, properties, dimensions).spec()
+            this.backend.vectorIndexTable(label, property, dimensions).spec()
         );
         return rows[0];
+    }
+
+    /** What the store's catalog records of the full-text index over the label's properties, where it keeps a record. */
+    private async fullTextIndex(label: string, properties: string[]): Promise<SearchIndex | undefined> {
+        const lookup = this.backend.fullTextIndex?.(label, properties);
+        return lookup && lookup.found(await this.persistenceManager.query<any>(lookup.statement.spec()));
     }
 
     /** The object with the id, and the row it was mapped from; undefined when there is none. */

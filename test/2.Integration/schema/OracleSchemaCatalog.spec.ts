@@ -155,13 +155,13 @@ END;`);
 
         // A search goes through the table drivine4j made, which its trigger keeps in step with what this library saves.
         const backend = backendFor(DatabaseType.ORACLE, GRAPH);
-        const tableOf = async (kind: 'VECTOR' | 'FULLTEXT', label: string, properties: string[]) =>
-            pm.maybeGetOne<string>(backend.searchIndexTable!(kind, label, properties).spec());
+        const vectorTable = async () => pm.maybeGetOne<string>(backend.vectorIndexTable!('Chunk', 'embedding').spec());
         const graph = new OracleGraph(GRAPH);
-        expect(await tableOf('VECTOR', 'Chunk', ['embedding'])).toEqual(graph.vectors('Chunk', 'embedding'));
-        expect(await tableOf('FULLTEXT', 'Article', ['title', 'body'])).toEqual(
-            graph.texts('Article', ['title', 'body'])
-        );
+        expect(await vectorTable()).toEqual(graph.vectors('Chunk', 'embedding'));
+        const lookup = backend.fullTextIndex!('Article', ['title', 'body']);
+        expect(lookup.found(await pm.query<any>(lookup.statement.spec()))).toEqual({
+            oracleText: graph.texts('Article', ['title', 'body'])
+        });
         await gom.saveAll([
             Object.assign(new Chunk(), { id: 'c1', embedding: [1, 0] }),
             Object.assign(new Chunk(), { id: 'c2', embedding: [0, 1] })
@@ -181,7 +181,7 @@ END;`);
         }
         expect(await rows(GRAPH)).toEqual([]);
         expect((await indexes(GRAPH)).filter((it) => /^JVM_(IX|LX|UQ|V|T)_/.test(it))).toEqual([]);
-        expect(await tableOf('VECTOR', 'Chunk', ['embedding'])).toBeUndefined();
+        expect(await vectorTable()).toBeUndefined();
     });
 
     it('should record what drivine4j records, to the object names', async () => {
@@ -298,9 +298,9 @@ END;`);
         expect((await gom.constraints.ensure(uniques[0])).status).toEqual('ALREADY_MATCHING');
         expect((await gom.indexes.ensure(vectors)).status).toEqual('ALREADY_MATCHING');
         const backend = backendFor(DatabaseType.ORACLE, EARLIER_GRAPH);
-        expect(
-            await pm.maybeGetOne<string>(backend.searchIndexTable!('VECTOR', 'Chunk', ['embedding']).spec())
-        ).toEqual(graph.vectors('Chunk', 'embedding'));
+        expect(await pm.maybeGetOne<string>(backend.vectorIndexTable!('Chunk', 'embedding').spec())).toEqual(
+            graph.vectors('Chunk', 'embedding')
+        );
 
         // A range index over the unique property is served by the earlier constraint's index, as by one made now.
         expect((await gom.indexes.ensure(rangeIndex('Person', 'uuid'))).status).toEqual('CREATED');

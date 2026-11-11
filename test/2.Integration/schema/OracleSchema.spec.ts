@@ -131,10 +131,14 @@ describeOnOracle('schema on Oracle', () => {
         await gom.indexes.ensure(vectors);
         await gom.indexes.ensure(texts);
         const backend = backendFor(DatabaseType.ORACLE);
-        const tableOf = async (kind: 'VECTOR' | 'FULLTEXT', properties: string[]) =>
-            pm.maybeGetOne<string>(backend.searchIndexTable!(kind, 'OraSearch', properties).spec());
-        expect(await tableOf('VECTOR', ['embedding'])).toMatch(/^drivine_v_OraSearchembedding_[0-9a-f]+$/);
-        expect(await tableOf('FULLTEXT', ['text'])).toMatch(/^drivine_t_OraSearchtext_[0-9a-f]+$/);
+        const vectorTable = async () =>
+            pm.maybeGetOne<string>(backend.vectorIndexTable!('OraSearch', 'embedding').spec());
+        const textIndex = async () => {
+            const lookup = backend.fullTextIndex!('OraSearch', ['text']);
+            return lookup.found(await pm.query<any>(lookup.statement.spec()));
+        };
+        expect(await vectorTable()).toMatch(/^drivine_v_OraSearchembedding_[0-9a-f]+$/);
+        expect((await textIndex()).oracleText).toMatch(/^drivine_t_OraSearchtext_[0-9a-f]+$/);
         // Saved after the index: the trigger puts it in the tables.
         await gom.save(Object.assign(new Note(), { id: 'n2', text: 'relational tables', embedding: [0, 1] }));
         expect((await gom.loadNearest(Note, [0, 1], { topK: 1 })).map((it) => it.value.id)).toEqual(['n2']);
@@ -144,7 +148,8 @@ describeOnOracle('schema on Oracle', () => {
         expect((await gom.loadMatching(Note, 'graph', { topK: 5 })).map((it) => it.value.id)).toEqual(['n1']);
         await gom.indexes.drop(vectors);
         await gom.indexes.drop(texts);
-        expect(await tableOf('VECTOR', ['embedding'])).toBeUndefined();
+        expect(await vectorTable()).toBeUndefined();
+        expect(await textIndex()).toEqual({});
         // Without the index, every node of the label is read, to the same answer.
         expect((await gom.loadMatching(Note, '+relational -graph', { topK: 5 })).map((it) => it.value.id)).toEqual([
             'n2'
