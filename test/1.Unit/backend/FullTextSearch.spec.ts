@@ -102,7 +102,9 @@ describe('Full-text search from the shared module', () => {
             expect(Object.keys(statement.bindings)).toEqual(['_cy_ft1']);
             const limits = [...statement.text.matchAll(/LIMIT (\S+)/g)].map((it) => it[1]);
             expect(limits.length).toBeGreaterThan(0);
-            for (const limit of limits) expect(limit).toMatch(/^[0-9]+$/);
+            for (const limit of limits) {
+                expect(limit).toMatch(/^[0-9]+$/);
+            }
             // The index is asked for ten times the hits where the root has labels beyond the first: 1,234,567,890, whole.
             expect(statement.text).not.toMatch(/1234567890\.|1\.23456789/);
         }
