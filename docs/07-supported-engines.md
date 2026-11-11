@@ -254,7 +254,7 @@ the graph engines; `PersistenceManager` runs plain SQL, with cursors and transac
 SQL as drivine4j compiles it (a cursor runs SQL alone). What Cypher does that SQLite's JSON functions don't, Drivine's
 functions registered on each connection do.
 
-**Which SQLite.** From Drivine 4.0.1, compiled Cypher needs SQLite 3.53.2 or later. On an older one it is wrong or
+**Which SQLite.** From Drivine 5.0, compiled Cypher needs SQLite 3.53.2 or later. On an older one it is wrong or
 refused: a float it computes is written to 15 digits (3.53.0 and 3.53.1 still write 15), 3.49 refuses a `CALL` that
 groups by a variable it imports, and SQLite before 3.47 refuses the `-> -1` that `last()` and a negative list index
 compile to. So a Cypher statement is refused there, with a `DrivineError` that names the SQLite and the Node that

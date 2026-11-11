@@ -10,8 +10,8 @@ compiled SQL is drivine4j's, byte for byte, but for the shape of an Oracle write
 statement gives the same rows in either library. A compiler fix lands once, in the module, and reaches this library
 with the next version of the package.
 
-Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there, but for
-`loadMatching` (see [Full-text search](#from-401-full-text-search-is-the-shared-compilers)). On a SQL
+Nothing changes for a statement run on Neo4j, Memgraph, FalkorDB or Neptune: the compiler isn't loaded there (from 5.0,
+but for `loadMatching`: see [Upgrading to 5.0](21-upgrading-to-5.md)). On a SQL
 store, most statements give what they gave before. What changes is below, the breaking changes first. Each links to
 the spec's cases that pin it, in [drivine-cypher-spec](https://github.com/liberation-data/drivine-cypher-spec).
 
@@ -20,15 +20,6 @@ the spec's cases that pin it, in [drivine-cypher-spec](https://github.com/libera
 ### Node 22 or later
 
 The shared compiler's Wasm build needs WasmGC, which Node has from 22. Drivine 4.0 is tested on Node 24.
-
-### From 4.0.1, compiled Cypher on SQLite needs SQLite 3.53.2
-
-From 4.0.1, a Cypher statement on a SQLite store is refused, with a `DrivineError`, where the SQLite is older than
-3.53.2: there a float it computes is written to 15 digits, 3.49 refuses a `CALL` that groups by a variable it imports,
-and before 3.47 `last()` and a negative list index are refused. 4.0.0 compiled it there all the same. The SQLite is the
-one Node bundles: Node 22.23.4, 24.19.0 and 26.4.0 are the first of their lines to bundle 3.53.2 or later. Plain SQL,
-the schema manager and the object manager still run on SQLite 3.45 or later. See
-[SQLite](07-supported-engines.md#sqlite).
 
 ### Statements Neo4j refuses are refused
 
@@ -94,19 +85,6 @@ SQLite's JSON has no NaN, so a NaN is written as the map `{"$numberDouble": "NaN
 (#675). A map a user stores that is exactly that, one key and that text, now reads, compares and adds as NaN. Any other
 map, with another key or another text, is the map it is.
 
-### From 4.0.1, full-text search is the shared compiler's
-
-From 4.0.1, `loadMatching` on every store runs the shared compiler's full-text search, as drivine4j does: the query read,
-BM25, each SQL store's ranked candidates and each graph engine's index call. On Neo4j, Memgraph and FalkorDB the
-compiler is loaded on the first `loadMatching`. What changes is:
-
-- **Oracle:** a full-text index Drivine for TypeScript 3.2 or earlier made, which its schema catalog records as
-  `FULLTEXT`, is no longer searched through Oracle Text, and a search scores by BM25 over every node of the label.
-  Make it again with `gom.indexes.recreate(spec)`.
-- **Exports:** `fullTextIndexLimit` and `MEMGRAPH_TEXT_SEARCH_LIMIT_CAP` are removed, a `CypherGrammar` gives
-  `searchStore` in place of `fullTextSearch`, a `GraphBackend`'s `searchIndexTable` is `vectorIndexTable` and
-  `fullTextIndex`, and a `MatchingSearch` gives its `text` always, and `index` in place of `table`.
-
 ### Drivine's own compiler is gone
 
 `PostgresCypherCompiler`, `OracleCypherCompiler`, `SqliteCypherCompiler`, `SqlCypherCompiler`, `CypherReader` and the
@@ -158,8 +136,8 @@ too.
 ## Loading and speed
 
 The compiler is required on the first statement compiled for a SQL store, and its Wasm module started on that
-statement's compile: about 50 to 65 ms, once a process. An application on a graph engine alone loads it only for
-`loadMatching`, on the first.
+statement's compile: about 50 to 65 ms, once a process. An application on a graph engine alone doesn't load it, but,
+from 5.0, for `loadMatching`, on the first.
 
 After that, a statement compiles in about a quarter of a millisecond, at the median, on Postgres and SQLite, much as on
 3.x. On Oracle it takes about twice 3.x's time, at the median, as the shared compiler writes some of Oracle's temporal

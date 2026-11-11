@@ -25,7 +25,7 @@ A Cypher statement runs on every store: on Postgres, Oracle and SQLite, Drivine 
 drivine-python read. A transaction there gives one writer at a time: it takes the file's write lock as it begins, so even
 one that only reads waits for the lock, up to the busy timeout. Reads outside a transaction don't wait for a writer; saves
 and deletes outside one are retried when contended; each statement Drivine writes applies whole or not at all; and a
-connection you open on the file yourself has none of this. From 4.0.1, compiled Cypher needs SQLite 3.53.2 or later,
+connection you open on the file yourself has none of this. From 5.0, compiled Cypher needs SQLite 3.53.2 or later,
 which Node 22.23.4, 24.19.0 and 26.4.0 and later bundle; it is refused on an older SQLite, which writes a computed
 float to 15 digits and refuses `last()` or a CALL that groups. Plain SQL runs on SQLite 3.45 or later. Use a Node whose
 SQLite writes a computed float to 17 significant digits, as Node 22.23.4, 24.22.2 and 26.13 were measured to, for
