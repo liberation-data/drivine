@@ -33,8 +33,9 @@ const PACKAGE = '@liberation-data/drivine-cypher-compiler';
 let loaded: Compile | undefined;
 
 /**
- * The shared compiler, required on the first compile for a SQL store, so an application on a graph engine alone never
- * loads it. The package's own entry starts its Wasm module on its first `compile`, not on `require`.
+ * The shared compiler, required on the first compile for a SQL store or the first full-text search, so an application
+ * on a graph engine that doesn't search by text never loads it. The package's own entry starts its Wasm module on its
+ * first `compile`, not on `require`.
  */
 function compileFunction(): Compile {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -93,6 +94,102 @@ export class SharedCypherCompiler implements CypherCompiler {
             nonFinite: answer.nonFinite ?? false
         };
     }
+}
+
+/** The stores the shared module writes a full-text search for: the SQL stores, and the graph engines' heads. */
+export type SearchStore = SharedStore | 'neo4j' | 'memgraph' | 'falkordb';
+
+/**
+ * What the library found of a full-text index, as the module's search request gives it: on Postgres whether its trigram
+ * index is made, on Oracle the table its Oracle Text index is over, and on Neo4j and Memgraph the index's name.
+ */
+export interface SearchIndex {
+    trigram?: boolean;
+    oracleText?: string;
+    name?: string;
+}
+
+/**
+ * A full-text search, as the module's `search` request has it (its README, "Full-text search"): the root's labels, the
+ * index's first; every property the index covers, in the order it declares them; the user's query; what was found of the
+ * index; and on a graph engine how many rows the search wants, whether its hits are filtered after the index, and what
+ * the head names a hit's node and score.
+ */
+export interface SearchRequest {
+    labels: string[];
+    properties: string[];
+    query: string;
+    index?: SearchIndex;
+    topK?: number;
+    filtered?: boolean;
+    alias?: string;
+    scoreAlias?: string;
+}
+
+/**
+ * A full-text search as the module writes it: on a SQL store one query of the ranked candidates, `nid` and `score`, the
+ * best scoring 1, which the library joins back to its node table; on a graph engine the search's head, the index's `CALL`
+ * and each hit's node and score against the best. Its parameters are named `_cy_ft<n>`, which no caller binds.
+ */
+export interface SearchPlan {
+    statement: string;
+    parameters: Record<string, any>;
+}
+
+/**
+ * The full-text search `request` asks of `store`, over the graph named `graph` on a SQL store, as the shared module plans
+ * it: drivine4j's statements, byte for byte. What it warns of is logged. Throws the module's refusal of a query with no
+ * word to look for.
+ */
+export function fullTextSearch(store: SearchStore, graph: string | undefined, request: SearchRequest): SearchPlan {
+    const answer = searchAnswer({ store, ...(graph !== undefined ? { graph: { name: graph } } : {}), search: request });
+    for (const warning of answer.warnings ?? []) {
+        new DrivineLogger('FullTextSearch').warn(warning);
+    }
+    const statement = answer.sql ?? answer.cypher;
+    if (typeof statement !== 'string') {
+        throw new DrivineError(`The full-text search on ${store} gave no statement.`);
+    }
+    return { statement, parameters: decoded(answer.parameters) };
+}
+
+/**
+ * The statement that finds what the graph's catalog records of the full-text index on `label`'s `properties`, as the
+ * shared module writes it: on Postgres a row where its trigram index is made, on Oracle the table its Oracle Text index
+ * is over, and no row where none is made. Undefined on a store that keeps no record of it.
+ */
+export function fullTextIndexLookup(
+    store: SharedStore,
+    graph: string,
+    label: string,
+    properties: string[]
+): SearchPlan | undefined {
+    const answer = searchAnswer({ store, graph: { name: graph }, searchIndex: { label, properties } });
+    return typeof answer.sql === 'string'
+        ? { statement: answer.sql, parameters: decoded(answer.parameters) }
+        : undefined;
+}
+
+interface SearchAnswer {
+    sql?: string | null;
+    cypher?: string;
+    parameters: Record<string, any>;
+    warnings?: string[];
+}
+
+/** The module's answer to a full-text request; its refusal, or its error, thrown. */
+function searchAnswer(request: Record<string, any>): SearchAnswer {
+    const answer = answerOf(compileFunction()(JSON.stringify(request))) as
+        | SearchAnswer
+        | { refusal: string }
+        | { error: string };
+    if ('refusal' in answer) {
+        throw new DrivineError(answer.refusal);
+    }
+    if ('error' in answer) {
+        throw new DrivineError(`The full-text search can't be asked of the shared module: ${answer.error}`);
+    }
+    return answer;
 }
 
 /** The graph as the request has it: Oracle's options only on Oracle, where they mean something. */

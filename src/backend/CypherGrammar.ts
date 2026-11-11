@@ -3,17 +3,6 @@ import { DrivineError } from '@/DrivineError';
 import { itemName } from '@/schema/SchemaSpecs';
 import { quoteString } from '@/backend/Cypher';
 
-/** The full-text index Drivine makes over a label's properties (see fullTextIndex), by the name it gives it. */
-function fullTextIndexName(label: string, properties: string[]): string {
-    return itemName({ kind: 'FULLTEXT', label, properties });
-}
-
-/**
- * The most hits a full-text search asks Memgraph's `text_search` for. Memgraph 3.14 takes 100,000,000 and aborts at
- * 500,000,000; a million is far more than a search can scale in memory, and far below where the server fails.
- */
-export const MEMGRAPH_TEXT_SEARCH_LIMIT_CAP = 1_000_000;
-
 /** The vector index Drivine makes over a label's property (see vectorIndex), by the name it gives it. */
 function vectorIndexName(label: string, property: string): string {
     return itemName({ kind: 'VECTOR', label, properties: [property], dimensions: 1, similarity: 'COSINE' });
@@ -58,6 +47,13 @@ export interface CypherGrammar {
      */
     readonly readsWithoutSnapshot?: boolean;
 
+    /**
+     * The engine the shared module writes a full-text search's head for (see CypherBackend.matching): Neo4j's
+     * `db.index.fulltext.queryNodes` and Memgraph's `text_search.search_all` find the index Drivine makes over a
+     * label's properties by its name, FalkorDB's `db.idx.fulltext.queryNodes` by its label.
+     */
+    readonly searchStore: 'neo4j' | 'memgraph' | 'falkordb';
+
     /** How a vector value is written so the engine's vector index takes it: as it is, or in the engine's own type. */
     vectorValue(expression: string): string;
 
@@ -67,13 +63,6 @@ export interface CypherGrammar {
      * for cosine, 1 / (1 + d²) for euclidean.
      */
     vectorSearch(label: string, property: string, similarity: 'COSINE' | 'EUCLIDEAN'): { call: string; score: string };
-
-    /**
-     * The call that asks the full-text index over a label's properties for nodes matching `$_text`, yielding `node,
-     * score`. Where the engine's call takes a limit, it is asked for no more than `limit` hits, so the index stops
-     * rather than yield hits the search would drop (see CypherBackend.matching).
-     */
-    fullTextSearch(label: string, properties: string[], limit: number): string;
 
     /**
      * A predicate that holds when `pattern` (e.g. `(n)-[:R]->(:T)`) matches at least once.
@@ -131,10 +120,7 @@ export const NEO4J_GRAMMAR: CypherGrammar = {
     keysetNullGuard: true,
     readsWithoutSnapshot: true,
     vectorValue: plainVector,
-    fullTextSearch: (label, properties, limit) =>
-        `CALL db.index.fulltext.queryNodes(${quoteString(
-            fullTextIndexName(label, properties)
-        )}, $_text, {limit: ${limit}}) YIELD node, score`,
+    searchStore: 'neo4j',
     // Neo4j's score is already (1 + cos) / 2, or 1 / (1 + d²).
     vectorSearch: (label, property) => ({
         call: `CALL db.index.vector.queryNodes(${quoteString(
@@ -153,13 +139,10 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     engine: 'Memgraph',
     keysetNullGuard: false,
     vectorValue: plainVector,
-    // Without a limit, text_search yields its best 1,000 hits and no more. A limit far above the cap aborts the server,
-    // however few hits there are: Memgraph allocates it up front (memgraph/memgraph#5200).
-    fullTextSearch: (label, properties, limit) =>
-        `CALL text_search.search_all(${quoteString(fullTextIndexName(label, properties))}, $_text, {limit: ${Math.min(
-            limit,
-            MEMGRAPH_TEXT_SEARCH_LIMIT_CAP
-        )}}) YIELD node, score`,
+    // The module asks text_search for no more than 1,000,000 hits: without a limit it yields its best 1,000, and a limit
+    // far above that aborts the server, however few hits there are, as Memgraph allocates it up front
+    // (memgraph/memgraph#5200).
+    searchStore: 'memgraph',
     // Memgraph's distance is 1 - cos for a cos index, so (1 + cos) / 2 is 1 - distance / 2; for l2sq it is d², so
     // 1 / (1 + d²) is 1 / (1 + distance). Not its similarity: for cos that is the absolute value of 1 - distance, so a
     // cosine of -0.6 would score as 0.6 does, and opposite vectors as equal ones (memgraph/memgraph#5199).
@@ -192,7 +175,7 @@ export const FALKORDB_GRAMMAR: CypherGrammar = {
     // FalkorDB indexes only its own vector type: a list stored as a list is never found by a vector search.
     vectorValue: (expression: string) => `vecf32(${expression})`,
     // One full-text index to a label, found by the label. Its call takes no limit: the search cuts the hits after it.
-    fullTextSearch: (label) => `CALL db.idx.fulltext.queryNodes(${quoteString(label)}, $_text) YIELD node, score`,
+    searchStore: 'falkordb',
     // FalkorDB's score is a distance: 1 - cos, or d.
     vectorSearch: (label, property, similarity) => ({
         call: `CALL db.idx.vector.queryNodes(${quoteString(label)}, ${quoteString(

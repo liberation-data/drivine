@@ -1,4 +1,11 @@
-import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
+import {
+    CascadeDepthCheck,
+    GraphBackend,
+    MatchingSearch,
+    NearestSearch,
+    Page,
+    searchedLabels
+} from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
@@ -22,6 +29,7 @@ import { FragmentBatchStatement, FragmentGroup } from '@/backend/FragmentBatchSt
 import { GroupStatement } from '@/backend/GroupStatement';
 import { GroupQuery } from '@/manager/Groups';
 import { EdgeStatements, MatchedNode } from '@/backend/EdgeStatements';
+import { fullTextSearch, SearchPlan } from '@/cypher/SharedCypherCompiler';
 import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
 
@@ -31,24 +39,19 @@ const STORE_LABEL = 'DrivineStore';
 /** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
 const SCHEMA_MARKER = '_DrivineSchema';
 
-/** How many times its limit a full-text search asks its index for, when something drops hits after the index. */
+/**
+ * How many times its limit a full-text search asks its index for, when something drops hits after the index: the shared
+ * module's `FILTERED_OVER_FETCH`. Where nothing drops a hit after the index, the best `limit` hits are the answer. Where
+ * a filter does, the filter chooses among the over-fetch, so a filter that passes fewer than one in ten of the best hits
+ * can return fewer than `limit` rows while the index holds more that pass it.
+ */
 export const FULL_TEXT_FILTERED_OVER_FETCH = 10;
 
 /**
  * The most hits a full-text search asks its index for, however large its limit: the largest a Java int holds, as
- * drivine4j's limit is one.
+ * drivine4j's limit is one, and the most the shared module's search is asked for.
  */
 export const FULL_TEXT_INDEX_LIMIT_CEILING = 2_147_483_647;
-
-/**
- * How many hits the full-text index may yield to a search that returns `limit` rows. Where nothing drops a hit after
- * the index, the best `limit` hits are the answer. Where a filter does, the index is asked for
- * FULL_TEXT_FILTERED_OVER_FETCH times as many and the filter chooses among them, so a filter that passes fewer than one
- * in ten of the best hits can return fewer than `limit` rows while the index holds more that pass it.
- */
-export function fullTextIndexLimit(limit: number, filtered: boolean): number {
-    return Math.min(filtered ? limit * FULL_TEXT_FILTERED_OVER_FETCH : limit, FULL_TEXT_INDEX_LIMIT_CEILING);
-}
 
 /** What a statement over a fragment calls its node. Filters are written against it. */
 export const NODE_ALIAS = 'n';
@@ -209,35 +212,28 @@ export class CypherBackend implements GraphBackend {
     }
 
     /**
-     * Scaled by the best hit, so the scale is [0, 1] on every engine; a best score of 0 (FalkorDB) gives each 1.
+     * The shared module's head of the search (`fullTextSearch`): the index's `CALL`, the hits checked for the root's every
+     * label (the index is on the first), cut to the best `limit` of them, or ten times as many where something drops a hit
+     * after the index (FULL_TEXT_FILTERED_OVER_FETCH), and each scaled by the best, so the scale is [0, 1] on every
+     * engine; a best score of 0 (FalkorDB) gives each 1. Every hit the cut keeps is collected to find the best, so the cut,
+     * not the limit, is what a search costs, and an engine whose call takes a limit is given it too. The head yields its
+     * rows best first, so a fragment's limit takes no sort of its own.
      *
-     * Every hit is collected to find the best, and each row after carries the collection, so the number of hits, not
-     * the limit, is what a search costs, and a common word matches most of a corpus. So the hits are cut to the best
-     * `fullTextIndexLimit` before they are collected, on every engine, and an engine whose call takes a limit is given
-     * it too. The cut keeps the best score, so the scale is the same as with every hit.
-     *
-     * The cut's sort stays even where the call yields its hits best first: `collect` keeps the order it is given and
-     * `UNWIND` the order of the list, so the rows come out best first, and a fragment's limit takes no sort of its own.
-     *
-     * The index is on the root's first label, so it yields nodes with that label alone, which are not the root's. A
-     * root with more labels has its hits checked for all of them before they are cut or scaled, so the best of the
-     * scale is a hit the search can return, as on a store that narrows by labels first. The check is a `WITH` of its
-     * own: FalkorDB and Memgraph take no `WHERE` before an `ORDER BY` in one.
+     * The query is bound as the module binds it. Its limits are written into the statement, as a vector search's `k` is:
+     * an engine takes only an integer, and a JS number is sent as a float.
      */
     matching(target: TargetModel, search: MatchingSearch): GraphStatement {
-        const indexLimit = fullTextIndexLimit(search.limit, this.filtersAfterSearch(target, search.where));
-        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-        const head = [
-            this.grammar.fullTextSearch(search.label, search.properties, indexLimit),
-            ...(root.labels.length > 1 ? [`WITH node, score WHERE node${labelExpression(root.labels)}`] : []),
-            'WITH node, score',
-            'ORDER BY score DESC',
-            `LIMIT ${indexLimit}`,
-            'WITH collect({node: node, score: score}) AS _hits, max(score) AS _best',
-            'UNWIND _hits AS _hit',
-            `WITH _hit.node AS ${NODE_ALIAS}, CASE WHEN _best > 0 THEN _hit.score / _best ELSE 1.0 END AS _score`
-        ];
-        return this.scored(target, head, search, true);
+        const head = fullTextSearch(this.grammar.searchStore, undefined, {
+            labels: searchedLabels(target, search.label),
+            properties: search.properties,
+            query: search.text,
+            topK: Math.min(search.limit, FULL_TEXT_INDEX_LIMIT_CEILING),
+            filtered: this.filtersAfterSearch(target, search.where),
+            alias: NODE_ALIAS,
+            scoreAlias: '_score'
+        });
+        const written = countsWritten(head);
+        return this.scored(target, [written.text], search, true, written.bindings);
     }
 
     save(
@@ -394,7 +390,8 @@ export class CypherBackend implements GraphBackend {
         target: TargetModel,
         head: string[],
         search: { where?: string; threshold?: boolean; limit?: number; depth?: Record<string, number> },
-        limitFirst: boolean = false
+        limitFirst: boolean = false,
+        bindings: Record<string, any> = {}
     ): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const filters = [
@@ -421,7 +418,8 @@ export class CypherBackend implements GraphBackend {
                 `RETURN {value: ${projection.expression}, score: _score} AS result`,
                 'ORDER BY result.score DESC',
                 ...(early ? [] : trimmed)
-            ].join('\n')
+            ].join('\n'),
+            bindings
         );
     }
 
@@ -476,4 +474,21 @@ export class CypherBackend implements GraphBackend {
         }
         return `${NODE_ALIAS}.${quoteName(model.nodeIdProperty)} = $id`;
     }
+}
+
+/**
+ * A full-text head the shared module wrote, with each whole number it binds, the limits, written into the statement as
+ * its digits, and the rest, the query, left to bind.
+ */
+function countsWritten(head: SearchPlan): { text: string; bindings: Record<string, any> } {
+    const bindings: Record<string, any> = {};
+    const text = head.statement.replace(/\$(_cy_ft[0-9]+)(?![A-Za-z0-9_])/g, (parameter, name: string) => {
+        const value = head.parameters[name];
+        if (typeof value === 'bigint' || (typeof value === 'number' && Number.isInteger(value))) {
+            return String(value);
+        }
+        bindings[name] = value;
+        return parameter;
+    });
+    return { text, bindings };
 }

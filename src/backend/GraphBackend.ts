@@ -14,6 +14,7 @@ import { MatchedNode } from '@/backend/EdgeStatements';
 import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
 import { SchemaItem } from '@/schema/SchemaGrammar';
+import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 
 /**
  * Generates the statements the object manager runs. One backend per engine family: Cypher now, SQL/PGQ later.
@@ -34,7 +35,7 @@ export interface NearestSearch {
     limit?: number;
     depth?: Record<string, number>;
     /**
-     * The table an index made for the search is over, where the store keeps one (see `searchIndexTable`). On Postgres,
+     * The table an index made for the search is over, where the store keeps one (see `vectorIndexTable`). On Postgres,
      * whose index is over the node table, the size of the embeddings the index holds.
      */
     table?: string;
@@ -49,13 +50,19 @@ export interface Page {
     limit?: number;
 }
 
+/** The statement that finds what a store's catalog records of a full-text index, and what its rows say of it. */
+export interface FullTextIndexLookup {
+    statement: GraphStatement;
+    found(rows: any[]): SearchIndex;
+}
+
 export interface MatchingSearch {
     label: string;
     properties: string[];
-    /** The query text, also bound as `$_text`, for a backend that writes its terms into the statement. */
-    text?: string;
-    /** The table an index made for the search is over, where the store keeps one (see `searchIndexTable`). */
-    table?: string;
+    /** The user's query, which the shared module's full-text search reads. */
+    text: string;
+    /** What the store's catalog records of the full-text index, where it keeps a record (see `fullTextIndex`). */
+    index?: SearchIndex;
     where?: string;
     threshold?: boolean;
     /** How many are returned, at most. On a graph engine, also what the hits the index yields are bounded by. */
@@ -217,25 +224,29 @@ export interface GraphBackend {
     nearest(target: TargetModel, search: NearestSearch): GraphStatement;
 
     /**
-     * Loads the nodes matching `$_text` by the full-text index over properties, as fragments or views, each with its
-     * relevance scaled so the best hit is 1, most relevant first. Filters apply after the search; `limit` trims. A
-     * graph engine also cuts the hits the index yields to `limit`, or ten times `limit` where a filter follows (see
-     * fullTextIndexLimit), before it scales them.
+     * Loads the nodes matching the text by the full-text index over properties, as fragments or views, each with its
+     * relevance scaled so the best hit is 1, most relevant first: the shared module's search (`fullTextSearch`), joined
+     * back to the store's own projection. Filters apply after the search; `limit` trims. A graph engine also cuts the hits
+     * the index yields to `limit`, or ten times `limit` where a filter follows (FULL_TEXT_FILTERED_OVER_FETCH), before it
+     * scales them.
      */
     matching(target: TargetModel, search: MatchingSearch): GraphStatement;
 
     /**
-     * Where a store keeps a search index as a table of its own (Oracle): the statement giving that table's name for the
-     * index over the label's properties, one row, or none when the index was not made. Given `dimensions`, a vector
-     * index made for embeddings of another size is taken as not made, where the store can't search it by a vector of
-     * that size. Undefined where the store searches its own index by name.
+     * Where a store keeps a vector index as a table of its own (Oracle), or over its node table (Postgres): the statement
+     * giving that table's name, on Postgres the size of the embeddings the index holds, for the index over the label's
+     * property, one row, or none when the index was not made. Given `dimensions`, an index made for embeddings of another
+     * size is taken as not made, where the store can't search it by a vector of that size. Undefined where the store
+     * searches its own index by name.
      */
-    searchIndexTable?(
-        kind: 'VECTOR' | 'FULLTEXT',
-        label: string,
-        properties: string[],
-        dimensions?: number
-    ): GraphStatement;
+    vectorIndexTable?(label: string, property: string, dimensions?: number): GraphStatement;
+
+    /**
+     * Where a store records its full-text indexes in its catalog (Postgres, Oracle): the shared module's lookup of the
+     * index over the label's properties, and what its rows say of it, for the search (`MatchingSearch.index`). Undefined
+     * where the store searches its own index by name.
+     */
+    fullTextIndex?(label: string, properties: string[]): FullTextIndexLookup;
 
     /** Writes the object as one statement: see SaveStatementBuilder. */
     save(
@@ -254,4 +265,14 @@ export interface GraphBackend {
 
     /** Whether a cause of the failure is the engine turning a statement away for contention. */
     contended(failure: unknown): boolean;
+}
+
+/**
+ * The labels a full-text search's hits must have, as the shared module's search is asked for them: the label of the
+ * index, `label`, first, then the root's others. The hits are narrowed by them before the scale, so the best of it is a
+ * hit the search can return.
+ */
+export function searchedLabels(target: TargetModel, label: string): string[] {
+    const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+    return [label, ...root.labels.filter((it) => it !== label)];
 }

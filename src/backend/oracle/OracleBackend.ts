@@ -1,4 +1,11 @@
-import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
+import {
+    CascadeDepthCheck,
+    FullTextIndexLookup,
+    GraphBackend,
+    MatchingSearch,
+    NearestSearch,
+    Page
+} from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
@@ -12,6 +19,7 @@ import { OracleSearch } from '@/backend/oracle/OracleSearch';
 import { OracleGroups } from '@/backend/oracle/OracleGroups';
 import { recordedAs } from '@/backend/oracle/OracleSchemaGrammar';
 import { catalogProperties } from '@/backend/sql/SqlCatalog';
+import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
@@ -174,18 +182,13 @@ END;`);
     }
 
     /**
-     * The table a search index was made over, recorded as drivine4j records it or as this library did before. Given
-     * `dimensions`, only a vector index made for embeddings of that size: Oracle refuses to measure a vector against an
-     * index of another size (ORA-51808), so a search by it measures every node instead.
+     * The table a vector index was made over, recorded as drivine4j records it or as this library did before. Given
+     * `dimensions`, only an index made for embeddings of that size: Oracle refuses to measure a vector against an index
+     * of another size (ORA-51808), so a search by it measures every node instead.
      */
-    searchIndexTable(
-        kind: 'VECTOR' | 'FULLTEXT',
-        label: string,
-        properties: string[],
-        dimensions?: number
-    ): GraphStatement {
-        const [recorded, earlier] = recordedAs(kind);
-        const sized = kind === 'VECTOR' && dimensions !== undefined;
+    vectorIndexTable(label: string, property: string, dimensions?: number): GraphStatement {
+        const [recorded, earlier] = recordedAs('VECTOR');
+        const sized = dimensions !== undefined;
         return new GraphStatement(
             `SELECT object_name AS "table" FROM ${this.graph.catalog} WHERE kind IN ($kind, $earlier) ` +
                 `AND label = $label AND properties = $properties AND object_name IS NOT NULL` +
@@ -194,10 +197,22 @@ END;`);
                 kind: recorded,
                 earlier,
                 label,
-                properties: catalogProperties(properties),
+                properties: catalogProperties([property]),
                 ...(sized ? { dimensions } : {})
             }
         );
+    }
+
+    /**
+     * The table the Oracle Text index of the full-text index was made over, by the shared module's lookup of the catalog:
+     * one row, or none when it was not made, and the search then scores by BM25 over every node of the label.
+     */
+    fullTextIndex(label: string, properties: string[]): FullTextIndexLookup {
+        const lookup = fullTextIndexLookup('oracle', this.graph.name, label, properties)!;
+        return {
+            statement: new GraphStatement(lookup.statement, lookup.parameters),
+            found: (rows) => (rows.length ? { oracleText: rows[0] } : {})
+        };
     }
 
     nearest(target: TargetModel, search: NearestSearch): GraphStatement {

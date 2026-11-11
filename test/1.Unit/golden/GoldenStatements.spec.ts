@@ -117,9 +117,9 @@ function oracleStatements(): Record<string, string> {
             properties: ['name', 'bio'],
             text: 'graph -relational',
             limit: 10,
-            table: 'drivine_t_Personnamebio_4d5e6f'
+            index: { oracleText: 'drivine_t_Personnamebio_4d5e6f' }
         }).text,
-        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text,
+        'Person.searchIndexTable': backend.vectorIndexTable('Person', 'embedding').text,
         // As loadNearest writes them: by a vector of 3, only embeddings and an index of that size (ORA-51808 otherwise).
         'Person.nearest.sized': backend.nearest(person, {
             label: 'Person',
@@ -138,7 +138,7 @@ function oracleStatements(): Record<string, string> {
             limit: 5,
             dimensions: 3
         }).text,
-        'Person.searchIndexTable.sized': backend.searchIndexTable('VECTOR', 'Person', ['embedding'], 3).text,
+        'Person.searchIndexTable.sized': backend.vectorIndexTable('Person', 'embedding', 3).text,
         ...indexedReads(backend, registry)
     };
 }
@@ -251,9 +251,9 @@ function postgresStatements(): Record<string, string> {
             properties: ['name', 'bio'],
             text: 'graph -relational',
             limit: 10,
-            table: 'drivine_t_Personnamebio_4d5e6f'
+            index: { trigram: true }
         }).text,
-        'Person.searchIndexTable': backend.searchIndexTable('VECTOR', 'Person', ['embedding']).text
+        'Person.searchIndexTable': backend.vectorIndexTable('Person', 'embedding').text
     };
 }
 

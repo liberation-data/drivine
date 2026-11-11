@@ -4,14 +4,12 @@ import {
     FALKORDB_GRAMMAR,
     FULL_TEXT_FILTERED_OVER_FETCH,
     FULL_TEXT_INDEX_LIMIT_CEILING,
-    fullTextIndexLimit,
     FullTextIndex,
     GraphPath,
     GraphRelationship,
     GraphView,
     hop,
     MEMGRAPH_GRAMMAR,
-    MEMGRAPH_TEXT_SEARCH_LIMIT_CAP,
     MatchingSearch,
     ModelRegistry,
     NEO4J_GRAMMAR,
@@ -88,35 +86,41 @@ describe('A full-text search’s index bound', () => {
     const search = (more: Partial<MatchingSearch> = {}): MatchingSearch => ({
         label: 'Article',
         properties: ['body'],
+        text: 'graph',
         limit: 8,
         ...more
     });
     /** The limit the head cuts the hits to, read off the statement. */
     const cutTo = (text: string): number => Number(/ORDER BY score DESC\nLIMIT (\d+)\n/.exec(text)![1]);
 
-    it('should ask Neo4j’s index call for a limit', () => {
-        expect(neo4j.matching(fragment, search()).text).toContain(
-            "CALL db.index.fulltext.queryNodes('Article_body_fulltext', $_text, {limit: 8}) YIELD node, score"
+    it('should ask Neo4j’s index call for a limit, written into the statement, and bind the query', () => {
+        const statement = neo4j.matching(fragment, search());
+        expect(statement.text).toContain(
+            "CALL db.index.fulltext.queryNodes('Article_body_fulltext', $_cy_ft1, {limit: 8})\nYIELD node, score"
         );
+        // A JS number is sent as a float, which no engine takes as a limit: only the query is bound.
+        expect(statement.bindings).toEqual({ _cy_ft1: 'graph' });
     });
 
     it('should ask Memgraph’s index call for a limit, since without one it yields only 1,000 hits', () => {
         const memgraph = new CypherBackend(MEMGRAPH_GRAMMAR);
         expect(memgraph.matching(fragment, search({ limit: 1_100 })).text).toContain(
-            "CALL text_search.search_all('Article_body_fulltext', $_text, {limit: 1100}) YIELD node, score"
+            "CALL text_search.search_all('Article_body_fulltext', $_cy_ft1, " +
+                '{limit: CASE WHEN 1100 < 1000000 THEN 1100 ELSE 1000000 END})\nYIELD node, score'
         );
     });
 
     it('should ask Memgraph’s index for no more than its cap, since a far larger limit aborts the server', () => {
         const memgraph = new CypherBackend(MEMGRAPH_GRAMMAR);
         const text = memgraph.matching(fragment, search({ limit: Number.MAX_SAFE_INTEGER })).text;
-        expect(text).toContain(`$_text, {limit: ${MEMGRAPH_TEXT_SEARCH_LIMIT_CAP}}) YIELD node, score`);
-        expect(MEMGRAPH_TEXT_SEARCH_LIMIT_CAP).toEqual(1_000_000);
+        expect(text).toContain(
+            `$_cy_ft1, {limit: CASE WHEN ${FULL_TEXT_INDEX_LIMIT_CEILING} < 1000000 THEN ${FULL_TEXT_INDEX_LIMIT_CEILING} ELSE 1000000 END})`
+        );
     });
 
     it('should give FalkorDB’s index call no limit, since it takes none', () => {
         const text = new CypherBackend(FALKORDB_GRAMMAR).matching(fragment, search()).text;
-        expect(text).toContain("CALL db.idx.fulltext.queryNodes('Article', $_text) YIELD node, score\n");
+        expect(text).toContain("CALL db.idx.fulltext.queryNodes('Article', $_cy_ft1)\nYIELD node, score\n");
     });
 
     it.each(engines.map((it) => [it.grammar.engine, it]))(
@@ -165,7 +169,7 @@ describe('A full-text search’s index bound', () => {
         (_engine, backend) => {
             const engine = backend as CypherBackend;
             const check =
-                'YIELD node, score\nWITH node, score WHERE node:Article:Reviewed\nWITH node, score\nORDER BY score DESC\nLIMIT 80\n';
+                'YIELD node, score\nWITH node, score WHERE node:`Article`:`Reviewed`\nWITH node, score\nORDER BY score DESC\nLIMIT 80\n';
             for (const target of [
                 { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) },
                 { kind: 'GRAPH_VIEW', model: registry.view(ReviewedArticleWithAuthors) }
@@ -181,15 +185,15 @@ describe('A full-text search’s index bound', () => {
     it.each([
         ['Postgres', new PostgresBackend(new PostgresGraph()), undefined, 'c.labels @> \'["Reviewed"]\''],
         ['Oracle', new OracleBackend(new OracleGraph()), undefined, ',"Reviewed",'],
-        ['Oracle Text', new OracleBackend(new OracleGraph()), 'drivine_t_Article', ',"Reviewed",']
+        ['Oracle Text', new OracleBackend(new OracleGraph()), { oracleText: 'drivine_t_Article' }, ',"Reviewed",']
     ])(
         'should check a root’s every label before scaling the hits on %s (liberation-data/drivine#307)',
-        (_store, backend, table, second) => {
+        (_store, backend, index, second) => {
             for (const target of [
                 { kind: 'NODE_FRAGMENT', model: registry.fragment(ReviewedArticle) },
                 { kind: 'GRAPH_VIEW', model: registry.view(ReviewedArticleWithAuthors) }
             ] as TargetModel[]) {
-                const text = backend.matching(target, search({ text: 'graph', table })).text;
+                const text = backend.matching(target, search({ index })).text;
                 // The hits the scale's MAX() OVER () is taken over, before they are joined to the nodes returned.
                 const scaled = text.slice(text.indexOf('OVER ()'), text.indexOf(') s JOIN'));
                 expect(scaled).toContain(second);
@@ -198,11 +202,18 @@ describe('A full-text search’s index bound', () => {
     );
 
     it('should clamp the over-fetch, and ask for no more than the ceiling however large the limit', () => {
-        expect(fullTextIndexLimit(Number.MAX_SAFE_INTEGER, true)).toEqual(FULL_TEXT_INDEX_LIMIT_CEILING);
-        expect(fullTextIndexLimit(Number.MAX_SAFE_INTEGER, false)).toEqual(FULL_TEXT_INDEX_LIMIT_CEILING);
-        expect(fullTextIndexLimit(FULL_TEXT_INDEX_LIMIT_CEILING / 10, true)).toEqual(FULL_TEXT_INDEX_LIMIT_CEILING);
-        expect(fullTextIndexLimit(3, true)).toEqual(30);
-        const text = neo4j.matching(fragment, search({ limit: Number.MAX_SAFE_INTEGER, where: 'n.x = 1' })).text;
+        expect(FULL_TEXT_INDEX_LIMIT_CEILING).toEqual(2_147_483_647);
+        for (const where of [undefined, 'n.x = 1']) {
+            expect(cutTo(neo4j.matching(fragment, search({ limit: Number.MAX_SAFE_INTEGER, where })).text)).toEqual(
+                FULL_TEXT_INDEX_LIMIT_CEILING
+            );
+        }
+        const where = 'n.x = 1';
+        expect(cutTo(neo4j.matching(fragment, search({ limit: 214_748_365, where })).text)).toEqual(
+            FULL_TEXT_INDEX_LIMIT_CEILING
+        );
+        expect(cutTo(neo4j.matching(fragment, search({ limit: 3, where })).text)).toEqual(30);
+        const text = neo4j.matching(fragment, search({ limit: Number.MAX_SAFE_INTEGER, where })).text;
         expect(text).toContain('{limit: 2147483647}');
         expect(text).toContain(`LIMIT ${Number.MAX_SAFE_INTEGER}\nRETURN`);
     });
@@ -211,7 +222,7 @@ describe('A full-text search’s index bound', () => {
         // The head yields its rows best first. A sort between the filter and the limit would hold each surviving row,
         // and each carries the hits the head collected.
         const text = neo4j.matching(fragment, search({ where: 'n.title = $t' })).text;
-        const tail = text.substring(text.indexOf('UNWIND _hits AS _hit'));
+        const tail = text.substring(text.indexOf('UNWIND _ftResults AS _ftRow'));
         expect(tail).toContain(
             'MATCH (n) WHERE n:Article AND (n.title = $t)\nWITH n, _score\nLIMIT 8\nRETURN {value: '
         );

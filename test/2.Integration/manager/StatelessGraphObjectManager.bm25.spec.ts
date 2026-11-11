@@ -10,14 +10,18 @@ import {
     QuerySpecification,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
-import { B, K1, PREFIX } from '@/backend/sql/Bm25';
 import { allStores, clearLabels, closeGraphEngines, persistenceManagerFor } from '../support/GraphEngines';
 
 // Schema DDL on Neo4j waits on schema locks other suites hold while they run in parallel.
 jest.setTimeout(60_000);
 
+/** Lucene's BM25 constants, which the shared module's search scores by: k1, b, and what a prefix term adds, k1 + 1. */
+const K1 = 1.2;
+const B = 0.75;
+const PREFIX = K1 + 1;
+
 /**
- * Full-text search scores by BM25 on every store (drivine4j#604): Lucene's, on Neo4j, and bm25Ranked on the SQL stores
+ * Full-text search scores by BM25 on every store (drivine4j#604): Lucene's, on Neo4j, and the shared module's on the SQL stores
  * without a text index of their own. A rare term outweighs a common one, a short text outranks a long one that holds a
  * term as often, and a term's count adds less each time it is counted again. Memgraph and FalkorDB score by their own
  * measures, and are left out.
@@ -148,7 +152,7 @@ describe.each(allStores().filter((it) => SCORED.includes(it.type)))('BM25 full-t
         expect(hits[0].score).toBeCloseTo(1, 9);
         expect(hits.every((it) => it.score > 0 && it.score <= 1)).toBe(true);
         if (engine.type !== DatabaseType.NEO4J) {
-            // bm25Ranked's own figure, lengths in characters (Lucene's are in words): "graph" 5 times in 45 characters, each
+            // The module's own figure, lengths in characters (Lucene's are in words): "graph" 5 times in 45 characters, each
             // counted though written again at once (drivine4j#607), against "graph" and "soup" once each in 15, over 33 texts
             // of 940 characters, "graph" in 22 and "soup" in 1.
             expect(hits.find((it) => it.value.id === 'many')!.score).toBeCloseTo(0.1541609729904888, 9);
