@@ -83,6 +83,10 @@ cases:
       - cypher: "MERGE (t:CyWrite {id: $task.id}) SET t += $task RETURN properties(t)"
         parameters: {task: {id: "t1", title: "Written", done: true}}
         rows: [{id: "t1", title: "Written", tags: ["a"], done: true}]
+      # Read on its own, the node the MERGE updated in place: Oracle keeps it as OSON version 2, which a thin driver reads
+      # only where the host asks for oracleReencodeJson (#165).
+      - cypher: "MATCH (t:CyWrite) RETURN properties(t)"
+        rows: [{id: "t1", title: "Written", tags: ["a"], done: true}]
       - cypher: "MATCH (t:CyWrite) RETURN count(t)"
         rows: [1]
 
@@ -1415,3 +1419,214 @@ cases:
         only: [neo4j, sql]
         cypher: "MATCH (a:CyWrite {k: 1}) SET a.s = size(a.name), a.c = 'ab' CONTAINS a.name RETURN [a.s, a.c]"
         rows: [[0, true]]
+
+  - name: "A walk of 1,100 hops"
+    description: "A variable-length relationship or a quantified path pattern walks a chain of 1,100 relationships, its path's nodes and relationships each in order. Oracle held a walk's ids as text of 4,000 bytes at most, and failed past them (ORA-01489, drivine4j#177)."
+    steps:
+      - note: "1,100 hops: a walk's ids pass 4,000 bytes as text, even where the ids start from 1."
+        cypher: "UNWIND range(0, 1100) AS i CREATE (:CyWrite {i: i})"
+      - note: "Each node linked to the next, by its place in a list, not by a probe of every node for each."
+        cypher: "MATCH (n:CyWrite) WITH n ORDER BY n.i WITH collect(n) AS ns UNWIND range(1, size(ns) - 1) AS k WITH ns[k - 1] AS a, ns[k] AS b CREATE (a)-[:NEXT]->(b) RETURN count(*)"
+        rows: [1100]
+      - cypher: "MATCH p = (:CyWrite {i: 0})-[rs:NEXT*]->(:CyWrite {i: 1100}) RETURN [length(p), size(nodes(p)), size(relationships(p)), size(rs), head(nodes(p)).i, last(nodes(p)).i]"
+        rows: [[1100, 1101, 1100, 1100, 0, 1100]]
+      - note: "Two equal paths are one, in a DISTINCT and as a key grouped by: on Oracle their lists are JSON lists, compared as JSON."
+        cypher: "MATCH p = (:CyWrite {i: 0})-[:NEXT*]->(:CyWrite {i: 1100}) UNWIND [1, 2] AS k WITH DISTINCT p UNWIND [1, 2] AS j WITH p, count(*) AS c RETURN [length(p), c]"
+        rows: [[1100, 2]]
+      - cypher: "MATCH p = (b:CyWrite {i: 1100})<-[:NEXT*]-(:CyWrite {i: 0}) RETURN [length(p), head(nodes(p)).i, last(nodes(p)).i, size([n IN nodes(p) WHERE n.i % 2 = 0])]"
+        rows: [[1100, 1100, 0, 551]]
+      - cypher: "MATCH (:CyWrite {i: 0}) ((x)-[:NEXT]->(y))+ (b:CyWrite {i: 1100}) RETURN [size(x), size(y), head(x).i, last(y).i]"
+        rows: [[1100, 1100, 0, 1100]]
+      - note: "A write over the walk, its path read back from the row the write carries it in."
+        cypher: "MATCH p = (:CyWrite {i: 0})-[:NEXT*]->(b:CyWrite {i: 1100}) SET b.hops = length(p) RETURN [b.hops, size(nodes(p)), size(relationships(p)), head(nodes(p)).i, last(nodes(p)).i]"
+        rows: [[1100, 1101, 1100, 0, 1100]]
+      - note: "Bounds either side of the longest walk Oracle holds as text: 136 hops."
+        cypher: "MATCH p = (:CyWrite {i: 0})-[:NEXT*..136]->(b) RETURN [count(p), max(length(p))]"
+        rows: [[136, 136]]
+      - cypher: "MATCH p = (:CyWrite {i: 0})-[:NEXT*..137]->(b) RETURN [count(p), max(length(p))]"
+        rows: [[137, 137]]
+
+  - name: "A UNION keeps different nodes with equal properties apart"
+    description: "A UNION keeps each row once as Cypher compares it: two nodes are one row only where they are the same node, not where their properties are equal (drivine4j#213)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyWrite:A), (:CyWrite:B), (:CyWrite:C {x: 1}), (:CyWrite:D {x: 1})"
+      - note: "openCypher's TCK, Union1 #4."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:A) RETURN a AS n UNION MATCH (b:B) RETURN b AS n"
+        rows: [{}, {}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n UNION MATCH (d:D) RETURN d AS n"
+        rows: [{x: 1}, {x: 1}]
+      - note: "In a row of several items."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n, c.x AS k UNION MATCH (d:D) RETURN d AS n, d.x AS k"
+        rows: [[{x: 1}, 1], [{x: 1}, 1]]
+      - note: "A node is no map of its properties."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n UNION RETURN {x: 1} AS n"
+        rows: [{x: 1}, {x: 1}]
+      - note: "The same node from each query is one row."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n UNION MATCH (c:C) RETURN c AS n"
+        rows: [{x: 1}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) WHERE n:A OR n:B RETURN n UNION MATCH (n:A) RETURN n"
+        rows: [{}, {}]
+      - note: "And where one query gives it by a function the SQL stores keep no identity through."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n UNION MATCH (c:C) RETURN head(collect(c)) AS n"
+        rows: [{x: 1}]
+      - note: "A map projection holds no node."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n UNION MATCH (c:C) RETURN c {.x} AS n"
+        rows: [{x: 1}, {x: 1}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN c AS n, 1 AS k UNION RETURN {x: 1} AS n, 1 AS k"
+        rows: [[{x: 1}, 1], [{x: 1}, 1]]
+      - note: "A null node, as OPTIONAL MATCH finds none, is the one null."
+        only: [neo4j, sql]
+        cypher: "OPTIONAL MATCH (z:Zed) RETURN z AS n UNION RETURN null AS n"
+        rows: [null]
+      - only: [neo4j, sql]
+        cypher: "OPTIONAL MATCH (z:Zed) RETURN z AS n, 1 AS k UNION RETURN null AS n, 1 AS k"
+        rows: [[null, 1]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:A) RETURN a AS n UNION ALL MATCH (a:A) RETURN a AS n"
+        rows: [{}, {}]
+      - note: "As DISTINCT keeps them."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) WHERE n:C OR n:D RETURN DISTINCT n"
+        rows: [{x: 1}, {x: 1}]
+
+  - name: "A UNION keeps different relationships with equal properties apart"
+    description: "A UNION keeps two relationships as one row only where they are the same relationship, not where their properties are equal (drivine4j#213)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (a:CyWrite:A)-[:R]->(b:CyWrite:B), (a)-[:S]->(b), (a)-[:T {w: 1}]->(b), (a)-[:U {w: 1}]->(b)"
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[r:R]->() RETURN r AS e UNION MATCH ()-[s:S]->() RETURN s AS e"
+        rows: [{}, {}]
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[t:T]->() RETURN t AS e UNION MATCH ()-[u:U]->() RETURN u AS e"
+        rows: [{w: 1}, {w: 1}]
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[t:T]->() RETURN t AS e UNION MATCH ()-[t:T]->() RETURN t AS e"
+        rows: [{w: 1}]
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[t:T]->() RETURN t AS e UNION ALL MATCH ()-[t:T]->() RETURN t AS e"
+        rows: [{w: 1}, {w: 1}]
+
+  - name: "A UNION keeps maps and lists holding different entities apart"
+    description: "A UNION compares a map or a list that holds a node or a relationship by what it holds, as Cypher compares them, not by their properties (drivine4j#213)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (a:CyWrite:A)-[:R]->(b:CyWrite:B), (a)-[:S]->(b), (:CyWrite:C {x: 1}), (:CyWrite:D {x: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:A) RETURN {x: a} AS m UNION MATCH (b:B) RETURN {x: b} AS m"
+        rows: [{x: {}}, {x: {}}]
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[r:R]->() RETURN {x: r} AS m UNION MATCH ()-[s:S]->() RETURN {x: s} AS m"
+        rows: [{x: {}}, {x: {}}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN {k: 1, x: c} AS m UNION MATCH (d:D) RETURN {k: 1, x: d} AS m"
+        rows: [{k: 1, x: {x: 1}}, {k: 1, x: {x: 1}}]
+      - note: "Nested in maps and lists."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN [{x: [c]}] AS m UNION MATCH (d:D) RETURN [{x: [d]}] AS m"
+        rows: [[{x: [{x: 1}]}], [{x: [{x: 1}]}]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:A) RETURN [a] AS m UNION MATCH (b:B) RETURN [b] AS m"
+        rows: [[{}], [{}]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN collect(c) AS m UNION MATCH (d:D) RETURN collect(d) AS m"
+        rows: [[{x: 1}], [{x: 1}]]
+      - note: "A map holding a node is no map holding its properties."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN {x: c} AS m UNION RETURN {x: {x: 1}} AS m"
+        rows: [{x: {x: 1}}, {x: {x: 1}}]
+      - note: "A map holding the same node from each query is one row."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN {x: c} AS m UNION MATCH (c:C) RETURN {x: c} AS m"
+        rows: [{x: {x: 1}}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN [{x: [c]}] AS m UNION MATCH (c:C) RETURN [{x: [c]}] AS m"
+        rows: [[{x: [{x: 1}]}]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN {x: c} AS m UNION ALL MATCH (c:C) RETURN {x: c} AS m"
+        rows: [{x: {x: 1}}, {x: {x: 1}}]
+
+  - name: "A UNION in CALL keeps different entities apart"
+    description: "A UNION in CALL { … }, importing variables or not, keeps two nodes or relationships, bare or in a map, as one row only where they are the same (drivine4j#213)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (a:CyWrite:A)-[:R]->(b:CyWrite:B), (a)-[:S]->(b), (:CyWrite:C {x: 1}), (:CyWrite:D {x: 1})"
+      - only: [neo4j, sql]
+        cypher: "CALL { MATCH (a:A) RETURN a AS n UNION MATCH (b:B) RETURN b AS n } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "CALL { MATCH (c:C) RETURN {x: c} AS m UNION MATCH (d:D) RETURN {x: d} AS m } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C), (d:D) CALL (c, d) { RETURN c AS n UNION RETURN d AS n } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C), (d:D) CALL (c, d) { RETURN {x: c} AS m UNION RETURN {x: d} AS m } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[r:R]->(), ()-[s:S]->() CALL (r, s) { RETURN {x: r} AS m UNION RETURN {x: s} AS m } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) CALL (c) { RETURN c AS n UNION RETURN c AS n } RETURN count(*)"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) CALL (c) { RETURN {x: c} AS m UNION RETURN {x: c} AS m } RETURN count(*)"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) CALL (c) { RETURN {x: c} AS m UNION ALL RETURN {x: c} AS m } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) CALL (c) { RETURN {x: c} AS m UNION RETURN {x: head(collect(c))} AS m } RETURN count(*)"
+        rows: [1]
+      - note: "A query whose map holds no node beside one whose map holds one."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) CALL (c) { RETURN {x: c} AS m UNION RETURN {x: {x: 1}} AS m } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C), (d:D) CALL (c, d) { RETURN {x: c} AS m UNION RETURN {x: d} AS m UNION RETURN {x: 1} AS m } RETURN count(*)"
+        rows: [3]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) CALL (c) { RETURN {x: 1} AS m UNION RETURN {x: c} AS m UNION RETURN {x: 1} AS m } RETURN count(*)"
+        rows: [2]
+      - note: "Compared by identity after the CALL too."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C), (d:D) CALL (c, d) { RETURN {x: c} AS m UNION ALL RETURN {x: d} AS m UNION ALL RETURN {x: {x: 1}} AS m UNION ALL RETURN {x: c} AS m } RETURN count(DISTINCT m)"
+        rows: [3]
+
+  - name: "A UNION in COUNT keeps different entities apart"
+    description: "A UNION in a COUNT { … } keeps two nodes or relationships, bare or in a map, as one row only where they are the same (drivine4j#213)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (a:CyWrite:A)-[:R]->(b:CyWrite:B), (a)-[:S]->(b), (:CyWrite:C {x: 1}), (:CyWrite:D {x: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C), (d:D) RETURN COUNT { RETURN c AS n UNION RETURN d AS n }"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C), (d:D) RETURN COUNT { RETURN {x: c} AS n UNION RETURN {x: d} AS n }"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH ()-[r:R]->(), ()-[s:S]->() RETURN COUNT { RETURN r AS e UNION RETURN s AS e }"
+        rows: [2]
+      - note: "The same node from each query, and from two rows of one, is one row."
+        only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN COUNT { RETURN c AS n UNION RETURN c AS n }"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:A) RETURN COUNT { MATCH (a)-->(b) RETURN b AS n UNION MATCH (a)-[:R]->(b) RETURN b AS n }"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN COUNT { RETURN c AS n UNION RETURN coalesce(c, c) AS n }"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "MATCH (c:C) RETURN COUNT { RETURN c AS n UNION ALL RETURN c AS n }"
+        rows: [2]

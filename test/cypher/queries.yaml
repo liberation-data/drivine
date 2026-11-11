@@ -1732,6 +1732,23 @@ cases:
         cypher: "RETURN 1 AS v UNION RETURN 2 AS w"
         error: "Each query of a UNION returns the same names, as in Cypher: (v) and (w)."
 
+  - name: "UNION of different relationships with equal properties"
+    description: "A UNION keeps two relationships, bare or in a map, as one row only where they are the same relationship, not where their properties are equal (drivine4j#213)."
+    steps:
+      - note: "Neither KNOWS has a property."
+        only: [neo4j, sql]
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->() RETURN {x: r1} AS m UNION MATCH (:Person {name: 'Laurence'})-[r2:KNOWS]->() RETURN {x: r2} AS m"
+        rows: [{x: {}}, {x: {}}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() CALL (r1, r2) { RETURN {x: r1} AS m UNION RETURN {x: r2} AS m } RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN r UNION MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix Reloaded'}) RETURN r"
+        rows: [{role: "Neo"}, {role: "Neo"}]
+      - only: [neo4j, sql]
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN {role: 'Neo'}]->() RETURN r UNION MATCH (:Person {name: 'Keanu'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN r"
+        rows: [{role: "Neo"}, {role: "Neo"}]
+
   - name: "range and reduce"
     description: "range() gives whole numbers, and reduce() folds a list from its first item."
     steps:

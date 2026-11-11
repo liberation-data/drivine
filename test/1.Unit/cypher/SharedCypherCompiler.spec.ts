@@ -169,6 +169,16 @@ describe('SharedCypherCompiler', () => {
         expect(STORES.map(rows)).toEqual(['one', 'one', 'one']);
     });
 
+    it('encodes each value Oracle returns again (oracleReencodeJson), reading or writing, and nothing elsewhere', () => {
+        const sql = (store: SharedStore, cypher: string): string =>
+            new SharedCypherCompiler(store, { name: 'g' }).compile(cypher).sql;
+        for (const cypher of ['MATCH (n:A) RETURN n', 'MERGE (n:A {id: 1}) SET n.x = 2 RETURN properties(n)']) {
+            expect(sql('oracle', cypher)).toContain(", KEEP '$') AS result");
+            expect(sql('postgres', cypher)).not.toContain('KEEP');
+            expect(sql('sqlite', cypher)).not.toContain('KEEP');
+        }
+    });
+
     it('says whether it was given NaN or an infinity', () => {
         const compiler = new SharedCypherCompiler('postgres', { name: 'g' });
         expect(compiler.compile('RETURN $x AS x', { x: NaN }).nonFinite).toBe(true);
