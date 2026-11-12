@@ -20,6 +20,7 @@ import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 
 /** How long a transaction may hold the file's write lock before its end is warned of: drivine4j's five seconds. */
 export const LONG_LOCK_MILLIS = 5_000;
@@ -89,7 +90,10 @@ export class SqliteConnection implements Connection {
         );
         new StatementLogger(this.sessionId()).log(spec, hrStart);
         // Read into arrays of this realm: the driver's are its own, which a test's deep equality tells apart.
-        const read = Array.from(rows, compiled.statement.startsWith(JSON_ROWS) ? jsonRow : (it) => ({ ...it }));
+        // A compiled Cypher statement's whole numbers past 2^53 are kept as bigints; the object manager's own JSON rows,
+        // as Postgres's, give them as numbers, which it can save again.
+        const json = compiled.statement.startsWith(JSON_ROWS);
+        const read = Array.from(rows, (it) => (json ? jsonRow(it, cypher !== undefined) : { ...it }));
         return this.resultMapper.mapQueryResults<T>(cypher ? read.map((it) => it.result) : read, finalizedSpec);
     }
 
@@ -102,7 +106,7 @@ export class SqliteConnection implements Connection {
             this.sessionId(),
             finalizedSpec,
             rows,
-            json ? jsonRow : (it) => ({ ...it }),
+            json ? (it) => jsonRow(it, false) : (it) => ({ ...it }),
             this.resultMapper
         );
         this.cursors.push(cursor);
@@ -215,19 +219,20 @@ function bound(parameters: Record<string, SqliteValue> | SqliteValue[]): any[] {
  * as NaN where a value's text holds it, as drivine4j's `JdbcResultMapper.sqliteRows` reads it. A statement given no NaN
  * can still work one out, as `∞ + -∞`.
  */
-function jsonRow(row: Record<string, SqliteValue>): Record<string, any> {
+function jsonRow(row: Record<string, SqliteValue>, exact: boolean): Record<string, any> {
     return Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key, typeof value === 'string' ? jsonValue(value) : value])
+        Object.entries(row).map(([key, value]) => [key, typeof value === 'string' ? jsonValue(value, exact) : value])
     );
 }
 
 /**
- * The JSON `text` as the value it is, with each map of {@link NAN_TEXT} in it NaN where the text holds one. A text value
+ * The JSON `text` as the value it is, a whole number past 2^53 a `bigint` of its digits where `exact` (see
+ * parseExactIntegers), and each map of {@link NAN_TEXT} in it NaN where the text holds one. A text value
  * that holds those characters holds each quote escaped, so only a map holds them: the look is a cheap pass over a row
  * that holds no NaN, which most do, and {@link withNaN} takes only the exact map.
  */
-function jsonValue(text: string): any {
-    const value = JSON.parse(text);
+function jsonValue(text: string, exact: boolean): any {
+    const value = exact ? parseExactIntegers(text) : JSON.parse(text);
     return text.includes(NAN_TEXT) ? withNaN(value) : value;
 }
 

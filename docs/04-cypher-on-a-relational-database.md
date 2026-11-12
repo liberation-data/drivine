@@ -150,6 +150,8 @@ documents them; the ones you're likeliest to meet:
 
 - A node in a row is its properties.
 - A temporal value is its ISO 8601 text.
+- A whole number past 2^53 comes back as a `bigint` of its digits on Postgres and SQLite, and from a write on Oracle,
+  as you bind one; a smaller one is a number.
 - Postgres works float arithmetic, `sum()` and `avg()` out in exact decimal, so it is more accurate: `0.1 + 0.2`
   is `0.3` there, where doubles give `0.30000000000000004`. A result differs from Neo4j's only around its 16th
   significant digit, and still comes back as a float.

@@ -1,3 +1,5 @@
+import { ReviverContext } from '@/utils/ExactIntegers';
+
 /**
  * JSON read and written with each number as the text it is written as, so a property no write touches keeps its text
  * (`1.50` stays `1.50`, and a whole number past 2^53 keeps its digits), as drivine4j's write function keeps it. A number
@@ -30,11 +32,6 @@ export class ExactNumber {
     toString(): string {
         return this.text;
     }
-}
-
-/** What JSON.parse hands a reviver beside the value, where it gives the source text. */
-interface ReviverContext {
-    source?: string;
 }
 
 const json = JSON as unknown as {

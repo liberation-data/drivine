@@ -38,3 +38,19 @@ describe('The Cypher spec runner reads {$float: …}', () => {
         await expect(stepGiving([[0, Infinity, -Infinity, 1.5]])).rejects.toThrow(/Expected/);
     });
 });
+
+/** A whole number past 2^53 is a bigint, in the spec's rows and in a SQL store's (liberation-data/drivine#735). */
+describe('The Cypher spec runner compares a whole number past 2^53', () => {
+    const big = BigInt('9007199254740993');
+
+    it('by its digits, in rows whose order does not count', async () => {
+        const cypherCase: CypherCase = {
+            name: 'A big runner case',
+            steps: [{ cypher: 'UNWIND $p AS x RETURN x', rows: [big, BigInt(1)], unordered: true }]
+        };
+        const run = async (rows: any[]): Promise<void> =>
+            await check('queries.yaml', cypherCase, 0, 'sqlite', async () => await Promise.resolve(rows));
+        await run([1, big]);
+        await expect(run([1, big - BigInt(1)])).rejects.toThrow(/Expected: \["9007199254740993",1\]/);
+    });
+});

@@ -379,6 +379,11 @@ const names = await pm.query<string>(
 - A row is one value: the one item a `RETURN` has, or a list of its items when it has more. A node is its properties,
   and so is each node or relationship of a list of them (`collect(n)`, `nodes(p)`); compared, indexed, searched with
   `IN` or iterated, its items are the nodes themselves, so two with equal properties differ.
+- A whole number past 2^53 in a row, within a long's range, is a `bigint` of its digits on Postgres and SQLite, where a
+  JavaScript number would round it ([#735](https://github.com/liberation-data/drivine/issues/735)); a smaller one is a
+  number. On Oracle a read still gives it rounded ([#737](https://github.com/liberation-data/drivine/issues/737)). The
+  digits are read from the source text `JSON.parse` hands its reviver (Node 21 or later); without it, it is rounded.
+  The object manager still loads a property past 2^53 as a number.
 - A statement that writes (`CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`, `FOREACH`) runs as one statement, applied whole
   or not at all: an anonymous PL/SQL block on Oracle, and a function of the session's own (`pg_temp`) on Postgres.
 - Variable-length relationships (`-[:R*1..3]->`, `-[:R]->{1,3}`) and quantified path patterns

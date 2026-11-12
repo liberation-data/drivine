@@ -1,5 +1,6 @@
 import { isInt } from '@/utils/Integers';
 import { nodeRequire } from '@/utils/NodeRequire';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { DrivineError } from '@/DrivineError';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
 import { CypherFloat } from '@/cypher/CypherFloat';
@@ -232,14 +233,7 @@ interface Answer {
 
 /** The compiler's answer, read: a whole number past 2^53 as a `bigint`, as Drivine binds a count of the Neo4j driver's Integer. */
 function answerOf(text: string): Answer | { refusal: string } | { error: string } {
-    return JSON.parse(text, (_key, value, context?: { source?: string }) =>
-        typeof value === 'number' &&
-        !Number.isSafeInteger(value) &&
-        context?.source &&
-        /^-?[0-9]+$/.test(context.source)
-            ? BigInt(context.source)
-            : value
-    );
+    return parseExactIntegers(text);
 }
 
 /**

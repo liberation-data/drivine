@@ -113,13 +113,23 @@ const compiled = (nonFinite: boolean): CompiledSpecification<unknown> => ({
     nonFinite
 });
 
-/** Which statements a Postgres connection reads for NaN: those that say they were given one, alone. */
+/**
+ * Which statements a Postgres connection reads for NaN: those that say they were given one, alone. Every compiled
+ * statement's JSON is read with its whole numbers past 2^53 kept (liberation-data/drivine#735).
+ */
 describe('A Postgres connection reading NaN', () => {
-    it('should run a statement not given NaN as it runs any, with no types of its own', async () => {
+    it('should run a statement not given NaN with types that keep its whole numbers, and read no NaN', async () => {
         const it = client();
         const rows = await compiledAs(new PostgresConnection(it as any, new PostgresResultMapper()), compiled(false));
         expect(rows).toEqual([1]);
-        expect(it.query.mock.calls).toEqual([['SELECT 0'], ['SELECT $1 AS result', [2]]]);
+        expect(it.query.mock.calls[0]).toEqual(['SELECT 0']);
+        const [config] = it.query.mock.calls[1];
+        expect(config).toMatchObject({ text: 'SELECT $1 AS result', values: [2] });
+        const read = config.types.getTypeParser(3802, 'text');
+        expect(read('[9007199254740993, 2.5, 100000000000000000000]')).toEqual([BigInt('9007199254740993'), 2.5, 1e20]);
+        expect(config.types.getTypeParser(114, 'text')('[9007199254740993]')).toEqual([BigInt('9007199254740993')]);
+        expect(read(`${NAN}`)).not.toBeNaN();
+        expect(config.types.getTypeParser(25, 'text')).toBe(it.getTypeParser.mock.results[0].value);
     });
 
     it('should run a statement given NaN with the types that read it, after its setup', async () => {
@@ -132,10 +142,9 @@ describe('A Postgres connection reading NaN', () => {
         expect(config.types.getTypeParser(3802, 'text')(`${NAN}`)).toBeNaN();
     });
 
-    it("should run a Cypher statement compiled by Drivine's own compiler, and SQL, with no types of their own", async () => {
+    it('should run SQL as it runs any, with no types of its own', async () => {
         const it = client();
         const connection = new PostgresConnection(it as any, new PostgresResultMapper());
-        await connection.query(new QuerySpecification({ text: 'RETURN 1 AS x', language: 'CYPHER' }));
         await connection.query(new QuerySpecification('SELECT 1'));
         for (const call of it.query.mock.calls) {
             expect(typeof call[0]).toBe('string');

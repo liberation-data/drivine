@@ -14,6 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -145,7 +146,8 @@ export class OracleConnection implements Connection {
             keepInStmtCache: !cypher
         });
         new StatementLogger(this.sessionId()).log(spec, hrStart);
-        const rows = result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined);
+        const rows =
+            result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined, cypher !== undefined);
         const returned = cypher && !result.rows ? returnedRows(rows, cypher.rows) : rows;
         return this.resultMapper.mapQueryResults<T>(returned, finalized);
     }
@@ -184,8 +186,9 @@ function withFloats(value: any): any {
     const keys = Object.keys(value);
     if (keys.length === 1 && keys[0] === '$numberDouble') {
         const number = value.$numberDouble;
-        if (typeof number === 'number') {
-            return number;
+        // A whole one past 2^53 is read as a bigint of its digits (see implicitRows): it is a float all the same.
+        if (typeof number === 'number' || typeof number === 'bigint') {
+            return Number(number);
         }
         if (NON_FINITE.has(number)) {
             return NON_FINITE.get(number);
@@ -195,16 +198,18 @@ function withFloats(value: any): any {
 }
 
 /**
- * The rows a PL/SQL block returned. A block returns JSON as text, in a column named `<name>:json`, which is parsed here
- * and named `<name>`: in thin mode, a returned result set with a JSON column gives only its prefetched rows
- * (oracle/node-oracledb#1795, 7.0.1 and 26.0.0 on Oracle 23.26).
+ * The rows a PL/SQL block returned. A block returns JSON as text, in a column named `<name>:json`, which is parsed here,
+ * where `exact` each whole number past 2^53 a `bigint` (see parseExactIntegers), and named `<name>`: in thin mode, a
+ * returned result set with a JSON column gives only its prefetched rows (oracle/node-oracledb#1795, 7.0.1 and 26.0.0
+ * on Oracle 23.26).
  */
-function implicitRows(rows: any[] | undefined): any[] {
+function implicitRows(rows: any[] | undefined, exact: boolean): any[] {
+    const parse = exact ? parseExactIntegers : JSON.parse;
     return (rows ?? []).map((row) => {
         const out: Record<string, any> = {};
         for (const [key, value] of Object.entries(row)) {
             if (key.endsWith(':json')) {
-                out[key.slice(0, -':json'.length)] = value == null ? value : JSON.parse(value as string);
+                out[key.slice(0, -':json'.length)] = value == null ? value : parse(value as string);
             } else {
                 out[key] = value;
             }

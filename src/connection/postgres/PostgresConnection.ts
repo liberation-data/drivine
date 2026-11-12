@@ -9,7 +9,7 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { DrivineLogger } from '@/logger';
 import { PostgresSpecCompiler } from '@/connection/postgres/PostgresSpecCompiler';
 import { CompiledSpecification, compiledSpecification } from '@/cypher/CompiledSpecification';
-import { nonFiniteTypes, TypeParsers } from '@/connection/postgres/PostgresNonFinite';
+import { nonFiniteTypes, exactIntegerTypes, TypeParsers } from '@/connection/postgres/PostgresNonFinite';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 
@@ -97,8 +97,10 @@ export class PostgresConnection implements Connection {
         const compiledSpec = new PostgresSpecCompiler(finalizedSpec).compile();
         const hrStart = timerStart();
         const logger = new StatementLogger(this.sessionId());
-        // Before anything runs: where the stand-ins can't be read, nothing is.
-        const types = cypher?.nonFinite ? nonFiniteTypes(this.client as unknown as TypeParsers) : undefined;
+        // Before anything runs: where the stand-ins can't be read, nothing is. A compiled statement's JSON is read with
+        // its whole numbers past 2^53 kept, NaN and the infinities too where it is given them.
+        const parsers = this.client as unknown as TypeParsers;
+        const types = cypher ? (cypher.nonFinite ? nonFiniteTypes(parsers) : exactIntegerTypes(parsers)) : undefined;
         for (const statement of cypher?.setup ?? []) {
             await this.client.query(statement);
         }
