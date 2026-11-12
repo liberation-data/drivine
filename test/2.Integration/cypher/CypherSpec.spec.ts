@@ -1117,106 +1117,87 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             await clear();
         });
 
-        // On Oracle an empty text looked for in one past 32 KB gives true here, and null in drivine4j, for the same SQL (#697).
-        (store.type === DatabaseType.ORACLE ? it.failing : it)(
-            'CONTAINS finds a text past 32 KB in a text of any length, given, stored, on several rows and in a write',
-            async () => {
-                // On Oracle INSTR refuses to look for a text past 32,767 UTF-16 units (ORA-22828, #457). Each text is looked
-                // for as a parameter, as a property on the node beside it, and of each node in a cross join, three times on
-                // one session. drivine4j's test of liberation-data/drivine4j#312.
-                await clear();
-                const long = 'aB'.repeat(20_000);
-                const pair = '😀';
-                const cases: [string | null, string | null][] = [
-                    // A short text in a long one, and texts just within and just past what INSTR looks for.
-                    [long, 'aB'],
-                    [long, 'zz'],
-                    [long, long.substring(1, 32_768)],
-                    [long, long.substring(1, 32_769)],
-                    [long, `${long.substring(0, 32_768)}z`],
-                    // A long text in a longer one, found only at its end, and not found.
-                    [`${long}c`, `${'aB'.repeat(19_000)}c`],
-                    [`${long}c`, `${'aB'.repeat(19_000)}d`],
-                    // As long: the issue's own, and one that differs in its last character.
-                    [long, long],
-                    [long, `${long.slice(0, -1)}b`],
-                    // Longer than the text.
-                    [long, `${long}x`],
-                    ['abc', long],
-                    // Empty and null.
-                    [long, ''],
-                    ['', long],
-                    [long, null],
-                    [null, long],
-                    // Three-byte characters, past 32 KB within INSTR's units and past them.
-                    ['€'.repeat(40_000), '€'.repeat(32_767)],
-                    ['€'.repeat(40_000), '€'.repeat(33_000)],
-                    ['€'.repeat(40_000), `${'€'.repeat(33_000)}x`],
-                    // Characters past U+FFFF: across the 1,000th unit the search starts with, across INSTR's 32,767th, and
-                    // only those.
-                    [
-                        `z${'x'.repeat(999)}${pair}${'y'.repeat(40_000)}`,
-                        `${'x'.repeat(999)}${pair}${'y'.repeat(39_000)}`
-                    ],
-                    [
-                        `z${'y'.repeat(32_766)}${pair}${'y'.repeat(100)}`,
-                        `${'y'.repeat(32_766)}${pair}${'y'.repeat(10)}`
-                    ],
-                    [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}q`],
-                    [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}z`],
-                    // A long text whose first units are nowhere in the text, so no place is compared.
-                    [long, 'c'.repeat(33_000)]
-                ];
-                // Oracle's empty text is null, so CONTAINS of one is null there.
-                const expected = (t: string | null, x: string | null): boolean | null => {
-                    if (t === null || x === null) {
-                        return null;
-                    }
-                    if (store.type === DatabaseType.ORACLE && (t === '' || x === '')) {
-                        return null;
-                    }
-                    return t.includes(x);
-                };
-                const parameters = Object.fromEntries(
-                    cases.flatMap(([t, x], i) => [
-                        [`t${i}`, t],
-                        [`x${i}`, x]
-                    ])
-                );
-                // One node at a time: on Oracle, UNWIND of a list of texts past 32 KB into CREATE closes the session.
-                for (const [i, [t, x]] of cases.entries()) {
-                    await query('CREATE (:CyContains {i: $i, t: $t, x: $x})', { i: BigInt(i), t, x });
-                }
-                const each = cases.map(([t, x]) => expected(t, x));
-                await onOneSession(async (run) => {
-                    for (let r = 1; r <= 3; r++) {
-                        for (const [i, [t, x]] of cases.entries()) {
-                            const described = `${x?.length} in ${t?.length}, case ${i}, run ${r}`;
-                            expect([described, await run(`WITH $t${i} AS t, $x${i} AS x RETURN t CONTAINS x`)]).toEqual(
-                                [described, [expected(t, x)]]
-                            );
-                        }
-                        expect([r, await run('MATCH (n:CyContains) RETURN n.t CONTAINS n.x ORDER BY n.i')]).toEqual([
-                            r,
-                            each
+        it('CONTAINS finds a text past 32 KB in a text of any length, given, stored, on several rows and in a write', async () => {
+            // On Oracle INSTR refuses to look for a text past 32,767 UTF-16 units (ORA-22828, #457). Each text is looked
+            // for as a parameter, as a property on the node beside it, and of each node in a cross join, three times on
+            // one session. drivine4j's test of liberation-data/drivine4j#312.
+            await clear();
+            const long = 'aB'.repeat(20_000);
+            const pair = '😀';
+            const cases: [string | null, string | null][] = [
+                // A short text in a long one, and texts just within and just past what INSTR looks for.
+                [long, 'aB'],
+                [long, 'zz'],
+                [long, long.substring(1, 32_768)],
+                [long, long.substring(1, 32_769)],
+                [long, `${long.substring(0, 32_768)}z`],
+                // A long text in a longer one, found only at its end, and not found.
+                [`${long}c`, `${'aB'.repeat(19_000)}c`],
+                [`${long}c`, `${'aB'.repeat(19_000)}d`],
+                // As long: the issue's own, and one that differs in its last character.
+                [long, long],
+                [long, `${long.slice(0, -1)}b`],
+                // Longer than the text.
+                [long, `${long}x`],
+                ['abc', long],
+                // Empty and null.
+                [long, ''],
+                ['', long],
+                [long, null],
+                [null, long],
+                // Three-byte characters, past 32 KB within INSTR's units and past them.
+                ['€'.repeat(40_000), '€'.repeat(32_767)],
+                ['€'.repeat(40_000), '€'.repeat(33_000)],
+                ['€'.repeat(40_000), `${'€'.repeat(33_000)}x`],
+                // Characters past U+FFFF: across the 1,000th unit the search starts with, across INSTR's 32,767th, and
+                // only those.
+                [`z${'x'.repeat(999)}${pair}${'y'.repeat(40_000)}`, `${'x'.repeat(999)}${pair}${'y'.repeat(39_000)}`],
+                [`z${'y'.repeat(32_766)}${pair}${'y'.repeat(100)}`, `${'y'.repeat(32_766)}${pair}${'y'.repeat(10)}`],
+                [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}q`],
+                [`z${pair.repeat(20_000)}q`, `${pair.repeat(19_000)}z`],
+                // A long text whose first units are nowhere in the text, so no place is compared.
+                [long, 'c'.repeat(33_000)]
+            ];
+            // An empty text is in every text, on Oracle too (liberation-data/drivine4j#416), as drivine4j's test has it.
+            const expected = (t: string | null, x: string | null): boolean | null =>
+                t === null || x === null ? null : t.includes(x);
+            const parameters = Object.fromEntries(
+                cases.flatMap(([t, x], i) => [
+                    [`t${i}`, t],
+                    [`x${i}`, x]
+                ])
+            );
+            // One node at a time: on Oracle, UNWIND of a list of texts past 32 KB into CREATE closes the session.
+            for (const [i, [t, x]] of cases.entries()) {
+                await query('CREATE (:CyContains {i: $i, t: $t, x: $x})', { i: BigInt(i), t, x });
+            }
+            const each = cases.map(([t, x]) => expected(t, x));
+            await onOneSession(async (run) => {
+                for (let r = 1; r <= 3; r++) {
+                    for (const [i, [t, x]] of cases.entries()) {
+                        const described = `${x?.length} in ${t?.length}, case ${i}, run ${r}`;
+                        expect([described, await run(`WITH $t${i} AS t, $x${i} AS x RETURN t CONTAINS x`)]).toEqual([
+                            described,
+                            [expected(t, x)]
                         ]);
-                        // The text of one node, looked for in each other's; and in a write, which runs as a block of its own.
-                        expect([
-                            r,
-                            await run(
-                                'MATCH (n:CyContains {i: 7}), (m:CyContains) RETURN m.t CONTAINS n.x ORDER BY m.i'
-                            )
-                        ]).toEqual([r, cases.map(([t]) => expected(t, long))]);
-                        expect([
-                            r,
-                            await run('MATCH (n:CyContains) SET n.r = n.t CONTAINS n.x WITH n ORDER BY n.i RETURN n.r')
-                        ]).toEqual([r, each]);
                     }
-                }, parameters);
-                await clear();
-            },
-            600_000
-        );
+                    expect([r, await run('MATCH (n:CyContains) RETURN n.t CONTAINS n.x ORDER BY n.i')]).toEqual([
+                        r,
+                        each
+                    ]);
+                    // The text of one node, looked for in each other's; and in a write, which runs as a block of its own.
+                    expect([
+                        r,
+                        await run('MATCH (n:CyContains {i: 7}), (m:CyContains) RETURN m.t CONTAINS n.x ORDER BY m.i')
+                    ]).toEqual([r, cases.map(([t]) => expected(t, long))]);
+                    expect([
+                        r,
+                        await run('MATCH (n:CyContains) SET n.r = n.t CONTAINS n.x WITH n ORDER BY n.i RETURN n.r')
+                    ]).toEqual([r, each]);
+                }
+            }, parameters);
+            await clear();
+        }, 600_000);
 
         it("CONTAINS of a text past 32 KB in an aggregate's argument, over an aggregate's result and beside a grouping key", async () => {
             // On Oracle the search of a text past 32,767 UTF-16 units is a subquery (#457): here an aggregate reads it,
@@ -2021,7 +2002,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
      * parametersFor.
      */
     describe('a whole number parameter past 2^63', () => {
-        // On Oracle a float past 2^63 written by CREATE reads back as an integer's text, for the same SQL drivine4j runs (#697).
+        // On Oracle a write given a map keyed as extended JSON's are (`$k`) stores a float past a long's range as a whole
+        // number: the compiler's, liberation-data/drivine-cypher-spec#200.
         (store.type === DatabaseType.ORACLE ? it.failing : it)(
             'is a float, alone, summed, in a map and in a list, read or written',
             async () => {
