@@ -23,7 +23,8 @@ describe('A password Drivine holds', () => {
         expect(maskedPassword(SECRET)).toBe('***');
         expect(maskedPassword(undefined)).toBeNull();
         expect(maskedPassword(null)).toBeNull();
-        expect(maskedPassword('')).toBeNull();
+        // An empty password is a password set, as drivine4j prints it.
+        expect(maskedPassword('')).toBe('***');
     });
 
     it('is masked in properties, which print every other field, and kept for a copy and to connect with', () => {
