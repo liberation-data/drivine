@@ -156,8 +156,7 @@ documents them; the ones you're likeliest to meet:
   is `0.3` there, where doubles give `0.30000000000000004`. A result differs from Neo4j's only around its 16th
   significant digit, and still comes back as a float.
 - Text sorts by its code points, as Cypher does, but on Postgres a list or a map read from a property sorts the texts
-  in it by the database's collation ([Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)), and Oracle
-  reads an empty string as null ([Oracle](07-supported-engines.md#oracle)).
+  in it by the database's collation ([Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)).
 
 ### Or no Cypher at all
 
