@@ -175,6 +175,34 @@ cases:
         args: [null]
         result: null
 
+  - name: "drivine_canonical"
+    description: "drivine_canonical(json) is the JSON text of the value with each map in it, at any depth, its keys in order, so two maps of the same entries are the same text, and group together. A list keeps its order. NaN, as SQLite's JSON writes it, and an infinity, written 9e999, are kept as they are. Of JSON's null, the text given; of null, null."
+    pairs:
+      queries.yaml: ["Grouping by maps and lists"]
+    steps:
+      - function: "drivine_canonical"
+        args: ['{"b":1,"a":{"d":[{"f":"x","e":true}],"c":null}}']
+        result: '{"a":{"c":null,"d":[{"e":true,"f":"x"}]},"b":1}'
+      - note: "Keys in order by their characters: a capital before a small letter."
+        function: "drivine_canonical"
+        args: ['{"b":1,"B":2,"a":3}']
+        result: '{"B":2,"a":3,"b":1}'
+      - function: "drivine_canonical"
+        args: ['[3,1,{"b":2,"a":1}]']
+        result: '[3,1,{"a":1,"b":2}]'
+      - function: "drivine_canonical"
+        args: ['{"y":9e999,"x":{"$numberDouble":"NaN"}}']
+        result: '{"x":{"$numberDouble":"NaN"},"y":9e999}'
+      - function: "drivine_canonical"
+        args: ['"a"']
+        result: '"a"'
+      - function: "drivine_canonical"
+        args: ['null']
+        result: 'null'
+      - function: "drivine_canonical"
+        args: [null]
+        result: null
+
   - name: "drivine_round"
     description: "drivine_round(number, precision, mode) rounds a SQL number to as many decimal places by the rounding mode, in decimal, as Neo4j's round(value, precision, mode) does; an infinity, which SQLite stores, is itself. Null where the number or the precision is."
     pairs:

@@ -39,7 +39,6 @@ describe('SqliteCypherFunctions', () => {
     it('exports each function by drivine4j SQL name', () => {
         expect(SqliteFunctions).toMatchObject({
             EQUAL: 'drivine_equal',
-            CONTAINS: 'drivine_contains',
             ADD: 'drivine_add',
             CANONICAL: 'drivine_canonical',
             CYPHER: 'drivine_cypher',
@@ -78,7 +77,7 @@ describe('SqliteCypherFunctions', () => {
         ]);
     });
 
-    describe('drivine_equal and drivine_contains', () => {
+    describe('drivine_equal', () => {
         it('compares as Cypher does, and null with anything is null', () => {
             expect(
                 row(
@@ -100,23 +99,14 @@ describe('SqliteCypherFunctions', () => {
             ).toEqual([null, n(0), n(0), n(0), n(0), n(1)]);
         });
 
-        it("holds a map's every entry with an equal value", () => {
-            expect(
-                row(
-                    `SELECT drivine_contains('{"a":1,"b":2}', '{"a":1.0}'), drivine_contains('{"a":1}', '{"a":1,"c":3}'), ` +
-                        `drivine_contains('[1]', '{}'), drivine_contains(NULL, '{}'), drivine_contains('{"a":null}', '{"a":null}')`
-                )
-            ).toEqual([n(1), n(0), n(0), null, n(1)]);
-        });
-
         it('finds NaN equal to nothing, itself too, and an infinity equal to itself (liberation-data/drivine4j#295)', () => {
             expect(
                 row(
                     `SELECT drivine_equal('${NAN}', '${NAN}'), drivine_equal('[${NAN}]', '[${NAN}]'), drivine_equal('${NAN}', '1'), ` +
                         `drivine_equal('{"a":${NAN}}', '{"a":${NAN}}'), drivine_equal('[${NAN},null]', '[${NAN},null]'), ` +
-                        `drivine_equal('${NAN}', 'null'), drivine_contains('{"a":${NAN}}', '{"a":${NAN}}')`
+                        `drivine_equal('${NAN}', 'null')`
                 )
-            ).toEqual([n(0), n(0), n(0), n(0), n(0), null, n(0)]);
+            ).toEqual([n(0), n(0), n(0), n(0), n(0), null]);
             expect(
                 row(
                     `SELECT drivine_equal('9e999', '9e999'), drivine_equal('[-9e999]', '[-9e999]'), drivine_equal('9e999', '-9e999'), ` +

@@ -602,6 +602,24 @@ cases:
         only: [neo4j, sql]
         rows: [8]
 
+  - name: "An item of a node's labels by its place"
+    description: "labels() of a node of one label gives its label at index 0 and at -1, as head() does, and null at an index past its end, whether the index is written, a parameter or a variable, and through a WITH."
+    steps:
+      - cypher: "CREATE (:CyWrite)"
+      - cypher: "MATCH (n:CyWrite) RETURN [labels(n)[0], labels(n)[-1], head(labels(n)), labels(n)[5]]"
+        rows: [["CyWrite", "CyWrite", "CyWrite", null]]
+      - cypher: "MATCH (n:CyWrite) RETURN labels(n)[0] AS first"
+        rows: ["CyWrite"]
+      - cypher: "MATCH (n:CyWrite) RETURN labels(n)[5]"
+        rows: [null]
+      - cypher: "MATCH (n:CyWrite) WITH labels(n) AS ls RETURN [ls[0], ls[5]]"
+        rows: [["CyWrite", null]]
+      - cypher: "MATCH (n:CyWrite) RETURN labels(n)[$i]"
+        parameters: {i: 0}
+        rows: ["CyWrite"]
+      - cypher: "MATCH (n:CyWrite) WITH n, 0 AS i RETURN labels(n)[i]"
+        rows: ["CyWrite"]
+
   - name: "Writing through lists"
     description: "A list of nodes or relationships refers to them, so writing to an item writes to the node."
     steps:
@@ -1390,7 +1408,7 @@ cases:
         rows: [2]
 
   - name: "A stored empty text searched for and measured"
-    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0, and the text functions make the empty text of it. Oracle's empty text is null as SQL text (drivine4j#416)."
     steps:
       - cypher: "CREATE (:CyWrite {k: 0, name: 'ab'}), (:CyWrite {k: 1, name: ''}), (:CyWrite {k: 2, name: 'xy'}), (:CyWrite {k: 3, name: 5})"
       - only: [neo4j, sql]
@@ -1419,6 +1437,10 @@ cases:
         only: [neo4j, sql]
         cypher: "MATCH (a:CyWrite {k: 1}) SET a.s = size(a.name), a.c = 'ab' CONTAINS a.name RETURN [a.s, a.c]"
         rows: [[0, true]]
+      - note: "Made from it by the text functions and +, read by the property's own path on Oracle."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}) RETURN [a.name + a.name, toUpper(a.name), trim(a.name), reverse(a.name), left(a.name, 1), substring(a.name, 0), replace(a.name, 'x', 'y'), toString(a.name), split(a.name, ',')]"
+        rows: [["", "", "", "", "", "", "", "", [""]]]
 
   - name: "A walk of 1,100 hops"
     description: "A variable-length relationship or a quantified path pattern walks a chain of 1,100 relationships, its path's nodes and relationships each in order. Oracle held a walk's ids as text of 4,000 bytes at most, and failed past them (ORA-01489, drivine4j#177)."

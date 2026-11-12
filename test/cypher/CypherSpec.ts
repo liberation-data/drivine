@@ -55,12 +55,12 @@ interface Skip {
 
 /**
  * A JavaScript number holds no whole number beyond 2^53: these steps bind or expect one, such as 9007199254740993.
- * Postgres and SQLite give one back as a bigint of its digits (liberation-data/drivine#735), so they run them; the graph
- * engines' drivers, and Oracle's, which reads a JSON number through a JavaScript number, are left out.
+ * The SQL stores give one back as a bigint of its digits (liberation-data/drivine#735, on Oracle #737), so they run
+ * them; the graph engines' drivers are left out.
  */
 const BEYOND_2_53: Skip = {
     why: 'a number beyond 2^53',
-    on: ['graph', 'oracle'],
+    on: ['graph'],
     holds: (step) => /[0-9]{16}/.test(JSON.stringify(step, replacer))
 };
 
@@ -120,6 +120,10 @@ const SKIPPED: Record<string, Record<string, [number[], Skip][]>> = {
     },
     'writes.yaml': {
         'Typical app round trip': [[[19, 20, 21], BEYOND_2_53]]
+    },
+    'refusals.yaml': {
+        // LIMIT $s of s = 2.0, which Cypher refuses as a float, and a SQL store binds as the whole number 2, so takes.
+        "SKIP or LIMIT that isn't a whole number of 0 or more": [[[6], WHOLE_FLOAT_PARAMETER]]
     }
 };
 

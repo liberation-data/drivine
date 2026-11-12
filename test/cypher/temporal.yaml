@@ -1057,6 +1057,55 @@ cases:
         only: [neo4j]
         rows: [false]
 
+  - name: "A text parameter in a list or a map beside a temporal value"
+    description: "A temporal value is in no list written of texts given as parameters, nor is a list or a map that holds one equal to one that holds such a text at its place, though its ISO text would be (drivine4j#779)."
+    steps:
+      - note: "Each kind beside its ISO text given as $s, bare, in a list, in a list of lists and in a map; and in a map beside the text written."
+        cypher: |
+          RETURN [date('2024-01-01') = $s, date('2024-01-01') IN [$s], $s IN [date('2024-01-01')], [date('2024-01-01')] = [$s], [date('2024-01-01')] <> [$s], [[date('2024-01-01')]] = [[$s]], [date('2024-01-01')] IN [[$s]],
+                  {k: date('2024-01-01')} = {k: $s}, {k: date('2024-01-01')} <> {k: $s}, {k: date('2024-01-01'), n: 1} = {k: $s, n: 1}, {k: date('2024-01-01')} = {k: '2024-01-01'}]
+        parameters: {s: "2024-01-01"}
+        rows: [[false, false, false, false, true, false, false, false, true, false, false]]
+      - cypher: |
+          RETURN [localdatetime('2024-01-01T10:00') = $s, localdatetime('2024-01-01T10:00') IN [$s], $s IN [localdatetime('2024-01-01T10:00')], [localdatetime('2024-01-01T10:00')] = [$s], [localdatetime('2024-01-01T10:00')] <> [$s], [[localdatetime('2024-01-01T10:00')]] = [[$s]], [localdatetime('2024-01-01T10:00')] IN [[$s]],
+                  {k: localdatetime('2024-01-01T10:00')} = {k: $s}, {k: localdatetime('2024-01-01T10:00')} <> {k: $s}, {k: localdatetime('2024-01-01T10:00'), n: 1} = {k: $s, n: 1}, {k: localdatetime('2024-01-01T10:00')} = {k: '2024-01-01T10:00:00'}]
+        parameters: {s: "2024-01-01T10:00:00"}
+        rows: [[false, false, false, false, true, false, false, false, true, false, false]]
+      - cypher: |
+          RETURN [datetime('2024-01-01T10:00Z') = $s, datetime('2024-01-01T10:00Z') IN [$s], $s IN [datetime('2024-01-01T10:00Z')], [datetime('2024-01-01T10:00Z')] = [$s], [datetime('2024-01-01T10:00Z')] <> [$s], [[datetime('2024-01-01T10:00Z')]] = [[$s]], [datetime('2024-01-01T10:00Z')] IN [[$s]],
+                  {k: datetime('2024-01-01T10:00Z')} = {k: $s}, {k: datetime('2024-01-01T10:00Z')} <> {k: $s}, {k: datetime('2024-01-01T10:00Z'), n: 1} = {k: $s, n: 1}, {k: datetime('2024-01-01T10:00Z')} = {k: '2024-01-01T10:00:00Z'}]
+        parameters: {s: "2024-01-01T10:00:00Z"}
+        rows: [[false, false, false, false, true, false, false, false, true, false, false]]
+      - cypher: |
+          RETURN [localtime('10:00') = $s, localtime('10:00') IN [$s], $s IN [localtime('10:00')], [localtime('10:00')] = [$s], [localtime('10:00')] <> [$s], [[localtime('10:00')]] = [[$s]], [localtime('10:00')] IN [[$s]],
+                  {k: localtime('10:00')} = {k: $s}, {k: localtime('10:00')} <> {k: $s}, {k: localtime('10:00'), n: 1} = {k: $s, n: 1}, {k: localtime('10:00')} = {k: '10:00:00'}]
+        parameters: {s: "10:00:00"}
+        rows: [[false, false, false, false, true, false, false, false, true, false, false]]
+      - note: "Memgraph has no time()."
+        except: [memgraph]
+        cypher: |
+          RETURN [time('10:00Z') = $s, time('10:00Z') IN [$s], $s IN [time('10:00Z')], [time('10:00Z')] = [$s], [time('10:00Z')] <> [$s], [[time('10:00Z')]] = [[$s]], [time('10:00Z')] IN [[$s]],
+                  {k: time('10:00Z')} = {k: $s}, {k: time('10:00Z')} <> {k: $s}, {k: time('10:00Z'), n: 1} = {k: $s, n: 1}, {k: time('10:00Z')} = {k: '10:00:00Z'}]
+        parameters: {s: "10:00:00Z"}
+        rows: [[false, false, false, false, true, false, false, false, true, false, false]]
+      - cypher: |
+          RETURN [duration('P1D') = $s, duration('P1D') IN [$s], $s IN [duration('P1D')], [duration('P1D')] = [$s], [duration('P1D')] <> [$s], [[duration('P1D')]] = [[$s]], [duration('P1D')] IN [[$s]],
+                  {k: duration('P1D')} = {k: $s}, {k: duration('P1D')} <> {k: $s}, {k: duration('P1D'), n: 1} = {k: $s, n: 1}, {k: duration('P1D')} = {k: 'P1D'}]
+        parameters: {s: "P1D"}
+        rows: [[false, false, false, false, true, false, false, false, true, false, false]]
+      - note: "Nor beside a map that holds its text at its kind's name, given or written; and the same value at the same place is equal."
+        cypher: |
+          RETURN [date('2024-01-01') IN [$m], [date('2024-01-01')] = [$m], {k: date('2024-01-01')} = {k: $m}, {k: date('2024-01-01')} = {k: {date: $s}},
+                  {k: date('2024-01-01')} = {k: date('2024-01-01')}, {k: date('2024-01-01'), t: $s} = {k: date('2024-01-01'), t: $s}, [date('2024-01-01'), $s] = [date('2024-01-01'), $s]]
+        parameters: {s: "2024-01-01", m: {date: "2024-01-01"}}
+        rows: [[false, false, false, false, true, true, true]]
+      - note: "A null given or written beside them: null, unless another pair of items or entries differs."
+        cypher: |
+          RETURN [date('2024-01-01') IN [$n], date('2024-01-01') IN [$s, null], [date('2024-01-01')] = [$n], {k: date('2024-01-01')} = {k: $n},
+                  {k: date('2024-01-01'), n: null} = {k: $s, n: null}, [date('2024-01-01'), $n] = [$s, $n]]
+        parameters: {s: "2024-01-01", n: null}
+        rows: [[null, null, null, null, false, false]]
+
   - name: "Years before 1"
     description: "A year is numbered astronomically, as ISO 8601 numbers it: 0000 is 1 BC and -0044 is 45 BC, read, made, worked out, truncated, written and read back."
     steps:
