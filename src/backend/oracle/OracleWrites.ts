@@ -10,6 +10,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { Stamps } from '@/model/Stamps';
 import { RelateMode } from '@/manager/NodeRef';
 import { SaveOptions } from '@/manager/SaveOptions';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * The writes beside a save, each one PL/SQL block over the save block's procedures, so stamps are kept as a save keeps
@@ -126,7 +127,7 @@ export class OracleWrites {
                         JSON.stringify(idOf(group.model, object))
                     )}, ` +
                         `${bind(JSON.stringify(group.model.labels))}, ${bind(
-                            JSON.stringify(props, (_, value) => (value === undefined ? null : value))
+                            jsonText(props, (_, value) => (value === undefined ? null : value))
                         )}, '[]', '[]', NULL, FALSE);`,
                     ...this.lowering(group.model)
                 );
@@ -185,7 +186,7 @@ export class OracleWrites {
                 'END IF;',
                 'OPEN c FOR SELECT v_related AS "related" FROM dual;'
             ],
-            { x_type: type, x_props: JSON.stringify(written) }
+            { x_type: type, x_props: jsonText(written) }
         );
     }
 

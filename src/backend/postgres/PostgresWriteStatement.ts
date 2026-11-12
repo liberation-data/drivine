@@ -3,6 +3,7 @@ import { columnValue } from '@/backend/postgres/PostgresStatement';
 import { WritePlan, WriteReturns } from '@/backend/sql/WritePlan';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { sqlText } from '@/backend/sql/SqlGraph';
+import { jsonText } from '@/utils/JsonText';
 
 /** The parameter the shapes a plan names are bound as: a JSON array of `{labels, key}`. */
 const SHAPES = '_shapes';
@@ -52,8 +53,8 @@ export class PostgresWriteStatement extends GraphStatement {
     /** The values a plan is bound with. */
     static bindings(plan: WritePlan, patchedIf?: string): Record<string, any> {
         return {
-            [WritePlan.PLAN]: JSON.stringify(plan.plan),
-            [SHAPES]: JSON.stringify(plan.shapesBound),
+            [WritePlan.PLAN]: jsonText(plan.plan),
+            [SHAPES]: jsonText(plan.shapesBound),
             [WritePlan.MARK]: plan.mark,
             [PATCHED_IF]: patchedIf ?? null
         };

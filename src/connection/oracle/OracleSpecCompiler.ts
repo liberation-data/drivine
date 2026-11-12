@@ -2,6 +2,7 @@ import * as oracledb from 'oracledb';
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * A named parameter, `$name`: the longest name. A name is as Cypher's grammar reads one, past ASCII too (`$größe`), but
@@ -74,7 +75,7 @@ function bindable(value: any): any {
         return null;
     }
     if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Buffer.isBuffer(value)) {
-        return bindable(JSON.stringify(value));
+        return bindable(jsonText(value));
     }
     if (typeof value === 'string' && value.length * 3 > MAX_STRING && Buffer.byteLength(value, 'utf8') > MAX_STRING) {
         return { type: oracledb.CLOB, val: value };

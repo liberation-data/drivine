@@ -2,6 +2,7 @@ import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
 import type { SqliteValue } from '@/connection/sqlite/SqliteDriver';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * A named parameter, `$name`, as Postgres's compiler reads one: the longest name, so `$id` is not read in `$idList`.
@@ -85,5 +86,5 @@ export function sqliteValue(value: unknown): SqliteValue {
     if (value instanceof Uint8Array) {
         return value;
     }
-    return JSON.stringify(value);
+    return jsonText(value);
 }

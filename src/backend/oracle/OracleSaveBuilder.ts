@@ -23,6 +23,7 @@ import { LowerCopies } from '@/model/LowerCopies';
 import { Stamps } from '@/model/Stamps';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * Writes a save as one PL/SQL block, applied whole or not at all, with or without a transaction: the root found (or
@@ -169,7 +170,7 @@ export class OracleSaveBuilder {
                 );
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
-                        ? this.bind(JSON.stringify(propsOf(rel.related.model, item, [rel.related.model.targetField])))
+                        ? this.bind(jsonText(propsOf(rel.related.model, item, [rel.related.model.targetField])))
                         : 'NULL';
                 out.push(
                     `link(${from}, ${variable}, ${sqlText(rel.type)}, '${direction(rel.direction)}', ${relProps});`
@@ -315,7 +316,7 @@ END;`;
             match: this.bind(match),
             id: this.bind(JSON.stringify(write.id)),
             labels: this.bind(JSON.stringify([...new Set(write.labels)])),
-            props: this.bind(JSON.stringify(write.props, (_, value) => (value === undefined ? null : value))),
+            props: this.bind(jsonText(write.props, (_, value) => (value === undefined ? null : value))),
             add: this.bind(JSON.stringify(write.add)),
             remove: this.bind(JSON.stringify(write.remove)),
             record: write.record ? this.bind(write.record.property) : 'NULL',
