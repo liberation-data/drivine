@@ -1,3 +1,4 @@
+import { timerStart } from '@/utils/Timing';
 import { Connection } from '@/connection/Connection';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { StatementLogger } from '@/logger/StatementLogger';
@@ -26,7 +27,7 @@ export class Neo4jConnection implements Connection {
     async query<T>(spec: QuerySpecification<T>): Promise<any[]> {
         const finalizedSpec = spec.finalizedCopy('CYPHER');
         const compiledSpec = new Neo4jSpecCompiler(finalizedSpec).compile();
-        const hrStart = process.hrtime();
+        const hrStart = timerStart();
         const logger = new StatementLogger(this.sessionId());
         let result;
         if (!this.transaction) {

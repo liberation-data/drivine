@@ -1,4 +1,20 @@
 import { DrivineError } from '@/DrivineError';
+import { nodeRequire } from '@/utils/NodeRequire';
+
+/** This Node's version, or `none` in a page, which has no Node: for messages that name the SQLite a Node bundles. */
+function nodeVersion(): string {
+    return typeof process !== 'undefined' && process.versions?.node ? process.versions.node : 'none';
+}
+
+/** Gives a warning as Node's `process.emitWarning`, or, in a page, as the console's `warn`. */
+function emitWarning(message: string, options: { code: string }): void {
+    if (typeof process !== 'undefined' && typeof process.emitWarning === 'function') {
+        process.emitWarning(message, options);
+    } else {
+        // eslint-disable-next-line no-console -- a page has no process to warn through
+        console.warn(`${options.code}: ${message}`);
+    }
+}
 
 /** A value SQLite binds or gives back. */
 export type SqliteValue = null | number | bigint | string | Uint8Array;
@@ -47,7 +63,7 @@ export function sqliteVersionOf(db: SqliteDatabase): string {
  * Refuses compiled Cypher on SQLite `version`, the one Node `node` bundles, when it is older than
  * MINIMUM_COMPILED_CYPHER_SQLITE. Plain SQL is not refused.
  */
-export function refuseCompiledCypherOn(version: string, node: string = process.versions.node): void {
+export function refuseCompiledCypherOn(version: string, node: string = nodeVersion()): void {
     if (sqliteOlderThan(version, MINIMUM_COMPILED_CYPHER_SQLITE)) {
         const minimum = MINIMUM_COMPILED_CYPHER_SQLITE.join('.');
         throw new DrivineError(
@@ -105,14 +121,14 @@ export type EmitWarning = (message: string, options: { code: string }) => void;
 export class RoundedFloats {
     private warned = false;
 
-    constructor(private readonly emit: EmitWarning = (message, options) => process.emitWarning(message, options)) {}
+    constructor(private readonly emit: EmitWarning = emitWarning) {}
 
     /**
      * Warns of `version`, the SQLite of this process, if `probe`, what it gave for `json_quote(0.1 + 0.2)`, is rounded,
      * and none was warned of before. `probe` is a function, so SQLite is asked only until it has been warned of. A probe
      * that fails says nothing, and never stops a file opening.
      */
-    warnOnce(version: string, probe: () => string, node: string = process.versions.node): void {
+    warnOnce(version: string, probe: () => string, node: string = nodeVersion()): void {
         if (this.warned) {
             return;
         }
@@ -143,21 +159,30 @@ const roundedFloats = new RoundedFloats();
 let driver: { DatabaseSync: new (path: string, options?: Record<string, unknown>) => SqliteDatabase } | undefined;
 
 /**
+ * Has SQLite stores open their files through [given], a driver with `node:sqlite`'s `DatabaseSync`, rather than through
+ * `node:sqlite`: as in a page, where SQLite is its wasm build. Set once, before the first SQLite connection opens.
+ */
+export function useSqliteDriver(given: {
+    DatabaseSync: new (path: string, options?: Record<string, unknown>) => SqliteDatabase;
+}): void {
+    driver = given;
+}
+
+/**
  * Opens the SQLite file at `path` through Node's own driver, `node:sqlite`: no native module to build, and the SQLite
  * Node is built with. It is loaded when the first SQLite connection is opened, so an application that uses no SQLite
- * store runs on a Node that has none. It registers functions written in JavaScript on a connection, which Drivine's
- * statements call (see SqliteFunctions).
+ * store runs on a Node that has none, and not at all where useSqliteDriver gave another driver. It registers functions
+ * written in JavaScript on a connection, which Drivine's statements call (see SqliteFunctions).
  */
 export function openSqlite(path: string): SqliteDatabase {
     if (!driver) {
         try {
             // Loaded on first use: `node:sqlite` is in Node 22.13 and later.
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            driver = require('node:sqlite');
+            driver = nodeRequire('node:sqlite');
         } catch (e) {
             throw new DrivineError(
                 `A SQLite store needs Node's own SQLite driver, node:sqlite, in Node 22.13 or later. This is Node ` +
-                    `${process.versions.node}. (${(e as Error).message})`
+                    `${nodeVersion()}. (${(e as Error).message})`
             );
         }
     }

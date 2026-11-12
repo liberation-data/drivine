@@ -1,3 +1,4 @@
+import { timerStart } from '@/utils/Timing';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { AbstractCursor } from '@/cursor/AbstractCursor';
@@ -22,7 +23,7 @@ export class SqliteCursor<T> extends AbstractCursor<T> implements AsyncIterable<
 
     async read(count: number): Promise<T[]> {
         this.logger.verbose(`Reading a batch of: ${count}`);
-        const hrStart = process.hrtime();
+        const hrStart = timerStart();
         const batch: any[] = [];
         while (!this.exhausted && batch.length < count) {
             const next = this.rows.next();

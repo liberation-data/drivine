@@ -1,4 +1,5 @@
-import { isInt } from 'neo4j-driver';
+import { isInt } from '@/utils/Integers';
+import { nodeRequire } from '@/utils/NodeRequire';
 import { DrivineError } from '@/DrivineError';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
 import { CypherFloat } from '@/cypher/CypherFloat';
@@ -38,9 +39,16 @@ let loaded: Compile | undefined;
  * first `compile`, not on `require`.
  */
 function compileFunction(): Compile {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    loaded ??= (require(PACKAGE) as { compile: Compile }).compile;
+    loaded ??= nodeRequire<{ compile: Compile }>(PACKAGE).compile;
     return loaded;
+}
+
+/**
+ * Has Drivine compile Cypher with `compile`, the shared compiler's `compile`, rather than requiring its package: as in a
+ * page, which imports the package's ES module itself, since that loads its Wasm by `fetch`. Set before the first compile.
+ */
+export function useCypherCompiler(compile: Compile): void {
+    loaded = compile;
 }
 
 /** Whether the shared compiler has been loaded in this process: for the test that a graph engine's app never loads it. */
@@ -313,6 +321,15 @@ function number(value: number): string {
     return Number.isFinite(value) && !Number.isInteger(value) ? JSON.stringify(value) : float(value);
 }
 
+/** `bytes` as base64, by `btoa`, which Node and a page both have: a page has no `Buffer`. */
+function base64(bytes: Uint8Array): string {
+    let binary = '';
+    for (const b of bytes) {
+        binary += String.fromCharCode(b);
+    }
+    return btoa(binary);
+}
+
 /** A `Date`, bytes, a list or another iterable, or a map. */
 function composite(value: object): string {
     if (value instanceof CypherFloat) {
@@ -324,8 +341,7 @@ function composite(value: object): string {
             : `{"$temporal":"DATE_TIME","text":${JSON.stringify(value.toISOString())}}`;
     }
     if (value instanceof Uint8Array || value instanceof Int8Array) {
-        const base64 = Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64');
-        return `{"$bytes":${JSON.stringify(base64)}}`;
+        return `{"$bytes":${JSON.stringify(base64(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)))}}`;
     }
     if (Array.isArray(value)) {
         return `[${value.map(written).join(',')}]`;

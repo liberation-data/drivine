@@ -1,4 +1,5 @@
-import { randomBytes } from 'crypto';
+import { timerStart } from '@/utils/Timing';
+import { randomHex } from '@/utils/Random';
 import { Connection } from '@/connection/Connection';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
@@ -42,7 +43,7 @@ export const LONG_LOCK_MILLIS = 5_000;
  */
 export class SqliteConnection implements Connection {
     private readonly logger = new DrivineLogger(SqliteConnection.name);
-    private readonly id = randomBytes(4).toString('hex');
+    private readonly id = randomHex(4);
     /** When the open transaction took the write lock, or undefined outside one. */
     private lockedAt?: number;
     /** The cursors opened on the connection, closed as it is given back. */
@@ -82,7 +83,7 @@ export class SqliteConnection implements Connection {
             return [];
         }
         const compiled = new SqliteSpecCompiler(finalizedSpec).compile();
-        const hrStart = process.hrtime();
+        const hrStart = timerStart();
         const rows = await this.waitingOutLocks(() =>
             this.db.prepare(compiled.statement).all(...bound(compiled.parameters))
         );

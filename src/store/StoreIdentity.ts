@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUuid } from '@/utils/Random';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger';
@@ -244,7 +244,7 @@ export class StoreIdentityResolver {
                 await this.persistenceManager.execute(
                     this.backend.assignStoreStamp().spec<void>({
                         key: SINGLETON,
-                        storeId: randomUUID(),
+                        storeId: randomUuid(),
                         assignedAt: new Date().toISOString(),
                         engine: this.persistenceManager.type
                     })

@@ -1,3 +1,4 @@
+import { timerStart } from '@/utils/Timing';
 import * as oracledb from 'oracledb';
 import { Connection } from '@/connection/Connection';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -133,7 +134,7 @@ export class OracleConnection implements Connection {
         cypher?: CompiledSpecification<T>
     ): Promise<any[]> {
         const compiled = new OracleSpecCompiler(finalized).compile();
-        const hrStart = process.hrtime();
+        const hrStart = timerStart();
         const result = await this.connection.execute<any>(compiled.statement, compiled.parameters, {
             ...EXECUTE_OPTIONS,
             autoCommit: !this.inTransaction,

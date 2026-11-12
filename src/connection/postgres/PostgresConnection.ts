@@ -1,3 +1,4 @@
+import { timerStart } from '@/utils/Timing';
 import { Connection } from '@/connection/Connection';
 import { CustomTypesConfig, PoolClient } from 'pg';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -94,7 +95,7 @@ export class PostgresConnection implements Connection {
         cypher?: CompiledSpecification<T>
     ): Promise<any[]> {
         const compiledSpec = new PostgresSpecCompiler(finalizedSpec).compile();
-        const hrStart = process.hrtime();
+        const hrStart = timerStart();
         const logger = new StatementLogger(this.sessionId());
         // Before anything runs: where the stand-ins can't be read, nothing is.
         const types = cypher?.nonFinite ? nonFiniteTypes(this.client as unknown as TypeParsers) : undefined;

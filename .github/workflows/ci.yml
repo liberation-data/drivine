@@ -87,6 +87,10 @@ jobs:
             - run: npm run build
             - name: The built package loads
               run: node -e 'require("./dist/index.js"); require("./dist/testing/index.js")'
+            # The browser entry (src/browser) bundles for a page with no database driver but SQLite's and nothing of
+            # Node's, and runs compiled Cypher on SQLite's wasm build with Node's globals hidden.
+            - name: The browser entry runs in a page
+              run: npm run check:browser
 
     # The shared Cypher compiler as Drivine runs it (scripts/bench-compiler.js), compiling only, with no store: its
     # tables go to the job's summary. It fails only when the median load, the package's require and the start of its
