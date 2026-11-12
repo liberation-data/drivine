@@ -54,7 +54,8 @@ export class Neo4jConnectionProvider implements ConnectionProvider {
             user: this.user,
             password: maskedPassword(this.#password),
             database: this.database,
-            protocol: this.protocol
+            protocol: this.protocol,
+            config: this.config
         };
     }
 

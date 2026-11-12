@@ -13,11 +13,38 @@ export function maskedPassword(password: unknown): string | null {
     return password === undefined || password === null || password === '' ? null : '***';
 }
 
-/** `properties` as they are printed: each of them, the password masked. */
+/**
+ * A connection URL as it is printed: the password in it, as in `postgres://user:secret@host/db` or `?password=secret`
+ * (which pg reads too), given as `***`. The password runs to the last `@` before the query, so an `@` in it is masked
+ * too, and one in the query (`?application_name=me@host`) isn't taken for the end of a password.
+ */
+export function maskedUrl(url: string): string {
+    return url.replace(/^([a-z][\w+.-]*:\/\/[^:@/]*:)[^?#]*@/i, '$1***@').replace(/([?&]password=)[^&#]*/gi, '$1***');
+}
+
+/**
+ * `properties` as they are printed: each of them, the password masked, in a connection string too, and Postgres' ssl
+ * key, passphrase and pfx.
+ */
 export function printable(properties: Record<string, unknown>): Record<string, unknown> {
-    return 'password' in properties
-        ? { ...properties, password: maskedPassword(properties.password) }
-        : { ...properties };
+    const printed = { ...properties };
+    if ('password' in printed) {
+        printed.password = maskedPassword(printed.password);
+    }
+    if (typeof printed.connectionString === 'string') {
+        printed.connectionString = maskedUrl(printed.connectionString);
+    }
+    if (typeof printed.ssl === 'object' && printed.ssl !== null) {
+        // Postgres' TLS options: its key, the key's passphrase and a PFX bundle are secrets as the password is. Read
+        // with `in`, as pg makes the key it is given unenumerable.
+        const given = printed.ssl as Record<string, unknown>;
+        const ssl: Record<string, unknown> = { ...given };
+        for (const key of ['key', 'passphrase', 'pfx'].filter((it) => it in given)) {
+            ssl[key] = maskedPassword(given[key]);
+        }
+        printed.ssl = ssl;
+    }
+    return printed;
 }
 
 /**

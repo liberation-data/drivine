@@ -62,7 +62,13 @@ export class FalkorDbConnectionProvider implements ConnectionProvider {
 
     /** The provider as it is printed: its settings, the password masked and its client left out (#730). */
     toJSON(): Record<string, unknown> {
-        return { name: this.name, type: this.type, graphName: this.graphName, ...printable({ ...this.options }) };
+        return {
+            name: this.name,
+            type: this.type,
+            graphName: this.graphName,
+            ...printable({ ...this.options }),
+            transactionMode: this.transactionMode
+        };
     }
 
     [INSPECT](): Record<string, unknown> {
