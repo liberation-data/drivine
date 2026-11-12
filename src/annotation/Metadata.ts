@@ -64,6 +64,8 @@ export interface PropertyMetadata {
     transient?: boolean;
     readOnly?: boolean;
     jsonPacked?: boolean;
+    /** Loads the property's whole numbers as bigints: see `@BigIntProperty`. */
+    bigInt?: boolean;
     propertyBag?: { prefix?: string; delimiter?: string; flat?: boolean };
     nodeLabels?: { members?: string[] };
     schema?: {

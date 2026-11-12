@@ -6,6 +6,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 
 /**
  * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
@@ -217,6 +218,7 @@ export class GraphObjectMapper {
             }
             fields[field] = mapping.jsonPacked.has(field) ? unpacked(value) : value;
         }
+        wholeNumbersAsDeclared(mapping, fields);
         const instance = plainToInstance(type as any, fields) as any;
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         loadCollections(type, mapping, instance, Object.keys(fields));
@@ -263,13 +265,77 @@ function asSet(value: any): any {
     return value?.constructor === Object && Object.keys(value).length === 0 ? new Set() : value;
 }
 
-/** A packed JSON value, unpacked; a value that isn't JSON text is left as it is. */
+/**
+ * Each field's whole numbers as the model declares them, not as their size would have them (#741): a field declared a
+ * bigint loads each as one, with the digits the store kept; any other field loads each as a number, past 2^53 the
+ * nearest, as it always has.
+ */
+function wholeNumbersAsDeclared(mapping: FieldMapping, fields: Record<string, any>): void {
+    for (const field of Object.keys(fields)) {
+        fields[field] = mapping.bigInts.has(field) ? asBigInts(fields[field]) : asNumbers(fields[field]);
+    }
+}
+
+/**
+ * `value` with each whole number in it, at any depth of its lists and plain maps, a bigint: one a store read as a bigint
+ * as it is, with its digits, and one it read as a number of that number's value, exact below 2^53, and past it as near as
+ * the store's driver read it (Oracle's, #737). A number with a fraction is left as it is.
+ */
+function asBigInts(value: any): any {
+    if (typeof value === 'number') {
+        return Number.isInteger(value) ? BigInt(value) : value;
+    }
+    if (Array.isArray(value)) {
+        return value.map(asBigInts);
+    }
+    if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+        return Object.fromEntries(Object.entries(value).map(([key, it]) => [key, asBigInts(it)]));
+    }
+    return value;
+}
+
+/** `value` with each bigint in it, at any depth of its lists and plain maps, the nearest JavaScript number. */
+function asNumbers(value: any): any {
+    if (typeof value === 'bigint') {
+        return Number(value);
+    }
+    if (Array.isArray(value)) {
+        return value.some(holdsBigInt) ? value.map(asNumbers) : value;
+    }
+    if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+        return holdsBigInt(value)
+            ? Object.fromEntries(Object.entries(value).map(([key, it]) => [key, asNumbers(it)]))
+            : value;
+    }
+    return value;
+}
+
+/** Whether `value` is a bigint or holds one, at any depth of its lists and plain maps. */
+function holdsBigInt(value: any): boolean {
+    if (typeof value === 'bigint') {
+        return true;
+    }
+    if (Array.isArray(value)) {
+        return value.some(holdsBigInt);
+    }
+    return (
+        value !== null &&
+        typeof value === 'object' &&
+        Object.getPrototypeOf(value) === Object.prototype &&
+        Object.values(value).some(holdsBigInt)
+    );
+}
+
+/**
+ * A packed JSON value, unpacked, a whole number past 2^53 in it a `bigint` of its digits, as it was saved (#741); a
+ * value that isn't JSON text is left as it is.
+ */
 function unpacked(value: any): any {
     if (typeof value !== 'string') {
         return value;
     }
     try {
-        return JSON.parse(value);
+        return parseExactIntegers(value);
     } catch {
         return value;
     }

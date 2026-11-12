@@ -10,6 +10,19 @@ export function JsonPacked(): PropertyDecorator {
 }
 
 /**
+ * Loads the property's whole numbers as bigints, those past 2^53 with the digits a store saved them with: the property
+ * itself, a list's items, a map's or a property bag's values, and a packed value. Any other property loads a whole
+ * number as a JavaScript number, past 2^53 the nearest. A property TypeScript records as `bigint`, or
+ * one the class initializes with a bigint, loads so without it; this is for one TypeScript records otherwise: a union
+ * such as `bigint | null`, a list, a map or a bag. On Oracle, whose driver reads a number as a JavaScript number, a
+ * load still gives the nearest number.
+ */
+export function BigIntProperty(): PropertyDecorator {
+    return (prototype: object, property: string | symbol) =>
+        definePropertyMetadata(prototype, String(property), { bigInt: true });
+}
+
+/**
  * Keeps the property's initializer when the stored value is null. (A property the node doesn't have keeps its
  * initializer anyway.)
  */

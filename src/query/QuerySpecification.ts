@@ -26,6 +26,12 @@ export class QuerySpecification<T> {
     postProcessors: ResultPostProcessor[];
     _skip?: number;
     _limit?: number;
+    /**
+     * Whether the statement's JSON is read with each whole number past 2^53 a `bigint` of its digits (see
+     * parseExactIntegers), as the object manager's own statements are on Postgres (liberation-data/drivine#741). A
+     * statement of a user's own is read as before.
+     */
+    _exactIntegers = false;
 
     static withStatement<T>(statement?: string | Statement): QuerySpecification<T> {
         return new QuerySpecification<T>(statement);
@@ -101,13 +107,19 @@ export class QuerySpecification<T> {
      * @param language
      */
     finalizedCopy(language: QueryLanguage): QuerySpecification<T> {
-        return Object.freeze(
-            new QuerySpecification<T>()
-                .withStatement(toPlatformDefault(language, this.statement))
-                .skip(this._skip)
-                .limit(this._limit)
-                .bind(this.parameters)
-                .addPostProcessors(...this.postProcessors)
-        );
+        const copy = new QuerySpecification<T>()
+            .withStatement(toPlatformDefault(language, this.statement))
+            .skip(this._skip)
+            .limit(this._limit)
+            .bind(this.parameters)
+            .addPostProcessors(...this.postProcessors);
+        copy._exactIntegers = this._exactIntegers;
+        return Object.freeze(copy);
+    }
+
+    /** Has the statement's JSON read with its whole numbers past 2^53 as bigints: see {@link _exactIntegers}. */
+    exactIntegers(): this {
+        this._exactIntegers = true;
+        return this;
     }
 }

@@ -90,8 +90,20 @@ packed field with a set compared it with `{}`, and matched nothing.
 **Whole numbers past 2^53.** A `bigint` is written as the whole number it is, with every digit, wherever a save,
 `patch`, `patchAll` or `edges.relate` writes a value: a property, a list's item, a property bag, a `@JsonPacked` field,
 a relationship's property and a `@NodeId`. A `where` compares a field with one as that number too. Before #739, a
-`bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite. A load does not read one back as
-a `bigint` yet: on the SQL stores it gives the nearest JavaScript number.
+`bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite.
+
+A load gives a field's whole numbers the type the model declares, not one their size picks. A field declared a
+`bigint` loads each as a `bigint`, with the digits Postgres and SQLite kept. Three things declare it:
+
+- a decorated field TypeScript records as `bigint`, such as `@NodeId() id: bigint`;
+- a field the class initializes with a `bigint`, such as `count: bigint = 0n`;
+- `@BigIntProperty()`, for a field TypeScript records otherwise: a union such as `bigint | null`, a list, a map, a
+  property bag or a `@JsonPacked` field.
+
+Any other field loads a whole number as a JavaScript number, past 2^53 the nearest, as before. So declare a field that
+holds whole numbers past 2^53 to load it back exactly. On Oracle a declared field still loads a `bigint`, but past 2^53
+the driver has already rounded it (#737). Compiled Cypher has no model to go by: there a whole number past 2^53 always
+comes back as a `bigint` (#735).
 
 #### 2. RelationshipFragment: a Relationship's Properties
 

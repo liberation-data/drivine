@@ -1,4 +1,5 @@
 import {
+    BigIntProperty,
     backendFor,
     DatabaseRegistry,
     DatabaseType,
@@ -34,6 +35,23 @@ class Counter {
 @NodeFragment({ labels: ['SqlBigSave', 'Tally'] })
 class Tally {
     @NodeId() id: bigint | number;
+}
+
+/** A node whose fields are declared bigints: by @BigIntProperty, and by its initializer. */
+@NodeFragment({ labels: ['SqlBigSave', 'Gauge'] })
+class Gauge {
+    @NodeId() id: string;
+    @BigIntProperty() value?: bigint | null;
+    @BigIntProperty() counts?: (bigint | number)[];
+    @BigIntProperty() @PropertyBag() metadata: Record<string, any> = {};
+    @BigIntProperty() @JsonPacked() packed?: Record<string, any>;
+    initialized: bigint = BigInt(0);
+}
+
+/** A node whose id TypeScript records as a bigint. */
+@NodeFragment({ labels: ['SqlBigSave', 'Ticket'] })
+class Ticket {
+    @NodeId() id: bigint;
 }
 
 @RelationshipFragment()
@@ -215,4 +233,54 @@ describe.each(sqlStores())('a bigint property saved on $name', (store) => {
         expect(await ids((q) => q.value.in([BIG, BigInt(4)]))).toEqual(['n']);
         expect(await ids((q) => q.counts.hasItem(BIG))).toEqual(['n']);
     });
+
+    // Oracle's driver reads a JSON value's numbers through a JavaScript number, so a load there still rounds (#737).
+    const exactLoads = store.type !== DatabaseType.ORACLE;
+
+    (exactLoads ? it : it.skip)(
+        'is loaded back as a bigint where the field is declared one, and saved again unchanged',
+        async () => {
+            await gom.save(
+                Object.assign(new Gauge(), {
+                    id: 'p',
+                    value: BIG,
+                    counts: [BIG, 2],
+                    metadata: { count: -BIG },
+                    packed: { deep: [BIG] }
+                })
+            );
+            const loaded = (await gom.load(Gauge, 'p'))!;
+            expect(loaded.value).toBe(BIG);
+            expect(loaded.counts).toEqual([BIG, BigInt(2)]);
+            expect(loaded.metadata.count).toBe(-BIG);
+            expect(loaded.packed).toEqual({ deep: [BIG] });
+            expect(loaded.initialized).toBe(BigInt(0));
+            await gom.save(Object.assign(loaded, { initialized: BIG }));
+            const again = (await gom.load(Gauge, 'p'))!;
+            expect(again.initialized).toBe(BIG);
+            expect(await stored('p')).toContain('-9007199254740993');
+        }
+    );
+
+    (exactLoads ? it : it.skip)('is loaded back as a number where the field is not declared a bigint', async () => {
+        await gom.save(counter('q', { value: BIG, counts: [BIG], metadata: { count: BIG }, packed: { deep: [BIG] } }));
+        const loaded = (await gom.load(Counter, 'q'))!;
+        expect(loaded.value).toBe(Number(BIG));
+        expect(loaded.counts).toEqual([Number(BIG)]);
+        expect(loaded.metadata.count).toBe(Number(BIG));
+        expect(loaded.packed).toEqual({ deep: [Number(BIG)] });
+    });
+
+    (exactLoads ? it : it.skip)(
+        'is loaded back as a bigint @NodeId declared bigint, a number where declared otherwise',
+        async () => {
+            await gom.saveAll([
+                Object.assign(new Ticket(), { id: BIG }),
+                Object.assign(new Ticket(), { id: BigInt(7) })
+            ]);
+            expect((await gom.loadAll(Ticket)).map((it) => it.id).sort()).toEqual([BigInt(7), BIG]);
+            await gom.save(Object.assign(new Tally(), { id: BIG }));
+            expect((await gom.load(Tally, BIG))!.id).toBe(Number(BIG));
+        }
+    );
 });

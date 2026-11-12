@@ -10,6 +10,7 @@ export class GraphStatement {
     ) {}
 
     spec<T>(more: Record<string, any> = {}): QuerySpecification<T> {
-        return new QuerySpecification<T>(this.text).bind({ ...this.bindings, ...more });
+        // Drivine's own statement: its JSON keeps a whole number's digits where the store reads it so.
+        return new QuerySpecification<T>(this.text).bind({ ...this.bindings, ...more }).exactIntegers();
     }
 }
