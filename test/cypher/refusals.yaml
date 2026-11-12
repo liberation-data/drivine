@@ -16,6 +16,69 @@ cases:
       - cypher: "MATCH (n) RETURN n SKIP 1.5"
         error: "SKIP and LIMIT take a whole number, not 1.5."
 
+  - name: "SKIP or LIMIT that isn't a whole number of 0 or more"
+    description: "SKIP and LIMIT take a whole number of 0 or more, written or bound to a parameter, as Neo4j does. A negative one bound to a parameter was taken as no SKIP or LIMIT, and a float bound to one was cut to a whole number (liberation-data/drivine4j#420). Neo4j 2026.10.1 refuses each of these."
+    steps:
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x SKIP -1"
+        error: "SKIP and LIMIT take a whole number of 0 or more, not -1, as in Neo4j."
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x LIMIT -1"
+        error: "SKIP and LIMIT take a whole number of 0 or more, not -1, as in Neo4j."
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x SKIP $s"
+        parameters: {s: -1}
+        error: "SKIP and LIMIT take a whole number of 0 or more, and $s is -1, as in Neo4j."
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x LIMIT $s"
+        parameters: {s: -1}
+        error: "SKIP and LIMIT take a whole number of 0 or more, and $s is -1, as in Neo4j."
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x LIMIT $s"
+        parameters: {s: 1.5}
+        error: "SKIP and LIMIT take a whole number of 0 or more, and $s is 1.5, as in Neo4j."
+      - note: "A whole float too, as Neo4j refuses it."
+        cypher: "UNWIND [1, 2, 3] AS x RETURN x LIMIT $s"
+        parameters: {s: 2.0}
+        error: "SKIP and LIMIT take a whole number of 0 or more, and $s is 2.0, as in Neo4j."
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x LIMIT $s"
+        parameters: {s: "2"}
+        error: "SKIP and LIMIT take a whole number of 0 or more, and $s is a text, as in Neo4j."
+      - cypher: "UNWIND [1, 2, 3] AS x RETURN x LIMIT $s"
+        parameters: {s: null}
+        error: "SKIP and LIMIT take a whole number of 0 or more, and $s is null, as in Neo4j."
+
+  - name: "Arithmetic of a value that isn't a number"
+    description: "-, *, /, % and ^ take numbers, and -, * and / temporal values where the store takes them (see temporal.yaml). Where a side is a text, a truth value, a list or a map the statement writes, makes or binds, the statement is refused, as Neo4j refuses it; it gave null (liberation-data/drivine4j#420). Neo4j 2026.10.1 refuses each of these. A side whose kind is left open is compiled as before."
+    steps:
+      - cypher: "RETURN 'a' - 1"
+        error: "- takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN 'a' * 2"
+        error: "* takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN 2 / 'a'"
+        error: "/ takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN 'a' ^ 2"
+        error: "^ takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN [1] % 2"
+        error: "% takes numbers, not a list, as in Neo4j."
+      - cypher: "RETURN true % 2"
+        error: "% takes numbers, not a truth value, as in Neo4j."
+      - cypher: "RETURN {a: 1} - 1"
+        error: "- takes numbers, not a map, as in Neo4j."
+      - cypher: "WITH 'a' AS s RETURN s % 2"
+        error: "% takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN $s % 2"
+        parameters: {s: "a"}
+        error: "% takes numbers, not a text, as in Neo4j."
+
+  - name: "toBoolean() of a list, a map or a float"
+    description: "toBoolean() takes a truth value, an integer or a text, and Neo4j refuses another kind it knows: of a list or a map it gave null, and of a float a truth value (liberation-data/drivine4j#420). Neo4j 2026.10.1 refuses each of these."
+    steps:
+      - cypher: "RETURN toBoolean([])"
+        error: "toBoolean() takes a truth value, an integer or a text, not a list, as in Neo4j."
+      - cypher: "RETURN toBoolean({a: 1})"
+        error: "toBoolean() takes a truth value, an integer or a text, not a map, as in Neo4j."
+      - cypher: "RETURN toBoolean(1.5)"
+        error: "toBoolean() takes a truth value, an integer or a text, not a float, as in Neo4j."
+      - cypher: "RETURN toBoolean($l)"
+        parameters: {l: []}
+        error: "toBoolean() takes a truth value, an integer or a text, not a list, as in Neo4j."
+
   - name: "Value used as the wrong kind"
     description: "Using a value as something it isn't (a number as a node, a path's property) is refused."
     steps:
@@ -871,6 +934,26 @@ cases:
       - cypher: "MATCH (n) WHERE (n)-->(a) RETURN n"
         error: "a is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
 
+  - name: "Aggregate in the ORDER BY of a projection that doesn't aggregate"
+    description: "An aggregate in the ORDER BY of a WITH or a RETURN whose items don't aggregate, and that isn't DISTINCT, is refused, as Neo4j refuses it (\"Illegal aggregation expression(s) in order by\"): there are no groups for it to aggregate over. Compiled, it made the query aggregate with no GROUP BY, so SQLite gave one row of an arbitrary value (liberation-data/drivine4j#439). A WITH or a RETURN that aggregates, or is DISTINCT, orders by an aggregate, as Neo4j does (see queries.yaml, \"Grouping by maps and lists\")."
+    steps:
+      - cypher: "MATCH (n) WITH n.num1 AS foo ORDER BY max(n.num2) RETURN foo AS foo"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "MATCH (n) RETURN n.num1 ORDER BY max(n.num2)"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "MATCH (n) WITH n.num1 AS foo ORDER BY n.num1, max(n.num2) RETURN foo AS foo"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "MATCH (n) WITH 'k' AS foo ORDER BY max(n.num2) RETURN foo AS foo"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "UNWIND [3, 1, 2] AS x RETURN 'k' AS k ORDER BY count(x)"
+        error: "count() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - note: "Of a DISTINCT projection, an aggregate in an ORDER BY term that names a variable outside the items is refused as an implicit grouping, as Neo4j refuses it."
+        cypher: "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY n.num2 + max(n.num2)"
+        error: "A term of an ORDER BY aggregates, and names n outside its aggregates and the items: Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
+      - note: "Neo4j 2026.10.1 refuses each of these. A COUNT { … } or a comprehension in the ORDER BY isn't an aggregate of the projection, and is taken."
+        cypher: "MATCH (n) WITH n ORDER BY count(*) WHERE n.num1 > 0 RETURN n.num1"
+        error: "count(*) aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+
   - name: "Aggregate in a WHERE"
     description: "An aggregate in a WHERE is refused, as Neo4j refuses it (its 42I24, \"invalid use of aggregate function\"): of a MATCH or a WITH that groups nothing, a pattern comprehension, a list comprehension, a quantifier, a quantified path pattern, EXISTS { … } and COUNT { … }, in a subquery's or a CALL { … }'s query too, and in a comprehension's, a quantifier's or a pattern's own WHERE or body within the WHERE of a WITH that groups. The WHERE of a WITH that aggregates, or is DISTINCT, holds an aggregate, and so does one after a subquery or a CALL that aggregates in its own projection (see queries.yaml, \"Aggregate in the WHERE of a WITH that groups\" and \"Aggregate beside a WHERE\")."
     steps:
@@ -1072,3 +1155,43 @@ cases:
     steps:
       - cypher: "UNWIND ['hello'] AS t RETURN localtime({time: t})"
         error: "localtime() takes a localtime, a time, a localdatetime or a datetime for time, not a text."
+
+  - name: "Parameter map in a matched pattern"
+    description: "A parameter's map as a pattern's properties is refused wherever the pattern is matched, in MATCH, OPTIONAL MATCH, MERGE (a node or a relationship), a variable-length relationship, a quantified path, a shortest path, EXISTS { } and a pattern in an expression, as Neo4j refuses it; the message says to match each property. CREATE takes one (see writes.yaml)."
+    steps:
+      - cypher: "MATCH (n:Person $props) RETURN n"
+        parameters: {props: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MATCH (a)-[r:KNOWS $p]->(b) RETURN r"
+        parameters: {p: {since: 1999}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "OPTIONAL MATCH (n $props) RETURN n"
+        parameters: {props: {}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MERGE (n:Person $props) RETURN n"
+        parameters: {props: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MATCH (n) WHERE (n)-->($props) RETURN n"
+        parameters: {props: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MERGE (a:Person {name: 'Keanu'})-[r:KNOWS $p]->(b:Person {name: 'Carrie'}) RETURN r"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (a)-[r:KNOWS*1..2 $p]->(b) RETURN b"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (a {name: 'Keanu'})-[*1..2]->(b $p) RETURN b"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH ((a $p)-[:KNOWS]->(b)){1,2} RETURN 1"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH path = shortestPath((a {name: 'Keanu'})-[*]->(b $p)) RETURN path"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (n) WHERE EXISTS { (n)-->(m $p) } RETURN n"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (n) RETURN [(n)-->(m $p) | m]"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."

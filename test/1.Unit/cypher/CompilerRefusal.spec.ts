@@ -1,6 +1,6 @@
 import { int } from 'neo4j-driver';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { check, loadSpec, runsOn, trimIndent, valuesFor } from '../../cypher/CypherSpec';
+import { check, loadSpec, runsOn, trimIndent, valuesFor, skipped } from '../../cypher/CypherSpec';
 
 /**
  * A statement the compiler cannot make SQL of, or that is wrong as Cypher is, is refused when it is compiled, with what
@@ -18,7 +18,7 @@ describe('The Cypher compiler refuses', () => {
     describe.each(compilers)('on %s', (store, compiler) => {
         it.each(spec.cases.map((it) => [it.name, it] as const))('%s', async (_, cypherCase) => {
             for (let i = 0; i < cypherCase.steps.length; i++) {
-                if (runsOn(cypherCase.steps[i], store)) {
+                if (runsOn(cypherCase.steps[i], store) && !skipped('refusals.yaml', cypherCase, i, store)) {
                     await check('refusals.yaml', cypherCase, i, store, async (step) => {
                         compiler().compile(trimIndent(step.cypher), valuesFor(step.parameters ?? {}, Number));
                         return Promise.resolve([]);

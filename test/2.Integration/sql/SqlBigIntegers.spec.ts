@@ -24,9 +24,8 @@ afterAll(async () => {
 // A whole number past 2^53 that compiled Cypher gives back keeps its digits, as a bigint, as one bound is given
 // (liberation-data/drivine#735): read as a JavaScript number, 9007199254740993 would be 9007199254740992. A whole
 // number a number holds exactly stays a number.
-// Oracle's driver reads a JSON number through a JavaScript number, so a compiled read there still rounds: left out
-// until that is read otherwise.
-describe.each(cypherSqlStores().filter((it) => it.name !== 'ORACLE'))('a whole number past 2^53 on $name', (store) => {
+// On Oracle a compiled read's rows come back as extended JSON text, which keeps a whole number's digits (#737).
+describe.each(cypherSqlStores())('a whole number past 2^53 on $name', (store) => {
     const manager = sqlPersistenceManager(store);
     const cypher = (text: string, parameters: Record<string, unknown> = {}) =>
         new QuerySpecification<any>(cypherStatement(text)).bind(parameters);

@@ -105,15 +105,6 @@ export const SqliteCypherValues = {
         return SqliteCypherValues.equal(a, b);
     },
 
-    /** Whether the map `props` holds each entry of the map `map`, with an equal value: a null is held only by a null. */
-    contains(props: JsonValue, map: JsonValue): boolean {
-        return (
-            props instanceof Map &&
-            map instanceof Map &&
-            [...map].every(([key, value]) => props.has(key) && SqliteCypherValues.equal(props.get(key)!, value))
-        );
-    },
-
     /**
      * `a + b`, as Cypher adds two values: numbers summed, a whole number where both are, NaN among them; lists joined, or
      * an item put at a list's end or start; a text and a text or a number written one after the other, NaN as `NaN`.

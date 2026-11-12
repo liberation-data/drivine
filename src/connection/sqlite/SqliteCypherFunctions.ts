@@ -14,7 +14,6 @@ import { procedures } from '@/connection/sqlite/SqliteCypherProcedure';
  */
 export const SqliteCypherFunctionNames = {
     EQUAL: 'drivine_equal',
-    CONTAINS: 'drivine_contains',
     ADD: 'drivine_add',
     CANONICAL: 'drivine_canonical',
     CYPHER: 'drivine_cypher',
@@ -40,7 +39,7 @@ const names = SqliteCypherFunctionNames;
 /**
  * Registers on `db` the functions compiled Cypher calls, as drivine4j's `SqliteFunctions.register` does:
  *
- * - `drivine_equal`, `drivine_contains`, `drivine_canonical` and `drivine_add` compare, group and add Cypher's values;
+ * - `drivine_equal`, `drivine_canonical` and `drivine_add` compare, group and add Cypher's values;
  * - `drivine_upper`, `drivine_split`, `drivine_reverse` and `drivine_uuid` are Cypher's `toUpper`, `split`, `reverse`
  *   and `randomUUID`;
  * - `drivine_math` and `drivine_round` work out Cypher's functions of numbers, `exp`, `log`, `sin` …, and `round` by a
@@ -67,11 +66,6 @@ export function registerCypherFunctions(db: SqliteDatabase, patterns: SqlitePatt
         const x = read(a);
         const y = read(b);
         return x === undefined || y === undefined ? null : truth(SqliteCypherValues.compare(x, y));
-    });
-    db.function(names.CONTAINS, exact, (props, map) => {
-        const x = read(props);
-        const y = read(map);
-        return x === undefined || y === undefined ? null : truth(SqliteCypherValues.contains(x, y));
     });
     db.function(names.ADD, exact, (a, b) => {
         const sum = SqliteCypherValues.add(read(a) ?? null, read(b) ?? null);

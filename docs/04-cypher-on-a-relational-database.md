@@ -150,14 +150,13 @@ documents them; the ones you're likeliest to meet:
 
 - A node in a row is its properties.
 - A temporal value is its ISO 8601 text.
-- A whole number past 2^53 comes back as a `bigint` of its digits on Postgres and SQLite, and from a write on Oracle,
-  as you bind one; a smaller one is a number.
+- A whole number past 2^53 comes back as a `bigint` of its digits on Postgres, SQLite and Oracle, as you bind one; a
+  smaller one is a number.
 - Postgres works float arithmetic, `sum()` and `avg()` out in exact decimal, so it is more accurate: `0.1 + 0.2`
   is `0.3` there, where doubles give `0.30000000000000004`. A result differs from Neo4j's only around its 16th
   significant digit, and still comes back as a float.
 - Text sorts by its code points, as Cypher does, but on Postgres a list or a map read from a property sorts the texts
-  in it by the database's collation ([Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)), and Oracle
-  reads an empty string as null ([Oracle](07-supported-engines.md#oracle)).
+  in it by the database's collation ([Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres)).
 
 ### Or no Cypher at all
 

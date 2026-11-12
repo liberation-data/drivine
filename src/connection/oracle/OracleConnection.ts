@@ -148,7 +148,7 @@ export class OracleConnection implements Connection {
         new StatementLogger(this.sessionId()).log(spec, hrStart);
         const rows =
             result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined, cypher !== undefined);
-        const returned = cypher && !result.rows ? returnedRows(rows, cypher.rows) : rows;
+        const returned = !cypher ? rows : result.rows ? rows.map(readRow) : returnedRows(rows, cypher.rows);
         return this.resultMapper.mapQueryResults<T>(returned, finalized);
     }
 }
@@ -162,6 +162,20 @@ export class OracleConnection implements Connection {
  */
 function returnedRows(rows: any[], shape: CompiledRows): any[] {
     return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: withFloats(it) }));
+}
+
+/**
+ * A row of a compiled Cypher statement that only reads: its one column, the value as its text in Oracle's extended JSON
+ * (`oracleReadsAsText`), read with each whole number past 2^53 a bigint of its digits and each float the number it is (see
+ * withFloats), as a write's rows are (#737). A null is null.
+ */
+function readRow(row: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+            key,
+            value === null || value === undefined ? value : withFloats(parseExactIntegers(String(value)))
+        ])
+    );
 }
 
 /** Oracle's names in its extended JSON for NaN and the infinities, and the numbers they are. */

@@ -58,10 +58,28 @@ describe('The rows of a compiled Oracle write', () => {
     });
 
     it.each(['one', 'each'] as const)(
-        "should read a compiled read's rows as they are, said to be '%s'",
+        "should read a compiled read's rows from their extended JSON text, said to be '%s' (#737)",
         async (rows) => {
-            const read = { rows: [{ RESULT: 1 }, { RESULT: { a: 2 } }] };
-            expect(await compiledAs(connection(session(read)), block(rows))).toEqual([1, { a: 2 }]);
+            const read = {
+                rows: [
+                    { RESULT: '1' },
+                    { RESULT: '{"a":2}' },
+                    { RESULT: '9007199254740993' },
+                    { RESULT: '{"$numberDouble":2.5}' },
+                    { RESULT: '[{"$numberDouble":"Nan"}]' },
+                    { RESULT: '"9007199254740993"' },
+                    { RESULT: null }
+                ]
+            };
+            expect(await compiledAs(connection(session(read)), block(rows))).toEqual([
+                1,
+                { a: 2 },
+                BigInt('9007199254740993'),
+                2.5,
+                [NaN],
+                '9007199254740993',
+                null
+            ]);
         }
     );
 

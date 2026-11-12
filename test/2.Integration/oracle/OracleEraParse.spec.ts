@@ -130,7 +130,8 @@ describeOnOracle('The hard parse of temporal arithmetic on Oracle', () => {
                 }
             );
             const ms = (await parseCpu(sid)) - before;
-            return [ms, (result.rows ?? []).map((it) => JSON.stringify(it[0]))];
+            // A read's rows are each its value's extended JSON text, a CLOB, in one column (oracleReadsAsText).
+            return [ms, (result.rows ?? []).map((it) => JSON.stringify(JSON.parse(it[0])))];
         } finally {
             clearTimeout(timer);
             killing.catch(() => undefined);

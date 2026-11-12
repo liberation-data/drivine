@@ -520,6 +520,17 @@ cases:
         rows: [["CARRIE", 1], ["HUGO", 1], ["KEANU", 1], ["LAURENCE", 1]]
       - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS n, count(*) AS c ORDER BY min(m.released), n"
         rows: [["Keanu", 3], ["Carrie", 2], ["Laurence", 1]]
+      - note: "One that is DISTINCT orders by an aggregate over each of its rows' groups, not over all the rows (liberation-data/drivine4j#439)."
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name AS n ORDER BY min(m.released), n"
+        rows: ["Keanu", "Carrie", "Laurence"]
+      - cypher: "UNWIND [2, 3, 3, 3, 1, 1] AS i WITH DISTINCT i ORDER BY count(*) DESC RETURN collect(i)"
+        rows: [[3, 1, 2]]
+      - note: "An item that holds a parameter, or a subquery, groups by its value."
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name + $s AS n ORDER BY min(m.released), n"
+        parameters: {s: "!"}
+        rows: ["Keanu!", "Carrie!", "Laurence!"]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT COUNT { (p)-[:ACTED_IN]->() } AS c ORDER BY min(m.released), c"
+        rows: [3, 1, 2]
       - note: An order of an expression of an item, which is no item.
         cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN {name: p.name} AS who, count(*) AS c ORDER BY who.name"
         rows: [[{name: "Carrie"}, 2], [{name: "Keanu"}, 3], [{name: "Laurence"}, 1]]
@@ -779,15 +790,9 @@ cases:
       - cypher: "RETURN [left('hello', 2147483647), right('hello', 2147483647), substring('hello', 1, 2147483647), left('hello', $m), substring('hello', 1, $m)]"
         parameters: {m: 2147483647}
         rows: [["hello", "hello", "ello", "hello", "ello"]]
-      - except: [oracle]
-        cypher: "UNWIND [2147483647] AS s RETURN [substring('hello', s), substring('hello', $m)]"
+      - cypher: "UNWIND [2147483647] AS s RETURN [substring('hello', s), substring('hello', $m)]"
         parameters: {m: 2147483647}
         rows: [["", ""]]
-      - note: "Oracle's empty text is null."
-        only: [oracle]
-        cypher: "UNWIND [2147483647] AS s RETURN [substring('hello', s), substring('hello', $m)]"
-        parameters: {m: 2147483647}
-        rows: [[null, null]]
       - note: "Beside a null text it is null. Memgraph refuses it."
         except: [memgraph]
         cypher: "RETURN [left(null, -1), right(null, -1), substring(null, 1, -1)]"
@@ -815,15 +820,10 @@ cases:
         parameters: {p: {i: 2}}
         rows: [[null, null]]
       - note: "Bound or read from data, a float is cut toward zero: 2.7 is 2, -0.5 is 0, and -1.5 is -1, which fails. Memgraph and FalkorDB refuse it."
-        only: [neo4j, postgres, sqlite]
+        only: [neo4j, sql]
         cypher: "RETURN [left('hello', $f), right('hello', $f), substring('hello', $s, $f), left('hello', $q)]"
         parameters: {f: 2.7, s: 1.7, q: -0.5}
         rows: [["he", "lo", "el", ""]]
-      - note: "Oracle's empty text is null."
-        only: [oracle]
-        cypher: "RETURN [left('hello', $f), right('hello', $f), substring('hello', $s, $f), left('hello', $q)]"
-        parameters: {f: 2.7, s: 1.7, q: -0.5}
-        rows: [["he", "lo", "el", null]]
       - only: [neo4j, sql]
         cypher: "UNWIND $xs AS n RETURN [left('hello', n), substring('hello', n)]"
         parameters: {xs: [2.7, 2.0, null]}
@@ -979,6 +979,47 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN ['  ' STARTS WITH '', '' CONTAINS ' ', '  ' ENDS WITH ' ', size('  '), isEmpty(' ')]"
         rows: [[true, false, true, 2, false]]
+
+  - name: "The empty text made"
+    description: "A function that makes a text makes the empty text where Cypher does: of empty texts, or of a count of 0. Oracle's empty text is null as SQL text, so its functions gave null there (drivine4j#416). An argument that is null still makes null."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN ['' + '', toUpper(''), toLower(''), trim(''), ltrim(''), rtrim(''), reverse(''), toString('')]"
+        rows: [["", "", "", "", "", "", "", ""]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [replace('a', 'a', ''), replace('', 'a', 'b'), substring('abc', 1, 0), substring('abc', 3), left('abc', 0), right('abc', 0), trim('   ')]"
+        rows: [["", "", "", "", "", "", ""]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [$e + $e, toUpper($e), reverse($e), substring($e, 0), left($e, 2)]"
+        parameters: {e: ""}
+        rows: [["", "", "", "", ""]]
+      - only: [neo4j, sql]
+        cypher: "RETURN split('', ','), split($e, ',')"
+        parameters: {e: ""}
+        rows: [[[""], [""]]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND ['', 'ab'] AS x RETURN x, toUpper(x), x + '', reverse(x), left(x, 1) ORDER BY x"
+        rows: [["", "", "", "", ""], ["ab", "AB", "ab", "ba", "a"]]
+      - note: "A text past 32 KB beside the empty text."
+        only: [neo4j, sql]
+        cypher: "RETURN size($e + $long), size(replace($long, 'x', '')), size(left($long, 0))"
+        parameters: {e: "", long: {$repeat: "x", times: 40000}}
+        rows: [[40000, 0, 0]]
+      - note: "A count out of range beside the empty text still fails, as it does beside any text."
+        only: [neo4j, sql]
+        cypher: "UNWIND [''] AS x RETURN left(x, -1)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [''] AS x RETURN substring(x, 0, $n)"
+        parameters: {n: -1}
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN split('', '')"
+        rows: [[""]]
+      - note: "A null argument, or a missing property, still makes null."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toUpper(p.nope), '' + null, substring('abc', 1, null), left('', null), replace('', null, 'x'), reverse(p.nope), split(null, ','), toString(p.nope), replace('ab', 'a', null)]"
+        rows: [[null, null, null, null, null, null, null, null, null]]
 
   - name: "Round to a fractional or negative precision"
     description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."
@@ -1772,8 +1813,7 @@ cases:
         except: [oracle]
         cypher: "MATCH p = (:Person {name: 'Laurence'})-[:KNOWS]->() RETURN reduce(s = 0, x IN [1] | s + length(p))"
         rows: [1]
-      - note: "A text built up from the empty text: Oracle's empty text is null."
-        except: [oracle]
+      - note: "A text built up from the empty text."
         cypher: |
           MATCH (p:Person) WITH p ORDER BY p.name
           WITH collect(p.name) AS names
@@ -3138,14 +3178,53 @@ cases:
         rows: [[3, ["a", "b"]], [1, ["b", "a", "d"]], [2, ["c"]]]
       - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, m ORDER BY m.released WITH p, collect(m.title) AS ts RETURN p.name ORDER BY ts DESC"
         rows: ["Carrie", "Laurence", "Keanu"]
-      - note: "Null sorts last within a list, as it does among values. Oracle sorts it first (drivine4j#205)."
+      - note: "Null sorts last within a list, as it does among values, and first descending. Oracle's JSON sorts it first; Oracle sorts a list by a key of its own (drivine4j#205)."
         cypher: "UNWIND [[1, 2], [1, null], [1], [null], [0]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [[0], [1], [1, 2], [1, null], [null]]
-      - note: "Items of different kinds sort as Cypher orders kinds: a text before a number. Oracle sorts a number first (drivine4j#205)."
+      - cypher: "UNWIND [[1, 2], [1, null], [1], [null], [0]] AS xs RETURN xs ORDER BY xs DESC"
+        rows: [[null], [1, null], [1, 2], [1], [0]]
+      - note: "Items of different kinds sort as Cypher orders kinds: a text before a number."
         cypher: "UNWIND [[1, 'a'], [1, 2], ['a'], [1.5]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [["a"], [1, "a"], [1, 2], [1.5]]
+      - note: "A number that another begins, as 1 begins 1.04 in Oracle's NUMBER, comes first whatever follows it."
+        cypher: "UNWIND [[1.04], [1, 5], [1]] AS xs RETURN xs ORDER BY xs"
+        rows: [[1], [1, 5], [1.04]]
+      - note: "An empty text, which Oracle's VARCHAR2 holds as null, comes before any other, and a text that another begins before it, whatever follows."
+        only: [neo4j, sql]
+        cypher: "UNWIND [['a!'], ['a', 1], [''], ['b'], ['a'], []] AS xs RETURN xs ORDER BY xs"
+        rows: [[], [""], ["a"], ["a", 1], ["a!"], ["b"]]
+      - note: "A map comes before a text, a text before a truth value, false before true, and a truth value before a number, a negative one among them."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[-1, 0], [true], [-1], ['a'], [-1.04], [false], [{a: 1}], [-2, 5]] AS xs RETURN xs ORDER BY xs"
+        rows: [[{a: 1}], ["a"], [false], [true], [-2, 5], [-1.04], [-1], [-1, 0]]
+      - note: "-Infinity comes before every other number, and Infinity after them, then NaN."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[$p], [$i], [3.0], [$n], ['a']] AS xs RETURN xs ORDER BY xs"
+        parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
+        rows: [["a"], [{$float: "-Infinity"}], [3.0], [{$float: "Infinity"}], [{$float: "NaN"}]]
+      - note: "A text that holds U+0000 comes before one that holds U+0001, whatever follows, as Oracle's key writes each as two bytes. Postgres fails, as its JSON holds no U+0000."
+        only: [neo4j, oracle]
+        cypher: "UNWIND [['a\\u0001', 1], ['a\\u0000', 2], ['a', 3]] AS xs RETURN xs[1] ORDER BY xs"
+        rows: [3, 2, 1]
+      - note: "A text too long for Oracle's VARCHAR2 sorts so too."
+        cypher: "UNWIND [[$t, 2], ['a' + $t, 1], [1, 0]] AS xs RETURN xs[1] ORDER BY xs"
+        parameters: {t: {$repeat: "x", times: 40000}}
+        rows: [1, 2, 0]
+      - note: "Such a text is read as itself, not as its JSON, whose quote would sort it before 'a'."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[$t], ['a']] AS xs RETURN size(xs[0]) ORDER BY xs"
+        parameters: {t: {$repeat: "x", times: 40000}}
+        rows: [1, 40000]
+      - note: "A list collected sorts so too."
+        cypher: "UNWIND [1, 2] AS g UNWIND (CASE g WHEN 1 THEN [5] ELSE ['a'] END) AS v WITH g, collect(v) AS c RETURN g ORDER BY c"
+        rows: [2, 1]
+      - note: "So does a list a CALL sorts and limits."
+        cypher: "CALL { UNWIND [[1, null], [1, 2], ['a']] AS xs RETURN xs ORDER BY xs LIMIT 2 } RETURN xs ORDER BY xs DESC"
+        rows: [[1, 2], ["a"]]
+      - note: "A list read from a map, whose kind the statement leaves open. Postgres sorts such a value as jsonb sorts it (drivine4j#307), and Oracle as its JSON sorts it (drivine4j#798)."
+        except: [postgres, oracle]
+        cypher: "UNWIND [{l: [1, 'a']}, {l: ['a']}, {l: [1, null]}] AS m RETURN m.l ORDER BY m.l"
+        rows: [["a"], [1, "a"], [1, null]]
       - note: "A list of lists compares each inner list item by item too."
         cypher: "UNWIND [[[1, 2]], [[3]], [[1]], [[1], [0]]] AS xs RETURN xs ORDER BY xs"
         rows: [[[1]], [[1], [0]], [[1, 2]], [[3]]]
@@ -3156,13 +3235,11 @@ cases:
         rows: [[[[[3]], [[[2]]]], [[[1, 2]]], []]]
       - cypher: "UNWIND [[[1]], [[]], [[], 1], []] AS xs RETURN xs ORDER BY xs"
         rows: [[], [[]], [[], 1], [[1]]]
-      - note: "Within a list, a list sorts before a number, as Cypher orders kinds. Oracle sorts a number first (drivine4j#205)."
+      - note: "Within a list, a list sorts before a number, as Cypher orders kinds."
         cypher: "UNWIND [[[1]], [[[]]]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [[[[]]], [[1]]]
-      - note: "So does a list that holds null, and a shorter list before a longer one it begins. Oracle sorts a number before a list (drivine4j#205)."
+      - note: "So does a list that holds null, and a shorter list before a longer one it begins."
         cypher: "UNWIND [[1, 2], [[null]], [1, [2, null]], [1, [2]], [1, [1, 5]]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [[[null]], [1, [1, 5]], [1, [2]], [1, [2, null]], [1, 2]]
       - note: "A list worked out in the order term, by reverse(), tail(), a slice, +, range() or split(), sorts so too."
         cypher: "UNWIND [[1, 2], [3], [0, 5, 6]] AS xs RETURN xs ORDER BY reverse(xs)"

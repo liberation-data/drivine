@@ -216,6 +216,10 @@ function graphJson(store: SharedStore, graph: SharedGraph): Record<string, any> 
         // back as OSON version 2, which node-oracledb's thin mode can't read (NJS-126, oracle/node-oracledb#1796,
         // liberation-data/drivine-cypher-spec#165). oracleRowsAsText covers a write's rows; this covers reads too.
         oracleReencodeJson: true,
+        // A read's rows each as its extended JSON text, a CLOB, not JSON: node-oracledb's thin mode reads a JSON value's
+        // numbers through a JavaScript number, so a whole number past 2^53 lost its digits (#737,
+        // liberation-data/drivine-cypher-spec#198). The text keeps them, and marks a float as one; see OracleConnection.
+        oracleReadsAsText: true,
         nullsEqualStored: graph.nullsEqualStored ?? true,
         eraStored: graph.eraStored ?? true,
         indexedProperties: (graph.indexedProperties ?? []).map(([label, property]) => [label, property])
