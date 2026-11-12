@@ -11,6 +11,7 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 ---
 
 <StarlightPage
+    hasSidebar={false}
     frontmatter={{
         title: 'Cypher playground',
         description: 'Run Cypher on SQLite in your browser with Drivine, and see the SQL it compiles to.',
@@ -132,6 +133,9 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
             runButton.disabled = resetButton.disabled = true;
             try {
                 await work();
+            } catch (e) {
+                // A run reports its own failures; this is for one that never got that far, such as a reset.
+                status.textContent = `Something went wrong: ${(e as Error)?.message ?? e}`;
             } finally {
                 busy = false;
                 runButton.disabled = resetButton.disabled = false;
@@ -154,6 +158,8 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
         });
         root.querySelectorAll<HTMLButtonElement>('.pg-example').forEach((button) =>
             button.addEventListener('click', () => {
+                // While a run is out, as Run does: the box keeps the query whose results are shown.
+                if (busy) return;
                 cypher.value = examples[Number(button.dataset.index)];
                 run();
             })
@@ -167,6 +173,10 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 </script>
 
 <style>
+    /* The gaps space the playground's parts, not Starlight's content flow, which spaces each from the one before. */
+    .pg :global(*) {
+        margin-top: 0;
+    }
     .pg {
         display: flex;
         flex-direction: column;
@@ -248,11 +258,12 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
     .pg-results {
         overflow-x: auto;
     }
-    .pg-results table {
+    /* Global: the script makes the results, so they don't carry this page's scope. */
+    .pg-results :global(table) {
         margin: 0;
         font-size: var(--sl-text-sm);
     }
-    .pg-results td {
+    .pg-results :global(td) {
         font-family: var(--sl-font-mono);
         white-space: pre-wrap;
     }
@@ -264,13 +275,13 @@ const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
         white-space: pre-wrap;
         word-break: break-word;
     }
-    .pg-error {
+    .pg-results :global(.pg-error) {
         color: var(--sl-color-red-high, #c00);
         font-family: var(--sl-font-mono);
         font-size: var(--sl-text-sm);
         white-space: pre-wrap;
     }
-    .pg-empty {
+    .pg-results :global(.pg-empty) {
         color: var(--sl-color-gray-3);
     }
 </style>

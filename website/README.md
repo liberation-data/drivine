@@ -27,6 +27,13 @@ The site at [drivine.org](https://drivine.org/), built with
   `printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><style>@media (prefers-color-scheme:dark){image{filter:invert(1)}}</style><image width="96" height="96" href="data:image/png;base64,%s"/></svg>\n' "$(base64 -i src/assets/cow-black.png)" > public/favicon.svg`.
 - `src/components/Share.astro`: the Share buttons under the video, on its end card, in the footer, and beside each docs
   page's title (`src/components/PageTitle.astro`).
+- `src/pages/playground.astro`: the Cypher playground at `/playground/`, Drivine running in the page on SQLite's wasm
+  build, with a small movies graph and example queries (`src/playground/movies.ts`). Its engine,
+  `src/playground/engine.ts`, is bundled into `public/playground/` with Drivine from this repository's `src/`, and with
+  SQLite's and the shared Cypher compiler's .wasm files from the root's `node_modules`, by
+  `scripts/bundle-playground.mjs`, which `npm run dev` and `npm run build` run (so `npm ci` at the root first). The
+  result's column names are read from the query's RETURN (`src/playground/columns.ts`). The graph and the examples are
+  run on SQLite by `test/2.Integration/website/PlaygroundExamples.spec.ts` at the root.
 - The docs are generated, not written here: `scripts/import-readmes.mjs` turns this repository's `docs/` into the
   TypeScript docs (`/ts/`), drivine-python's into the Python docs (`/py/`) and drivine4j's into the Kotlin & Java docs
   (`/jvm/`). Each library's `docs/` holds its guide a file to each `##` section, after `00-introduction.md`; a library
@@ -38,6 +45,7 @@ The site at [drivine.org](https://drivine.org/), built with
   sitemap and linking each result to its page and heading.
 
 ```bash
+(cd .. && npm ci)  # the playground is bundled from Drivine's source and the root's packages
 npm install
 npm run dev        # imports the docs, then serves the site at localhost:4321
 npm run build      # the same, into dist/

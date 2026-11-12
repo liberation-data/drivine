@@ -9,7 +9,10 @@ describe("the playground's column names", () => {
         ["RETURN {a: 1, b: [1, 2]} AS m, 'x, AS y' AS `odd name`", ['m', 'odd name']],
         ['CALL { MATCH (n) RETURN n AS inner } RETURN inner.name AS name LIMIT 3', ['name']],
         ['RETURN 1 AS a UNION RETURN 2 AS a', ['a']],
-        ['MATCH (n) WHERE n.note = "RETURN x" RETURN n.id AS id SKIP 1', ['id']]
+        ['MATCH (n) WHERE n.note = "RETURN x" RETURN n.id AS id SKIP 1', ['id']],
+        ["// Keanu's films\nMATCH (m) RETURN m.title AS title, m.released AS released", ['title', 'released']],
+        ['MATCH (m) RETURN m.title AS title, /* a, b */ m.released AS released // RETURN x', ['title', 'released']],
+        ["MATCH (m) WHERE m.url = 'http://x' RETURN m.url AS url, 1 AS one", ['url', 'one']]
     ])('reads %s', (cypher, columns) => {
         expect(returnedColumns(cypher)).toEqual(columns);
     });

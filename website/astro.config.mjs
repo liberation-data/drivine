@@ -48,7 +48,8 @@ export default defineConfig({
                     { label: 'Python', link: '/py/', items: sidebar.py },
                     { label: 'Kotlin & Java', link: '/jvm/', items: sidebar.jvm }
                 ], {
-                    // The playground is for every library's readers, so it sits in none of their sidebars.
+                    // The playground is for every library's readers, so it sits in none of their sidebars, and shows none
+                    // (hasSidebar in src/pages/playground.astro).
                     exclude: ['/playground']
                 })
             ]
