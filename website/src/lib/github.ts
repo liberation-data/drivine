@@ -17,7 +17,8 @@ export const studioUrl = `https://github.com/${STUDIO.repo}`;
 /**
  * Where to get Drivine Studio, for the panels that ask the reader to try it. There are no published downloads yet, so it
  * is the README's steps to build the app on the machine that runs it. When signed downloads ship, point it at their page
- * and change the label: every panel follows.
+ * and change the label, and the words around its links: "There are no downloads yet." in StudioPanel.astro, and the
+ * landing page's "build it from source" and footer "Build it".
  */
 export const STUDIO_GET = { url: `${studioUrl}#install-it-yourself`, label: 'Build it from source' } as const;
 
