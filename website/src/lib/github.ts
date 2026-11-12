@@ -14,6 +14,13 @@ export type Topic = keyof typeof REPOS;
 export const STUDIO = { name: 'Drivine Studio', language: 'Desktop app', repo: 'liberation-data/drivine-studio' } as const;
 export const studioUrl = `https://github.com/${STUDIO.repo}`;
 
+/**
+ * Where to get Drivine Studio, for the panels that ask the reader to try it. There are no published downloads yet, so it
+ * is the README's steps to build the app on the machine that runs it. When signed downloads ship, point it at their page
+ * and change the label: every panel follows.
+ */
+export const STUDIO_GET = { url: `${studioUrl}#install-it-yourself`, label: 'Build it from source' } as const;
+
 export const repoUrl = (topic: Topic): string => `https://github.com/${REPOS[topic].repo}`;
 
 /** A GET of GitHub's API, with GITHUB_TOKEN if it's set, given up after 10 s. */

@@ -17,6 +17,8 @@ import studioCypher from '../assets/studio-cypher.png';
 import videoPoster from '../assets/video-poster.jpg';
 import videoEnd from '../assets/video-end.jpg';
 import Share from '../components/Share.astro';
+import Playground from '../components/Playground.astro';
+import StudioPanel from '../components/StudioPanel.astro';
 import video from '../generated/video.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
@@ -35,6 +37,7 @@ const photoVars = `--photo: ${photoLarge.css}; --photo-small: ${photoSmall.css};
 const ts = `${base}ts/`;
 const py = `${base}py/`;
 const jvm = `${base}jvm/`;
+const playground = `${base}playground/`;
 const image = (name: string) => `${base}images/${name}`;
 // The explainer. The section and the hero's tip show while VIDEO is set. It is on YouTube too (VIDEO_ID).
 const VIDEO = `${base}video/drivine-explainer.mp4`;
@@ -347,6 +350,13 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .perf dd { margin: 4px 0 0; font-size: 15px; line-height: 1.5; color: var(--muted); }
             @media (max-width: 600px) { .perf { padding-top: 32px; } .perf .wrap { padding: 28px 22px; gap: 28px; } }
 
+            .try { padding: 96px 32px; }
+            .try .wrap { max-width: 1040px; display: flex; flex-direction: column; gap: 0; }
+            .try header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+            .try header > p:not(.eyebrow) { margin: 0; font-size: 18px; line-height: 1.65; color: var(--muted); }
+            .try .more { margin: 16px 0 0; font-size: 16px; }
+            @media (max-width: 800px) { .try { padding: 64px 16px; } }
+
             .studio { padding: 0 32px 96px; }
             .studio .wrap { display: flex; flex-direction: column; gap: 36px; }
             .studio header { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
@@ -394,6 +404,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <a href={ts}>TypeScript docs</a>
                     <a href={py}>Python docs</a>
                     <a href={jvm}>Kotlin &amp; Java docs</a>
+                    <a href={playground}>Playground</a>
                     <details class="repo-menu">
                         <summary>GitHub</summary>
                         <div class="menu">
@@ -619,6 +630,23 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <li><span>Cypher the compiler doesn’t take yet is refused by name, before the store is sent anything.</span></li>
                         <li><span>One <a href="https://github.com/liberation-data/drivine-cypher-spec">Cypher spec</a>, run by all three libraries, says what each statement gives on each store.</span></li>
                     </ul>
+                </div>
+            </section>
+
+            <section class="try" id="try">
+                <div class="wrap">
+                    <header>
+                        <p class="eyebrow">PLAYGROUND</p>
+                        <h2>Try Cypher in your browser.</h2>
+                        <p>
+                            Drivine compiles each statement to SQL and runs it on SQLite, here in the page: nothing is sent to
+                            a server. The graph is a few films and the people who made them. Run an example, or write your
+                            own, and see the rows and the SQL it compiled to.
+                        </p>
+                    </header>
+                    <Playground examples={[0, 2]} lazy paneHeading="h3" />
+                    <p class="more"><a href={playground}>The full playground, with more examples →</a></p>
+                    <StudioPanel />
                 </div>
             </section>
 
