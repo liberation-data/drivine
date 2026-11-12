@@ -1024,8 +1024,8 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             ]) {
                 expect([fn, await query(`WITH $n AS n RETURN ${fn}`, { n: null })]).toEqual([fn, [null]]);
             }
-            // Oracle's empty text is null.
-            const empty = oracle ? null : '';
+            // The empty text, on Oracle too, where a read's rows come back as their JSON text (#737).
+            const empty = '';
             expect(
                 await query('WITH $s AS s, $w AS w RETURN substring(s, 5), left(s, 0), replace(s, $s, $e), trim(w)', {
                     s: 'abc',
@@ -1033,7 +1033,7 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                     e: ''
                 })
             ).toEqual([[empty, empty, empty, empty]]);
-            // Two empty texts put together are empty: on Oracle null, as its empty text is, and not read as a long one.
+            // Two empty texts put together are empty, and not read as a long one.
             expect(await query('WITH $e AS e RETURN e + e', { e: '' })).toEqual([empty]);
         });
 
@@ -1738,10 +1738,9 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             const rows = ['aB'.repeat(3_000), 'abc', `x${'😀'.repeat(1_500)}`, `${'é中'.repeat(1_999)}x`];
             expect(await query('UNWIND $ts AS t RETURN reverse(t)', { ts: rows })).toEqual(rows.map(reversed));
             expect(await query('RETURN [t IN $ts | reverse(t)]', { ts: rows })).toEqual([rows.map(reversed)]);
-            // A null text is null, and an empty one empty: on Oracle null, as its empty text is, and not read again as a
-            // long one.
+            // A null text is null, and an empty one empty, and not read again as a long one.
             expect(await query('WITH $n AS n RETURN reverse(n)', { n: null })).toEqual([null]);
-            expect(await query('WITH $e AS e RETURN reverse(e)', { e: '' })).toEqual([oracle ? null : '']);
+            expect(await query('WITH $e AS e RETURN reverse(e)', { e: '' })).toEqual(['']);
             // A literal, a text or a list, whose CLOB Oracle bound without a type, and found no DBMS_LOB.SUBSTR for (PLS-307).
             expect(await query("RETURN [reverse('Keanu'), reverse([1, 2, 3])]")).toEqual([['unaeK', [3, 2, 1]]]);
         });
@@ -4972,8 +4971,8 @@ describe.each(
         ]);
     });
 
-    /** The empty text, which Oracle reads as null. */
-    const empty = store.type === DatabaseType.ORACLE ? null : '';
+    /** The empty text, on Oracle too, where a read's rows come back as their JSON text (#737). */
+    const empty = '';
 
     /** What the compiler refuses a written float start or length `what` of `fn` with. */
     const float = (fn: string, what: string): string =>
