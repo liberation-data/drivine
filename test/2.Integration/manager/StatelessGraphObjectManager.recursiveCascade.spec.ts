@@ -270,7 +270,10 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
         const before = await ids();
         const deleted = await remove();
         const after = await ids();
-        return { removed: before.filter((it) => !after.includes(it)), deleted };
+        const removed = before.filter((it) => !after.includes(it));
+        // A delete returns every node it took, the roots and what the cascade took, as drivine4j asserts (#562).
+        expect(deleted).toEqual(removed.length);
+        return { removed, deleted };
     };
 
     const clear = async (): Promise<void> => {
@@ -307,7 +310,7 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
         );
 
         expect(removed).toEqual(loaded);
-        expect(deleted).toEqual(1);
+        expect(deleted).toEqual(removed.length);
         // The nested messages point at the user, which the view does not declare.
         expect(await ids()).toEqual(['rc-user']);
     });
@@ -523,7 +526,7 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
             // The nested messages are kept: the user outside the view still refers to each. The sessions are deleted,
             // though each relates to its own messages and parts: those are in the cascade.
             expect(removed).toEqual(loaded.filter((it) => it !== 'rc-m1' && it !== 'rc-m2'));
-            expect(deleted).toEqual(1);
+            expect(deleted).toEqual(removed.length);
             expect(await ids()).toEqual(['rc-m1', 'rc-m2', 'rc-user']);
         });
 
@@ -538,7 +541,7 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
             );
 
             expect(removed).toEqual(loaded);
-            expect(deleted).toEqual(1);
+            expect(deleted).toEqual(removed.length);
         });
 
         it('should keep what a kept node holds', async () => {

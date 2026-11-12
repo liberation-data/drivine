@@ -114,7 +114,7 @@ export class SqliteBackend implements GraphBackend {
      * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it
      * through the relationships a save writes (see SqlViews.cascade): every one, or with `DELETE_ORPHAN` those not kept
      * (see keptTargets). Every node is selected before any is deleted, so what is kept is read first, and handed to
-     * `drivine_delete`. Returns how many roots were deleted: `{deleted}`.
+     * `drivine_delete`. Returns how many nodes were deleted, the roots and what the cascade took (#562): `{deleted}`.
      */
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
@@ -145,7 +145,7 @@ export class SqliteBackend implements GraphBackend {
             ? `SELECT nid FROM cascade_roots UNION SELECT nid FROM cascade_targets` +
               `${orphans ? ' WHERE nid NOT IN (SELECT nid FROM cascade_kept)' : ''}`
             : 'SELECT nid FROM cascade_roots';
-        // The roots are counted before anything is deleted: the left of the sum is worked out first.
+        // Every node deleted is counted, the roots and what the cascade took, as drivine4j counts them (#562).
         return new PostgresStatement(
             [
                 `WITH ${orphans ? 'RECURSIVE ' : ''}cascade_roots AS (SELECT ${ROW_ALIAS}.nid ${this.from(
@@ -154,8 +154,9 @@ export class SqliteBackend implements GraphBackend {
                 )}),`,
                 ...targets,
                 `gone AS (${deleted})`,
-                `SELECT (SELECT COUNT(*) FROM cascade_roots) + 0 * ` +
-                    `drivine_delete(${sqlText(this.graph.name)}, (SELECT json_group_array(nid) FROM gone)) AS "deleted"`
+                `SELECT drivine_delete(${sqlText(
+                    this.graph.name
+                )}, (SELECT json_group_array(nid) FROM gone)) AS "deleted"`
             ].join('\n')
         );
     }

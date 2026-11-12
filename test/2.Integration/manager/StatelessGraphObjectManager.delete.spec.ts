@@ -132,7 +132,8 @@ describe.each(graphEngines())('StatelessGraphObjectManager deletes on $type', (e
     });
 
     it('should delete every node the view reaches with DELETE_ALL', async () => {
-        expect(await gom.delete(SessionView, 's1', { cascade: CascadeType.DELETE_ALL })).toEqual(1);
+        // Every node it took: s1, a1, m1, m2, shared and u (#562).
+        expect(await gom.delete(SessionView, 's1', { cascade: CascadeType.DELETE_ALL })).toEqual(6);
         expect(await ids()).toEqual(['m3', 's2']);
     });
 
@@ -143,7 +144,7 @@ describe.each(graphEngines())('StatelessGraphObjectManager deletes on $type', (e
             );
             return;
         }
-        expect(await gom.delete(SessionView, 's1', { cascade: CascadeType.DELETE_ORPHAN })).toEqual(1);
+        expect(await gom.delete(SessionView, 's1', { cascade: CascadeType.DELETE_ORPHAN })).toEqual(5);
         // shared is attached to m3, outside the view, so it is kept; the rest of the view goes, m1 with it, though it
         // attached shared: its relationships to a1 and shared were to nodes in the view.
         expect(await ids()).toEqual(['m3', 's2', 'shared']);
@@ -163,7 +164,8 @@ describe.each(graphEngines())('StatelessGraphObjectManager deletes on $type', (e
         const loaded = (await gom.load(SessionTree, 'rc-root'))!;
         expect(loaded.parts[0].messages.map((it) => it.id)).toEqual(['rc-m1']);
         expect(loaded.parts[0].parts[0].messages.map((it) => it.id)).toEqual(['rc-m2']);
-        expect(await gom.delete(SessionTree, 'rc-root', { cascade: CascadeType.DELETE_ALL })).toEqual(1);
+        // The three sessions and their three messages (#562).
+        expect(await gom.delete(SessionTree, 'rc-root', { cascade: CascadeType.DELETE_ALL })).toEqual(6);
         expect((await ids()).filter((it) => it.startsWith('rc-'))).toEqual([]);
     });
 

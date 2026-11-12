@@ -118,7 +118,8 @@ export class OracleBackend implements GraphBackend {
     /**
      * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it
      * through the relationships a save writes (see SqlViews.cascade): every one, or with `DELETE_ORPHAN` those not kept
-     * (see keptTargets), which are read before anything is deleted. Returns how many roots were deleted: `{deleted}`.
+     * (see keptTargets), which are read before anything is deleted. Returns how many nodes were deleted, the roots and what
+     * the cascade took (#562): `{deleted}`.
      */
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
@@ -157,6 +158,7 @@ BEGIN
     DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT column_value FROM TABLE(v_roots));
     v_deleted := SQL%ROWCOUNT;
     DELETE FROM ${this.graph.nodes} x WHERE x.nid IN (SELECT column_value FROM TABLE(v_targets));
+    v_deleted := v_deleted + SQL%ROWCOUNT;
     OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
     DBMS_SQL.RETURN_RESULT(c);
 END;`);

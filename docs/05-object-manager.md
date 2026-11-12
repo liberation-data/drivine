@@ -1027,7 +1027,8 @@ is deleted. `DELETE_ALL` deletes nodes others may still point at, so use it for 
 keeps a node in the view that a node outside it still refers to, at any level, together with everything the view holds
 below it: a bookmarked message keeps its attachments, and a pinned sub-session keeps its messages and its own
 sub-sessions. The rest of the view is deleted, including the session that held a kept message. `DELETE_ORPHAN` isn't
-available on Memgraph.
+available on Memgraph. A cascading delete returns how many nodes it deleted: the root and every node the cascade took,
+on every store, as drivine4j counts them. Before #562 it counted the root alone.
 
 A view that contains itself (`parts: SessionTree[]`, with a `maxDepth`) deletes what a load of it reads: the nodes at
 every level, and what each level holds through the view's other relationships a save writes. A cascade never stops
