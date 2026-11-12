@@ -14,6 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -204,7 +205,7 @@ function implicitRows(rows: any[] | undefined): any[] {
         const out: Record<string, any> = {};
         for (const [key, value] of Object.entries(row)) {
             if (key.endsWith(':json')) {
-                out[key.slice(0, -':json'.length)] = value == null ? value : JSON.parse(value as string);
+                out[key.slice(0, -':json'.length)] = value == null ? value : parseExactIntegers(value as string);
             } else {
                 out[key] = value;
             }

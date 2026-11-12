@@ -20,6 +20,7 @@ import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 
 /** How long a transaction may hold the file's write lock before its end is warned of: drivine4j's five seconds. */
 export const LONG_LOCK_MILLIS = 5_000;
@@ -222,12 +223,13 @@ function jsonRow(row: Record<string, SqliteValue>): Record<string, any> {
 }
 
 /**
- * The JSON `text` as the value it is, with each map of {@link NAN_TEXT} in it NaN where the text holds one. A text value
+ * The JSON `text` as the value it is, a whole number past 2^53 a `bigint` of its digits (see parseExactIntegers), and
+ * each map of {@link NAN_TEXT} in it NaN where the text holds one. A text value
  * that holds those characters holds each quote escaped, so only a map holds them: the look is a cheap pass over a row
  * that holds no NaN, which most do, and {@link withNaN} takes only the exact map.
  */
 function jsonValue(text: string): any {
-    const value = JSON.parse(text);
+    const value = parseExactIntegers(text);
     return text.includes(NAN_TEXT) ? withNaN(value) : value;
 }
 

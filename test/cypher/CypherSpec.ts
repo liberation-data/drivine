@@ -53,9 +53,14 @@ interface Skip {
     holds: (step: CypherStep) => boolean;
 }
 
-/** A JavaScript number holds no whole number beyond 2^53: these steps bind or expect one, such as 9007199254740993. */
+/**
+ * A JavaScript number holds no whole number beyond 2^53: these steps bind or expect one, such as 9007199254740993.
+ * Postgres and SQLite give one back as a bigint of its digits (liberation-data/drivine#735), so they run them; the graph
+ * engines' drivers, and Oracle's, which reads a JSON number through a JavaScript number, are left out.
+ */
 const BEYOND_2_53: Skip = {
     why: 'a number beyond 2^53',
+    on: ['graph', 'oracle'],
     holds: (step) => /[0-9]{16}/.test(JSON.stringify(step, replacer))
 };
 
@@ -293,10 +298,13 @@ async function checkStep(
     if (step.rows === undefined) {
         return;
     }
-    const expected = canonical(valuesFor(step.rows, Number), step, step.unordered ?? false);
+    // A whole number past 2^53 is kept as the bigint it is, as a store gives it back (liberation-data/drivine#735), so
+    // its digits are compared, not those of the nearest JavaScript number.
+    const expected = canonical(valuesFor(step.rows, exactWhole), step, step.unordered ?? false);
     const actual = canonical(rows, step, step.unordered ?? false);
-    if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-        throw new Mismatch(`${where}\nExpected: ${JSON.stringify(expected)}\nReceived: ${JSON.stringify(actual)}`);
+    const [e, a] = [JSON.stringify(expected, replacer), JSON.stringify(actual, replacer)];
+    if (e !== a) {
+        throw new Mismatch(`${where}\nExpected: ${e}\nReceived: ${a}`);
     }
 }
 
@@ -337,6 +345,11 @@ function canonical(value: any, step: CypherStep, sorted: boolean = step.unordere
         return step.keyOrder ? entries : Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : 1)));
     }
     return value === undefined ? null : value;
+}
+
+/** A spec's whole number as a store gives it back: a number where one holds it exactly, else the bigint itself. */
+export function exactWhole(value: bigint): number | bigint {
+    return Number.isSafeInteger(Number(value)) ? Number(value) : value;
 }
 
 function replacer(_: string, value: any): any {

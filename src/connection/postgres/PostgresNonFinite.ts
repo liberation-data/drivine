@@ -1,4 +1,5 @@
 import { DrivineError } from '@/DrivineError';
+import { exactInteger, parseExactIntegers } from '@/utils/ExactIntegers';
 
 /** Postgres's `json` and `jsonb`, by type OID. */
 const JSON_OID = 114;
@@ -92,18 +93,19 @@ const SOURCE_TEXT =
 
 /**
  * A reviver that gives each number that stands for NaN or an infinity as the double it is (see {@link nonFiniteOf}). A
- * number JSON.parse reads as finite is under any double's greatest, 1.8e308, so stands for neither, and is kept.
+ * number JSON.parse reads as finite is under any double's greatest, 1.8e308, so stands for neither: it is kept, a whole
+ * one past 2^53 as a `bigint` of its digits (see exactInteger).
  */
 function revived(_key: string, value: any, context?: { source?: string }): any {
     if (typeof value !== 'number' || Number.isFinite(value)) {
-        return value;
+        return exactInteger(value, context);
     }
     return nonFiniteOf(context!.source!) ?? value;
 }
 
 /**
  * The JSON text `text`, as Postgres writes a `json` or `jsonb` value, with each number that stands for NaN or an
- * infinity the double it is, as drivine4j's compiler writes them on Postgres where a statement is given one
+ * infinity the double it is, and each whole number past 2^53 a `bigint`, as drivine4j's compiler writes them on Postgres where a statement is given one
  * (liberation-data/drivine#673): `jsonb` holds neither.
  */
 export function readNonFiniteJson(text: string): any {
@@ -138,6 +140,21 @@ export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
         getTypeParser: (oid: number, format?: any) =>
             (oid === JSON_OID || oid === JSONB_OID) && (format ?? 'text') === 'text'
                 ? readNonFiniteJson
+                : parsers.getTypeParser(oid, format)
+    };
+}
+
+/**
+ * The type parsers a compiled Cypher statement runs with, as `pg`'s per-query `types`: `json` and `jsonb` read with
+ * each whole number past 2^53 a `bigint` of its digits (see parseExactIntegers), as a compiled statement gives each
+ * value as JSON, and each other type as `parsers`, the client's own, read it. Given to that statement alone, never set
+ * for the process, as {@link nonFiniteTypes} is.
+ */
+export function exactIntegerTypes(parsers: TypeParsers): TypeParsers {
+    return {
+        getTypeParser: (oid: number, format?: any) =>
+            (oid === JSON_OID || oid === JSONB_OID) && (format ?? 'text') === 'text'
+                ? parseExactIntegers
                 : parsers.getTypeParser(oid, format)
     };
 }

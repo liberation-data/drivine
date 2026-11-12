@@ -14,7 +14,16 @@ import {
     TransactionContextHolder
 } from '@liberation-data/drivine';
 import { DrivineTestContainers, Environment } from '@/testing';
-import { check, CypherCase, loadSpec, runsOn, skipped, trimIndent, valuesFor } from '../../cypher/CypherSpec';
+import {
+    check,
+    CypherCase,
+    exactWhole,
+    loadSpec,
+    runsOn,
+    skipped,
+    trimIndent,
+    valuesFor
+} from '../../cypher/CypherSpec';
 
 jest.setTimeout(120_000);
 
@@ -116,7 +125,9 @@ async function startNeo4j(): Promise<void> {
  * SQL store binds every parameter as JSON, where it is the number it is.
  */
 function parametersFor(store: Store, parameters: Record<string, any>): Record<string, any> {
-    return valuesFor(parameters, (it) => (store.type === DatabaseType.NEO4J ? neo4j.int(it.toString()) : Number(it)));
+    return valuesFor(parameters, (it) =>
+        store.type === DatabaseType.NEO4J ? neo4j.int(it.toString()) : exactWhole(it)
+    );
 }
 
 /**

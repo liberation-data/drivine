@@ -39,12 +39,15 @@ describe('The Cypher spec runner holds a step', () => {
     });
 
     it('but not one the runner crashes on', async () => {
-        await expect(oracle(held(step), async () => await Promise.resolve([BigInt(1)]))).rejects.toThrow(TypeError);
+        // A row that refers to itself, which the runner can't put in order to compare: it overflows the stack.
+        const loop: Record<string, unknown> = {};
+        loop.self = loop;
+        await expect(oracle(held(step), async () => await Promise.resolve([loop]))).rejects.toThrow(RangeError);
     });
 
     it('only on the stores its hold names', async () => {
-        await expect(check('queries.yaml', held(step), 1, 'neo4j', async () => await Promise.resolve([2]))).rejects.toThrow(
-            /Expected: \[1\]/
-        );
+        await expect(
+            check('queries.yaml', held(step), 1, 'neo4j', async () => await Promise.resolve([2]))
+        ).rejects.toThrow(/Expected: \[1\]/);
     });
 });
