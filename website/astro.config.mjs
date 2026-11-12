@@ -4,6 +4,7 @@ import starlight from '@astrojs/starlight';
 import starlightSidebarTopics from 'starlight-sidebar-topics';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Written by scripts/import-readmes.mjs, which `npm run dev` and `npm run build` run first.
 const sidebar = JSON.parse(readFileSync(new URL('./src/generated/sidebar.json', import.meta.url), 'utf8'));
@@ -16,7 +17,7 @@ const sidebar = JSON.parse(readFileSync(new URL('./src/generated/sidebar.json', 
 const playgroundOnDevServer = {
     name: 'drivine-playground-on-dev-server',
     configureServer(server) {
-        const dir = new URL('./public/playground/', import.meta.url).pathname;
+        const dir = fileURLToPath(new URL('./public/playground/', import.meta.url));
         const types = { '.mjs': 'text/javascript', '.wasm': 'application/wasm' };
         server.middlewares.use('/playground/', (req, res, next) => {
             const file = join(dir, basename((req.url ?? '').split('?')[0]));
