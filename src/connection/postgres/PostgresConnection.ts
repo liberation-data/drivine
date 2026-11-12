@@ -100,7 +100,14 @@ export class PostgresConnection implements Connection {
         // Before anything runs: where the stand-ins can't be read, nothing is. A compiled statement's JSON is read with
         // its whole numbers past 2^53 kept, NaN and the infinities too where it is given them.
         const parsers = this.client as unknown as TypeParsers;
-        const types = cypher ? (cypher.nonFinite ? nonFiniteTypes(parsers) : exactIntegerTypes(parsers)) : undefined;
+        // So is the object manager's own statements' (#741); a user's own SQL is read as the client reads it.
+        const types = cypher
+            ? cypher.nonFinite
+                ? nonFiniteTypes(parsers)
+                : exactIntegerTypes(parsers)
+            : finalizedSpec._exactIntegers
+            ? exactIntegerTypes(parsers)
+            : undefined;
         for (const statement of cypher?.setup ?? []) {
             await this.client.query(statement);
         }

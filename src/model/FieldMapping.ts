@@ -19,6 +19,11 @@ export interface FieldMapping {
      * initializes with one. A store holds a set as a list, and a load gives such a field a Set.
      */
     sets: Set<string>;
+    /**
+     * Fields whose whole numbers load as bigints: those `@BigIntProperty` marks, those TypeScript records as `bigint`,
+     * and those the class initializes with one. Every other field loads them as numbers (#741).
+     */
+    bigInts: Set<string>;
 }
 
 /** What a load gives an `@EmptyWhenAbsent` field of the kind where the node holds no value for it, or holds null. */

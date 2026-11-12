@@ -141,9 +141,9 @@ export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
 }
 
 /**
- * The type parsers a compiled Cypher statement runs with, as `pg`'s per-query `types`: `json` and `jsonb` read with
- * each whole number past 2^53 a `bigint` of its digits (see parseExactIntegers), as a compiled statement gives each
- * value as JSON, and each other type as `parsers`, the client's own, read it. Given to that statement alone, never set
+ * The type parsers a compiled Cypher statement, or the object manager's own (#741), runs with, as `pg`'s per-query
+ * `types`: `json` and `jsonb` read with each whole number past 2^53 a `bigint` of its digits (see parseExactIntegers),
+ * as such a statement gives each value as JSON, and each other type as `parsers`, the client's own, read it. Given to that statement alone, never set
  * for the process, as {@link nonFiniteTypes} is.
  */
 export function exactIntegerTypes(parsers: TypeParsers): TypeParsers {

@@ -299,7 +299,8 @@ export class ModelRegistry {
                     function: options.function as AggregateModel['function'],
                     type: options.type,
                     property: options.property,
-                    direction: options.direction ?? Direction.OUTGOING
+                    direction: options.direction ?? Direction.OUTGOING,
+                    bigInt: !!it.bigInt || it.designType === BigInt
                 };
             });
         const paths = [...properties].filter(([, it]) => it.path).map(([field, it]) => this.path(type, field, it));
@@ -539,7 +540,8 @@ export class ModelRegistry {
                     this.emptyCollectionKind(type, field, properties.get(field)!)
                 ])
             ),
-            sets: this.sets(type, properties)
+            sets: this.sets(type, properties),
+            bigInts: this.bigInts(type, properties)
         };
     }
 
@@ -549,15 +551,23 @@ export class ModelRegistry {
      * neither decorated nor initialized, or declared with a union, can't be told from a list.
      */
     private sets(type: Function, properties: Map<string, PropertyMetadata>): Set<string> {
-        let initialized: Record<string, any> = {};
-        try {
-            initialized = plainToInstance(type as any, {}) as Record<string, any>;
-        } catch {
-            // A constructor that needs its arguments: its decorated fields are all there is to go by.
-        }
+        const initialized = initializedFields(type);
         return new Set([
             ...[...properties].filter(([, it]) => it.designType === Set).map(([field]) => field),
             ...Object.keys(initialized).filter((field) => initialized[field] instanceof Set)
+        ]);
+    }
+
+    /**
+     * The fields whose whole numbers load as bigints: those `@BigIntProperty` marks, those TypeScript records
+     * as `bigint` (a decorated field declared so, as a `@NodeId` often is), and those the class initializes with a
+     * bigint. A union such as `bigint | null` TypeScript records as Object, so it needs the decorator.
+     */
+    private bigInts(type: Function, properties: Map<string, PropertyMetadata>): Set<string> {
+        const initialized = initializedFields(type);
+        return new Set([
+            ...[...properties].filter(([, it]) => it.bigInt || it.designType === BigInt).map(([field]) => field),
+            ...Object.keys(initialized).filter((field) => typeof initialized[field] === 'bigint')
         ]);
     }
 
@@ -650,6 +660,7 @@ function decoratorName(key: keyof PropertyMetadata): string {
         aggregate: '@Count or @Aggregate',
         path: '@GraphPath',
         jsonPacked: '@JsonPacked',
+        bigInt: '@BigIntProperty',
         default: '@Default',
         emptyWhenAbsent: '@EmptyWhenAbsent',
         sortedBy: '@SortedBy',
@@ -658,4 +669,14 @@ function decoratorName(key: keyof PropertyMetadata): string {
         schema: 'a schema decorator',
         designType: ''
     }[key];
+}
+
+/** A new instance's fields, as the class initializes them; none where its constructor needs its arguments. */
+function initializedFields(type: Function): Record<string, any> {
+    try {
+        return plainToInstance(type as any, {}) as Record<string, any>;
+    } catch {
+        // A constructor that needs its arguments: its decorated fields are all there is to go by.
+        return {};
+    }
 }

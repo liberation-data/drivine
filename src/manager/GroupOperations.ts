@@ -1,6 +1,6 @@
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
-import { GraphObjectMapper } from '@/mapper/GraphObjectMapper';
+import { GraphObjectMapper, wholeNumbers } from '@/mapper/GraphObjectMapper';
 import { FragmentModel } from '@/model/FragmentModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
@@ -64,9 +64,11 @@ export class GroupOperations {
             const result: any = {};
             keyNames.forEach((name, i) => {
                 const target = targets.get(name);
-                result[name] = target ? this.mapper.fragment(target, row[`k${i}`]) : row[`k${i}`] ?? undefined;
+                result[name] = target
+                    ? this.mapper.fragment(target, row[`k${i}`])
+                    : wholeNumbers(row[`k${i}`] ?? undefined, false);
             });
-            aggregateNames.forEach((name, i) => (result[name] = row[`a${i}`] ?? undefined));
+            aggregateNames.forEach((name, i) => (result[name] = wholeNumbers(row[`a${i}`] ?? undefined, false)));
             return result;
         });
     }
