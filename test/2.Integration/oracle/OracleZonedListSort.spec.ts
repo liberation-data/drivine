@@ -131,6 +131,7 @@ describeOnOracle('a list of zoned values on Oracle', () => {
             if (result !== undefined) {
                 const written = result.rows ? undefined : (result.implicitResults?.[0] as any[][] | undefined);
                 // A write hands back a row for each, as the compiler says (CompiledRows), each its value in one column.
+                // A read's rows are each its value's extended JSON text, a CLOB, in one column (oracleReadsAsText).
                 const value = (it: any): any => (typeof it === 'string' ? JSON.parse(it) : it);
                 const each = cypherCompiled.rows === 'each';
                 return (
@@ -138,7 +139,7 @@ describeOnOracle('a list of zoned values on Oracle', () => {
                         ? each
                             ? written.map((it) => value(it[0]))
                             : JSON.parse(written[0][0])
-                        : (result.rows ?? []).map((it) => it[0])
+                        : (result.rows ?? []).map((it) => value(it[0]))
                 ).map((it: any) => JSON.stringify(it));
             }
             running.catch(() => undefined);

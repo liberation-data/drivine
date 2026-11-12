@@ -67,6 +67,7 @@ describe('The rows of a compiled Oracle write', () => {
                     { RESULT: '9007199254740993' },
                     { RESULT: '{"$numberDouble":2.5}' },
                     { RESULT: '[{"$numberDouble":"Nan"}]' },
+                    { RESULT: '"9007199254740993"' },
                     { RESULT: null }
                 ]
             };
@@ -76,6 +77,7 @@ describe('The rows of a compiled Oracle write', () => {
                 BigInt('9007199254740993'),
                 2.5,
                 [NaN],
+                '9007199254740993',
                 null
             ]);
         }
