@@ -29,7 +29,6 @@ export class ConnectionProviderBuilder {
     private _host: string;
     private _port?: number;
     private _userName?: string;
-    private _password?: string;
     private _protocol?: string;
     private _poolMax?: number;
     private _transactionMode?: TransactionMode;
@@ -44,6 +43,9 @@ export class ConnectionProviderBuilder {
 
     private registry: DatabaseRegistry;
 
+    /** Kept private, so a builder logged doesn't print it (#730). */
+    #password?: string;
+
     constructor(registry: DatabaseRegistry) {
         this.registry = registry;
     }
@@ -53,7 +55,7 @@ export class ConnectionProviderBuilder {
         this._host = properties.host;
         this._port = properties.port;
         this._userName = properties.userName;
-        this._password = properties.password;
+        this.#password = properties.password;
         this._idleTimeout = properties.idleTimeout;
         this._connectionTimeout = properties.connectionTimeout ?? 5000;
         this._busyTimeout = properties.connectionTimeout;
@@ -87,7 +89,7 @@ export class ConnectionProviderBuilder {
     }
 
     password(password: string): this {
-        this._password = password;
+        this.#password = password;
         return this;
     }
 
@@ -174,7 +176,7 @@ export class ConnectionProviderBuilder {
             {
                 host: this._host,
                 user: this._userName,
-                password: this._password,
+                password: this.#password,
                 database: this._name!,
                 port: this._port,
                 idleTimeoutMillis: this._idleTimeout,
@@ -193,7 +195,7 @@ export class ConnectionProviderBuilder {
         }
         return new OracleConnectionProvider(name, this._type, {
             user: this._userName,
-            password: this._password,
+            password: this.#password,
             connectString: `${this._host}:${this._port ?? 1521}/${this._name}`,
             poolMax: this._poolMax,
             connectTimeout: this._connectionTimeout ? Math.ceil(this._connectionTimeout / 1000) : undefined,
@@ -248,7 +250,7 @@ export class ConnectionProviderBuilder {
             this._host,
             this._port,
             this._userName!,
-            this._password,
+            this.#password,
             this._name,
             this._protocol,
             {
@@ -279,7 +281,7 @@ export class ConnectionProviderBuilder {
             this._host,
             this._port,
             this._userName ?? '',
-            this._password ?? '',
+            this.#password ?? '',
             this._name,
             this._protocol,
             {
@@ -293,7 +295,7 @@ export class ConnectionProviderBuilder {
         if (this._userName) {
             this.logger.warn(`userName is not supported by Neptune`);
         }
-        if (this._password) {
+        if (this.#password) {
             this.logger.warn(`password is not supported by Neptune`);
         }
         if (this._idleTimeout) {
@@ -330,7 +332,7 @@ export class ConnectionProviderBuilder {
                 host: this._host,
                 port: this._port,
                 userName: this._userName,
-                password: this._password,
+                password: this.#password,
                 connectionTimeout: this._connectionTimeout
             },
             this._transactionMode ?? TransactionMode.WARN

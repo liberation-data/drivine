@@ -16,6 +16,11 @@ DATABASE_POOL_MAX=40
 DATABASE_CONNECTION_TIMEOUT=5000
 ```
 
+Drivine never prints the password. The properties it reads from the environment and its connection providers print it
+as `***` through `console.log`, `util.inspect` and `JSON.stringify`, and the properties through `toString` too; its
+builder leaves it out. A `ConnectionProperties` object your own code builds is plain data: printing it is your code's
+to take care of.
+
 Use them through Nest's module, or without Nest. Only the setup differs: the decorators, the DSL, `@Transactional`
 and the managers are the same.
 

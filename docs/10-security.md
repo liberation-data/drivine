@@ -8,6 +8,10 @@ names are escaped for the JSON path and the SQL literal around it, and a graph's
 underscores. A raw `QuerySpecification`'s `skip` and `limit` must be whole numbers. Rows are never copied onto an
 object under `__proto__`, `constructor` or `prototype`.
 
+The password is never printed. The properties Drivine reads from the environment and its connection providers give it
+as `***` through `console.log`, `util.inspect` and `JSON.stringify` (the properties through `toString` too), in a
+Postgres connection string too, and so are Postgres' ssl `key`, `passphrase` and `pfx`. Its builder leaves it out.
+
 What stays yours to guard:
 
 - **A `where` string** (raw Cypher or SQL) is written as it is. Put values in its parameters.

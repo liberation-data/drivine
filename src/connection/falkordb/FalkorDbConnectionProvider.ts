@@ -7,6 +7,7 @@ import { AutoCommitTransactions } from '@/connection/AutoCommitTransactions';
 import { FalkorDbConnection } from '@/connection/falkordb/FalkorDbConnection';
 import { FalkorDbResultMapper } from '@/connection/falkordb/FalkorDbResultMapper';
 import ShortUniqueId from 'short-unique-id';
+import { INSPECT, maskedProperties, printable } from '@/connection/Masking';
 
 const shortId = new ShortUniqueId({ length: 7 });
 
@@ -19,6 +20,8 @@ export interface FalkorDbConnectionOptions {
 }
 
 export class FalkorDbConnectionProvider implements ConnectionProvider {
+    /** The options, a copy whose password is printed masked (#730). */
+    readonly options: FalkorDbConnectionOptions;
     private client?: Promise<FalkorDB>;
     private readonly transactions: AutoCommitTransactions;
 
@@ -26,9 +29,10 @@ export class FalkorDbConnectionProvider implements ConnectionProvider {
         readonly name: string,
         readonly type: DatabaseType,
         readonly graphName: string,
-        readonly options: FalkorDbConnectionOptions,
+        options: FalkorDbConnectionOptions,
         readonly transactionMode: TransactionMode = TransactionMode.WARN
     ) {
+        this.options = maskedProperties({ ...options });
         this.transactions = new AutoCommitTransactions('FalkorDB', transactionMode);
     }
 
@@ -54,6 +58,21 @@ export class FalkorDbConnectionProvider implements ConnectionProvider {
         if (client) {
             await (await client).close();
         }
+    }
+
+    /** The provider as it is printed: its settings, the password masked and its client left out (#730). */
+    toJSON(): Record<string, unknown> {
+        return {
+            name: this.name,
+            type: this.type,
+            graphName: this.graphName,
+            ...printable({ ...this.options }),
+            transactionMode: this.transactionMode
+        };
+    }
+
+    [INSPECT](): Record<string, unknown> {
+        return this.toJSON();
     }
 
     private async connectedClient(): Promise<FalkorDB> {
