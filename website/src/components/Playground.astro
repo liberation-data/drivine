@@ -2,60 +2,38 @@
 /**
  * The Cypher playground: Drivine for TypeScript running in the page, on SQLite's wasm build, with a small movies graph.
  * A query is compiled to SQL by the shared Cypher compiler and run on SQLite, in the browser, with nothing sent to a
- * server. The engine is public/playground/engine.mjs, bundled by scripts/bundle-playground.mjs. Used whole by the
- * /playground page, and with fewer examples by the landing page.
- *
- * With `lazy`, nothing of the engine loads with the page: it starts when the playground is about to scroll into view,
- * or at the first Run or example pressed, whichever comes first, so a page that shows it weighs no more until then.
- * Without, it starts as the page loads. Either way, once started it runs the query in the box.
+ * server. The engine is public/playground/engine.mjs, bundled by scripts/bundle-playground.mjs. It starts as the page
+ * loads, and runs the query in the box.
  */
 import { EXAMPLES } from '../playground/movies';
 
-interface Props {
-    /** The examples offered, by their index in EXAMPLES; every one when not given. */
-    examples?: number[];
-    /** Whether the engine waits to be needed, rather than starting with the page. */
-    lazy?: boolean;
-    /** The level of the panes' headings, under the heading the playground sits under. */
-    paneHeading?: 'h2' | 'h3';
-}
-
-const { examples = EXAMPLES.map((_, i) => i), lazy = false, paneHeading: Heading = 'h2' } = Astro.props;
-const offered = examples.map((i) => EXAMPLES[i]);
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
-// Ids apart for each playground, should a page ever show two.
-const id = `pg-${Math.random().toString(36).slice(2, 8)}`;
 ---
 
-<div
-    class="pg"
-    data-engine={`${base}playground/engine.mjs`}
-    data-examples={JSON.stringify(offered.map((e) => e.cypher))}
-    data-lazy={lazy ? '' : undefined}
->
+<div class="pg" data-engine={`${base}playground/engine.mjs`} data-examples={JSON.stringify(EXAMPLES.map((e) => e.cypher))}>
     <div class="pg-examples" role="group" aria-label="Example queries">
         {
-            offered.map((example, i) => (
+            EXAMPLES.map((example, i) => (
                 <button type="button" class="pg-example" data-index={i}>
                     {example.label}
                 </button>
             ))
         }
     </div>
-    <label class="pg-label" for={`${id}-cypher`}>Cypher</label>
-    <textarea id={`${id}-cypher`} class="pg-cypher" rows="7" spellcheck="false" autocapitalize="off">{offered[0].cypher}</textarea>
+    <label class="pg-label" for="pg-cypher">Cypher</label>
+    <textarea id="pg-cypher" class="pg-cypher" rows="7" spellcheck="false" autocapitalize="off">{EXAMPLES[0].cypher}</textarea>
     <div class="pg-actions">
-        <button type="button" class="pg-run" disabled={!lazy}>{lazy ? 'Run' : 'Loading…'}</button>
+        <button type="button" class="pg-run" disabled>Loading…</button>
         <button type="button" class="pg-reset" disabled>Reset</button>
         <span class="pg-status" role="status" aria-live="polite"></span>
     </div>
     <div class="pg-panes">
-        <section class="pg-pane" aria-labelledby={`${id}-results`}>
-            <Heading id={`${id}-results`} class="pg-pane-title">Results</Heading>
+        <section class="pg-pane" aria-labelledby="pg-results-title">
+            <h2 id="pg-results-title" class="pg-pane-title">Results</h2>
             <div class="pg-results"></div>
         </section>
-        <section class="pg-pane" aria-labelledby={`${id}-sql`}>
-            <Heading id={`${id}-sql`} class="pg-pane-title">Compiled SQL (SQLite)</Heading>
+        <section class="pg-pane" aria-labelledby="pg-sql-title">
+            <h2 id="pg-sql-title" class="pg-pane-title">Compiled SQL (SQLite)</h2>
             <pre class="pg-sql"><code></code></pre>
         </section>
     </div>
@@ -97,7 +75,7 @@ const id = `pg-${Math.random().toString(36).slice(2, 8)}`;
         return element;
     }
 
-    /** Wires the playground `root` up, and starts its engine now, or, where it is lazy, once it is needed. */
+    /** Wires the playground `root` up, and starts its engine. */
     function playground(root: HTMLElement): void {
         const cypher = root.querySelector<HTMLTextAreaElement>('.pg-cypher')!;
         const runButton = root.querySelector<HTMLButtonElement>('.pg-run')!;
@@ -126,19 +104,23 @@ const id = `pg-${Math.random().toString(36).slice(2, 8)}`;
         // The engine, once asked for: started once, however many ask.
         let engine: Promise<Playground | undefined> | undefined;
         let ready = false;
+        let tries = 0;
         const started = (): Promise<Playground | undefined> =>
             (engine ??= (async () => {
                 runButton.disabled = true;
                 runButton.textContent = 'Loading…';
                 status.textContent = '';
                 try {
-                    const module = await import(/* @vite-ignore */ root.dataset.engine!);
+                    // A retry asks afresh: the browser keeps a module that failed to load as failed.
+                    const url = root.dataset.engine! + (tries++ ? `?try=${tries}` : '');
+                    const module = await import(/* @vite-ignore */ url);
                     const it: Playground = await module.start();
                     ready = true;
                     status.textContent = 'Ready.';
                     return it;
                 } catch (e) {
                     status.textContent = `The playground couldn't start: ${(e as Error)?.message ?? e}`;
+                    engine = undefined; // so Run tries again
                     return undefined;
                 } finally {
                     runButton.disabled = false;
@@ -180,28 +162,15 @@ const id = `pg-${Math.random().toString(36).slice(2, 8)}`;
         });
         root.querySelectorAll<HTMLButtonElement>('.pg-example').forEach((button) =>
             button.addEventListener('click', () => {
-                // While a run is out, as Run does: the box keeps the query whose results are shown.
-                if (busy) return;
+                // While a run is out, as Run does: the box keeps the query whose results are shown. While the engine
+                // loads, nothing is shown yet, so the example goes in the box for the run waiting on it.
+                if (busy && ready) return;
                 cypher.value = examples[Number(button.dataset.index)];
-                run();
+                if (!busy) run();
             })
         );
 
-        if (root.dataset.lazy === undefined || !('IntersectionObserver' in window)) {
-            run();
-            return;
-        }
-        // Started a screen ahead, so it is ready, or nearly, as the visitor reaches it.
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries.some((entry) => entry.isIntersecting)) {
-                    observer.disconnect();
-                    if (!busy) run();
-                }
-            },
-            { rootMargin: '0px 0px 100% 0px' }
-        );
-        observer.observe(root);
+        run();
     }
 
     document.querySelectorAll<HTMLElement>('.pg').forEach(playground);
