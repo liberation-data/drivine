@@ -42,4 +42,6 @@ export interface AggregateModel {
     type: string;
     property?: string;
     direction: Direction;
+    /** Whether the field is declared a bigint, as a fragment's field is (see FieldMapping.bigInts), so loads as one. */
+    bigInt?: boolean;
 }

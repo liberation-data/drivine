@@ -131,7 +131,7 @@ export class GraphObjectMapper {
                 : this.fragment(path.target, value);
         }
         for (const aggregate of model.aggregates) {
-            instance[aggregate.field] = row.rels?.[aggregate.field] ?? undefined;
+            instance[aggregate.field] = wholeNumbers(row.rels?.[aggregate.field] ?? undefined, !!aggregate.bigInt);
         }
         return instance as T;
     }
@@ -218,7 +218,7 @@ export class GraphObjectMapper {
             }
             fields[field] = mapping.jsonPacked.has(field) ? unpacked(value) : value;
         }
-        wholeNumbersAsDeclared(mapping, fields);
+        wholeNumbersAsDeclared(type, mapping, fields);
         const instance = plainToInstance(type as any, fields) as any;
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         loadCollections(type, mapping, instance, Object.keys(fields));
@@ -270,10 +270,26 @@ function asSet(value: any): any {
  * bigint loads each as one, with the digits the store kept; any other field loads each as a number, past 2^53 the
  * nearest, as it always has.
  */
-function wholeNumbersAsDeclared(mapping: FieldMapping, fields: Record<string, any>): void {
+function wholeNumbersAsDeclared(type: Function, mapping: FieldMapping, fields: Record<string, any>): void {
     for (const field of Object.keys(fields)) {
-        fields[field] = mapping.bigInts.has(field) ? asBigInts(fields[field]) : asNumbers(fields[field]);
+        fields[field] = wholeNumbers(fields[field], declaredBigInt(type, mapping, field));
     }
+}
+
+/**
+ * Whether the field is declared a bigint: as the model records it, or as TypeScript records it for a field only another
+ * library's decorator marks, which the model doesn't know of (as {@link declaredSet}).
+ */
+function declaredBigInt(type: Function, mapping: FieldMapping, field: string): boolean {
+    return mapping.bigInts.has(field) || Reflect.getMetadata('design:type', type.prototype, field) === BigInt;
+}
+
+/**
+ * Internal: `value`'s whole numbers as bigints where `bigInt`, else as numbers, past 2^53 the nearest: a value the model
+ * declares no field for, as a group's key or aggregate, as numbers, as before #741.
+ */
+export function wholeNumbers(value: any, bigInt: boolean): any {
+    return bigInt ? asBigInts(value) : asNumbers(value);
 }
 
 /**

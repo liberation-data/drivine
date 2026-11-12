@@ -299,7 +299,8 @@ export class ModelRegistry {
                     function: options.function as AggregateModel['function'],
                     type: options.type,
                     property: options.property,
-                    direction: options.direction ?? Direction.OUTGOING
+                    direction: options.direction ?? Direction.OUTGOING,
+                    bigInt: !!it.bigInt || it.designType === BigInt
                 };
             });
         const paths = [...properties].filter(([, it]) => it.path).map(([field, it]) => this.path(type, field, it));

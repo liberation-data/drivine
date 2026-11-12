@@ -15,7 +15,7 @@ export function JsonPacked(): PropertyDecorator {
  * number as a JavaScript number, past 2^53 the nearest. A property TypeScript records as `bigint`, or
  * one the class initializes with a bigint, loads so without it; this is for one TypeScript records otherwise: a union
  * such as `bigint | null`, a list, a map or a bag. On Oracle, whose driver reads a number as a JavaScript number, a
- * load still gives the nearest number.
+ * load still gives a bigint, but of the nearest number past 2^53 (#737).
  */
 export function BigIntProperty(): PropertyDecorator {
     return (prototype: object, property: string | symbol) =>

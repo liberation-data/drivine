@@ -101,7 +101,8 @@ A load gives a field's whole numbers the type the model declares, not one their 
   property bag or a `@JsonPacked` field.
 
 Any other field loads a whole number as a JavaScript number, past 2^53 the nearest, as before. So declare a field that
-holds whole numbers past 2^53 to load it back exactly. On Oracle a declared field still loads a `bigint`, but past 2^53
+holds whole numbers past 2^53 to load it back exactly. A view's `@Count` or `@Aggregate` field loads by the same rule,
+and a `groups` key or aggregate, which has no field to declare, as a number. On Oracle a declared field still loads a `bigint`, but past 2^53
 the driver has already rounded it (#737). Compiled Cypher has no model to go by: there a whole number past 2^53 always
 comes back as a `bigint` (#735).
 
@@ -1122,6 +1123,16 @@ engine without list properties. Packed on write and unpacked on load:
 
 ```typescript
 @JsonPacked() tags?: string[];
+```
+
+#### @BigIntProperty
+
+Loads a field's whole numbers as `bigint`s, at any depth of its lists and maps, where TypeScript doesn't record the
+field as a `bigint`: a union, a list, a map, a property bag or a `@JsonPacked` field. See
+[whole numbers past 2^53](#1-nodefragment-a-node):
+
+```typescript
+@BigIntProperty() balance?: bigint | null;
 ```
 
 #### @PropertyBag

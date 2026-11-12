@@ -1,4 +1,6 @@
 import {
+    Aggregate,
+    AggregateFunction,
     BigIntProperty,
     backendFor,
     DatabaseRegistry,
@@ -6,6 +8,7 @@ import {
     GraphRelationship,
     GraphView,
     JsonPacked,
+    key,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -16,6 +19,7 @@ import {
     RelationshipFragment,
     Root,
     StatelessGraphObjectManager,
+    sum,
     TargetNode
 } from '@liberation-data/drivine';
 import { SqlSeed, sqlPersistenceManager, sqlStores, SqlStore } from '../support/SqlStores';
@@ -64,6 +68,14 @@ class Holding {
 class Ledger {
     @Root() counter: Counter;
     @GraphRelationship({ type: 'SQL_BIG_HOLDS', target: () => Holding }) holdings: Holding[] = [];
+}
+
+/** A ledger with the sum of its counters' values: as a number, and declared a bigint. */
+@GraphView()
+class Totals {
+    @Root() counter: Counter;
+    @Aggregate({ function: AggregateFunction.SUM, type: 'SQL_BIG_HOLDS', property: 'value' }) total: number;
+    @Aggregate({ function: AggregateFunction.SUM, type: 'SQL_BIG_HOLDS', property: 'value' }) exact: bigint;
 }
 
 /** A view of tallies, each id a bigint. */
@@ -281,6 +293,27 @@ describe.each(sqlStores())('a bigint property saved on $name', (store) => {
             expect((await gom.loadAll(Ticket)).map((it) => it.id).sort()).toEqual([BigInt(7), BIG]);
             await gom.save(Object.assign(new Tally(), { id: BIG }));
             expect((await gom.load(Tally, BIG))!.id).toBe(Number(BIG));
+        }
+    );
+
+    (exactLoads ? it : it.skip)(
+        "gives an aggregate or a group's value past 2^53 as a number, and an aggregate declared a bigint as one",
+        async () => {
+            await gom.save(
+                Object.assign(new Ledger(), {
+                    counter: counter('r'),
+                    holdings: [Object.assign(new Holding(), { since: 1, counter: counter('s', { value: BIG }) })]
+                })
+            );
+            const totals = (await gom.load(Totals, 'r'))!;
+            expect(totals.total).toBe(Number(BIG));
+            expect(totals.exact).toBe(BIG);
+            const groups = await gom.groups.load(Counter, {
+                where: "n.id = 's'",
+                keys: { value: key('value') },
+                aggregates: { total: sum('value') }
+            });
+            expect(groups).toEqual([{ value: Number(BIG), total: Number(BIG) }]);
         }
     );
 });
