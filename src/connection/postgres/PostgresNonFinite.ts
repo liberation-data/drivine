@@ -105,8 +105,9 @@ function revived(_key: string, value: any, context?: { source?: string }): any {
 
 /**
  * The JSON text `text`, as Postgres writes a `json` or `jsonb` value, with each number that stands for NaN or an
- * infinity the double it is, and each whole number past 2^53 a `bigint`, as drivine4j's compiler writes them on Postgres where a statement is given one
- * (liberation-data/drivine#673): `jsonb` holds neither.
+ * infinity the double it is, as drivine4j's compiler writes them on Postgres where a statement is given one
+ * (liberation-data/drivine#673): `jsonb` holds neither. Each whole number past 2^53 in it is a `bigint` of its digits
+ * (see exactInteger).
  */
 export function readNonFiniteJson(text: string): any {
     requireSourceText();
@@ -136,12 +137,7 @@ export interface TypeParsers {
  */
 export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
     requireSourceText();
-    return {
-        getTypeParser: (oid: number, format?: any) =>
-            (oid === JSON_OID || oid === JSONB_OID) && (format ?? 'text') === 'text'
-                ? readNonFiniteJson
-                : parsers.getTypeParser(oid, format)
-    };
+    return jsonTypes(parsers, readNonFiniteJson);
 }
 
 /**
@@ -151,10 +147,15 @@ export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
  * for the process, as {@link nonFiniteTypes} is.
  */
 export function exactIntegerTypes(parsers: TypeParsers): TypeParsers {
+    return jsonTypes(parsers, parseExactIntegers);
+}
+
+/** `parsers` with `json` and `jsonb`, as text, read by `read`. */
+function jsonTypes(parsers: TypeParsers, read: (text: string) => any): TypeParsers {
     return {
         getTypeParser: (oid: number, format?: any) =>
             (oid === JSON_OID || oid === JSONB_OID) && (format ?? 'text') === 'text'
-                ? parseExactIntegers
+                ? read
                 : parsers.getTypeParser(oid, format)
     };
 }

@@ -127,6 +127,7 @@ describe('A Postgres connection reading NaN', () => {
         expect(config).toMatchObject({ text: 'SELECT $1 AS result', values: [2] });
         const read = config.types.getTypeParser(3802, 'text');
         expect(read('[9007199254740993, 2.5, 100000000000000000000]')).toEqual([BigInt('9007199254740993'), 2.5, 1e20]);
+        expect(config.types.getTypeParser(114, 'text')('[9007199254740993]')).toEqual([BigInt('9007199254740993')]);
         expect(read(`${NAN}`)).not.toBeNaN();
         expect(config.types.getTypeParser(25, 'text')).toBe(it.getTypeParser.mock.results[0].value);
     });

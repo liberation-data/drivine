@@ -338,7 +338,9 @@ function canonical(value: any, step: CypherStep, sorted: boolean = step.unordere
     }
     if (Array.isArray(value)) {
         const items = value.map((it) => canonical(it, step));
-        return sorted ? items.sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1)) : items;
+        return sorted
+            ? items.sort((a, b) => (JSON.stringify(a, replacer) < JSON.stringify(b, replacer) ? -1 : 1))
+            : items;
     }
     if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
         const entries = Object.entries(value).map(([key, item]): [string, any] => [key, canonical(item, step)]);
