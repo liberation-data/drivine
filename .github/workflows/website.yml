@@ -44,6 +44,9 @@ jobs:
               env:
                   # For the repositories' star counts and the docs/ listings, without the anonymous API's rate limit.
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            # The dev server serves the playground as the built site does (astro.config.mjs).
+            - run: npm run check:dev
+              working-directory: website
             - uses: actions/upload-pages-artifact@v5
               with:
                   path: website/dist

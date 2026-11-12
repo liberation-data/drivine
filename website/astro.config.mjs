@@ -2,14 +2,37 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightSidebarTopics from 'starlight-sidebar-topics';
-import { readFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Written by scripts/import-readmes.mjs, which `npm run dev` and `npm run build` run first.
 const sidebar = JSON.parse(readFileSync(new URL('./src/generated/sidebar.json', import.meta.url), 'utf8'));
 
+/**
+ * On the dev server, the playground's bundle (public/playground) served as it is, as the built site serves it. The page
+ * imports engine.mjs itself, and Vite's dev server refuses a module from public/ ("should not be imported from source
+ * code"), with a 403 for `engine.mjs?import`. Its middleware is added before Vite's own, so the request never reaches it.
+ */
+const playgroundOnDevServer = {
+    name: 'drivine-playground-on-dev-server',
+    configureServer(server) {
+        const dir = fileURLToPath(new URL('./public/playground/', import.meta.url));
+        const types = { '.mjs': 'text/javascript', '.wasm': 'application/wasm' };
+        server.middlewares.use('/playground/', (req, res, next) => {
+            const file = join(dir, basename((req.url ?? '').split('?')[0]));
+            const type = types[file.slice(file.lastIndexOf('.'))];
+            if (!type || !existsSync(file)) return next();
+            res.setHeader('Content-Type', type);
+            createReadStream(file).pipe(res);
+        });
+    }
+};
+
 // Served by GitHub Pages at drivine.org; liberation-data.github.io/drivine redirects there.
 export default defineConfig({
     site: 'https://drivine.org',
+    vite: { plugins: [playgroundOnDevServer] },
     integrations: [
         starlight({
             title: 'Drivine',

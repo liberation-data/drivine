@@ -1,0 +1,58 @@
+---
+/**
+ * "Want more? Try Drivine Studio": what Studio adds over the playground, under it on the /playground page. Each claim is in Studio's README (github.com/liberation-data/drivine-studio). The link is STUDIO_GET,
+ * which turns into a download link when signed downloads ship.
+ */
+import { STUDIO_GET } from '../lib/github';
+---
+
+<aside class="studio-panel" aria-label="Drivine Studio">
+    <p class="studio-panel-title"><strong>Want more? Try Drivine Studio.</strong></p>
+    <p>
+        The playground runs a few films in your browser. Drivine Studio, a desktop app, works on your own data:
+    </p>
+    <ul>
+        <li>It connects to your databases: Neo4j, Memgraph, Neptune, FalkorDB, Postgres, Oracle and SQLite.</li>
+        <li>It draws what a statement gives back as a graph as well as rows, in 3D too for a graph of up to 300 nodes.</li>
+        <li>It completes your graph's labels, relationship types and property keys as you type.</li>
+        <li>
+            It reads your Drivine model: drag a view to the canvas and it loads as <code>loadAll</code> does, with the Cypher
+            shown (on Neo4j, Memgraph, Neptune and FalkorDB for now).
+        </li>
+        <li>It only reads, unless you let a connection write.</li>
+    </ul>
+    <p>
+        <a href={STUDIO_GET.url}>{STUDIO_GET.label} →</a> for macOS, Windows or Linux. There are no downloads yet.
+    </p>
+</aside>
+
+<style>
+    .studio-panel {
+        margin-top: 2rem;
+        padding: 1.25rem 1.5rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--sl-color-gray-5, var(--line, #d5e3e6));
+        border-left: 4px solid var(--sl-color-accent, var(--accent, #f08a5d));
+        background: var(--sl-color-bg-nav, #fff);
+        color: var(--sl-color-text, var(--ink, #0b2530));
+        font-size: var(--sl-text-sm, 1rem);
+        line-height: 1.6;
+        text-align: left;
+    }
+    .studio-panel :global(*) {
+        margin-top: 0;
+    }
+    .studio-panel p,
+    .studio-panel ul {
+        margin: 0 0 0.6rem;
+    }
+    .studio-panel p:last-child {
+        margin-bottom: 0;
+    }
+    .studio-panel ul {
+        padding-left: 1.25rem;
+    }
+    .studio-panel-title {
+        font-size: var(--sl-text-base, 1.125rem);
+    }
+</style>

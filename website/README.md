@@ -27,13 +27,18 @@ The site at [drivine.org](https://drivine.org/), built with
   `printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><style>@media (prefers-color-scheme:dark){image{filter:invert(1)}}</style><image width="96" height="96" href="data:image/png;base64,%s"/></svg>\n' "$(base64 -i src/assets/cow-black.png)" > public/favicon.svg`.
 - `src/components/Share.astro`: the Share buttons under the video, on its end card, in the footer, and beside each docs
   page's title (`src/components/PageTitle.astro`).
-- `src/pages/playground.astro`: the Cypher playground at `/playground/`, Drivine running in the page on SQLite's wasm
-  build, with a small movies graph and example queries (`src/playground/movies.ts`). Its engine,
+- `src/components/Playground.astro`: the Cypher playground, Drivine running in the page on SQLite's wasm build, with a
+  small movies graph and example queries (`src/playground/movies.ts`), at `/playground/` (`src/pages/playground.astro`).
+  The landing page's "Try it in your browser" opens it in a tab of its own (`TRY_IN_BROWSER` in `src/pages/index.astro`).
+  Under it, `src/components/StudioPanel.astro` says what Drivine Studio adds, each claim from Studio's README; its link,
+  like the landing page's links to get Studio, is `STUDIO_GET` in `src/lib/github.ts`. Its engine,
   `src/playground/engine.ts`, is bundled into `public/playground/` with Drivine from this repository's `src/`, and with
   SQLite's and the shared Cypher compiler's .wasm files from the root's `node_modules`, by
   `scripts/bundle-playground.mjs`, which `npm run dev` and `npm run build` run (so `npm ci` at the root first). The
   result's column names are read from the query's RETURN (`src/playground/columns.ts`). The graph and the examples are
-  run on SQLite by `test/2.Integration/website/PlaygroundExamples.spec.ts` at the root.
+  run on SQLite by `test/2.Integration/website/PlaygroundExamples.spec.ts` at the root. Vite's dev server refuses a
+  module from `public/`, so `astro.config.mjs` serves the bundle on it as it is; `npm run check:dev` (run by CI) checks
+  that it does.
 - The docs are generated, not written here: `scripts/import-readmes.mjs` turns this repository's `docs/` into the
   TypeScript docs (`/ts/`), drivine-python's into the Python docs (`/py/`) and drivine4j's into the Kotlin & Java docs
   (`/jvm/`). Each library's `docs/` holds its guide a file to each `##` section, after `00-introduction.md`; a library

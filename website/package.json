@@ -8,7 +8,8 @@
         "bundle-playground": "node scripts/bundle-playground.mjs",
         "dev": "npm run import-readmes && npm run segment-video && npm run bundle-playground && astro dev",
         "build": "npm run import-readmes && npm run segment-video && npm run bundle-playground && astro build",
-        "preview": "astro preview"
+        "preview": "astro preview",
+        "check:dev": "node scripts/check-dev-playground.mjs"
     },
     "dependencies": {
         "@astrojs/starlight": "^0.42.6",

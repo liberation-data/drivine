@@ -35,6 +35,10 @@ const photoVars = `--photo: ${photoLarge.css}; --photo-small: ${photoSmall.css};
 const ts = `${base}ts/`;
 const py = `${base}py/`;
 const jvm = `${base}jvm/`;
+const playground = `${base}playground/`;
+// What "Try it in your browser" opens, in a tab of its own: the playground until Drivine Studio runs in the browser
+// (drivine-studio#78), when it opens Studio.
+const TRY_IN_BROWSER = playground;
 const image = (name: string) => `${base}images/${name}`;
 // The explainer. The section and the hero's tip show while VIDEO is set. It is on YouTube too (VIDEO_ID).
 const VIDEO = `${base}video/drivine-explainer.mp4`;
@@ -51,7 +55,7 @@ const SITE = 'https://drivine.org/';
 const VIDEO_SHARE = new URL('#watch', SITE).href;
 const SHARE_TEXT = 'Drivine: graph RAG on any database. Build AI apps on the database you already run.';
 
-import { REPOS, STUDIO, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
+import { REPOS, STUDIO, STUDIO_GET, formatStars, releasedTrain, repoUrl, stars, starsOf, studioUrl, trainUrl } from '../lib/github';
 const tsStars = await stars('ts');
 const pyStars = await stars('py');
 const jvmStars = await stars('jvm');
@@ -251,7 +255,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
 
             .intro { padding: 96px 32px 72px; }
             .intro .wrap { max-width: 880px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
-            .intro p:last-child { margin: 0; font-size: 19px; line-height: 1.65; color: var(--muted); max-width: 720px; }
+            .intro .wrap > p:not(.eyebrow):not(.try) { margin: 0; font-size: 19px; line-height: 1.65; color: var(--muted); max-width: 720px; }
+            .intro .try { margin: 6px 0 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px; font-size: 15px; color: var(--muted); }
+            .intro .try a { padding: 8px 18px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--teal); font-weight: 500; text-decoration: none; }
+            .intro .try a:hover { border-color: var(--teal); }
 
             .watch { padding: 0 32px 96px; scroll-margin-top: 24px; }
             .watch .wrap { max-width: 1040px; display: flex; flex-direction: column; gap: 18px; }
@@ -394,6 +401,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <a href={ts}>TypeScript docs</a>
                     <a href={py}>Python docs</a>
                     <a href={jvm}>Kotlin &amp; Java docs</a>
+                    <a href={playground}>Playground</a>
                     <details class="repo-menu">
                         <summary>GitHub</summary>
                         <div class="menu">
@@ -458,6 +466,10 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         Drivine maps graphs to objects by composition. Declare the view a use case needs, made of node fragments
                         and the relationships between them, and Drivine writes the statement. When you would rather write the
                         Cypher yourself, the persistence manager is still there.
+                    </p>
+                    <p class="try">
+                        <a href={TRY_IN_BROWSER} target="_blank" rel="noopener" aria-describedby="try-note">Try it in your browser ↗</a>
+                        <span id="try-note">Opens in a new tab, and takes a few seconds to load.</span>
                     </p>
                 </div>
             </section>
@@ -672,7 +684,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                         <Image src={studioCypher} widths={[800, 1572]} sizes="(max-width: 1264px) 100vw, 1200px" alt="Drivine Studio's desktop app on a Mac, its Cypher window on Postgres: a statement above, and below it a metro network drawn as a graph of stations and their routes, with the station China Town chosen and its properties shown beside the graph" />
                         <figcaption>Cypher on Postgres, compiled to SQL by Drivine: the metro network from <a href="https://liberation-data.com/saxeburg-series/2018/11/28/rock-n-roll-traffic-routing.html">Rock ’n’ Roll Traffic Routing, with Neo4j</a>, now on any store. The station chosen is shown beside it.</figcaption>
                     </figure>
-                    <p class="note">Early days: <a href="https://github.com/liberation-data/drivine-studio#install-it-yourself">build it from source</a> for macOS, Windows or Linux.</p>
+                    <p class="note">Early days: <a href={STUDIO_GET.url}>build it from source</a> for macOS, Windows or Linux.</p>
                 </div>
             </section>
 
@@ -724,7 +736,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>TypeScript</span><a href="https://github.com/liberation-data/drivine">GitHub</a><a href="https://www.npmjs.com/package/@liberation-data/drivine">npm</a></div>
                     <div><span>Python</span><a href="https://github.com/liberation-data/drivine-python">GitHub</a><a href="https://pypi.org/project/drivine/">PyPI</a></div>
                     <div><span>JVM</span><a href="https://github.com/liberation-data/drivine4j">GitHub</a><a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a></div>
-                    <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={`${studioUrl}#install-it-yourself`}>Build it</a></div>
+                    <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={STUDIO_GET.url}>Build it</a></div>
                     <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
                 <Share tone="dark" label="Share Drivine" url={SITE} text={SHARE_TEXT} />
