@@ -37,7 +37,7 @@
     "scripts": {
         "build": "rm -fr dist && tsc -p tsconfig.build.json --strict && node scripts/rewrite-paths.js dist && cp package.json dist/ && cp README.md LICENSE dist/ && npm run build:browser",
         "build:browser": "esbuild src/browser/index.ts --bundle --platform=browser --format=esm --tsconfig=tsconfig.json --log-level=warning --outfile=dist/browser/index.mjs",
-        "check:browser": "node scripts/check-browser-bundle.mjs && node scripts/smoke-browser-bundle.mjs",
+        "check:browser": "node scripts/check-browser-bundle.mjs && node --expose-gc scripts/smoke-browser-bundle.mjs",
         "format": "npm run format:src && npm run format:test",
         "format:src": "prettier --write \"src/**/*.ts\"",
         "format:src:check": "prettier --check \"src/**/*.ts\"",

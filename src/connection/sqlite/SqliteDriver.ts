@@ -171,8 +171,8 @@ export function useSqliteDriver(given: {
 /**
  * Opens the SQLite file at `path` through Node's own driver, `node:sqlite`: no native module to build, and the SQLite
  * Node is built with. It is loaded when the first SQLite connection is opened, so an application that uses no SQLite
- * store runs on a Node that has none. It registers functions written in JavaScript on a connection, which Drivine's
- * statements call (see SqliteFunctions).
+ * store runs on a Node that has none, and not at all where useSqliteDriver gave another driver. It registers functions
+ * written in JavaScript on a connection, which Drivine's statements call (see SqliteFunctions).
  */
 export function openSqlite(path: string): SqliteDatabase {
     if (!driver) {
