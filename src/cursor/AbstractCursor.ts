@@ -1,4 +1,4 @@
-import * as assert from 'assert';
+import { assert } from '@/utils/Assert';
 import { Duplex, Readable } from 'stream';
 import { CursorStreamOptions } from '@/cursor/CursorStreamOptions';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
@@ -6,7 +6,11 @@ import { StatementLogger } from '@/logger/StatementLogger';
 import { Cursor } from '@/cursor/Cursor';
 import { DrivineLogger } from '@/logger';
 
-const miss = require('mississippi');
+import { nodeRequire } from '@/utils/NodeRequire';
+
+/** Streams, loaded when a cursor is first read as a stream: Node only, so a page's bundle leaves them out. */
+let mississippi: any;
+const miss = (): any => (mississippi ??= nodeRequire('mississippi'));
 
 export abstract class AbstractCursor<T> implements Cursor<T> {
     protected logger = new DrivineLogger(AbstractCursor.name);
@@ -15,7 +19,10 @@ export abstract class AbstractCursor<T> implements Cursor<T> {
     protected stream?: Readable = undefined;
     protected queryLogger: StatementLogger;
 
-    protected constructor(protected readonly sessionId: string, protected readonly spec: CursorSpecification<T>) {
+    protected constructor(
+        protected readonly sessionId: string,
+        protected readonly spec: CursorSpecification<T>
+    ) {
         assert(this.spec.batch > 0, `batchSize must be more than zero`);
         this.logger.verbose(`Created cursor with batchSize: ${this.spec.batch}`);
         this.queryLogger = new StatementLogger(this.sessionId);
@@ -44,7 +51,7 @@ export abstract class AbstractCursor<T> implements Cursor<T> {
     }
 
     private composeStreamWithOptions(options?: CursorStreamOptions<T>): Readable {
-        const readable = miss.from({ objectMode: true }, async (size: number, next: Function): Promise<Function> => {
+        const readable = miss().from({ objectMode: true }, async (size: number, next: Function): Promise<Function> => {
             await this.readBatchIfExpired();
             const done = this.currentBatch.length <= this.currentIndex;
             if (done) {
@@ -53,12 +60,12 @@ export abstract class AbstractCursor<T> implements Cursor<T> {
             return next(null, this.currentBatch[this.currentIndex++]);
         });
         return options && options.transform
-            ? miss.pipeline.obj(readable, this.transformStream(options.transform))
+            ? miss().pipeline.obj(readable, this.transformStream(options.transform))
             : readable;
     }
 
     private transformStream(transform: (chunk: T) => any): Duplex {
-        return miss.through.obj((chunk: T, enc: string, cb: Function) => cb(null, transform(chunk)));
+        return miss().through.obj((chunk: T, enc: string, cb: Function) => cb(null, transform(chunk)));
     }
 
     /**

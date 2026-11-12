@@ -1,4 +1,4 @@
-import { isInt } from 'neo4j-driver';
+import { isInt } from '@/utils/Integers';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import type { CypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { CompiledRows } from '@/cypher/CompiledCypher';

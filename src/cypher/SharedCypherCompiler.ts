@@ -1,4 +1,5 @@
-import { isInt } from 'neo4j-driver';
+import { isInt } from '@/utils/Integers';
+import { nodeRequire } from '@/utils/NodeRequire';
 import { DrivineError } from '@/DrivineError';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
 import { CypherFloat } from '@/cypher/CypherFloat';
@@ -38,9 +39,16 @@ let loaded: Compile | undefined;
  * first `compile`, not on `require`.
  */
 function compileFunction(): Compile {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    loaded ??= (require(PACKAGE) as { compile: Compile }).compile;
+    loaded ??= nodeRequire<{ compile: Compile }>(PACKAGE).compile;
     return loaded;
+}
+
+/**
+ * Has Drivine compile Cypher with `compile`, the shared compiler's `compile`, rather than requiring its package: as in a
+ * page, which imports the package's ES module itself, since that loads its Wasm by `fetch`. Set before the first compile.
+ */
+export function useCypherCompiler(compile: Compile): void {
+    loaded = compile;
 }
 
 /** Whether the shared compiler has been loaded in this process: for the test that a graph engine's app never loads it. */

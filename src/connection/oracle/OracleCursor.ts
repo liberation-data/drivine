@@ -1,3 +1,4 @@
+import { timerStart } from '@/utils/Timing';
 import { CursorSpecification } from '@/cursor/CursorSpecification';
 import { ResultMapper } from '@/mapper/ResultMapper';
 import { AbstractCursor } from '@/cursor/AbstractCursor';
@@ -14,7 +15,7 @@ export class OracleCursor<T> extends AbstractCursor<T> implements AsyncIterable<
     }
 
     async read(count: number): Promise<T[]> {
-        const hrStart = process.hrtime();
+        const hrStart = timerStart();
         const rows = await this.resultSet.getRows(count);
         this.queryLogger.log(this.spec, hrStart);
         return this.resultMapper.mapQueryResults(rows, this.spec);

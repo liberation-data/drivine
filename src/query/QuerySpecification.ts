@@ -1,5 +1,5 @@
 import { Statement, toPlatformDefault } from '@/query/Statement';
-import * as assert from 'assert';
+import { assert } from '@/utils/Assert';
 import { ResultPostProcessor } from '@/mapper/ResultPostProcessor';
 import { MapPostProcessor } from '@/mapper/MapPostProcessor';
 import { TransformPostProcessor } from '@/mapper/TransformPostProcessor';

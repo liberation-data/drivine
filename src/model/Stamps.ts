@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { randomHex } from '@/utils/Random';
 
 const QUOTED = '`__drivine.stamp`';
 const TOKEN = 16;
@@ -19,7 +19,7 @@ export const Stamps = {
     NEVER_STAMPED: '-',
 
     fresh(): string {
-        return `${randomBytes(8).toString('hex')}:${randomBytes(8).toString('hex')}`;
+        return `${randomHex(8)}:${randomHex(8)}`;
     },
 
     dataToken(stamp: string): string {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUuid } from '@/utils/Random';
 import { javaDouble } from '@/connection/sqlite/JavaDouble';
 import { SqliteArguments } from '@/connection/sqlite/SqliteArguments';
 import { JsonValue, SqliteCypherValues } from '@/connection/sqlite/SqliteCypherValues';
@@ -88,7 +88,7 @@ export function registerCypherFunctions(db: SqliteDatabase, patterns: SqlitePatt
         const written = text(value);
         return written === null ? null : [...written].reverse().join('');
     });
-    db.function(names.UUID, {}, () => randomUUID());
+    db.function(names.UUID, {}, () => randomUuid());
     db.function(names.REGEX_GROUP, exact, (value, expression, group) =>
         regexGroup(patterns, text(value), text(expression), group)
     );
