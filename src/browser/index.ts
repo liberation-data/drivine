@@ -9,3 +9,4 @@ export { cypherStatement } from '@/query/Statement';
 export { useSqliteDriver } from '@/connection/sqlite/SqliteDriver';
 export { useCypherCompiler } from '@/cypher/SharedCypherCompiler';
 export { wasmSqliteDriver } from '@/browser/WasmSqlite';
+export { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';

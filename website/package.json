@@ -5,8 +5,9 @@
     "scripts": {
         "import-readmes": "node scripts/import-readmes.mjs",
         "segment-video": "node scripts/segment-video.mjs",
-        "dev": "npm run import-readmes && npm run segment-video && astro dev",
-        "build": "npm run import-readmes && npm run segment-video && astro build",
+        "bundle-playground": "node scripts/bundle-playground.mjs",
+        "dev": "npm run import-readmes && npm run segment-video && npm run bundle-playground && astro dev",
+        "build": "npm run import-readmes && npm run segment-video && npm run bundle-playground && astro build",
         "preview": "astro preview"
     },
     "dependencies": {
