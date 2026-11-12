@@ -4,11 +4,11 @@
 // `npm run bundle-playground`), which writes the bundle: `npm run check:dev`.
 import { dev } from 'astro';
 
-const port = 4399;
-const server = await dev({ root: new URL('..', import.meta.url), server: { port, host: '127.0.0.1' }, logLevel: 'warn' });
+// A port in use is passed over for the next free one, so the checks ask the port the server is on.
+const server = await dev({ root: new URL('..', import.meta.url), server: { port: 4399, host: '127.0.0.1' }, logLevel: 'warn' });
 const failures = [];
 try {
-    const base = `http://127.0.0.1:${port}`;
+    const base = `http://127.0.0.1:${server.address.port}`;
     const asks = [
         ['/playground/', 'text/html'],
         ['/playground/engine.mjs?import', 'text/javascript'],
