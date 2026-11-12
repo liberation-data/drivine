@@ -115,7 +115,7 @@ export class PostgresBackend implements GraphBackend {
      * Deletes the root with id `$id` that meets `where`, and for a cascade the nodes a load of the view reaches from it
      * through the relationships a save writes (see SqlViews.cascade): every one, or with `DELETE_ORPHAN` those not kept
      * (see keptTargets). Postgres runs a statement's deletes on one snapshot, so what is kept is read before anything
-     * is deleted. Returns how many roots were deleted: `{deleted}`.
+     * is deleted. Returns how many nodes were deleted, the roots and what the cascade took (#562): `{deleted}`.
      */
     delete(target: TargetModel, where?: string, cascade: CascadeType = CascadeType.NONE): GraphStatement {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
@@ -153,7 +153,10 @@ export class PostgresBackend implements GraphBackend {
                 )}),`,
                 ...targets,
                 `deleted AS (DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM cascade_roots) RETURNING 1)`,
-                `SELECT CAST(COUNT(*) AS integer) AS "deleted" FROM deleted`
+                // Every node deleted, the roots and what the cascade took, as drivine4j counts them (#562).
+                `SELECT CAST((SELECT COUNT(*) FROM deleted)${
+                    cascaded.reached.length ? ' + (SELECT COUNT(*) FROM deleted_targets)' : ''
+                } AS integer) AS "deleted"`
             ].join('\n')
         );
     }

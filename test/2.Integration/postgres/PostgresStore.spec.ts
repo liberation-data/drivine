@@ -270,10 +270,11 @@ describe.each(postgres)('a store on $name', (store) => {
         // it has no relationship but to the roots deleted.
         await seed.node(['Owner'], { id: 'other' });
         await seed.edge('other', 'TAGGED', 'orphans-tag');
-        expect(await gom.delete(Holding, 'all', { cascade: CascadeType.DELETE_ALL })).toBe(1);
+        // Every node deleted (#562): all, all-item and all-tag; then orphans and orphans-item, the tag kept.
+        expect(await gom.delete(Holding, 'all', { cascade: CascadeType.DELETE_ALL })).toBe(3);
         expect(await gom.load(Item, 'all-item')).toBeUndefined();
         expect(await gom.load(Tag, 'all-tag')).toBeUndefined();
-        expect(await gom.delete(Holding, 'orphans', { cascade: CascadeType.DELETE_ORPHAN })).toBe(1);
+        expect(await gom.delete(Holding, 'orphans', { cascade: CascadeType.DELETE_ORPHAN })).toBe(2);
         expect(await gom.load(Item, 'orphans-item')).toBeUndefined();
         expect(await gom.load(Tag, 'orphans-tag')).toBeDefined();
         expect(await gom.load(Owner, 'other')).toBeDefined();

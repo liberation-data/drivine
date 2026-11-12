@@ -270,7 +270,10 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
         const before = await ids();
         const deleted = await remove();
         const after = await ids();
-        return { removed: before.filter((it) => !after.includes(it)), deleted };
+        const removed = before.filter((it) => !after.includes(it));
+        // A delete returns every node it took, the roots and what the cascade took, as drivine4j asserts (#562).
+        expect(deleted).toEqual(removed.length);
+        return { removed, deleted };
     };
 
     const clear = async (): Promise<void> => {
@@ -307,7 +310,7 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
         );
 
         expect(removed).toEqual(loaded);
-        expect(deleted).toEqual(1);
+        expect(deleted).toEqual(removed.length);
         // The nested messages point at the user, which the view does not declare.
         expect(await ids()).toEqual(['rc-user']);
     });
@@ -467,6 +470,20 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
             }
         });
 
+        it('should delete nothing, and count 0, for a root that is not there (#562)', async () => {
+            for (const cascade of cascades) {
+                await clear();
+                await seed(TREE);
+
+                const { removed, deleted }: Removed = await removedBy(async () =>
+                    gom.delete(DeletableSessionTree, 'rc-none', { cascade })
+                );
+
+                expect(removed).toEqual([]);
+                expect(deleted).toEqual(0);
+            }
+        });
+
         it('should leave the nodes of a list read over several hops', async () => {
             for (const cascade of cascades) {
                 await clear();
@@ -523,7 +540,7 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
             // The nested messages are kept: the user outside the view still refers to each. The sessions are deleted,
             // though each relates to its own messages and parts: those are in the cascade.
             expect(removed).toEqual(loaded.filter((it) => it !== 'rc-m1' && it !== 'rc-m2'));
-            expect(deleted).toEqual(1);
+            expect(deleted).toEqual(removed.length);
             expect(await ids()).toEqual(['rc-m1', 'rc-m2', 'rc-user']);
         });
 
@@ -538,6 +555,18 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
             );
 
             expect(removed).toEqual(loaded);
+            expect(deleted).toEqual(removed.length);
+        });
+
+        it('should count the root alone when every node the cascade reaches is kept (#562)', async () => {
+            await seed(TREE);
+
+            const { removed, deleted }: Removed = await removedBy(async () =>
+                gom.delete(DeletableSessionTree, 'rc-grand', { cascade: CascadeType.DELETE_ORPHAN })
+            );
+
+            // rc-m2 is kept: rc-user, outside the view, still refers to it.
+            expect(removed).toEqual(['rc-grand']);
             expect(deleted).toEqual(1);
         });
 

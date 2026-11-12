@@ -127,14 +127,16 @@ export class CypherBackend implements GraphBackend {
         // (FalkorDB/FalkorDB#3387).
         const targets = [`\nWITH ${NODE_ALIAS}`, `\nWITH ${NODE_ALIAS}, ${cascaded.targets} AS targets`];
         if (cascade === CascadeType.DELETE_ALL) {
+            // Each node once, the root and what the cascade took, however many paths reach it, counted as drivine4j
+            // counts them (#562). DISTINCT, not a reduce over the list, which is quadratic in a big view.
             return new GraphStatement(
                 [
                     head,
                     ...targets,
-                    `\nDETACH DELETE ${NODE_ALIAS}`,
-                    `\nWITH targets`,
-                    `\nFOREACH (t IN targets | DETACH DELETE t)`,
-                    `\nRETURN count(*) AS deleted`
+                    `\nUNWIND [${NODE_ALIAS}] + targets AS t`,
+                    `\nWITH DISTINCT t`,
+                    `\nDETACH DELETE t`,
+                    `\nRETURN count(t) AS deleted`
                 ].join('')
             );
         }
@@ -148,7 +150,8 @@ export class CypherBackend implements GraphBackend {
             [
                 head,
                 ...targets,
-                // A node reached by two paths, or the root reached again, is in the targets once, and the root not at all.
+                // A node reached by two paths, or the root reached again, is in the targets once, and the root not at
+                // all, so each node deleted is counted once (#562).
                 `\nWITH ${NODE_ALIAS}, reduce(seen = [], t IN targets | ` +
                     `CASE WHEN t IN seen OR t = ${NODE_ALIAS} THEN seen ELSE seen + t END) AS targets`,
                 `\nWITH ${NODE_ALIAS}, targets, ` +
@@ -160,7 +163,7 @@ export class CypherBackend implements GraphBackend {
                 `\nDETACH DELETE ${NODE_ALIAS}`,
                 `\nWITH orphans`,
                 `\nFOREACH (t IN orphans | DETACH DELETE t)`,
-                `\nRETURN count(*) AS deleted`
+                `\nRETURN count(*) + sum(size(orphans)) AS deleted`
             ].join('')
         );
     }

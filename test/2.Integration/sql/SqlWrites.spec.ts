@@ -256,7 +256,8 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
         // a is kept by a node outside the cascade, and b by its pairing with a, stored the other way round from a.
         await relate('a', 'outside', 'KNOWS');
         await relate('b', 'a', 'PAIRED');
-        expect(await gom.delete(Pairing, 'root', { cascade: CascadeType.DELETE_ORPHAN })).toBe(1);
+        // Every node deleted (#562): root and c.
+        expect(await gom.delete(Pairing, 'root', { cascade: CascadeType.DELETE_ORPHAN })).toBe(2);
         const left = async (id: string): Promise<boolean> => (await gom.load(Person, id)) !== undefined;
         expect(await Promise.all(['root', 'a', 'b', 'c', 'outside'].map(left))).toEqual([
             false,
@@ -284,7 +285,8 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
         await relate('d', 'a', 'MENTORS');
         await relate('c', 'a', 'LEADS');
         await relate('a', 'f', 'MENTORS');
-        expect(await gom.delete(Team, 'root', { cascade: CascadeType.DELETE_ORPHAN })).toBe(1);
+        // Every node deleted (#562): root, c, f and g.
+        expect(await gom.delete(Team, 'root', { cascade: CascadeType.DELETE_ORPHAN })).toBe(4);
         const left = async (id: string): Promise<boolean> => (await gom.load(Person, id)) !== undefined;
         expect(Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await left(id)])))).toEqual({
             root: false,
@@ -307,10 +309,11 @@ describe.each(sqlStores())('writes beside save on $name', (store) => {
             });
         await gom.save(conversation('s1', ['m1', 'm2'], 'ada'));
         await gom.save(conversation('s2', ['m3'], 'ada'));
-        expect(await gom.delete(Conversation, 's2', { cascade: CascadeType.DELETE_ORPHAN })).toBe(1);
+        // Every node deleted (#562): s2 and m3, ada kept; then s1, m1, m2 and ada.
+        expect(await gom.delete(Conversation, 's2', { cascade: CascadeType.DELETE_ORPHAN })).toBe(2);
         expect(await gom.load(Message, 'm3')).toBeUndefined();
         expect(await gom.load(Person, 'ada')).toBeDefined();
-        expect(await gom.delete(Conversation, 's1', { cascade: CascadeType.DELETE_ALL })).toBe(1);
+        expect(await gom.delete(Conversation, 's1', { cascade: CascadeType.DELETE_ALL })).toBe(4);
         expect(await gom.load(Message, 'm1')).toBeUndefined();
         expect(await gom.load(Person, 'ada')).toBeUndefined();
     });
