@@ -6,7 +6,7 @@ name: Website
 on:
     push:
         branches: [master]
-        paths: ['website/**', 'docs/**', 'README.md', '.github/workflows/website.yml']
+        paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package-lock.json', '.github/workflows/website.yml']
     schedule:
         - cron: '17 3 * * *'
     workflow_dispatch:
@@ -29,7 +29,11 @@ jobs:
               with:
                   node-version: 24
                   cache: npm
-                  cache-dependency-path: website/package-lock.json
+                  cache-dependency-path: |
+                      package-lock.json
+                      website/package-lock.json
+            # The playground is bundled from Drivine's own source and packages (scripts/bundle-playground.mjs).
+            - run: npm ci
             - run: npm ci
               working-directory: website
             # The build cuts the video into HLS segments with ffmpeg (scripts/segment-video.mjs), where the runner lacks it.

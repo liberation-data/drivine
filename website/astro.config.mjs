@@ -47,7 +47,10 @@ export default defineConfig({
                     { label: 'TypeScript', link: '/ts/', items: sidebar.ts },
                     { label: 'Python', link: '/py/', items: sidebar.py },
                     { label: 'Kotlin & Java', link: '/jvm/', items: sidebar.jvm }
-                ])
+                ], {
+                    // The playground is for every library's readers, so it sits in none of their sidebars.
+                    exclude: ['/playground']
+                })
             ]
         })
     ]

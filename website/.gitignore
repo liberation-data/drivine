@@ -6,3 +6,5 @@ src/generated
 # The video's HLS segments, cut from it by scripts/segment-video.mjs.
 public/video/hls
 public/video/hls.part
+# The playground's engine and .wasm files, bundled by scripts/bundle-playground.mjs.
+public/playground

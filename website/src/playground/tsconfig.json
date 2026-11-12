@@ -1,0 +1,8 @@
+{
+    "//": "For scripts/bundle-playground.mjs: Drivine's `@/` imports, without the root's `*` mapping, which would bypass the packages' exports and take their Node builds.",
+    "extends": "../../../tsconfig.json",
+    "compilerOptions": {
+        "baseUrl": ".",
+        "paths": { "@/*": ["../../../src/*"] }
+    }
+}
