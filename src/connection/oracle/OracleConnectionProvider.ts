@@ -7,6 +7,7 @@ import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { FirstConnection } from '@/connection/FirstConnection';
 import { DrivineLogger } from '@/logger';
+import { INSPECT, maskedProperties, printable } from '@/connection/Masking';
 
 /** The oldest Oracle Drivine runs Cypher on, 23.9: see {@link oracleRefusal}. */
 const ORACLE_MAJOR = 23;
@@ -55,6 +56,8 @@ export interface OracleConnectionProperties {
  * runs, and Cypher, which needs Oracle's `UUID()`, is refused with why (see {@link oracleRefusal}).
  */
 export class OracleConnectionProvider implements ConnectionProvider {
+    /** The properties, a copy whose password is printed masked (#730). */
+    readonly connectionProperties: OracleConnectionProperties;
     private readonly logger = new DrivineLogger(OracleConnectionProvider.name);
     private pool?: Promise<oracledb.Pool>;
     private readonly firstConnection = new FirstConnection(
@@ -66,8 +69,9 @@ export class OracleConnectionProvider implements ConnectionProvider {
     constructor(
         readonly name: string,
         readonly type: DatabaseType,
-        readonly connectionProperties: OracleConnectionProperties
+        connectionProperties: OracleConnectionProperties
     ) {
+        this.connectionProperties = maskedProperties({ ...connectionProperties });
         // Refuses a name that can't name the graph's tables now, rather than at the first connection.
         new OracleGraph(this.graphName);
     }
@@ -112,6 +116,15 @@ export class OracleConnectionProvider implements ConnectionProvider {
             this.pool = undefined;
             await pool.close(0);
         }
+    }
+
+    /** The provider as it is printed: its settings, the password masked and its client left out (#730). */
+    toJSON(): Record<string, unknown> {
+        return { name: this.name, type: this.type, ...printable({ ...this.connectionProperties }) };
+    }
+
+    [INSPECT](): Record<string, unknown> {
+        return this.toJSON();
     }
 
     /** Finds whether the Oracle behind `connection` is too old for Cypher, and warns if so. */

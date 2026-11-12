@@ -8,9 +8,13 @@ import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { FirstConnection } from '@/connection/FirstConnection';
 import { ddlDeadlocked, whenNotContended } from '@/manager/Contention';
+import { INSPECT, maskedProperties, printable } from '@/connection/Masking';
 
 /** Connections to Postgres, from a pool of its own, through `pg`. */
 export class PostgresConnectionProvider implements ConnectionProvider {
+    /** The pool's settings, a copy whose password is printed masked (#730). */
+    readonly connectionProperties: PoolConfig;
+
     private readonly pool: Pool;
     private readonly firstConnection = new FirstConnection(
         () => `graph '${this.graphName}' on ${this.type} database '${this.name}'`
@@ -23,9 +27,10 @@ export class PostgresConnectionProvider implements ConnectionProvider {
     constructor(
         readonly name: string,
         readonly type: DatabaseType,
-        readonly connectionProperties: PoolConfig,
+        connectionProperties: PoolConfig,
         private readonly graph?: string
     ) {
+        this.connectionProperties = maskedProperties({ ...connectionProperties });
         this.pool = new Pool({ ...connectionProperties });
         // Refuses a name that can't name the graph's tables now, rather than at the first statement.
         new PostgresGraph(this.graphName);
@@ -58,6 +63,20 @@ export class PostgresConnectionProvider implements ConnectionProvider {
 
     async end(): Promise<void> {
         await this.pool.end();
+    }
+
+    /** The provider as it is printed: its settings, the password masked and its client left out (#730). */
+    toJSON(): Record<string, unknown> {
+        return {
+            name: this.name,
+            type: this.type,
+            graphName: this.graphName,
+            ...printable({ ...this.connectionProperties })
+        };
+    }
+
+    [INSPECT](): Record<string, unknown> {
+        return this.toJSON();
     }
 
     private async setSessionId(client: PoolClient): Promise<void> {

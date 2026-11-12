@@ -1,6 +1,7 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import * as assert from 'assert';
 import { TransactionMode } from '@/connection/TransactionMode';
+import { maskedProperties } from '@/connection/Masking';
 
 export interface ConnectionProperties {
     databaseType: DatabaseType;
@@ -81,7 +82,8 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         assert(databaseName, `${prefix}DATABASE_NAME for named connection is required.`);
     }
 
-    return <ConnectionProperties>{
+    // Printed with the password masked (#730); read, spread and passed on as they are.
+    return maskedProperties(<ConnectionProperties>{
         databaseType,
         host,
         port,
@@ -94,5 +96,5 @@ export function ConnectionPropertiesFromEnv(connectionName?: string): Connection
         poolMax,
         transactionMode,
         defaultGraphPath
-    };
+    });
 }
