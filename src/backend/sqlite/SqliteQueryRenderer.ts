@@ -8,6 +8,7 @@ import { Query, QueryFn, WhereFn } from '@/dsl/Refs';
 import { Scope } from '@/dsl/ModelScope';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
+import { jsonText } from '@/utils/JsonText';
 
 /** The function each SQLite connection registers that lowers text as Unicode does: SQLite's `lower` lowers ASCII only. */
 const LOWER = 'drivine_lower';
@@ -138,7 +139,7 @@ export class SqliteQueryRenderer extends SqlQueryRenderer {
             : `(CASE v.type WHEN 'text' THEN v.value WHEN 'null' THEN NULL WHEN 'true' THEN 'true' ` +
               `WHEN 'false' THEN 'false' WHEN 'integer' THEN json_quote(v.value) WHEN 'real' THEN json_quote(v.value) ` +
               `ELSE v.value END)`;
-        const bound = this.bind(JSON.stringify(values.map((it) => this.scalar(it, jsonPacked))));
+        const bound = this.bind(jsonText(values.map((it) => this.scalar(it, jsonPacked))));
         return `${numbers ? numberOf(row, name) : textOf(row, name)} IN (SELECT ${read} FROM json_each(${bound}) v)`;
     }
 
@@ -148,7 +149,7 @@ export class SqliteQueryRenderer extends SqlQueryRenderer {
      * reads it, and a boolean is one and not its text.
      */
     private holds(row: string, name: string, item: unknown): string {
-        const elements = `json_each(${row}.props, ${path(name)}) h, json_each(${this.bind(JSON.stringify([item]))}) b`;
+        const elements = `json_each(${row}.props, ${path(name)}) h, json_each(${this.bind(jsonText([item]))}) b`;
         const sameType = `(h.type = b.type OR (h.type IN ('integer', 'real') AND b.type IN ('integer', 'real')))`;
         return (
             `(${jsonType(row, name)} = 'array' AND EXISTS (SELECT 1 FROM ${elements} WHERE ${sameType} ` +

@@ -236,8 +236,8 @@ export class OracleSaveBuilder {
                       `(SELECT 1 FROM ${this.graph.edges} r WHERE ${referencedAs(rel.direction)})`
                     : null;
             this.body.push(
-                `trim_edges(v_root, ${this.bind(dropped)}, ${this.bind(JSON.stringify(keep))}, ` +
-                    `${unreferenced ? this.bind(unreferenced) : 'NULL'}, ${this.bind(JSON.stringify(held))});`
+                `trim_edges(v_root, ${this.bind(dropped)}, ${this.bind(jsonText(keep))}, ` +
+                    `${unreferenced ? this.bind(unreferenced) : 'NULL'}, ${this.bind(jsonText(held))});`
             );
         }
     }
@@ -254,7 +254,7 @@ export class OracleSaveBuilder {
                 `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
                 `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
                 `WHERE ${hasLabels('n', it.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(${this.bind(
-                    JSON.stringify(it.ids)
+                    jsonText(it.ids)
                 )}, '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
             );
         });
@@ -314,7 +314,7 @@ END;`;
         )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1) AS "v")`;
         return {
             match: this.bind(match),
-            id: this.bind(JSON.stringify(write.id)),
+            id: this.bind(jsonText(write.id)),
             labels: this.bind(JSON.stringify([...new Set(write.labels)])),
             props: this.bind(jsonText(write.props, (_, value) => (value === undefined ? null : value))),
             add: this.bind(JSON.stringify(write.add)),

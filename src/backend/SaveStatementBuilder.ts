@@ -18,6 +18,7 @@ import { splitVectors, vectorClauses } from '@/backend/VectorWrites';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassKind } from '@/annotation/Metadata';
 import { changes, EXPECTED, LOCK, MADE, relink, restamp, STAMP } from '@/backend/CypherStamps';
+import { jsonText } from '@/utils/JsonText';
 
 /** A stamped fragment among the related nodes a save writes, and its place in the statement. */
 interface StampedNodes {
@@ -777,7 +778,7 @@ export function propsOf(
  */
 export function storedValue(value: any, packed: boolean): any {
     const stored = value instanceof Set ? [...value] : value;
-    return stored != null && packed ? JSON.stringify(stored) : stored ?? null;
+    return stored != null && packed ? jsonText(stored) : stored ?? null;
 }
 
 function pattern(rel: RelationshipModel, from: string, relAlias: string, to: string): string {

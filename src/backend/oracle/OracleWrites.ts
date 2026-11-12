@@ -114,7 +114,7 @@ export class OracleWrites {
                     `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
                         `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
                         `WHERE ${hasLabels('n', group.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(${bind(
-                            JSON.stringify(group.objects.map((it) => idOf(group.model, it)))
+                            jsonText(group.objects.map((it) => idOf(group.model, it)))
                         )}, '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
                 );
             });
@@ -124,7 +124,7 @@ export class OracleWrites {
                 const props = objectProps(group.model, object, options);
                 body.push(
                     `v_root := write_node(${bind(this.matchText(group.model))}, ${bind(
-                        JSON.stringify(idOf(group.model, object))
+                        jsonText(idOf(group.model, object))
                     )}, ` +
                         `${bind(JSON.stringify(group.model.labels))}, ${bind(
                             jsonText(props, (_, value) => (value === undefined ? null : value))
@@ -230,7 +230,7 @@ export class OracleWrites {
                 'END IF;',
                 'OPEN c FOR SELECT v_removed AS "removed" FROM dual;'
             ],
-            { x_type: type, x_from: JSON.stringify(from.id) }
+            { x_type: type, x_from: jsonText(from.id) }
         );
     }
 
@@ -252,7 +252,7 @@ export class OracleWrites {
                     idProperty(from.model)
                 )} == $v)' PASSING JSON($x_from) AS "v") AND ` +
                 `${hasLabels('x', target.labels)})`,
-            { x_type: type, x_from: JSON.stringify(from.id) }
+            { x_type: type, x_from: jsonText(from.id) }
         );
     }
 
@@ -272,9 +272,9 @@ export class OracleWrites {
             labels
         )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1) AS "v")`;
         if (name === 'x_frommatch') {
-            this.pending.x_from = JSON.stringify(node.id);
+            this.pending.x_from = jsonText(node.id);
         } else {
-            this.pending.x_to = JSON.stringify(node.id);
+            this.pending.x_to = jsonText(node.id);
         }
         return `$${name}`;
     }

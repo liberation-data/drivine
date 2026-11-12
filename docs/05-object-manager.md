@@ -87,6 +87,12 @@ JSON text of that list, which is also what a `where` compares a packed set field
 set as `{}`, and on Postgres and Oracle so did `patch` and `relate` any set, losing its items; a `where` comparing a
 packed field with a set compared it with `{}`, and matched nothing.
 
+**Whole numbers past 2^53.** A `bigint` is written as the whole number it is, with every digit, wherever a save,
+`patch`, `patchAll` or `edges.relate` writes a value: a property, a list's item, a property bag, a `@JsonPacked` field,
+a relationship's property and a `@NodeId`. A `where` compares a field with one as that number too. Before #739, a
+`bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite. A load does not read one back as
+a `bigint` yet: on the SQL stores it gives the nearest JavaScript number.
+
 #### 2. RelationshipFragment: a Relationship's Properties
 
 A `@RelationshipFragment` holds the properties of a relationship, and the node it leads to:

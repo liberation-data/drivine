@@ -23,6 +23,7 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * Writes a save as one plan for drivine4j's write function (Postgres's, or SQLite's: see WriteFunction), applied whole or not at all, with or without a transaction.
@@ -241,7 +242,7 @@ export class PostgresSaveBuilder {
 
 /** An id as the store reads its property back with `->>`: text as it is, a number or a boolean as its JSON. */
 export function storedKey(id: unknown): string {
-    return typeof id === 'string' ? id : JSON.stringify(id);
+    return typeof id === 'string' ? id : jsonText(id);
 }
 
 /** The properties a node step writes: its id is the step's key, which a node is made with and found by, and no more. */
