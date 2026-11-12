@@ -470,6 +470,20 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
             }
         });
 
+        it('should delete nothing, and count 0, for a root that is not there (#562)', async () => {
+            for (const cascade of cascades) {
+                await clear();
+                await seed(TREE);
+
+                const { removed, deleted }: Removed = await removedBy(async () =>
+                    gom.delete(DeletableSessionTree, 'rc-none', { cascade })
+                );
+
+                expect(removed).toEqual([]);
+                expect(deleted).toEqual(0);
+            }
+        });
+
         it('should leave the nodes of a list read over several hops', async () => {
             for (const cascade of cascades) {
                 await clear();
@@ -542,6 +556,18 @@ describe.each(allStores())('a cascade through a recursive view on $type', (engin
 
             expect(removed).toEqual(loaded);
             expect(deleted).toEqual(removed.length);
+        });
+
+        it('should count the root alone when every node the cascade reaches is kept (#562)', async () => {
+            await seed(TREE);
+
+            const { removed, deleted }: Removed = await removedBy(async () =>
+                gom.delete(DeletableSessionTree, 'rc-grand', { cascade: CascadeType.DELETE_ORPHAN })
+            );
+
+            // rc-m2 is kept: rc-user, outside the view, still refers to it.
+            expect(removed).toEqual(['rc-grand']);
+            expect(deleted).toEqual(1);
         });
 
         it('should keep what a kept node holds', async () => {
