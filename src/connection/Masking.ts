@@ -8,9 +8,12 @@
 /** Node's hook for what `util.inspect` prints of an object. A symbol of the registry, so no `util` is imported. */
 export const INSPECT = Symbol.for('nodejs.util.inspect.custom');
 
-/** A password as it is printed: `***`, or null where there is none. */
+/**
+ * A password as it is printed: `***` where one is set, the empty one too, and null where there is none, as drivine4j
+ * prints it (`password?.let { "***" }`).
+ */
 export function maskedPassword(password: unknown): string | null {
-    return password === undefined || password === null || password === '' ? null : '***';
+    return password === undefined || password === null ? null : '***';
 }
 
 /**
