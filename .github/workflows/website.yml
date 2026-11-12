@@ -7,9 +7,9 @@ name: Website
 on:
     push:
         branches: [master]
-        paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package-lock.json', '.github/workflows/website.yml']
+        paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package.json', 'package-lock.json', 'tsconfig.json', '.github/workflows/website.yml']
     pull_request:
-        paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package-lock.json', '.github/workflows/website.yml']
+        paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package.json', 'package-lock.json', 'tsconfig.json', '.github/workflows/website.yml']
     schedule:
         - cron: '17 3 * * *'
     workflow_dispatch:
