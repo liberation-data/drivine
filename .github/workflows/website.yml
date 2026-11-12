@@ -1,11 +1,14 @@
 # Builds the website (website/) and publishes it to GitHub Pages. Its docs are generated from the docs/ of this
 # repository, drivine-python and drivine4j (or their READMEs, where they have none), so it also runs daily, to pick up
-# the other two's changes.
+# the other two's changes. A pull request that touches the site or what it is built from builds it, and checks the dev
+# server, without publishing it.
 name: Website
 
 on:
     push:
         branches: [master]
+        paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package-lock.json', '.github/workflows/website.yml']
+    pull_request:
         paths: ['website/**', 'docs/**', 'README.md', 'src/**', 'package-lock.json', '.github/workflows/website.yml']
     schedule:
         - cron: '17 3 * * *'
@@ -13,12 +16,11 @@ on:
 
 permissions:
     contents: read
-    pages: write
-    id-token: write
 
+# One publish at a time, never cut short; a pull request's build is cut short by its next push.
 concurrency:
-    group: pages
-    cancel-in-progress: false
+    group: ${{ github.event_name == 'pull_request' && format('website-{0}', github.ref) || 'pages' }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
     build:
@@ -47,13 +49,18 @@ jobs:
             # The dev server serves the playground as the built site does (astro.config.mjs).
             - run: npm run check:dev
               working-directory: website
-            - uses: actions/upload-pages-artifact@v5
+            - if: github.event_name != 'pull_request'
+              uses: actions/upload-pages-artifact@v5
               with:
                   path: website/dist
 
     deploy:
+        if: github.event_name != 'pull_request'
         needs: build
         runs-on: ubuntu-latest
+        permissions:
+            pages: write
+            id-token: write
         environment:
             name: github-pages
             url: ${{ steps.deployment.outputs.page_url }}
