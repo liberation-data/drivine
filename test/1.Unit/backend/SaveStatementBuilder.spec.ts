@@ -19,7 +19,7 @@ import {
     SaveStatementBuilder
 } from '@liberation-data/drivine';
 import { CypherGrammar } from '@/backend/CypherGrammar';
-import { bagEntries } from '@/backend/SaveStatementBuilder';
+import { bagEntries, storedValue } from '@/backend/SaveStatementBuilder';
 
 @NodeFragment({ labels: ['Person'] })
 class Person {
@@ -370,5 +370,14 @@ describe('SaveStatementBuilder', () => {
         expect(check).toContain('size([l IN labels(n) WHERE l IN $_loadedLabelsClosed]) = size($_loadedLabels)');
         expect(bindings._loadedLabelsClosed).toEqual(['Red', 'Green', 'Blue']);
         expect(bindings._loadedLabels).toEqual(['Blue']);
+    });
+});
+
+// A @JsonPacked field is packed as the same JSON on every backend; a bigint in it keeps its digits (#739).
+describe('storedValue', () => {
+    it('packs a bigint with its digits', () => {
+        expect(storedValue({ n: BigInt('9007199254740993'), l: [BigInt(-1)] }, true)).toBe(
+            '{"n":9007199254740993,"l":[-1]}'
+        );
     });
 });

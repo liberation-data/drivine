@@ -8,6 +8,7 @@ import { Query, QueryFn, WhereFn } from '@/dsl/Refs';
 import { Scope } from '@/dsl/ModelScope';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * Writes a query on Postgres (see SqlQueryRenderer), as drivine4j writes one. A property is read with `->>`, as the
@@ -132,7 +133,7 @@ export class PostgresQueryRenderer extends SqlQueryRenderer {
         const read = numbers
             ? "CASE WHEN jsonb_typeof(v.value) = 'number' THEN (v.value #>> '{}')::numeric END"
             : "v.value #>> '{}'";
-        const bound = this.bind(JSON.stringify(values.map((it) => this.scalar(it, jsonPacked))));
+        const bound = this.bind(jsonText(values.map((it) => this.scalar(it, jsonPacked))));
         return (
             `${numbers ? numberOf(row, name) : textOf(row, name)} IN ` +
             `(SELECT ${read} FROM jsonb_array_elements(CAST(${bound} AS jsonb)) v)`
@@ -143,7 +144,7 @@ export class PostgresQueryRenderer extends SqlQueryRenderer {
     private holds(row: string, name: string, item: unknown): string {
         return (
             `(jsonb_typeof(${jsonValue(row, name)}) = 'array' AND ${jsonValue(row, name)} @> ` +
-            `CAST(${this.bind(JSON.stringify([item]))} AS jsonb))`
+            `CAST(${this.bind(jsonText([item]))} AS jsonb))`
         );
     }
 

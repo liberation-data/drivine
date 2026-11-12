@@ -26,6 +26,10 @@ describe('OracleSpecCompiler', () => {
         expect(bound({ a: [1, 2] })).toEqual('{"a":[1,2]}');
     });
 
+    it('binds a list or a map holding a bigint as its JSON text, the bigint with its digits (#739)', () => {
+        expect(bound([BigInt('9007199254740993'), 1])).toEqual('[9007199254740993,1]');
+    });
+
     it('binds a name past ASCII, as Cypher reads one, and not a name it is the prefix of', () => {
         const spec = new QuerySpecification('select $größe, $größer from dual').bind({ größe: 3 }).finalizedCopy('SQL');
         const compiled = new OracleSpecCompiler(spec).compile();
