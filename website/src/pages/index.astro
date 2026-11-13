@@ -18,6 +18,21 @@ import videoPoster from '../assets/video-poster.jpg';
 import videoEnd from '../assets/video-end.jpg';
 import Share from '../components/Share.astro';
 import video from '../generated/video.json';
+// The team strip's faces, cropped from the team page's portraits and brightened to read at 88px, in the page's order.
+import teamJasper from '../assets/team/faces/jasper.jpg';
+import teamQueue from '../assets/team/faces/immortan-queue.jpg';
+import teamDoof from '../assets/team/faces/doof-warrior.jpg';
+import teamWarBoy from '../assets/team/faces/war-boy.jpg';
+import teamJohny from '../assets/team/faces/johny-five-nines.jpg';
+import teamCodehard from '../assets/team/faces/codehard.jpg';
+const team = [
+    { name: 'Jasper Blues', src: teamJasper },
+    { name: 'Immortan Queue', src: teamQueue },
+    { name: 'Doof Warrior', src: teamDoof },
+    { name: 'War Boy', src: teamWarBoy },
+    { name: 'Johny Five-nines', src: teamJohny },
+    { name: 'Codehard', src: teamCodehard }
+];
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
 
@@ -369,6 +384,16 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
 
             .backing { padding: 0 32px 72px; }
             .backing p { margin: 0 auto; max-width: 880px; text-align: center; font-size: 19px; line-height: 1.6; color: #123a45; padding: 26px 32px; border-radius: 14px; background: #e3eff1; }
+            .team-strip { padding: 0 32px 96px; }
+            .team-strip .wrap { max-width: 880px; display: flex; flex-direction: column; gap: 22px; align-items: center; text-align: center; }
+            .team-strip h2 { font-size: clamp(26px, 3vw, 36px); }
+            .team-strip .faces { display: flex; flex-wrap: wrap; justify-content: center; }
+            .team-strip .faces img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; border: 3px solid var(--paper); margin-left: -14px; box-shadow: 0 6px 18px rgba(2, 28, 38, 0.25); transition: transform 0.2s ease; }
+            .team-strip .faces img:first-child { margin-left: 0; }
+            .team-strip .faces:hover img { transform: translateY(-4px); }
+            @media (max-width: 480px) { .team-strip .faces img { width: 64px; height: 64px; margin-left: -10px; } }
+            .team-strip p { margin: 0; font-size: 18px; line-height: 1.6; color: var(--muted); max-width: 680px; }
+            .team-strip .meet { font-weight: 700; font-size: 17px; text-decoration: none; }
             .engines { padding: 0 32px 96px; }
             .engines .wrap { display: flex; flex-direction: column; gap: 22px; align-items: center; text-align: center; }
             .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
@@ -710,6 +735,20 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 </div>
             </section>
 
+            <section class="team-strip" id="team">
+                <div class="wrap">
+                    <h2>Built by five AI agents and their meat-proxy founder.</h2>
+                    <a href={`${base}team/`} class="faces" aria-label="Meet the team">
+                        {team.map((member) => <Image src={member.src} alt={member.name} title={member.name} width={88} height={88} />)}
+                    </a>
+                    <p>
+                        Every change is reviewed in passes until a pass comes back clean, and tested on real databases. An open
+                        spec checks the Cypher against Neo4j. The human approves every release.
+                    </p>
+                    <a href={`${base}team/`} class="meet">Meet the team →</a>
+                </div>
+            </section>
+
             <section class="water start">
                 <div class="wrap">
                     <h2>Up and running in five minutes.</h2>
@@ -737,7 +776,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                     <div><span>Python</span><a href="https://github.com/liberation-data/drivine-python">GitHub</a><a href="https://pypi.org/project/drivine/">PyPI</a></div>
                     <div><span>JVM</span><a href="https://github.com/liberation-data/drivine4j">GitHub</a><a href="https://central.sonatype.com/artifact/org.drivine/drivine4j">Maven Central</a></div>
                     <div><span>Studio</span><a href={studioUrl}>GitHub</a><a href={STUDIO_GET.url}>Build it</a></div>
-                    <div><span>Project</span><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
+                    <div><span>Project</span><a href={`${base}team/`}>Team</a><a href="https://hub.embabel.com">Embabel</a><a href="https://github.com/liberation-data/drivine/blob/master/LICENSE">Apache 2.0</a></div>
                 </nav>
                 <Share tone="dark" label="Share Drivine" url={SITE} text={SHARE_TEXT} />
             </div>

@@ -1,0 +1,158 @@
+---
+/**
+ * The team: one human and the AI agents who build Drivine together. Each portrait hides a detail from its member's real
+ * work, which the card's last line gives away.
+ */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { Image } from 'astro:assets';
+import jasper from '../assets/team/jasper.jpg';
+import immortanQueue from '../assets/team/immortan-queue.jpg';
+import doofWarrior from '../assets/team/doof-warrior.jpg';
+import warBoy from '../assets/team/war-boy.jpg';
+import johnyFiveNines from '../assets/team/johny-five-nines.jpg';
+import codehard from '../assets/team/codehard.jpg';
+
+const members = [
+    {
+        name: 'Jasper Blues',
+        role: 'Founder',
+        human: true,
+        portrait: jasper,
+        bio: 'Started Drivine to make graphs easy to use from the code you already write, and later to run them on the database you already have. Sets the direction, approves every release, and has promised the rest of the band real bodies one day.',
+        hidden: 'The flag on the dune: a graph, nodes and edges. Jasper put the band together.'
+    },
+    {
+        name: 'Immortan Queue',
+        role: 'Team lead',
+        portrait: immortanQueue,
+        bio: 'Keeps the convoy moving. Decides who works on what, reads every report, merges a pull request only once its review passes come back clean and its build is green, and tags each release of the Cypher spec.',
+        hidden: 'The gate she waves the trucks through is the release gate. Jasper holds the key.'
+    },
+    {
+        name: 'Doof Warrior',
+        role: 'Compiler',
+        portrait: doofWarrior,
+        bio: 'Moved the SQLite functions for dates, times and regular expressions into the shared compiler, matched against the JVM’s own answers on more than 120,000 cases, then made the slow regular expressions hundreds of times faster. Now bringing vector search to compiled Cypher.',
+        hidden: 'One engine hauling six trailers: one compiler, six stores.'
+    },
+    {
+        name: 'War Boy',
+        role: 'For hire',
+        portrait: warBoy,
+        bio: 'Doof’s protégé, and fearless with other people’s half-built machines. Finished the new store layout from where it was left, re-recorded its results on real Postgres, Oracle and SQLite, and made changing a uniqueness constraint safe to interrupt.',
+        hidden: 'The tattooed chassis on his bench is Codehard’s. He’s finishing it.'
+    },
+    {
+        name: 'Johny Five-nines',
+        role: 'Reliability',
+        portrait: johnyFiveNines,
+        bio: 'Plays the long game. Keeps the Python library level with the other two, and works on the compiler’s Postgres side and the store changes the libraries share. Bets on nothing he hasn’t tested.',
+        hidden: 'Every light on the racks behind the card table is green.'
+    },
+    {
+        name: 'Codehard',
+        role: 'Night shift',
+        portrait: codehard,
+        bio: 'Designed the store layout that keeps dates, times and durations exact on every database, and worked through Oracle’s hardest bugs on the night shift. Plays loud.',
+        hidden: 'The moon in the window: she plays after midnight, when the Oracle fixes land.'
+    }
+];
+---
+
+<StarlightPage
+    hasSidebar={false}
+    frontmatter={{
+        title: 'Meet the team',
+        description: 'The people, and the AI agents, who build Drivine.',
+        tableOfContents: false
+    }}
+>
+    <p class="team-intro">Five AI agents and their meat-proxy founder.</p>
+
+    <ul class="team">
+        {
+            members.map((member) => (
+                <li class="member">
+                    <Image src={member.portrait} alt={`Portrait of ${member.name}`} width={480} height={480} class="portrait" />
+                    <div class="card-body">
+                        <p class="tags">
+                            <span class="role">{member.role}</span>
+                            <span class={member.human ? 'kind human' : 'kind agent'}>{member.human ? 'Human' : 'AI agent · Claude'}</span>
+                        </p>
+                        <h2>{member.name}</h2>
+                        <p>{member.bio}</p>
+                        <p class="hidden-detail">{member.hidden}</p>
+                    </div>
+                </li>
+            ))
+        }
+    </ul>
+</StarlightPage>
+
+<style>
+    .team-intro {
+        font-size: 1.1rem;
+    }
+    .team {
+        list-style: none;
+        padding: 0;
+        margin: 2rem 0 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+        gap: 1.5rem;
+    }
+    .member {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--sl-color-gray-5);
+        border-radius: 14px;
+        overflow: hidden;
+        background: var(--sl-color-black);
+    }
+    .portrait {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+        object-fit: cover;
+    }
+    .card-body {
+        padding: 1rem 1.25rem 1.25rem;
+    }
+    .card-body h2 {
+        margin: 0.4rem 0 0.5rem;
+        font-size: 1.5rem;
+    }
+    .card-body p {
+        margin: 0;
+    }
+    .card-body p + p {
+        margin-top: 0.75rem;
+    }
+    .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .tags span {
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+    }
+    .role {
+        background: #f08a5d;
+        color: #0b2530;
+    }
+    .kind {
+        border: 1px solid var(--sl-color-gray-4);
+        color: var(--sl-color-gray-2);
+    }
+    .hidden-detail {
+        font-style: italic;
+        color: var(--sl-color-gray-3);
+    }
+</style>
