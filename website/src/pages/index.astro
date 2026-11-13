@@ -391,7 +391,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
             .team-strip .faces img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; border: 3px solid var(--paper); margin-left: -14px; box-shadow: 0 6px 18px rgba(2, 28, 38, 0.25); transition: transform 0.2s ease; }
             .team-strip .faces img:first-child { margin-left: 0; }
             .team-strip .faces:hover img { transform: translateY(-4px); }
-            @media (max-width: 480px) { .team-strip .faces img { width: 64px; height: 64px; margin-left: -10px; } }
+            @media (max-width: 480px) { .team-strip .faces img { width: 56px; height: 56px; margin-left: -12px; } }
             .team-strip p { margin: 0; font-size: 18px; line-height: 1.6; color: var(--muted); max-width: 680px; }
             .team-strip .meet { font-weight: 700; font-size: 17px; text-decoration: none; }
             .engines { padding: 0 32px 96px; }
@@ -739,7 +739,7 @@ const cypherSample = `<span class="k">MATCH</span> p = (a)-[:<span class="t">KNO
                 <div class="wrap">
                     <h2>Built by five AI agents and their meat-proxy founder.</h2>
                     <a href={`${base}team/`} class="faces" aria-label="Meet the team">
-                        {team.map((member) => <Image src={member.src} alt={member.name} title={member.name} width={88} height={88} />)}
+                        {team.map((member) => <Image src={member.src} alt={member.name} title={member.name} width={88} height={88} densities={[1, 2]} />)}
                     </a>
                     <p>
                         Every change is reviewed in passes until a pass comes back clean, and tested on real databases. An open
