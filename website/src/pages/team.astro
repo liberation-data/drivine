@@ -73,7 +73,7 @@ const members = [
         {
             members.map((member) => (
                 <li class="member">
-                    <Image src={member.portrait} alt={`Portrait of ${member.name}`} width={480} height={480} class="portrait" />
+                    <Image src={member.portrait} alt={`Portrait of ${member.name}`} width={480} height={480} densities={[1, 2]} class="portrait" />
                     <div class="card-body">
                         <p class="tags">
                             <span class="role">{member.role}</span>
