@@ -14,7 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
-import { readLayout } from '@/cypher/ValueLayout';
+import { readLayoutAfter } from '@/cypher/ValueLayout';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -156,12 +156,14 @@ export class OracleConnection implements Connection {
 /**
  * The rows of a compiled Cypher statement that writes, from the rows `rows` its PL/SQL block returned in the shape
  * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as the shared compiler returns them
- * with `oracleRowsAsText` (see SharedCypherCompiler), their floats read (see withFloats); `'each'`, the rows as they
+ * with `oracleRowsAsText` (see SharedCypherCompiler), their floats and the layout read as the text was (see
+ * implicitRows); `'each'`, the rows as they
  * are, one a row in the column `RESULT`, which the result mapper takes the value of. Read as the statement says, never
  * by a column's name.
  */
 function returnedRows(rows: any[], shape: CompiledRows): any[] {
-    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: withFloats(it) }));
+    // Their floats are read already, with the rest of the layout, as the block's text was parsed (see implicitRows).
+    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: it }));
 }
 
 /**
@@ -173,7 +175,7 @@ function readRow(row: Record<string, unknown>): Record<string, unknown> {
     return Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
             key,
-            value === null || value === undefined ? value : withFloats(readLayout(String(value)))
+            value === null || value === undefined ? value : readLayoutAfter(String(value), withFloats)
         ])
     );
 }
@@ -218,7 +220,7 @@ function withFloats(value: any): any {
  * on Oracle 23.26).
  */
 function implicitRows(rows: any[] | undefined, exact: boolean): any[] {
-    const parse = exact ? (text: string): any => readLayout(text) : JSON.parse;
+    const parse = exact ? (text: string): any => readLayoutAfter(text, withFloats) : JSON.parse;
     return (rows ?? []).map((row) => {
         const out: Record<string, any> = {};
         for (const [key, value] of Object.entries(row)) {

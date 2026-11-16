@@ -1,6 +1,7 @@
 import { DrivineError } from '@/DrivineError';
-import { cypherCompilerModule } from '@/cypher/SharedCypherCompiler';
+import { cypherCompilerModule, parametersJson } from '@/cypher/SharedCypherCompiler';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { jsonText } from '@/utils/JsonText';
 
 /**
  * A column of a statement's rows, its JSON text as the store gave it, read as the value it holds in the store layout
@@ -26,4 +27,86 @@ export function readLayout(text: string, parse: (text: string) => any = parseExa
         throw new DrivineError(`A row's value can't be read in the store layout: ${answer.error}`);
     }
     return answer.value;
+}
+
+/** What stands for a number JSON has no text of while a value crosses to the module and back: no row's text holds one. */
+const NON_FINITE = new Map<string, number>([
+    ['\u0000drivine:NaN', NaN],
+    ['\u0000drivine:Infinity', Infinity],
+    ['\u0000drivine:-Infinity', -Infinity]
+]);
+
+/**
+ * A column read in the store layout, as {@link readLayout} reads it, where the store writes some values its own way in
+ * the column's JSON (SQLite's NaN, `{"$numberDouble": "NaN"}`; Oracle's floats, `{"$numberDouble": 2.5}`): `raw` reads
+ * those on the column as the store wrote it, where such a map's key has one `$` and a map of the user's with that key
+ * has two, as the layout escapes it; the module then reads the rest. Read the other way round, the module's unescaping
+ * would hand `raw` a user's map as the store's own.
+ */
+export function readLayoutAfter(text: string, raw: (value: any) => any): any {
+    const value = raw(parseExactIntegers(text));
+    if (!text.includes('"$') && !text.includes('\\u0024')) {
+        return value;
+    }
+    const marked = jsonText(value, (_, item) => {
+        if (typeof item === 'number' && !Number.isFinite(item)) {
+            return Number.isNaN(item)
+                ? '\u0000drivine:NaN'
+                : item > 0
+                ? '\u0000drivine:Infinity'
+                : '\u0000drivine:-Infinity';
+        }
+        return item;
+    });
+    return unmarked(readLayout(marked));
+}
+
+/** `value` with each stand-in for a non-finite number the number again, at any depth. */
+function unmarked(value: any): any {
+    if (typeof value === 'string') {
+        return NON_FINITE.has(value) ? NON_FINITE.get(value) : value;
+    }
+    if (Array.isArray(value)) {
+        return value.map(unmarked);
+    }
+    if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, unmarked(item)]));
+    }
+    return value;
+}
+
+/**
+ * `value`, a value a save writes, as the store layout holds it, as the shared module writes it (its `write` request,
+ * drivine4j's `CypherJson.valueToTree`): each `Date` its tag (`{"$t": "datetime", "v": …, "s": …}`), and each map key that
+ * begins with `$` with one more `$` before it, at any depth. A value with neither in it is held as it is, and the module
+ * is asked only of one that has.
+ */
+export function writeLayout(value: any): any {
+    if (!heldOtherwise(value)) {
+        return value;
+    }
+    const answer = parseExactIntegers(cypherCompilerModule().compile(`{"write":${parametersJson(value)}}`));
+    if (answer && typeof answer === 'object' && 'error' in answer) {
+        throw new DrivineError(`A value can't be written in the store layout: ${answer.error}`);
+    }
+    return answer.value;
+}
+
+/** A property's name as the store layout holds it: one more `$` before a name that begins with one. */
+export function heldKey(name: string): string {
+    return name.startsWith('$') ? `$${name}` : name;
+}
+
+/** Whether `value` holds a `Date`, or a map key that begins with `$`, at any depth: what the layout holds otherwise. */
+function heldOtherwise(value: any): boolean {
+    if (value instanceof Date) {
+        return true;
+    }
+    if (value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) {
+        return false;
+    }
+    if (Array.isArray(value) || value instanceof Set) {
+        return [...value].some(heldOtherwise);
+    }
+    return Object.entries(value).some(([key, item]) => key.startsWith('$') || heldOtherwise(item));
 }

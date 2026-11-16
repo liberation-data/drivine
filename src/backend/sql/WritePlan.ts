@@ -1,5 +1,6 @@
 import { Direction } from '@/annotation/Metadata';
 import { Stamps } from '@/model/Stamps';
+import { heldKey, writeLayout } from '@/cypher/ValueLayout';
 
 /** What a statement that carries out a plan gives back. */
 export type WriteReturns =
@@ -83,12 +84,15 @@ export class WritePlan {
     /** The number of the shape a node of the labels, found by the property `key`, has: one number for one shape. */
     shape(labels: string[], key: string): number {
         const found = this.shapes.findIndex(
-            (it) => it.key === key && it.labels.length === labels.length && it.labels.every((l, i) => l === labels[i])
+            (it) =>
+                it.key === heldKey(key) &&
+                it.labels.length === labels.length &&
+                it.labels.every((l, i) => l === labels[i])
         );
         if (found >= 0) {
             return found;
         }
-        this.shapes.push({ labels: [...labels], key });
+        this.shapes.push({ labels: [...labels], key: heldKey(key) });
         return this.shapes.length - 1;
     }
 
@@ -236,9 +240,31 @@ export class WritePlan {
     private add(op: string, fields: Record<string, any>): void {
         this.steps.push({
             op,
-            ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined))
+            ...Object.fromEntries(
+                Object.entries(fields)
+                    .filter(([, value]) => value !== undefined)
+                    .map(([name, value]) => [name, held(name, value)])
+            )
         });
     }
+}
+
+/**
+ * A step's field as the store layout holds it (drivine-cypher-spec#161), as drivine4j's plan writes it: the values it writes
+ * and the id it finds a node by through the module's write (see writeLayout), and the names of the properties it keys,
+ * removes, clears or lowercases escaped as their keys are held.
+ */
+function held(name: string, value: any): any {
+    if (name === 'set' || name === 'props' || name === 'id') {
+        return writeLayout(value);
+    }
+    if (name === 'key') {
+        return heldKey(value as string);
+    }
+    if (name === 'unset' || name === 'lower' || name === 'clear') {
+        return (value as string[]).map(heldKey);
+    }
+    return value;
 }
 
 /** The direction as a step writes it. */
