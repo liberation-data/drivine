@@ -92,6 +92,14 @@ export function writeLayout(value: any): any {
     return answer.value;
 }
 
+/**
+ * The properties a save writes, each by its name, as the store layout holds them (see writeLayout): one undefined
+ * written null, as a save clears it.
+ */
+export function writeProps(props: Record<string, any>): Record<string, any> {
+    return writeLayout(Object.fromEntries(Object.entries(props).map(([name, value]) => [name, value ?? null])));
+}
+
 /** A property's name as the store layout holds it: one more `$` before a name that begins with one. */
 export function heldKey(name: string): string {
     return name.startsWith('$') ? `$${name}` : name;
