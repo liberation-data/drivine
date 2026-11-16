@@ -389,7 +389,7 @@ export class SchemaPlan {
             throw errors[report.rethrown.round] ?? new DrivineError(report.failure ?? 'The schema plan failed.');
         }
         if (report.failure) {
-            throw new DrivineError(report.failure);
+            throw new DrivineError(withOptionNames(report.failure));
         }
         return report;
     }
@@ -619,4 +619,21 @@ export async function listed(
         return [];
     }
     return planning.plan.items(of, rows, spec);
+}
+
+/** What drivine4j's failure says to set, in the names of its Spring settings, which the module writes for every library. */
+const DRIVINE4J_SETTINGS =
+    'Resolve them, set drivine.schema.recreate-on-drift=true (destructive), ' +
+    'drivine.schema.replace-blocking-index=true for an index in the way of a constraint, ' +
+    'drivine.schema.index-build-timeout longer for an index still being built, ' +
+    'or set drivine.schema.mode=WARN to continue with warnings.';
+
+/** The same, in the names of SchemaOptions, which is what a TypeScript application sets. */
+const SCHEMA_OPTIONS =
+    'Resolve them, set recreateOnDrift (destructive), replaceBlockingIndex for an index in the way of a constraint, ' +
+    'indexBuildTimeout longer for an index still being built, or set mode to WARN to continue with warnings.';
+
+/** A plan's failure, naming the options a TypeScript application sets where the module names drivine4j's settings. */
+export function withOptionNames(failure: string): string {
+    return failure.split(DRIVINE4J_SETTINGS).join(SCHEMA_OPTIONS);
 }

@@ -58,15 +58,16 @@ describe.each(graphEngines())('vector and full-text indexes on $type', (engine) 
         await gom.indexes.recreate(vector);
     });
 
-    it('should make a full-text index once; another over other properties is drift on FalkorDB, a second index elsewhere', async () => {
+    it('should make a full-text index once; another over fewer properties is the one on FalkorDB, a second index elsewhere', async () => {
         expect((await gom.indexes.ensure(text)).status).toEqual('CREATED');
         expect((await gom.indexes.ensure(fullTextIndex('SchemaChunk', ['body', 'title']))).status).toEqual(
             'ALREADY_MATCHING'
         );
         const narrower = fullTextIndex('SchemaChunk', 'title');
-        // FalkorDB holds one full-text index to a label; Neo4j and Memgraph name each, by its label and properties.
+        // FalkorDB holds one full-text index to a label, which covers the narrower one's property, as drivine4j finds it;
+        // Neo4j and Memgraph name each, by its label and properties.
         expect((await gom.indexes.ensure(narrower)).status).toEqual(
-            engine.type === DatabaseType.FALKORDB ? 'DRIFT' : 'CREATED'
+            engine.type === DatabaseType.FALKORDB ? 'ALREADY_MATCHING' : 'CREATED'
         );
         expect((await gom.indexes.recreate(narrower)).status).toEqual('RECREATED');
         expect((await gom.indexes.ensure(narrower)).status).toEqual('ALREADY_MATCHING');

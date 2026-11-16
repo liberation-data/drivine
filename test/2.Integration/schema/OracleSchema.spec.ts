@@ -137,7 +137,7 @@ describeOnOracle('schema on Oracle', () => {
             const lookup = backend.fullTextIndex!('OraSearch', ['text']);
             return lookup.found(await pm.query<any>(lookup.statement.spec()));
         };
-        expect(await vectorTable()).toMatch(/^drivine_v_OraSearchembedding_[0-9a-f]+$/);
+        expect(await vectorTable()).toMatch(/^drivine_v2_OraSearchembedding_[0-9a-f]+$/);
         expect((await textIndex()).oracleText).toMatch(/^drivine_t_OraSearchtext_[0-9a-f]+$/);
         // Saved after the index: the trigger puts it in the tables.
         await gom.save(Object.assign(new Note(), { id: 'n2', text: 'relational tables', embedding: [0, 1] }));

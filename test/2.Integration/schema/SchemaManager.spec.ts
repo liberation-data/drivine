@@ -12,6 +12,7 @@ import {
     TransactionContextHolder,
     Unique,
     uniquenessConstraint,
+    UniquenessConstraintSpec,
     vectorIndex
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
@@ -71,7 +72,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
 
     it('should fail on drift, warn about it, or recreate it, as asked', async () => {
         const drifted = SchemaCatalog.of(vectorIndex('ManagedDoc', 'embedding', 4));
-        await expect(manager([drifted]).enforce()).rejects.toThrow(/DRIFT for the VECTOR on ManagedDoc/);
+        await expect(manager([drifted]).enforce()).rejects.toThrow(/DRIFT: VECTOR_INDEX on ManagedDoc\[embedding\]/);
         expect(await statuses(manager([drifted], { mode: 'WARN' }))).toEqual(['VECTOR:DRIFT']);
         expect(await statuses(manager([drifted], { recreateOnDrift: true }))).toEqual(['VECTOR:RECREATED']);
         expect(await statuses(manager([SchemaCatalog.of(...items)], { recreateOnDrift: true }))).toContain(
@@ -83,7 +84,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const v1 = SchemaCatalog.of(...items).withVersion('model-1');
         expect(await statuses(manager([v1]))).not.toContain('RANGE:RECREATED');
         const v2 = SchemaCatalog.of(...items).withVersion('model-2');
-        expect(await statuses(manager([v2]))).toEqual(['RANGE:RECREATED', 'VECTOR:RECREATED', 'UNIQUE:CREATED']);
+        expect(await statuses(manager([v2]))).toEqual(['RANGE:RECREATED', 'VECTOR:RECREATED', 'UNIQUE:RECREATED']);
         expect(await statuses(manager([v2]))).toEqual([
             'RANGE:ALREADY_MATCHING',
             'VECTOR:ALREADY_MATCHING',
@@ -94,7 +95,9 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
     it('should refuse conflicting declarations of one item', async () => {
         const a = SchemaCatalog.of(vectorIndex('ManagedDoc', 'embedding', 3));
         const b = SchemaCatalog.of(vectorIndex('ManagedDoc', 'embedding', 5));
-        await expect(manager([a, b]).enforce()).rejects.toThrow(/declare the VECTOR on ManagedDoc\(embedding\)/);
+        await expect(manager([a, b]).enforce()).rejects.toThrow(
+            /Conflicting schema declarations for VECTOR_INDEX on ManagedDoc\[embedding\]/
+        );
     });
 
     it("should keep a marker per owner in drivine4j's shape: version and inventory, under scope", async () => {
@@ -112,8 +115,8 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         expect(await read('schema', 'version')).toEqual('v1');
         expect(await read('schema', 'items')).toEqual([
             'RANGE_INDEX:ManagedDoc:contextId:ManagedDoc_contextId_range',
-            'UNIQUENESS_CONSTRAINT:ManagedDoc:id:ManagedDoc_id_unique',
-            'VECTOR_INDEX:ManagedDoc:embedding:ManagedDoc_embedding_vector'
+            'VECTOR_INDEX:ManagedDoc:embedding:ManagedDoc_embedding_vector',
+            'UNIQUENESS_CONSTRAINT:ManagedDoc:id:ManagedDoc_id_unique'
         ]);
         expect(await read('rag', 'version')).toBeNull();
         expect(await read('rag', 'items')).toEqual(['RANGE_INDEX:ManagedDoc:contextId:ManagedDoc_contextId_range']);
@@ -153,7 +156,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         expect(await statuses(manager([SchemaCatalog.of(...items)], { recreateOnStartup: true }))).toEqual([
             'RANGE:RECREATED',
             'VECTOR:RECREATED',
-            'UNIQUE:CREATED'
+            'UNIQUE:RECREATED'
         ]);
     });
 
@@ -184,7 +187,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         }
         // Elsewhere the engine refuses the constraint, and its refusal is thrown.
         await expect(manager([SchemaCatalog.of(unique)], { violationSampleSize: 0 }).enforce()).rejects.toThrow(
-            engine.type === DatabaseType.FALKORDB ? 'VIOLATION for the UNIQUE on ManagedDoc(id)' : undefined
+            engine.type === DatabaseType.FALKORDB ? 'VIOLATION: UNIQUENESS_CONSTRAINT on ManagedDoc[id]' : undefined
         );
         await clearLabels(gom.persistenceManager, engine, 'ManagedDoc');
         // Nothing the refusal left behind is in the way once the data allows the constraint.
@@ -247,7 +250,11 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             [byHand, fromFragment]
         ]) {
             const report = await manager(catalogs, { mode: 'WARN' }).enforce();
-            const violations = [...report.values()].flat().filter((it) => it.status === 'VIOLATION');
+            // The violation of the declaration that carries the fragment's @NodeId names the nodes by it, as the module
+            // reports each owner's: drivine4j's planner takes the @NodeId within an owner, not across owners.
+            const violations = [...report.values()]
+                .flat()
+                .filter((it) => it.status === 'VIOLATION' && (it.spec as UniquenessConstraintSpec).nodeIdProperty);
             expect(violations.length).toBeGreaterThan(0);
             violations.forEach((it) =>
                 expect(it.sample![0].nodes.map((node) => node.key).sort()).toEqual(['k0', 'k1'])
@@ -260,8 +267,13 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const ledger = uniquenessConstraint('Ledger', 'ref');
         const neo4j = engine.type === DatabaseType.NEO4J;
         const gom = () => factory.get(engine.name);
-        const rangeNames = async (label: string) =>
-            (await gom().indexes.list('RANGE')).filter((it) => it.label === label).map((it) => it.name);
+        /** The plain range indexes over the label: Neo4j lists a constraint's own index too, by the constraint's name. */
+        const rangeNames = async (label: string) => {
+            const owned = new Set((await gom().constraints.list()).map((it) => it.name));
+            return (await gom().indexes.list('RANGE'))
+                .filter((it) => it.label === label && !owned.has(it.name))
+                .map((it) => it.name);
+        };
         /** A plain index made by hand, as Drivine wouldn't name it, on Neo4j; Drivine's own elsewhere. */
         const plainIndex = async (label: string, property: string): Promise<void> => {
             if (neo4j) {
@@ -277,6 +289,15 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const tidyLedger = async (): Promise<void> => {
             await gom().constraints.drop(ledger);
             await gom().constraints.drop(uniquenessConstraint('_DrivineSchema', 'scope'));
+            if (neo4j) {
+                for (const it of (await gom().constraints.list()).filter((c) =>
+                    ['Ledger', '_DrivineSchema'].includes(c.label)
+                )) {
+                    await gom().persistenceManager.execute(
+                        new QuerySpecification(`DROP CONSTRAINT ${it.name} IF EXISTS`)
+                    );
+                }
+            }
             for (const label of ['Ledger', '_DrivineSchema']) {
                 for (const it of (await gom().indexes.list('RANGE')).filter((index) => index.label === label)) {
                     if (neo4j && it.name) {
@@ -324,7 +345,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             const catalog = SchemaCatalog.of(ledger);
             if (neo4j) {
                 await expect(manager([catalog]).enforce()).rejects.toThrow(
-                    /BLOCKED_BY_INDEX for the UNIQUE on Ledger\(ref\): index ledger_lookup is in the way of it/
+                    /BLOCKED: UNIQUENESS_CONSTRAINT on Ledger\[ref\] cannot be created while index ledger_lookup is in the way of it/
                 );
                 expect(await statuses(manager([catalog], { mode: 'WARN' }))).toEqual(['UNIQUE:BLOCKED_BY_INDEX']);
                 expect(await rangeNames('Ledger')).toEqual(['ledger_lookup']);
@@ -342,7 +363,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
                     .map((it) => `${it.spec.kind}:${it.status}`);
             if (neo4j) {
                 await expect(ensured(manager([]))).rejects.toThrow(
-                    /BLOCKED_BY_INDEX for the UNIQUE on Ledger\(ref\): index ledger_lookup is in the way of it/
+                    /BLOCKED: UNIQUENESS_CONSTRAINT on Ledger\[ref\] cannot be created while index ledger_lookup is in the way of it/
                 );
                 const warn = jest.spyOn(DrivineLogger.prototype, 'warn');
                 try {
@@ -378,7 +399,9 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
                 replaceBlockingIndex: true,
                 violationSampleSize: 0
             }).enforce();
-            await expect(enforced).rejects.toThrow(/^VIOLATION for the UNIQUE on Ledger\(ref\)$/);
+            await expect(enforced).rejects.toThrow(
+                /VIOLATION: UNIQUENESS_CONSTRAINT on Ledger\[ref\] cannot be created/
+            );
             expect(await rangeNames('Ledger')).toEqual(['ledger_lookup']);
         });
 
