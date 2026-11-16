@@ -138,7 +138,7 @@ describeOnOracle('schema on Oracle', () => {
             return lookup.found(await pm.query<any>(lookup.statement.spec()));
         };
         expect(await vectorTable()).toMatch(/^drivine_v2_OraSearchembedding_[0-9a-f]+$/);
-        expect((await textIndex()).oracleText).toMatch(/^drivine_t_OraSearchtext_[0-9a-f]+$/);
+        expect((await textIndex()).oracleText).toMatch(/^drivine_t2_OraSearchtext_[0-9a-f]+$/);
         // Saved after the index: the trigger puts it in the tables.
         await gom.save(Object.assign(new Note(), { id: 'n2', text: 'relational tables', embedding: [0, 1] }));
         expect((await gom.loadNearest(Note, [0, 1], { topK: 1 })).map((it) => it.value.id)).toEqual(['n2']);

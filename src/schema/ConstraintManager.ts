@@ -1,7 +1,6 @@
 import { DrivineError } from '@/DrivineError';
 import type { SchemaItem } from '@/schema/SchemaGrammar';
 import { EnsureResult, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
-import { IndexBuildOptions } from '@/schema/IndexManager';
 import {
     DEFAULT_BUILD_TIMEOUT,
     DEFAULT_VIOLATION_SAMPLE,
@@ -28,18 +27,11 @@ const BUILD_POLL = 200;
  * drivine-python's are; `plans.yaml` in the spec pins each call's decisions.
  */
 export class ConstraintManager {
-    /** @param build how the range index FalkorDB needs first is waited on to be built (see IndexManager's `ensure`). */
     constructor(
         private readonly planning: SchemaPlanning,
-        private readonly build: IndexBuildOptions = {},
         private readonly sleep: (millis: number) => Promise<void> = async (millis) =>
             new Promise((resolve) => setTimeout(resolve, millis))
     ) {}
-
-    /** This manager, waiting on a build as `build` says. */
-    withBuild(build: IndexBuildOptions): ConstraintManager {
-        return new ConstraintManager(this.planning, build, this.sleep);
-    }
 
     /** The constraints the engine holds and enforces, each with the aliases its catalog record keeps. */
     async list(): Promise<SchemaItem[]> {
@@ -69,11 +61,11 @@ export class ConstraintManager {
 
     /**
      * Whether the constraint is there and built, so that the engine enforces it, as one another process made. One still
-     * being built is waited on, up to the build's timeout; one whose build failed (FalkorDB) is not in force, and is left
+     * being built is waited on, up to INDEX_BUILD_TIMEOUT; one whose build failed (FalkorDB) is not in force, and is left
      * as it is. A read: no schema plan.
      */
     async inForce(spec: UniquenessConstraintSpec): Promise<boolean> {
-        const until = Date.now() + (this.build.timeout ?? DEFAULT_BUILD_TIMEOUT);
+        const until = Date.now() + DEFAULT_BUILD_TIMEOUT;
         for (;;) {
             const found = (await this.listed(spec))[0];
             if (!found || found.buildFailed) {
@@ -118,8 +110,6 @@ export class ConstraintManager {
         replaceBlockingIndex: boolean
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
         const item = await planItem(this.planning, call, spec, {
-            mode: this.build.mode,
-            buildTimeoutMillis: this.build.timeout,
             violationSampleSize: sampleSize,
             replaceBlockingIndex
         });

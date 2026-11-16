@@ -34,7 +34,7 @@ items and waits again. Under `WARN` it is logged so, naming the index and giving
 on; the item is reported as what was done (`CREATED`, `ALREADY_MATCHING` or `RECREATED`), the index is left as it is,
 to finish building or to stay failed, and it is waited for again on the next apply. An error reading the index's state
 (a connection lost) is thrown as it is. Where a constraint's index covers the properties already, Neo4j makes no other
-and there is nothing to wait for. `gom.indexes` throws either, unless given `withBuild({ timeout, mode })`. Neo4j's `CREATE CONSTRAINT`
+and there is nothing to wait for. `gom.indexes` waits 60 seconds, as drivine4j's index manager does, and throws either. Neo4j's `CREATE CONSTRAINT`
 returns once its index is built, so a constraint is not waited on; FalkorDB's is (see below), and so is the range index
 it needs first.
 

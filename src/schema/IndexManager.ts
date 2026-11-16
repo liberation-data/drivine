@@ -12,19 +12,8 @@ import {
     schemaItem
 } from '@/schema/SchemaPlan';
 
-/** How long, in milliseconds, an index is waited on to be built, unless IndexBuildOptions says otherwise. */
+/** How long, in milliseconds, an index's call waits for it to be built: drivine4j's public managers' 60 s. */
 export const INDEX_BUILD_TIMEOUT = DEFAULT_BUILD_TIMEOUT;
-
-/** How an index the engine builds in the background is waited on (see IndexManager's `ensure`). */
-export interface IndexBuildOptions {
-    /** How long, in milliseconds, to wait for the build. Defaults to INDEX_BUILD_TIMEOUT, 60 s. */
-    timeout?: number;
-    /**
-     * FAIL_FAST (default) throws for a build that failed or did not end in time; WARN logs it, naming the index and the
-     * engine's reason, and carries on, as SchemaManager's mode says.
-     */
-    mode?: 'FAIL_FAST' | 'WARN';
-}
 
 /** An index made or found that is not built: its build failed, or it is `stillBuilding` when the wait ran out. */
 export interface UnbuiltIndex {
@@ -43,16 +32,7 @@ export interface UnbuiltIndex {
  * the spec pins each call's decisions.
  */
 export class IndexManager {
-    /** @param build how an index the engine builds in the background is waited on. */
-    constructor(
-        private readonly planning: SchemaPlanning,
-        private readonly build: IndexBuildOptions = {}
-    ) {}
-
-    /** This manager, waiting on a build as `build` says. */
-    withBuild(build: IndexBuildOptions): IndexManager {
-        return new IndexManager(this.planning, build);
-    }
+    constructor(private readonly planning: SchemaPlanning) {}
 
     /** The indexes of a kind the engine holds, each with the aliases its catalog record keeps. */
     async list(kind: IndexSpec['kind'] = 'RANGE'): Promise<SchemaItem[]> {
@@ -68,9 +48,10 @@ export class IndexManager {
      * where recorded, as by `recreate`.
      *
      * On an engine that builds an index in the background (Neo4j, FalkorDB), returns once the index, made here or found
-     * there, is built, waiting at most the build's `timeout`. A build that failed, or did not end in time, throws a
-     * DrivineError naming the index and giving the engine's reason, unless the build's mode is WARN, which logs it. The
-     * index is left as it is.
+     * there, is built, waiting at most INDEX_BUILD_TIMEOUT, as drivine4j's public manager does. A build that failed, or
+     * did not end in time, throws a DrivineError naming the index and giving the engine's reason. The index is left as
+     * it is. SchemaManager's `indexBuildTimeout` and `mode` say how long its plan waits, and what it does with one not
+     * built.
      */
     async ensure<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
         return this.result('ENSURE', spec);
@@ -110,10 +91,7 @@ export class IndexManager {
     }
 
     private async result<S extends IndexSpec>(call: 'ENSURE' | 'RECREATE', spec: S): Promise<EnsureResult<S>> {
-        const item = await planItem(this.planning, call, spec, {
-            mode: this.build.mode,
-            buildTimeoutMillis: this.build.timeout
-        });
+        const item = await planItem(this.planning, call, spec);
         if (!item.result) {
             throw new DrivineError(`The plan of ${call} of the ${spec.kind} on ${spec.label} gave no result.`);
         }

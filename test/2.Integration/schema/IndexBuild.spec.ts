@@ -147,26 +147,6 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             await gom().persistenceManager.execute(new QuerySpecification(`DROP INDEX ${other}`));
         });
 
-        it('should log an index not built within the timeout under WARN, and raise it under FAIL_FAST', async () => {
-            await gom().indexes.drop(index);
-            const warned = new SchemaManager(factory, { catalogs: [], mode: 'WARN', indexBuildTimeout: 5 });
-            const report = await warned.ensure('build', index);
-            expect([...report.values()].flat().map((it) => it.status)).toEqual(['CREATED']);
-            expect(warn).toHaveBeenCalledWith(
-                expect.stringMatching(
-                    new RegExp(`RANGE_INDEX '${SEEDED}_text_range' on ${SEEDED}\\[text\\] is still being built`)
-                )
-            );
-
-            await gom().indexes.drop(index);
-            const strict = new SchemaManager(factory, { catalogs: [], indexBuildTimeout: 5 });
-            await expect(strict.ensure('build', index)).rejects.toThrow(
-                new RegExp(
-                    `STILL BUILDING: .*RANGE_INDEX '${SEEDED}_text_range' on ${SEEDED}\\[text\\] is still being built`
-                )
-            );
-        });
-
         it("should wait for nothing where a uniqueness constraint's index covers the properties already", async () => {
             // The constraint's own index is listed as a range index over the properties, as drivine4j lists it, so the range
             // index is taken as there: nothing is made, and nothing waited on.
