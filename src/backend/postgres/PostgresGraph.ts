@@ -1,9 +1,5 @@
 import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
-import {
-    GRAPH_PLACEHOLDER,
-    POSTGRES_STORE_ENSURING,
-    POSTGRES_STORE_VERSION
-} from '@/backend/postgres/PostgresStoreText';
+import { storeStatements } from '@/backend/StoreStatements';
 import { DrivineError } from '@/DrivineError';
 import { Stamps } from '@/model/Stamps';
 import { WriteReturns } from '@/backend/sql/WritePlan';
@@ -21,23 +17,31 @@ const MAX_OBJECT_NAME = 63;
  * `contracts_node`, and is the same graph as one called `contracts`.
  */
 export class PostgresGraph extends SqlGraph implements WriteFunction {
-    /** What the node table's comment says of a store this version made. */
-    static readonly VERSION = POSTGRES_STORE_VERSION;
+    /** What the node table's comment says of a store this version made: the module's version of the store. */
+    static get VERSION(): string {
+        const version = /COMMENT ON TABLE \w+ IS '([^']+)'/.exec(
+            storeStatements('postgres', DEFAULT_GRAPH).ensuring!
+        )?.[1];
+        if (version === undefined) {
+            throw new DrivineError("The shared module's Postgres store says no version in its node table's comment.");
+        }
+        return version;
+    }
 
     constructor(name: string = DEFAULT_GRAPH) {
         super(name, 'Postgres', MAX_OBJECT_NAME);
     }
 
     /**
-     * The block that makes the store when it is not there, and does nothing when it is: drivine4j's, byte for byte (see
-     * PostgresStoreText), so a graph is one store whichever library made it. The node table's comment, written last,
+     * The block that makes the store when it is not there, and does nothing when it is: the shared module's
+     * (StoreStatements), so a graph is one store whichever library made it. The node table's comment, written last,
      * says which version made the store: one this version made is left alone, and over one an earlier version made the
      * rest is made again, which keeps its rows and has its functions replaced. The block takes a lock of its own for the
      * graph first, so two processes that each find the store missing make it one after the other; Postgres runs a
      * block's schema statements in its transaction, so the store is made whole or not at all.
      */
     get ensuring(): string {
-        return POSTGRES_STORE_ENSURING.split(GRAPH_PLACEHOLDER).join(this.name);
+        return storeStatements('postgres', this.name).ensuring!;
     }
 
     /** The call of the graph's write function, `<graph>_write`, which the store keeps. */

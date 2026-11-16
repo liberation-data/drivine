@@ -1,16 +1,8 @@
 import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
 import { ddlDeadlocked, whenNotContended } from '@/manager/Contention';
 import { Stamps } from '@/model/Stamps';
-import {
-    eraDateFunction,
-    eraDateName,
-    eraFunction,
-    eraName,
-    Executes,
-    nullsEqualFunction,
-    nullsEqualName,
-    OracleStoredFunctions
-} from '@/backend/oracle/OracleStoredFunctions';
+import { Executes, OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
+import { storeStatements } from '@/backend/StoreStatements';
 
 export { DEFAULT_GRAPH, sqlText };
 
@@ -19,141 +11,56 @@ export { DEFAULT_GRAPH, sqlText };
  * through.
  */
 export class OracleGraph extends SqlGraph {
-    /** How long a statement of `ensuring` waits on a lock another session making the store holds. */
-    static readonly DDL_WAIT_SECONDS = 60;
-
     constructor(name: string = DEFAULT_GRAPH) {
         super(name, 'Oracle', 128);
     }
 
-    /** What makes the store. Each statement may run again. */
+    /** What makes the store, the shared module's statements (StoreStatements). Each statement may run again. */
     get ddl(): string[] {
-        return [
-            `CREATE TABLE IF NOT EXISTS ${this.nodes} (
-                nid    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                labels JSON NOT NULL,
-                props  JSON NOT NULL,
-                stamp  VARCHAR2(33)
-            )`,
-            `CREATE TABLE IF NOT EXISTS ${this.edges} (
-                eid   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                src   NUMBER NOT NULL REFERENCES ${this.nodes} (nid) ON DELETE CASCADE,
-                dst   NUMBER NOT NULL REFERENCES ${this.nodes} (nid) ON DELETE CASCADE,
-                type  VARCHAR2(128) NOT NULL,
-                props JSON DEFAULT '{}' NOT NULL
-            )`,
-            `CREATE TABLE IF NOT EXISTS ${this.catalog} (
-                kind        VARCHAR2(40) NOT NULL,
-                label       VARCHAR2(400) NOT NULL,
-                properties  VARCHAR2(2000) NOT NULL,
-                name        VARCHAR2(400),
-                object_name VARCHAR2(128),
-                details     JSON NOT NULL,
-                PRIMARY KEY (kind, label, properties)
-            )`,
-            `CREATE INDEX IF NOT EXISTS ${this.name}_edge_src ON ${this.edges} (src, type)`,
-            `CREATE INDEX IF NOT EXISTS ${this.name}_edge_dst ON ${this.edges} (dst, type)`,
-            `CREATE MULTIVALUE INDEX IF NOT EXISTS ${this.name}_node_labels ON ${this.nodes} n (n.labels.string())`,
-            `CREATE OR REPLACE PROPERTY GRAPH ${this.name}
-                VERTEX TABLES (${this.nodes} KEY (nid) LABEL node PROPERTIES (nid, labels, props, stamp))
-                EDGE TABLES (${this.edges} KEY (eid)
-                    SOURCE KEY (src) REFERENCES ${this.nodes} (nid)
-                    DESTINATION KEY (dst) REFERENCES ${this.nodes} (nid)
-                    LABEL edge PROPERTIES (eid, src, dst, type, props))`
-        ];
+        return storeStatements('oracle', this.name).ddl!;
     }
 
     /**
      * The function a compiled Cypher statement compares two values that may hold a null by, list item by list item and
      * map key by map key (see the shared compiler's `OracleCypherCompiler.nullsEqual`): a statement that writes is a
-     * PL/SQL block, whose queries call no function of its own, so the store keeps it. drivine4j and drivine-python make
-     * it byte for byte alike.
+     * PL/SQL block, whose queries call no function of its own, so the store keeps it.
      */
     get nullsEqual(): string {
-        return nullsEqualName(this.name);
+        return `${this.name}_nulls_equal`;
     }
 
     /**
      * The functions a compiled Cypher statement renumbers a year that may be BC by, as it reads an ISO text (this) and
      * as it writes one ({@link eraDate}): each reads its text once, where the SQL it stands for read it three or four
-     * times, which Oracle took far longer to plan (see `OracleTemporalSql.era`). drivine4j and drivine-python make them
-     * byte for byte alike.
+     * times, which Oracle took far longer to plan (see `OracleTemporalSql.era`).
      */
     get era(): string {
-        return eraName(this.name);
+        return `${this.name}_era`;
     }
 
     /** See {@link era}. */
     get eraDate(): string {
-        return eraDateName(this.name);
-    }
-
-    /** What makes {@link nullsEqual}, {@link era} and {@link eraDate}, in that order: safe to run again. */
-    get functions(): string[] {
-        return this.made.map(([, making]) => making);
-    }
-
-    /** Each function the store keeps beside the graph's tables, by name, and what makes it. */
-    private get made(): [string, string][] {
-        return [
-            [this.nullsEqual, nullsEqualFunction(this.nullsEqual)],
-            [this.era, eraFunction(this.era)],
-            [this.eraDate, eraDateFunction(this.eraDate)]
-        ].map(([name, function_]) => [name, `CREATE OR REPLACE ${function_}`]);
+        return `${this.name}_era_date`;
     }
 
     /**
-     * The block that makes the store when it is not there and does nothing when it is: the property graph is made
-     * last, so its presence says the rest is. One another process made meanwhile (ORA-00955) is taken as made.
-     *
-     * Each of the {@link functions} is made after the tables, where it is not there or not valid, so a store an earlier
-     * version made gains those it lacks. A user who may not make a function (ORA-01031: making one takes
-     * `CREATE PROCEDURE`, which the `RESOURCE` role grants) still has the store made: a statement then calls none of
-     * those it lacks (see {@link OracleStoredFunctions}).
-     *
-     * Two sessions that each find the store missing, as two pools or processes first connecting at once do, make it
-     * together: a statement of one waits on the lock the other's holds, rather than being turned away at once
-     * (ORA-00054), for up to {@link OracleGraph.DDL_WAIT_SECONDS}, and then finds what the other made. The wait is the
-     * session's DDL_LOCK_TIMEOUT, set back to Oracle's default, no wait, when the block ends, failed or not, so the
-     * session's later statements are as they were.
+     * What makes each function the store keeps beside the graph's tables, the module's, so drivine4j, drivine-python and
+     * this library make them byte for byte alike: safe to run again.
+     */
+    get functions(): string[] {
+        return storeStatements('oracle', this.name).functions!;
+    }
+
+    /**
+     * The block that makes the store when it is not there and does nothing when it is, the module's: it makes each of
+     * the {@link functions} where it is not there, not valid or of another version, so a store an earlier version made
+     * gains those it lacks. A user who may not make a function (ORA-01031: making one takes `CREATE PROCEDURE`, which
+     * the `RESOURCE` role grants) still has the store made: a statement then calls none of those it lacks (see
+     * {@link OracleStoredFunctions}). Two sessions that each find the store missing make it together, each statement
+     * of one waiting out a lock the other's holds (ORA-00054) rather than being turned away at once.
      */
     get ensuring(): string {
-        const waits = `    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';`;
-        const resets = "    EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';";
-        const statements = this.ddl
-            .map((it) => `    BEGIN EXECUTE IMMEDIATE ${sqlText(it)}; EXCEPTION WHEN e_exists THEN NULL; END;`)
-            .join('\n');
-        const functions = this.made
-            .map(([name, making]) =>
-                [
-                    `    SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${name.toUpperCase()}' AND status = 'VALID';`,
-                    '    IF v_made = 0 THEN',
-                    waits,
-                    `    BEGIN EXECUTE IMMEDIATE ${sqlText(making)}; EXCEPTION WHEN e_denied THEN NULL; END;`,
-                    resets,
-                    '    END IF;'
-                ].join('\n')
-            )
-            .join('\n');
-        return `DECLARE
-    v_made NUMBER;
-    e_exists EXCEPTION;
-    PRAGMA EXCEPTION_INIT(e_exists, -955);
-    e_denied EXCEPTION;
-    PRAGMA EXCEPTION_INIT(e_denied, -1031);
-BEGIN
-    SELECT COUNT(*) INTO v_made FROM user_property_graphs WHERE graph_name = '${this.name.toUpperCase()}';
-    IF v_made = 0 THEN
-${waits}
-${statements}
-${resets}
-    END IF;
-${functions}
-EXCEPTION
-    WHEN OTHERS THEN
-        EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';
-        RAISE;
-END;`;
+        return storeStatements('oracle', this.name).ensuring!;
     }
 
     /**
@@ -164,7 +71,7 @@ END;`;
      * pools' first writes each wait on the other's lock on the node table (ORA-04020), is run again after a pause (see
      * {@link ddlDeadlocked}): what the block made before it was turned away stays, and the block makes the rest, or
      * finds the store another session finished meanwhile and does nothing (liberation-data/drivine#454). One whose lock
-     * stayed busy (ORA-00054) is not: it has waited {@link OracleGraph.DDL_WAIT_SECONDS} inside the block already.
+     * stayed busy (ORA-00054) is not: it has waited out the lock inside the block already, up to 30 seconds a statement.
      */
     async ensure(connection: Executes): Promise<void> {
         await whenNotContended(async () => connection.execute(this.ensuring), ddlDeadlocked);

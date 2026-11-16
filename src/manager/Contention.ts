@@ -29,7 +29,7 @@ export function anyCause(failure: unknown, matches: (cause: any) => boolean): bo
  * running them again may succeed. On Oracle, that is for an object's library cache lock (ORA-04020), as DDL over
  * a table that other sessions' writes hold may be, or for a row (ORA-00060); on Postgres, a deadlock (40P01). A graph's
  * first-use block runs again only for these: a lock merely busy has had its wait inside the block already (on Oracle,
- * `OracleGraph.DDL_WAIT_SECONDS`), and running it again would hold the app's first connection for that wait again each
+ * up to 30 seconds a statement, `OracleGraph.ensuring`), and running it again would hold the app's first connection for that wait again each
  * time. The failure and each cause under it are looked at.
  */
 export function ddlDeadlocked(failure: unknown): boolean {
@@ -109,8 +109,8 @@ function givingUp(failure: unknown, runAgain: boolean): unknown {
  * The first failure is thrown once attempts run out; a failure of another kind is thrown at once. So is one a run
  * inside `statement` already threw, having run out of attempts on it or taken it for one not to run again, so that
  * runs one inside the other don't multiply their attempts (six by six), nor run again what the inner one would not, as
- * a schema statement would the first-use block whose lock stayed busy on Oracle: each of those may wait a minute for
- * its lock (see `OracleGraph.DDL_WAIT_SECONDS`).
+ * a schema statement would the first-use block whose lock stayed busy on Oracle: each of those may wait 30 seconds for
+ * its lock (see `OracleGraph.ensuring`).
  */
 export async function whenNotContended<T>(
     statement: () => Promise<T>,

@@ -119,6 +119,11 @@ async function rows(pm: PersistenceManager, sql: string, bindings: Record<string
     return pm.query(new QuerySpecification(sql).bind(bindings));
 }
 
+/** The names of the tables and indexes the graph's statements make, in order of name. */
+function made(graph: SqliteGraph): string[] {
+    return graph.ddl.flatMap((it) => /IF NOT EXISTS (\w+)/.exec(it)?.[1] ?? []).sort();
+}
+
 describe('a SQLite store', () => {
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
@@ -139,18 +144,12 @@ describe('a SQLite store', () => {
     });
 
     describe('its file', () => {
-        it("should make the graph's tables on the first connection, as drivine4j makes them", async () => {
+        it("should make the graph's tables on the first connection, as the shared module makes them", async () => {
             const tables = await rows(
                 pm,
                 `SELECT name, sql FROM sqlite_master WHERE name LIKE 'drivine%' ORDER BY name`
             );
-            expect(tables.map((it) => it.name)).toEqual([
-                'drivine_edge',
-                'drivine_edge_dst',
-                'drivine_edge_src',
-                'drivine_node',
-                'drivine_schema'
-            ]);
+            expect(tables.map((it) => it.name)).toEqual(made(new SqliteGraph()));
             expect(tables.find((it) => it.name === 'drivine_node').sql).toEqual(
                 new SqliteGraph().ddl[0].replace(' IF NOT EXISTS', '')
             );
@@ -164,7 +163,9 @@ describe('a SQLite store', () => {
             );
             expect(await rows(pm, `SELECT name FROM sqlite_master WHERE name = 'tickets_node'`)).toEqual([]);
             expect(await other.count(Ticket)).toBe(0);
-            expect((await rows(pm, `SELECT name FROM sqlite_master WHERE name LIKE 'tickets_%'`)).length).toBe(5);
+            expect((await rows(pm, `SELECT name FROM sqlite_master WHERE name LIKE 'tickets_%'`)).length).toBe(
+                made(new SqliteGraph('tickets')).length
+            );
         });
 
         it('should make the tables once when many connections first ask for them together', async () => {
@@ -172,8 +173,8 @@ describe('a SQLite store', () => {
             await Promise.all(
                 Array.from({ length: 8 }, async () => racing.query(new QuerySpecification('SELECT 1 AS one')))
             );
-            const made = new SqliteGraph('race');
-            expect((await rows(racing, made.made))[0].made).toBe(5);
+            const race = new SqliteGraph('race');
+            expect((await rows(racing, race.made))[0].made).toBe(race.ddl.length);
         });
 
         it('should open each connection writing ahead to a log and keeping foreign keys', async () => {

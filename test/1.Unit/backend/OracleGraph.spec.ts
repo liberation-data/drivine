@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle';
 import { hasLabels, holdsLabel, serializedLabel } from '@/backend/oracle/OracleGraph';
+import { storeStatements } from '@/backend/StoreStatements';
 
 /** The start of the test of a later label, up to its needle. */
 const HELD = `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"',`;
@@ -10,16 +11,13 @@ const HELD = `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || '
 const DRIVINE4J = JSON.parse(fs.readFileSync(path.join(__dirname, '../golden/drivine4j-oracle-schema.json'), 'utf8'));
 
 describe('OracleGraph', () => {
-    it('should wait on the locks of another session making the store, and set the wait back after, failed or not', () => {
-        const ensuring = new OracleGraph('tenant_a').ensuring;
-        const waits = `EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = ${OracleGraph.DDL_WAIT_SECONDS}';`;
-        const resets = "EXECUTE IMMEDIATE 'ALTER SESSION SET DDL_LOCK_TIMEOUT = 0';";
-        const first = ensuring.indexOf('CREATE TABLE IF NOT EXISTS tenant_a_node');
-        const graph = ensuring.indexOf('CREATE OR REPLACE PROPERTY GRAPH tenant_a');
-        expect(ensuring.indexOf(waits)).toBeGreaterThan(ensuring.indexOf('IF v_made = 0 THEN'));
-        expect(ensuring.indexOf(waits)).toBeLessThan(first);
-        expect(ensuring.indexOf(resets)).toBeGreaterThan(graph);
-        expect(ensuring).toContain(`WHEN OTHERS THEN\n        ${resets}\n        RAISE;`);
+    it("should make the store with the shared module's statements, the property graph among them", () => {
+        const graph = new OracleGraph('tenant_a');
+        const module = storeStatements('oracle', 'tenant_a');
+        expect(graph.ddl).toEqual(module.ddl);
+        expect(graph.ensuring).toEqual(module.ensuring);
+        expect(graph.ddl[0]).toMatch(/^CREATE TABLE IF NOT EXISTS tenant_a_node \(/);
+        expect(graph.ddl.some((it) => it.startsWith('CREATE OR REPLACE PROPERTY GRAPH tenant_a'))).toBe(true);
     });
 
     it('should run the block again when a deadlock turned it away, and once when it failed for another reason', async () => {
