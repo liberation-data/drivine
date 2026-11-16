@@ -14,6 +14,7 @@ import {
     TransactionContextHolder
 } from '@liberation-data/drivine';
 import { DrivineTestContainers, Environment } from '@/testing';
+import { CypherFloat, cypherFloat } from '@/cypher/CypherFloat';
 import {
     check,
     CypherCase,
@@ -125,9 +126,44 @@ async function startNeo4j(): Promise<void> {
  * SQL store binds every parameter as JSON, where it is the number it is.
  */
 function parametersFor(store: Store, parameters: Record<string, any>): Record<string, any> {
-    return valuesFor(parameters, (it) =>
-        store.type === DatabaseType.NEO4J ? neo4j.int(it.toString()) : exactWhole(it)
-    );
+    if (store.type === DatabaseType.NEO4J) {
+        return valuesFor(parameters, (it) => neo4j.int(it.toString()));
+    }
+    // The spec's whole numbers are bigints, so a number in it is a float: one that is whole (2.0) is bound as the float
+    // it is, which a JavaScript number alone can't say.
+    return wholeFloats(valuesFor(wholeFloatsMarked(parameters), exactWhole));
+}
+
+/** What marks a whole float of the spec's while its parameters are read: no key of the spec's begins so. */
+const WHOLE_FLOAT = '\u0000wholeFloat';
+
+/** `value` with each whole float in it, a number the spec wrote with a point (2.0), marked. */
+function wholeFloatsMarked(value: any): any {
+    if (typeof value === 'number' && Number.isInteger(value)) {
+        return { [WHOLE_FLOAT]: value };
+    }
+    if (Array.isArray(value)) {
+        return value.map(wholeFloatsMarked);
+    }
+    if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, wholeFloatsMarked(item)]));
+    }
+    return value;
+}
+
+/** `value` with each marked whole float a CypherFloat, bound as the float it is. */
+function wholeFloats(value: any): any {
+    if (Array.isArray(value)) {
+        return value.map(wholeFloats);
+    }
+    if (value !== null && typeof value === 'object' && !(value instanceof CypherFloat)) {
+        const keys = Object.keys(value);
+        if (keys.length === 1 && keys[0] === WHOLE_FLOAT) {
+            return cypherFloat(value[WHOLE_FLOAT]);
+        }
+        return Object.fromEntries(keys.map((key) => [key, wholeFloats(value[key])]));
+    }
+    return value;
 }
 
 /**
@@ -921,7 +957,11 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
             [`t CONTAINS '${t.slice(2, 5)}'`, true],
             ["t CONTAINS 'z'", false],
             ['t CONTAINS left(t, 4100)', true],
-            [`t =~ ' (${t.slice(1, 3)})+ '`, true],
+            // Held on SQLite: the module's regexp on wasm overflows the stack on a group repeated 2,500 times
+            // (drivine-cypher-spec#320).
+            ...(store.type === DatabaseType.SQLITE
+                ? []
+                : [[`t =~ ' (${t.slice(1, 3)})+ '`, true] as [string, unknown]]),
             ["t + 'z'", `${t}z`],
             ["'z' + t", `z${t}`],
             ['t + t', t + t],
@@ -1968,14 +2008,16 @@ describe.each(stores().map((it) => [it.name, it] as const))('The Cypher spec on 
                 }
             }
             expect(differing).toEqual([]);
-            // Oracle reads a text that is a number, '0.5', as that number where it is asked for one, so a sum reads no
-            // text: Cypher refuses one, and a SQL store sums the numbers alone.
+            // A sum of a text is refused, as Cypher refuses one: on a SQL store by the compiled statement, which names it on
+            // SQLite and Postgres; Oracle fails it with ORA-01722, the refusal's text read as a number.
             const text = "UNWIND ['0.5', 2] AS x RETURN toString(sum(x))";
-            if (store.type === DatabaseType.NEO4J) {
-                await expect(query(text)).rejects.toThrow('can only handle numerical values');
-            } else {
-                expect(await query(text)).toEqual(['2']);
-            }
+            await expect(query(text)).rejects.toThrow(
+                store.type === DatabaseType.NEO4J
+                    ? 'can only handle numerical values'
+                    : store.type === DatabaseType.ORACLE
+                    ? 'ORA-01722'
+                    : 'sum() and avg() take integers, floats and durations alone'
+            );
             // Not compiled to SQL yet, so they give no integer for a float.
             const uncompiled: [string, any][] = [
                 ['UNWIND [2.0, 3.0] AS x RETURN toString(percentileDisc(x, 0.5))', '2.0'],

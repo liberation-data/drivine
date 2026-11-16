@@ -1,5 +1,5 @@
 import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { readLayout } from '@/cypher/ValueLayout';
+import { readLayout, readLayoutAfter } from '@/cypher/ValueLayout';
 
 /**
  * A column read in the store layout (readLayout): the module is asked of every text that holds `"$` or `$`, and
@@ -47,6 +47,26 @@ describe('readLayout', () => {
     it('asks the module of a text that holds a dollar escaped, which reads as one', () => {
         expect(readLayout('{"\\u0024\\u0024k":{"\\u0024t":"date","v":"2024-01-01"}}')).toEqual({ $k: '2024-01-01' });
         expect(asked).toHaveLength(1);
+    });
+
+    it("reads a store's own spelling of a float on the column as the store wrote it, before the layout", () => {
+        // Oracle's floats and SQLite's NaN, a map whose key has one $; the user's map with that key is held as $$.
+        const floats = (value: any): any =>
+            value !== null && typeof value === 'object' && !Array.isArray(value) && '$numberDouble' in value
+                ? Number(value.$numberDouble)
+                : Array.isArray(value)
+                ? value.map(floats)
+                : value;
+        expect(
+            readLayoutAfter(
+                '[{"$numberDouble":10000000000000000},{"$numberDouble":"NaN"},{"$$numberDouble":"NaN"}]',
+                floats
+            )
+        ).toEqual([1e16, NaN, { $numberDouble: 'NaN' }]);
+        expect(readLayoutAfter('[{"$numberDouble":2.5},9007199254740993]', floats)).toEqual([
+            2.5,
+            BigInt('9007199254740993')
+        ]);
     });
 
     it('keeps a whole number past 2^53 and an infinity in a text the module reads', () => {

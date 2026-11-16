@@ -29,12 +29,12 @@ export function readLayout(text: string, parse: (text: string) => any = parseExa
     return answer.value;
 }
 
-/** What stands for a number JSON has no text of while a value crosses to the module and back: no row's text holds one. */
-const NON_FINITE = new Map<string, number>([
-    ['\u0000drivine:NaN', NaN],
-    ['\u0000drivine:Infinity', Infinity],
-    ['\u0000drivine:-Infinity', -Infinity]
-]);
+/**
+ * What a float that JSON would misread stands for while it crosses to the module and back, its text after it: NaN and the
+ * infinities, which JSON has no text of, and a whole float past 2^53, which a whole number's reader would read as an
+ * integer (Oracle's `{"$numberDouble": 1e16}`, a float). No row's text holds a NUL, so none holds this.
+ */
+const FLOAT = '\u0000drivine:float:';
 
 /**
  * A column read in the store layout, as {@link readLayout} reads it, where the store writes some values its own way in
@@ -48,23 +48,19 @@ export function readLayoutAfter(text: string, raw: (value: any) => any): any {
     if (!text.includes('"$') && !text.includes('\\u0024')) {
         return value;
     }
-    const marked = jsonText(value, (_, item) => {
-        if (typeof item === 'number' && !Number.isFinite(item)) {
-            return Number.isNaN(item)
-                ? '\u0000drivine:NaN'
-                : item > 0
-                ? '\u0000drivine:Infinity'
-                : '\u0000drivine:-Infinity';
-        }
-        return item;
-    });
+    // A number here is a float, a whole number past 2^53 being a bigint: one JSON would misread crosses as its stand-in.
+    const marked = jsonText(value, (_, item) =>
+        typeof item === 'number' && !Number.isSafeInteger(item) && !(Number.isFinite(item) && !Number.isInteger(item))
+            ? `${FLOAT}${String(item)}`
+            : item
+    );
     return unmarked(readLayout(marked));
 }
 
-/** `value` with each stand-in for a non-finite number the number again, at any depth. */
+/** `value` with each stand-in for a float the float again, at any depth. */
 function unmarked(value: any): any {
     if (typeof value === 'string') {
-        return NON_FINITE.has(value) ? NON_FINITE.get(value) : value;
+        return value.startsWith(FLOAT) ? Number(value.slice(FLOAT.length)) : value;
     }
     if (Array.isArray(value)) {
         return value.map(unmarked);
