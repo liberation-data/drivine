@@ -271,7 +271,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         const rangeNames = async (label: string) => {
             const owned = new Set((await gom().constraints.list()).map((it) => it.name));
             return (await gom().indexes.list('RANGE'))
-                .filter((it) => it.label === label && !owned.has(it.name))
+                .filter((it) => it.label === label && !(it.name && owned.has(it.name)))
                 .map((it) => it.name);
         };
         /** A plain index made by hand, as Drivine wouldn't name it, on Neo4j; Drivine's own elsewhere. */
@@ -352,7 +352,7 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             }
             expect(await statuses(manager([catalog], { replaceBlockingIndex: true }))).toEqual(['UNIQUE:CREATED']);
             expect(await statuses(manager([catalog], { replaceBlockingIndex: true }), 'recreateAll')).toEqual([
-                'UNIQUE:CREATED'
+                'UNIQUE:RECREATED'
             ]);
         });
 
@@ -384,8 +384,8 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
             const first = await statuses(manager([both], { replaceBlockingIndex: true }));
             const again = await statuses(manager([both], { replaceBlockingIndex: true }));
             expect(first).toEqual(['RANGE:CREATED', 'UNIQUE:CREATED']);
-            // Neo4j lists only the range indexes no constraint owns, so its range index reads as made again.
-            expect(again).toEqual([neo4j ? 'RANGE:CREATED' : 'RANGE:ALREADY_MATCHING', 'UNIQUE:ALREADY_MATCHING']);
+            // Neo4j lists the constraint's own index as a range index over the properties, so it reads as there, as in drivine4j.
+            expect(again).toEqual(['RANGE:ALREADY_MATCHING', 'UNIQUE:ALREADY_MATCHING']);
         });
 
         it('should keep the index and fail enforce for a repeated value, asked to replace it with no sample', async () => {
