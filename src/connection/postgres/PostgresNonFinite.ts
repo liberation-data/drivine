@@ -1,5 +1,6 @@
 import { DrivineError } from '@/DrivineError';
-import { exactInteger, parseExactIntegers } from '@/utils/ExactIntegers';
+import { exactInteger } from '@/utils/ExactIntegers';
+import { readLayout } from '@/cypher/ValueLayout';
 
 /** Postgres's `json` and `jsonb`, by type OID. */
 const JSON_OID = 114;
@@ -137,7 +138,7 @@ export interface TypeParsers {
  */
 export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
     requireSourceText();
-    return jsonTypes(parsers, readNonFiniteJson);
+    return jsonTypes(parsers, (text) => readLayoutOr(text, readNonFiniteJson));
 }
 
 /**
@@ -147,7 +148,7 @@ export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
  * for the process, as {@link nonFiniteTypes} is.
  */
 export function exactIntegerTypes(parsers: TypeParsers): TypeParsers {
-    return jsonTypes(parsers, parseExactIntegers);
+    return jsonTypes(parsers, (text) => readLayout(text));
 }
 
 /** `parsers` with `json` and `jsonb`, as text, read by `read`. */
@@ -158,4 +159,16 @@ function jsonTypes(parsers: TypeParsers, read: (text: string) => any): TypeParse
                 ? read
                 : parsers.getTypeParser(oid, format)
     };
+}
+
+/**
+ * `text` read in the store layout (see readLayout), each number that stands for NaN or an infinity read by `read`: a text
+ * that holds both such a number and a tag or an escaped key is not JSON the module reads, and is read by `read` alone.
+ */
+function readLayoutOr(text: string, read: (text: string) => any): any {
+    try {
+        return readLayout(text, read);
+    } catch {
+        return read(text);
+    }
 }

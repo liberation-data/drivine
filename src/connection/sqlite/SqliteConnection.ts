@@ -19,7 +19,7 @@ import {
 import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
-import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { readLayout } from '@/cypher/ValueLayout';
 
 /** How long a transaction may hold the file's write lock before its end is warned of: drivine4j's five seconds. */
 export const LONG_LOCK_MILLIS = 5_000;
@@ -240,7 +240,7 @@ function jsonRow(row: Record<string, SqliteValue>): Record<string, any> {
  * that holds no NaN, which most do, and {@link withNaN} takes only the exact map.
  */
 function jsonValue(text: string): any {
-    const value = parseExactIntegers(text);
+    const value = readLayout(text);
     return text.includes(NAN_TEXT) ? withNaN(value) : value;
 }
 

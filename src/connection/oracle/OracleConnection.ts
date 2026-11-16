@@ -14,7 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
-import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { readLayout } from '@/cypher/ValueLayout';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -173,7 +173,7 @@ function readRow(row: Record<string, unknown>): Record<string, unknown> {
     return Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
             key,
-            value === null || value === undefined ? value : withFloats(parseExactIntegers(String(value)))
+            value === null || value === undefined ? value : withFloats(readLayout(String(value)))
         ])
     );
 }
@@ -218,7 +218,7 @@ function withFloats(value: any): any {
  * on Oracle 23.26).
  */
 function implicitRows(rows: any[] | undefined, exact: boolean): any[] {
-    const parse = exact ? parseExactIntegers : JSON.parse;
+    const parse = exact ? (text: string): any => readLayout(text) : JSON.parse;
     return (rows ?? []).map((row) => {
         const out: Record<string, any> = {};
         for (const [key, value] of Object.entries(row)) {
