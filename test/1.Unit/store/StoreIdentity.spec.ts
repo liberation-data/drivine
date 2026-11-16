@@ -10,11 +10,11 @@ import {
     PersistenceManager,
     QuerySpecification,
     SchemaExecutor,
-    schemaGrammarFor,
     StoreIdentity,
     StoreIdentityResolver
 } from '@liberation-data/drivine';
 import { DrivineLogger } from '@/logger';
+import { planningOn } from '../schema/Planning';
 import { Neo4jError } from 'neo4j-driver';
 
 interface Resolved {
@@ -138,7 +138,15 @@ const neo4jStore = (
             }
             return Promise.resolve(
                 statement.startsWith('SHOW CONSTRAINTS') && created
-                    ? [{ name: 'DrivineStore_key', labels: ['DrivineStore'], properties: ['key'] }]
+                    ? [
+                          {
+                              name: 'DrivineStore_key_unique',
+                              type: 'UNIQUENESS',
+                              entityType: 'NODE',
+                              labelsOrTypes: ['DrivineStore'],
+                              properties: ['key']
+                          }
+                      ]
                     : []
             );
         },
@@ -159,7 +167,7 @@ const neo4jStore = (
         },
         query: async () => Promise.resolve([{ id: 'store-8', assignedAt: '2026-01-01T00:00:00Z' }])
     } as unknown as PersistenceManager;
-    const constraints = new ConstraintManager(new SchemaExecutor(provider), schemaGrammarFor(DatabaseType.NEO4J));
+    const constraints = new ConstraintManager(planningOn('neo4j', new SchemaExecutor(provider)));
     return {
         resolver: new StoreIdentityResolver(
             persistenceManager,

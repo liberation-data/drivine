@@ -1,3 +1,4 @@
+import type { ModuleStore } from '@/backend/StoreStatements';
 import { FragmentModel } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
@@ -88,6 +89,9 @@ export interface CascadeDepthCheck {
  * written by the backend.
  */
 export interface GraphBackend {
+    /** The store as the shared module names it, and on a SQL store its graph: what its statements and plans are of. */
+    readonly moduleStore: { store: ModuleStore; graph?: string };
+
     /**
      * Where the store is tables (Postgres): the statement that makes them when they are not there and does nothing
      * when they are, which a manager runs once, before its first statement, outside any transaction. The connection

@@ -1,4 +1,4 @@
-import { StampAndMarker } from '@/backend/StoreStatements';
+import { ModuleStore, StampAndMarker } from '@/backend/StoreStatements';
 import { Direction } from '@/annotation/Metadata';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
@@ -58,6 +58,11 @@ export class PostgresBackend implements GraphBackend {
         this.graph.name,
         (text, bindings) => new PostgresStatement(text, bindings)
     );
+
+    get moduleStore(): { store: ModuleStore; graph?: string } {
+        return { store: 'postgres', graph: this.graph.name };
+    }
+
 
     constructor(readonly graph: PostgresGraph = new PostgresGraph()) {}
 

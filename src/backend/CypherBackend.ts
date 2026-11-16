@@ -1,4 +1,4 @@
-import { StampAndMarker } from '@/backend/StoreStatements';
+import { ModuleStore, StampAndMarker } from '@/backend/StoreStatements';
 import {
     CascadeDepthCheck,
     GraphBackend,
@@ -61,6 +61,11 @@ export class CypherBackend implements GraphBackend {
         undefined,
         (text, bindings) => new GraphStatement(text, bindings)
     );
+
+    get moduleStore(): { store: ModuleStore; graph?: string } {
+        return { store: this.grammar.searchStore };
+    }
+
 
     constructor(readonly grammar: CypherGrammar) {}
 

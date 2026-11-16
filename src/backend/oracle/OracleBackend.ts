@@ -1,4 +1,4 @@
-import { StampAndMarker } from '@/backend/StoreStatements';
+import { ModuleStore, StampAndMarker } from '@/backend/StoreStatements';
 import {
     CascadeDepthCheck,
     FullTextIndexLookup,
@@ -54,6 +54,11 @@ export class OracleBackend implements GraphBackend {
         this.graph.name,
         (text, bindings) => new GraphStatement(text, bindings)
     );
+
+    get moduleStore(): { store: ModuleStore; graph?: string } {
+        return { store: 'oracle', graph: this.graph.name };
+    }
+
 
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
 

@@ -70,7 +70,7 @@
         "typescript": ">= 5"
     },
     "dependencies": {
-        "@liberation-data/drivine-cypher-compiler": "file:.compiler/liberation-data-drivine-cypher-compiler-0.0.0-a1c34d2b.tgz",
+        "@liberation-data/drivine-cypher-compiler": "file:.compiler/liberation-data-drivine-cypher-compiler-0.0.0-0fa8b5ba.tgz",
         "async-mutex": "^0.4.0",
         "dotenv": "^16.3.1",
         "falkordb": "^6.8.0",

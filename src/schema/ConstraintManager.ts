@@ -1,347 +1,131 @@
 import { DrivineError } from '@/DrivineError';
-import { SchemaExecutor } from '@/schema/SchemaExecutor';
-import { SchemaGrammar, SchemaItem } from '@/schema/SchemaGrammar';
+import type { SchemaItem } from '@/schema/SchemaGrammar';
+import { EnsureResult, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
+import { IndexBuildOptions } from '@/schema/IndexManager';
 import {
-    EnsureResult,
-    lowercased,
-    madeAs,
-    rangeIndex,
-    UniquenessConstraintSpec,
-    ViolatingKey
-} from '@/schema/SchemaSpecs';
-import { IndexBuildOptions, IndexManager } from '@/schema/IndexManager';
-import { fillInLowerCopies, LowerCopyFiller } from '@/schema/LowerCopyCatalog';
-import { DrivineLogger } from '@/logger';
+    DEFAULT_BUILD_TIMEOUT,
+    DEFAULT_VIOLATION_SAMPLE,
+    ensureResult,
+    listed,
+    planItem,
+    SchemaPlanning,
+    schemaItem
+} from '@/schema/SchemaPlan';
 
 /** How many conflicting values a constraint violation reports. */
-export const VIOLATION_SAMPLE = 10;
+export const VIOLATION_SAMPLE = DEFAULT_VIOLATION_SAMPLE;
 
-/** Whether two constraints cover the same properties: order means nothing to uniqueness, and engines reorder them. */
-const same = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it) => b.includes(it));
-
-/** Whether an index covers the properties in the constraint's order: an index over them in another order is another. */
-const sameInOrder = (a: string[], b: string[]): boolean => a.length === b.length && a.every((it, k) => it === b[k]);
+/** How often, in milliseconds, a constraint being built is looked at again, while `inForce` waits on it. */
+const BUILD_POLL = 200;
 
 /**
  * Uniqueness constraints, made idempotently. Before making one, the data is checked: if two nodes already hold the same
  * values, nothing is made and the result is a VIOLATION with a sample of the keys, each naming the nodes that hold it.
  * On Neo4j a plain range index over the same label and properties is in the way of a constraint: the result is then
  * BLOCKED_BY_INDEX, naming it, unless replacing it is asked for.
+ *
+ * What each call makes, drops and waits on is the shared module's schema plan (SchemaPlan), as drivine4j's and
+ * drivine-python's are; `plans.yaml` in the spec pins each call's decisions.
  */
 export class ConstraintManager {
-    private readonly logger = new DrivineLogger(ConstraintManager.name);
-
-    /**
-     * @param changed told once this has made or dropped a constraint, as the object manager's list is then stale.
-     * @param copies fills in the lowercased copies a constraint that ignores case is made over; without it, such a
-     * constraint is refused.
-     * @param build how the range index FalkorDB needs first is waited on to be built (see IndexManager's `ensure`).
-     * Neo4j's CREATE CONSTRAINT returns once the constraint's own index is ONLINE, so it is not waited on.
-     */
+    /** @param build how the range index FalkorDB needs first is waited on to be built (see IndexManager's `ensure`). */
     constructor(
-        private readonly executor: SchemaExecutor,
-        private readonly grammar: SchemaGrammar,
-        private readonly changed: () => void = () => undefined,
-        private readonly copies?: LowerCopyFiller,
-        private readonly build: IndexBuildOptions = {}
+        private readonly planning: SchemaPlanning,
+        private readonly build: IndexBuildOptions = {},
+        private readonly sleep: (millis: number) => Promise<void> = async (millis) =>
+            new Promise((resolve) => setTimeout(resolve, millis))
     ) {}
 
-    /** This manager, waiting on the build of the index FalkorDB needs first as `build` says. */
+    /** This manager, waiting on a build as `build` says. */
     withBuild(build: IndexBuildOptions): ConstraintManager {
-        return new ConstraintManager(this.executor, this.grammar, this.changed, this.copies, build);
+        return new ConstraintManager(this.planning, build, this.sleep);
     }
 
+    /** The constraints the engine holds and enforces, each with the aliases its catalog record keeps. */
     async list(): Promise<SchemaItem[]> {
-        return this.grammar.listUniques.read(await this.executor.run(this.grammar.listUniques.statement));
+        return (await this.listed()).filter((it) => !it.buildFailed).map(schemaItem);
     }
 
     /**
      * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` keys held more than
      * once are reported, each with up to `sampleSize` of the nodes that hold it; 0 skips the check, leaving the engine
-     * to refuse a constraint the data breaks. FalkorDB doesn't refuse one: it builds it in the background and marks the
-     * build FAILED. The failed constraint is then dropped, and the result is a VIOLATION when the data shows a key held
-     * more than once, with up to `sampleSize` of them (none at 0, though the data is still read to confirm it). A build
-     * that fails with no key held more than once throws. A constraint FalkorDB already lists as UNDER CONSTRUCTION, from
-     * another process or an earlier run, is waited on as one made here is: ALREADY_MATCHING once built, and dropped and
-     * made again once its build fails, as is one already marked FAILED.
+     * to refuse a constraint the data breaks. FalkorDB builds one in the background and marks a build the data breaks
+     * FAILED: the failed constraint is then dropped, and the result is a VIOLATION.
      *
      * @param replaceBlockingIndex drop a plain index in the way of the constraint and make the constraint, whose own
-     * index takes its place, rather than returning BLOCKED_BY_INDEX. The data is read first: a key held more than once
-     * keeps the index and is a VIOLATION, with an empty sample when `sampleSize` is 0, and data that can't be read keeps
-     * it and throws the refusal. Only an engine whose constraint brings its own index reports one in the way (Neo4j), so
-     * elsewhere this changes nothing.
+     * index takes its place, rather than returning BLOCKED_BY_INDEX (Neo4j). A key held more than once keeps the index
+     * and is a VIOLATION.
      *
      * A constraint that ignores case (see UniquenessConstraintSpec) is made over the lowercased copies, and first fills
-     * them in, as IndexManager's `ensure` does: again, recorded or not, where the constraint isn't there yet. FalkorDB
-     * can't make one, and refuses it before that.
+     * them in, as IndexManager's `ensure` does. FalkorDB can't make one, and refuses it before that.
      */
     async ensure(
         spec: UniquenessConstraintSpec,
         sampleSize: number = VIOLATION_SAMPLE,
         replaceBlockingIndex: boolean = false
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        const made = madeAs(spec);
-        this.grammar.requireConstrainable?.(made);
-        if (lowercased(spec).length) {
-            // A node saved before there were copies is held to the constraint too. One made anew fills them in again,
-            // recorded or not: they may have gone out of step while it was gone.
-            await fillInLowerCopies(this.copies, spec, !(await this.exists(made)));
-        }
-        return { ...(await this.ensureMade(made, sampleSize, replaceBlockingIndex)), spec };
+        return this.result('ENSURE', spec, sampleSize, replaceBlockingIndex);
     }
 
     /**
      * Whether the constraint is there and built, so that the engine enforces it, as one another process made. One still
-     * being built is waited on; one whose build failed (FalkorDB) is not in force, and is left as it is.
+     * being built is waited on, up to the build's timeout; one whose build failed (FalkorDB) is not in force, and is left
+     * as it is. A read: no schema plan.
      */
     async inForce(spec: UniquenessConstraintSpec): Promise<boolean> {
-        return (await this.awaitBuild(madeAs(spec), false)) === 'BUILT';
+        const until = Date.now() + (this.build.timeout ?? DEFAULT_BUILD_TIMEOUT);
+        for (;;) {
+            const found = (await this.listed(spec))[0];
+            if (!found || found.buildFailed) {
+                return false;
+            }
+            if (!found.buildInProgress) {
+                return true;
+            }
+            if (Date.now() >= until) {
+                return false;
+            }
+            await this.sleep(BUILD_POLL);
+        }
     }
 
     /** Drops the constraint, or one whose build FalkorDB marked FAILED, which `list` leaves out. */
     async drop(declared: UniquenessConstraintSpec): Promise<void> {
-        const spec = madeAs(declared);
-        if ((await this.exists(spec)) || (await this.failed(spec))) {
-            await this.dropUnique(spec);
-            this.changed();
-        }
+        await planItem(this.planning, 'DROP', declared);
     }
 
     /**
-     * Drops the constraint, whatever its state, and ensures it again, as `ensure` does: the data is checked first, and a
-     * key held more than once is a VIOLATION, the previous constraint being dropped already. A constraint that ignores
-     * case fills the lowercased copies in again on every node of its label. The constraint made again keeps the aliases
-     * its record kept (see SchemaItem's `aliases`).
+     * Drops the constraint, whatever its state, and makes it again, as `ensure` does: the data is checked first, and a
+     * key held more than once is a VIOLATION. A constraint that ignores case fills the lowercased copies in again on
+     * every node of its label. The constraint made again keeps the aliases its record kept (see SchemaItem's `aliases`).
      */
     async recreate(
         spec: UniquenessConstraintSpec,
         sampleSize: number = VIOLATION_SAMPLE,
         replaceBlockingIndex: boolean = false
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        const made = madeAs(spec);
-        const aliases = (await this.list()).find(
-            (it) => it.label === made.label && same(it.properties, made.properties)
-        )?.aliases;
-        await this.drop(spec);
-        const result = await this.ensure(spec, sampleSize, replaceBlockingIndex);
-        if (aliases && result.status === 'CREATED') {
-            await new IndexManager(this.executor, this.grammar).alias(made.kind, made, aliases);
-        }
-        return result;
+        return this.result('RECREATE', spec, sampleSize, replaceBlockingIndex);
     }
 
-    /** `ensure`, of the constraint as it is made. */
-    private async ensureMade(
+    private async listed(spec?: UniquenessConstraintSpec): ReturnType<typeof listed> {
+        return listed(this.planning, 'constraints', this.planning.plan.listings().constraints, spec);
+    }
+
+    private async result(
+        call: 'ENSURE' | 'RECREATE',
         spec: UniquenessConstraintSpec,
         sampleSize: number,
         replaceBlockingIndex: boolean
     ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        if (await this.built(spec)) {
-            return { status: 'ALREADY_MATCHING', spec };
+        const item = await planItem(this.planning, call, spec, {
+            mode: this.build.mode,
+            buildTimeoutMillis: this.build.timeout,
+            violationSampleSize: sampleSize,
+            replaceBlockingIndex
+        });
+        if (!item.result) {
+            throw new DrivineError(`The plan of ${call} of the constraint on ${spec.label} gave no result.`);
         }
-        const sample = sampleSize > 0 ? await this.conflicts(spec, sampleSize) : [];
-        if (sample.length) {
-            return { status: 'VIOLATION', spec, sample };
-        }
-        const indexes = new IndexManager(this.executor, this.grammar, this.changed, undefined, this.build);
-        if (this.grammar.uniqueNeedsRange) {
-            await indexes.ensure(rangeIndex(spec.label, spec.properties));
-        }
-        try {
-            await this.create(spec);
-        } catch (e) {
-            const index = this.grammar.blockedByIndex?.(e) ? await this.blockingIndex(indexes, spec) : undefined;
-            if (!index) {
-                throw e;
-            }
-            if (!replaceBlockingIndex) {
-                this.logger.warn(
-                    `Could not create the uniqueness constraint on ${spec.label}(${spec.properties.join(', ')}): ` +
-                        `index ${index.name} is in the way of it`
-                );
-                return { status: 'BLOCKED_BY_INDEX', spec, index };
-            }
-            // Neo4j refuses for the index before it reads the data, so a key held more than once would refuse the
-            // constraint once the index is gone: unless the data was read above, look first, keeping the index.
-            if (sampleSize <= 0 && (await this.repeats(spec, e))) {
-                return { status: 'VIOLATION', spec, sample: [] };
-            }
-            for (const statement of this.grammar.dropRange(rangeIndex(spec.label, spec.properties), index.name)) {
-                await this.executor.run(statement);
-            }
-            this.logger.log(
-                `Dropped index ${index.name} on ${spec.label}(${spec.properties.join(', ')}), in the way of a ` +
-                    `uniqueness constraint that replaces it`
-            );
-            await this.create(spec);
-        }
-        return this.awaitBuilt(spec, sampleSize);
-    }
-
-    /**
-     * Whether the constraint is there and built. One still being built, by another process or an earlier run, may yet
-     * fail: its build is waited on, as for one made here. FalkorDB keeps listing a constraint whose build failed, though
-     * it enforces nothing. It isn't the constraint: it is dropped, to be made again, which gives a VIOLATION when the
-     * data still holds a key more than once. One dropped meanwhile is made again too.
-     */
-    private async built(spec: UniquenessConstraintSpec): Promise<boolean> {
-        const found = await this.awaitBuild(spec, false);
-        if (found === 'FAILED') {
-            await this.dropFailedBuild(spec);
-            this.changed();
-            this.logger.warn(
-                `Dropped the uniqueness constraint on ${spec.label}(${spec.properties.join(', ')}), whose build ` +
-                    `${this.grammar.engine} had marked FAILED, to make it again`
-            );
-        }
-        return found === 'BUILT';
-    }
-
-    private async exists(spec: UniquenessConstraintSpec): Promise<boolean> {
-        return (await this.list()).some((it) => it.label === spec.label && same(it.properties, spec.properties));
-    }
-
-    /** Whether the engine reports that its build of the constraint failed. */
-    private async failed(spec: UniquenessConstraintSpec): Promise<boolean> {
-        return this.listedBy(this.grammar.listFailedUniques, spec);
-    }
-
-    /** Whether `listing` lists the constraint; a statement already in `rows` is read from there, not run again. */
-    private async listedBy(
-        listing: SchemaGrammar['listFailedUniques'],
-        spec: UniquenessConstraintSpec,
-        rows: Map<string, Promise<any[]>> = new Map()
-    ): Promise<boolean> {
-        if (!listing) {
-            return false;
-        }
-        if (!rows.has(listing.statement)) {
-            rows.set(listing.statement, this.executor.run(listing.statement));
-        }
-        return listing
-            .read(await rows.get(listing.statement)!)
-            .some((it) => it.label === spec.label && same(it.properties, spec.properties));
-    }
-
-    /** Up to `sampleSize` keys held more than once, each naming up to `sampleSize` of the nodes that hold it. */
-    private async conflicts(spec: UniquenessConstraintSpec, sampleSize: number): Promise<ViolatingKey[]> {
-        return (await this.executor.run(this.grammar.conflicts(spec, sampleSize))) as ViolatingKey[];
-    }
-
-    /** Whether a key of the constraint's properties is held more than once; the refusal is thrown if unreadable. */
-    private async repeats(spec: UniquenessConstraintSpec, refusal: unknown): Promise<boolean> {
-        try {
-            return (await this.conflicts(spec, 1)).length > 0;
-        } catch {
-            throw refusal;
-        }
-    }
-
-    private async dropUnique(spec: UniquenessConstraintSpec): Promise<void> {
-        for (const statement of this.grammar.dropUnique(spec)) {
-            await this.executor.run(statement);
-        }
-    }
-
-    /**
-     * Drops the constraint, whose build failed. Another process waiting on the same build sees it fail too, and may drop
-     * it first: FalkorDB then refuses the drop, as there is no such constraint, which is no error once the failed build
-     * is no longer listed.
-     */
-    private async dropFailedBuild(spec: UniquenessConstraintSpec): Promise<void> {
-        try {
-            await this.dropUnique(spec);
-        } catch (e) {
-            if (await this.failed(spec)) {
-                throw e;
-            }
-        }
-    }
-
-    private async create(spec: UniquenessConstraintSpec): Promise<void> {
-        for (const statement of this.grammar.createUnique(spec)) {
-            await this.executor.run(statement);
-        }
-    }
-
-    /** The plain range index over the constraint's label and properties, in their order, that is in the way of it. */
-    private async blockingIndex(
-        indexes: IndexManager,
-        spec: UniquenessConstraintSpec
-    ): Promise<SchemaItem | undefined> {
-        return (await indexes.list('RANGE')).find(
-            (it) => it.label === spec.label && sameInOrder(it.properties, spec.properties)
-        );
-    }
-
-    /**
-     * CREATED once the engine reports the constraint built, which FalkorDB does in the background. A build FalkorDB
-     * marks FAILED gives what `buildFailed` gives.
-     */
-    private async awaitBuilt(
-        spec: UniquenessConstraintSpec,
-        sampleSize: number
-    ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        if ((await this.awaitBuild(spec, true)) === 'FAILED') {
-            return this.buildFailed(spec, sampleSize);
-        }
-        this.changed();
-        return { status: 'CREATED', spec };
-    }
-
-    /**
-     * Reads the constraint until its build has ended: BUILT, or FAILED where the engine builds it in the background and
-     * the build failed. FalkorDB lists the constraint UNDER CONSTRUCTION as it builds it, and may yet mark it FAILED.
-     * While it isn't listed, reading goes on when `untilListed` (one just made, not yet listed), and otherwise ends with
-     * undefined (none there, or one dropped meanwhile).
-     */
-    private async awaitBuild(
-        spec: UniquenessConstraintSpec,
-        untilListed: boolean
-    ): Promise<'BUILT' | 'FAILED' | undefined> {
-        for (let attempt = 0; attempt < 50; attempt++) {
-            // One reading per attempt, so that a build marked FAILED between two readings isn't taken for built.
-            const rows = new Map<string, Promise<any[]>>();
-            if (await this.listedBy(this.grammar.listFailedUniques, spec, rows)) {
-                return 'FAILED';
-            }
-            if (await this.listedBy(this.grammar.listUniques, spec, rows)) {
-                if (!(await this.listedBy(this.grammar.listBuildingUniques, spec, rows))) {
-                    return 'BUILT';
-                }
-            } else if (!untilListed) {
-                return undefined;
-            }
-            await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
-        }
-        throw new DrivineError(
-            `The uniqueness constraint on ${spec.label}(${spec.properties.join(', ')}) was not built.`
-        );
-    }
-
-    /**
-     * A constraint whose build FalkorDB marked FAILED is dropped: it enforces nothing, yet stays listed, and drivine4j
-     * and drivine-python, reading the same store, would take it for the constraint. It is then a VIOLATION, as in
-     * drivine4j, when a key is held more than once, with up to `sampleSize` of them (none at 0, though the data is
-     * read to confirm it). A build that fails with no key held more than once, or data that can't be read, throws.
-     */
-    private async buildFailed(
-        spec: UniquenessConstraintSpec,
-        sampleSize: number
-    ): Promise<EnsureResult<UniquenessConstraintSpec>> {
-        await this.dropFailedBuild(spec);
-        const failed =
-            `${this.grammar.engine} could not build the uniqueness constraint on ` +
-            `${spec.label}(${spec.properties.join(', ')})`;
-        let sample: ViolatingKey[];
-        try {
-            sample = await this.conflicts(spec, Math.max(sampleSize, 1));
-        } catch (e) {
-            throw new DrivineError(`${failed}, and the data could not be read to see why.`, e as Error);
-        }
-        if (!sample.length) {
-            throw new DrivineError(`${failed}, but no key it covers is held more than once.`);
-        }
-        return { status: 'VIOLATION', spec, sample: sample.slice(0, Math.max(sampleSize, 0)) };
+        return ensureResult(item.result, spec);
     }
 }
