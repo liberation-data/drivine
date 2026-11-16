@@ -9,7 +9,7 @@ import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
-import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
+import { cypherCompilerModule, SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { CompiledSpecification } from '@/cypher/CompiledSpecification';
 import { loadSpec, runsOn, valuesFor } from '../../cypher/CypherSpec';
 import { compiledAs } from '../../CompiledAs';
@@ -39,13 +39,25 @@ interface Read {
     column: any;
 }
 
-/** The keys of each kind of step, beside its optional `note`: a function's result, its order, and a read. */
+/**
+ * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read, and a
+ * temporal value's sort key.
+ */
 const SHAPES = [
     ['function', 'args', 'result'],
+    ['function', 'args', 'error'],
     ['function', 'ascending'],
-    ['read', 'value']
+    ['read', 'value'],
+    ['key', 'result']
 ];
 const READ = ['store', 'nonFinite', 'column'];
+const KEY = ['kind', 'v'];
+/** A call in Cypher that makes a temporal value of a kind with a sort key, as a statement runs. */
+const TEMPORAL_CALL = /\b(?:date|localtime|time|localdatetime|datetime)\s*\(/i;
+/** SQLite's errors of a call it won't make, which no step's failure can be: the step names no function of the store's. */
+const RUNNER_ERRORS = ['no such function', 'wrong number of arguments'];
+/** The function a library calls itself, once on each connection, and no compiled statement does: its steps pair nothing. */
+const UNPAIRED = 'drivine_host_version';
 /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for its operator `text REGEXP pattern`. */
 const FUNCTION = /^(?:drivine_[a-z_]+|regexp)$/;
 const REGEXP_OPERATOR = /\bREGEXP\b/i;
@@ -67,6 +79,13 @@ interface Hold {
 
 const HELD: Record<string, Hold[]> = {};
 
+/**
+ * The note of a step held until the store's timestamps keep nine digits (layout 2), as drivine4j and the module hold it:
+ * it is run, and must fail, so the hold comes off when it passes. Matched within the note.
+ */
+const LAYOUT_2_NOTE = 'drivine4j#421 (layout 2)';
+const LAYOUT_2_ISSUE = 421;
+
 const spec: HostCase[] = parse(fs.readFileSync(path.join(__dirname, '../../cypher/host.yaml'), 'utf8'), {
     intAsBigInt: true
 }).cases;
@@ -74,7 +93,9 @@ const spec: HostCase[] = parse(fs.readFileSync(path.join(__dirname, '../../cyphe
 describe("The Cypher spec's host.yaml", () => {
     describe.each(spec.map((it) => [it.name, it] as const))('%s', (_, hostCase) => {
         const holds = HELD[hostCase.name] ?? [];
-        const heldStep = (index: number) => holds.find((it) => it.steps?.includes(index + 1))?.issue;
+        const heldStep = (index: number) =>
+            holds.find((it) => it.steps?.includes(index + 1))?.issue ??
+            (String(hostCase.steps[index].note ?? '').includes(LAYOUT_2_NOTE) ? LAYOUT_2_ISSUE : undefined);
         const heldPairs = holds.find((it) => it.pairs)?.issue;
 
         it.each(hostCase.steps.map((step, index) => [index + 1, step, index] as const))(
@@ -136,6 +157,47 @@ describe('The host.yaml runner', () => {
             steps: [given]
         };
         expect(() => paired(reading)).toThrow(/compiles on postgres with nonFinite true/);
+    });
+
+    it('should pass a step that fails with its error, and fail one that gives a value or fails otherwise', async () => {
+        const fails = { function: 'drivine_round', args: [2.5, BigInt(0), 'UNNECESSARY'], error: 'Rounding necessary' };
+        await checkStep(fails, 'fails');
+        await expect(checkStep({ ...fails, error: 'no such' }, 'fails')).rejects.toThrow();
+        await expect(checkStep({ function: 'drivine_add', args: ['1', '2'], error: 'x' }, 'gives')).rejects.toThrow(
+            /but gave "3"/
+        );
+        await expect(checkStep({ ...fails, error: BigInt(1) }, 'fails')).rejects.toThrow(/error is a text/);
+        // SQLite's own refusal to call a function is the runner's: not a failure a hold may count.
+        await expect(
+            held(1, 'a held step', async () => checkStep({ function: 'drivine_nothing', args: ['1'], error: 'x' }, 'x'))
+        ).rejects.toThrow(/no such function/);
+    });
+
+    it('should give a key step the module sort key, and fail one with another key, another shape or no kind', async () => {
+        const step = { key: { kind: 'date', v: '2024-01-01' }, result: '10000020240101' };
+        await checkStep(step, 'key');
+        await checkStep({ key: { kind: 'duration', v: 'P1D' }, result: null }, 'key');
+        await expect(checkStep({ ...step, result: '10000020240102' }, 'key')).rejects.toThrow();
+        await expect(checkStep({ ...step, key: { kind: 'date', value: '2024-01-01' } }, 'key')).rejects.toThrow(
+            /a key has the keys/
+        );
+        await expect(checkStep({ ...step, key: { kind: 'day', v: '2024-01-01' } }, 'key')).rejects.toThrow();
+    });
+
+    it('should pair a key step by a statement that makes a temporal value, and drivine_host_version by nothing', () => {
+        const step = { key: { kind: 'date', v: '2024-01-01' }, result: '10000020240101' };
+        paired({
+            name: 'key',
+            pairs: { 'temporal.yaml': ['A sort key worked out as the statement runs'] },
+            steps: [step]
+        });
+        expect(() =>
+            paired({ name: 'key', pairs: { 'queries.yaml': ['Returning nodes and properties'] }, steps: [step] })
+        ).toThrow(/makes a temporal value as the statement runs/);
+        const version = { function: 'drivine_host_version', args: [], result: BigInt(2) };
+        paired({ name: 'version', pairs: {}, steps: [version] });
+        expect(() => paired({ name: 'version', steps: [version] })).toThrow(/pairs no store case/);
+        expect(() => paired({ name: 'version', pairs: {}, steps: [version, add] })).toThrow(/pairs no store case/);
     });
 
     it('should call regexp with the pattern first, and pair it by SQL that holds the REGEXP operator', async () => {
@@ -231,6 +293,10 @@ async function checkStep(step: Record<string, any>, where: string): Promise<void
         await checkRead(step.read, step.value, where);
         return;
     }
+    if ('key' in step) {
+        checkKey(step, where);
+        return;
+    }
     const db = openSqlite(':memory:');
     try {
         SqliteFunctions.register(db);
@@ -260,8 +326,47 @@ function checkFunction(db: SqliteDatabase, step: Record<string, any>, where: str
         return;
     }
     const args = valuesFor(step.args, (it) => it) as SqliteValue[];
-    const result = call(db, `SELECT ${name}(${args.map(() => '?').join(', ')})`, args);
-    expect([where, result]).toEqual([where, valuesFor(step.result, (it) => it)]);
+    const sql = `SELECT ${name}(${args.map(() => '?').join(', ')})`;
+    if (!('error' in step)) {
+        expect([where, call(db, sql, args)]).toEqual([where, valuesFor(step.result, (it) => it)]);
+        return;
+    }
+    if (typeof step.error !== 'string') {
+        throw new Error(`${where}: error is a text, not ${JSON.stringify(step.error, replacer)}`);
+    }
+    let failure: Mismatch | undefined;
+    let gave: SqliteValue = null;
+    try {
+        gave = call(db, sql, args);
+    } catch (e) {
+        failure = e as Mismatch;
+    }
+    if (!failure) {
+        throw new Mismatch(`${where}: fails with "${step.error}", but gave ${JSON.stringify(gave, replacer)}`);
+    }
+    // SQLite's own refusal to call it is the runner's, not the step's error: a held step mustn't count it as failing.
+    if (RUNNER_ERRORS.some((it) => failure!.message.includes(it))) {
+        throw new Error(failure.message);
+    }
+    expect([where, failure.message]).toEqual([where, expect.stringContaining(step.error)]);
+}
+
+/**
+ * The step's `key`, the kind's word and canonical text of a temporal value, has the sort key `result`, a text of digits,
+ * or null for a duration: as the module works it out (its `temporalKey` request), which every store's SQL gives.
+ */
+function checkKey(step: Record<string, any>, where: string): void {
+    const key = step.key;
+    if (typeof key !== 'object' || key === null || !sameKeys(KEY, Object.keys(key))) {
+        throw new Error(`${where}: a key has the keys ${JSON.stringify(KEY)}`);
+    }
+    const answer = JSON.parse(
+        cypherCompilerModule().compile(JSON.stringify({ temporalKey: { kind: key.kind, v: key.v } }))
+    ) as { key?: string | null; error?: string };
+    if (answer.error !== undefined) {
+        throw new Mismatch(`${where}: ${answer.error}`);
+    }
+    expect([where, answer.key]).toEqual([where, step.result]);
 }
 
 /** The one value `sql` gives, run with `args`: a whole number as a bigint, so one SQLite holds as an integer is told from a real. */
@@ -339,10 +444,14 @@ async function rowsOf(store: string, text: string, nonFinite: boolean, where: st
 
 /**
  * The case's pairs are cases of their files, and rely on its steps: one of them compiles on SQLite to SQL that calls
- * each function its steps call, and one compiles on each store its steps read with the `nonFinite` each read step says.
+ * each function its steps call, one compiles on each store its steps read with the `nonFinite` each read step says, and,
+ * for its `key` steps, one that compiles on SQLite makes a temporal value as the statement runs.
  */
 function paired(hostCase: HostCase): void {
     const pairs = Object.entries(hostCase.pairs ?? {});
+    if (pairsNothing(hostCase)) {
+        return;
+    }
     if (pairs.length === 0) {
         throw new Error(`${hostCase.name}: pairs no store case`);
     }
@@ -399,6 +508,45 @@ function paired(hostCase: HostCase): void {
             );
         }
     }
+    keyPaired(hostCase, steps);
+}
+
+/** Where the case has `key` steps, one of its pairs' `steps` compiles on SQLite and makes a temporal value as it runs. */
+function keyPaired(hostCase: HostCase, steps: Record<string, any>[]): void {
+    if (hostCase.steps.some((it) => 'key' in it) && !makesTemporalValue(steps)) {
+        throw new Mismatch(
+            `${hostCase.name}: no step of its pairs compiles on SQLite and makes a temporal value as the statement runs`
+        );
+    }
+}
+
+/**
+ * Whether the case is of drivine_host_version's steps alone, with `pairs: {}`: no compiled statement calls it, as a library
+ * calls it itself, once on each connection, so its steps need no pair.
+ */
+function pairsNothing(hostCase: HostCase): boolean {
+    return (
+        hostCase.pairs !== undefined &&
+        Object.keys(hostCase.pairs).length === 0 &&
+        hostCase.steps.every((it) => it.function === UNPAIRED)
+    );
+}
+
+/** Whether one of `steps` compiles on SQLite and makes a temporal value as the statement runs, for a `key` step's pair. */
+function makesTemporalValue(steps: Record<string, any>[]): boolean {
+    return steps
+        .filter((it) => runsOn(it as any, 'sqlite') && TEMPORAL_CALL.test(it.cypher))
+        .some((it) => {
+            try {
+                new SharedCypherCompiler('sqlite', { name: 'g' }).compile(
+                    it.cypher,
+                    valuesFor(it.parameters ?? {}, Number)
+                );
+                return true;
+            } catch {
+                return false;
+            }
+        });
 }
 
 /** Whether `sql` holds SQLite's `REGEXP` operator, outside its quoted texts and names. */

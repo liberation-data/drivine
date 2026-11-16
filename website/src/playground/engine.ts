@@ -2,7 +2,7 @@
 // the shared compiler's Wasm build. Bundled with both by scripts/bundle-playground.mjs, which puts their .wasm files
 // beside the bundle, where each looks for its own.
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { compile } from '@liberation-data/drivine-cypher-compiler';
+import * as compilerModule from '@liberation-data/drivine-cypher-compiler';
 import {
     DatabaseType,
     NonTransactionalPersistenceManager,
@@ -43,7 +43,7 @@ export interface Playground {
 /** Starts SQLite and the compiler, and writes the movies graph. */
 export async function start(): Promise<Playground> {
     useSqliteDriver(wasmSqliteDriver(await sqlite3InitModule()));
-    useCypherCompiler(compile);
+    useCypherCompiler(compilerModule);
     const provider = new SqliteConnectionProvider('playground', DatabaseType.SQLITE, 'playground.db', { graph: GRAPH });
     const manager = new NonTransactionalPersistenceManager(provider, 'playground', DatabaseType.SQLITE);
     const compiler = new SharedCypherCompiler('sqlite', { name: GRAPH });

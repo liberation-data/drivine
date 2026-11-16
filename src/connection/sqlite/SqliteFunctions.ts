@@ -16,12 +16,12 @@ import { registerCypherFunctions, SqliteCypherFunctionNames } from '@/connection
  * - `drivine_delete(graph, nids)` deletes the nodes a statement selected, and counts them;
  * - `drivine_lower_copies(graph, label, property, batch)` fills in the lowercased copies of a property;
  * - `drivine_similarity(embedding, vector, similarity)` scores an embedding against a vector;
- * - `drivine_regexp_count(text, expression)` counts a regular expression's matches, and `regexp` is SQLite's `REGEXP`;
+ * - `drivine_regexp_count(text, expression)` counts a regular expression's matches;
  * - `drivine_lower(text)` lowers text as Unicode does: SQLite's own `lower` lowers only ASCII;
  * - `drivine_epoch(text)` reads a moment as nanoseconds since the epoch, so moments compare exactly.
  *
- * Compiled Cypher calls the rest, by the names {@link SqliteCypherFunctionNames} gives (`EQUAL`, `CYPHER` …): see
- * registerCypherFunctions.
+ * Compiled Cypher calls the rest, by the names {@link SqliteCypherFunctionNames} gives (`CYPHER`, `FAIL` …), and the
+ * shared compiler's own, `regexp` (SQLite's `REGEXP`) among them: see registerCypherFunctions.
  *
  * A function that reads only its arguments is registered as deterministic, so SQLite may index an expression over it.
  * One that gives a count or a truth value gives an integer, as drivine4j's do: a JavaScript number SQLite holds as real.
@@ -34,7 +34,6 @@ export const SqliteFunctions = {
     REGEXP_COUNT: 'drivine_regexp_count',
     LOWER: 'drivine_lower',
     EPOCH: 'drivine_epoch',
-    REGEXP: 'regexp',
     ...SqliteCypherFunctionNames,
 
     /** Registers every function on `db`, for the statements run on it. */
@@ -74,19 +73,13 @@ export const SqliteFunctions = {
             }
             return BigInt(String(text).match(patterns.of(String(expression), 'g'))?.length ?? 0);
         });
-        db.function(SqliteFunctions.REGEXP, { deterministic: true }, (expression, text) => {
-            if (expression == null || text == null) {
-                return null;
-            }
-            return BigInt(patterns.of(String(expression), '').test(String(text)) ? 1 : 0);
-        });
         db.function(SqliteFunctions.LOWER, { deterministic: true }, (text) =>
             text == null ? null : String(text).toLowerCase()
         );
         db.function(SqliteFunctions.EPOCH, { deterministic: true }, (text) =>
             text == null ? null : epoch(String(text).trim())
         );
-        registerCypherFunctions(db, patterns);
+        registerCypherFunctions(db);
     }
 };
 

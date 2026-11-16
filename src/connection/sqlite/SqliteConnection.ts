@@ -18,7 +18,6 @@ import {
 } from '@/connection/sqlite/SqliteDriver';
 import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
 
@@ -212,6 +211,16 @@ export class SqliteConnection implements Connection {
 function bound(parameters: Record<string, SqliteValue> | SqliteValue[]): any[] {
     return Array.isArray(parameters) ? parameters : [parameters];
 }
+
+/**
+ * NaN as SQLite's JSON text writes it, where its JSON holds no NaN: the map drivine4j's statements given NaN write, and
+ * the one map that is NaN.
+ */
+const NAN_TEXT = '{"$numberDouble":"NaN"}';
+
+/** The key and the value of the map that is NaN: see {@link NAN_TEXT}. */
+const NAN_KEY = '$numberDouble';
+const NAN_VALUE = 'NaN';
 
 /**
  * A row whose text values are each JSON, as the values they are: NaN, which SQLite's JSON writes as {@link NAN_TEXT}, read

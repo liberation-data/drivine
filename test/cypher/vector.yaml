@@ -1,0 +1,313 @@
+# Vector search in Cypher: the nodes a search of a vector index finds, and their scores, by Neo4j's procedure
+# db.index.vector.queryNodes() and Cypher 25's SEARCH clause, and the vector.similarity functions. See README.md.
+#
+# A case is a list of steps, as in queries.yaml: each a Cypher statement, run over the graph `graph` writes, with the rows
+# it gives or its failure. A runner empties the graph, makes each of `indexes` under its `name`, the one the statements
+# search by (as the schema API ensures a spec, store.yaml's DDL), writes `graph`, and waits for the indexes to hold it (CALL db.awaitIndexes() on Neo4j), before each
+# case. Postgres runs each case twice: with its indexes made, and with each index's record kept and its HNSW index
+# dropped, as SQLite always is, so every node of the label is measured. A search reads the record as it is, as the schema
+# listing leaves out a record whose object is gone, so the runner drops the HNSW index after it makes the indexes. The
+# index only narrows the nodes read (exactly, on a graph this small), and both give the case's rows.
+#
+# The stores are neo4j, postgres, oracle and sqlite; `sql` names the last three. Memgraph and FalkorDB run none of the
+# file: each has a vector search procedure of its own (vector_search.search on Memgraph, db.idx.vector.queryNodes on
+# FalkorDB), and Drivine is to refuse these statements there, naming it (liberation-data/drivine-cypher-spec#214).
+# Neptune runs none of it either.
+#
+# Each case says what Neo4j gives (Neo4j 2026.10.1 community, Cypher 25, its default), which is what every store is to
+# give: for vector search, Neo4j's answer is the rule (liberation-data/drivine-cypher-spec#160). Where a store gives
+# something else today, `today` says what, and the issue, as in search.yaml; a library holds such a step in its own HELD
+# list until the issue's fix lands. `today` is not read. The SQL stores' compiler compiles db.index.vector.queryNodes(),
+# given the graph's vector indexes as its catalog records them (GraphOptions.vectorIndexes). It does not read SEARCH
+# yet, and refuses vector.similarity.cosine() and vector.similarity.euclidean() as functions it does not compile: those
+# steps are held.
+#
+# Rows are compared as queries.yaml compares them, with two differences. Each float is compared within 1e-6: Neo4j's
+# scores are float32s, so 0.8 comes back 0.800000011920929. And a run of consecutive rows whose last column, the score,
+# is the same number (within 1e-6) is compared in any order, as if sorted by id: Neo4j's own order of hits that score
+# alike is not stable (of the same two hits, a search for 10 gave a then d, and one for 2 gave d then a). No step rests
+# on which of two hits that score alike a search keeps: where k cuts between hits, they score apart.
+#
+# A step's `error: true` is Neo4j's failure, and its note says Neo4j's code and message; what each SQL store's message
+# is to be is not yet pinned.
+#
+# The scores: on a cosine index, (1 + cos) / 2, so the same direction is 1.0, a right angle 0.5 and the opposite 0.0; on
+# a euclidean index, 1 / (1 + d²), d the distance, so the same point is 1.0. A node is in an index if it has the index's
+# label and its property is a list of numbers of the index's size; on a cosine index, not a list of zeros. A filter on
+# what a search finds (a WHERE after its YIELD, a WHERE before or after SEARCH, a MATCH after it) is applied after the k
+# nearest are found, so it may leave fewer than k.
+
+graph: |
+  CREATE (a:Chunk {id: 'a', embedding: [1.0, 0.0, 0.0], lang: 'en'}),
+         (b:Chunk {id: 'b', embedding: [0.0, 1.0, 0.0], lang: 'en'}),
+         (c:Chunk {id: 'c', embedding: [0.6, 0.8, 0.0], lang: 'fr'}),
+         (d:Chunk {id: 'd', embedding: [1.0, 0.0, 0.0], lang: 'fr'}),
+         (:Chunk {id: 'e', embedding: [1.0, 1.0], lang: 'en'}),
+         (:Chunk {id: 'f', lang: 'en'}),
+         (:Chunk {id: 'g', embedding: [-1.0, 0.0, 0.0]}),
+         (:Chunk {id: 'z', embedding: [0.0, 0.0, 0.0]}),
+         (:Other {id: 'o', embedding: [1.0, 0.0, 0.0]}),
+         (:Place {id: 'p', embedding: [3.0, 4.0, 0.0]}),
+         (:Place {id: 'q', embedding: [0.0, 0.0, 0.0]}),
+         (:Place {id: 'r', embedding: [1.0, 1.0, 1.0]}),
+         (en:Doc {id: 'doc-en', public: true}),
+         (fr:Doc {id: 'doc-fr', public: false}),
+         (a)-[:PART_OF]->(en), (b)-[:PART_OF]->(en), (c)-[:PART_OF]->(fr), (d)-[:PART_OF]->(fr),
+         (:Author {name: 'Ann'})-[:WROTE]->(en),
+         (:Author {name: 'Bo'})-[:WROTE]->(fr)
+
+indexes:
+  - {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "chunk_cos", options: {dimensions: 3, similarity: "COSINE"}}
+  - {kind: "VECTOR_INDEX", label: "Place", properties: ["embedding"], name: "place_l2", options: {dimensions: 3, similarity: "EUCLIDEAN"}}
+
+cases:
+  - name: "Cosine"
+    description: "A cosine index gives the k nodes nearest the vector, best first, each scored (1 + cos) / 2."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 10, [0.1, 0.2, 0.3]) YIELD node, score RETURN node.id, score"
+        rows: [["c", 0.7939873933792114], ["b", 0.767261266708374], ["a", 0.633630633354187], ["d", 0.633630633354187], ["g", 0.366369366645813]]
+      - note: "A vector's length doesn't count, only its direction."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [2.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
+      - note: "A list of integers is taken as one of floats."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [1, 0, 0]) YIELD node, score RETURN node.id, score"
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
+
+  - name: "Euclidean"
+    description: "A euclidean index gives the k nodes nearest the vector, best first, each scored 1 / (1 + d²)."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('place_l2', 3, [0.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["q", 1.0], ["r", 0.25], ["p", 0.03846153989434242]]
+      - cypher: "CALL db.index.vector.queryNodes('place_l2', 3, [3.0, 4.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["p", 1.0], ["r", 0.06666667014360428], ["q", 0.03846153989434242]]
+
+  - name: "Hits that score alike"
+    description: "Hits that score alike come in any order: Neo4j gave d before a here, and a before d for a k of 3 or more."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["d", 1.0], ["a", 1.0]]
+
+  - name: "Only the index's nodes"
+    description: "A k past the index's nodes gives each of them once: not a node of another label (o), of an embedding of another size (e), of none (f), or, on a cosine index, of a list of zeros (z)."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 100, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929], ["b", 0.5], ["g", 0.0]]
+      - note: "On a euclidean index, a list of zeros is a point like any other."
+        cypher: "CALL db.index.vector.queryNodes('place_l2', 100, [0.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["q", 1.0], ["r", 0.25], ["p", 0.03846153989434242]]
+
+  - name: "One neighbour"
+    description: "A k of 1 gives the nearest node alone."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 1, [0.0, 1.0, 0.0]) YIELD node, score RETURN node.id, score"
+        rows: [["b", 1.0]]
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [0.0, 1.0, 0.0] LIMIT 1) SCORE AS s RETURN c.id, s"
+        rows: [["b", 1.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "Parameters"
+    description: "k and the vector may be parameters, in either form."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', $k, $v) YIELD node, score RETURN node.id, score"
+        parameters: {k: 3, v: [1.0, 0.0, 0.0]}
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR $v LIMIT $k) SCORE AS s RETURN c.id, s"
+        parameters: {k: 3, v: [1.0, 0.0, 0.0]}
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "A filter after the k nearest"
+    description: "A WHERE on what a search finds is applied to its k nearest, after they are found, so it may leave fewer than k: the nearest 2 are a and d, and of them only a is in English, though b is too."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score WHERE node.lang = 'en' RETURN node.id, score"
+        rows: [["a", 1.0]]
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 10, [1.0, 0.0, 0.0]) YIELD node, score WHERE node.lang = 'en' RETURN node.id, score"
+        rows: [["a", 1.0], ["b", 0.5]]
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score WITH node, score WHERE node.lang = 'en' RETURN node.id, score"
+        rows: [["a", 1.0]]
+      - note: "A WHERE before SEARCH, in its MATCH, is applied after the search too."
+        cypher: "MATCH (c:Chunk) WHERE c.lang = 'en' SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 2) SCORE AS s RETURN c.id, s"
+        rows: [["a", 1.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 2) SCORE AS s WHERE c.lang = 'en' RETURN c.id, s"
+        rows: [["a", 1.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "SEARCH"
+    description: "Cypher 25's SEARCH binds the k nearest nodes to its MATCH's one variable, with SCORE AS their score, or none: those of the index's label, whatever label the MATCH names."
+    steps:
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 3) SCORE AS s RETURN c.id, s"
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "SCORE AS may be left out."
+        cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 3) RETURN c.id ORDER BY c.id"
+        rows: ["a", "c", "d"]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "A LIMIT of 0 gives no rows, where db.index.vector.queryNodes() fails for a k of 0."
+        cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 0) SCORE AS s RETURN c.id, s"
+        rows: []
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "A label that is not the index's matches none of its nodes."
+        cypher: "MATCH (c:Other) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 2) SCORE AS s RETURN c.id, s"
+        rows: []
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "No label: the index's nodes."
+        cypher: "MATCH (c) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 2) SCORE AS s RETURN c.id, s"
+        rows: [["d", 1.0], ["a", 1.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (p:Place) SEARCH p IN (VECTOR INDEX place_l2 FOR [0.0, 0.0, 0.0] LIMIT 10) SCORE AS s RETURN p.id, s"
+        rows: [["q", 1.0], ["r", 0.25], ["p", 0.03846153989434242]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "From each hit, a traversal"
+    description: "What db.index.vector.queryNodes() yields is read on as any node is: matched out from, with a WHERE on the nodes it reaches, OPTIONAL MATCH, EXISTS { }, a variable bound before the call, and an aggregate over the hits."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [1.0, 0.0, 0.0]) YIELD node, score MATCH (node)-[:PART_OF]->(d:Doc)<-[:WROTE]-(a:Author) WHERE d.public RETURN node.id, score, d.id, a.name"
+        rows: [["a", 1.0, "doc-en", "Ann"]]
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [1.0, 0.0, 0.0]) YIELD node AS c, score MATCH (c)-[:PART_OF]->(d:Doc) WHERE EXISTS { (d)<-[:WROTE]-(:Author {name: 'Bo'}) } RETURN c.id, d.id, score"
+        rows: [["d", "doc-fr", 1.0], ["c", "doc-fr", 0.800000011920929]]
+      - cypher: "MATCH (a:Author {name: 'Ann'}) CALL db.index.vector.queryNodes('chunk_cos', 4, [1.0, 0.0, 0.0]) YIELD node, score MATCH (node)-[:PART_OF]->(:Doc)<-[:WROTE]-(a) RETURN node.id, score"
+        rows: [["a", 1.0], ["b", 0.5]]
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 5, [1.0, 0.0, 0.0]) YIELD node, score OPTIONAL MATCH (node)-[:PART_OF]->(d:Doc) RETURN node.id, d.id, score"
+        rows: [["a", "doc-en", 1.0], ["d", "doc-fr", 1.0], ["c", "doc-fr", 0.800000011920929], ["b", "doc-en", 0.5], ["g", null, 0.0]]
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 4, [1.0, 0.0, 0.0]) YIELD node, score MATCH (node)-[:PART_OF]->(d:Doc) RETURN d.id, count(*) AS hits, max(score) AS best ORDER BY d.id"
+        rows: [["doc-en", 2, 1.0], ["doc-fr", 2, 1.0]]
+
+  - name: "From each SEARCH hit, a traversal"
+    description: "What SEARCH binds is read on as any node is, as db.index.vector.queryNodes()'s hits are."
+    steps:
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 3) SCORE AS s MATCH (c)-[:PART_OF]->(d:Doc)<-[:WROTE]-(a:Author) WHERE d.public RETURN c.id, s, d.id, a.name"
+        rows: [["a", 1.0, "doc-en", "Ann"]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 3) SCORE AS s MATCH (c)-[:PART_OF]->(d:Doc) WHERE EXISTS { (d)<-[:WROTE]-(:Author {name: 'Bo'}) } RETURN c.id, d.id, s"
+        rows: [["d", "doc-fr", 1.0], ["c", "doc-fr", 0.800000011920929]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (a:Author {name: 'Ann'}) MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 4) SCORE AS s MATCH (c)-[:PART_OF]->(:Doc)<-[:WROTE]-(a) RETURN c.id, s"
+        rows: [["a", 1.0], ["b", 0.5]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 5) SCORE AS s OPTIONAL MATCH (c)-[:PART_OF]->(d:Doc) RETURN c.id, d.id, s"
+        rows: [["a", "doc-en", 1.0], ["d", "doc-fr", 1.0], ["c", "doc-fr", 0.800000011920929], ["b", "doc-en", 0.5], ["g", null, 0.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 4) SCORE AS s MATCH (c)-[:PART_OF]->(d:Doc) RETURN d.id, count(*) AS hits, max(s) AS best ORDER BY d.id"
+        rows: [["doc-en", 2, 1.0], ["doc-fr", 2, 1.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "In a CALL subquery"
+    description: "A search inside CALL (x) { } runs once for each row, with the vector from the row."
+    steps:
+      - cypher: "MATCH (q:Chunk {id: 'c'}) CALL (q) { CALL db.index.vector.queryNodes('chunk_cos', 2, q.embedding) YIELD node, score RETURN node, score } RETURN node.id, score"
+        rows: [["c", 1.0], ["b", 0.8999999761581421]]
+      - cypher: "MATCH (q:Chunk {id: 'c'}) CALL (q) { MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR q.embedding LIMIT 2) SCORE AS s RETURN c, s } RETURN c.id, s"
+        rows: [["c", 1.0], ["b", 0.8999999761581421]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "A vector from each row"
+    description: "The vector may be read from the row: a node's property, or each of an UNWIND's lists, a search for each."
+    steps:
+      - note: "a and d score alike, so k is 4, to keep both: k = 3 would cut between them, and Neo4j's choice of one is not stable."
+        cypher: "MATCH (q:Chunk {id: 'c'}) CALL db.index.vector.queryNodes('chunk_cos', 4, q.embedding) YIELD node, score RETURN node.id, score"
+        rows: [["c", 1.0], ["b", 0.8999999761581421], ["a", 0.800000011920929], ["d", 0.800000011920929]]
+      - cypher: "UNWIND [[0.0, 1.0, 0.0], [0.6, 0.8, 0.0]] AS v CALL db.index.vector.queryNodes('chunk_cos', 1, v) YIELD node, score RETURN v, node.id, score"
+        rows: [[[0.0, 1.0, 0.0], "b", 1.0], [[0.6, 0.8, 0.0], "c", 1.0]]
+      - cypher: "UNWIND [[0.0, 1.0, 0.0], [0.6, 0.8, 0.0]] AS v MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR v LIMIT 1) SCORE AS s RETURN v, c.id, s"
+        rows: [[[0.0, 1.0, 0.0], "b", 1.0], [[0.6, 0.8, 0.0], "c", 1.0]]
+        today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
+
+  - name: "vector.similarity over nodes"
+    description: "vector.similarity.cosine() and vector.similarity.euclidean() score two lists as the indexes do, for each row, with no index: null where a node has no embedding, and a failure for a list of zeros (cosine) or of another size."
+    steps:
+      - cypher: "MATCH (c:Chunk) WHERE size(c.embedding) = 3 AND c.id <> 'z' RETURN c.id, vector.similarity.cosine(c.embedding, [1.0, 0.0, 0.0]) AS s ORDER BY s DESC, c.id"
+        rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929], ["b", 0.5], ["g", 0.0]]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (p:Place) RETURN p.id, vector.similarity.euclidean(p.embedding, [0.0, 0.0, 0.0]) AS s ORDER BY s DESC, p.id"
+        rows: [["q", 1.0], ["r", 0.25], ["p", 0.03846153989434242]]
+        today: [{stores: ["sql"], error: "The function vector.similarity.euclidean() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "MATCH (c:Chunk {id: 'f'}) RETURN c.id, vector.similarity.cosine(c.embedding, [1.0, 0.0, 0.0]) AS s"
+        rows: [["f", null]]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "Neo4j: 22N38, Invalid argument to the function vector.similarity.cosine."
+        cypher: "MATCH (c:Chunk {id: 'z'}) RETURN vector.similarity.cosine(c.embedding, [1.0, 0.0, 0.0]) AS s"
+        error: true
+      - note: "Neo4j: 22N38, Invalid argument to the function vector.similarity.cosine."
+        cypher: "MATCH (c:Chunk {id: 'e'}) RETURN vector.similarity.cosine(c.embedding, [1.0, 0.0, 0.0]) AS s"
+        error: true
+
+  - name: "vector.similarity of two lists"
+    description: "vector.similarity.cosine() and vector.similarity.euclidean() of two lists written out: a list of integers is taken, null is null, and lists of other sizes, of no items, of zeros (cosine) or of text fail."
+    steps:
+      - cypher: "RETURN vector.similarity.cosine([1.0, 0.0, 0.0], [0.6, 0.8, 0.0]) AS s"
+        rows: [0.800000011920929]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "RETURN vector.similarity.cosine([1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]) AS s"
+        rows: [0.0]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "RETURN vector.similarity.cosine([1, 0], [1, 0]) AS s"
+        rows: [1.0]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "RETURN vector.similarity.euclidean([0.0, 0.0, 0.0], [3.0, 4.0, 0.0]) AS s"
+        rows: [0.03846153989434242]
+        today: [{stores: ["sql"], error: "The function vector.similarity.euclidean() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "Two lists of zeros are the same point."
+        cypher: "RETURN vector.similarity.euclidean([0.0, 0.0], [0.0, 0.0]) AS s"
+        rows: [1.0]
+        today: [{stores: ["sql"], error: "The function vector.similarity.euclidean() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "RETURN vector.similarity.cosine([0.1, 0.2, 0.3], [0.6, 0.8, 0.0]) AS s, vector.similarity.euclidean([0.1, 0.2, 0.3], [3.0, 4.0, 0.0]) AS e"
+        rows: [[0.7939873933792114, 0.041771095246076584]]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "RETURN vector.similarity.cosine(null, [1.0, 0.0]) AS s"
+        rows: [null]
+        today: [{stores: ["sql"], error: "The function vector.similarity.cosine() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - cypher: "RETURN vector.similarity.euclidean([1.0, 0.0], null) AS s"
+        rows: [null]
+        today: [{stores: ["sql"], error: "The function vector.similarity.euclidean() is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+      - note: "Neo4j: 22N38, Invalid argument to the function vector.similarity.cosine."
+        cypher: "RETURN vector.similarity.cosine([1.0, 0.0], [1.0, 0.0, 0.0]) AS s"
+        error: true
+      - note: "Neo4j: 22N38, Invalid argument to the function vector.similarity.cosine."
+        cypher: "RETURN vector.similarity.cosine([0.0, 0.0], [1.0, 0.0]) AS s"
+        error: true
+      - note: "Neo4j: 22N38, Invalid argument to the function vector.similarity.cosine."
+        cypher: "RETURN vector.similarity.cosine([], []) AS s"
+        error: true
+      - note: "Neo4j refuses it before it runs: 22N27, Invalid input 'LIST<STRING>' for argument at index 0 of function vector.similarity.cosine(). Expected to be VECTOR or LIST<INTEGER | FLOAT>."
+        cypher: "RETURN vector.similarity.cosine(['a'], [1.0]) AS s"
+        error: true
+
+  - name: "A search that fails"
+    description: "A search fails for a k under 1, a vector of another size than the index's, of zeros (cosine), of text or null, an index there isn't, and SEARCH in a MATCH of more than one variable or with a WHERE of its own."
+    steps:
+      - note: "Neo4j: 22N03, Expected 'numberOfNearestNeighbours' to be of type INTEGER and in the range 1 to 2147483647 but found 0."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 0, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 22N03, Expected 'numberOfNearestNeighbours' to be of type INTEGER and in the range 1 to 2147483647 but found -1."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', -1, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 51N65, Vector index `chunk_cos` has a configured dimensionality of 3, but the provided vector has a dimension 2."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [1.0, 0.0]) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 22NBG, Invalid vector coordinates. The vector coordinates must be finite, but are [\"a\", \"b\", \"c\"]."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, ['a', 'b', 'c']) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 22N06, Invalid input. 'query' needs to be specified."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, null) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 22NBG, Invalid vector coordinates. The vector coordinates must be finite, but are [0.0, 0.0, 0.0]."
+        cypher: "CALL db.index.vector.queryNodes('chunk_cos', 3, [0.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 52N02, Execution of the procedure db.index.vector.queryNodes() failed due to a client error, caused by 22N69, The index 'nope' does not exist."
+        cypher: "CALL db.index.vector.queryNodes('nope', 3, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
+        error: true
+      - note: "Neo4j: 22N69, The index 'nope' does not exist."
+        cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX nope FOR [1.0, 0.0, 0.0] LIMIT 2) SCORE AS s RETURN c.id, s"
+        error: true
+      - note: "Neo4j: 51N65, Vector index `chunk_cos` has a configured dimensionality of 3, but the provided vector has a dimension 2."
+        cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0] LIMIT 2) SCORE AS s RETURN c.id, s"
+        error: true
+      - note: "Neo4j refuses it before it runs: 42I70, In order to have a search clause, a MATCH statement can only have one bound variable."
+        cypher: "MATCH (c:Chunk)-[:PART_OF]->(d:Doc) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] LIMIT 3) SCORE AS s RETURN c.id, s, d.id"
+        error: true
+      - note: "Neo4j: 22ND3, The property `lang` is not an additional property for vector search with filters on the vector index `chunk_cos`. Its WHERE filters by the properties an index is made WITH, which a SQL store's vector index doesn't have: schema.yaml refuses an index made WITH them."
+        cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR [1.0, 0.0, 0.0] WHERE c.lang = 'en' LIMIT 3) SCORE AS s RETURN c.id, s"
+        error: true

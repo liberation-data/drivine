@@ -1,8 +1,8 @@
 import type { SqliteValue } from '@/connection/sqlite/SqliteDriver';
 
 /**
- * An argument of a function Drivine registers, read as SQLite's `sqlite3_value_text`, `sqlite3_value_double` and
- * `sqlite3_value_int64` read one, as drivine4j's functions read theirs. A function registered with
+ * An argument of a function Drivine registers, read as SQLite's `sqlite3_value_text` and `sqlite3_value_double` read
+ * one, as drivine4j's functions read theirs. A function registered with
  * `useBigIntArguments` is given a whole number as a bigint and a real one as a number, so it tells them apart.
  */
 export const SqliteArguments = {
@@ -37,47 +37,11 @@ export const SqliteArguments = {
         const text = SqliteArguments.text(value)!;
         const number = NUMERIC.exec(text);
         return number ? Number(number[0]) : 0;
-    },
-
-    /** The argument as a whole number: a real one cut toward zero, within SQLite's integers; a text's number. */
-    integer(value: SqliteValue): bigint {
-        if (typeof value === 'bigint') {
-            return value;
-        }
-        if (typeof value === 'string' || value instanceof Uint8Array) {
-            const text = SqliteArguments.text(value)!;
-            const whole = WHOLE.exec(text);
-            if (whole) {
-                return clamp(BigInt(whole[1]));
-            }
-        }
-        const real = SqliteArguments.real(value);
-        if (Number.isNaN(real)) {
-            return BigInt(0);
-        }
-        if (real >= 2 ** 63) {
-            return MAX_INTEGER;
-        }
-        if (real <= -(2 ** 63)) {
-            return MIN_INTEGER;
-        }
-        return BigInt(Math.trunc(real));
     }
 };
 
 /** The number a text starts with, as SQLite reads one: spaces before it allowed. */
 const NUMERIC = /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/;
-
-/** A text that is a whole number alone, spaces around it allowed. */
-const WHOLE = /^\s*([+-]?\d+)\s*$/;
-
-/** The least and the greatest integer SQLite holds. */
-const MIN_INTEGER = BigInt('-9223372036854775808');
-const MAX_INTEGER = BigInt('9223372036854775807');
-
-function clamp(value: bigint): bigint {
-    return value > MAX_INTEGER ? MAX_INTEGER : value < MIN_INTEGER ? MIN_INTEGER : value;
-}
 
 /**
  * The real number `value` as SQLite writes one as text, `%!.15g`: 15 significant digits, a point and a digit after it

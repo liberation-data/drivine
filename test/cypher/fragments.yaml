@@ -1,0 +1,580 @@
+# Fragments: the parts of a statement a library writes itself, its object manager's filters and orders, as the module
+# compiles them (SqlCypherCompiler.condition, value and order; the JSON entry's `fragment` request), so each library compares,
+# sorts and binds a value as a compiled statement does, on each store and in each store layout. See README.md.
+#
+# Each case is one Cypher expression over the node `n`, a row `people_` of the graph's table of nodes, which the library
+# knows has the label Person; the graph's indexed properties are `indexed`, as a library gives them (Oracle answers an
+# equality through the index of a label and property it is given). `parameters` are written as the JSON entry takes them:
+# a temporal value as {"$temporal": <kind>, "text": <ISO 8601>}.
+#
+# `sql` pins each store's terms, as the module gives them: the module's test holds it to them. `rows` is what Neo4j keeps
+# or orders for the same expression, over the nodes `setup` makes, by id: `MATCH (n:Person) WHERE <condition> RETURN n.id`,
+# or `MATCH (n:Person) RETURN n.id ORDER BY <order>, n.id`. Each library's runner makes the nodes on each SQL store, runs
+# `SELECT /*+ <the fragment's hints> */ ... FROM <graph>_node people_ WHERE <the label test> AND <condition>` (or ORDER BY
+# the order's terms, then the id), and checks it keeps or orders those rows.
+
+graph: "g"
+indexed: [["Person", "name"], ["Person", "id"]]
+variables: {n: {node: "people_", labels: ["Person"]}}
+
+setup:
+  - "CREATE (:Person {id: 'p1', name: 'Ada', born: date('1815-12-10'), age: 36, tags: ['math', 'poet'], `$k`: 'x'})"
+  - "CREATE (:Person {id: 'p2', name: 'Grace', born: date('1906-12-09'), age: 85, tags: ['navy']})"
+  - "CREATE (:Person {id: 'p3', name: 'ada', age: 36.0, born: localdatetime('1900-01-01T00:00')})"
+  - "CREATE (:Person {id: 'p4', name: 7, born: datetime('2020-01-01T00:00Z'), tags: []})"
+  - "CREATE (:Person {id: 'p5'})"
+  - "MATCH (a:Person {id: 'p1'}), (b:Person {id: 'p2'}) CREATE (a)-[:KNOWS]->(b)"
+  - "MATCH (a:Person {id: 'p2'}), (b:Person {id: 'p3'}) CREATE (a)-[:KNOWS]->(b)"
+  - "MATCH (n:Person {id: 'p2'}) SET n:Admin"
+  - "MATCH (:Person {id: 'p1'})-[r:KNOWS]->(:Person {id: 'p2'}) SET r.since = 1990"
+  - "MATCH (n:Person {id: 'p1'}) SET n.seen = datetime('1969-12-31T23:59:59.5Z'), n.bio = 'b'"
+  - "MATCH (n:Person {id: 'p2'}) SET n.seen = datetime('2020-01-01T10:00+10:00'), n.bio = 'ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééz'"
+  - "MATCH (n:Person {id: 'p3'}) SET n.seen = datetime('2020-01-01T00:00:00.001Z')"
+
+cases:
+  - name: "A property equal to a text"
+    condition: "n.name = $p"
+    parameters: {p: "Ada"}
+    rows: ["p1"]
+    sql:
+      postgres:
+        - "(people_.props -> 'name') = CAST($_cy_p AS jsonb)"
+      oracle:
+        - "(CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') THEN CASE WHEN CASE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.name') END IS NOT NULL THEN CASE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN JSON_VALUE(people_.props, '$.name.\"$t\"' RETURNING VARCHAR2(16)) WHEN 'double' THEN 'number' ELSE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) END END END = 'string' AND CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') THEN CASE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.name') END END = $_cyk_p AND CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(people_.props, '$.name') THEN CASE WHEN CASE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.name') END IS NOT NULL THEN CASE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN JSON_VALUE(people_.props, '$.name.\"$t\"' RETURNING VARCHAR2(16)) WHEN 'double' THEN 'number' ELSE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) END END END = 'string' AND CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(people_.props, '$.name') THEN CASE JSON_VALUE(people_.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.name') END END = $_cyk_p AND COALESCE(JSON_VALUE(people_.props, '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = $_cyk_p, CASE WHEN NVL(JSON_VALUE(people_.props, '$.name.type()'), 'null') <> 'null' THEN FALSE END))"
+      sqlite:
+        - "(COALESCE(people_.props ->> '$.\"name\".\"$t\"', CASE json_type(people_.props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"name\"') END) = COALESCE($_cy_p ->> '$.\"$t\"', CASE json_type($_cy_p, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_p, '$') END) AND COALESCE(people_.props ->> '$.\"name\".s', people_.props ->> '$.\"name\".v', people_.props ->> '$.\"name\"') = COALESCE($_cy_p ->> '$.s', $_cy_p ->> '$.v', $_cy_p ->> '$') AND (json_type((people_.props -> '$.\"name\"')) = 'text' AND ((people_.props -> '$.\"name\"') ->> '$') = ($_cy_p ->> '$')))"
+  - name: "A property unequal to a text: a value of another kind is unequal, a missing one null"
+    condition: "n.name <> $p"
+    parameters: {p: "Ada"}
+    rows: ["p2", "p3", "p4"]
+    sql:
+      postgres:
+        - "NOT ((people_.props -> 'name') = CAST($_cy_p AS jsonb))"
+      oracle:
+        - "NOT (COALESCE(JSON_VALUE(people_.props, '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = $_cyk_p, CASE WHEN NVL(JSON_VALUE(people_.props, '$.name.type()'), 'null') <> 'null' THEN FALSE END))"
+      sqlite:
+        - "NOT ((COALESCE(people_.props ->> '$.\"name\".\"$t\"', CASE json_type(people_.props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"name\"') END) = COALESCE($_cy_p ->> '$.\"$t\"', CASE json_type($_cy_p, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_p, '$') END) AND COALESCE(people_.props ->> '$.\"name\".s', people_.props ->> '$.\"name\".v', people_.props ->> '$.\"name\"') = COALESCE($_cy_p ->> '$.s', $_cy_p ->> '$.v', $_cy_p ->> '$') AND (json_type((people_.props -> '$.\"name\"')) = 'text' AND ((people_.props -> '$.\"name\"') ->> '$') = ($_cy_p ->> '$'))))"
+  - name: "An id equal to a text, through the index"
+    condition: "n.id = $id"
+    parameters: {id: "p2"}
+    rows: ["p2"]
+    sql:
+      postgres:
+        - "(people_.props -> 'id') = CAST($_cy_id AS jsonb)"
+      oracle:
+        - "(CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') THEN CASE WHEN CASE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.id.s'), JSON_VALUE(people_.props, '$.id.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.id') END IS NOT NULL THEN CASE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN JSON_VALUE(people_.props, '$.id.\"$t\"' RETURNING VARCHAR2(16)) WHEN 'double' THEN 'number' ELSE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) END END END = 'string' AND CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') THEN CASE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.id.s'), JSON_VALUE(people_.props, '$.id.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.id') END END = $_cyk_id AND CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(people_.props, '$.id') THEN CASE WHEN CASE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.id.s'), JSON_VALUE(people_.props, '$.id.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.id') END IS NOT NULL THEN CASE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN JSON_VALUE(people_.props, '$.id.\"$t\"' RETURNING VARCHAR2(16)) WHEN 'double' THEN 'number' ELSE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) END END END = 'string' AND CASE WHEN JSON_EXISTS(people_.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(people_.props, '$.id') THEN CASE JSON_VALUE(people_.props, '$.id.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(people_.props, '$.id.s'), JSON_VALUE(people_.props, '$.id.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(people_.props, '$.id') END END = $_cyk_id AND COALESCE(JSON_VALUE(people_.props, '$.id' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = $_cyk_id, CASE WHEN NVL(JSON_VALUE(people_.props, '$.id.type()'), 'null') <> 'null' THEN FALSE END))"
+      sqlite:
+        - "(COALESCE(people_.props ->> '$.\"id\".\"$t\"', CASE json_type(people_.props, '$.\"id\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"id\"') END) = COALESCE($_cy_id ->> '$.\"$t\"', CASE json_type($_cy_id, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_id, '$') END) AND COALESCE(people_.props ->> '$.\"id\".s', people_.props ->> '$.\"id\".v', people_.props ->> '$.\"id\"') = COALESCE($_cy_id ->> '$.s', $_cy_id ->> '$.v', $_cy_id ->> '$') AND (json_type((people_.props -> '$.\"id\"')) = 'text' AND ((people_.props -> '$.\"id\"') ->> '$') = ($_cy_id ->> '$')))"
+  - name: "A whole number equal to a float"
+    condition: "n.age = $a"
+    parameters: {a: 36}
+    rows: ["p1", "p3"]
+    sql:
+      postgres:
+        - "(people_.props -> 'age') = CAST($_cy_a AS jsonb)"
+      oracle:
+        - "COALESCE(JSON_VALUE(people_.props, '$.age' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER($_cyk_a), CASE WHEN NVL(JSON_VALUE(people_.props, '$.age.type()'), 'null') <> 'null' THEN FALSE END)"
+      sqlite:
+        - "(COALESCE(people_.props ->> '$.\"age\".\"$t\"', CASE json_type(people_.props, '$.\"age\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"age\"') END) = COALESCE($_cy_a ->> '$.\"$t\"', CASE json_type($_cy_a, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_a, '$') END) AND COALESCE(people_.props ->> '$.\"age\".s', people_.props ->> '$.\"age\".v', people_.props ->> '$.\"age\"') = COALESCE($_cy_a ->> '$.s', $_cy_a ->> '$.v', $_cy_a ->> '$') AND (json_type((people_.props -> '$.\"age\"')) IN ('integer', 'real') AND ((people_.props -> '$.\"age\"') ->> '$') = ($_cy_a ->> '$')))"
+  - name: "A date before a date: a value of another kind is no date, and neither before nor after it"
+    condition: "n.born < $d"
+    parameters: {d: {"$temporal": "DATE", "text": "1900-01-01"}}
+    rows: ["p1"]
+    sql:
+      postgres:
+        - "CASE WHEN COALESCE(jsonb_typeof((people_.props -> 'born')), 'null') = 'null' THEN NULL WHEN ((people_.props -> 'born') ->> '$t') = 'date' THEN ((people_.props -> 'born') ->> 's') < (CAST($_cy_d AS jsonb) ->> 's') END"
+      oracle:
+        - "CASE WHEN NVL(JSON_VALUE(people_.props, '$.born.type()'), 'null') = 'null' THEN NULL WHEN CASE WHEN JSON_VALUE(people_.props, '$.born.type()') = 'object' THEN JSON_VALUE(people_.props, '$.born.\"$t\"') END = 'date' THEN JSON_VALUE(people_.props, '$.born.s') < JSON_VALUE(JSON($_cy_d), '$.s') END"
+      sqlite:
+        - "CASE WHEN COALESCE(json_type((people_.props -> '$.\"born\"')), 'null') = 'null' THEN NULL WHEN ((people_.props -> '$.\"born\"') ->> '$.\"$t\"') = 'date' THEN ((people_.props -> '$.\"born\"') ->> '$.s') < ($_cy_d ->> '$.s') END"
+  - name: "A date on or after a date"
+    condition: "n.born >= $d"
+    parameters: {d: {"$temporal": "DATE", "text": "1900-01-01"}}
+    rows: ["p2"]
+    sql:
+      postgres:
+        - "CASE WHEN COALESCE(jsonb_typeof((people_.props -> 'born')), 'null') = 'null' THEN NULL WHEN ((people_.props -> 'born') ->> '$t') = 'date' THEN ((people_.props -> 'born') ->> 's') >= (CAST($_cy_d AS jsonb) ->> 's') END"
+      oracle:
+        - "CASE WHEN NVL(JSON_VALUE(people_.props, '$.born.type()'), 'null') = 'null' THEN NULL WHEN CASE WHEN JSON_VALUE(people_.props, '$.born.type()') = 'object' THEN JSON_VALUE(people_.props, '$.born.\"$t\"') END = 'date' THEN JSON_VALUE(people_.props, '$.born.s') >= JSON_VALUE(JSON($_cy_d), '$.s') END"
+      sqlite:
+        - "CASE WHEN COALESCE(json_type((people_.props -> '$.\"born\"')), 'null') = 'null' THEN NULL WHEN ((people_.props -> '$.\"born\"') ->> '$.\"$t\"') = 'date' THEN ((people_.props -> '$.\"born\"') ->> '$.s') >= ($_cy_d ->> '$.s') END"
+  - name: "A moment equal to a moment"
+    condition: "n.born = $t"
+    parameters: {t: {"$temporal": "DATE_TIME", "text": "2020-01-01T00:00Z"}}
+    rows: ["p4"]
+    sql:
+      postgres:
+        - "(people_.props -> 'born') = CAST($_cy_t AS jsonb)"
+      oracle:
+        - "(CASE WHEN JSON_VALUE(people_.props, '$.born') IS NOT NULL AND JSON_VALUE(JSON($_cy_t), '$') IS NOT NULL THEN JSON_QUERY(people_.props, '$.born' RETURNING JSON) = JSON($_cy_t) WHEN JSON_VALUE(people_.props, '$.born.type()') = 'string' AND JSON_VALUE(JSON($_cy_t), '$.type()') = 'string' THEN NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(people_.props, '$.born' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_t), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(people_.props, '$.born' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_t), '$' RETURNING CLOB))), 0))) = 0 WHEN JSON_VALUE(people_.props, '$.born.type()') IS NULL OR JSON_VALUE(JSON($_cy_t), '$.type()') IS NULL THEN NULL WHEN JSON_VALUE(people_.props, '$.born.type()') = 'string' OR JSON_VALUE(JSON($_cy_t), '$.type()') = 'string' THEN FALSE ELSE JSON_QUERY(people_.props, '$.born' RETURNING JSON) = JSON($_cy_t) END AND NOT ((JSON_VALUE(people_.props, '$.born.type()') = 'double' AND JSON_VALUE(people_.props, '$.born' RETURNING BINARY_DOUBLE) IS NAN) OR JSON_VALUE(people_.props, '$.born.type()') IN ('array', 'object') AND INSTR(JSON_SERIALIZE(COALESCE(JSON_QUERY(people_.props, '$?(@.born.type() != \"string\" || @.born.length() <= 4000).born' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.born') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.born') RETURNING CLOB EXTENDED), '$.born' RETURNING CLOB) EXTENDED) END) RETURNING CLOB EXTENDED), '{\"$numberDouble\":\"Nan\"}') > 0))"
+      sqlite:
+        - "(COALESCE(people_.props ->> '$.\"born\".\"$t\"', CASE json_type(people_.props, '$.\"born\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"born\"') END) = COALESCE($_cy_t ->> '$.\"$t\"', CASE json_type($_cy_t, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_t, '$') END) AND COALESCE(people_.props ->> '$.\"born\".s', people_.props ->> '$.\"born\".v', people_.props ->> '$.\"born\"') = COALESCE($_cy_t ->> '$.s', $_cy_t ->> '$.v', $_cy_t ->> '$') AND drivine_equal((people_.props -> '$.\"born\"'), $_cy_t))"
+  - name: "A local date and time equal to one"
+    condition: "n.born = $t"
+    parameters: {t: {"$temporal": "LOCAL_DATE_TIME", "text": "1900-01-01T00:00"}}
+    rows: ["p3"]
+    sql:
+      postgres:
+        - "(people_.props -> 'born') = CAST($_cy_t AS jsonb)"
+      oracle:
+        - "(CASE WHEN JSON_VALUE(people_.props, '$.born') IS NOT NULL AND JSON_VALUE(JSON($_cy_t), '$') IS NOT NULL THEN JSON_QUERY(people_.props, '$.born' RETURNING JSON) = JSON($_cy_t) WHEN JSON_VALUE(people_.props, '$.born.type()') = 'string' AND JSON_VALUE(JSON($_cy_t), '$.type()') = 'string' THEN NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(people_.props, '$.born' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_t), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(people_.props, '$.born' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_t), '$' RETURNING CLOB))), 0))) = 0 WHEN JSON_VALUE(people_.props, '$.born.type()') IS NULL OR JSON_VALUE(JSON($_cy_t), '$.type()') IS NULL THEN NULL WHEN JSON_VALUE(people_.props, '$.born.type()') = 'string' OR JSON_VALUE(JSON($_cy_t), '$.type()') = 'string' THEN FALSE ELSE JSON_QUERY(people_.props, '$.born' RETURNING JSON) = JSON($_cy_t) END AND NOT ((JSON_VALUE(people_.props, '$.born.type()') = 'double' AND JSON_VALUE(people_.props, '$.born' RETURNING BINARY_DOUBLE) IS NAN) OR JSON_VALUE(people_.props, '$.born.type()') IN ('array', 'object') AND INSTR(JSON_SERIALIZE(COALESCE(JSON_QUERY(people_.props, '$?(@.born.type() != \"string\" || @.born.length() <= 4000).born' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.born') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.born') RETURNING CLOB EXTENDED), '$.born' RETURNING CLOB) EXTENDED) END) RETURNING CLOB EXTENDED), '{\"$numberDouble\":\"Nan\"}') > 0))"
+      sqlite:
+        - "(COALESCE(people_.props ->> '$.\"born\".\"$t\"', CASE json_type(people_.props, '$.\"born\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"born\"') END) = COALESCE($_cy_t ->> '$.\"$t\"', CASE json_type($_cy_t, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_t, '$') END) AND COALESCE(people_.props ->> '$.\"born\".s', people_.props ->> '$.\"born\".v', people_.props ->> '$.\"born\"') = COALESCE($_cy_t ->> '$.s', $_cy_t ->> '$.v', $_cy_t ->> '$') AND drivine_equal((people_.props -> '$.\"born\"'), $_cy_t))"
+  - name: "A number between two"
+    condition: "n.age >= $low AND n.age < $high"
+    parameters: {low: 30, high: 40.5}
+    rows: ["p1", "p3"]
+    sql:
+      postgres:
+        - "(CASE WHEN jsonb_typeof((people_.props -> 'age')) = jsonb_typeof(CAST($_cy_low AS jsonb)) AND jsonb_typeof((people_.props -> 'age')) IN ('number', 'string', 'boolean') THEN CASE WHEN jsonb_typeof((people_.props -> 'age')) = 'string' THEN (people_.props ->> 'age') COLLATE \"C\" >= (CAST($_cy_low AS jsonb) #>> '{}') ELSE (people_.props -> 'age') >= CAST($_cy_low AS jsonb) END END AND CASE WHEN jsonb_typeof((people_.props -> 'age')) = jsonb_typeof(CAST($_cy_high AS jsonb)) AND jsonb_typeof((people_.props -> 'age')) IN ('number', 'string', 'boolean') THEN CASE WHEN jsonb_typeof((people_.props -> 'age')) = 'string' THEN (people_.props ->> 'age') COLLATE \"C\" < (CAST($_cy_high AS jsonb) #>> '{}') ELSE (people_.props -> 'age') < CAST($_cy_high AS jsonb) END END)"
+      oracle:
+        - "(CASE WHEN DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.age.type()')) = DECODE(JSON_VALUE(JSON($_cy_low), '$.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(JSON($_cy_low), '$.type()')) AND DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.age.type()')) IN ('number', 'string', 'boolean') THEN CASE WHEN JSON_VALUE(people_.props, '$.age.type()') = 'string' THEN CASE WHEN JSON_VALUE(people_.props, '$.age') IS NOT NULL AND JSON_VALUE(JSON($_cy_low), '$') IS NOT NULL THEN JSON_VALUE(people_.props, '$.age') >= JSON_VALUE(JSON($_cy_low), '$') ELSE NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(people_.props, '$.age' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_low), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(people_.props, '$.age' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_low), '$' RETURNING CLOB))), 0))) >= 0 END ELSE (NOT ((JSON_VALUE(people_.props, '$.age.type()') = 'double' AND JSON_VALUE(people_.props, '$.age' RETURNING BINARY_DOUBLE) IS NAN) OR (JSON_VALUE(JSON($_cy_low), '$.type()') = 'double' AND JSON_VALUE(JSON($_cy_low), '$' RETURNING BINARY_DOUBLE) IS NAN)) AND JSON_QUERY(people_.props, '$.age' RETURNING JSON) >= JSON($_cy_low)) END END AND CASE WHEN DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.age.type()')) = DECODE(JSON_VALUE(JSON($_cy_high EXTENDED), '$.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(JSON($_cy_high EXTENDED), '$.type()')) AND DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.age.type()')) IN ('number', 'string', 'boolean') THEN CASE WHEN JSON_VALUE(people_.props, '$.age.type()') = 'string' THEN CASE WHEN JSON_VALUE(people_.props, '$.age') IS NOT NULL AND JSON_VALUE(JSON($_cy_high EXTENDED), '$') IS NOT NULL THEN JSON_VALUE(people_.props, '$.age') < JSON_VALUE(JSON($_cy_high EXTENDED), '$') ELSE NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(people_.props, '$.age' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_high EXTENDED), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(people_.props, '$.age' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_high EXTENDED), '$' RETURNING CLOB))), 0))) < 0 END ELSE (NOT ((JSON_VALUE(people_.props, '$.age.type()') = 'double' AND JSON_VALUE(people_.props, '$.age' RETURNING BINARY_DOUBLE) IS NAN) OR (JSON_VALUE(JSON($_cy_high EXTENDED), '$.type()') = 'double' AND JSON_VALUE(JSON($_cy_high EXTENDED), '$' RETURNING BINARY_DOUBLE) IS NAN)) AND JSON_QUERY(people_.props, '$.age' RETURNING JSON) < JSON($_cy_high EXTENDED)) END END)"
+      sqlite:
+        - "(CASE WHEN (CASE json_type((people_.props -> '$.\"age\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) = (CASE json_type($_cy_low) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) AND (CASE json_type((people_.props -> '$.\"age\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) IN ('number', 'string', 'boolean') THEN (((people_.props -> '$.\"age\"') ->> '$') >= ($_cy_low ->> '$')) END AND CASE WHEN (CASE json_type((people_.props -> '$.\"age\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) = (CASE json_type($_cy_high) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) AND (CASE json_type((people_.props -> '$.\"age\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) IN ('number', 'string', 'boolean') THEN (((people_.props -> '$.\"age\"') ->> '$') < ($_cy_high ->> '$')) END)"
+  - name: "A property in a list given"
+    condition: "n.name IN $l"
+    parameters: {l: ["Ada", "Grace", 7]}
+    rows: ["p1", "p2", "p4"]
+    sql:
+      postgres:
+        - "EXISTS (SELECT 1 FROM jsonb_array_elements(CAST($_cy_l AS jsonb)) WITH ORDINALITY i1 (item, item_no) WHERE i1.item = (people_.props -> 'name'))"
+      oracle:
+        - "((JSON_VALUE(people_.props, '$.name') IS NOT NULL OR NVL(JSON_VALUE(people_.props, '$.name.type()'), 'null') <> 'string') AND EXISTS (SELECT /*+ NO_COALESCE_SQ */ 1 FROM JSON_TABLE(JSON($_cy_l), '$[*]' COLUMNS (item_no FOR ORDINALITY, item JSON PATH '$')) i1 WHERE i1.item = COALESCE(JSON_QUERY(people_.props, '$?(@.name.type() != \"string\" || @.name.length() <= 4000).name' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.name') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.name') RETURNING CLOB EXTENDED), '$.name' RETURNING CLOB) EXTENDED) END)))"
+      sqlite:
+        - "EXISTS (SELECT 1 FROM json_each($_cy_l) AS i1 WHERE drivine_equal((CASE i1.type WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null' WHEN 'array' THEN i1.value WHEN 'object' THEN i1.value ELSE json_quote(i1.value) END), (people_.props -> '$.\"name\"')))"
+  - name: "A property not in a list given"
+    condition: "NOT n.name IN $l"
+    parameters: {l: ["Ada"]}
+    rows: ["p2", "p3", "p4"]
+    sql:
+      postgres:
+        - "(NOT ((EXISTS (SELECT 1 FROM jsonb_array_elements(CAST($_cy_l AS jsonb)) WITH ORDINALITY i1 (item, item_no) WHERE i1.item = (people_.props -> 'name')) OR CASE WHEN NOT COALESCE(jsonb_typeof((people_.props -> 'name')), 'null') = 'null' THEN FALSE END)))"
+      oracle:
+        - "(NOT ((((JSON_VALUE(people_.props, '$.name') IS NOT NULL OR NVL(JSON_VALUE(people_.props, '$.name.type()'), 'null') <> 'string') AND EXISTS (SELECT /*+ NO_COALESCE_SQ */ 1 FROM JSON_TABLE(JSON($_cy_l), '$[*]' COLUMNS (item_no FOR ORDINALITY, item JSON PATH '$')) i1 WHERE i1.item = COALESCE(JSON_QUERY(people_.props, '$?(@.name.type() != \"string\" || @.name.length() <= 4000).name' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.name') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.name') RETURNING CLOB EXTENDED), '$.name' RETURNING CLOB) EXTENDED) END))) OR CASE WHEN NOT NVL(JSON_VALUE(people_.props, '$.name.type()'), 'null') = 'null' THEN FALSE END)))"
+      sqlite:
+        - "(NOT ((EXISTS (SELECT 1 FROM json_each($_cy_l) AS i1 WHERE drivine_equal((CASE i1.type WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null' WHEN 'array' THEN i1.value WHEN 'object' THEN i1.value ELSE json_quote(i1.value) END), (people_.props -> '$.\"name\"'))) OR CASE WHEN NOT COALESCE(json_type((people_.props -> '$.\"name\"')), 'null') = 'null' THEN FALSE END)))"
+  - name: "A text that starts with one"
+    condition: "n.name STARTS WITH $p"
+    parameters: {p: "A"}
+    rows: ["p1"]
+    sql:
+      postgres:
+        - "starts_with(CASE WHEN jsonb_typeof((people_.props -> 'name')) = 'string' THEN (people_.props -> 'name') #>> '{}' END, CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END)"
+      oracle:
+        - "COALESCE((SUBSTR(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name') END, 1, LENGTH(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END)) = CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END), (DBMS_LOB.COMPARE(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name' RETURNING CLOB) END, CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END, LENGTH(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END), 1, 1) = 0), CASE WHEN CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END = 0 AND CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END IS NOT NULL THEN TRUE WHEN CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END = 0 AND CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END IS NOT NULL THEN FALSE END)"
+      sqlite:
+        - "CASE WHEN CASE WHEN json_type((people_.props -> '$.\"name\"')) = 'text' THEN (people_.props -> '$.\"name\"') ->> '$' END IS NOT NULL AND CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END IS NOT NULL THEN substr(CASE WHEN json_type((people_.props -> '$.\"name\"')) = 'text' THEN (people_.props -> '$.\"name\"') ->> '$' END, 1, length(CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END)) = CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END END"
+  - name: "A text that ends with one"
+    condition: "n.name ENDS WITH $p"
+    parameters: {p: "ce"}
+    rows: ["p2"]
+    sql:
+      postgres:
+        - "right(CASE WHEN jsonb_typeof((people_.props -> 'name')) = 'string' THEN (people_.props -> 'name') #>> '{}' END, length(CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END)) = CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END"
+      oracle:
+        - "COALESCE((SUBSTR(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name') END, -LENGTH(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END)) = CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END), (LENGTH(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name' RETURNING CLOB) END) >= LENGTH(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END) AND DBMS_LOB.COMPARE(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name' RETURNING CLOB) END, CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END, LENGTH(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END), LENGTH(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name' RETURNING CLOB) END) - LENGTH(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END) + 1, 1) = 0), CASE WHEN CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END = 0 AND CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END IS NOT NULL THEN TRUE WHEN CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END = 0 AND CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END IS NOT NULL THEN FALSE END)"
+      sqlite:
+        - "CASE WHEN CASE WHEN json_type((people_.props -> '$.\"name\"')) = 'text' THEN (people_.props -> '$.\"name\"') ->> '$' END IS NOT NULL AND CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END IS NOT NULL THEN (CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END = '' OR substr(CASE WHEN json_type((people_.props -> '$.\"name\"')) = 'text' THEN (people_.props -> '$.\"name\"') ->> '$' END, -length(CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END)) = CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END) END"
+  - name: "A text that holds one"
+    condition: "n.name CONTAINS $p"
+    parameters: {p: "d"}
+    rows: ["p1", "p3"]
+    sql:
+      postgres:
+        - "strpos(CASE WHEN jsonb_typeof((people_.props -> 'name')) = 'string' THEN (people_.props -> 'name') #>> '{}' END, CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END) > 0"
+      oracle:
+        - "COALESCE((INSTR(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name') END, CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END) > 0), (SELECT (CASE WHEN sh1.v1 IS NULL OR sh1.v2 IS NULL THEN NULL WHEN LENGTH(sh1.v2) <= 32767 THEN SIGN(INSTR(sh1.v1, sh1.v2)) WHEN LENGTH(sh1.v2) >= LENGTH(sh1.v1) THEN CASE WHEN LENGTH(sh1.v2) = LENGTH(sh1.v1) AND DBMS_LOB.COMPARE(sh1.v1, sh1.v2) = 0 THEN 1 ELSE 0 END ELSE (SELECT cs_found FROM DUAL MODEL DIMENSION BY (0 cs_i) MEASURES (INSTR(sh1.v1, SUBSTR(sh1.v2, 1, 1000)) cs_at, 0 cs_found) RULES ITERATE (4294967295) UNTIL (cs_found[0] <> 0) (cs_found[0] = CASE WHEN cs_at[0] = 0 OR cs_at[0] > LENGTH(sh1.v1) - LENGTH(sh1.v2) + 1 THEN -1 WHEN DBMS_LOB.COMPARE(sh1.v1, sh1.v2, LENGTH(sh1.v2), cs_at[0], 1) = 0 THEN 1 ELSE 0 END, cs_at[0] = CASE WHEN cs_found[0] = 0 THEN INSTR(sh1.v1, SUBSTR(sh1.v2, 1, 1000), cs_at[0] + 1) ELSE cs_at[0] END)) END = 1) FROM (SELECT /*+ NO_MERGE */ CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name' RETURNING CLOB) END AS v1, CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END AS v2) sh1), CASE WHEN CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END = 0 AND CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END IS NOT NULL THEN TRUE WHEN CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END = 0 AND CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END IS NOT NULL THEN FALSE END)"
+      sqlite:
+        - "(instr(CASE WHEN json_type((people_.props -> '$.\"name\"')) = 'text' THEN (people_.props -> '$.\"name\"') ->> '$' END, CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END) > 0)"
+  - name: "A text equal to one, either in lower case"
+    condition: "toLower(n.id) = toLower($p)"
+    parameters: {p: "P3"}
+    rows: ["p3"]
+    sql:
+      postgres:
+        - "CASE WHEN NOT COALESCE(jsonb_typeof(to_jsonb(lower(CASE WHEN jsonb_typeof((people_.props -> 'id')) = 'string' THEN (people_.props -> 'id') #>> '{}' END))), 'null') = 'null' AND NOT COALESCE(jsonb_typeof(to_jsonb(lower(CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END))), 'null') = 'null' THEN to_jsonb(lower(CASE WHEN jsonb_typeof((people_.props -> 'id')) = 'string' THEN (people_.props -> 'id') #>> '{}' END)) = to_jsonb(lower(CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END)) END"
+      oracle:
+        - "(SELECT CASE WHEN NOT NVL(JSON_VALUE(sh1.v1, '$.type()'), 'null') = 'null' AND NOT NVL(JSON_VALUE(sh1.v2, '$.type()'), 'null') = 'null' THEN (CASE WHEN JSON_VALUE(sh1.v1, '$') IS NOT NULL AND JSON_VALUE(sh1.v2, '$') IS NOT NULL THEN sh1.v1 = sh1.v2 WHEN JSON_VALUE(sh1.v1, '$.type()') = 'string' AND JSON_VALUE(sh1.v2, '$.type()') = 'string' THEN NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(sh1.v1, '$' RETURNING CLOB)), TO_CLOB(JSON_VALUE(sh1.v2, '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(sh1.v1, '$' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(sh1.v2, '$' RETURNING CLOB))), 0))) = 0 WHEN JSON_VALUE(sh1.v1, '$.type()') IS NULL OR JSON_VALUE(sh1.v2, '$.type()') IS NULL THEN NULL WHEN JSON_VALUE(sh1.v1, '$.type()') = 'string' OR JSON_VALUE(sh1.v2, '$.type()') = 'string' THEN FALSE ELSE sh1.v1 = sh1.v2 END AND NOT ((JSON_VALUE(sh1.v1, '$.type()') = 'double' AND JSON_VALUE(sh1.v1, '$' RETURNING BINARY_DOUBLE) IS NAN) OR JSON_VALUE(sh1.v1, '$.type()') IN ('array', 'object') AND INSTR(JSON_SERIALIZE(sh1.v1 RETURNING CLOB EXTENDED), '{\"$numberDouble\":\"Nan\"}') > 0)) END FROM (SELECT /*+ NO_MERGE */ COALESCE(JSON_SCALAR(LOWER(CASE WHEN JSON_VALUE(people_.props, '$.id.type()') = 'string' THEN JSON_VALUE(people_.props, '$.id') END)), JSON_SCALAR(CASE WHEN LENGTH(LOWER(CASE WHEN JSON_VALUE(people_.props, '$.id.type()') = 'string' THEN JSON_VALUE(people_.props, '$.id' RETURNING CLOB) END)) > 0 THEN LOWER(CASE WHEN JSON_VALUE(people_.props, '$.id.type()') = 'string' THEN JSON_VALUE(people_.props, '$.id' RETURNING CLOB) END) END), CASE WHEN CASE WHEN JSON_VALUE(people_.props, '$.id.type()') = 'string' THEN JSON_VALUE(people_.props, '$.id.length()' RETURNING NUMBER) END IS NOT NULL THEN JSON('\"\"') END) AS v1, COALESCE(JSON_SCALAR(LOWER(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END)), JSON_SCALAR(CASE WHEN LENGTH(LOWER(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END)) > 0 THEN LOWER(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$' RETURNING CLOB) END) END), CASE WHEN CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$.length()' RETURNING NUMBER) END IS NOT NULL THEN JSON('\"\"') END) AS v2) sh1)"
+      sqlite:
+        - "CASE WHEN NOT COALESCE(json_type(NULLIF(json_quote(drivine_lower(CASE WHEN json_type((people_.props -> '$.\"id\"')) = 'text' THEN (people_.props -> '$.\"id\"') ->> '$' END)), 'null')), 'null') = 'null' AND NOT COALESCE(json_type(NULLIF(json_quote(drivine_lower(CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END)), 'null')), 'null') = 'null' THEN drivine_equal(NULLIF(json_quote(drivine_lower(CASE WHEN json_type((people_.props -> '$.\"id\"')) = 'text' THEN (people_.props -> '$.\"id\"') ->> '$' END)), 'null'), NULLIF(json_quote(drivine_lower(CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END)), 'null')) END"
+  - name: "A text a pattern matches"
+    condition: "n.name =~ $p"
+    parameters: {p: "[A-Z].*"}
+    rows: ["p1", "p2"]
+    sql:
+      postgres:
+        - "(CASE WHEN jsonb_typeof((people_.props -> 'name')) = 'string' THEN (people_.props -> 'name') #>> '{}' END ~ regexp_replace(regexp_replace(regexp_replace(CASE WHEN jsonb_typeof(CAST($_cy_p AS jsonb)) = 'string' THEN CAST($_cy_p AS jsonb) #>> '{}' END, '(^|[^\\\\])((\\\\\\\\)*)\\\\z', '\\1\\2\\\\Z', 'g'), '^(\\(\\?([a-z]+)\\))?(.*)$', '(?p\\2)\\\\A(?:\\3)\\\\Z'), '^\\(\\?([a-z]*(s[a-z]*m|m[a-z]*s)[a-z]*)\\)', '(?\\1w)'))"
+      oracle:
+        - "CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN COALESCE(REGEXP_LIKE(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name') END, '\\A(' || REGEXP_REPLACE(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE(REGEXP_SUBSTR(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1), 's', 'n'), 'c')), REGEXP_LIKE(CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name' RETURNING CLOB) END, '\\A(' || REGEXP_REPLACE(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE(REGEXP_SUBSTR(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1), 's', 'n'), 'c')), CASE WHEN CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'string' THEN JSON_VALUE(people_.props, '$.name.length()' RETURNING NUMBER) END = 0 THEN REGEXP_LIKE(CHR(10), '\\A(' || REGEXP_REPLACE(REGEXP_REPLACE(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END, '^\\(\\?[a-z]+\\)', ''), '(^|[^\\\\])((\\\\\\\\)*)\\\\z', '\\1\\2\\\\Z') || ')[[:cntrl:]]\\z', NVL(REPLACE(REGEXP_SUBSTR(CASE WHEN JSON_VALUE(JSON($_cy_p), '$.type()') = 'string' THEN JSON_VALUE(JSON($_cy_p), '$') END, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1), 's', 'n'), 'c')) END) END"
+      sqlite:
+        - "(CASE WHEN json_type((people_.props -> '$.\"name\"')) = 'text' THEN (people_.props -> '$.\"name\"') ->> '$' END REGEXP ('^(?:' || CASE WHEN json_type($_cy_p) = 'text' THEN $_cy_p ->> '$' END || ')\\z'))"
+  - name: "A value in a stored list"
+    condition: "$t IN n.tags"
+    parameters: {t: "navy"}
+    rows: ["p2"]
+    sql:
+      postgres:
+        - "EXISTS (SELECT 1 FROM jsonb_array_elements((people_.props -> 'tags')) WITH ORDINALITY i1 (item, item_no) WHERE i1.item = CAST($_cy_t AS jsonb))"
+      oracle:
+        - "EXISTS (SELECT /*+ NO_COALESCE_SQ */ 1 FROM JSON_TABLE(COALESCE(JSON_QUERY(people_.props, '$?(@.tags.type() != \"string\" || @.tags.length() <= 4000).tags' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.tags') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.tags') RETURNING CLOB EXTENDED), '$.tags' RETURNING CLOB) EXTENDED) END), '$[*]' COLUMNS (item_no FOR ORDINALITY, item JSON PATH '$')) i1 WHERE (CASE WHEN JSON_VALUE(i1.item, '$') IS NOT NULL AND JSON_VALUE(JSON($_cy_t), '$') IS NOT NULL THEN i1.item = JSON($_cy_t) WHEN JSON_VALUE(i1.item, '$.type()') = 'string' AND JSON_VALUE(JSON($_cy_t), '$.type()') = 'string' THEN NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(i1.item, '$' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_t), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(i1.item, '$' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_t), '$' RETURNING CLOB))), 0))) = 0 WHEN JSON_VALUE(i1.item, '$.type()') IS NULL OR JSON_VALUE(JSON($_cy_t), '$.type()') IS NULL THEN NULL WHEN JSON_VALUE(i1.item, '$.type()') = 'string' OR JSON_VALUE(JSON($_cy_t), '$.type()') = 'string' THEN FALSE ELSE i1.item = JSON($_cy_t) END AND NOT ((JSON_VALUE(i1.item, '$.type()') = 'double' AND JSON_VALUE(i1.item, '$' RETURNING BINARY_DOUBLE) IS NAN) OR JSON_VALUE(i1.item, '$.type()') IN ('array', 'object') AND INSTR(JSON_SERIALIZE(i1.item RETURNING CLOB EXTENDED), '{\"$numberDouble\":\"Nan\"}') > 0)))"
+      sqlite:
+        - "EXISTS (SELECT 1 FROM json_each((people_.props -> '$.\"tags\"')) AS i1 WHERE drivine_equal((CASE i1.type WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null' WHEN 'array' THEN i1.value WHEN 'object' THEN i1.value ELSE json_quote(i1.value) END), $_cy_t))"
+  - name: "A property whose key begins with $"
+    condition: "n.`$k` = $p"
+    parameters: {p: "x"}
+    rows: ["p1"]
+    sql:
+      postgres:
+        - "(people_.props -> '$$k') = CAST($_cy_p AS jsonb)"
+      oracle:
+        - "COALESCE(JSON_VALUE(people_.props, '$.\"$$k\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = $_cyk_p, CASE WHEN NVL(JSON_VALUE(people_.props, '$.\"$$k\".type()'), 'null') <> 'null' THEN FALSE END)"
+      sqlite:
+        - "(COALESCE(people_.props ->> '$.\"$$k\".\"$t\"', CASE json_type(people_.props, '$.\"$$k\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"$$k\"') END) = COALESCE($_cy_p ->> '$.\"$t\"', CASE json_type($_cy_p, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_p, '$') END) AND COALESCE(people_.props ->> '$.\"$$k\".s', people_.props ->> '$.\"$$k\".v', people_.props ->> '$.\"$$k\"') = COALESCE($_cy_p ->> '$.s', $_cy_p ->> '$.v', $_cy_p ->> '$') AND (json_type((people_.props -> '$.\"$$k\"')) = 'text' AND ((people_.props -> '$.\"$$k\"') ->> '$') = ($_cy_p ->> '$')))"
+  - name: "A property not there"
+    condition: "n.name IS NULL"
+    rows: ["p5"]
+    sql:
+      postgres:
+        - "(COALESCE(jsonb_typeof((people_.props -> 'name')), 'null') = 'null')"
+      oracle:
+        - "(NVL(JSON_VALUE(people_.props, '$.name.type()'), 'null') = 'null')"
+      sqlite:
+        - "(COALESCE(json_type((people_.props -> '$.\"name\"')), 'null') = 'null')"
+  - name: "A property there"
+    condition: "n.born IS NOT NULL"
+    rows: ["p1", "p2", "p3", "p4"]
+    sql:
+      postgres:
+        - "(NOT COALESCE(jsonb_typeof((people_.props -> 'born')), 'null') = 'null')"
+      oracle:
+        - "(NOT NVL(JSON_VALUE(people_.props, '$.born.type()'), 'null') = 'null')"
+      sqlite:
+        - "(NOT COALESCE(json_type((people_.props -> '$.\"born\"')), 'null') = 'null')"
+  - name: "A seek past a cursor, by a number and then the id"
+    condition: "n.age > $age OR (n.age = $age AND n.id > $id)"
+    parameters: {age: 36, id: "p1"}
+    rows: ["p2", "p3"]
+    sql:
+      postgres:
+        - "(CASE WHEN jsonb_typeof((people_.props -> 'age')) = jsonb_typeof(CAST($_cy_age AS jsonb)) AND jsonb_typeof((people_.props -> 'age')) IN ('number', 'string', 'boolean') THEN CASE WHEN jsonb_typeof((people_.props -> 'age')) = 'string' THEN (people_.props ->> 'age') COLLATE \"C\" > (CAST($_cy_age AS jsonb) #>> '{}') ELSE (people_.props -> 'age') > CAST($_cy_age AS jsonb) END END OR ((people_.props -> 'age') = CAST($_cy_age AS jsonb) AND CASE WHEN jsonb_typeof((people_.props -> 'id')) = jsonb_typeof(CAST($_cy_id AS jsonb)) AND jsonb_typeof((people_.props -> 'id')) IN ('number', 'string', 'boolean') THEN CASE WHEN jsonb_typeof((people_.props -> 'id')) = 'string' THEN (people_.props ->> 'id') COLLATE \"C\" > (CAST($_cy_id AS jsonb) #>> '{}') ELSE (people_.props -> 'id') > CAST($_cy_id AS jsonb) END END))"
+      oracle:
+        - "(CASE WHEN DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.age.type()')) = DECODE(JSON_VALUE(JSON($_cy_age), '$.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(JSON($_cy_age), '$.type()')) AND DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.age.type()')) IN ('number', 'string', 'boolean') THEN CASE WHEN JSON_VALUE(people_.props, '$.age.type()') = 'string' THEN CASE WHEN JSON_VALUE(people_.props, '$.age') IS NOT NULL AND JSON_VALUE(JSON($_cy_age), '$') IS NOT NULL THEN JSON_VALUE(people_.props, '$.age') > JSON_VALUE(JSON($_cy_age), '$') ELSE NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(people_.props, '$.age' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_age), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(people_.props, '$.age' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_age), '$' RETURNING CLOB))), 0))) > 0 END ELSE (NOT ((JSON_VALUE(people_.props, '$.age.type()') = 'double' AND JSON_VALUE(people_.props, '$.age' RETURNING BINARY_DOUBLE) IS NAN) OR (JSON_VALUE(JSON($_cy_age), '$.type()') = 'double' AND JSON_VALUE(JSON($_cy_age), '$' RETURNING BINARY_DOUBLE) IS NAN)) AND JSON_QUERY(people_.props, '$.age' RETURNING JSON) > JSON($_cy_age)) END END OR (COALESCE(JSON_VALUE(people_.props, '$.age' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER($_cyk_age), CASE WHEN NVL(JSON_VALUE(people_.props, '$.age.type()'), 'null') <> 'null' THEN FALSE END) AND CASE WHEN DECODE(JSON_VALUE(people_.props, '$.id.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.id.type()')) = DECODE(JSON_VALUE(JSON($_cy_id), '$.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(JSON($_cy_id), '$.type()')) AND DECODE(JSON_VALUE(people_.props, '$.id.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(people_.props, '$.id.type()')) IN ('number', 'string', 'boolean') THEN CASE WHEN JSON_VALUE(people_.props, '$.id.type()') = 'string' THEN CASE WHEN JSON_VALUE(people_.props, '$.id') IS NOT NULL AND JSON_VALUE(JSON($_cy_id), '$') IS NOT NULL THEN JSON_VALUE(people_.props, '$.id') > JSON_VALUE(JSON($_cy_id), '$') ELSE NVL(DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(people_.props, '$.id' RETURNING CLOB)), TO_CLOB(JSON_VALUE(JSON($_cy_id), '$' RETURNING CLOB))), SIGN(NVL(LENGTH(TO_CLOB(JSON_VALUE(people_.props, '$.id' RETURNING CLOB))), 0) - NVL(LENGTH(TO_CLOB(JSON_VALUE(JSON($_cy_id), '$' RETURNING CLOB))), 0))) > 0 END ELSE (NOT ((JSON_VALUE(people_.props, '$.id.type()') = 'double' AND JSON_VALUE(people_.props, '$.id' RETURNING BINARY_DOUBLE) IS NAN) OR (JSON_VALUE(JSON($_cy_id), '$.type()') = 'double' AND JSON_VALUE(JSON($_cy_id), '$' RETURNING BINARY_DOUBLE) IS NAN)) AND JSON_QUERY(people_.props, '$.id' RETURNING JSON) > JSON($_cy_id)) END END))"
+      sqlite:
+        - "(CASE WHEN (CASE json_type((people_.props -> '$.\"age\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) = (CASE json_type($_cy_age) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) AND (CASE json_type((people_.props -> '$.\"age\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) IN ('number', 'string', 'boolean') THEN (((people_.props -> '$.\"age\"') ->> '$') > ($_cy_age ->> '$')) END OR ((COALESCE(people_.props ->> '$.\"age\".\"$t\"', CASE json_type(people_.props, '$.\"age\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(people_.props, '$.\"age\"') END) = COALESCE($_cy_age ->> '$.\"$t\"', CASE json_type($_cy_age, '$') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($_cy_age, '$') END) AND COALESCE(people_.props ->> '$.\"age\".s', people_.props ->> '$.\"age\".v', people_.props ->> '$.\"age\"') = COALESCE($_cy_age ->> '$.s', $_cy_age ->> '$.v', $_cy_age ->> '$') AND (json_type((people_.props -> '$.\"age\"')) IN ('integer', 'real') AND ((people_.props -> '$.\"age\"') ->> '$') = ($_cy_age ->> '$'))) AND CASE WHEN (CASE json_type((people_.props -> '$.\"id\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) = (CASE json_type($_cy_id) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) AND (CASE json_type((people_.props -> '$.\"id\"')) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END) IN ('number', 'string', 'boolean') THEN (((people_.props -> '$.\"id\"') ->> '$') > ($_cy_id ->> '$')) END))"
+  - name: "Ordered by a property of values of several kinds"
+    order: "n.born"
+    rows: ["p4", "p3", "p1", "p2", "p5"]
+    sql:
+      postgres:
+        - "ROW(CASE jsonb_typeof((people_.props -> 'born')) WHEN 'string' THEN '\"\"'::jsonb WHEN 'object' THEN CASE WHEN ((people_.props -> 'born') ->> '$t') IS NOT NULL THEN jsonb_build_object('k', CASE ((people_.props -> 'born') ->> '$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE((people_.props -> 'born') -> 's', (people_.props -> 'born') -> 'v')) ELSE (people_.props -> 'born') END WHEN 'array' THEN CAST(g_list_key((people_.props -> 'born')) AS jsonb) ELSE NULLIF((people_.props -> 'born'), 'null'::jsonb) END, (CASE WHEN jsonb_typeof((people_.props -> 'born')) = 'string' THEN (people_.props ->> 'born') END) COLLATE \"C\")"
+      oracle:
+        - "DECODE(JSON_VALUE(people_.props, '$.born.type()'), 'object', CASE CASE WHEN JSON_VALUE(people_.props, '$.born.type()') = 'object' THEN JSON_VALUE(people_.props, '$.born.\"$t\"') END WHEN 'datetime' THEN '21' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'localdatetime' THEN '22' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'date' THEN '23' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'time' THEN '24' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'localtime' THEN '25' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'duration' THEN '26' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) ELSE '1' END, 'array', '2', 'string', '3', 'boolean', '4', 'number', '5', 'double', '5', 'float', '5')"
+        - "COALESCE(JSON_QUERY(people_.props, '$?(@.born.type() != \"string\" || @.born.length() <= 4000).born' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.born') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.born') RETURNING CLOB EXTENDED), '$.born' RETURNING CLOB) EXTENDED) END)"
+      sqlite:
+        - "CASE json_type((people_.props -> '$.\"born\"')) WHEN 'object' THEN CASE ((people_.props -> '$.\"born\"') ->> '$.\"$t\"') WHEN 'datetime' THEN '2~1' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'localdatetime' THEN '2~2' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'date' THEN '2~3' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'time' THEN '2~4' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'localtime' THEN '2~5' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'duration' THEN '2~6' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) ELSE '1' END WHEN 'array' THEN '2!' || drivine_sort_key((people_.props -> '$.\"born\"')) WHEN 'text' THEN '3' WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END NULLS LAST"
+        - "((people_.props -> '$.\"born\"') ->> '$') NULLS LAST"
+  - name: "Ordered by a property of values of several kinds, descending"
+    order: "n.born"
+    descending: true
+    rows: ["p5", "p2", "p1", "p3", "p4"]
+    sql:
+      postgres:
+        - "ROW(CASE jsonb_typeof((people_.props -> 'born')) WHEN 'string' THEN '\"\"'::jsonb WHEN 'object' THEN CASE WHEN ((people_.props -> 'born') ->> '$t') IS NOT NULL THEN jsonb_build_object('k', CASE ((people_.props -> 'born') ->> '$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE((people_.props -> 'born') -> 's', (people_.props -> 'born') -> 'v')) ELSE (people_.props -> 'born') END WHEN 'array' THEN CAST(g_list_key((people_.props -> 'born')) AS jsonb) ELSE NULLIF((people_.props -> 'born'), 'null'::jsonb) END, (CASE WHEN jsonb_typeof((people_.props -> 'born')) = 'string' THEN (people_.props ->> 'born') END) COLLATE \"C\") DESC"
+      oracle:
+        - "DECODE(JSON_VALUE(people_.props, '$.born.type()'), 'object', CASE CASE WHEN JSON_VALUE(people_.props, '$.born.type()') = 'object' THEN JSON_VALUE(people_.props, '$.born.\"$t\"') END WHEN 'datetime' THEN '21' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'localdatetime' THEN '22' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'date' THEN '23' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'time' THEN '24' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'localtime' THEN '25' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) WHEN 'duration' THEN '26' || COALESCE(JSON_VALUE(people_.props, '$.born.s'), JSON_VALUE(people_.props, '$.born.v')) ELSE '1' END, 'array', '2', 'string', '3', 'boolean', '4', 'number', '5', 'double', '5', 'float', '5') DESC"
+        - "COALESCE(JSON_QUERY(people_.props, '$?(@.born.type() != \"string\" || @.born.length() <= 4000).born' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.born') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.born') RETURNING CLOB EXTENDED), '$.born' RETURNING CLOB) EXTENDED) END) DESC"
+      sqlite:
+        - "CASE json_type((people_.props -> '$.\"born\"')) WHEN 'object' THEN CASE ((people_.props -> '$.\"born\"') ->> '$.\"$t\"') WHEN 'datetime' THEN '2~1' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'localdatetime' THEN '2~2' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'date' THEN '2~3' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'time' THEN '2~4' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'localtime' THEN '2~5' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) WHEN 'duration' THEN '2~6' || COALESCE(((people_.props -> '$.\"born\"') ->> '$.s'), ((people_.props -> '$.\"born\"') ->> '$.v')) ELSE '1' END WHEN 'array' THEN '2!' || drivine_sort_key((people_.props -> '$.\"born\"')) WHEN 'text' THEN '3' WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END DESC NULLS FIRST"
+        - "((people_.props -> '$.\"born\"') ->> '$') DESC NULLS FIRST"
+  - name: "Ordered by a text and a number"
+    order: "n.name"
+    rows: ["p1", "p2", "p3", "p4", "p5"]
+    sql:
+      postgres:
+        - "ROW(CASE jsonb_typeof((people_.props -> 'name')) WHEN 'string' THEN '\"\"'::jsonb WHEN 'object' THEN CASE WHEN ((people_.props -> 'name') ->> '$t') IS NOT NULL THEN jsonb_build_object('k', CASE ((people_.props -> 'name') ->> '$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE((people_.props -> 'name') -> 's', (people_.props -> 'name') -> 'v')) ELSE (people_.props -> 'name') END WHEN 'array' THEN CAST(g_list_key((people_.props -> 'name')) AS jsonb) ELSE NULLIF((people_.props -> 'name'), 'null'::jsonb) END, (CASE WHEN jsonb_typeof((people_.props -> 'name')) = 'string' THEN (people_.props ->> 'name') END) COLLATE \"C\")"
+      oracle:
+        - "DECODE(JSON_VALUE(people_.props, '$.name.type()'), 'object', CASE CASE WHEN JSON_VALUE(people_.props, '$.name.type()') = 'object' THEN JSON_VALUE(people_.props, '$.name.\"$t\"') END WHEN 'datetime' THEN '21' || COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'localdatetime' THEN '22' || COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'date' THEN '23' || COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'time' THEN '24' || COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'localtime' THEN '25' || COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) WHEN 'duration' THEN '26' || COALESCE(JSON_VALUE(people_.props, '$.name.s'), JSON_VALUE(people_.props, '$.name.v')) ELSE '1' END, 'array', '2', 'string', '3', 'boolean', '4', 'number', '5', 'double', '5', 'float', '5')"
+        - "COALESCE(JSON_QUERY(people_.props, '$?(@.name.type() != \"string\" || @.name.length() <= 4000).name' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.name') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.name') RETURNING CLOB EXTENDED), '$.name' RETURNING CLOB) EXTENDED) END)"
+      sqlite:
+        - "CASE json_type((people_.props -> '$.\"name\"')) WHEN 'object' THEN CASE ((people_.props -> '$.\"name\"') ->> '$.\"$t\"') WHEN 'datetime' THEN '2~1' || COALESCE(((people_.props -> '$.\"name\"') ->> '$.s'), ((people_.props -> '$.\"name\"') ->> '$.v')) WHEN 'localdatetime' THEN '2~2' || COALESCE(((people_.props -> '$.\"name\"') ->> '$.s'), ((people_.props -> '$.\"name\"') ->> '$.v')) WHEN 'date' THEN '2~3' || COALESCE(((people_.props -> '$.\"name\"') ->> '$.s'), ((people_.props -> '$.\"name\"') ->> '$.v')) WHEN 'time' THEN '2~4' || COALESCE(((people_.props -> '$.\"name\"') ->> '$.s'), ((people_.props -> '$.\"name\"') ->> '$.v')) WHEN 'localtime' THEN '2~5' || COALESCE(((people_.props -> '$.\"name\"') ->> '$.s'), ((people_.props -> '$.\"name\"') ->> '$.v')) WHEN 'duration' THEN '2~6' || COALESCE(((people_.props -> '$.\"name\"') ->> '$.s'), ((people_.props -> '$.\"name\"') ->> '$.v')) ELSE '1' END WHEN 'array' THEN '2!' || drivine_sort_key((people_.props -> '$.\"name\"')) WHEN 'text' THEN '3' WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END NULLS LAST"
+        - "((people_.props -> '$.\"name\"') ->> '$') NULLS LAST"
+  - name: "Ordered by a number"
+    order: "n.age"
+    descending: true
+    rows: ["p4", "p5", "p2", "p1", "p3"]
+    sql:
+      postgres:
+        - "ROW(CASE jsonb_typeof((people_.props -> 'age')) WHEN 'string' THEN '\"\"'::jsonb WHEN 'object' THEN CASE WHEN ((people_.props -> 'age') ->> '$t') IS NOT NULL THEN jsonb_build_object('k', CASE ((people_.props -> 'age') ->> '$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE((people_.props -> 'age') -> 's', (people_.props -> 'age') -> 'v')) ELSE (people_.props -> 'age') END WHEN 'array' THEN CAST(g_list_key((people_.props -> 'age')) AS jsonb) ELSE NULLIF((people_.props -> 'age'), 'null'::jsonb) END, (CASE WHEN jsonb_typeof((people_.props -> 'age')) = 'string' THEN (people_.props ->> 'age') END) COLLATE \"C\") DESC"
+      oracle:
+        - "DECODE(JSON_VALUE(people_.props, '$.age.type()'), 'object', CASE CASE WHEN JSON_VALUE(people_.props, '$.age.type()') = 'object' THEN JSON_VALUE(people_.props, '$.age.\"$t\"') END WHEN 'datetime' THEN '21' || COALESCE(JSON_VALUE(people_.props, '$.age.s'), JSON_VALUE(people_.props, '$.age.v')) WHEN 'localdatetime' THEN '22' || COALESCE(JSON_VALUE(people_.props, '$.age.s'), JSON_VALUE(people_.props, '$.age.v')) WHEN 'date' THEN '23' || COALESCE(JSON_VALUE(people_.props, '$.age.s'), JSON_VALUE(people_.props, '$.age.v')) WHEN 'time' THEN '24' || COALESCE(JSON_VALUE(people_.props, '$.age.s'), JSON_VALUE(people_.props, '$.age.v')) WHEN 'localtime' THEN '25' || COALESCE(JSON_VALUE(people_.props, '$.age.s'), JSON_VALUE(people_.props, '$.age.v')) WHEN 'duration' THEN '26' || COALESCE(JSON_VALUE(people_.props, '$.age.s'), JSON_VALUE(people_.props, '$.age.v')) ELSE '1' END, 'array', '2', 'string', '3', 'boolean', '4', 'number', '5', 'double', '5', 'float', '5') DESC"
+        - "COALESCE(JSON_QUERY(people_.props, '$?(@.age.type() != \"string\" || @.age.length() <= 4000).age' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.age') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.age') RETURNING CLOB EXTENDED), '$.age' RETURNING CLOB) EXTENDED) END) DESC"
+      sqlite:
+        - "CASE json_type((people_.props -> '$.\"age\"')) WHEN 'object' THEN CASE ((people_.props -> '$.\"age\"') ->> '$.\"$t\"') WHEN 'datetime' THEN '2~1' || COALESCE(((people_.props -> '$.\"age\"') ->> '$.s'), ((people_.props -> '$.\"age\"') ->> '$.v')) WHEN 'localdatetime' THEN '2~2' || COALESCE(((people_.props -> '$.\"age\"') ->> '$.s'), ((people_.props -> '$.\"age\"') ->> '$.v')) WHEN 'date' THEN '2~3' || COALESCE(((people_.props -> '$.\"age\"') ->> '$.s'), ((people_.props -> '$.\"age\"') ->> '$.v')) WHEN 'time' THEN '2~4' || COALESCE(((people_.props -> '$.\"age\"') ->> '$.s'), ((people_.props -> '$.\"age\"') ->> '$.v')) WHEN 'localtime' THEN '2~5' || COALESCE(((people_.props -> '$.\"age\"') ->> '$.s'), ((people_.props -> '$.\"age\"') ->> '$.v')) WHEN 'duration' THEN '2~6' || COALESCE(((people_.props -> '$.\"age\"') ->> '$.s'), ((people_.props -> '$.\"age\"') ->> '$.v')) ELSE '1' END WHEN 'array' THEN '2!' || drivine_sort_key((people_.props -> '$.\"age\"')) WHEN 'text' THEN '3' WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END DESC NULLS FIRST"
+        - "((people_.props -> '$.\"age\"') ->> '$') DESC NULLS FIRST"
+  - name: "A property's value"
+    value: "n.born"
+    sql:
+      postgres:
+        - "(people_.props -> 'born')"
+      oracle:
+        - "COALESCE(JSON_QUERY(people_.props, '$?(@.born.type() != \"string\" || @.born.length() <= 4000).born' RETURNING JSON), CASE WHEN JSON_EXISTS(people_.props, '$.born') THEN JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(people_.props, KEEP '$.born') RETURNING CLOB EXTENDED), '$.born' RETURNING CLOB) EXTENDED) END)"
+      sqlite:
+        - "(people_.props -> '$.\"born\"')"
+
+# The table: each form a fragment takes (compiler/README.md, "Fragments"), each condition in each of `positions`, each value
+# as an order both ways, over `setup`'s nodes. `rows` is what Neo4j keeps, for each position in turn, or orders, ascending then
+# descending, by id as the cases' are; `digests` the first 16 hexadecimal digits of the SHA-256 of each store's terms joined by a
+# line feed, in the same turn. A runner checks each on its store as it checks a case.
+table:
+  positions: ["{f}", "NOT ({f})", "({f}) OR n.id = 'p5'", "({f}) AND n.age IS NOT NULL"]
+  conditions:
+    - form: "n.name = $p"
+      parameters: {"p": "Ada"}
+      rows: [["p1"], ["p2", "p3", "p4"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["3f39dc293c572e87", "e4f60342007564db", "88863234a372a769", "a1787b6face43262"], "oracle": ["63d4e215245a1e7c", "c810b2c48f843fa8", "c2cc63038afedea8", "7a92b5cf4dadbaec"], "sqlite": ["44b8f2bc521c77e7", "99c8c8c35c0cb875", "de88e185f076bfe0", "7fd7abecb9a8fa5b"]}
+    - form: "n.name <> $p"
+      parameters: {"p": "Ada"}
+      rows: [["p2", "p3", "p4"], ["p1"], ["p2", "p3", "p4", "p5"], ["p2", "p3"]]
+      digests: {"postgres": ["20d600a6de8b734b", "4d933d36b7a27dbb", "e6efbeeeeccb1dfb", "ee514f7e0b61e6ed"], "oracle": ["d6188209ffc495b2", "093d10ac5f3cec83", "9379b4b705983f16", "6897a2bbbaf69dfa"], "sqlite": ["a1502cfbb995dc9d", "9a7f0e56406d8096", "34f614ad66dc5595", "65c35223b204a6fd"]}
+    - form: "n.age < $a"
+      parameters: {"a": 50}
+      rows: [["p1", "p3"], ["p2"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["0bcea71ecfc9cba8", "b5c1b77159a1d00d", "86bf5a1078cece02", "a951d3adabca0f22"], "oracle": ["ce375b3bf4263d11", "4db938f9095e7917", "836f1fe6c8a17fa2", "8ab8e6186edbfa54"], "sqlite": ["b22f07d14410444f", "8042a6fad90d319f", "f3a11d61347462a1", "25e73031273f2a84"]}
+    - form: "n.name IN $l"
+      parameters: {"l": ["Ada", "Grace"]}
+      rows: [["p1", "p2"], ["p3", "p4"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["b7028a085a097ab8", "1e0ce5b6314ec76a", "72f62c473187d97d", "a468f7c291a588d1"], "oracle": ["0ca16b04729b1567", "d3ef48cea4b30ff7", "09510f2614cb1d1d", "eb5e47a7d48cf89e"], "sqlite": ["fffec6a2bff80969", "5aed69db05581667", "2d575c8a54c98d1f", "698ba16a73d12938"]}
+    - form: "$t IN n.tags"
+      parameters: {"t": "navy"}
+      rows: [["p2"], ["p1", "p4"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["8a1e98993c631c59", "bf190afc0e206dd7", "17db7891724c8a57", "eba6c92351b495a8"], "oracle": ["fe813d9d877c7b6e", "437df5b49548e4bc", "f5c6bdcf0cdeccdb", "7acf1a1be04c053f"], "sqlite": ["9083e8d6d0879af6", "62c37718e262bc1d", "3e5c540e223bd616", "33c01c833cc0f71a"]}
+    - form: "n.age IS NULL"
+      rows: [["p4", "p5"], ["p1", "p2", "p3"], ["p4", "p5"], []]
+      digests: {"postgres": ["68bcb20536da24ec", "657c6626d9313057", "ac43a7d839756550", "cfb125e5c24db09e"], "oracle": ["aa00ff3aa40f901e", "69bcdcff866543e9", "b21d2f3209ccc740", "d850deda685b5e9e"], "sqlite": ["ceaaa2986ebaa2c6", "6dee3cc507ed9128", "d6c426e9965779df", "615bdb98bf32b13a"]}
+    - form: "n.age IS NOT NULL"
+      rows: [["p1", "p2", "p3"], ["p4", "p5"], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
+      digests: {"postgres": ["3bf6b6aa29bdb818", "12350645fc65d680", "41a8c01676f68640", "9a708d46bb4b3010"], "oracle": ["1d5119eafdcd08ed", "0037f248c19b69d8", "3a4dbbc2b0ff72a8", "7fce152344d77ff7"], "sqlite": ["522557302b581eaa", "da7788b4630def40", "95a2efc20c37e9be", "e01944caeb55393e"]}
+    - form: "n.name STARTS WITH $s"
+      parameters: {"s": "A"}
+      rows: [["p1"], ["p2", "p3"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["88e4f92137a524a9", "f8624fd88460bf92", "144fbe7a5771bcc0", "79cd51d1e2a678f6"], "oracle": ["0cff2204cfe631b0", "4c847686c2ca1466", "35258839cdb99828", "d64209a73619dc02"], "sqlite": ["2cd428879fd82e00", "b7dd71e6fdddfa45", "a647f8c68da50019", "4718e3b74f835a2c"]}
+    - form: "n.name ENDS WITH $s"
+      parameters: {"s": "ce"}
+      rows: [["p2"], ["p1", "p3"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["2b42a325aca27373", "80344ce8a3a64ac5", "970a79b655ec2928", "b40053ee0355a606"], "oracle": ["ffee6f8763063642", "a2d8f1d3e12a95cf", "0324896eb3ed2fcd", "16211abc5fd41ac5"], "sqlite": ["fbf016fdd8a7a67e", "0a25fdb6ae49634a", "813d275b69f061d9", "0718591b783e06a9"]}
+    - form: "n.name CONTAINS $s"
+      parameters: {"s": "d"}
+      rows: [["p1", "p3"], ["p2"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["0b2f4bfeafbcae58", "1bcb1baa5ce96ac6", "d39b95ad516547fa", "cb20361484a9d124"], "oracle": ["8cbc489d18ab6519", "388246021598ec70", "1eb9725eb893c900", "ce2573c889ff36fc"], "sqlite": ["84b1c9d18adb4c79", "60812dddcd65d5be", "e0bd095ed454e082", "d72241eff1bca401"]}
+    - form: "n.name =~ $r"
+      parameters: {"r": "[A-Z].*"}
+      rows: [["p1", "p2"], ["p3"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["cfed86eb1a22543f", "0ccc7f223aee36a9", "6bf4962071869bc1", "a5d60c4cc3820506"], "oracle": ["d50933e0cdf391b2", "d1b94643280adf75", "0bbe855f3425cb72", "fc2c72d869d0c56f"], "sqlite": ["878cd0b24a525761", "3c3dc611619bd3a0", "f8ecfd37927413ec", "123b8e83636ca34a"]}
+    - form: "toLower(n.id) = toLower($u)"
+      parameters: {"u": "P3"}
+      rows: [["p3"], ["p1", "p2", "p4", "p5"], ["p3", "p5"], ["p3"]]
+      digests: {"postgres": ["4151bec37157ee31", "d92b391f06af243e", "68d11d60bb306a17", "559af3ab40108602"], "oracle": ["4fd7558b08501891", "f81cc85ff37fb665", "b57eb2eb6df8391c", "f7fa167673b631d2"], "sqlite": ["f273fc59359e9a85", "32f7a4e3aa52dccd", "4064f4eeb66a787e", "22ce18a33d3026b1"]}
+    - form: "toUpper(n.id) = $u"
+      parameters: {"u": "P1"}
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["24648e9ad67bfcde", "a4c201e2f97057ea", "5a2c35aa50df065a", "a5a102fa594b6bfe"], "oracle": ["b78229845ca20ecd", "44b4bcc185daa858", "1bcdfd21440c4acc", "b2ec4d35a5aaa2ba"], "sqlite": ["6d6388d1a96dcad9", "2abd60235efe2047", "0d93822548c8a8e4", "31ad83f76d97e05c"]}
+    - form: "n:Admin"
+      rows: [["p2"], ["p1", "p3", "p4", "p5"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["d9dbc75e58d70ab4", "c6ed7e32475edd46", "41c6d00bdb91f343", "63e60e4cfd0b8aa1"], "oracle": ["2b4491b78ddeea53", "d4f0e9fe9196e41c", "9bda7e1b6dbbfb44", "3a130658aa92e891"], "sqlite": ["3cfecd8906dbaaaa", "acd309ff3622c827", "b843fc383ab043ce", "e6605c8c052b58c3"]}
+    - form: "any(x IN labels(n) WHERE x IN $ls)"
+      parameters: {"ls": ["Admin"]}
+      rows: [["p2"], ["p1", "p3", "p4", "p5"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["6fd80a2e2631e857", "9714e436721a198c", "fbf10695b7debeed", "d50c10e0c0c49772"], "oracle": ["4524d1f80754868f", "f3c4cd64ac853d96", "1e4ef08c78b8f710", "fd7ec67c1c0aa8e5"], "sqlite": ["190c145283a54f51", "aacaded47b6db136", "5786c64ca9e82b35", "a82a2ba4e280fffe"]}
+    - form: "EXISTS { (n)-[:KNOWS]->(m:Person) WHERE m.age > $a }"
+      parameters: {"a": 40}
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["766f7aae0254fc3c", "e17c73f3dc30f847", "0422e3dafda6e927", "0c3cc6749eb10416"], "oracle": ["8119e01f08c65060", "437c8e3acc9a35d1", "2cd4685990d2e378", "7f074c4352f3e073"], "sqlite": ["c77ebe8eed9c072e", "2d65d1c7510bf229", "55f40d6a79c552d0", "3263bae396540f01"]}
+    - form: "EXISTS { (n)-[:KNOWS*1..2]->(m:Person {name: $p}) }"
+      parameters: {"p": "ada"}
+      rows: [["p1", "p2"], ["p3", "p4", "p5"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["c672174a99bd73b1", "06db17a4a655e13f", "5a4304e9c32f788d", "d1367627a7fc9d0a"], "oracle": ["2e85b2678cda5f51", "615c0f91943f7598", "0c51034d3bd42cc3", "a160935c911a528c"], "sqlite": ["97d315a30779de6b", "932346b035e3a015", "58910ccca5722d57", "9a5480b12598802a"]}
+    - form: "all(x IN n.tags WHERE x <> $t)"
+      parameters: {"t": "navy"}
+      rows: [["p1", "p4"], ["p2"], ["p1", "p4", "p5"], ["p1"]]
+      digests: {"postgres": ["f23c26d9b4875cc4", "1cad8406ac4364fc", "62350f4878782f67", "fc29f673949e9978"], "oracle": ["3661e0583986b96c", "3a667165f85b242e", "f2d874907ff5e25d", "df71b6e17ef1e1fd"], "sqlite": ["a5499ff5e70cb3cf", "6b3a51e08946a65d", "c8ab2bcd8921469f", "3e830cd35ad1656c"]}
+    - form: "none(x IN n.tags WHERE x = $t)"
+      parameters: {"t": "math"}
+      rows: [["p2", "p4"], ["p1"], ["p2", "p4", "p5"], ["p2"]]
+      digests: {"postgres": ["f23c26d9b4875cc4", "e2226beb5ae58b67", "62350f4878782f67", "fc29f673949e9978"], "oracle": ["3661e0583986b96c", "5b2b5bc92e20e6e0", "f2d874907ff5e25d", "df71b6e17ef1e1fd"], "sqlite": ["a5499ff5e70cb3cf", "c832fa80150b15c0", "c8ab2bcd8921469f", "3e830cd35ad1656c"]}
+    - form: "coalesce(n.age, 0) * 2 > $a"
+      parameters: {"a": 60}
+      rows: [["p1", "p2", "p3"], ["p4", "p5"], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
+      digests: {"postgres": ["b983dc5b696d7a50", "8509bb9b9a19a043", "7f9e69c929dae4be", "42668977ced95601"], "oracle": ["f4cfa7dce6e9d9ca", "94cd002168b4cade", "a350a8d7d71fb5e5", "e4dae660b3204a6e"], "sqlite": ["69c3d3104aa8c4dd", "eca8e5549dd2f76c", "68d928ff40d56771", "8df755d94843a708"]}
+    - form: "CASE WHEN n.age IS NULL THEN 'none' ELSE 'some' END = $w"
+      parameters: {"w": "none"}
+      rows: [["p4", "p5"], ["p1", "p2", "p3"], ["p4", "p5"], []]
+      digests: {"postgres": ["ec0e7902e26861f7", "0107c6bf31adb5a7", "bf325d70eecd0926", "c2840e532e0bae86"], "oracle": ["5dc13a0ae85e6997", "9abd2fcbb09d8fb9", "9f03e3b0691ab0db", "3074dc767f24c310"], "sqlite": ["b366a3a1c5dd25cb", "d496a03eb6c93796", "f27df1de90a4276d", "ae2e1d8815694fac"]}
+    - form: "n.age / 2 + 1 > $a"
+      parameters: {"a": 20}
+      rows: [["p2"], ["p1", "p3"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["186b3d7c39137817", "382f8d5ab59c76b5", "d2144b3632c25440", "dbce39b1dbd0bd85"], "oracle": ["4ec739af54cd51bf", "0926421d1c603318", "3cab828f9d6f2db6", "9b0f8c8ccf92d41b"], "sqlite": ["1a844ad4ee621bef", "0937832b6e7d153c", "1ec973e342988b95", "ead6b87305158c0a"]}
+    - form: "abs(n.age - 50) < $a"
+      parameters: {"a": 20}
+      rows: [["p1", "p3"], ["p2"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["482df467191132ab", "d7aa6bc218786665", "fe3f86f896e1057e", "99ba7c0abdfa3d99"], "oracle": ["c5b4f1b5ff471bd5", "976ac2c895a53e11", "992dd72dc0e52171", "94b5fcf1e725b4c7"], "sqlite": ["7ac28b58d9749e79", "9be8f475a17ba907", "4b51eb7bf78e8867", "2f4c43fa01257688"]}
+    - form: "toString(n.age) = $s"
+      parameters: {"s": "36"}
+      rows: [["p1"], ["p2", "p3"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["a6b8f3b6b7109d4c", "1b0f95b82da3f8b5", "c82d3de3b6b0d897", "24e262f4ef6a82d1"], "oracle": ["558d2c02dbf791e6", "913eeecb57660d46", "63d968aacc0ee036", "974e23944ccf0f44"], "sqlite": ["c8d72b4d59d6f735", "7380c8335b876c82", "9384b2961f1fe174", "36da5e117702f3d5"]}
+    - form: "size(n.tags) = $c"
+      parameters: {"c": 1}
+      rows: [["p2"], ["p1", "p4"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["cbf5a1a41ed93ebf", "fffda3486586a01d", "0ca50a07e2168bc1", "2c4c6c9a2c66d42c"], "oracle": ["bd63216341075b76", "ef88ebd1583e6440", "469f06186ffc7ef9", "dadcb3517d722d61"], "sqlite": ["22ad0999209952b2", "9aa87e03ab996cc3", "dbfa146b0bb2c221", "a25874e2c2353e89"]}
+    - form: "floor(n.age / 7) = $f"
+      parameters: {"f": 5}
+      rows: [["p1", "p3"], ["p2"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["5db13f985320a4ed", "885cae093b7e1abf", "fb1eab07710cd70f", "fc5b46fa2424cb20"], "oracle": ["6f844daf512c9e5b", "0de6232f1a28d276", "336078783bacde35", "b29c11fb88f51277"], "sqlite": ["366799de01b9d668", "a455a801626f2a7f", "39019000a0d3e237", "5806a962dd8fba59"]}
+    - form: "toInteger(n.age) = $i AND toFloat(n.age) = $x"
+      parameters: {"i": 36, "x": 36.0}
+      rows: [["p1", "p3"], ["p2"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["999df1db5bb502ba", "7a3f8fed77b180e8", "d00a3ec40eae9a60", "9050d0016fd4f0c5"], "oracle": ["66a19edaa2b52639", "8ff978759da0ae06", "c0f805600fbaeb3b", "b1936593f890c2b5"], "sqlite": ["690a89c7cdf8e6e7", "d385916b4de3376f", "0beeb9acb61f1b0f", "bc8113320e40f052"]}
+    - form: "n.name = $p XOR n.age > $a"
+      parameters: {"p": "Ada", "a": 50}
+      rows: [["p1", "p2"], ["p3"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["edb0493ec03b15bc", "18e33443f6d8ed60", "ae9c24a3c2bd5209", "a7aff889378b1136"], "oracle": ["0bb27c7f589c2757", "4ad51412e110eacb", "5976a44c6ea67474", "7ecd964dcdb7d601"], "sqlite": ["d323284d269121dc", "1c7bac906cefdb38", "1109f12b69db0b28", "c5c3bdf9029c88de"]}
+    - form: "n.born.year > $y"
+      parameters: {"y": 1900}
+      rows: [["p2", "p4"], ["p1", "p3"], ["p2", "p4", "p5"], ["p2"]]
+      digests: {"postgres": ["2dcbae4e2e53e955", "3d4f1bab37bd2e23", "91787c7de055ef92", "2713aa37ca6feb2b"], "oracle": ["9156354d614bc836", "fe6d9bf0384bd4f4", "ceeacb5609e7d3c7", "6b25e98a87ecb9c9"], "sqlite": ["e86832a837a1745b", "1a513f76b2309599", "b1784a437235d486", "927761449008e3fe"]}
+    - form: "n.born < $d"
+      parameters: {"d": {"$temporal": "DATE", "text": "1900-01-01"}}
+      rows: [["p1"], ["p2"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["4f9b7c1345c730e5", "00694d926b8d1708", "4f9b6ef5d70ad4d7", "a86983571a9bd893"], "oracle": ["f67ac17cb7be492a", "763257ce33eab09c", "06933ad0193179b3", "153dcb8e4afc5581"], "sqlite": ["a337cb2129afebae", "9fc6e4c9e6a3d218", "6961ff46335da918", "7d15d73f758f102a"]}
+    - form: "exp(n.age - n.age) = $one"
+      parameters: {"one": 1.0}
+      rows: [["p1", "p2", "p3"], [], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
+      digests: {"postgres": ["7261b085da3dd2de", "ca6c26c470314b2e", "0b80e080c0f11d9f", "1e80b19d92dd961d"], "oracle": ["df68e9666029c3de", "2e633a83a8192a52", "a8b71622c701e5db", "556c1220541b50c0"], "sqlite": ["a9b5996dc27b83d5", "ddd7fd1d83fb8dba", "7ce97e9aecaecdc5", "863b1ca9e199b3dd"]}
+    - form: "-n.age < $a"
+      parameters: {"a": -40}
+      rows: [["p2"], ["p1", "p3"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["1b5df7b30923d2ff", "4c39ba433ba417b6", "e0110971c8ca834a", "b216ae5723dcc55d"], "oracle": ["20e076bca6b9ce01", "cd6f61a070a72883", "f9ae9ca56d4c46f4", "da47b5a3c76240dc"], "sqlite": ["d604754db46f40ee", "e52c75c435aa13cf", "1d2c780e9c9376c9", "9944d12f13ee00ec"]}
+    - form: "n.name <= $p"
+      parameters: {"p": "B"}
+      rows: [["p1"], ["p2", "p3"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["886194ca0b4540cf", "44bae6d29e7021cd", "2c964205b1153466", "1507dd1b5bd2111b"], "oracle": ["eca0c27fcab737e2", "2fc83f7ab45a10b0", "5acbdaa381ab3151", "ac2039373fb805c9"], "sqlite": ["91a8a246407dce20", "45c24e9e532fb1bd", "7c1d6010ab7c5fe6", "9ae1cce17b2470e2"]}
+    - form: "n.name IN [$p, 'Grace']"
+      parameters: {"p": "ada"}
+      rows: [["p2", "p3"], ["p1", "p4"], ["p2", "p3", "p5"], ["p2", "p3"]]
+      digests: {"postgres": ["a806ba9936024e55", "84d26f28bdd9d237", "4fc33277364335b5", "ff7aa9dd0bc3c7bc"], "oracle": ["875af98c0da3a9c1", "9846a663fdf6232e", "3c08875f0b602c50", "019dcbe7951d9391"], "sqlite": ["81fdb6b5bdb40623", "77a12bb5e0408207", "45298e37c77373a0", "db2ea7b0bb1c0797"]}
+    - form: "n:Person:Admin"
+      rows: [["p2"], ["p1", "p3", "p4", "p5"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["dd075ace4b3c861a", "f33abca7fbb911fc", "177703f4ec149de6", "0d3694c17c0734fb"], "oracle": ["7d8feee9955a8c91", "32ab58f21c2f68b5", "fdc663d85fc19c51", "5807bb8907666990"], "sqlite": ["83a1d53c09fedfd4", "a925e806ed8ef8fe", "9c3a0f8ab527725d", "e4efbcb1a85f2497"]}
+    - form: "any(x IN $l WHERE n.name STARTS WITH x)"
+      parameters: {"l": ["G", "a"]}
+      rows: [["p2", "p3"], ["p1"], ["p2", "p3", "p5"], ["p2", "p3"]]
+      digests: {"postgres": ["c4b02dfee313412d", "65c654076c43d28a", "204b40e299f42f3c", "fe2ce3a83a995f39"], "oracle": ["1062ac7ec980c900", "6ca736c01444597d", "e4ed492acbfb53fd", "4b7211dd0960321e"], "sqlite": ["89e7cdbce662c471", "b2bc946ced5d4985", "5c59d87232b68661", "49e7c72d106e7c66"]}
+    - form: "EXISTS { (n)-[:KNOWS]->(m:Person) WHERE EXISTS { (m)-[:KNOWS]->(o:Person) WHERE o.name = $p } }"
+      parameters: {"p": "ada"}
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["241fb699ec91595c", "6ca47c8a2e3c2e2c", "5bb38ad57d2664b0", "762f3cb5e9e54700"], "oracle": ["f3fb9bc57e61012d", "9d568a89b21e8130", "0e5ad4a0d26e1cf5", "33ea8987f9ffde45"], "sqlite": ["b0ee057353952427", "36ef47eee001c8b3", "ae4883538526498e", "2949af929cdb532a"]}
+    - form: "EXISTS { (n)-[r:KNOWS]->(m:Person) WHERE r.since > $y }"
+      parameters: {"y": 1980}
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["2814780c3eda7434", "431ef7f98764f05c", "ea70a3929d5efcd4", "81e4b655819ba457"], "oracle": ["19711806985cb1d8", "a62fe0c8c7b16e93", "7a290e2a9cec10f6", "893022aaa60fffd4"], "sqlite": ["a65ccd52e28279eb", "a7262cb4c1196497", "ecf7dcad94668bbb", "148229f38848c812"]}
+    - form: "CASE n.age WHEN $a THEN 'y' ELSE 'n' END = $w"
+      parameters: {"a": 36, "w": "y"}
+      rows: [["p1", "p3"], ["p2", "p4", "p5"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["6e9ef790f0e11a7a", "452654ac1549167a", "df00a7e1083078be", "0b366bfdc4a1159a"], "oracle": ["4b66b7aa148d87ce", "e2b3af6206fbaee1", "320ae015854ee09a", "75683ef3e6d8d8ea"], "sqlite": ["87260eb2bbe935da", "2c2d34177e02bbae", "f30c6f8213c4f544", "f42fe3762efc0119"]}
+    - form: "size(n.bio) = $c"
+      parameters: {"c": 2101}
+      rows: [["p2"], ["p1"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["7dab33d364b33f45", "3500fbcd47bf498d", "7e65440c3828e17b", "558bc1c91440764f"], "oracle": ["902b7176a6fa38ba", "129528df4474dd08", "8859834a77fe0f59", "ac55d079c94b0fc1"], "sqlite": ["97d0cbebba42d669", "3e7c3cad26aeb470", "8fee7c8e09131aa1", "785bb2c22b0ae0da"]}
+    - form: "n.bio ENDS WITH $s"
+      parameters: {"s": "éz"}
+      rows: [["p2"], ["p1"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["d590eae870493273", "4bda3f3ad1b5c30f", "caee9e7b4b27b9bc", "6e22bc5769c12393"], "oracle": ["a11510f0411aec3b", "226a0ee636ac73d8", "5c208a3e9e856e8a", "386a27164ab3fb20"], "sqlite": ["f9b1166e3fde616f", "72e8eaa303022673", "bc4be15bde675a6b", "b2310c57c5b0a93b"]}
+    - form: "floor(-n.age / 7) = $f"
+      parameters: {"f": -5}
+      rows: [["p1"], ["p2", "p3"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["c4ab4d84d8fb7150", "30b37d832a99dfee", "86bffd0bf918413c", "9768251ab9834906"], "oracle": ["b08e12001cc601c2", "c24c69f652d187eb", "6e2c80d029045ee0", "b5387de9f99a9e08"], "sqlite": ["809048d0cbb02052", "1d02fc445f39cb59", "58854d9e407b3d16", "a7d0d34d76cda572"]}
+    - form: "exp(-n.age) < $e"
+      parameters: {"e": 1.0e-20}
+      rows: [["p2"], ["p1", "p3"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["4016e82c1b9c6892", "0acbf9f1ff4b787b", "defc2cc345d5c199", "b6a15c6da5ad4299"], "oracle": ["8807426b1156c6f6", "01e31147ec535c22", "632d17d3cebf231c", "73f3ba1b7f03237f"], "sqlite": ["36969cf1422df0cf", "0838cb85600ba033", "2c29c75701c731ef", "c88b58f10a4bedd5"]}
+    - form: "n.seen.epochMillis / 1000.0 > $s"
+      parameters: {"s": 0}
+      rows: [["p2", "p3"], ["p1"], ["p2", "p3", "p5"], ["p2", "p3"]]
+      digests: {"postgres": ["8d2ce83f06f9a83d", "5e115036fd82fff2", "8b3cc2b230c32f7b", "42b8e4616305b418"], "oracle": ["4c5b14ba89532d03", "f2deea82cf7836e5", "9ad0e04e8b4d815c", "7333604cc76d64ac"], "sqlite": ["d480cc4ed798cbb0", "80cbdbdcce47ea7a", "d6572d8f5f06e694", "ea46974d7411c3ee"]}
+    - form: "n.age >= $a"
+      parameters: {"a": 36}
+      rows: [["p1", "p2", "p3"], [], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
+      digests: {"postgres": ["2555bb9c4d55c6df", "8f2cf48973d4760d", "5507e57c384296ba", "bcfd727b859f66b0"], "oracle": ["e7206cab2905177b", "40edfc47a8847745", "118b1988f9f29207", "86ccc74c8b004f40"], "sqlite": ["94b8861791ac6782", "13a0a938fb8618f7", "5f074aeba9259569", "44cbf3dc23ee6541"]}
+    - form: "n.seen < $t"
+      parameters: {"t": {"$temporal": "DATE_TIME", "text": "2020-01-01T00:00:00.0005Z"}}
+      rows: [["p1", "p2"], ["p3"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["7c1056b2570172b5", "8e31e1063b4beee1", "3f97314a00f7ce53", "ecee000ca3bab004"], "oracle": ["83ad9c3904c33b18", "98235a7847bb9911", "f2d1df2edf312690", "2073a8c7c91261e1"], "sqlite": ["1da3b738448171bb", "e2959fb7a00d63ae", "df88f2de96132060", "835fcaec16f91fa7"]}
+    - form: "EXISTS { (n)<-[:KNOWS {since: $y}]-(m:Person) }"
+      parameters: {"y": 1990}
+      rows: [["p2"], ["p1", "p3", "p4", "p5"], ["p2", "p5"], ["p2"]]
+      digests: {"postgres": ["7e2b97fd392c5d8d", "f7425aac92316414", "821712d187f0ab62", "9708b40746daf25d"], "oracle": ["9297531feb9507cb", "6f124ab21825c943", "982be3499897dfdd", "5b4bc05a8c31dc16"], "sqlite": ["cb4f3556a1683129", "b2a07b9a4c1d9824", "c995bb9184a754bd", "145843695b372cb2"]}
+    - form: "EXISTS { (n)-[:KNOWS*2..2]-(m:Person) WHERE m.age >= $a }"
+      parameters: {"a": 36}
+      rows: [["p1", "p3"], ["p2", "p4", "p5"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["8f886d6eec5e961c", "ad8fc1ab2dfbbc5f", "8f376f75d1b18389", "526b8fe4cab1c766"], "oracle": ["8bb167fc6ff0f3bf", "fb363e3f903f23d6", "fea98a30ad4894fd", "1d825d623c659368"], "sqlite": ["509542754deb1fe3", "aa85264e57769973", "eda0f6527b3e0133", "a9ad22f6f628473a"]}
+    - form: "EXISTS { (n)-[:KNOWS]-(:Person)-[:KNOWS]-(m:Person) }"
+      rows: [["p1", "p3"], ["p2", "p4", "p5"], ["p1", "p3", "p5"], ["p1", "p3"]]
+      digests: {"postgres": ["d50b6f7529949eca", "6ca9b1fb1e2ba8c8", "7d52435da6106538", "eede1868773529c3"], "oracle": ["65f170cb48dad3cc", "76addfa6bd42c406", "1587b0398451d501", "af4c47493e66eec3"], "sqlite": ["001f9d8ac533d02a", "00c82ac161a0ab59", "2cdcc803e4416580", "3e921716a7d50e74"]}
+    - form: "EXISTS { MATCH (n)-[:KNOWS]->(m:Person) WHERE m.age > $a }"
+      parameters: {"a": 40}
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["6d682601f76ded31", "5a31033a57457fb7", "fa2faad2f519c0dd", "ea0d7a13accaedd0"], "oracle": ["c52393203e51d0f5", "a9a82f5aead0b1c2", "4aa8a5155a98bbed", "7e6e7b8a2991bdda"], "sqlite": ["c41506566969a275", "00596115936ac10f", "361cbc3951d424d1", "1ab9e9350bc54c7b"]}
+    - form: "EXISTS { (n)-[:KNOWS*1..2]->(_:Person:Admin) }"
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["0ac1b221498395b2", "56a37023d415339b", "d3fcc56643661fa1", "714b2c73bc0b9734"], "oracle": ["366b26b1dc2eacbb", "8982af882303ef2a", "4bbbb29fa95d2860", "a9b57299e87fae16"], "sqlite": ["b55d6e8fb9b4e541", "10d1983ef88eb5bd", "4f1bdb2854348782", "da4103457230a581"]}
+    - form: "EXISTS { MATCH (n)<-[:KNOWS]-(_x0:Person:Admin) }"
+      rows: [["p3"], ["p1", "p2", "p4", "p5"], ["p3", "p5"], ["p3"]]
+      digests: {"postgres": ["6cb209490f4541e2", "fb754f3a8ec6826e", "be15ab27a1a1a6c2", "8e520f5dad7020ac"], "oracle": ["fff7e1eb4b12c9d3", "6df8ceae9c49bfb0", "62abfcff87bcb85a", "1e345a4fe07bdb34"], "sqlite": ["3c60d4d7e246c6c5", "b88cc604d6b299fd", "2e20e2eadcb79ffb", "121d84da2c39f594"]}
+    - form: "EXISTS { MATCH (n)-[:KNOWS*1..2]->(_x0:Person) WHERE _x0.name = $p }"
+      parameters: {"p": "ada"}
+      rows: [["p1", "p2"], ["p3", "p4", "p5"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["9bfcb4bc5df26994", "79c6ef407086e31b", "c0f38bbe9c543866", "401b5ecadccec878"], "oracle": ["92b9dbf9ec7d83ff", "a5f0fc944a29080b", "11e3f0c0546c8ed1", "7f94d2aadb376e4a"], "sqlite": ["faf8b77a99176003", "ea100085811a6792", "0571b433da482d30", "77ee92f19ec4ce9b"]}
+    - form: "EXISTS { MATCH (n)-[_r1:KNOWS]-(_x0:Person) WHERE _r1.since > $y }"
+      parameters: {"y": 1980}
+      rows: [["p1", "p2"], ["p3", "p4", "p5"], ["p1", "p2", "p5"], ["p1", "p2"]]
+      digests: {"postgres": ["4f76b36e8df7822c", "a033fb4c0f44b017", "4bb94ff5999b98e7", "5cc30b716c77673b"], "oracle": ["718e830efbb3d81e", "6f91a0f3c735c205", "67340d8c4f193b92", "667338aa2bb3b82a"], "sqlite": ["6a728cd33efed705", "3f2556b4469230c8", "b6a5968bfa05c4bc", "f4952dcdf581ba52"]}
+    - form: "EXISTS { MATCH (n)-[:KNOWS]->(:Person)-[:KNOWS]->(_p1) WHERE _p1:Person }"
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["41057f2aa3ec58e4", "436f81aaadade705", "7da84955c5711c62", "944fccd6d78c6252"], "oracle": ["abdf38841a7a8324", "9250550d6a114a9a", "7ae465184d8dbb43", "c15b3ba54d75fb97"], "sqlite": ["0fdd288aad26b1a3", "2a6ef8e264c79ab9", "781b3a52afaf33a9", "faf3f9077463c7de"]}
+    - form: "EXISTS { MATCH (n)-[:KNOWS]->(_x0:Person) WHERE EXISTS { MATCH (_x0)-[:KNOWS]->(_x1:Person) WHERE _x1.name = $p } }"
+      parameters: {"p": "ada"}
+      rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
+      digests: {"postgres": ["b05e4f5c5606e43e", "d5aa1f275cc4be31", "d913210f432e118d", "facb9ffb38d9f7b1"], "oracle": ["701be3974804630f", "4861ec1beadeb12c", "76e35245577d1ff3", "5b34ed8b0c130d66"], "sqlite": ["434fb44dc30dd084", "a718b7f71ec784a1", "d6e8f3dd4b5e8a3e", "d2c4aacdea9145fc"]}
+  orders:
+    - value: "n.age"
+      rows: [["p1", "p3", "p2", "p4", "p5"], ["p4", "p5", "p2", "p1", "p3"]]
+      digests: {"postgres": ["248e6ee51133a6df", "cb65186f4b5dc9d5"], "oracle": ["a7981fae06f8edef", "53e16f3bec6efcaf"], "sqlite": ["cd653cf79daed719", "658472eb044ee01b"]}
+    - value: "n.name"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p5", "p4", "p3", "p2", "p1"]]
+      digests: {"postgres": ["1f8a28a7c535c523", "adfa9446087eea75"], "oracle": ["8207bece67bff692", "2b11cc91a7ee394e"], "sqlite": ["794e443ee7328aba", "7bd7a0c4378099ac"]}
+    - value: "toLower(n.id)"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p5", "p4", "p3", "p2", "p1"]]
+      digests: {"postgres": ["cba90a2a023d87fc", "9762ee98ec48c393"], "oracle": ["927062be9466bd5c", "426248fe9cc857ba"], "sqlite": ["4fb449f584a7cc48", "20759e6750378315"]}
+    - value: "coalesce(n.age, -1)"
+      rows: [["p4", "p5", "p1", "p3", "p2"], ["p2", "p1", "p3", "p4", "p5"]]
+      digests: {"postgres": ["a640e8d6792ee278", "f4b3e9a7de02e881"], "oracle": ["010f4fb065e8ee81", "91104e7307ffe134"], "sqlite": ["27cc06e78bfa9026", "e734ca6ce0ee0242"]}
+    - value: "CASE WHEN n.age IS NULL THEN 1 ELSE 0 END"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p4", "p5", "p1", "p2", "p3"]]
+      digests: {"postgres": ["b00e088e253cc7fb", "4d1ea3e5c77f34db"], "oracle": ["36207bc1906102a6", "3f28370e3055031c"], "sqlite": ["5ef29c51ec8e72d2", "8ecf52523d3dd53f"]}
+    - value: "n.born"
+      rows: [["p4", "p3", "p1", "p2", "p5"], ["p5", "p2", "p1", "p3", "p4"]]
+      digests: {"postgres": ["ccad7844cdbe848d", "ece83c15ba800c55"], "oracle": ["a4bf4ef2d0ff8c26", "b121b79751804b79"], "sqlite": ["69cefd4ee00e8b15", "431c56601a20fbb3"]}
+    - value: "n.age * -1"
+      rows: [["p2", "p1", "p3", "p4", "p5"], ["p4", "p5", "p1", "p3", "p2"]]
+      digests: {"postgres": ["823972fb83578801", "43c7bddd79db9b48"], "oracle": ["d146051f2c66b1c0", "918b68b578ec8af0"], "sqlite": ["0cac44720491e073", "65753ff2e132a7c5"]}
+    - value: "n.seen.epochMillis / 1000.0"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p4", "p5", "p3", "p2", "p1"]]
+      digests: {"postgres": ["6962bd231d2420e8", "2608211fc557881b"], "oracle": ["504c6b3a26738248", "6e5161ae958b79e7"], "sqlite": ["7d71a128f5bc5b51", "ce2ca25a6c29642d"]}
+    - value: "n.bio"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p3", "p4", "p5", "p2", "p1"]]
+      digests: {"postgres": ["0b2c2488831e2468", "f3d6dd2e122f8f39"], "oracle": ["ea072f2f14360e88", "2404a7364fd2dcfd"], "sqlite": ["4b0a2d8f891e8b60", "d55857a0441bc7a9"]}
+    - value: "n.seen"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p4", "p5", "p3", "p2", "p1"]]
+      digests: {"postgres": ["ce1a9daf870ce39c", "5d29ab09e294557d"], "oracle": ["09789449b05c645b", "49a737c91f5cf77a"], "sqlite": ["42cb3022c410a1bc", "010b60d23adf0148"]}
+    - value: "n.age IS NULL"
+      rows: [["p1", "p2", "p3", "p4", "p5"], ["p4", "p5", "p1", "p2", "p3"]]
+      digests: {"postgres": ["68bcb20536da24ec", "250d1760581ae74c"], "oracle": ["aa00ff3aa40f901e", "9b09d1e31c16b082"], "sqlite": ["b279d93296119c8a", "61d904f79b891237"]}
