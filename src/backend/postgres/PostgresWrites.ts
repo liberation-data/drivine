@@ -42,6 +42,7 @@ export class PostgresWrites {
                 plan.patch(
                     plan.shape(model.labels, key),
                     storedKey(bound.id),
+                    bound.id,
                     '0',
                     present(values),
                     absent(values),
@@ -73,7 +74,15 @@ export class PostgresWrites {
                 const shape = plan.shape(model.labels, key);
                 (bound.rows as any[]).forEach((row, i) => {
                     const values = { ...row.props, ...row.vectors };
-                    plan.patch(shape, storedKey(row.id), String(i), present(values), absent(values), model.lowerCopied);
+                    plan.patch(
+                        shape,
+                        storedKey(row.id),
+                        row.id,
+                        String(i),
+                        present(values),
+                        absent(values),
+                        model.lowerCopied
+                    );
                 });
                 return { plan };
             },
@@ -176,7 +185,8 @@ export class PostgresWrites {
         const key = idProperty(node.model, "a node of it can't be referred to by id");
         return plan.ref(
             plan.shape([...new Set([...node.model.labels, ...(node.labels ?? [])])], key),
-            storedKey(node.id)
+            storedKey(node.id),
+            node.id
         );
     }
 

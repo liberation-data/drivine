@@ -139,10 +139,14 @@ export class WritePlan {
         return node;
     }
 
-    /** The step that finds the node of `shape` whose stored id is `storedId`, which must be there. */
-    ref(shape: number, storedId: string): number {
+    /**
+     * The step that finds the node of `shape` whose id is `id`, keyed within the plan by the text `storedId`, which must
+     * be there: found by `id` as the node holds it, as the store's write function finds a node (drivine4j's
+     * `WritePlan.ref`). A null `id` finds no node: it is sent as JSON's null, as a step that finds a node carries its id.
+     */
+    ref(shape: number, storedId: string, id: unknown): number {
         const node = this.nodes++;
-        this.add('ref', { r: node, s: shape, k: storedId });
+        this.add('ref', { r: node, s: shape, k: storedId, id: id ?? null });
         return node;
     }
 
@@ -203,13 +207,14 @@ export class WritePlan {
     }
 
     /**
-     * The step that writes `set` to the node of `shape` whose stored id is `storedId`, and removes `unset` from it, if
-     * the node is there. It makes no node. The node is returned under `index`, with whether the step changed it. It
+     * The step that writes `set` to the node of `shape` whose id is `id`, keyed within the plan by the text `storedId`,
+     * and removes `unset` from it, if the node is there: found by `id` as the node holds it, a null `id` finding none. It makes no node. The node is returned under `index`, with whether the step changed it. It
      * writes the lowercased copy of each of `lower` on a node it changed, as a `node` step does.
      */
     patch(
         shape: number,
         storedId: string,
+        id: unknown,
         index: string,
         set: Record<string, any>,
         unset: string[],
@@ -218,6 +223,7 @@ export class WritePlan {
         this.add('patch', {
             s: shape,
             k: storedId,
+            id: id ?? null,
             i: index,
             fresh: Stamps.fresh(),
             set: nonEmpty(set),

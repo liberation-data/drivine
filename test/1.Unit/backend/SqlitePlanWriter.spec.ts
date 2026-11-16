@@ -92,7 +92,9 @@ describe('drivine_write', () => {
         const before = node('p1').stamp;
         const linking = new WritePlan();
         const shape = linking.shape(['Person'], 'id');
-        linking.link(linking.ref(shape, 'p1'), linking.ref(shape, 'p2'), 'KNOWS', Direction.OUTGOING, { since: 1.5 });
+        linking.link(linking.ref(shape, 'p1', 'p1'), linking.ref(shape, 'p2', 'p2'), 'KNOWS', Direction.OUTGOING, {
+            since: 1.5
+        });
         expect(write(linking, 'COUNT')).toEqual([1]);
         expect(write(linking, 'COUNT')).toEqual([1]);
         expect(edges()).toEqual([{ src: node('p1').nid, dst: node('p2').nid, type: 'KNOWS', props: '{"since":1.5}' }]);
@@ -100,12 +102,17 @@ describe('drivine_write', () => {
         expect(after.slice(0, 16)).toEqual(before.slice(0, 16));
         expect(after.slice(17)).not.toEqual(before.slice(17));
         const cutting = new WritePlan();
-        cutting.cut(cutting.ref(cutting.shape(['Person'], 'id'), 'p1'), undefined, 'KNOWS', Direction.OUTGOING);
+        cutting.cut(cutting.ref(cutting.shape(['Person'], 'id'), 'p1', 'p1'), undefined, 'KNOWS', Direction.OUTGOING);
         expect(write(cutting, 'COUNT')).toEqual([1]);
         expect(edges()).toEqual([]);
         // A node a step needs that is not there counts nothing.
         const missing = new WritePlan();
-        missing.cut(missing.ref(missing.shape(['Person'], 'id'), 'nobody'), undefined, 'KNOWS', Direction.OUTGOING);
+        missing.cut(
+            missing.ref(missing.shape(['Person'], 'id'), 'nobody', 'nobody'),
+            undefined,
+            'KNOWS',
+            Direction.OUTGOING
+        );
         expect(write(missing, 'COUNT')).toEqual([0]);
     });
 
@@ -128,8 +135,8 @@ describe('drivine_write', () => {
         write(saving('p1', { score: 1 }), 'STAMPS');
         const patching = (set: Record<string, any>, patchedIf: string | null = null): string[] => {
             const plan = new WritePlan();
-            plan.patch(plan.shape(['Person'], 'id'), 'p1', '0', set, []);
-            plan.patch(plan.shape(['Person'], 'id'), 'nobody', '1', set, []);
+            plan.patch(plan.shape(['Person'], 'id'), 'p1', 'p1', '0', set, []);
+            plan.patch(plan.shape(['Person'], 'id'), 'nobody', 'nobody', '1', set, []);
             return write(plan, 'EACH_STAMP', patchedIf).map((it) => String(it).split('=')[0]);
         };
         expect(patching({ score: 2 })).toEqual(['0/1']);
