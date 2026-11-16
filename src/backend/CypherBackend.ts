@@ -66,7 +66,6 @@ export class CypherBackend implements GraphBackend {
         return { store: this.grammar.searchStore };
     }
 
-
     constructor(readonly grammar: CypherGrammar) {}
 
     loadAllFragments(model: FragmentModel, where?: string, page: Page = {}): GraphStatement {

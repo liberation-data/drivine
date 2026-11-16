@@ -63,7 +63,6 @@ export class PostgresBackend implements GraphBackend {
         return { store: 'postgres', graph: this.graph.name };
     }
 
-
     constructor(readonly graph: PostgresGraph = new PostgresGraph()) {}
 
     get ensuring(): string {

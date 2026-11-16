@@ -59,7 +59,6 @@ export class OracleBackend implements GraphBackend {
         return { store: 'oracle', graph: this.graph.name };
     }
 
-
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
 
     loadAllFragments(model: FragmentModel, where?: string, page: Page = {}, tested: string[] = []): GraphStatement {

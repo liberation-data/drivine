@@ -59,7 +59,6 @@ export class SqliteBackend implements GraphBackend {
         return { store: 'sqlite', graph: this.graph.name };
     }
 
-
     constructor(readonly graph: SqliteGraph = new SqliteGraph()) {}
 
     get ensuring(): string {
