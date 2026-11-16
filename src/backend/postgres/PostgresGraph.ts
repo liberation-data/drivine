@@ -33,6 +33,16 @@ export class PostgresGraph extends SqlGraph implements WriteFunction {
     }
 
     /**
+     * A query of the store's catalog whose one value is how many of the graph's table of nodes it holds, none or one: a
+     * graph without one is new, and its layout is not judged (see judgeLayout).
+     */
+    get tablesMade(): string {
+        return `SELECT count(*) AS "made" FROM pg_catalog.pg_class c WHERE c.oid = to_regclass(${sqlText(
+            this.nodes.toLowerCase()
+        )})`;
+    }
+
+    /**
      * The block that makes the store when it is not there, and does nothing when it is: the shared module's
      * (StoreStatements), so a graph is one store whichever library made it. The node table's comment, written last,
      * says which version made the store: one this version made is left alone, and over one an earlier version made the

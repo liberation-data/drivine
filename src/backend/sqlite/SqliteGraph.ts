@@ -50,6 +50,16 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
     }
 
     /**
+     * A query of the store's catalog whose one value is how many of the graph's table of nodes it holds, none or one: a
+     * graph without one is new, and its layout is not judged (see judgeLayout).
+     */
+    get tablesMade(): string {
+        return `SELECT count(*) AS "made" FROM sqlite_master WHERE type = 'table' AND lower(name) = ${sqlText(
+            this.nodes.toLowerCase()
+        )}`;
+    }
+
+    /**
      * What makes the store when it is not there: the shared module's statements (StoreStatements), so each library makes
      * the same file. The last, the lock table's row, makes nothing of its own.
      */

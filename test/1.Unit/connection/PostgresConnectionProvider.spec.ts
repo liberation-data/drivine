@@ -13,9 +13,14 @@ describe('PostgresConnectionProvider', () => {
     const providerFailing = (...codes: string[]): Failing => {
         let blocks = 0;
         const client = {
-            query: async (sql: string) => {
-                if (sql.includes('pg_backend_pid')) {
+            query: async (sql: string | { text: string }) => {
+                const text = typeof sql === 'string' ? sql : sql.text;
+                if (text.includes('pg_backend_pid')) {
                     return Promise.resolve({ rows: [{ sid: 's.1' }] });
+                }
+                // The look for the graph's table of nodes, before its layout is judged: none, so the graph is new.
+                if (text.startsWith('SELECT count(*) AS "made"')) {
+                    return Promise.resolve({ rows: [{ made: '0' }] });
                 }
                 const code = codes[blocks++];
                 return code

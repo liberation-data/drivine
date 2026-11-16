@@ -1,3 +1,4 @@
+import { judgeLayout, runOn } from '@/backend/sql/StoreLayout';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import { Connection } from '@/connection/Connection';
@@ -51,8 +52,16 @@ export class PostgresConnectionProvider implements ConnectionProvider {
     async connect(): Promise<Connection> {
         const client = await this.firstConnection.ensured(
             await this.pool.connect(),
-            async (it) =>
-                whenNotContended(async () => it.query(new PostgresGraph(this.graphName).ensuring), ddlDeadlocked),
+            async (it) => {
+                const graph = new PostgresGraph(this.graphName);
+                await judgeLayout(
+                    'postgres',
+                    graph.name,
+                    graph.tablesMade,
+                    runOn(new PostgresConnection(it, new PostgresResultMapper(), graph.name))
+                );
+                return whenNotContended(async () => it.query(graph.ensuring), ddlDeadlocked);
+            },
             (it, failure) => it.release(failure)
         );
         if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {

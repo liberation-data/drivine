@@ -15,6 +15,14 @@ export class OracleGraph extends SqlGraph {
         super(name, 'Oracle', 128);
     }
 
+    /**
+     * A query of the store's catalog whose one value is how many of the graph's table of nodes it holds, none or one: a
+     * graph without one is new, and its layout is not judged (see judgeLayout).
+     */
+    get tablesMade(): string {
+        return `SELECT COUNT(*) AS "made" FROM user_tables WHERE table_name = UPPER(${sqlText(this.nodes)})`;
+    }
+
     /** What makes the store, the shared module's statements (StoreStatements). Each statement may run again. */
     get ddl(): string[] {
         return storeStatements('oracle', this.name).ddl!;
