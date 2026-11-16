@@ -1,3 +1,4 @@
+import { StampAndMarker } from '@/backend/StoreStatements';
 import {
     CascadeDepthCheck,
     GraphBackend,
@@ -33,9 +34,6 @@ import { fullTextSearch, SearchPlan } from '@/cypher/SharedCypherCompiler';
 import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
 
-/** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
-const STORE_LABEL = 'DrivineStore';
-
 /** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
 const SCHEMA_MARKER = '_DrivineSchema';
 
@@ -57,6 +55,13 @@ export const FULL_TEXT_INDEX_LIMIT_CEILING = 2_147_483_647;
 export const NODE_ALIAS = 'n';
 
 export class CypherBackend implements GraphBackend {
+    /** The store's stamp and schema marker, the shared module's statements. */
+    private readonly stampAndMarker = new StampAndMarker(
+        this.grammar.searchStore,
+        undefined,
+        (text, bindings) => new GraphStatement(text, bindings)
+    );
+
     constructor(readonly grammar: CypherGrammar) {}
 
     loadAllFragments(model: FragmentModel, where?: string, page: Page = {}): GraphStatement {
@@ -318,41 +323,35 @@ export class CypherBackend implements GraphBackend {
     }
 
     storeStamps(): GraphStatement {
-        return new GraphStatement(
-            `MATCH (s:${STORE_LABEL}) RETURN {id: s.storeId, assignedAt: s.assignedAt} AS stamp ORDER BY stamp.assignedAt, stamp.id`
-        );
+        return this.stampAndMarker.storeStamps();
     }
 
-    assignStoreStamp(): GraphStatement {
-        return new GraphStatement(
-            `MERGE (s:${STORE_LABEL} {key: $key}) ON CREATE SET s.storeId = $storeId, s.assignedAt = $assignedAt, s.engine = $engine`
-        );
+    assignStoreStamp(storeId: string, assignedAt: string, engine: string): GraphStatement {
+        return this.stampAndMarker.assignStoreStamp(storeId, assignedAt, engine);
     }
 
     schemaMarker(property: 'version' | 'items'): GraphStatement {
-        return new GraphStatement(
-            `MATCH (m:${SCHEMA_MARKER} {scope: $scope}) RETURN m.${property} ORDER BY m.appliedAt DESC LIMIT 1`
-        );
+        return this.stampAndMarker.schemaMarker(property);
     }
 
     schemaScopes(): GraphStatement {
-        return new GraphStatement(`MATCH (m:${SCHEMA_MARKER}) RETURN DISTINCT m.scope`);
+        // The graph engines' marker scopes are read in Cypher.
+        return (
+            this.stampAndMarker.schemaScopes() ??
+            new GraphStatement(`MATCH (m:${SCHEMA_MARKER}) RETURN DISTINCT m.scope`)
+        );
     }
 
     markerItems(stored: string | null | undefined): string[] | undefined {
-        return stored == null ? undefined : stored === '' ? [] : stored.split('\n');
+        return this.stampAndMarker.markerItems(stored);
     }
 
-    recordSchemaMarker(): GraphStatement {
-        return new GraphStatement(
-            `MERGE (m:${SCHEMA_MARKER} {scope: $scope}) SET m.version = $version, m.items = $items, m.appliedAt = timestamp()`
-        );
+    recordSchemaMarker(scope: string, version: string | null, items: string): GraphStatement {
+        return this.stampAndMarker.recordSchemaMarker(scope, version, items);
     }
 
     pruneSchemaMarkers(): GraphStatement {
-        return new GraphStatement(
-            `MATCH (m:${SCHEMA_MARKER} {scope: $scope}) WITH m ORDER BY m.appliedAt DESC SKIP 1 DELETE m`
-        );
+        return this.stampAndMarker.pruneSchemaMarkers();
     }
 
     contended(failure: unknown): boolean {

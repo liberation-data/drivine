@@ -140,11 +140,14 @@ export interface GraphBackend {
 
     unrelateAll(from: MatchedNode, type: string, direction: Direction): GraphStatement;
 
-    /** The store's identity stamps, `{id, assignedAt}`, oldest first. */
+    /** The store's identity stamps, `{id, assignedAt, layout}`, oldest first: the shared module's statement. */
     storeStamps(): GraphStatement;
 
-    /** Mints the identity stamp keyed `$key` unless it is there: `$storeId`, `$assignedAt`, `$engine`. */
-    assignStoreStamp(): GraphStatement;
+    /**
+     * Mints the identity stamp unless it is there, `storeId` at `assignedAt` by a manager of `engine`: the shared
+     * module's statement, bound.
+     */
+    assignStoreStamp(storeId: string, assignedAt: string, engine: string): GraphStatement;
 
     /**
      * A property ('version', or 'items', the newline-joined inventory) of the newest schema marker of the owner
@@ -161,8 +164,8 @@ export interface GraphBackend {
     /** The inventory keys a marker's stored `items` holds; undefined for none recorded (a marker that predates them). */
     markerItems(stored: string | null | undefined): string[] | undefined;
 
-    /** Writes the owner `$scope`'s marker, making it if it is not there: `$version`, `$items`, and when. */
-    recordSchemaMarker(): GraphStatement;
+    /** Writes the owner `scope`'s marker, making it if it is not there, with `version` and `items`, applied now. */
+    recordSchemaMarker(scope: string, version: string | null, items: string): GraphStatement;
 
     /** Removes every marker of the owner `$scope` but the newest: what a race before the marker's constraint left. */
     pruneSchemaMarkers(): GraphStatement;

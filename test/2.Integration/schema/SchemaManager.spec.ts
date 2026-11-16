@@ -119,11 +119,9 @@ describe.each(allStores())('SchemaManager on $type', (engine) => {
         expect(await read('rag', 'items')).toEqual(['RANGE_INDEX:ManagedDoc:contextId:ManagedDoc_contextId_range']);
         // An item ensured at runtime is kept behind drivine4j's prefixes, in the same property.
         await gom.persistenceManager.execute(
-            gom.backend.recordSchemaMarker().spec({
-                scope: 'rag',
-                version: null,
-                items: inventoryEntries(['a', 'b', 'c'], new Set(['b', 'c']), new Set(['c']))
-            })
+            gom.backend
+                .recordSchemaMarker('rag', null, inventoryEntries(['a', 'b', 'c'], new Set(['b', 'c']), new Set(['c'])))
+                .spec()
         );
         expect(await read('rag', 'items')).toEqual(['a', 'runtime:b', 'runtime-stale:c']);
         expect(readInventory((await read('rag', 'items')) as string[])).toEqual({

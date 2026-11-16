@@ -384,15 +384,12 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         // drivine4j names items as asked: the marker holds the one it ensured at runtime under its own name.
         await gom().persistenceManager.execute(
             gom()
-                .backend.recordSchemaMarker()
-                .spec({
-                    scope: 'dice',
-                    version: null,
-                    items: inventoryEntries(
-                        ['RANGE_INDEX:RtTag:name:tag_one'],
-                        new Set(['RANGE_INDEX:RtTag:name:tag_one'])
-                    )
-                })
+                .backend.recordSchemaMarker(
+                    'dice',
+                    null,
+                    inventoryEntries(['RANGE_INDEX:RtTag:name:tag_one'], new Set(['RANGE_INDEX:RtTag:name:tag_one']))
+                )
+                .spec()
         );
 
         await manager([dice], { mode: 'WARN' }).ensure('dice', rangeIndex('RtTag', 'name'));

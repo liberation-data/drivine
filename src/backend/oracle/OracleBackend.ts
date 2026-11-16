@@ -1,3 +1,4 @@
+import { StampAndMarker } from '@/backend/StoreStatements';
 import {
     CascadeDepthCheck,
     FullTextIndexLookup,
@@ -38,22 +39,6 @@ import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
 import { Stamps } from '@/model/Stamps';
 
-/** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
-const STORE_LABEL = 'DrivineStore';
-
-/** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
-const SCHEMA_MARKER = '_DrivineSchema';
-
-/** What a marker's inventory is kept behind, as drivine4j keeps it: Oracle has no empty string. */
-const ITEMS_MARK = 'items:';
-
-/** The moment, in milliseconds since the epoch, as the graph engines' timestamp() gives it. */
-const NOW_MILLIS = "ROUND((CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400000)";
-
-/** The newest marker first, then the one made later, so the marker read, written and kept are one. */
-const NEWEST_FIRST = (alias: string): string =>
-    `JSON_VALUE(${alias}.props, '$.appliedAt' RETURNING NUMBER) DESC NULLS LAST, ${alias}.nid DESC`;
-
 /** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
 export const ROW_ALIAS = 'n';
 
@@ -63,6 +48,13 @@ export const ROW_ALIAS = 'n';
  * and `stamp`), in which a property of the node may be written as Cypher writes it, `n.name` (see `written`).
  */
 export class OracleBackend implements GraphBackend {
+    /** The store's stamp and schema marker, the shared module's statements. */
+    private readonly stampAndMarker = new StampAndMarker(
+        'oracle',
+        this.graph.name,
+        (text, bindings) => new GraphStatement(text, bindings)
+    );
+
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
 
     loadAllFragments(model: FragmentModel, where?: string, page: Page = {}, tested: string[] = []): GraphStatement {
@@ -314,79 +306,31 @@ END;`);
     }
 
     storeStamps(): GraphStatement {
-        return new GraphStatement(
-            `SELECT JSON_OBJECT('id' VALUE JSON_VALUE(n.props, '$.storeId'), 'assignedAt' VALUE JSON_VALUE(n.props, '$.assignedAt') ` +
-                `RETURNING JSON) AS "stamp" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [STORE_LABEL])} ` +
-                `ORDER BY JSON_VALUE(n.props, '$.assignedAt'), JSON_VALUE(n.props, '$.storeId')`
-        );
+        return this.stampAndMarker.storeStamps();
     }
 
-    /** Mints the stamp unless it is there; the uniqueness constraint on its key turns away a racing writer's. */
-    assignStoreStamp(): GraphStatement {
-        return new GraphStatement(
-            `INSERT INTO ${this.graph.nodes} (labels, props) SELECT JSON('["${STORE_LABEL}"]'), ` +
-                `JSON_OBJECT('key' VALUE $key, 'storeId' VALUE $storeId, 'assignedAt' VALUE $assignedAt, 'engine' VALUE $engine) ` +
-                `FROM dual WHERE NOT EXISTS (SELECT 1 FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [
-                    STORE_LABEL
-                ])} ` +
-                `AND JSON_VALUE(n.props, '$.key') = $key)`
-        );
+    assignStoreStamp(storeId: string, assignedAt: string, engine: string): GraphStatement {
+        return this.stampAndMarker.assignStoreStamp(storeId, assignedAt, engine);
     }
 
-    /** An inventory is kept behind 'items:', so an empty one reads back empty, not absent (drivine4j's mark). */
     schemaMarker(property: 'version' | 'items'): GraphStatement {
-        return new GraphStatement(
-            `SELECT JSON_VALUE(n.props, '$.${property}' RETURNING CLOB) AS "value" ` +
-                `FROM ${this.graph.nodes} n WHERE ${this.marker('n')} ORDER BY ${NEWEST_FIRST(
-                    'n'
-                )} FETCH FIRST 1 ROWS ONLY`
-        );
+        return this.stampAndMarker.schemaMarker(property);
     }
 
     schemaScopes(): GraphStatement {
-        return new GraphStatement(
-            `SELECT DISTINCT JSON_VALUE(n.props, '$.scope') AS "scope" FROM ${this.graph.nodes} n ` +
-                `WHERE ${hasLabels('n', [SCHEMA_MARKER])}`
-        );
+        return this.stampAndMarker.schemaScopes()!;
     }
 
-    /** The inventory behind its mark: stripped here, as SQL would make an empty one null. */
     markerItems(stored: string | null | undefined): string[] | undefined {
-        if (stored == null || !stored.startsWith(ITEMS_MARK)) {
-            return undefined;
-        }
-        const items = stored.slice(ITEMS_MARK.length);
-        return items === '' ? [] : items.split('\n');
+        return this.stampAndMarker.markerItems(stored);
     }
 
-    /**
-     * The marker found by a query and matched by its id: matched by its scope, the MERGE would update the column it
-     * matches on, which Oracle refuses (ORA-38104). Where a race left several, the newest is written. Both objects
-     * are built RETURNING JSON: by default JSON_OBJECT returns VARCHAR2(4000), which an inventory of about 300 items
-     * overflows (ORA-40478).
-     */
-    recordSchemaMarker(): GraphStatement {
-        return new GraphStatement(
-            `MERGE INTO ${this.graph.nodes} n USING (SELECT (SELECT m.nid FROM ${
-                this.graph.nodes
-            } m WHERE ${this.marker('m')} ORDER BY ${NEWEST_FIRST(
-                'm'
-            )} FETCH FIRST 1 ROWS ONLY) AS nid FROM dual) found ON (n.nid = found.nid) ` +
-                `WHEN MATCHED THEN UPDATE SET n.props = JSON_MERGEPATCH(n.props, JSON_OBJECT('version' VALUE $version, ` +
-                `'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ${NOW_MILLIS} RETURNING JSON)) ` +
-                `WHEN NOT MATCHED THEN INSERT (labels, props) VALUES (JSON('["${SCHEMA_MARKER}"]'), JSON_OBJECT('scope' ` +
-                `VALUE $scope, 'version' VALUE $version, 'items' VALUE '${ITEMS_MARK}' || $items, 'appliedAt' VALUE ` +
-                `${NOW_MILLIS} ABSENT ON NULL RETURNING JSON))`
-        );
+    recordSchemaMarker(scope: string, version: string | null, items: string): GraphStatement {
+        return this.stampAndMarker.recordSchemaMarker(scope, version, items);
     }
 
     pruneSchemaMarkers(): GraphStatement {
-        return new GraphStatement(
-            `DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM (SELECT n.nid, ROW_NUMBER() OVER (ORDER BY ` +
-                `${NEWEST_FIRST('n')}) AS position FROM ${this.graph.nodes} n WHERE ${this.marker(
-                    'n'
-                )}) WHERE position > 1)`
-        );
+        return this.stampAndMarker.pruneSchemaMarkers();
     }
 
     /** ORA-00060 (deadlock) and ORA-08177 (serialization) are another writer's doing: running again may succeed. */
@@ -399,11 +343,6 @@ END;`);
             cause = cause.rootCause ?? cause.cause;
         }
         return false;
-    }
-
-    /** The markers of the owner bound as `$scope`. */
-    private marker(alias: string): string {
-        return `${hasLabels(alias, [SCHEMA_MARKER])} AND JSON_VALUE(${alias}.props, '$.scope') = $scope`;
     }
 
     /** What the root a delete by `$id` takes meets: the id, `where`, and for a view the view's requirements. */

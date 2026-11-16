@@ -370,15 +370,17 @@ export class SchemaManager {
                 gom.backend.schemaMarker('version').spec({ scope: owner })
             );
             await pm.execute(
-                gom.backend.recordSchemaMarker().spec({
-                    scope: owner,
-                    version: version ?? null,
-                    items: inventoryEntries(
-                        without(recorded.keys),
-                        new Set(without(recorded.runtime)),
-                        new Set(without(recorded.stale))
+                gom.backend
+                    .recordSchemaMarker(
+                        owner,
+                        version ?? null,
+                        inventoryEntries(
+                            without(recorded.keys),
+                            new Set(without(recorded.runtime)),
+                            new Set(without(recorded.stale))
+                        )
                     )
-                })
+                    .spec()
             );
         }
         this.logger.log(
@@ -544,11 +546,13 @@ export class SchemaManager {
             )
         });
         await gom.persistenceManager.execute(
-            gom.backend.recordSchemaMarker().spec({
-                scope: owner,
-                version: (ensuring ? stored : version) ?? null,
-                items: inventoryEntries([...declared, ...carried], new Set([...runtimeOnly, ...carried]), marked)
-            })
+            gom.backend
+                .recordSchemaMarker(
+                    owner,
+                    (ensuring ? stored : version) ?? null,
+                    inventoryEntries([...declared, ...carried], new Set([...runtimeOnly, ...carried]), marked)
+                )
+                .spec()
         );
         return results;
     }

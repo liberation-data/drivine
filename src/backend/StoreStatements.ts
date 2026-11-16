@@ -1,5 +1,6 @@
 import { DrivineError } from '@/DrivineError';
 import { cypherCompilerModule } from '@/cypher/SharedCypherCompiler';
+import { GraphStatement } from '@/backend/GraphStatement';
 
 /** A store as the shared module names one in a `storeStatements` request. */
 export type ModuleStore = 'postgres' | 'oracle' | 'sqlite' | 'neo4j' | 'memgraph' | 'falkordb';
@@ -147,4 +148,62 @@ function answer<T>(store: ModuleStore, graph: string | undefined, asking: Record
         throw new DrivineError(`The shared module wrote no statements for the ${store} store: ${given.error}`);
     }
     return given as T;
+}
+
+/**
+ * A backend's statements of the store's stamp and its schema marker, the module's for `store` (StoreStatements), each
+ * made a statement of the backend's own by `statement`, so its rows are read as the backend reads any.
+ */
+export class StampAndMarker {
+    constructor(
+        private readonly store: ModuleStore,
+        private readonly graph: string | undefined,
+        private readonly statement: (text: string, bindings?: Record<string, any>) => GraphStatement
+    ) {}
+
+    private get statements(): StoreStatements {
+        return storeStatements(this.store, this.graph);
+    }
+
+    /** The store's identity stamps, `{id, assignedAt, layout}`, oldest first. */
+    storeStamps(): GraphStatement {
+        return this.statement(this.statements.stamp.readStamps);
+    }
+
+    /** Writes the identity stamp unless it is there, minted `storeId` at `assignedAt` by a manager of `engine`. */
+    assignStoreStamp(storeId: string, assignedAt: string, engine: string): GraphStatement {
+        return this.statement(
+            this.statements.stamp.assignIfAbsent,
+            stampParameters(this.store, this.graph, storeId, assignedAt, engine)
+        );
+    }
+
+    /** The newest marker of the scope `$scope`'s `version` or `items`, as text: one row, or none. */
+    schemaMarker(property: 'version' | 'items'): GraphStatement {
+        return this.statement(this.statements.marker.read[property]);
+    }
+
+    /** The scope of every marker, once each; undefined where the store's Cypher reads them. */
+    schemaScopes(): GraphStatement | undefined {
+        const scopes = this.statements.marker.scopes;
+        return scopes == null ? undefined : this.statement(scopes);
+    }
+
+    /** See {@link markerItems}. */
+    markerItems(stored: string | null | undefined): string[] | undefined {
+        return markerItems(this.statements, stored);
+    }
+
+    /** Writes the scope's marker, made where there is none, with `version` and `items`, applied now. */
+    recordSchemaMarker(scope: string, version: string | null, items: string): GraphStatement {
+        return this.statement(
+            this.statements.marker.merge,
+            markerParameters(this.store, this.graph, scope, version, items, Date.now())
+        );
+    }
+
+    /** Removes every marker of the scope `$scope` but the newest. */
+    pruneSchemaMarkers(): GraphStatement {
+        return this.statement(this.statements.marker.deleteAllButNewest);
+    }
 }
