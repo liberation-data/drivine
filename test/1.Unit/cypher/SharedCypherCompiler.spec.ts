@@ -106,6 +106,13 @@ describe('parametersJson', () => {
         );
     });
 
+    it('writes a datetime in a zone that is an offset, with no offset of its own, at that offset (#767)', () => {
+        const offsetZone = new neo4j.types.DateTime(2024, 1, 15, 10, 0, 0, 0, undefined, '+01:00');
+        expect(JSON.parse(parametersJson({ t: offsetZone }))).toEqual({
+            t: { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00+01:00' }
+        });
+    });
+
     it('writes each Temporal value as its kind and its text, told by its Symbol.toStringTag (#767)', () => {
         const values = Object.fromEntries(
             [
@@ -303,6 +310,13 @@ describe('A Temporal parameter on Neo4j', () => {
         });
         const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({ hebrew });
         expect(new Neo4jSpecCompiler(spec).formattedParams().hebrew.toString()).toEqual('2024-01-15');
+    });
+
+    it('is the driver value of its kind among positional parameters too (#767)', () => {
+        const date = temporalLike('Temporal.PlainDate', '', { year: 2024, month: 1, day: 15 });
+        const spec = new QuerySpecification({ text: 'RETURN $1', language: 'CYPHER' }).bind([date, [date]]);
+        const params = new Neo4jSpecCompiler(spec).formattedParams();
+        expect([params[1].toString(), params[2][0].toString()]).toEqual(['2024-01-15', '2024-01-15']);
     });
 });
 
