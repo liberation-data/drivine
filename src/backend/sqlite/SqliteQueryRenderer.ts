@@ -192,13 +192,14 @@ export class SqliteQueryRenderer extends SqlQueryRenderer {
 
     /**
      * A regular expression that must match the whole value, as Cypher's `=~` does. A leading `(?i)` ignores case. It
-     * is held to the whole value by a group that takes no number, so its own groups keep theirs. SQLite has no regular
-     * expressions of its own: `REGEXP` calls the function each connection registers, which reads JavaScript's.
+     * is held to the whole value by a group that takes no number, so its own groups keep theirs, and by `\z`, the end of
+     * the text: SQLite has no regular expressions of its own, and `REGEXP` calls the shared module's function, which reads
+     * Java's, whose `$` matches before a line break that ends the text too.
      */
     private matches(text: string, pattern: string): string {
         const ignoreCase = pattern.startsWith('(?i)');
         const body = ignoreCase ? pattern.slice(4) : pattern;
-        return `${text} REGEXP ${this.text(`${ignoreCase ? '(?i)' : ''}^(?:${body})$`)}`;
+        return `${text} REGEXP ${this.text(`${ignoreCase ? '(?i)' : ''}^(?:${body})\\z`)}`;
     }
 
     /** Whether the row has the property, and not as a JSON null. */

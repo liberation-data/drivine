@@ -87,10 +87,11 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             );
 
         const tidy = async (): Promise<void> => {
+            // The constraint first: Neo4j lists its own index as a range index over the property, which it won't drop.
+            await gom().constraints.drop(unique);
             for (const spec of [...all, failing, rangeIndex(COVERED, 'p')]) {
                 await gom().indexes.drop(spec);
             }
-            await gom().constraints.drop(unique);
             await clearLabels(gom().persistenceManager, engine, SEEDED, FAILED, COVERED, '_DrivineSchema');
         };
 
