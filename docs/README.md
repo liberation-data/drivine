@@ -22,3 +22,4 @@ The Drivine for TypeScript guide, a file per section. It is also on [drivine.org
 - [License](19-license.md)
 - [Upgrading to 4.0](20-upgrading-to-4.md)
 - [Upgrading to 5.0](21-upgrading-to-5.md)
+- [Upgrading to 6.0](22-upgrading-to-6.md)

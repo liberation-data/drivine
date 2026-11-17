@@ -122,7 +122,7 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         try {
             expect(statuses(await schema.ensure('dice', vector(3)))).toEqual(['VECTOR:CREATED']);
             expect(log).toHaveBeenCalledWith(
-                `Ensuring schema for owner 'dice' on ${engine.name}: 1 runtime items, 2 declared in all`
+                `Ensuring schema for owner 'dice' on '${engine.name}': 1 runtime items, 2 declared in all`
             );
         } finally {
             log.mockRestore();
@@ -284,7 +284,9 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
 
         expect(statuses(await manager([dice], { mode: 'WARN' }).ensure('dice', vector(4)))).toEqual(['VECTOR:DRIFT']);
         expect(await dimensions('RtProp')).toEqual(3);
-        await expect(manager([dice]).ensure('dice', vector(4))).rejects.toThrow(/DRIFT for the VECTOR on RtProp/);
+        await expect(manager([dice]).ensure('dice', vector(4))).rejects.toThrow(
+            /DRIFT: VECTOR_INDEX on RtProp\[embedding\]/
+        );
         expect(statuses(await manager([dice], { recreateOnDrift: true }).ensure('dice', vector(4)))).toEqual([
             'VECTOR:RECREATED'
         ]);
@@ -333,7 +335,7 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         await schema.enforce();
 
         await expect(schema.ensure('rag', vectorIndex('RtDoc', 'embedding', 4))).rejects.toThrow(
-            /declare the VECTOR on RtDoc\(embedding\) .* differently, owned by 'app' and 'rag'/
+            /Conflicting schema declarations for VECTOR_INDEX on RtDoc\[embedding\] .*across owners: 'app' declares .*'rag' declares/
         );
 
         await schema.enforce(); // would fail, were the conflicting item kept
@@ -345,7 +347,9 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         const schema = manager([SchemaCatalog.of(vector(3)).named('dice')]);
         await schema.enforce();
 
-        await expect(schema.ensure('dice', vector(4))).rejects.toThrow(/differently, both owned by 'dice'/);
+        await expect(schema.ensure('dice', vector(4))).rejects.toThrow(
+            /Conflicting schema declarations for VECTOR_INDEX on RtProp\[embedding\] \(they disagree on portable parameters\)/
+        );
         await schema.enforce();
         expect(await dimensions('RtProp')).toEqual(3);
     });
@@ -353,7 +357,9 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
     it('should refuse two items of one identity given at once that differ, and keep nothing', async () => {
         const schema = manager([]);
 
-        await expect(schema.ensure('dice', vector(3), vector(4))).rejects.toThrow(/differently, both owned by 'dice'/);
+        await expect(schema.ensure('dice', vector(3), vector(4))).rejects.toThrow(
+            /Conflicting schema declarations for VECTOR_INDEX on RtProp\[embedding\] \(they disagree on portable parameters\)/
+        );
         await schema.enforce();
         expect(await dimensions('RtProp')).toBeUndefined();
         expect(await read('dice', 'items')).toBeUndefined();
@@ -384,15 +390,12 @@ describe.each(allStores())('SchemaManager.ensure on $type', (engine) => {
         // drivine4j names items as asked: the marker holds the one it ensured at runtime under its own name.
         await gom().persistenceManager.execute(
             gom()
-                .backend.recordSchemaMarker()
-                .spec({
-                    scope: 'dice',
-                    version: null,
-                    items: inventoryEntries(
-                        ['RANGE_INDEX:RtTag:name:tag_one'],
-                        new Set(['RANGE_INDEX:RtTag:name:tag_one'])
-                    )
-                })
+                .backend.recordSchemaMarker(
+                    'dice',
+                    null,
+                    inventoryEntries(['RANGE_INDEX:RtTag:name:tag_one'], new Set(['RANGE_INDEX:RtTag:name:tag_one']))
+                )
+                .spec()
         );
 
         await manager([dice], { mode: 'WARN' }).ensure('dice', rangeIndex('RtTag', 'name'));
@@ -486,7 +489,7 @@ describe.each(allStores().filter((it) => it.type === DatabaseType.NEO4J))(
 
             await expect(
                 schema.ensure('rag', rangeIndex('RtFresh', 'slug'), vectorIndex('RtDoc', 'embedding', 4))
-            ).rejects.toThrow(/differently, owned by 'app' and 'rag'/);
+            ).rejects.toThrow(/across owners: 'app' declares .*'rag' declares/);
 
             const gom = factory.get(engine.name);
             expect((await gom.indexes.list('RANGE')).some((it) => it.label === 'RtFresh')).toBe(false);

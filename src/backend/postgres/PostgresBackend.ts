@@ -1,3 +1,4 @@
+import { ModuleStore, StampAndMarker } from '@/backend/StoreStatements';
 import { Direction } from '@/annotation/Metadata';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
@@ -11,7 +12,7 @@ import {
 } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGroups } from '@/backend/postgres/PostgresGroups';
-import { hasLabels, nodeDocument, numberOf, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
+import { hasLabels, nodeDocument, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresQueryRenderer } from '@/backend/postgres/PostgresQueryRenderer';
 import { PostgresSaveBuilder, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresSearch } from '@/backend/postgres/PostgresSearch';
@@ -24,7 +25,7 @@ import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
 import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
-import { selfLoopOnce, sqlText } from '@/backend/sql/SqlGraph';
+import { selfLoopOnce } from '@/backend/sql/SqlGraph';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
@@ -37,15 +38,6 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
-
-/** The label of the node holding the store's identity: drivine4j's, so both read one identity. */
-const STORE_LABEL = 'DrivineStore';
-
-/** The label of the nodes recording what each schema owner applied: drivine4j's, so both read one marker. */
-const SCHEMA_MARKER = '_DrivineSchema';
-
-/** The moment, in milliseconds since the epoch, as the graph engines' timestamp() gives it. */
-const NOW_MILLIS = 'CAST(floor(extract(epoch FROM clock_timestamp()) * 1000) AS bigint)';
 
 /** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
 export const ROW_ALIAS = 'n';
@@ -60,6 +52,17 @@ export const ROW_ALIAS = 'n';
  * statement, for a backend of another graph than the provider's: see `ensuring`.
  */
 export class PostgresBackend implements GraphBackend {
+    /** The store's stamp and schema marker, the shared module's statements. */
+    private readonly stampAndMarker = new StampAndMarker(
+        'postgres',
+        this.graph.name,
+        (text, bindings) => new PostgresStatement(text, bindings)
+    );
+
+    get moduleStore(): { store: ModuleStore; graph?: string } {
+        return { store: 'postgres', graph: this.graph.name };
+    }
+
     constructor(readonly graph: PostgresGraph = new PostgresGraph()) {}
 
     get ensuring(): string {
@@ -319,64 +322,31 @@ export class PostgresBackend implements GraphBackend {
     }
 
     storeStamps(): GraphStatement {
-        return new PostgresStatement(
-            `SELECT jsonb_build_object('id', ${textOf('n', 'storeId')}, 'assignedAt', ${textOf('n', 'assignedAt')}) ` +
-                `AS "stamp" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [STORE_LABEL])} ` +
-                `ORDER BY ${textOf('n', 'assignedAt')}, ${textOf('n', 'storeId')}`
-        );
+        return this.stampAndMarker.storeStamps();
     }
 
-    /** Mints the stamp unless it is there; the uniqueness constraint on its key turns away a racing writer's. */
-    assignStoreStamp(): GraphStatement {
-        return new PostgresStatement(
-            `INSERT INTO ${this.graph.nodes} (labels, props) SELECT ${sqlText(`["${STORE_LABEL}"]`)}, ` +
-                `jsonb_build_object('key', CAST($key AS text), 'storeId', CAST($storeId AS text), ` +
-                `'assignedAt', CAST($assignedAt AS text), 'engine', CAST($engine AS text)) ` +
-                `WHERE NOT EXISTS (SELECT 1 FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [STORE_LABEL])} ` +
-                `AND ${textOf('n', 'key')} = CAST($key AS text))`
-        );
+    assignStoreStamp(storeId: string, assignedAt: string, engine: string): GraphStatement {
+        return this.stampAndMarker.assignStoreStamp(storeId, assignedAt, engine);
     }
 
     schemaMarker(property: 'version' | 'items'): GraphStatement {
-        return new PostgresStatement(
-            `SELECT ${textOf('n', property)} AS "value" FROM ${this.graph.nodes} n WHERE ${this.marker('n')} ` +
-                `ORDER BY ${this.newestFirst('n')} LIMIT 1`
-        );
+        return this.stampAndMarker.schemaMarker(property);
     }
 
     schemaScopes(): GraphStatement {
-        return new PostgresStatement(
-            `SELECT DISTINCT ${textOf('n', 'scope')} AS "scope" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [
-                SCHEMA_MARKER
-            ])}`
-        );
+        return this.stampAndMarker.schemaScopes()!;
     }
 
-    /** Postgres keeps an empty string apart from null, so an inventory is kept as it is, as drivine4j keeps it. */
     markerItems(stored: string | null | undefined): string[] | undefined {
-        return stored == null ? undefined : stored === '' ? [] : stored.split('\n');
+        return this.stampAndMarker.markerItems(stored);
     }
 
-    /** The newest marker of the scope is written, and one is made where there is none. */
-    recordSchemaMarker(): GraphStatement {
-        const written = `'version', CAST($version AS text), 'items', CAST($items AS text), 'appliedAt', ${NOW_MILLIS}`;
-        return new PostgresStatement(
-            `WITH found AS (SELECT m.nid FROM ${this.graph.nodes} m WHERE ${this.marker('m')} ` +
-                `ORDER BY ${this.newestFirst('m')} LIMIT 1), ` +
-                `written AS (UPDATE ${this.graph.nodes} n SET props = jsonb_strip_nulls(n.props || jsonb_build_object(${written})) ` +
-                `FROM found WHERE n.nid = found.nid RETURNING n.nid) ` +
-                `INSERT INTO ${this.graph.nodes} (labels, props) SELECT ${sqlText(`["${SCHEMA_MARKER}"]`)}, ` +
-                `jsonb_strip_nulls(jsonb_build_object('scope', CAST($scope AS text), ${written})) ` +
-                `WHERE NOT EXISTS (SELECT 1 FROM found)`
-        );
+    recordSchemaMarker(scope: string, version: string | null, items: string): GraphStatement {
+        return this.stampAndMarker.recordSchemaMarker(scope, version, items);
     }
 
     pruneSchemaMarkers(): GraphStatement {
-        return new PostgresStatement(
-            `DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM (SELECT n.nid, row_number() OVER (ORDER BY ` +
-                `${this.newestFirst('n')}) AS position FROM ${this.graph.nodes} n WHERE ${this.marker('n')}) ranked ` +
-                `WHERE position > 1)`
-        );
+        return this.stampAndMarker.pruneSchemaMarkers();
     }
 
     /** A serialization failure (40001) or a deadlock (40P01) is another writer's doing: running again may succeed. */
@@ -389,16 +359,6 @@ export class PostgresBackend implements GraphBackend {
             cause = cause.rootCause ?? cause.cause;
         }
         return false;
-    }
-
-    /** The markers of the owner bound as `$scope`. */
-    private marker(alias: string): string {
-        return `${hasLabels(alias, [SCHEMA_MARKER])} AND ${textOf(alias, 'scope')} = CAST($scope AS text)`;
-    }
-
-    /** The marker applied last first, then the one made later, so the marker read, written and kept are one. */
-    private newestFirst(alias: string): string {
-        return `${numberOf(alias, 'appliedAt')} DESC NULLS LAST, ${alias}.nid DESC`;
     }
 
     /** What the root a delete by `$id` takes meets: the id, `where`, and for a view the view's requirements. */

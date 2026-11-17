@@ -3,6 +3,8 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
+import { writeProps } from '@/cypher/ValueLayout';
+import { LayoutBoundStatement } from '@/backend/oracle/LayoutBoundStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { prelude } from '@/backend/oracle/OracleSaveBuilder';
 import { DrivineError } from '@/DrivineError';
@@ -127,7 +129,7 @@ export class OracleWrites {
                         jsonText(idOf(group.model, object))
                     )}, ` +
                         `${bind(JSON.stringify(group.model.labels))}, ${bind(
-                            jsonText(props, (_, value) => (value === undefined ? null : value))
+                            jsonText(writeProps(props))
                         )}, '[]', '[]', NULL, FALSE);`,
                     ...this.lowering(group.model)
                 );
@@ -186,7 +188,7 @@ export class OracleWrites {
                 'END IF;',
                 'OPEN c FOR SELECT v_related AS "related" FROM dual;'
             ],
-            { x_type: type, x_props: jsonText(written) }
+            { x_type: type, x_props: jsonText(writeProps(written)) }
         );
     }
 
@@ -321,7 +323,7 @@ END;`;
         for (const key of Object.keys(this.pending)) {
             delete this.pending[key];
         }
-        return new GraphStatement(text, all);
+        return new LayoutBoundStatement(text, all);
     }
 }
 

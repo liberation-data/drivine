@@ -129,3 +129,39 @@ describe('The rows of a compiled Oracle write', () => {
         expect(await connection(session(EACH)).query(sql)).toEqual([1, { a: [2, 'x'] }, null]);
     });
 });
+
+/**
+ * The object manager's own statements' rows on Oracle, a JSON column the driver hands over parsed: read in the store
+ * layout, as on Postgres and SQLite, so a load gives a date back as its text and a key that begins with `$` as it was.
+ */
+describe("The object manager's own rows on Oracle", () => {
+    const own = (text: string): QuerySpecification<unknown> => new QuerySpecification(text).exactIntegers();
+    const tag = { $t: 'datetime', v: '2026-11-02T10:30:00.123Z', s: '10000020261102103000123000000064800' };
+
+    it('should read a tag as its text and an escaped key as it was, in a row and in an implicit result', async () => {
+        const props = { at: tag, $$k: { $$j: [tag, -0, 2.5] }, n: 1, s: '$5' };
+        const read = {
+            at: '2026-11-02T10:30:00.123Z',
+            $k: { $j: ['2026-11-02T10:30:00.123Z', -0, 2.5] },
+            n: 1,
+            s: '$5'
+        };
+        expect(
+            await connection(session({ rows: [{ result: { props, labels: ['T'] } }] })).query(own('SELECT 1'))
+        ).toEqual([{ props: read, labels: ['T'] }]);
+        const [row] = (await connection(session({ rows: [{ result: { props } }] })).query(own('SELECT 1'))) as any[];
+        expect(Object.is(row.props.$k.$j[1], -0)).toBe(true);
+        expect(
+            await connection(session({ implicitResults: [[{ 'result:json': JSON.stringify({ props }) }]] })).query(
+                own('BEGIN NULL; END;')
+            )
+        ).toEqual([{ props: { ...read, $k: { $j: ['2026-11-02T10:30:00.123Z', 0, 2.5] } } }]);
+    });
+
+    it("should hand back a user's own SQL as the driver gives it", async () => {
+        const rows = [{ result: { at: tag, $$k: 1 } }];
+        expect(await connection(session({ rows })).query(new QuerySpecification('SELECT 1'))).toEqual([
+            { at: tag, $$k: 1 }
+        ]);
+    });
+});

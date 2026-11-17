@@ -1,3 +1,4 @@
+import { ModuleStore, StampAndMarker } from '@/backend/StoreStatements';
 import { Direction } from '@/annotation/Metadata';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
@@ -12,15 +13,7 @@ import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { SqliteGroups } from '@/backend/sqlite/SqliteGroups';
-import {
-    hasLabels,
-    JSON_ROWS,
-    labelArray,
-    nodeDocument,
-    numberOf,
-    SqliteGraph,
-    textOf
-} from '@/backend/sqlite/SqliteGraph';
+import { hasLabels, JSON_ROWS, nodeDocument, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
 import { SqliteQueryRenderer } from '@/backend/sqlite/SqliteQueryRenderer';
 import { SqliteSearch } from '@/backend/sqlite/SqliteSearch';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
@@ -37,15 +30,6 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
-
-/** The label of the node holding the store's identity: drivine4j's, so each library reads one identity. */
-const STORE_LABEL = 'DrivineStore';
-
-/** The label of the nodes recording what each schema owner applied: drivine4j's, so each reads one marker. */
-const SCHEMA_MARKER = '_DrivineSchema';
-
-/** The moment, in milliseconds since the epoch, as the graph engines' timestamp() gives it. */
-const NOW_MILLIS = `CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 
 /** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
 export const ROW_ALIAS = 'n';
@@ -64,6 +48,17 @@ export const ROW_ALIAS = 'n';
  * statement, for a backend of another graph than the provider's: see `ensuring`.
  */
 export class SqliteBackend implements GraphBackend {
+    /** The store's stamp and schema marker, the shared module's statements. */
+    private readonly stampAndMarker = new StampAndMarker(
+        'sqlite',
+        this.graph.name,
+        (text, bindings) => new PostgresStatement(text, bindings)
+    );
+
+    get moduleStore(): { store: ModuleStore; graph?: string } {
+        return { store: 'sqlite', graph: this.graph.name };
+    }
+
     constructor(readonly graph: SqliteGraph = new SqliteGraph()) {}
 
     get ensuring(): string {
@@ -287,66 +282,31 @@ export class SqliteBackend implements GraphBackend {
     }
 
     storeStamps(): GraphStatement {
-        return json(
-            `SELECT json_object('id', ${textOf('n', 'storeId')}, 'assignedAt', ${textOf('n', 'assignedAt')}) ` +
-                `AS "stamp" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [STORE_LABEL])} ` +
-                `ORDER BY ${textOf('n', 'assignedAt')}, ${textOf('n', 'storeId')}`
-        );
+        return this.stampAndMarker.storeStamps();
     }
 
-    /** Mints the stamp unless it is there; the uniqueness constraint on its key turns away a racing writer's. */
-    assignStoreStamp(): GraphStatement {
-        return new PostgresStatement(
-            `INSERT INTO ${this.graph.nodes} (labels, props) SELECT ${labelArray(STORE_LABEL)}, ` +
-                `json_object('key', CAST($key AS TEXT), 'storeId', CAST($storeId AS TEXT), ` +
-                `'assignedAt', CAST($assignedAt AS TEXT), 'engine', CAST($engine AS TEXT)) ` +
-                `WHERE NOT EXISTS (SELECT 1 FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [STORE_LABEL])} ` +
-                `AND ${textOf('n', 'key')} = CAST($key AS TEXT))`
-        );
+    assignStoreStamp(storeId: string, assignedAt: string, engine: string): GraphStatement {
+        return this.stampAndMarker.assignStoreStamp(storeId, assignedAt, engine);
     }
 
     schemaMarker(property: 'version' | 'items'): GraphStatement {
-        return new PostgresStatement(
-            `SELECT ${textOf('n', property)} AS "value" FROM ${this.graph.nodes} n WHERE ${this.marker('n')} ` +
-                `ORDER BY ${this.newestFirst('n')} LIMIT 1`
-        );
+        return this.stampAndMarker.schemaMarker(property);
     }
 
     schemaScopes(): GraphStatement {
-        return new PostgresStatement(
-            `SELECT DISTINCT ${textOf('n', 'scope')} AS "scope" FROM ${this.graph.nodes} n WHERE ${hasLabels('n', [
-                SCHEMA_MARKER
-            ])}`
-        );
+        return this.stampAndMarker.schemaScopes()!;
     }
 
-    /** SQLite keeps an empty string apart from null, so an inventory is kept as it is, as drivine4j keeps it. */
     markerItems(stored: string | null | undefined): string[] | undefined {
-        return stored == null ? undefined : stored === '' ? [] : stored.split('\n');
+        return this.stampAndMarker.markerItems(stored);
     }
 
-    /**
-     * The newest marker of the scope is written, and one is made where there is none: the row is inserted with the
-     * `nid` of the marker found, or none, and a marker that is there is written instead, as drivine4j writes it. A merge
-     * patch leaves out what is null, so a version that is null removes the one the marker had.
-     */
-    recordSchemaMarker(): GraphStatement {
-        const written = `'version', CAST($version AS TEXT), 'items', CAST($items AS TEXT), 'appliedAt', ${NOW_MILLIS}`;
-        return new PostgresStatement(
-            `INSERT INTO ${this.graph.nodes} (nid, labels, props) ` +
-                `SELECT (SELECT m.nid FROM ${this.graph.nodes} m WHERE ${this.marker('m')} ` +
-                `ORDER BY ${this.newestFirst('m')} LIMIT 1), ${labelArray(SCHEMA_MARKER)}, ` +
-                `json_patch('{}', json_object('scope', CAST($scope AS TEXT), ${written})) WHERE 1 ` +
-                `ON CONFLICT (nid) DO UPDATE SET props = json_patch(props, json_object(${written}))`
-        );
+    recordSchemaMarker(scope: string, version: string | null, items: string): GraphStatement {
+        return this.stampAndMarker.recordSchemaMarker(scope, version, items);
     }
 
     pruneSchemaMarkers(): GraphStatement {
-        return new PostgresStatement(
-            `DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM (SELECT n.nid, row_number() OVER (ORDER BY ` +
-                `${this.newestFirst('n')}) AS position FROM ${this.graph.nodes} n WHERE ${this.marker('n')}) ranked ` +
-                `WHERE position > 1)`
-        );
+        return this.stampAndMarker.pruneSchemaMarkers();
     }
 
     /**
@@ -362,16 +322,6 @@ export class SqliteBackend implements GraphBackend {
             cause = cause.rootCause ?? cause.cause;
         }
         return false;
-    }
-
-    /** The markers of the owner bound as `$scope`. */
-    private marker(alias: string): string {
-        return `${hasLabels(alias, [SCHEMA_MARKER])} AND ${textOf(alias, 'scope')} = CAST($scope AS TEXT)`;
-    }
-
-    /** The marker applied last first, then the one made later, so the marker read, written and kept are one. */
-    private newestFirst(alias: string): string {
-        return `${numberOf(alias, 'appliedAt')} DESC NULLS LAST, ${alias}.nid DESC`;
     }
 
     /** What the root a delete by `$id` takes meets: the id, `where`, and for a view the view's requirements. */

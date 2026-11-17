@@ -79,6 +79,15 @@ describe('Postgres NaN and the infinities', () => {
         expect(types.getTypeParser(3802, 'text')(`[${NAN}]`)).toEqual([Infinity]);
     });
 
+    it('should read NaN and the infinities beside a tag or an escaped key, and the layout around them', () => {
+        const read = nonFiniteTypes({ getTypeParser: jest.fn() }).getTypeParser(3802, 'text');
+        const date = '{"$t":"date","v":"2024-01-01","s":"10000020240101"}';
+        expect(read(`{"d":${date},"$$k":[${NAN},${INFINITY},${NEGATIVE_INFINITY},9007199254740993]}`)).toEqual({
+            d: '2024-01-01',
+            $k: [NaN, Infinity, -Infinity, BigInt('9007199254740993')]
+        });
+    });
+
     it('should fail, before a statement runs, where JSON.parse gives a reviver no source text', () => {
         const parse = JSON.parse;
         JSON.parse = (text: string, reviver?: (key: string, value: any) => any) =>

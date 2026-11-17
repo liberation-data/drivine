@@ -1,6 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
+import { writeProps } from '@/cypher/ValueLayout';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -170,7 +171,9 @@ export class OracleSaveBuilder {
                 );
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
-                        ? this.bind(jsonText(propsOf(rel.related.model, item, [rel.related.model.targetField])))
+                        ? this.bind(
+                              jsonText(writeProps(propsOf(rel.related.model, item, [rel.related.model.targetField])))
+                          )
                         : 'NULL';
                 out.push(
                     `link(${from}, ${variable}, ${sqlText(rel.type)}, '${direction(rel.direction)}', ${relProps});`
@@ -316,7 +319,7 @@ END;`;
             match: this.bind(match),
             id: this.bind(jsonText(write.id)),
             labels: this.bind(JSON.stringify([...new Set(write.labels)])),
-            props: this.bind(jsonText(write.props, (_, value) => (value === undefined ? null : value))),
+            props: this.bind(jsonText(writeProps(write.props))),
             add: this.bind(JSON.stringify(write.add)),
             remove: this.bind(JSON.stringify(write.remove)),
             record: write.record ? this.bind(write.record.property) : 'NULL',

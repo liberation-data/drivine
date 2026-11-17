@@ -157,14 +157,44 @@ export const HELD: Record<string, Record<string, Hold[]>> = {
         // node:sqlite gives a function a text cut at its first NUL, so toFloat('\u0000NaN') reads an empty text (#699).
         ...(SQLITE_CUTS_AT_NUL
             ? { 'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }] }
-            : {})
+            : {}),
+        // CI's Neo4j gives four rows where the box's, the same 2026.10.2, gives none: under investigation (#764).
+        'Nesting of a dropped variable: a WITH that drops p and groups, in its WHERE': [
+            { issue: 764, steps: [11], on: ['neo4j'], mayPass: 'it passes on the test box, and fails on CI' }
+        ],
+        // The module's regexp on wasm refuses a back reference by name, where Neo4j answers it.
+        'A regular expression with a backreference': [
+            { issue: 'drivine-cypher-spec#240', steps: [1, 3, 4], on: ['sqlite'] }
+        ],
+        // The module's regexp on wasm overflows the stack on a group repeated 2,500 times.
+        'A text past 4000 bytes': [
+            {
+                issue: 'drivine-cypher-spec#320',
+                steps: [4],
+                on: ['sqlite'],
+                mayPass: "the wasm stack's depth differs by platform: the step overflows it on macOS, not on CI's Linux"
+            }
+        ]
+    },
+    'temporal.yaml': {
+        // Neo4j refuses a sub-second field without a minute; the SQL stores write a moment's zero seconds.
+        'A nanosecond past the microsecond': [
+            { issue: 'drivine-cypher-spec#321', steps: [6, 8, 14], on: ['neo4j'] },
+            { issue: 'drivine-cypher-spec#321', steps: [8, 14], on: ['sql'] }
+        ]
     }
 };
 
 export interface Hold {
-    issue: number;
+    /** A Drivine for TypeScript issue by its number, or another repository's (`drivine-cypher-spec#320`). */
+    issue: number | string;
     steps: number[] | 'all';
     on: string[];
+    /**
+     * Why the step may pass where it is held, where whether it fails depends on where it runs, not on the code: a held
+     * step that passes is otherwise an error, so that a hold is taken out once its issue is fixed.
+     */
+    mayPass?: string;
 }
 
 /**
@@ -235,10 +265,20 @@ export function valuesFor(value: any, whole: (value: bigint) => any): any {
 }
 
 /** The issue the step at `index` (from 0) of `case` in `file` is held for on `store`, if it is: see {@link HELD}. */
-export function heldFor(file: string, cypherCase: CypherCase, index: number, store: string): number | undefined {
+export function heldFor(
+    file: string,
+    cypherCase: CypherCase,
+    index: number,
+    store: string
+): number | string | undefined {
+    return holdOf(file, cypherCase, index, store)?.issue;
+}
+
+/** The hold on the step at `index` of `cypherCase` on `store`, where there is one. */
+function holdOf(file: string, cypherCase: CypherCase, index: number, store: string): Hold | undefined {
     return (HELD[file]?.[cypherCase.name] ?? []).find(
         (hold) => named(hold.on, store) && (hold.steps === 'all' || hold.steps.includes(index + 1))
-    )?.issue;
+    );
 }
 
 /** A step that gives rows, or fails with a message, not as the spec says. */
@@ -257,7 +297,8 @@ export async function check(
     store: string,
     run: (step: CypherStep) => Promise<any[]>
 ): Promise<void> {
-    const issue = heldFor(file, cypherCase, index, store);
+    const hold = holdOf(file, cypherCase, index, store);
+    const issue = hold?.issue;
     if (issue === undefined) {
         await checkStep(cypherCase, index, store, run);
         return;
@@ -273,15 +314,18 @@ export async function check(
             }
         });
     } catch (e) {
-        // Held, as liberation-data/drivine#<issue> has it, if it fails as the spec says it does not or as the store
+        // Held, as the issue has it, if it fails as the spec says it does not or as the store
         // fails: anything else the runner throws is thrown on, so that a hold does not hide the runner's own crash.
         if (e instanceof Mismatch || storeFailed) {
             return;
         }
         throw e;
     }
+    if (hold?.mayPass) {
+        return;
+    }
     throw new Error(
-        `${file}, ${cypherCase.name}, step ${index + 1} is held on ${store} for liberation-data/drivine#${issue}, ` +
+        `${file}, ${cypherCase.name}, step ${index + 1} is held on ${store} for ${issueName(issue)}, ` +
             'and passes: take it out of HELD.'
     );
 }
@@ -360,4 +404,9 @@ export function exactWhole(value: bigint): number | bigint {
 
 function replacer(_: string, value: any): any {
     return typeof value === 'bigint' ? value.toString() : value;
+}
+
+/** A hold's issue as GitHub names it. */
+function issueName(issue: number | string): string {
+    return typeof issue === 'number' ? `liberation-data/drivine#${issue}` : `liberation-data/${issue}`;
 }

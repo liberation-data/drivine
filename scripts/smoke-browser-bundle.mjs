@@ -4,7 +4,7 @@
 // it back by compiled Cypher. Run in CI after check-browser-bundle.mjs.
 import { build } from 'esbuild';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { compile } from '@liberation-data/drivine-cypher-compiler';
+import * as compiler from '@liberation-data/drivine-cypher-compiler';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +36,7 @@ const NODE_GLOBALS = [
 const Drivine = new Function(...NODE_GLOBALS, `${bundle.outputFiles[0].text}\nreturn Drivine;`)();
 
 Drivine.useSqliteDriver(Drivine.wasmSqliteDriver(await sqlite3InitModule()));
-Drivine.useCypherCompiler(compile);
+Drivine.useCypherCompiler(compiler);
 
 const provider = new Drivine.SqliteConnectionProvider('page', Drivine.DatabaseType.SQLITE, 'page.db', {
     graph: 'movies'
@@ -72,6 +72,14 @@ const kinds = await manager.query(
 );
 if (JSON.stringify(kinds) !== JSON.stringify([['2.0', 'AQI=']])) {
     console.error(`The browser bundle read back ${JSON.stringify(kinds)}, not [["2.0","AQI="]].`);
+    process.exit(1);
+}
+// The shared compiler's own host functions, which SQL compiled on SQLite calls, run in the page through its hostCall.
+const host = await manager.query(
+    cypher("RETURN [1, 2] = [1, 2.0] AS same, 'Neo' =~ 'N.*' AS matched, toString(date('2024-02-28') + duration('P2D')) AS day")
+);
+if (JSON.stringify(host) !== JSON.stringify([[true, true, '2024-03-01']])) {
+    console.error(`The browser bundle read back ${JSON.stringify(host)}, not [[true,true,"2024-03-01"]].`);
     process.exit(1);
 }
 // A failed statement closes its connection, the only one open, and the provider ends: the graph outlives them, as a

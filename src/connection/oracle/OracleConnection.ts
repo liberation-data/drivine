@@ -14,7 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
-import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { readLayoutAfter, readLayoutOf } from '@/cypher/ValueLayout';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -148,7 +148,13 @@ export class OracleConnection implements Connection {
         new StatementLogger(this.sessionId()).log(spec, hrStart);
         const rows =
             result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined, cypher !== undefined);
-        const returned = !cypher ? rows : result.rows ? rows.map(readRow) : returnedRows(rows, cypher.rows);
+        const returned = !cypher
+            ? finalized._exactIntegers
+                ? rows.map(ownRow)
+                : rows
+            : result.rows
+            ? rows.map(readRow)
+            : returnedRows(rows, cypher.rows);
         return this.resultMapper.mapQueryResults<T>(returned, finalized);
     }
 }
@@ -156,12 +162,14 @@ export class OracleConnection implements Connection {
 /**
  * The rows of a compiled Cypher statement that writes, from the rows `rows` its PL/SQL block returned in the shape
  * `shape` (see {@link CompiledRows}): `'one'`, the items of the one row's `rows`, as the shared compiler returns them
- * with `oracleRowsAsText` (see SharedCypherCompiler), their floats read (see withFloats); `'each'`, the rows as they
+ * with `oracleRowsAsText` (see SharedCypherCompiler), their floats and the layout read as the text was (see
+ * implicitRows); `'each'`, the rows as they
  * are, one a row in the column `RESULT`, which the result mapper takes the value of. Read as the statement says, never
  * by a column's name.
  */
 function returnedRows(rows: any[], shape: CompiledRows): any[] {
-    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: withFloats(it) }));
+    // Their floats are read already, with the rest of the layout, as the block's text was parsed (see implicitRows).
+    return shape === 'each' ? rows : (rows[0]?.rows ?? []).map((it: any) => ({ result: it }));
 }
 
 /**
@@ -173,9 +181,17 @@ function readRow(row: Record<string, unknown>): Record<string, unknown> {
     return Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
             key,
-            value === null || value === undefined ? value : withFloats(parseExactIntegers(String(value)))
+            value === null || value === undefined ? value : readLayoutAfter(String(value), withFloats)
         ])
     );
+}
+
+/**
+ * A row of the object manager's own statement (#741): each column the driver read, a JSON column as the object it
+ * holds, read in the store layout (see readLayoutOf), as Postgres and SQLite read it. A user's own SQL is not.
+ */
+function ownRow(row: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, readLayoutOf(value)]));
 }
 
 /** Oracle's names in its extended JSON for NaN and the infinities, and the numbers they are. */
@@ -218,7 +234,7 @@ function withFloats(value: any): any {
  * on Oracle 23.26).
  */
 function implicitRows(rows: any[] | undefined, exact: boolean): any[] {
-    const parse = exact ? parseExactIntegers : JSON.parse;
+    const parse = exact ? (text: string): any => readLayoutAfter(text, withFloats) : JSON.parse;
     return (rows ?? []).map((row) => {
         const out: Record<string, any> = {};
         for (const [key, value] of Object.entries(row)) {

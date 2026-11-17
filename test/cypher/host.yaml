@@ -4,10 +4,11 @@
 
 cases:
   - name: "drivine_equal"
-    description: "drivine_equal(a, b) compares two JSON values as Cypher does: 1 or 0, or null where either is no value or a null in them decides. NaN, as SQLite's JSON writes it, is equal to nothing, itself included, in a list or a map too; an infinity, as SQLite's JSON writes it, is equal to itself. A map that is not exactly the tag of NaN is a map."
+    description: "drivine_equal(a, b) compares two JSON values as Cypher does: 1 or 0, or null where either is no value or a null in them decides. NaN, as SQLite's JSON writes it, is equal to nothing, itself included, in a list or a map too; an infinity, as SQLite's JSON writes it, is equal to itself. A map that is not exactly the tag of NaN is a map. A temporal value's tag is equal to another only where it is the same value, its kind, text and key: two moments at one instant and two offsets are not, nor a date and the text that spells it."
     pairs:
       writes.yaml: ["NaN worked out from stored infinities"]
       queries.yaml: ["NaN and the infinities as parameters"]
+      temporal.yaml: ["Zoned values at one instant", "A date and the text that spells it"]
     steps:
       - function: "drivine_equal"
         args: ['{"$numberDouble":"NaN"}', '{"$numberDouble":"NaN"}']
@@ -57,6 +58,25 @@ cases:
       - function: "drivine_equal"
         args: ['null', '1']
         result: null
+      - note: "The same value."
+        function: "drivine_equal"
+        args: ['{"$t":"datetime","v":"2024-01-01T10:00:00+02:00","s":"10000020240101080000000000000072000"}', '{"$t":"datetime","v":"2024-01-01T10:00:00+02:00","s":"10000020240101080000000000000072000"}']
+        result: 1
+      - note: "The same instant at another offset, as Neo4j has it."
+        function: "drivine_equal"
+        args: ['{"$t":"datetime","v":"2024-01-01T10:00:00+02:00","s":"10000020240101080000000000000072000"}', '{"$t":"datetime","v":"2024-01-01T08:00:00Z","s":"10000020240101080000000000000064800"}']
+        result: 0
+      - note: "A date and the text that spells it."
+        function: "drivine_equal"
+        args: ['{"$t":"date","v":"2024-01-01","s":"10000020240101"}', '"2024-01-01"']
+        result: 0
+      - function: "drivine_equal"
+        args: ['[{"$t":"date","v":"2024-01-01","s":"10000020240101"}]', '[{"$t":"date","v":"2024-01-01","s":"10000020240101"}]']
+        result: 1
+      - note: "Durations of the same length, as Neo4j has them."
+        function: "drivine_equal"
+        args: ['{"$t":"duration","v":"P1D"}', '{"$t":"duration","v":"PT24H"}']
+        result: 0
 
   - name: "drivine_add"
     description: "drivine_add(a, b) is Cypher's a + b of two JSON values, as JSON text: NaN, as SQLite's JSON writes it, adds as a number, a sum of floats past a double's range is an infinity, written 9e999, and infinities of both signs sum to NaN; a text put together with NaN or an infinity writes it as Java does. Null where Cypher adds no such two, a map that is not exactly the tag of NaN among them."
@@ -112,8 +132,9 @@ cases:
         result: null
 
   - name: "drivine_list_order"
-    description: "drivine_list_order(a, b) is where the JSON list a comes beside the JSON list b in a comparison (<, >= …): -1, 0 or 1, by the first pair of items not equal, or by their sizes; null where either is no list, or where the pair that decides is not ordered, as a pair with NaN is not. An infinity is ordered as the float it is."
+    description: "drivine_list_order(a, b) is where the JSON list a comes beside the JSON list b in a comparison (<, >= …): -1, 0 or 1, by the first pair of items not equal, or by their sizes; null where either is no list, or where the pair that decides is not ordered, as a pair with NaN is not. An infinity is ordered as the float it is. Two temporal values' tags of one kind, not durations, are ordered by their sort keys s; tags of two kinds, two durations, and a tag beside any other value are not ordered."
     pairs:
+      temporal.yaml: ["A temporal list beside a text list"]
       writes.yaml: ["NaN worked out from stored infinities"]
       queries.yaml: ["NaN and the infinities as parameters"]
     steps:
@@ -142,9 +163,29 @@ cases:
       - function: "drivine_list_order"
         args: ['1', '[1]']
         result: null
+      - note: "Tags of a kind by their sort keys."
+        function: "drivine_list_order"
+        args: ['[{"$t":"date","v":"2024-01-01","s":"10000020240101"}]', '[{"$t":"date","v":"2024-01-02","s":"10000020240102"}]']
+        result: -1
+      - note: "A zoned value by its instant, whatever its offset."
+        function: "drivine_list_order"
+        args: ['[{"$t":"datetime","v":"2024-01-01T10:00:00+02:00","s":"10000020240101080000000000000072000"}]', '[{"$t":"datetime","v":"2024-01-01T09:00:00Z","s":"10000020240101090000000000000064800"}]']
+        result: -1
+      - note: "Tags of two kinds are not ordered."
+        function: "drivine_list_order"
+        args: ['[{"$t":"date","v":"2024-01-01","s":"10000020240101"}]', '[{"$t":"localdatetime","v":"2024-01-02T00:00:00","s":"10000020240102000000000000000"}]']
+        result: null
+      - note: "Nor are durations."
+        function: "drivine_list_order"
+        args: ['[{"$t":"duration","v":"P1D"}]', '[{"$t":"duration","v":"P2D"}]']
+        result: null
+      - note: "Nor a tag and a text."
+        function: "drivine_list_order"
+        args: ['[{"$t":"date","v":"2024-01-01","s":"10000020240101"}]', '["2024-01-02"]']
+        result: null
 
   - name: "drivine_sort_key"
-    description: "drivine_sort_key(list) is a text that orders, as SQLite orders text, as Cypher orders the JSON list: item by item, a list that another begins with first, and items of different kinds as Cypher orders kinds, a map, a list, a text, a truth value, a number, then null. NaN, as SQLite's JSON writes it, is a number, after every other, an infinity's too. A map that is not exactly the tag of NaN is a map. The text itself is each library's own: only its order is pinned. Of a value that is no list, it is the JSON text given; of null, null."
+    description: "drivine_sort_key(list) is a text that orders, as SQLite orders text, as Cypher orders the JSON list: item by item, a list that another begins with first, and items of different kinds as Cypher orders kinds, a map, a list, a temporal value's tag, a text, a truth value, a number, then null, tags by their kinds in Cypher's order and within a kind by their sort keys s. NaN, as SQLite's JSON writes it, is a number, after every other, an infinity's too. A map that is not exactly the tag of NaN is a map. The text itself is each library's own: only its order is pinned. Of a value that is no list, it is the JSON text given; of null, null."
     pairs:
       writes.yaml: ["NaN worked out from stored infinities"]
       queries.yaml: ["NaN and the infinities as parameters"]
@@ -174,6 +215,23 @@ cases:
       - function: "drivine_sort_key"
         args: [null]
         result: null
+      - note: "Temporal values' tags after lists and before texts, by their kinds in Cypher's order, datetime, localdatetime, date, time, localtime, then duration, and within a kind by their sort keys: a zoned value by its instant, then its offset."
+        function: "drivine_sort_key"
+        ascending:
+          - '[{}]'
+          - '[[1]]'
+          - '[{"$t":"datetime","v":"2024-01-01T09:00:00+02:00","s":"10000020240101070000000000000072000"}]'
+          - '[{"$t":"datetime","v":"2024-01-01T08:00:00Z","s":"10000020240101080000000000000064800"}]'
+          - '[{"$t":"datetime","v":"2024-01-01T10:00:00+02:00","s":"10000020240101080000000000000072000"}]'
+          - '[{"$t":"localdatetime","v":"2024-01-01T00:00:00","s":"10000020240101000000000000000"}]'
+          - '[{"$t":"date","v":"-0044-03-15","s":"09999999560315"}]'
+          - '[{"$t":"date","v":"2024-01-01","s":"10000020240101"}]'
+          - '[{"$t":"date","v":"2024-01-01","s":"10000020240101"},1]'
+          - '[{"$t":"time","v":"01:00:00+02:00","s":"061200000000000072000"}]'
+          - '[{"$t":"time","v":"22:00:00Z","s":"144000000000000064800"}]'
+          - '[{"$t":"localtime","v":"10:00:00","s":"36000000000000"}]'
+          - '[{"$t":"duration","v":"P1D"}]'
+          - '["a"]'
 
   - name: "drivine_canonical"
     description: "drivine_canonical(json) is the JSON text of the value with each map in it, at any depth, its keys in order, so two maps of the same entries are the same text, and group together. A list keeps its order. NaN, as SQLite's JSON writes it, and an infinity, written 9e999, are kept as they are. Of JSON's null, the text given; of null, null."
@@ -518,3 +576,502 @@ cases:
         value: [{$float: "Infinity"}, {$float: "-Infinity"}]
       - read: {store: "sqlite", nonFinite: false, column: '[1,2.0,"NaN"]'}
         value: [1, 2.0, "NaN"]
+
+  - name: "Temporal values' sort keys"
+    description: "The sort key s of a temporal value's tag, worked out of its canonical text v alone, as Temporals.key works it out and each store's SQL does (see README.md, Values in the store): digits of one width for each kind, which order two values of a kind as Neo4j does; a zoned time by its UTC nanoseconds of the day plus 18 hours, with no wrap at midnight. A duration has none."
+    pairs:
+      temporal.yaml: ["A sort key worked out as the statement runs", "A zoned time across midnight", "A zoned time at the offsets' limits", "The extremes of a year, an offset and a fraction"]
+    steps:
+      - key: {kind: "date", v: "2024-01-01"}
+        result: "10000020240101"
+      - note: "45 BC, numbered astronomically."
+        key: {kind: "date", v: "-0044-03-15"}
+        result: "09999999560315"
+      - note: "The last date Neo4j holds."
+        key: {kind: "date", v: "+999999999-12-31"}
+        result: "19999999991231"
+      - note: "The first."
+        key: {kind: "date", v: "-999999999-01-01"}
+        result: "00000000010101"
+      - key: {kind: "localtime", v: "00:00:00"}
+        result: "00000000000000"
+      - key: {kind: "localtime", v: "23:59:59.999999999"}
+        result: "86399999999999"
+      - key: {kind: "localtime", v: "10:30:00.000001"}
+        result: "37800000001000"
+      - note: "23:00 UTC of the day before: -1 hour, plus 18."
+        key: {kind: "time", v: "01:00:00+02:00"}
+        result: "061200000000000072000"
+      - key: {kind: "time", v: "22:00:00Z"}
+        result: "144000000000000064800"
+      - note: "-18 hours: the least."
+        key: {kind: "time", v: "00:00:00+18:00"}
+        result: "000000000000000129600"
+      - note: "42 hours less a nanosecond: the greatest."
+        key: {kind: "time", v: "23:59:59.999999999-18:00"}
+        result: "215999999999999000000"
+      - key: {kind: "localdatetime", v: "2024-03-15T10:30:00.500"}
+        result: "10000020240315103000500000000"
+      - key: {kind: "datetime", v: "2024-03-15T10:30:00.500+02:00"}
+        result: "10000020240315083000500000000072000"
+      - note: "UTC a year back."
+        key: {kind: "datetime", v: "2024-01-01T01:00:00+02:00"}
+        result: "10000020231231230000000000000072000"
+      - note: "UTC the leap day before."
+        key: {kind: "datetime", v: "2024-03-01T00:30:00+01:00"}
+        result: "10000020240229233000000000000068400"
+      - note: "UTC a year on."
+        key: {kind: "datetime", v: "2024-12-31T23:00:00-02:00"}
+        result: "10000020250101010000000000000057600"
+      - note: "UTC the year 1,000,000,000: the greatest."
+        key: {kind: "datetime", v: "+999999999-12-31T23:59:59.999999999-18:00"}
+        result: "20000000000101175959999999999000000"
+      - note: "UTC the year -1,000,000,000: the least."
+        key: {kind: "datetime", v: "-999999999-01-01T00:00:00+18:00"}
+        result: "00000000001231060000000000000129600"
+      - note: "A duration has no order."
+        key: {kind: "duration", v: "P1D"}
+        result: null
+
+  - name: "Rows that hold temporal values and keys that begin with $"
+    description: "In a column of a compiled statement's rows, a temporal value's tag, {\"$t\", \"v\", \"s\"} with $t a kind's word and v a text, is read as its text v, in a list or a map too; a map's key that begins with $$ is read with one $ fewer, and any other key as it is. An object whose $t names no kind, or whose v is no text, is a map."
+    pairs:
+      temporal.yaml: ["ISO text on SQL stores", "A sort key worked out as the statement runs"]
+      queries.yaml: ["Map keys that begin with $"]
+    steps:
+      - read: {store: "postgres", nonFinite: false, column: '{"$t":"date","v":"2024-01-01","s":"10000020240101"}'}
+        value: "2024-01-01"
+      - read: {store: "postgres", nonFinite: false, column: '{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"}'}
+        value: "2024-03-15T10:30:00.500+02:00"
+      - read: {store: "postgres", nonFinite: false, column: '{"$t":"duration","v":"P1DT2H"}'}
+        value: "P1DT2H"
+      - read: {store: "postgres", nonFinite: false, column: '[{"$t":"date","v":"2024-01-01","s":"10000020240101"},{"$t":"duration","v":"P1DT2H"},null]'}
+        value: ["2024-01-01", "P1DT2H", null]
+      - read: {store: "postgres", nonFinite: false, column: '{"a":{"$t":"date","v":"2024-01-01","s":"10000020240101"},"b":[{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"}]}'}
+        value: {a: "2024-01-01", b: ["2024-03-15T10:30:00.500+02:00"]}
+      - read: {store: "postgres", nonFinite: false, column: '{"$$t":1,"$$$t":2,"$$x":3,"a$":4}'}
+        value: {"$t": 1, "$$t": 2, "$x": 3, "a$": 4}
+      - read: {store: "postgres", nonFinite: false, column: '{"$$t":"date","v":"2024-01-01"}'}
+        value: {"$t": "date", v: "2024-01-01"}
+      - read: {store: "postgres", nonFinite: false, column: '{"$t":"week","v":"2024-W01"}'}
+        value: {"$t": "week", v: "2024-W01"}
+      - read: {store: "postgres", nonFinite: false, column: '{"$t":"date","v":1}'}
+        value: {"$t": "date", v: 1}
+      - read: {store: "sqlite", nonFinite: false, column: '{"$t":"date","v":"2024-01-01","s":"10000020240101"}'}
+        value: "2024-01-01"
+      - read: {store: "sqlite", nonFinite: false, column: '{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"}'}
+        value: "2024-03-15T10:30:00.500+02:00"
+      - read: {store: "sqlite", nonFinite: false, column: '{"$t":"duration","v":"P1DT2H"}'}
+        value: "P1DT2H"
+      - read: {store: "sqlite", nonFinite: false, column: '[{"$t":"date","v":"2024-01-01","s":"10000020240101"},{"$t":"duration","v":"P1DT2H"},null]'}
+        value: ["2024-01-01", "P1DT2H", null]
+      - read: {store: "sqlite", nonFinite: false, column: '{"a":{"$t":"date","v":"2024-01-01","s":"10000020240101"},"b":[{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"}]}'}
+        value: {a: "2024-01-01", b: ["2024-03-15T10:30:00.500+02:00"]}
+      - read: {store: "sqlite", nonFinite: false, column: '{"$$t":1,"$$$t":2,"$$x":3,"a$":4}'}
+        value: {"$t": 1, "$$t": 2, "$x": 3, "a$": 4}
+      - read: {store: "sqlite", nonFinite: false, column: '{"$$t":"date","v":"2024-01-01"}'}
+        value: {"$t": "date", v: "2024-01-01"}
+      - read: {store: "sqlite", nonFinite: false, column: '{"$t":"week","v":"2024-W01"}'}
+        value: {"$t": "week", v: "2024-W01"}
+      - read: {store: "sqlite", nonFinite: false, column: '{"$t":"date","v":1}'}
+        value: {"$t": "date", v: 1}
+
+
+  - name: "Random temporal values' sort keys"
+    description: "Forty values, eight of each kind with a key, drawn at random once (seed 1610) from every year Neo4j holds, every offset to ±18:00 and fractions to the nanosecond: each key as Temporals.key works it out of the canonical text alone, which a store's SQL gives the same (#161). temporal.yaml has them in Neo4j's order."
+    pairs:
+      temporal.yaml: ["Random temporal values in Neo4j's order"]
+    steps:
+      - key: {kind: "date", v: "2065-06-27"}
+        result: "10000020650627"
+      - key: {kind: "date", v: "+821765819-09-24"}
+        result: "18217658190924"
+      - key: {kind: "date", v: "-1806-10-13"}
+        result: "09999981941013"
+      - key: {kind: "date", v: "+839561317-09-05"}
+        result: "18395613170905"
+      - key: {kind: "date", v: "2044-03-01"}
+        result: "10000020440301"
+      - key: {kind: "date", v: "2077-03-08"}
+        result: "10000020770308"
+      - key: {kind: "date", v: "1966-02-20"}
+        result: "10000019660220"
+      - key: {kind: "date", v: "1989-05-18"}
+        result: "10000019890518"
+      - key: {kind: "localtime", v: "00:00:00.339676"}
+        result: "00000339676000"
+      - key: {kind: "localtime", v: "21:41:51.499241"}
+        result: "78111499241000"
+      - key: {kind: "localtime", v: "13:22:53.023888"}
+        result: "48173023888000"
+      - key: {kind: "localtime", v: "22:03:18.358120558"}
+        result: "79398358120558"
+      - key: {kind: "localtime", v: "20:00:22"}
+        result: "72022000000000"
+      - key: {kind: "localtime", v: "10:24:47.675661"}
+        result: "37487675661000"
+      - key: {kind: "localtime", v: "14:22:18.962937739"}
+        result: "51738962937739"
+      - key: {kind: "localtime", v: "10:30:31.687834683"}
+        result: "37831687834683"
+      - key: {kind: "time", v: "05:01:41-01:13"}
+        result: "087281000000000060420"
+      - key: {kind: "time", v: "21:56:37.317258+00:46"}
+        result: "141037317258000067560"
+      - key: {kind: "time", v: "02:00:12.756-15:51"}
+        result: "129072756000000007740"
+      - key: {kind: "time", v: "23:59:59.896-15:13"}
+        result: "205979896000000010020"
+      - key: {kind: "time", v: "11:44:02.351977-14:40"}
+        result: "159842351977000012000"
+      - key: {kind: "time", v: "00:00:00.636515+18:00"}
+        result: "000000636515000129600"
+      - key: {kind: "time", v: "01:54:18.783017Z"}
+        result: "071658783017000064800"
+      - key: {kind: "time", v: "00:00:00.156083-18:00"}
+        result: "129600156083000000000"
+      - key: {kind: "localdatetime", v: "2081-09-22T12:04:27.895794"}
+        result: "10000020810922120427895794000"
+      - key: {kind: "localdatetime", v: "2010-11-13T01:31:46.696"}
+        result: "10000020101113013146696000000"
+      - key: {kind: "localdatetime", v: "2075-10-19T08:03:20"}
+        result: "10000020751019080320000000000"
+      - key: {kind: "localdatetime", v: "-749579651-02-05T06:46:44.697560"}
+        result: "02504203490205064644697560000"
+      - key: {kind: "localdatetime", v: "1988-02-24T07:36:53.243"}
+        result: "10000019880224073653243000000"
+      - key: {kind: "localdatetime", v: "1933-11-08T00:00:00.476886"}
+        result: "10000019331108000000476886000"
+      - key: {kind: "localdatetime", v: "1938-09-11T00:00:00.222765348"}
+        result: "10000019380911000000222765348"
+      - key: {kind: "localdatetime", v: "2036-10-15T00:00:00.304"}
+        result: "10000020361015000000304000000"
+      - key: {kind: "datetime", v: "+308673642-03-14T12:55:21-18:00"}
+        result: "13086736420315065521000000000000000"
+      - key: {kind: "datetime", v: "1989-03-01T00:00:00.609289164+07:25"}
+        result: "10000019890228163500609289164091500"
+      - key: {kind: "datetime", v: "-8997-07-31T16:07:06.922963255+07:31"}
+        result: "09999910030731083606922963255091860"
+      - key: {kind: "datetime", v: "+980281921-01-15T17:43:39-18:00"}
+        result: "19802819210116114339000000000000000"
+      - key: {kind: "datetime", v: "1925-07-04T05:45:22.355634+05:27"}
+        result: "10000019250704001822355634000084420"
+      - key: {kind: "datetime", v: "2008-11-28T10:21:08+03:36"}
+        result: "10000020081128064508000000000077760"
+      - key: {kind: "datetime", v: "+948027483-03-02T14:49:43.418664-18:00"}
+        result: "19480274830303084943418664000000000"
+      - key: {kind: "datetime", v: "1932-02-22T04:38:45.447+07:36"}
+        result: "10000019320221210245447000000092160"
+
+  - name: "drivine_temporal"
+    description: "drivine_temporal(operation, …) works out what SQLite can't of a timestamp, the text of a wall clock to the microsecond (2024-03-15T10:30:00.000000), by its operation: add_time(timestamp, days, seconds, nanos) so many days, seconds and nanoseconds later, whole numbers each, the nanoseconds any number of them (a second or more is carried, as Java's plusNanos carries it); seconds_between(from, to) the whole seconds from one to the other, floored, as Cypher holds a duration's seconds, and nanos_between(from, to) the nanoseconds past them, from 0 to 999999999, so the seconds times a billion plus the nanoseconds is the exact difference over the whole range of years, which nanoseconds alone in a 64-bit integer cover for only 292 years either way; extract(timestamp, 'NANOSECOND_OF_MINUTE') its nanoseconds into the minute; local(text, kind) and utc(text, kind) the wall clock an ISO text of a temporal kind reads, its offset left out or moved to UTC. A timestamp keeps the microsecond: a finer part is cut, never rounded. Null where an argument is. The steps here pin what drivine4j#418, #421 and #424 fix; a step noted drivine4j#421 (layout 2) needs a timestamp of nine digits, and is held until it is the store's."
+    pairs:
+      temporal.yaml: ["Adding durations", "duration.between", "Fields of a date, time and moment"]
+    steps:
+      - function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000", 1, 1, 500000000]
+        result: "2024-03-16T10:30:01.500000"
+      - note: "Nanoseconds finer than the timestamp's microsecond are cut, not rounded."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000", 0, 0, 1999]
+        result: "2024-03-15T10:30:00.000001"
+      - function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T00:00:00.000000", 0, -1, 999999999]
+        result: "2024-03-14T23:59:59.999999"
+      - note: "Three days of seconds, past a 32-bit integer's range as nanoseconds."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T00:00:00.000000", 0, 259200, 0]
+        result: "2024-03-18T00:00:00.000000"
+      - function: "drivine_temporal"
+        args: ["add_time", null, 1, 1, 0]
+        result: null
+      - note: "drivine4j#421 (layout 2): a nanosecond is kept."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000000", 0, 0, 1]
+        result: "2024-03-15T10:30:00.000000001"
+      - note: "drivine4j#418: whole seconds, and the nanoseconds past them, so a fraction of a second comes out exact, not 22.14199996."
+        function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:00.000000", "2024-03-15T10:30:22.142000"]
+        result: 22
+      - note: "Floored, as Cypher holds a duration's seconds: -22.142 seconds are -23 and 858000000 nanoseconds."
+        function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:22.142000", "2024-03-15T10:30:00.000000"]
+        result: -23
+      - function: "drivine_temporal"
+        args: ["seconds_between", "1970-01-01T00:00:00.000000", "2024-03-15T10:30:00.000000"]
+        result: 1710498600
+      - function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:00.000000", null]
+        result: null
+      - function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:22.142000", "NANOSECOND_OF_MINUTE"]
+        result: 22142000000
+      - function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:00.000001", "NANOSECOND_OF_MINUTE"]
+        result: 1000
+      - note: "A timestamp of nine digits, as layout 2 keeps one (drivine4j#421), is read to the nanosecond already: not held."
+        function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:59.999999999", "NANOSECOND_OF_MINUTE"]
+        result: 59999999999
+      - note: "drivine4j#424: an offset with seconds, which the compiler refuses in a text but passes on from a map's timezone (time({hour: 12, timezone: '+02:05:59'})), fails here rather than being misread as hours and minutes."
+        function: "drivine_temporal"
+        args: ["utc", "10:00:00+02:05:59", "TIME"]
+        error: "'10:00:00+02:05:59' is no temporal value"
+      - note: "An offset of hours and minutes is read, as before."
+        function: "drivine_temporal"
+        args: ["utc", "10:00:00+02:05", "TIME"]
+        result: "1970-01-01T07:55:00.000000"
+      - function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:00:00+02:05:59", "DATE_TIME"]
+        error: "'2024-03-15T10:00:00+02:05:59' is no temporal value"
+      - function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:00:00+02:05", "DATE_TIME"]
+        result: "2024-03-15T10:00:00.000000"
+      - note: "drivine4j#421 (layout 2): a text's nanoseconds are kept."
+        function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:30:00.123456789", "LOCAL_DATE_TIME"]
+        result: "2024-03-15T10:30:00.123456789"
+      - note: "drivine4j#421 (layout 2)."
+        function: "drivine_temporal"
+        args: ["utc", "2024-03-15T10:30:00.123456789+01:00", "DATE_TIME"]
+        result: "2024-03-15T09:30:00.123456789"
+      - note: "A text's nanoseconds are read, but a timestamp keeps the microsecond until layout 2: the seventh digit and on are cut, never rounded."
+        function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:30:00.1234567", "LOCAL_DATE_TIME"]
+        result: "2024-03-15T10:30:00.123456"
+      - function: "drivine_temporal"
+        args: ["utc", "2024-03-15T10:30:00.9999999+01:00", "DATE_TIME"]
+        result: "2024-03-15T09:30:00.999999"
+      - note: "The nanoseconds past seconds_between's whole seconds (drivine4j#418)."
+        function: "drivine_temporal"
+        args: ["nanos_between", "2024-03-15T10:30:00.000000", "2024-03-15T10:30:22.142000"]
+        result: 142000000
+      - note: "From 0 up to a second, as the seconds are floored: -22.142 seconds are -23 and 858000000 nanoseconds."
+        function: "drivine_temporal"
+        args: ["nanos_between", "2024-03-15T10:30:22.142000", "2024-03-15T10:30:00.000000"]
+        result: 858000000
+      - function: "drivine_temporal"
+        args: ["nanos_between", "1970-01-01T00:00:00.000000", "2024-03-15T10:30:00.000000"]
+        result: 0
+      - function: "drivine_temporal"
+        args: ["nanos_between", null, "2024-03-15T10:30:00.000000"]
+        result: null
+      - note: "A microsecond back is -1 second and 999999000 nanoseconds."
+        function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:00.000001", "2024-03-15T10:30:00.000000"]
+        result: -1
+      - function: "drivine_temporal"
+        args: ["nanos_between", "2024-03-15T10:30:00.000001", "2024-03-15T10:30:00.000000"]
+        result: 999999000
+      - note: "Nearly ten thousand years, past the 292 years a 64-bit integer of nanoseconds holds: exact still."
+        function: "drivine_temporal"
+        args: ["seconds_between", "0001-01-01T00:00:00.000000", "9999-12-31T23:59:59.999999"]
+        result: 315537897599
+      - function: "drivine_temporal"
+        args: ["nanos_between", "0001-01-01T00:00:00.000000", "9999-12-31T23:59:59.999999"]
+        result: 999999000
+      - function: "drivine_temporal"
+        args: ["seconds_between", "9999-12-31T23:59:59.999999", "0001-01-01T00:00:00.000000"]
+        result: -315537897600
+      - function: "drivine_temporal"
+        args: ["nanos_between", "9999-12-31T23:59:59.999999", "0001-01-01T00:00:00.000000"]
+        result: 1000
+      - note: "Ten billion seconds, about 317 years, past the 292 years a 64-bit integer of nanoseconds holds."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000", 0, 10000000000, 0]
+        result: "2341-02-03T04:16:40.000000"
+      - function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000", 0, -10000000000, 0]
+        result: "1707-04-26T16:43:20.000000"
+      - note: "Nanoseconds of a second or more, or negative, are carried into the seconds, as Java's plusNanos carries them."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T00:00:00.000000", 0, 1, -1500000000]
+        result: "2024-03-14T23:59:59.500000"
+      - note: "SECOND is no field: the compiler reads NANOSECOND_OF_MINUTE, a whole number, where a float of seconds lost digits."
+        function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:22.142000", "SECOND"]
+        error: "A timestamp has no field SECOND."
+
+  - name: "drivine_trunc"
+    description: "drivine_trunc(number) cuts the number's fraction off, as Postgres's and Oracle's TRUNC do, and gives a whole number where one holds it, where SQLite's own trunc gives a float, which JSON writes 2.0. A float within two units of its last place of a whole number is that whole number: SQLite works out a fraction of a second in binary, which misses it by that much (33.001 seconds times a million is 33000999.999999996, and those microseconds are 33001000). A float past a whole number's range, an infinity among them, is the float. Null of null."
+    pairs:
+      temporal.yaml: ["Fields of a date, time and moment", "Fractions of a second and wrapping times"]
+    steps:
+      - function: "drivine_trunc"
+        args: [2.7]
+        result: 2
+      - function: "drivine_trunc"
+        args: [-2.7]
+        result: -2
+      - function: "drivine_trunc"
+        args: [-0.5]
+        result: 0
+      - note: "Within two units of the last place of 33001000, so 33001000, not 33000999."
+        function: "drivine_trunc"
+        args: [33000999.999999996]
+        result: 33001000
+      - function: "drivine_trunc"
+        args: [5]
+        result: 5
+      - function: "drivine_trunc"
+        args: [9223372036854775807]
+        result: 9223372036854775807
+      - function: "drivine_trunc"
+        args: [1.0e19]
+        result: 1.0e19
+      - function: "drivine_trunc"
+        args: [{$float: "-Infinity"}]
+        result: {$float: "-Infinity"}
+      - function: "drivine_trunc"
+        args: [null]
+        result: null
+
+  - name: "drivine_to_char"
+    description: "drivine_to_char(value, pattern) writes a timestamp or a number in a pattern of Postgres's and Oracle's to_char, those compiled SQL writes temporal values with. A timestamp's pattern is made of YYYY, MM, DD, HH24, MI, SS, IYYY (the ISO week's year), IW (its week) and DDD (the day of the year), and text in double quotes, written as it is; anything else is itself. A year is numbered astronomically, as Cypher numbers it, and written with its sign before 0: 0000 is 1 BC and -0044 is 45 BC. A number's pattern opens with FM: 0s for its digits, a whole number rounded half away from zero and padded to as many; or after a point as many places as the fraction may have, rounded likewise, its trailing zeros left out, and the point kept where no fraction is left (2.). Null where the value or the pattern is."
+    pairs:
+      temporal.yaml: ["Fields of a date, time and moment", "Fractions of a second and wrapping times", "Fields of a duration"]
+    steps:
+      - function: "drivine_to_char"
+        args: ["2024-03-15T10:30:05.000000", 'YYYY-MM-DD"T"HH24:MI:SS']
+        result: "2024-03-15T10:30:05"
+      - function: "drivine_to_char"
+        args: ["-0044-03-15T00:00:00.000000", "YYYY-MM-DD"]
+        result: "-0044-03-15"
+      - note: "The year 0, 1 BC, is a leap year."
+        function: "drivine_to_char"
+        args: ["0000-12-31T00:00:00.000000", "YYYY DDD"]
+        result: "0000 366"
+      - note: "The 3rd of January 2021 is in the last ISO week of 2020."
+        function: "drivine_to_char"
+        args: ["2021-01-03T00:00:00.000000", "IYYY-IW"]
+        result: "2020-53"
+      - note: "The 30th of December 2024 is in the first ISO week of 2025."
+        function: "drivine_to_char"
+        args: ["2024-12-30T00:00:00.000000", "IYYY-IW"]
+        result: "2025-01"
+      - function: "drivine_to_char"
+        args: ["2024-02-30T00:00:00.000000", "YYYY"]
+        error: "Text '2024-02-30T00:00:00.000000' could not be parsed"
+      - function: "drivine_to_char"
+        args: [12, "FM0000"]
+        result: "0012"
+      - function: "drivine_to_char"
+        args: [-5, "FM00"]
+        result: "-05"
+      - note: "Half away from zero."
+        function: "drivine_to_char"
+        args: ["2.5", "FM0000"]
+        result: "0003"
+      - function: "drivine_to_char"
+        args: ["-2.5", "FM00"]
+        result: "-03"
+      - function: "drivine_to_char"
+        args: ["6.5", "FM9999999999990.999999999"]
+        result: "6.5"
+      - function: "drivine_to_char"
+        args: ["2", "FM9999999999990.999999999"]
+        result: "2."
+      - function: "drivine_to_char"
+        args: ["1.0000000005", "FM9999999999990.999999999"]
+        result: "1.000000001"
+      - note: "Rounded to no fraction, a negative number is 0, with no sign."
+        function: "drivine_to_char"
+        args: ["-0.0000000004", "FM9999999999990.999999999"]
+        result: "0."
+      - function: "drivine_to_char"
+        args: [null, "FM00"]
+        result: null
+      - function: "drivine_to_char"
+        args: ["2024-03-15T10:30:05.000000", null]
+        result: null
+
+  - name: "drivine_temporal_arithmetic"
+    description: "drivine_temporal_arithmetic(operator, x, y) is Cypher's x + y, x - y, x * y or x / y where either is the tag of a temporal value read from the store, of a kind the statement doesn't know, or is a duration the statement scales by a number (#262), or two durations it adds or takes one from the other (#275): the tag the arithmetic makes, as JSON text, as Postgres and Oracle work it out by the function they keep (drivine4j#418). A moment moved by a duration's months, then its days and time, a date taking the time in whole days; two durations added or taken away; a duration times or divided by a number, each part divided, and by zero failing as Neo4j fails a number divided by zero. A moment of a nanosecond past the microsecond, or one but a date moved by a duration of one, fails by name, as the inline SQL fails it (drivine4j#421). x and y are JSON texts, or SQL numbers; null where either is SQL's or JSON's null. A pair Cypher has no arithmetic of fails, naming it, as does a date or a moment with a date moved past the year 9999 or before -9999, as the inline SQL fails (#263)."
+    pairs:
+      temporal.yaml: ["Adding durations", "Arithmetic on temporal values read from the store", "A duration divided, and its seconds written", "A nanosecond past the microsecond"]
+    steps:
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"2024-01-31","s":"10000020240131"}', '{"$t":"duration","v":"P1M"}']
+        result: '{"$t":"date","v":"2024-02-29","s":"10000020240229"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['-', '{"$t":"localdatetime","v":"2024-02-29T12:00:00","s":"10000020240229120000000000000"}', '{"$t":"duration","v":"P1Y"}']
+        result: '{"$t":"localdatetime","v":"2023-02-28T12:00:00","s":"10000020230228120000000000000"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"2024-01-01","s":"10000020240101"}', '{"$t":"duration","v":"P-1M-2DT-3H"}']
+        result: '{"$t":"date","v":"2023-11-29","s":"10000020231129"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"localtime","v":"23:30:00","s":"84600000000000"}', '{"$t":"duration","v":"PT45M"}']
+        result: '{"$t":"localtime","v":"00:15:00","s":"00900000000000"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"time","v":"10:00:00+02:00","s":"093600000000000072000"}', '{"$t":"duration","v":"PT14H"}']
+        result: '{"$t":"time","v":"00:00:00+02:00","s":"057600000000000072000"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"localdatetime","v":"2024-01-31T23:59:59.500","s":"10000020240131235959500000000"}', '{"$t":"duration","v":"P1MT0.5S"}']
+        result: '{"$t":"localdatetime","v":"2024-03-01T00:00:00","s":"10000020240301000000000000000"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['-', '{"$t":"datetime","v":"2024-01-01T10:00:00Z","s":"10000020240101100000000000000064800"}', '{"$t":"duration","v":"PT30M"}']
+        result: '{"$t":"datetime","v":"2024-01-01T09:30:00Z","s":"10000020240101093000000000000064800"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"duration","v":"P1M2DT3H"}', '{"$t":"duration","v":"P-2M-1DT-30M"}']
+        result: '{"$t":"duration","v":"P-1M1DT2H30M"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['-', '{"$t":"duration","v":"PT1S"}', '{"$t":"duration","v":"P1D"}']
+        result: '{"$t":"duration","v":"P-1DT1S"}'
+      - note: "Exactly, a nanosecond beside ten thousand years of hours, which SQLite's doubles lost (#275)."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"duration","v":"PT87660000H"}', '{"$t":"duration","v":"PT0.000000001S"}']
+        result: '{"$t":"duration","v":"PT87660000H0.000000001S"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['*', '{"$t":"duration","v":"PT1S"}', '0.5']
+        result: '{"$t":"duration","v":"PT0.5S"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['*', '1.5', '{"$t":"duration","v":"P1M"}']
+        result: '{"$t":"duration","v":"P1M15DT5H14M33S"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['/', '{"$t":"duration","v":"P1M"}', '3']
+        result: '{"$t":"duration","v":"P10DT3H29M42S"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['/', '{"$t":"duration","v":"P1Y"}', '3']
+        result: '{"$t":"duration","v":"P4M"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"duration","v":"PT30M"}', '{"$t":"datetime","v":"2024-01-01T10:00:00Z","s":"10000020240101100000000000000064800"}']
+        result: '{"$t":"datetime","v":"2024-01-01T10:30:00Z","s":"10000020240101103000000000000064800"}'
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"duration","v":"P1D"}', null]
+        result: null
+      - function: "drivine_temporal_arithmetic"
+        args: ['-', 'null', '{"$t":"duration","v":"P1D"}']
+        result: null
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"2024-01-01","s":"10000020240101"}', '{"$t":"date","v":"2024-01-01","s":"10000020240101"}']
+        error: "Cypher has no temporal arithmetic of the operator, kinds or values"
+      - function: "drivine_temporal_arithmetic"
+        args: ['/', '2', '{"$t":"duration","v":"P1D"}']
+        error: "Cypher has no temporal arithmetic of the operator, kinds or values"
+      - note: "A date moved past the years SQLite's text writes fails by name, as the inline SQL does (#263)."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"9999-12-31","s":"10000099991231"}', '{"$t":"duration","v":"P1D"}']
+        error: "A year the store doesn't hold, past 9999 or before its first"
+      - note: "A duration divided by zero fails, as Postgres, Oracle and Neo4j do, in Neo4j's words for a number (#262)."
+        function: "drivine_temporal_arithmetic"
+        args: ['/', '{"$t":"duration","v":"P1D"}', '0']
+        error: "/ by zero"
+      - note: "A moment of a nanosecond past the microsecond, or moved by a duration of one, fails by name: SQLite's timestamp keeps microseconds (drivine4j#421)."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"localdatetime","v":"2024-01-01T00:00:00.000000001"}', '{"$t":"duration","v":"PT1S"}']
+        error: "A fraction of a second past the microsecond"
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"localdatetime","v":"2024-01-01T00:00:00"}', '{"$t":"duration","v":"PT0.000000001S"}']
+        error: "A fraction of a second past the microsecond"
+      - note: "A date takes the whole days of a duration's time alone, so its nanoseconds are no matter there."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"2024-01-01","s":"10000020240101"}', '{"$t":"duration","v":"PT0.000000001S"}']
+        result: '{"$t":"date","v":"2024-01-01","s":"10000020240101"}'
+
+  - name: "drivine_host_version"
+    description: "drivine_host_version() is the version of the drivine_ functions' contract, the forms of their arguments and results this file pins, as the compiler's SqliteFunctions.HOST_VERSION is. A library checks it once on each connection it registers the functions on, and fails where it is not the compiler's, or the function is missing: then the functions are not those the compiled SQL calls. No compiled statement calls it, so its case pairs no store case."
+    pairs: {}
+    steps:
+      - function: "drivine_host_version"
+        args: []
+        result: 2

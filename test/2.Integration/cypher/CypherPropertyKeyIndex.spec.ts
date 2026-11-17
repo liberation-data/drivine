@@ -76,7 +76,8 @@ function postgresPlanner(store: SqlStore): Planner {
             }
         },
         probesIndex: (plan) =>
-            new RegExp(`Index Cond: \\(\\(props ->> '(id|${IMPORT_ID})'::text\\) = `).test(plan) &&
+            // Layout 2 compares the property's JSON (->), as its index is made over it.
+            new RegExp(`Index Cond: \\(\\(props ->>? '(id|${IMPORT_ID})'::text\\) = `).test(plan) &&
             !plan.includes(`Seq Scan on ${GRAPH}_node`),
         whereProbesIndex: true
     };

@@ -1,4 +1,5 @@
 import { DEFAULT_GRAPH, SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
+import { storeStatements } from '@/backend/StoreStatements';
 import { DrivineError } from '@/DrivineError';
 import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
 import { Stamps } from '@/model/Stamps';
@@ -48,59 +49,46 @@ export class SqliteGraph extends SqlGraph implements WriteFunction {
         super(name, 'SQLite', MAX_OBJECT_NAME);
     }
 
-    /** What makes the store when it is not there: drivine4j's statements, so each library makes the same file. */
-    get ddl(): string[] {
-        return [
-            [
-                `CREATE TABLE IF NOT EXISTS ${this.nodes} (`,
-                `    nid    INTEGER PRIMARY KEY AUTOINCREMENT,`,
-                `    labels TEXT NOT NULL,`,
-                `    props  TEXT NOT NULL,`,
-                `    stamp  TEXT`,
-                `)`
-            ].join('\n'),
-            [
-                `CREATE TABLE IF NOT EXISTS ${this.edges} (`,
-                `    eid   INTEGER PRIMARY KEY AUTOINCREMENT,`,
-                `    src   INTEGER NOT NULL REFERENCES ${this.nodes} (nid) ON DELETE CASCADE,`,
-                `    dst   INTEGER NOT NULL REFERENCES ${this.nodes} (nid) ON DELETE CASCADE,`,
-                `    type  TEXT NOT NULL,`,
-                `    props TEXT NOT NULL DEFAULT '{}'`,
-                `)`
-            ].join('\n'),
-            [
-                `CREATE TABLE IF NOT EXISTS ${this.catalog} (`,
-                `    kind        TEXT NOT NULL,`,
-                `    label       TEXT NOT NULL,`,
-                `    properties  TEXT NOT NULL,`,
-                `    name        TEXT,`,
-                `    object_name TEXT,`,
-                `    details     TEXT NOT NULL,`,
-                `    PRIMARY KEY (kind, label, properties)`,
-                `)`
-            ].join('\n'),
-            `CREATE INDEX IF NOT EXISTS ${this.name}_edge_src ON ${this.edges} (src, type)`,
-            `CREATE INDEX IF NOT EXISTS ${this.name}_edge_dst ON ${this.edges} (dst, type)`
-        ];
+    /**
+     * A query of the store's catalog whose one value is how many of the graph's table of nodes it holds, none or one: a
+     * graph without one is new, and its layout is not judged (see judgeLayout).
+     */
+    get tablesMade(): string {
+        return `SELECT count(*) AS "made" FROM sqlite_master WHERE type = 'table' AND lower(name) = ${sqlText(
+            this.nodes.toLowerCase()
+        )}`;
     }
 
     /**
-     * Counts what of the {@link ddl} makes is there: each table and index, by its name in any case. A user who may only
-     * read the file is refused a `CREATE ... IF NOT EXISTS` even over a table that is there, so the store is looked for
-     * first.
+     * What makes the store when it is not there: the shared module's statements (StoreStatements), so each library makes
+     * the same file. The last, the lock table's row, makes nothing of its own.
+     */
+    get ddl(): string[] {
+        return storeStatements('sqlite', this.name).ddl!;
+    }
+
+    /**
+     * Counts what of the {@link ddl} makes is there: each table and index, by its name in any case, and each statement
+     * that makes nothing of its own (the lock table's row) as there where the rest are, as the module counts it
+     * (`SqliteDdl.made`). A user who may only read the file is refused a `CREATE ... IF NOT EXISTS` even over a table
+     * that is there, so the store is looked for first.
      *
      * The count is {@link REUSES_IDS} where the table of nodes or of relationships is there and was made without
-     * `AUTOINCREMENT`, as SQLite keeps the statement that made it: one look finds both. It is drivine4j's and
-     * drivine-python's text: it looks for `KEY AUTOINCREMENT`, so that a graph whose name holds the word is not taken
-     * for one made with it.
+     * `AUTOINCREMENT`, as SQLite keeps the statement that made it: one look finds both. It looks for `KEY AUTOINCREMENT`,
+     * so that a graph whose name holds the word is not taken for one made with it.
      */
     get made(): string {
-        const names = this.ddl.map((it) => /IF NOT EXISTS (\w+)/.exec(it)![1].toLowerCase());
+        const making = this.ddl.flatMap((it) => {
+            const name = /IF NOT EXISTS (\w+)/.exec(it)?.[1];
+            return name ? [name.toLowerCase()] : [];
+        });
+        const rows = this.ddl.length - making.length;
         const keyed = [this.nodes, this.edges].map((it) => sqlText(it.toLowerCase())).join(', ');
         return (
             `SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) IN ` +
-            `(${keyed}) AND sql NOT LIKE '%KEY AUTOINCREMENT%') THEN ${REUSES_IDS} ELSE COUNT(*) END AS "made" ` +
-            `FROM sqlite_master WHERE lower(name) IN (${names.map(sqlText).join(', ')})`
+            `(${keyed}) AND sql NOT LIKE '%KEY AUTOINCREMENT%') THEN ${REUSES_IDS} ELSE COUNT(*)${
+                rows > 0 ? ` + ${rows}` : ''
+            } END AS "made" FROM sqlite_master WHERE lower(name) IN (${making.map(sqlText).join(', ')})`
         );
     }
 

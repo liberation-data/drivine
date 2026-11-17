@@ -31,25 +31,45 @@ export interface SharedGraph {
 /** The shared compiler's entry point: a request as JSON text in, the answer as JSON text out. */
 type Compile = (request: string) => string;
 
+/**
+ * A call of one of the module's SQLite host functions by its SQL name, its arguments and its answer each written as the
+ * package's README says ("Host functions from JavaScript"): see SqliteHostFunctions.
+ */
+type HostCall = (name: string, args: string) => string;
+
+/** What Drivine uses of the shared compiler's package. */
+export interface CypherCompilerModule {
+    compile: Compile;
+    hostCall: HostCall;
+}
+
 const PACKAGE = '@liberation-data/drivine-cypher-compiler';
-let loaded: Compile | undefined;
+let loaded: CypherCompilerModule | undefined;
 
 /**
- * The shared compiler, required on the first compile for a SQL store or the first full-text search, so an application
- * on a graph engine that doesn't search by text never loads it. The package's own entry starts its Wasm module on its
- * first `compile`, not on `require`.
+ * The shared compiler, required on the first compile for a SQL store, the first full-text search, or the first call of
+ * a host function on SQLite, so an application on a graph engine that doesn't search by text never loads it. The
+ * package's own entry starts its Wasm module on its first call, not on `require`.
  */
-function compileFunction(): Compile {
-    loaded ??= nodeRequire<{ compile: Compile }>(PACKAGE).compile;
+export function cypherCompilerModule(): CypherCompilerModule {
+    loaded ??= nodeRequire<CypherCompilerModule>(PACKAGE);
     return loaded;
 }
 
+function compileFunction(): Compile {
+    return cypherCompilerModule().compile;
+}
+
 /**
- * Has Drivine compile Cypher with `compile`, the shared compiler's `compile`, rather than requiring its package: as in a
- * page, which imports the package's ES module itself, since that loads its Wasm by `fetch`. Set before the first compile.
+ * Has Drivine use `compiler`, the shared compiler's package, rather than requiring it: as in a page, which imports the
+ * package's ES module itself, since that loads its Wasm by `fetch`. Its `compile` compiles Cypher, and its `hostCall`
+ * runs the host functions compiled SQL calls on SQLite. Set before the first compile.
+ *
+ *     import * as compiler from '@liberation-data/drivine-cypher-compiler';
+ *     useCypherCompiler(compiler);
  */
-export function useCypherCompiler(compile: Compile): void {
-    loaded = compile;
+export function useCypherCompiler(compiler: CypherCompilerModule): void {
+    loaded = compiler;
 }
 
 /** Whether the shared compiler has been loaded in this process: for the test that a graph engine's app never loads it. */
@@ -320,7 +340,7 @@ function number(value: number): string {
 }
 
 /** `bytes` as base64, by `btoa`, which Node and a page both have: a page has no `Buffer`. */
-function base64(bytes: Uint8Array): string {
+export function base64(bytes: Uint8Array): string {
     let binary = '';
     for (const b of bytes) {
         binary += String.fromCharCode(b);

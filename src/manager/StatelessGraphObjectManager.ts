@@ -47,7 +47,10 @@ import { DrivineLogger } from '@/logger';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { PersistenceManager } from '@/manager/PersistenceManager';
 import { SearchIndex } from '@/cypher/SharedCypherCompiler';
-import { ClassRef, ClassType } from '@/query/QuerySpecification';
+import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecification';
+import { cypherStatement } from '@/query/Statement';
+import { columnValue } from '@/backend/postgres/PostgresStatement';
+import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
 /**
  * Loads, saves and deletes decorated objects. It keeps nothing between calls: what a call does depends only on its
@@ -265,22 +268,48 @@ export class StatelessGraphObjectManager {
 
     /** Range indexes of this manager's database: made idempotently, outside any transaction. */
     get indexes(): IndexManager {
-        return new IndexManager(
-            this.schemaExecutor(),
-            this.schemaGrammar(),
-            () => this.indexAdvisor.refresh(),
-            this.lowerCopies()
-        );
+        return new IndexManager(this.schemaPlanning());
     }
 
     /** Uniqueness constraints of this manager's database: made idempotently, outside any transaction. */
     get constraints(): ConstraintManager {
-        return new ConstraintManager(
-            this.schemaExecutor(),
-            this.schemaGrammar(),
-            () => this.indexAdvisor.refresh(),
-            this.lowerCopies()
-        );
+        return new ConstraintManager(this.schemaPlanning());
+    }
+
+    /**
+     * The shared module's schema plan of this manager's store, with how its statements run here: schema statements and
+     * listings on a connection of their own, outside any transaction, and the marker's through this manager's
+     * persistence manager, Cypher where the plan says it is compiled.
+     */
+    schemaPlanning(): SchemaPlanning {
+        const executor = this.schemaExecutor();
+        const copies = this.lowerCopies();
+        const pm = this.persistenceManager;
+        return {
+            plan: new SchemaPlan(this.backend.moduleStore.store, this.backend.moduleStore.graph),
+            database: pm.database,
+            host: {
+                run: async (statement, parameters) => executor.run(statement, parameters),
+                marker: async (statement, parameters, compiled, rows) => {
+                    const spec = new QuerySpecification<any>(compiled ? cypherStatement(statement) : statement).bind(
+                        parameters
+                    );
+                    if (!rows) {
+                        await pm.execute(spec);
+                        return [];
+                    }
+                    return (await pm.query(spec)).map(columnValue);
+                },
+                ...(copies
+                    ? {
+                          readLowerCopies: async () => copies.storedCopies(),
+                          fillLowerCopies: async (label: string, properties: string[]) =>
+                              copies.fillIn(label, properties, true)
+                      }
+                    : {}),
+                changed: () => this.indexAdvisor.refresh()
+            }
+        };
     }
 
     /**
@@ -624,13 +653,13 @@ export class StatelessGraphObjectManager {
         // In order of id, so that two calls over the same nodes take their locks in the same order.
         const sorted = [...rows].sort((a, b) => inOrder(String(a.id), String(b.id)));
         const results = new Map<any, PatchResult>();
+        // Each statement bound before the first runs: one a SQL store refuses (a NaN) is refused with none written.
+        const statements: QuerySpecification<PatchResult & { id: any }>[] = [];
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
-            const chunk = sorted.slice(start, start + PATCH_ROWS);
-            const found = await this.whenUncontended(async () =>
-                this.persistenceManager.query<PatchResult & { id: any }>(
-                    this.backend.patchMany(root).spec({ rows: chunk })
-                )
-            );
+            statements.push(this.backend.patchMany(root).spec({ rows: sorted.slice(start, start + PATCH_ROWS) }));
+        }
+        for (const statement of statements) {
+            const found = await this.whenUncontended(async () => this.persistenceManager.query(statement));
             found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
         }
         return ids.map((id) => results.get(id)!);

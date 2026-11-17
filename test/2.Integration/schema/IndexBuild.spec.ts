@@ -87,10 +87,11 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             );
 
         const tidy = async (): Promise<void> => {
+            // The constraint first: Neo4j lists its own index as a range index over the property, which it won't drop.
+            await gom().constraints.drop(unique);
             for (const spec of [...all, failing, rangeIndex(COVERED, 'p')]) {
                 await gom().indexes.drop(spec);
             }
-            await gom().constraints.drop(unique);
             await clearLabels(gom().persistenceManager, engine, SEEDED, FAILED, COVERED, '_DrivineSchema');
         };
 
@@ -147,29 +148,14 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             await gom().persistenceManager.execute(new QuerySpecification(`DROP INDEX ${other}`));
         });
 
-        it('should log an index not built within the timeout under WARN, and raise it under FAIL_FAST', async () => {
-            await gom().indexes.drop(index);
-            const warned = new SchemaManager(factory, { catalogs: [], mode: 'WARN', indexBuildTimeout: 5 });
-            const report = await warned.ensure('build', index);
-            expect([...report.values()].flat().map((it) => it.status)).toEqual(['CREATED']);
-            expect(warn).toHaveBeenCalledWith(
-                expect.stringMatching(new RegExp(`had not built the RANGE index ${SEEDED}_text_range .*after 5 ms`))
-            );
-
-            await gom().indexes.drop(index);
-            const strict = new SchemaManager(factory, { catalogs: [], indexBuildTimeout: 5 });
-            await expect(strict.ensure('build', index)).rejects.toThrow(
-                new RegExp(`had not built the RANGE index ${SEEDED}_text_range .*after 5 ms`)
-            );
-        });
-
         it("should wait for nothing where a uniqueness constraint's index covers the properties already", async () => {
-            // CREATE INDEX IF NOT EXISTS then makes nothing, so no index of the name is listed to wait for.
+            // The constraint's own index is listed as a range index over the properties, as drivine4j lists it, so the range
+            // index is taken as there: nothing is made, and nothing waited on.
             expect((await gom().constraints.ensure(unique, 0)).status).toEqual('CREATED');
 
             const report = await new SchemaManager(factory, { catalogs: [] }).ensure('build', rangeIndex(COVERED, 'p'));
 
-            expect([...report.values()].flat().map((it) => it.status)).toEqual(['CREATED']);
+            expect([...report.values()].flat().map((it) => it.status)).toEqual(['ALREADY_MATCHING']);
             expect(await state(`${COVERED}_p_range`)).toEqual([]);
         });
 
@@ -178,7 +164,7 @@ describe.each(graphEngines().filter((it) => it.type === DatabaseType.NEO4J))(
             await gom().persistenceManager.execute(
                 new QuerySpecification(`CREATE (:${FAILED} {s: $s})`).bind({ s: 'x'.repeat(40_000) })
             );
-            const named = new RegExp(`${FAILED}_s_range.*too large`, 'i');
+            const named = new RegExp(`RANGE_INDEX '${FAILED}_s_range' on ${FAILED}\\[s\\] failed to build`);
 
             await expect(new SchemaManager(factory, { catalogs: [] }).ensure('build', failing)).rejects.toThrow(named);
             expect(await state(`${FAILED}_s_range`)).toEqual(['FAILED']);

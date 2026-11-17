@@ -225,6 +225,11 @@ export class LowerCopyCatalog implements LowerCopyFiller {
     }
 
     /** What the store records, read now. */
+    /** Each label and property whose lowercased copy is recorded as filled in, as the store's record holds them. */
+    async storedCopies(): Promise<[string, string][]> {
+        return this.statements.entries(await this.run(this.statements.read));
+    }
+
     private async stored(): Promise<Set<string>> {
         const entries = this.statements.entries(await this.run(this.statements.read));
         return new Set(entries.map(([label, property]) => keyOf(label, property)));

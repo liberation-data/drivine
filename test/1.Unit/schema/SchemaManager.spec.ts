@@ -16,26 +16,24 @@ describe('SchemaManager.ensure refusing two items of one identity given at once 
     beforeEach(() => DatabaseRegistry.tearDown());
     afterAll(() => DatabaseRegistry.tearDown());
 
-    it('should still refuse them with no graph database registered, naming none', async () => {
-        await expect(schema().ensure('dice', ...differing)).rejects.toThrow(
-            "Two schema catalogs declare the VECTOR on RtProp(embedding) differently, both owned by 'dice'."
-        );
+    /** The module's refusal (drivine4j's), which names the item and both declarations, and no database. */
+    const REFUSAL =
+        'Conflicting schema declarations for VECTOR_INDEX on RtProp[embedding] (they disagree on portable parameters)';
+
+    it('should still refuse them with no graph database registered', async () => {
+        await expect(schema().ensure('dice', ...differing)).rejects.toThrow(REFUSAL);
     });
 
-    it('should name the database they are given for', async () => {
+    it('should refuse them before the database they are given for is spoken to', async () => {
         DatabaseRegistry.getInstance().register(graph('a'));
 
-        await expect(schema().ensure('dice', ...differing)).rejects.toThrow(
-            "Two schema catalogs declare the VECTOR on RtProp(embedding) on a differently, both owned by 'dice'."
-        );
+        await expect(schema().ensure('dice', ...differing)).rejects.toThrow(REFUSAL);
     });
 
-    it('should name no one database when they are given for several', async () => {
+    it('should refuse them once when they are given for several databases', async () => {
         DatabaseRegistry.getInstance().register(graph('a'));
         DatabaseRegistry.getInstance().register(graph('b'));
 
-        await expect(schema().ensure(SchemaCatalog.of(...differing).named('dice'))).rejects.toThrow(
-            "Two schema catalogs declare the VECTOR on RtProp(embedding) differently, both owned by 'dice'."
-        );
+        await expect(schema().ensure(SchemaCatalog.of(...differing).named('dice'))).rejects.toThrow(REFUSAL);
     });
 });

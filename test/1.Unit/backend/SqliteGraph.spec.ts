@@ -9,38 +9,33 @@ import {
     textOf
 } from '@/backend/sqlite/SqliteGraph';
 import { byCodePoints, ExactJson, ExactNumber } from '@/backend/sqlite/ExactJson';
+import { storeStatements } from '@/backend/StoreStatements';
 
 describe('SqliteGraph', () => {
-    it("should make drivine4j's tables, named for the graph", () => {
+    it("should make the shared module's tables, named for the graph", () => {
         const graph = new SqliteGraph('contracts');
-        expect(graph.ddl[0]).toEqual(
-            [
-                'CREATE TABLE IF NOT EXISTS contracts_node (',
-                '    nid    INTEGER PRIMARY KEY AUTOINCREMENT,',
-                '    labels TEXT NOT NULL,',
-                '    props  TEXT NOT NULL,',
-                '    stamp  TEXT',
-                ')'
-            ].join('\n')
+        expect(graph.ddl).toEqual(storeStatements('sqlite', 'contracts').ddl);
+        expect(graph.ddl[0]).toMatch(
+            /^CREATE TABLE IF NOT EXISTS contracts_node \(\n {4}nid {4}INTEGER PRIMARY KEY AUTOINCREMENT,/
         );
-        expect(graph.ddl[1]).toContain('src   INTEGER NOT NULL REFERENCES contracts_node (nid) ON DELETE CASCADE');
         // Keys that never give a deleted row's id again (liberation-data/drivine4j#713).
         expect(graph.ddl[1]).toContain('    eid   INTEGER PRIMARY KEY AUTOINCREMENT,\n');
-        expect(graph.ddl[2]).toContain('PRIMARY KEY (kind, label, properties)');
-        expect(graph.ddl.slice(3)).toEqual([
-            'CREATE INDEX IF NOT EXISTS contracts_edge_src ON contracts_edge (src, type)',
-            'CREATE INDEX IF NOT EXISTS contracts_edge_dst ON contracts_edge (dst, type)'
-        ]);
     });
 
-    it('should look for each table and index in any case before it makes them', () => {
-        // drivine4j's look, which gives -1 for tables an earlier Drivine made, whose ids could be reused (#713), but for
-        // the KEY before AUTOINCREMENT, as drivine-python's, so a graph whose name holds the word is not taken for new.
-        expect(new SqliteGraph('Contracts').made).toEqual(
+    it('should look for each table and index in any case before it makes them, as the module counts them', () => {
+        // The module's look (SqliteDdl.made), which gives -1 for tables an earlier Drivine made, whose ids could be reused
+        // (#713), for the KEY before AUTOINCREMENT, so a graph whose name holds the word is not taken for new; and counts
+        // the lock table's row, which makes nothing of its own, as there where the rest are.
+        const graph = new SqliteGraph('Contracts');
+        const named = graph.ddl.flatMap((it) => /IF NOT EXISTS (\w+)/.exec(it)?.[1].toLowerCase() ?? []);
+        expect(named).toEqual(
+            expect.arrayContaining(['contracts_node', 'contracts_edge', 'contracts_schema', 'contracts_lock2'])
+        );
+        expect(graph.ddl.length - named.length).toEqual(1);
+        expect(graph.made).toEqual(
             `SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) IN ` +
-                `('contracts_node', 'contracts_edge') AND sql NOT LIKE '%KEY AUTOINCREMENT%') THEN -1 ELSE COUNT(*) END ` +
-                `AS "made" FROM sqlite_master WHERE lower(name) IN ('contracts_node', 'contracts_edge', ` +
-                `'contracts_schema', 'contracts_edge_src', 'contracts_edge_dst')`
+                `('contracts_node', 'contracts_edge') AND sql NOT LIKE '%KEY AUTOINCREMENT%') THEN -1 ELSE COUNT(*) + 1 END ` +
+                `AS "made" FROM sqlite_master WHERE lower(name) IN (${named.map((it) => `'${it}'`).join(', ')})`
         );
     });
 
@@ -73,7 +68,7 @@ describe('SqliteGraph', () => {
             );
             return sent;
         };
-        expect(ensured(5)).toEqual([graph.made]);
+        expect(ensured(graph.ddl.length)).toEqual([graph.made]);
         expect(ensured(2)).toEqual([graph.made, ...graph.ddl]);
         expect(() => ensured(-1)).toThrow(new ReusedIdsError('Contracts', '/data/graph.db'));
         expect(() => ensured(-1)).toThrow(

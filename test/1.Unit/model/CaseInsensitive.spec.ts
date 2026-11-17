@@ -5,7 +5,6 @@ import {
     CYPHER_LOWER_COPIES,
     CypherBackend,
     DatabaseType,
-    FALKORDB_SCHEMA,
     GraphProperty,
     GraphRelationship,
     GraphView,
@@ -18,7 +17,6 @@ import {
     madeAs,
     ModelRegistry,
     NEO4J_GRAMMAR,
-    NEO4J_SCHEMA,
     NodeFragment,
     NodeId,
     NodeLabels,
@@ -40,6 +38,7 @@ import {
     uniquenessConstraint
 } from '@liberation-data/drivine';
 import { loweredEntry } from '@/schema/LowerCopyCatalog';
+import { planningOn } from '../schema/Planning';
 import { loweredQuery, loweredWhere } from '@/dsl/LowerCopyLookups';
 
 @NodeFragment({ labels: ['CiAccount'] })
@@ -370,12 +369,13 @@ describe('@CaseInsensitive', () => {
                     return Promise.resolve();
                 }
             };
-            const constraints = new ConstraintManager(executor, FALKORDB_SCHEMA, undefined, copies);
+            const constraints = new ConstraintManager(planningOn('falkordb', executor, copies));
             await expect(
                 constraints.ensure(uniquenessConstraint('Account', 'email', { ignoreCase: true }))
-            ).rejects.toThrow(/FalkorDB cannot make the uniqueness constraint Account_email_ci_unique/);
+            ).rejects.toThrow(/FalkorDB cannot make the UNIQUENESS_CONSTRAINT Account_email_ci_unique/);
             expect(filled).toEqual([]);
-            expect(ran).toEqual([]);
+            // The listings are read first, as drivine4j's plan reads them; nothing is made.
+            expect(ran.filter((it) => !it.startsWith('CALL db.'))).toEqual([]);
         });
 
         it('should fill the copies in before it makes an index that ignores case, again where it is made anew', async () => {
@@ -388,13 +388,13 @@ describe('@CaseInsensitive', () => {
                     return Promise.resolve();
                 }
             };
-            const indexes = new IndexManager(executor, NEO4J_SCHEMA, undefined, copies);
+            const indexes = new IndexManager(planningOn('neo4j', executor, copies));
             const result = await indexes.ensure(rangeIndex('Account', 'email', { ignoreCase: true }));
             expect(result.status).toEqual('CREATED');
             expect(result.spec).toEqual(rangeIndex('Account', 'email', { ignoreCase: true }));
             expect(fills).toEqual([['Account', ['email'], true]]);
             expect(ran.filter((it) => it.startsWith('CREATE'))).toEqual([
-                'CREATE INDEX Account_email_ci_range IF NOT EXISTS FOR (n:Account) ON (n.`__drivine.lower.email`)'
+                'CREATE INDEX `Account_email_ci_range` IF NOT EXISTS FOR (n:`Account`) ON (n.`__drivine.lower.email`)'
             ]);
             await indexes.recreate(rangeIndex('Account', 'email', { ignoreCase: true }));
             expect(fills[1]).toEqual(['Account', ['email'], true]);
@@ -403,7 +403,9 @@ describe('@CaseInsensitive', () => {
         it('should refuse an item that ignores case where there is no store to fill the copies in through', async () => {
             const executor = recording([]);
             await expect(
-                new IndexManager(executor, NEO4J_SCHEMA).ensure(rangeIndex('Account', 'email', { ignoreCase: true }))
+                new IndexManager(planningOn('neo4j', executor)).ensure(
+                    rangeIndex('Account', 'email', { ignoreCase: true })
+                )
             ).rejects.toThrow(/ignores case, and this manager has no store to fill the lowercased copies in through/);
         });
     });

@@ -112,17 +112,15 @@ describe('The Cypher compiler refuses', () => {
         });
     });
 
-    it('toString() of a list or a map the statement makes, as Neo4j refuses it', () => {
-        // drivine4j's #349: Postgres gave the list's JSON text, and Oracle null. The spec's refusals hold the rest.
+    it('toString() of a list whose items are all of one kind, as Neo4j refuses it', () => {
+        // drivine4j's #349: Postgres gave the list's JSON text, and Oracle null. Neo4j writes a map and a list of items of
+        // more than one kind (the spec's toString cases), and refuses a list of one. The spec's refusals hold the rest.
         compilers.forEach(([, compiler]) => {
-            for (const [cypher, kind] of [
-                ['WITH [1, 2] AS l RETURN toString(l)', 'list'],
-                ['RETURN toString({a: 1})', 'map']
-            ]) {
-                expect(() => compiler().compile(cypher)).toThrow(
-                    `toString() takes a number, a text, a truth value or a temporal value, not a ${kind}, as in Neo4j.`
-                );
-            }
+            expect(() => compiler().compile('WITH [1, 2] AS l RETURN toString(l)')).toThrow(
+                'toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.'
+            );
+            compiler().compile('RETURN toString({a: 1})');
+            compiler().compile("RETURN toString([1, 'a'])");
             // A value whose kind the statement leaves open is compiled, as Neo4j plans it.
             compiler().compile("UNWIND [1, 'a'] AS x RETURN toString(x)");
             compiler().compile('MATCH (n) RETURN toString(n.x)');
@@ -203,8 +201,8 @@ describe('The Cypher compiler refuses', () => {
                 'a is bound already, so a CREATE makes no node of it, as in Neo4j.'
             );
             // Neo4j takes each of these: a node bound before an OPTIONAL MATCH or a MERGE that joins it up, a name a WITH, a
-            // UNION, a pattern comprehension, an EXISTS or a CALL that imports nothing leaves to a new variable, a list a
-            // variable-length relationship matches, a value whose kind the statement leaves open, and a variable bound
+            // UNION, a pattern comprehension, an EXISTS or a CALL that imports nothing leaves to a new variable, a value whose
+            // kind the statement leaves open, and a variable bound
             // already that a CREATE or a MERGE in a FOREACH names.
             [
                 'MATCH (a) OPTIONAL MATCH (a)-->(b) RETURN b',
@@ -224,7 +222,6 @@ describe('The Cypher compiler refuses', () => {
                 'MATCH (a) FOREACH (x IN [1] | MERGE (a)-[:R]->())',
                 'MATCH (a) WITH a SKIP 0 MERGE (a)-[:R]->()',
                 'MATCH (a) CALL { CREATE (a) RETURN 1 AS x } RETURN x',
-                'MATCH (a)-[r*]->() WITH r MATCH ()-[r*]->() RETURN r',
                 'MATCH (a) RETURN [(a)-->(a) | 1] AS l',
                 'WITH 1 AS p RETURN [p = ()-->() | length(p)] AS l',
                 'MATCH (a), (a)-->() RETURN a',
@@ -243,7 +240,6 @@ describe('The Cypher compiler refuses', () => {
                 'MATCH (a) WITH a, 1 AS b ORDER BY size([(a)-->(x) | x]) RETURN b',
                 'MATCH (a) MATCH p = (a)-->() RETURN nodes(p)',
                 'MATCH ()-[r*]->() RETURN size(r)',
-                'WITH [] AS r MATCH ()-[r*]-() RETURN r',
                 'MATCH (a) WITH collect(a) AS ns UNWIND ns AS n MATCH (n)-->(m) RETURN m'
             ].forEach((cypher) => compiler().compile(cypher));
             // Neo4j takes these too, and the compiler refuses them for what it does not compile yet, as before. So it refuses a
@@ -252,6 +248,8 @@ describe('The Cypher compiler refuses', () => {
                 'A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.';
             [
                 ['MATCH ()-[r]->() WITH r MATCH ()-[r]->() RETURN r', boundBefore],
+                ['MATCH (a)-[r*]->() WITH r MATCH ()-[r*]->() RETURN r', boundBefore],
+                ['WITH [] AS r MATCH ()-[r*]-() RETURN r', boundBefore],
                 ['MATCH (a)-[r]->() RETURN EXISTS { (a)-[r]->() } AS e', boundBefore],
                 ['MATCH (a)-[r]->(b) MERGE (a)-[r]->(b)', boundBefore],
                 ['MATCH ()-[r]->() FOREACH (x IN [1] | CREATE ()-[r:T]->())', boundBefore],
@@ -327,10 +325,18 @@ describe('The Cypher compiler refuses', () => {
                 'MATCH (n) WITH collect(n) AS l RETURN [x IN l WHERE (x)-->() | x]',
                 'MATCH (n) UNWIND [n] AS x MATCH (m) WHERE (m)-->(x) RETURN m',
                 'MATCH (n) CALL (n) { MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m',
-                'MATCH (n) CALL { WITH n MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m',
-                'MATCH (n) RETURN CASE WHEN (n)-->() THEN 1 ELSE 0 END, (n)-->() AS has ORDER BY (n)-->()'
+                'MATCH (n) CALL { WITH n MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m'
             ].forEach((cypher) =>
                 expect([store, cypher, refusal(compiler, cypher)]).toEqual([store, cypher, undefined])
+            );
+            // A pattern used as a value, not a condition, is refused as Neo4j refuses it, whether it names a new variable or not.
+            expect(
+                refusal(
+                    compiler,
+                    'MATCH (n) RETURN CASE WHEN (n)-->() THEN 1 ELSE 0 END, (n)-->() AS has ORDER BY (n)-->()'
+                )
+            ).toEqual(
+                'A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }.'
             );
         });
     });

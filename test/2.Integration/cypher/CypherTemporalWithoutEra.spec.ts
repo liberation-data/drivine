@@ -83,11 +83,21 @@ describeOnOracle('The Cypher spec on Oracle without the era functions', () => {
         ]);
     });
 
+    /**
+     * Held until a statement is compiled to call the store's function of temporal arithmetic only where the session may
+     * (#758): that function calls the era functions this suite drops, so it is left invalid (ORA-06575).
+     */
+    const HELD_FOR_758 = new Set([
+        'Zoned kind in a list, and in a list of lists',
+        'Arithmetic on temporal values read from the store',
+        'A duration divided, and its seconds written'
+    ]);
+
     const spec = loadSpec('temporal.yaml');
     spec.cases
         .filter((cypherCase) => cypherCase.name !== PLANNED_TOO_SLOWLY)
         .forEach((cypherCase) =>
-            it(cypherCase.name, async () => {
+            (HELD_FOR_758.has(cypherCase.name) ? it.failing : it)(cypherCase.name, async () => {
                 await pm.execute(new QuerySpecification(`DELETE FROM ${GRAPH}_node`));
                 if (spec.graph) {
                     await query(spec.graph);

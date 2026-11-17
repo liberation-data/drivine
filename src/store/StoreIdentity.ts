@@ -25,7 +25,6 @@ export interface StoreIdentity {
 
 /** The stamp's node and key, as drivine4j writes them, so a store stamped from the JVM and from Node has one identity. */
 const LABEL = 'DrivineStore';
-const SINGLETON = 'singleton';
 const KEY_CONSTRAINT = uniquenessConstraint(LABEL, 'key');
 const ATTEMPTS = 3;
 const MERGE_ATTEMPTS = 5;
@@ -242,12 +241,9 @@ export class StoreIdentityResolver {
         for (let attempt = 1; ; attempt++) {
             try {
                 await this.persistenceManager.execute(
-                    this.backend.assignStoreStamp().spec<void>({
-                        key: SINGLETON,
-                        storeId: randomUuid(),
-                        assignedAt: new Date().toISOString(),
-                        engine: this.persistenceManager.type
-                    })
+                    this.backend
+                        .assignStoreStamp(randomUuid(), new Date().toISOString(), this.persistenceManager.type)
+                        .spec<void>()
                 );
                 return;
             } catch (e) {

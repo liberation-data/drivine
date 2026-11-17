@@ -6,8 +6,9 @@ import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper
 import { SqliteConnection } from '@/connection/sqlite/SqliteConnection';
 import { openSqlite, SqliteDatabase, sqliteVersionOf, waitingOutLocks } from '@/connection/sqlite/SqliteDriver';
 import { SqliteFunctions } from '@/connection/sqlite/SqliteFunctions';
-import { SqliteGraph } from '@/backend/sqlite/SqliteGraph';
+import { REUSES_IDS, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
+import { judgeLayout, runOn } from '@/backend/sql/StoreLayout';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
 /** How long a connection waits for a locked file by default: long enough for any one save to finish, as drivine4j's. */
@@ -73,7 +74,18 @@ export class SqliteConnectionProvider implements ConnectionProvider {
         this.ended = false;
         return this.firstConnection.ensured(
             this.connection(this.idle.pop() ?? (await this.open())),
-            async (it) => it.query(new QuerySpecification(new SqliteGraph(this.graphName).ensuring)),
+            async (it) => {
+                const graph = new SqliteGraph(this.graphName);
+                // A store whose ids could be reused is refused first, as the store's making refuses it, and then the
+                // graph's layout is judged, before anything is made in it.
+                if (
+                    Number(Object.values((await it.query(new QuerySpecification(graph.made)))[0] ?? {})[0]) !==
+                    REUSES_IDS
+                ) {
+                    await judgeLayout('sqlite', graph.name, graph.tablesMade, runOn(it));
+                }
+                return it.query(new QuerySpecification(graph.ensuring));
+            },
             async (it, failure) => it.release(failure)
         );
     }

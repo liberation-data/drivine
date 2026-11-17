@@ -85,6 +85,17 @@ may give null (`[null] = [1]`), and a read declares the function itself. Without
 the same rows, renumbering a year inline, but Oracle takes longer to plan one of temporal arithmetic: seconds, and over
 a minute for a moment two `CALL`s deep.
 
+**A graph an earlier Drivine wrote.** Oracle, Postgres and SQLite hold each value in store layout 2, as the shared
+compiler writes it, and as drivine4j and drivine-python write it: a `Date` a save writes, and a temporal value a Cypher
+statement writes, as a tagged map of its ISO 8601 text and the key it orders by (`{"$t": "datetime", "v": "…", "s":
+"…"}`), read back as its text, and a property or map key whose name begins with `$` under one more `$`. The graph's
+stamp, its `DrivineStore` node, names its layout, and the provider reads it on its first connection, before anything
+is made. A graph an earlier Drivine wrote in layout 1 that holds no node but Drivine's own, its stamp and its schema
+marker, has that layout's indexes dropped and is stamped layout 2. One that holds the application's nodes is refused,
+on that connection and every one after it, with a `StoreLayoutError` that names the graph and says what to do: export
+it with the Drivine version that wrote it, and import it with this one. Nothing is migrated. A graph a later Drivine
+stamped with a later layout is refused too.
+
 Notes:
 
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher. A statement that writes and returns
@@ -165,7 +176,8 @@ startup: to keep a database you use only for plain SQL free of them, narrow the 
 `<graph>_node (nid, labels, props, stamp)` and `<graph>_edge (eid, src, dst, type, props)`, with `labels` and `props`
 as `jsonb` and a GIN index over the labels, so a node carries any number of them; `<graph>_schema`, the indexes and
 constraints Drivine made; and `<graph>_write`, the function a save's steps are carried out by, as one statement that is
-applied whole or not at all.
+applied whole or not at all. Values are held in store layout 2, and a graph an earlier Drivine wrote is judged, as
+on [Oracle](#oracle).
 
 Notes:
 
@@ -306,7 +318,8 @@ of its own. The tables are made on the first connection, when they are not there
 `<graph>_edge (eid INTEGER PRIMARY KEY AUTOINCREMENT, src, dst REFERENCES node ON DELETE CASCADE, type, props TEXT)`, and
 `<graph>_schema`. Labels and properties are JSON text, not SQLite's binary `jsonb`. Labels are written sorted, with no
 character escaped that JSON does not require, because a label is found by its text, `"Label"`, within `labels`. The stamp
-is a column. A moment is ISO 8601 text.
+is a column. Values are held in store layout 2, a moment as a tagged map of its ISO 8601 text, and a graph an earlier
+Drivine wrote is judged, as on [Oracle](#oracle).
 
 `nid` and `eid` are `AUTOINCREMENT` keys, so the id of a node or relationship that is deleted is never given to another,
 within a statement, a transaction or after it, as on Oracle and Postgres: an element id an application holds names the
@@ -346,7 +359,9 @@ Notes:
 - Each connection registers the functions Drivine's statements call, by drivine4j's names: `drivine_write`,
   `drivine_delete`, `drivine_lower_copies`, `drivine_similarity`, `drivine_epoch` (a moment as nanoseconds since the
   epoch), `drivine_lower` (a Unicode `lower`), `drivine_regexp_count`, and `regexp`, which SQLite's `REGEXP` calls.
-- A range index or a uniqueness constraint is a partial index over the property's text, for the nodes of the label.
+- A range index or a uniqueness constraint is a partial index, for the nodes of the label, over the property's class
+  and key as store layout 2 holds it (a temporal value's kind and sort key, any other value as `->>` reads it), so a
+  value is equal only to one of its kind.
   A vector or a full-text index is recorded and not made: `loadNearest` measures every node of the label that holds an
   embedding of the vector's size, and `loadMatching` reads every node of the label and scores by BM25, as Postgres
   does.

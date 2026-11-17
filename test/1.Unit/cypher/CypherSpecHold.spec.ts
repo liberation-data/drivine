@@ -1,4 +1,4 @@
-import { check, CypherCase, CypherStep, HELD } from '../../cypher/CypherSpec';
+import { check, CypherCase, CypherStep, HELD, loadSpec } from '../../cypher/CypherSpec';
 
 /**
  * A held step must still fail, by rows or a message not as the spec says, or as the store fails: one the runner crashes
@@ -45,9 +45,55 @@ describe('The Cypher spec runner holds a step', () => {
         await expect(oracle(held(step), async () => await Promise.resolve([loop]))).rejects.toThrow(RangeError);
     });
 
+    it("by another repository's issue, named with its repository", async () => {
+        HELD['queries.yaml']['NaN worked out'] = [{ issue: 'drivine-cypher-spec#320', steps: [2], on: ['sql'] }];
+        try {
+            await expect(oracle(held(step), async () => await Promise.resolve([1]))).rejects.toThrow(
+                /step 2 is held on oracle for liberation-data\/drivine-cypher-spec#320, and passes/
+            );
+        } finally {
+            HELD['queries.yaml']['NaN worked out'] = [{ issue: 512, steps: [2], on: ['oracle'] }];
+        }
+    });
+
+    it('that may pass where it says why, and fails otherwise as any hold does', async () => {
+        HELD['queries.yaml']['NaN worked out'] = [
+            { issue: 'drivine-cypher-spec#320', steps: [2], on: ['oracle'], mayPass: 'the stack differs by platform' }
+        ];
+        try {
+            await oracle(held(step), async () => await Promise.resolve([1]));
+            await oracle(held(step), async () => await Promise.resolve([2]));
+            const loop: Record<string, unknown> = {};
+            loop.self = loop;
+            await expect(oracle(held(step), async () => await Promise.resolve([loop]))).rejects.toThrow(RangeError);
+        } finally {
+            HELD['queries.yaml']['NaN worked out'] = [{ issue: 512, steps: [2], on: ['oracle'] }];
+        }
+    });
+
     it('only on the stores its hold names', async () => {
         await expect(
             check('queries.yaml', held(step), 1, 'neo4j', async () => await Promise.resolve([2]))
         ).rejects.toThrow(/Expected: \[1\]/);
+    });
+});
+
+describe('Each hold of the Cypher spec runner', () => {
+    it('names a case of its file, and steps the case has', () => {
+        const stale = Object.entries(HELD).flatMap(([file, cases]) => {
+            const spec = loadSpec(file);
+            return Object.entries(cases)
+                .filter(([name, holds]) => {
+                    const found = spec.cases.find((it) => it.name === name);
+                    return (
+                        !found ||
+                        holds.some(
+                            (hold) => hold.steps !== 'all' && hold.steps.some((n) => n < 1 || n > found.steps.length)
+                        )
+                    );
+                })
+                .map(([name]) => `${file}: ${name}`);
+        });
+        expect(stale).toEqual([]);
     });
 });

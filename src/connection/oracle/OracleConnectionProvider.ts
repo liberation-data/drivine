@@ -1,3 +1,4 @@
+import { judgeLayout, runOn } from '@/backend/sql/StoreLayout';
 import * as oracledb from 'oracledb';
 import { DatabaseType } from '@/connection/DatabaseType';
 import { Connection } from '@/connection/Connection';
@@ -91,7 +92,14 @@ export class OracleConnectionProvider implements ConnectionProvider {
             await (await this.poolOf()).getConnection(),
             async (it) => {
                 this.checkVersion(it);
-                return new OracleGraph(this.graphName).ensure(it);
+                const graph = new OracleGraph(this.graphName);
+                await judgeLayout(
+                    'oracle',
+                    graph.name,
+                    graph.tablesMade,
+                    runOn(new OracleConnection(it, new OracleResultMapper(), 'layout', graph.name))
+                );
+                return graph.ensure(it);
             },
             async (it) => it.close()
         );

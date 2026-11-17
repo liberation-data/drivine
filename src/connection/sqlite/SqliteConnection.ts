@@ -18,9 +18,8 @@ import {
 } from '@/connection/sqlite/SqliteDriver';
 import { compiledSpecification } from '@/cypher/CompiledSpecification';
 import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { NAN_KEY, NAN_TEXT, NAN_VALUE } from '@/connection/sqlite/SqliteCypherValues';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
-import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { readLayout, readLayoutAfter } from '@/cypher/ValueLayout';
 
 /** How long a transaction may hold the file's write lock before its end is warned of: drivine4j's five seconds. */
 export const LONG_LOCK_MILLIS = 5_000;
@@ -214,6 +213,16 @@ function bound(parameters: Record<string, SqliteValue> | SqliteValue[]): any[] {
 }
 
 /**
+ * NaN as SQLite's JSON text writes it, where its JSON holds no NaN: the map drivine4j's statements given NaN write, and
+ * the one map that is NaN.
+ */
+const NAN_TEXT = '{"$numberDouble":"NaN"}';
+
+/** The key and the value of the map that is NaN: see {@link NAN_TEXT}. */
+const NAN_KEY = '$numberDouble';
+const NAN_VALUE = 'NaN';
+
+/**
  * A row whose text values are each JSON, as the values they are: NaN, which SQLite's JSON writes as {@link NAN_TEXT}, read
  * as NaN where a value's text holds it, as drivine4j's `JdbcResultMapper.sqliteRows` reads it. A statement given no NaN
  * can still work one out, as `∞ + -∞`.
@@ -228,11 +237,12 @@ function jsonRow(row: Record<string, SqliteValue>): Record<string, any> {
  * The JSON `text` as the value it is, a whole number past 2^53 a `bigint` of its digits (see parseExactIntegers), as
  * compiled Cypher's and the object manager's own rows are (#735, #741), and each map of {@link NAN_TEXT} in it NaN where the text holds one. A text value
  * that holds those characters holds each quote escaped, so only a map holds them: the look is a cheap pass over a row
- * that holds no NaN, which most do, and {@link withNaN} takes only the exact map.
+ * that holds no NaN, which most do, and {@link withNaN} takes only the exact map. The column is read in the store layout
+ * (see readLayout).
  */
 function jsonValue(text: string): any {
-    const value = parseExactIntegers(text);
-    return text.includes(NAN_TEXT) ? withNaN(value) : value;
+    // NaN's map read on the column as SQLite wrote it, where a map of the user's with that key holds it escaped.
+    return text.includes(NAN_TEXT) ? readLayoutAfter(text, withNaN) : readLayout(text);
 }
 
 /** `value` with each map in it, at any depth, that is exactly NaN's, `{"$numberDouble": "NaN"}`, NaN. */

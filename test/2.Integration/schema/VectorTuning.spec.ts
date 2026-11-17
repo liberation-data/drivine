@@ -56,7 +56,8 @@ describe.each(allStores())('vector index tuning on $type', (engine) => {
             expect([listed.hnswM, listed.hnswEfConstruction, listed.quantizationEnabled]).toEqual([24, 150, false]);
         }
         if (engine.type === DatabaseType.FALKORDB) {
-            expect([listed.hnswM, listed.hnswEfConstruction, listed.efRuntime]).toEqual([24, 150, 20]);
+            // The module reads back the portable parameters, not FalkorDB's efRuntime, as drivine4j does.
+            expect([listed.hnswM, listed.hnswEfConstruction]).toEqual([24, 150]);
         }
         expect((await gom.indexes.ensure(tuned)).status).toEqual('ALREADY_MATCHING');
         if (engine.type === DatabaseType.NEO4J) {
@@ -122,7 +123,7 @@ describe.each(allStores())('vector index tuning on $type', (engine) => {
                     SchemaCatalog.of(clashing).forDatabase(engine.name)
                 ]
             }).enforce()
-        ).rejects.toThrow(/differently/);
+        ).rejects.toThrow(/Conflicting schema declarations for VECTOR_INDEX on TunedChunk\[embedding\]/);
         await expect(
             new SchemaManager(factory, {
                 catalogs: [
@@ -132,6 +133,6 @@ describe.each(allStores())('vector index tuning on $type', (engine) => {
                     )
                 ]
             }).enforce()
-        ).rejects.toThrow(/differently/);
+        ).rejects.toThrow(/Conflicting schema declarations for VECTOR_INDEX on TunedChunk\[embedding\]/);
     });
 });

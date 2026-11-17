@@ -137,8 +137,8 @@ describeOnOracle('schema on Oracle', () => {
             const lookup = backend.fullTextIndex!('OraSearch', ['text']);
             return lookup.found(await pm.query<any>(lookup.statement.spec()));
         };
-        expect(await vectorTable()).toMatch(/^drivine_v_OraSearchembedding_[0-9a-f]+$/);
-        expect((await textIndex()).oracleText).toMatch(/^drivine_t_OraSearchtext_[0-9a-f]+$/);
+        expect(await vectorTable()).toMatch(/^drivine_v2_OraSearchembedding_[0-9a-f]+$/);
+        expect((await textIndex()).oracleText).toMatch(/^drivine_t2_OraSearchtext_[0-9a-f]+$/);
         // Saved after the index: the trigger puts it in the tables.
         await gom.save(Object.assign(new Note(), { id: 'n2', text: 'relational tables', embedding: [0, 1] }));
         expect((await gom.loadNearest(Note, [0, 1], { topK: 1 })).map((it) => it.value.id)).toEqual(['n2']);
@@ -166,9 +166,9 @@ describeOnOracle('schema on Oracle', () => {
             return property === 'items' ? backend.markerItems(value) : value;
         };
         expect(await read('version')).toBeUndefined();
-        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v1', items: '' }));
+        await pm.execute(backend.recordSchemaMarker(scope, 'v1', '').spec());
         expect(await read('items')).toEqual([]);
-        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v2', items: 'a\nb' }));
+        await pm.execute(backend.recordSchemaMarker(scope, 'v2', 'a\nb').spec());
         expect([await read('version'), await read('items')]).toEqual(['v2', ['a', 'b']]);
         await pm.execute(
             new QuerySpecification(`DELETE FROM drivine_node n WHERE JSON_VALUE(n.props, '$.scope') = $scope`).bind({
@@ -185,14 +185,14 @@ describeOnOracle('schema on Oracle', () => {
             backend.markerItems(await pm.maybeGetOne<string>(backend.schemaMarker('items').spec({ scope })));
         const items = Array.from({ length: 300 }, (_, i) => `uniqueness:Label${i + 1}:property${i + 1}`);
         // The first record inserts the marker and the second updates it, so both branches of the MERGE are run.
-        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v1', items: items.join('\n') }));
+        await pm.execute(backend.recordSchemaMarker(scope, 'v1', items.join('\n')).spec());
         expect(await read()).toEqual(items);
         const more = [...items, 'one-more'];
-        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v2', items: more.join('\n') }));
+        await pm.execute(backend.recordSchemaMarker(scope, 'v2', more.join('\n')).spec());
         expect(await read()).toEqual(more);
         // Past 32767 bytes the items are bound as a CLOB, not a VARCHAR2.
         const many = Array.from({ length: 1200 }, (_, i) => `uniqueness:Label${i + 1}:property${i + 1}`);
-        await pm.execute(backend.recordSchemaMarker().spec({ scope, version: 'v3', items: many.join('\n') }));
+        await pm.execute(backend.recordSchemaMarker(scope, 'v3', many.join('\n')).spec());
         expect(await read()).toEqual(many);
         await pm.execute(
             new QuerySpecification(`DELETE FROM drivine_node n WHERE JSON_VALUE(n.props, '$.scope') = $scope`).bind({

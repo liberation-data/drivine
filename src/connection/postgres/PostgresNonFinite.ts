@@ -1,5 +1,6 @@
 import { DrivineError } from '@/DrivineError';
-import { exactInteger, parseExactIntegers } from '@/utils/ExactIntegers';
+import { exactInteger } from '@/utils/ExactIntegers';
+import { readLayout, readLayoutAfter } from '@/cypher/ValueLayout';
 
 /** Postgres's `json` and `jsonb`, by type OID. */
 const JSON_OID = 114;
@@ -131,13 +132,13 @@ export interface TypeParsers {
 
 /**
  * The type parsers a statement given NaN or an infinity runs with, as `pg`'s per-query `types`: `json` and `jsonb` read
- * by {@link readNonFiniteJson}, and each other type as `parsers`, the client's own, read it. Given to that statement
+ * by {@link readNonFiniteJson}, then in the store layout (see readLayoutAfter), and each other type as `parsers`, the client's own, read it. Given to that statement
  * alone, never set for the process: it would reach every statement, a user's own SQL and other libraries' too. Fails
  * before the statement runs where the numbers can't be read right.
  */
 export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
     requireSourceText();
-    return jsonTypes(parsers, readNonFiniteJson);
+    return jsonTypes(parsers, (text) => readLayoutAfter(text, (value) => value, readNonFiniteJson));
 }
 
 /**
@@ -147,7 +148,7 @@ export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
  * for the process, as {@link nonFiniteTypes} is.
  */
 export function exactIntegerTypes(parsers: TypeParsers): TypeParsers {
-    return jsonTypes(parsers, parseExactIntegers);
+    return jsonTypes(parsers, (text) => readLayout(text));
 }
 
 /** `parsers` with `json` and `jsonb`, as text, read by `read`. */

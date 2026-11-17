@@ -92,6 +92,14 @@ packed field with a set compared it with `{}`, and matched nothing.
 a relationship's property and a `@NodeId`. A `where` compares a field with one as that number too. Before #739, a
 `bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite.
 
+**Bytes, typed arrays, NaN and the infinities.** On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll`
+or `edges.relate` writes a value, bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are written as the list of their
+signed values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255), and another typed array, such as a
+`Float32Array` embedding, as the list of its numbers, where JSON text wrote a map of indexes. A value that is NaN or an
+infinity, at any depth, is refused with a `DrivineError` that says so, where JSON text wrote null: the store layout
+holds no such number yet ([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)).
+The refusal comes before anything is written, `patchAll`'s first statement included.
+
 A load gives a field's whole numbers the type the model declares, not one their size picks. A field declared a
 `bigint` loads each as a `bigint`, with the digits Postgres and SQLite kept. Three things declare it:
 
