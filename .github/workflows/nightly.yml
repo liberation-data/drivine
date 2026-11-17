@@ -119,6 +119,8 @@ jobs:
             - name: Test on FalkorDB latest
               id: test
               continue-on-error: true
+              # Short of the job's 30, so a test that hangs ends here, as a failure, and the summary still says so.
+              timeout-minutes: 20
               env:
                   FALKORDB_TEST_IMAGE: ghcr.io/falkordb/falkordb:latest
                   DRIVINE_TEST_PART: falkordb
@@ -142,10 +144,10 @@ jobs:
                       line="$image passes every FalkorDB test: the 6.0.3 pin in ci.yml can go (drivine#717)."
                   elif [ "$OUTCOME" != failure ]; then
                       level=warning
-                      line="The canary didn't run its tests: a step before them failed."
+                      line="The canary's tests concluded $OUTCOME: a step before them failed, or the run was cancelled."
                   elif [ -z "$failing" ]; then
                       level=warning
-                      line="$image fails before any test does: the step's log says where."
+                      line="$image fails with no failing test in its log: before the tests, or at one that hangs past the step's 20 minutes; the step's log says where."
                   elif grep -qxF "  ● $test717" <<< "$failing"; then
                       level=warning
                       others=$(grep -cvxF "  ● $test717" <<< "$failing" || true)
