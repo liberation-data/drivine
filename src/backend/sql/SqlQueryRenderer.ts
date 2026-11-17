@@ -20,6 +20,13 @@ import { allOfOne, Condition, OrderTerm, Query, QueryFn, SeekValue, Test, WhereF
 import { classLabels } from '@/model/InstanceOf';
 import { TargetModel } from '@/model/RelationshipModel';
 
+/**
+ * What a query's filter, seek or order value says of a date on a SQL store (see SqlQueryRenderer.storable): the DSL
+ * compares one wrongly there until its filters come from the shared module's fragments.
+ */
+export const TEMPORAL_FILTER_REFUSED =
+    "A query's filter, seek or order is given a date, which the query DSL doesn't compare on a SQL store yet (drivine-cypher-spec#235): compare it in a Cypher statement.";
+
 /** The row a path's conditions read: the node's, and the relationship's that a relationship fragment holds. */
 export interface Rows {
     node: string;
@@ -105,9 +112,18 @@ export abstract class SqlQueryRenderer {
         return [];
     }
 
-    /** A value as the store holds it: a date as ISO 8601 text, as a save writes it. */
+    /**
+     * A value as the store holds it, to compare a property with, seek past or order by. A date is refused by name: the store
+     * layout holds one as its tag (`{"$t": "datetime", "v": …, "s": …}`), and the DSL's SQL here compares a property's
+     * text with the date's ISO text, so an equality, an `in` or a `hasItem` found nothing and an order (`gt`, a seek) gave
+     * the wrong rows (#771). The DSL's filters get a date right once they come from the shared module's fragments
+     * (drivine-cypher-spec#235); until then a Cypher statement compares dates as Neo4j does.
+     */
     protected storable(value: unknown): unknown {
-        return value instanceof Date ? value.toISOString() : value;
+        if (value instanceof Date) {
+            throw new DrivineError(TEMPORAL_FILTER_REFUSED);
+        }
+        return value;
     }
 
     // ----- Conditions -----
