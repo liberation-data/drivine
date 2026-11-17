@@ -100,10 +100,19 @@ describe.each([
         gom = new StatelessGraphObjectManager(pm, backend(), new ModelRegistry());
     });
 
-    it('is bound by a load and a delete as the text the store holds it as', async () => {
+    it('is bound by a load, a delete and a cascade as the text the store holds it as', async () => {
         await gom.load(Gauge, 1e-7);
+        await gom.load(GaugeTree, 1e-7);
         await gom.delete(Gauge, 1e-7);
-        expect(bound.map((it) => it.id)).toEqual([key, key]);
+        await gom.delete(GaugeTree, 1e-7, { cascade: CascadeType.DELETE_ALL });
+        expect(bound.map((it) => it.id)).toEqual(Array(5).fill(key));
+    });
+
+    it("is bound by a save's reads of the node's properties and stamp as the text the store holds it as", () => {
+        const model = new ModelRegistry().fragment(Gauge);
+        const held = backend().heldProperties(model).spec({ id: 1e-7 });
+        const found = backend().foundStamp(model).spec({ id: 1e-7 });
+        expect([(held.parameters as any).id, (found.parameters as any).id]).toEqual([key, key]);
     });
 
     it('is bound by loadRelated as the text the store holds it as', async () => {
@@ -154,6 +163,15 @@ describe('an id on Oracle', () => {
         await gom.delete(GaugeTree, 1e-7, { cascade: CascadeType.DELETE_ALL });
         expect(bound.map((it) => it.id)).toEqual(Array(5).fill('{"$numberDouble":"1.0E-7"}'));
         expect(bound.every((it) => /PASSING JSON\(\S+ EXTENDED\) AS "id__"/.test(it.text))).toBe(true);
+    });
+
+    it("binds a save's reads of the node's properties and stamp as the JSON Oracle holds the id as", () => {
+        const backend = new OracleBackend(new OracleGraph());
+        const model = new ModelRegistry().fragment(Gauge);
+        for (const statement of [backend.heldProperties(model), backend.foundStamp(model)]) {
+            expect(statement.text).toMatch(/PASSING JSON\(\S+ EXTENDED\) AS "id__"/);
+            expect((statement.spec({ id: 1e-7 }).parameters as any).id).toEqual('{"$numberDouble":"1.0E-7"}');
+        }
     });
 
     it('binds a text id as its JSON, and a null id as it is', async () => {
