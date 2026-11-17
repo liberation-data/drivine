@@ -1,8 +1,10 @@
 import {
     above,
     caseOf,
+    count,
     GraphBackend,
     JsonPacked,
+    key,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -12,6 +14,7 @@ import {
     TargetModel
 } from '@liberation-data/drivine';
 import { TEMPORAL_FILTER_REFUSED } from '@/backend/sql/SqlQueryRenderer';
+import { GroupOperations } from '@/manager/GroupOperations';
 
 @NodeFragment({ labels: ['Dated'] })
 class Dated {
@@ -22,7 +25,8 @@ class Dated {
     @JsonPacked() packed?: any;
 }
 
-const dated: TargetModel = { kind: 'NODE_FRAGMENT', model: new ModelRegistry().fragment(Dated) };
+const registry = new ModelRegistry();
+const dated: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Dated) };
 const first = new Date('2026-01-01T00:00:00.000Z');
 
 // The query DSL refuses a date on a SQL store by name, until its filters come from the module's fragments
@@ -54,6 +58,19 @@ describe.each([
         expect(query((q) => ({ orderBy: caseOf([above(q.at, first).then(1)], 2).asc() }))).toThrow(
             TEMPORAL_FILTER_REFUSED
         );
+    });
+
+    it("is refused by name in a grouped read's where and in a filtered aggregate", async () => {
+        const groups = new GroupOperations(registry, async () => Promise.resolve([]), undefined as any, backend);
+        await expect(
+            groups.load(Dated, (q: any) => ({ where: q.at.gte(first), keys: { name: key(q.name) } }))
+        ).rejects.toThrow(TEMPORAL_FILTER_REFUSED);
+        await expect(
+            groups.load(Dated, (q: any) => ({
+                keys: { name: key(q.name) },
+                aggregates: { since: count(q.at.gt(first)) }
+            }))
+        ).rejects.toThrow(TEMPORAL_FILTER_REFUSED);
     });
 
     it("leaves a JSON-packed property's value, date or not, and any other value, as it was", () => {

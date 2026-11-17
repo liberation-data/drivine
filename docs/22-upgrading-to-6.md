@@ -22,9 +22,9 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
 
 - A `Date` is held as a tagged map of its ISO 8601 text and the key it orders by (`{"$t": "datetime", "v": "…", "s":
   "…"}`), where 5.0 held its text. It reads back as its text, as before.
-  The query DSL there refuses a `Date` in a condition, a `seek`, an order expression or a `patch`'s `where`, by name,
-  where it compared the date's text and found nothing or the wrong rows; compare dates in a Cypher statement until
-  [drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235). See
+  The query DSL there refuses a `Date` in a condition, a `seek`, an order expression, a grouped read or a `patch`'s
+  `where`, by name, where it compared the date's text and found nothing or the wrong rows; compare dates in a Cypher
+  statement until [drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235). See
   [Object Manager](05-object-manager.md#operators).
 - A property or map key whose name begins with `$` is held under one more `$` (`$$k` for `$k`), and reads back as it
   was.

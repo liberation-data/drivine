@@ -438,7 +438,8 @@ where: q.mentions.none((m) => m.resolvedId.eq(entityId))
 `gt`, `gte`, `lt` and `lte` are offered on numbers, texts and dates, and the text operators on texts alone.
 
 **A date on Oracle, Postgres or SQLite is refused.** There, a `Date` given to a condition (`eq`, `gt`, `in`, `hasItem`
-and the rest), a `seek` cursor, an order expression or a `patch`'s `where` is refused with a `DrivineError` that names
+and the rest), a `seek` cursor, an order expression, a grouped read's `where` or filtered aggregate, or a `patch`'s
+`where` is refused with a `DrivineError` that names
 [drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235). The store holds a date as
 its tag (see [Upgrading to 6.0](22-upgrading-to-6.md#values-are-held-as-layout-2-holds-them)), which the query DSL's SQL
 doesn't compare yet, so it found nothing or the wrong rows; it will once the DSL's filters come from the shared
@@ -697,6 +698,9 @@ const ratings = await gom.groups.load(Feedback, (q) => ({
 }));
 // [{ page: '/install', votes: 3, likes: 2 }, …]: each row is typed by its keys and aggregates
 ```
+
+On Oracle, Postgres and SQLite the `createdAt.gte(march)` above is refused for now, since `march` is a `Date`: see
+[Operators](#operators).
 
 | Filter | Removes |
 | --- | --- |
