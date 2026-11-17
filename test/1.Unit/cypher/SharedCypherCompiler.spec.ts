@@ -152,6 +152,11 @@ describe('parametersJson', () => {
             )
         );
         expect(() => parametersJson({ t: new neo4j.types.Time(10, 0, 0, 0, 3601) })).toThrow(/offset with seconds/);
+        // The driver's datetime in that zone, its zone dropped first: refused for its offset, not as one with none.
+        const driverMonrovia = new neo4j.types.DateTime(1971, 1, 1, 0, 0, 0, 0, -2670, 'Africa/Monrovia');
+        expect(() => parametersJson({ t: driverMonrovia })).toThrow(
+            /offset with seconds \(1971-01-01T00:00:00-00:44:30\)/
+        );
         expect(JSON.parse(parametersJson({ t: new neo4j.types.Time(10, 0, 0, 0, -3600) }))).toEqual({
             t: { $temporal: 'TIME', text: '10:00:00-01:00' }
         });
