@@ -5,6 +5,7 @@ import { MatchedNode } from '@/backend/EdgeStatements';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { LayoutBoundStatement } from '@/backend/oracle/LayoutBoundStatement';
+import { RowOrderedStatement } from '@/backend/oracle/RowOrderedStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { prelude } from '@/backend/oracle/OracleSaveBuilder';
 import { DrivineError } from '@/DrivineError';
@@ -55,9 +56,12 @@ export class OracleWrites {
         );
     }
 
-    /** Writes each row of `$rows`, `{id, props, vectors}`, to its node, making none: `{id, found, changed}` per row. */
+    /**
+     * Writes each row of `$rows`, `{id, props, vectors}`, to its node, making none: `{id, found, changed}` per row, in the
+     * rows' order, each with its row's id as bound (see RowOrderedStatement).
+     */
     patchMany(model: FragmentModel): GraphStatement {
-        return this.block(
+        const block = this.block(
             [
                 'v_changed BOOLEAN;',
                 'v_out SYS.ODCIVARCHAR2LIST := SYS.ODCIVARCHAR2LIST();',
@@ -90,6 +94,7 @@ export class OracleWrites {
                 'OPEN c FOR SELECT column_value AS "result:json" FROM TABLE(v_out);'
             ]
         );
+        return new RowOrderedStatement(block.text, block.bindings);
     }
 
     /**

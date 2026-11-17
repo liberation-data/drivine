@@ -310,6 +310,23 @@ describe.each(stores())('values a save writes on $type', (store) => {
         expect(await gom.count(SavedGauge)).toEqual(6);
     });
 
+    // patchAll matches its results to its objects: on Oracle by the row's position, as the id the block gives back is
+    // its plain JSON text of the binary double held, which need not read back as the number given.
+    onSql('hands each node whose id is a float its result from a patchAll, and patches each', async () => {
+        const ids = [0.1 + 0.2, 1e-7, 123456.789, 4.5];
+        await gom.saveAll(ids.map((id) => Object.assign(new SavedGauge(), { id, name: 'one' })));
+        const results = await gom.patchAll(
+            ids.map((id) => Object.assign(new SavedGauge(), { id, name: `two ${id}` })),
+            { only: ['name'] }
+        );
+        expect(results).toEqual(ids.map(() => ({ found: true, applied: true, changed: true })));
+        const names: any[] = [];
+        for (const id of ids) {
+            names.push((await gom.load(SavedGauge, id))?.name);
+        }
+        expect(names).toEqual(ids.map((id) => `two ${id}`));
+    });
+
     it('patches a float in as a float, and NaN and the infinities as the store holds them, or refuses them as a save', async () => {
         await gom.saveAll([value('p', { d: 1.5 }), value('q', { d: 1.5 })]);
         await gom.patchAll([value('p', { d: cypherFloat(3), l: [cypherFloat(2)] })], { only: ['d', 'l'] });
