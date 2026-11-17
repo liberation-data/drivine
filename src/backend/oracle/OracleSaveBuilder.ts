@@ -1,7 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
-import { writeProps } from '@/cypher/ValueLayout';
+import { writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -24,7 +24,6 @@ import { LowerCopies } from '@/model/LowerCopies';
 import { Stamps } from '@/model/Stamps';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
-import { jsonText } from '@/utils/JsonText';
 
 /**
  * Writes a save as one PL/SQL block, applied whole or not at all, with or without a transaction: the root found (or
@@ -172,7 +171,7 @@ export class OracleSaveBuilder {
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
                         ? this.bind(
-                              jsonText(writeProps(propsOf(rel.related.model, item, [rel.related.model.targetField])))
+                              writeProps(propsOf(rel.related.model, item, [rel.related.model.targetField]), 'oracle')
                           )
                         : 'NULL';
                 out.push(
@@ -218,7 +217,7 @@ export class OracleSaveBuilder {
                 );
             const k = jsonKey(into.nodeIdProperty!);
             const notIn = (list: string): string =>
-                `NOT EXISTS (SELECT 1 FROM JSON_TABLE(${list}, '$[*]' COLUMNS (v JSON PATH '$')) t ` +
+                `NOT EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${list} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t ` +
                 `WHERE JSON_EXISTS(x.props, '$?(@${k} == $v)' PASSING t.v AS "v"))`;
             const side =
                 rel.direction === Direction.INCOMING
@@ -239,8 +238,8 @@ export class OracleSaveBuilder {
                       `(SELECT 1 FROM ${this.graph.edges} r WHERE ${referencedAs(rel.direction)})`
                     : null;
             this.body.push(
-                `trim_edges(v_root, ${this.bind(dropped)}, ${this.bind(jsonText(keep))}, ` +
-                    `${unreferenced ? this.bind(unreferenced) : 'NULL'}, ${this.bind(jsonText(held))});`
+                `trim_edges(v_root, ${this.bind(dropped)}, ${this.bind(writeLayout(keep, 'oracle'))}, ` +
+                    `${unreferenced ? this.bind(unreferenced) : 'NULL'}, ${this.bind(writeLayout(held, 'oracle'))});`
             );
         }
     }
@@ -256,9 +255,9 @@ export class OracleSaveBuilder {
             return (
                 `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
                 `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
-                `WHERE ${hasLabels('n', it.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(${this.bind(
-                    jsonText(it.ids)
-                )}, '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
+                `WHERE ${hasLabels('n', it.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${this.bind(
+                    writeLayout(it.ids, 'oracle')
+                )} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
             );
         });
     }
@@ -314,12 +313,12 @@ END;`;
         const match = `${hasLabels(
             'n',
             write.model.labels
-        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1) AS "v")`;
+        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
         return {
             match: this.bind(match),
-            id: this.bind(jsonText(write.id)),
+            id: this.bind(writeLayout(write.id, 'oracle')),
             labels: this.bind(JSON.stringify([...new Set(write.labels)])),
-            props: this.bind(jsonText(writeProps(write.props))),
+            props: this.bind(writeProps(write.props, 'oracle')),
             add: this.bind(JSON.stringify(write.add)),
             remove: this.bind(JSON.stringify(write.remove)),
             record: write.record ? this.bind(write.record.property) : 'NULL',
@@ -441,7 +440,7 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
         kept_text VARCHAR2(4000);
     BEGIN
         SELECT props, labels INTO old_props, old_labels FROM ${nodes} WHERE nid = p FOR UPDATE;
-        SELECT JSON_MERGEPATCH(old_props, JSON(p_props)) INTO new_props FROM dual;
+        SELECT JSON_MERGEPATCH(old_props, JSON(p_props EXTENDED)) INTO new_props FROM dual;
         labels := JSON_ARRAY_T.parse(JSON_SERIALIZE(old_labels));
         FOR i IN 0 .. labels.get_size - 1 LOOP
             IF has(removals, labels.get_string(i)) THEN relabelled := TRUE; ELSE kept.append(labels.get_string(i)); END IF;
@@ -450,14 +449,14 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
             IF NOT has(kept, additions.get_string(i)) THEN kept.append(additions.get_string(i)); relabelled := TRUE; END IF;
         END LOOP;
         IF p_record IS NOT NULL THEN
-            props := JSON_OBJECT_T.parse(JSON_SERIALIZE(new_props RETURNING CLOB));
+            props := JSON_OBJECT_T(new_props);
             IF p_replace OR NOT props.has(p_record) THEN recorded := JSON_ARRAY_T();
             ELSE recorded := props.get_array(p_record); END IF;
             FOR i IN 0 .. additions.get_size - 1 LOOP
                 IF NOT has(recorded, additions.get_string(i)) THEN recorded.append(additions.get_string(i)); END IF;
             END LOOP;
             props.put(p_record, recorded);
-            new_props := JSON(props.to_clob());
+            new_props := props.to_json;
         END IF;
         SELECT CASE WHEN JSON_EQUAL(old_props, new_props) THEN 1 ELSE 0 END INTO same FROM dual;
         -- An object type's methods are PL/SQL's: called in SQL, they are refused (ORA-40573).
@@ -493,11 +492,11 @@ ${declarations.map((it) => `    ${it}`).join('\n')}
         END;
         IF e IS NULL THEN
             INSERT INTO ${edges} (src, dst, type, props) VALUES (CASE WHEN p_dir = 'IN' THEN p_to ELSE p_from END,
-                CASE WHEN p_dir = 'IN' THEN p_from ELSE p_to END, p_type, JSON(NVL(p_props, '{}')));
+                CASE WHEN p_dir = 'IN' THEN p_from ELSE p_to END, p_type, JSON(NVL(p_props, '{}') EXTENDED));
             relink(p_from);
             relink(p_to);
         ELSIF p_props IS NOT NULL THEN
-            SELECT JSON_MERGEPATCH(old_props, JSON(p_props)) INTO new_props FROM dual;
+            SELECT JSON_MERGEPATCH(old_props, JSON(p_props EXTENDED)) INTO new_props FROM dual;
             SELECT CASE WHEN JSON_EQUAL(old_props, new_props) THEN 1 ELSE 0 END INTO same FROM dual;
             IF same = 0 THEN
                 UPDATE ${edges} SET props = new_props WHERE eid = e;
@@ -543,14 +542,14 @@ function lowerNode(nodes: string): string {
     return `    -- Writes the lowercased copy of each property p_keys names from what the node holds, and removes the copy of one
     -- that holds nothing. Called once the write's change is told: the copies are no part of it.
     PROCEDURE lower_node(p NUMBER, p_keys VARCHAR2) IS
-        held CLOB;
+        held JSON;
         o JSON_OBJECT_T;
         lowered JSON_ARRAY_T := JSON_ARRAY_T.parse(p_keys);
         k VARCHAR2(4000);
         v CLOB;
     BEGIN
-        SELECT JSON_SERIALIZE(props RETURNING CLOB) INTO held FROM ${nodes} WHERE nid = p;
-        o := JSON_OBJECT_T.parse(held);
+        SELECT props INTO held FROM ${nodes} WHERE nid = p;
+        o := JSON_OBJECT_T(held);
         FOR i IN 0 .. lowered.get_size - 1 LOOP
             k := lowered.get_string(i);
             v := NULL;
@@ -560,8 +559,8 @@ function lowerNode(nodes: string): string {
             ELSE o.put('${LowerCopies.PREFIX}' || k, v); END IF;
         END LOOP;
         -- An object type's methods are PL/SQL's: called in SQL, they are refused (ORA-40573).
-        held := o.to_clob();
-        UPDATE ${nodes} SET props = JSON(held) WHERE nid = p;
+        held := o.to_json;
+        UPDATE ${nodes} SET props = held WHERE nid = p;
     END;`;
 }
 

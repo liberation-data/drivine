@@ -23,7 +23,7 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
-import { jsonText } from '@/utils/JsonText';
+import { writeLayout } from '@/cypher/ValueLayout';
 
 /**
  * Writes a save as one plan for drivine4j's write function (Postgres's, or SQLite's: see WriteFunction), applied whole or not at all, with or without a transaction.
@@ -147,7 +147,7 @@ export class PostgresSaveBuilder {
      * direction from the root to nodes of its labels, other than those any field of that type and direction holds.
      */
     private trims(view: GraphViewModel, object: any, replace: string[]): void {
-        const held = heldIds(view, object).map(storedKey);
+        const held = heldIds(view, object).map((it) => storedKey(it, this.graph.store));
         for (const field of replace) {
             const rel = view.relationships.find((it) => it.field === field);
             if (!rel) {
@@ -178,7 +178,7 @@ export class PostgresSaveBuilder {
                 rel.type,
                 rel.direction,
                 this.plan.shape(into.labels, idProperty(into)),
-                keep.map(storedKey),
+                keep.map((it) => storedKey(it, this.graph.store)),
                 true,
                 this.options.removedTargets === RemovedTargets.DELETE_UNREFERENCED,
                 held
@@ -204,7 +204,7 @@ export class PostgresSaveBuilder {
             this.plan.shape(write.model.labels, key),
             key,
             write.id,
-            storedKey(write.id),
+            storedKey(write.id, this.graph.store),
             [...new Set(write.labels)],
             writes,
             index,
@@ -230,7 +230,7 @@ export class PostgresSaveBuilder {
     private statement(root: FragmentModel, rootObject: any, expected?: string): SaveStatement {
         return new PostgresSaveStatement(
             this.graph.writeCall('STAMPS'),
-            { ...PostgresWriteStatement.bindings(this.plan), root: { id: idOf(root, rootObject) } },
+            { ...PostgresWriteStatement.bindings(this.plan, this.graph.store), root: { id: idOf(root, rootObject) } },
             root,
             rootObject,
             expected,
@@ -240,9 +240,13 @@ export class PostgresSaveBuilder {
     }
 }
 
-/** An id as the store reads its property back with `->>`: text as it is, a number or a boolean as its JSON. */
-export function storedKey(id: unknown): string {
-    return typeof id === 'string' ? id : jsonText(id);
+/**
+ * An id as the store reads its property back as text (`->>`, and on SQLite the JSON text as it was written): text as it
+ * is, and anything else as the JSON text `store`'s layout holds it as (see writeLayout), as a save writes it, so a float
+ * id is keyed by the text it is held as (`1.0E-7`, where JSON text writes `1e-7`).
+ */
+export function storedKey(id: unknown, store: 'postgres' | 'sqlite'): string {
+    return typeof id === 'string' ? id : writeLayout(id, store);
 }
 
 /** The properties a node step writes: its id is the step's key, which a node is made with and found by, and no more. */

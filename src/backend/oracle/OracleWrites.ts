@@ -3,7 +3,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
-import { writeProps } from '@/cypher/ValueLayout';
+import { writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { LayoutBoundStatement } from '@/backend/oracle/LayoutBoundStatement';
 import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { prelude } from '@/backend/oracle/OracleSaveBuilder';
@@ -12,7 +12,6 @@ import { FragmentModel } from '@/model/FragmentModel';
 import { Stamps } from '@/model/Stamps';
 import { RelateMode } from '@/manager/NodeRef';
 import { SaveOptions } from '@/manager/SaveOptions';
-import { jsonText } from '@/utils/JsonText';
 
 /**
  * The writes beside a save, each one PL/SQL block over the save block's procedures, so stamps are kept as a save keeps
@@ -34,14 +33,16 @@ export class OracleWrites {
         return this.block(
             ['v_meets NUMBER;', 'v_changed BOOLEAN := FALSE;', 'v_id VARCHAR2(4000);', 'v_patch CLOB;'],
             [
-                'SELECT JSON_SERIALIZE(JSON_SCALAR($id)) INTO v_id FROM dual;',
+                'v_id := $id;',
                 `v_root := find_node(${this.match(model)}, v_id);`,
                 'IF v_root IS NOT NULL THEN',
                 `    SELECT stamp INTO v_found FROM ${this.graph.nodes} WHERE nid = v_root FOR UPDATE;`,
                 `    ${condition}`,
                 '    IF v_meets > 0 THEN',
                 // As a CLOB: JSON_SERIALIZE gives a VARCHAR2(4000) unless told otherwise, too short for a long text.
-                "        SELECT JSON_SERIALIZE(JSON_MERGEPATCH(JSON($set), JSON(NVL($vectors, '{}'))) RETURNING CLOB) " +
+                // EXTENDED, read and written, so each float stays a binary double (see LayoutBoundStatement).
+                "        SELECT JSON_SERIALIZE(JSON_MERGEPATCH(JSON($set EXTENDED), JSON(NVL($vectors, '{}') EXTENDED)) " +
+                    'RETURNING CLOB EXTENDED) ' +
                     'INTO v_patch FROM dual;',
                 "        v_changed := apply_node(v_root, v_patch, '[]', '[]', NULL, FALSE);",
                 '        restamp(v_root, v_changed);',
@@ -67,9 +68,9 @@ export class OracleWrites {
             [
                 // Read whole before any write: a cursor loop over the bound rows, with writes in it, stopped after the
                 // first node it changed (23.26), silently. Each patch as a CLOB, as in patchOne.
-                "SELECT JSON_SERIALIZE(id), JSON_SERIALIZE(JSON_MERGEPATCH(NVL(props, JSON('{}')), " +
-                    "NVL(vectors, JSON('{}'))) RETURNING CLOB) BULK COLLECT INTO v_ids, v_patches FROM " +
-                    "JSON_TABLE($rows, '$[*]' COLUMNS (id JSON PATH '$.id', props JSON PATH '$.props', " +
+                'SELECT JSON_SERIALIZE(id RETURNING CLOB EXTENDED), JSON_SERIALIZE(JSON_MERGEPATCH(NVL(props, ' +
+                    "JSON('{}')), NVL(vectors, JSON('{}'))) RETURNING CLOB EXTENDED) BULK COLLECT INTO v_ids, v_patches " +
+                    "FROM JSON_TABLE(JSON($rows EXTENDED), '$[*]' COLUMNS (id JSON PATH '$.id', props JSON PATH '$.props', " +
                     "vectors JSON PATH '$.vectors'));",
                 'FOR i IN 1 .. v_ids.COUNT LOOP',
                 `    v_root := find_node(${this.match(model)}, v_ids(i));`,
@@ -81,7 +82,7 @@ export class OracleWrites {
                 ...this.lowering(model, 'IF v_changed THEN ', ' END IF;').map((it) => `        ${it}`),
                 '    END IF;',
                 '    v_out.EXTEND;',
-                "    SELECT JSON_SERIALIZE(JSON_OBJECT('id' VALUE JSON(v_ids(i)), 'found' VALUE v_root IS NOT NULL, " +
+                "    SELECT JSON_SERIALIZE(JSON_OBJECT('id' VALUE JSON(v_ids(i) EXTENDED), 'found' VALUE v_root IS NOT NULL, " +
                     "'changed' VALUE v_changed)) INTO v_out(v_out.COUNT) FROM dual;",
                 'END LOOP;',
                 // Rows from a collection, as text: a returned result set with a JSON column gives only its prefetched rows
@@ -115,9 +116,12 @@ export class OracleWrites {
                 body.push(
                     `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
                         `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
-                        `WHERE ${hasLabels('n', group.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(${bind(
-                            jsonText(group.objects.map((it) => idOf(group.model, it)))
-                        )}, '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
+                        `WHERE ${hasLabels('n', group.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${bind(
+                            writeLayout(
+                                group.objects.map((it) => idOf(group.model, it)),
+                                'oracle'
+                            )
+                        )} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
                 );
             });
         reads('before');
@@ -126,10 +130,10 @@ export class OracleWrites {
                 const props = objectProps(group.model, object, options);
                 body.push(
                     `v_root := write_node(${bind(this.matchText(group.model))}, ${bind(
-                        jsonText(idOf(group.model, object))
+                        writeLayout(idOf(group.model, object), 'oracle')
                     )}, ` +
                         `${bind(JSON.stringify(group.model.labels))}, ${bind(
-                            jsonText(writeProps(props))
+                            writeProps(props, 'oracle')
                         )}, '[]', '[]', NULL, FALSE);`,
                     ...this.lowering(group.model)
                 );
@@ -169,18 +173,18 @@ export class OracleWrites {
                 `    SELECT stamp INTO v_found FROM ${this.graph.nodes} WHERE nid = GREATEST(v_root, v_to) FOR UPDATE;`,
                 ...(merge
                     ? [
-                          `    SELECT COUNT(*), NVL(SUM(CASE WHEN JSON_EQUAL(props, JSON_MERGEPATCH(props, JSON($x_props))) THEN 1 ELSE 0 END), 0)`,
+                          `    SELECT COUNT(*), NVL(SUM(CASE WHEN JSON_EQUAL(props, JSON_MERGEPATCH(props, JSON($x_props EXTENDED))) THEN 1 ELSE 0 END), 0)`,
                           `        INTO v_had, v_same FROM ${this.graph.edges} WHERE src = v_root AND dst = v_to AND type = $x_type;`,
                           '    IF v_had = 0 THEN',
-                          `        INSERT INTO ${this.graph.edges} (src, dst, type, props) VALUES (v_root, v_to, $x_type, JSON($x_props));`,
+                          `        INSERT INTO ${this.graph.edges} (src, dst, type, props) VALUES (v_root, v_to, $x_type, JSON($x_props EXTENDED));`,
                           '    ELSE',
-                          `        UPDATE ${this.graph.edges} SET props = JSON_MERGEPATCH(props, JSON($x_props)) WHERE src = v_root AND dst = v_to AND type = $x_type;`,
+                          `        UPDATE ${this.graph.edges} SET props = JSON_MERGEPATCH(props, JSON($x_props EXTENDED)) WHERE src = v_root AND dst = v_to AND type = $x_type;`,
                           '    END IF;',
                           '    IF v_had = 0 OR v_same < v_had THEN relink(v_root); relink(v_to); END IF;',
                           '    v_related := GREATEST(v_had, 1);'
                       ]
                     : [
-                          `    INSERT INTO ${this.graph.edges} (src, dst, type, props) VALUES (v_root, v_to, $x_type, JSON($x_props));`,
+                          `    INSERT INTO ${this.graph.edges} (src, dst, type, props) VALUES (v_root, v_to, $x_type, JSON($x_props EXTENDED));`,
                           '    relink(v_root);',
                           '    relink(v_to);',
                           '    v_related := 1;'
@@ -188,7 +192,7 @@ export class OracleWrites {
                 'END IF;',
                 'OPEN c FOR SELECT v_related AS "related" FROM dual;'
             ],
-            { x_type: type, x_props: jsonText(writeProps(written)) }
+            { x_type: type, x_props: writeProps(written, 'oracle') }
         );
     }
 
@@ -232,7 +236,7 @@ export class OracleWrites {
                 'END IF;',
                 'OPEN c FOR SELECT v_removed AS "removed" FROM dual;'
             ],
-            { x_type: type, x_from: jsonText(from.id) }
+            { x_type: type, x_from: writeLayout(from.id, 'oracle') }
         );
     }
 
@@ -252,9 +256,9 @@ export class OracleWrites {
                 `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasLabels('a', labels)} AND ` +
                 `JSON_EXISTS(a.props, '$?(@${jsonKey(
                     idProperty(from.model)
-                )} == $v)' PASSING JSON($x_from) AS "v") AND ` +
+                )} == $v)' PASSING JSON($x_from EXTENDED) AS "v") AND ` +
                 `${hasLabels('x', target.labels)})`,
-            { x_type: type, x_from: jsonText(from.id) }
+            { x_type: type, x_from: writeLayout(from.id, 'oracle') }
         );
     }
 
@@ -272,11 +276,11 @@ export class OracleWrites {
         this.pending[name] = `${hasLabels(
             'n',
             labels
-        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1) AS "v")`;
+        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
         if (name === 'x_frommatch') {
-            this.pending.x_from = jsonText(node.id);
+            this.pending.x_from = writeLayout(node.id, 'oracle');
         } else {
-            this.pending.x_to = jsonText(node.id);
+            this.pending.x_to = writeLayout(node.id, 'oracle');
         }
         return `$${name}`;
     }
@@ -288,7 +292,10 @@ export class OracleWrites {
 
     private matchText(model: FragmentModel): string {
         const k = jsonKey(idProperty(model));
-        return `${hasLabels('n', model.labels)} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1) AS "v")`;
+        return `${hasLabels(
+            'n',
+            model.labels
+        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
     }
 
     /**

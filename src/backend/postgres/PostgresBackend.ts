@@ -299,7 +299,7 @@ export class PostgresBackend implements GraphBackend {
                     'x',
                     target.labels
                 )})`,
-            { x_type: type, x_from: storedKey(from.id) }
+            { x_type: type, x_from: storedKey(from.id, 'postgres') }
         );
     }
 

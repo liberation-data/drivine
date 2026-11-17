@@ -1,6 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
 import { Stamps } from '@/model/Stamps';
 import { heldKey, writeLayout } from '@/cypher/ValueLayout';
+import { SharedStore } from '@/cypher/SharedCypherCompiler';
 
 /** What a statement that carries out a plan gives back. */
 export type WriteReturns =
@@ -71,9 +72,20 @@ export class WritePlan {
     /** How many nodes the steps have saved or found, which is the number the next is given. */
     private nodes = 0;
 
-    /** The steps, as they are bound. */
+    /** The steps, in the order they were added: see {@link text} for how they are bound. */
     get plan(): Record<string, any>[] {
         return this.steps;
+    }
+
+    /**
+     * The steps as JSON text, as `store`'s layout holds each value they write and each id they find a node by: written by
+     * the shared module's `write` for the store (see writeLayout), as drivine4j's `WritePlan.bindings` writes them, so a
+     * value saved is held as one `CREATE` made (drivine-cypher-spec#329). A float the store's JSON holds as no number,
+     * Postgres's NaN and infinities and SQLite's NaN, is refused by name, with the message a `CREATE` given one is refused
+     * with.
+     */
+    text(store: SharedStore): string {
+        return writeLayout(this.steps, store);
     }
 
     /** The shapes the steps name, as they are bound: each `{labels, key}`, in the order the plan numbers them. */
@@ -250,14 +262,11 @@ export class WritePlan {
 }
 
 /**
- * A step's field as the store layout holds it (drivine-cypher-spec#161), as drivine4j's plan writes it: the values it writes
- * and the id it finds a node by through the module's write (see writeLayout), and the names of the properties it keys,
- * removes, clears or lowercases escaped as their keys are held.
+ * A step's field as the store layout holds it (drivine-cypher-spec#161), as drivine4j's plan writes it: the names of the
+ * properties it keys, removes, clears or lowercases escaped as their keys are held. The values it writes and the id it
+ * finds a node by are written in the layout with the whole plan (see WritePlan.text), each map's keys escaped there.
  */
 function held(name: string, value: any): any {
-    if (name === 'set' || name === 'props' || name === 'id') {
-        return writeLayout(value);
-    }
     if (name === 'key') {
         return heldKey(value as string);
     }

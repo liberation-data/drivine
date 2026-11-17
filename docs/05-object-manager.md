@@ -92,13 +92,23 @@ packed field with a set compared it with `{}`, and matched nothing.
 a relationship's property and a `@NodeId`. A `where` compares a field with one as that number too. Before #739, a
 `bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite.
 
-**Bytes, typed arrays, NaN and the infinities.** On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll`
-or `edges.relate` writes a value, bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are written as the list of their
-signed values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255), and another typed array, such as a
-`Float32Array` embedding, as the list of its numbers, where JSON text wrote a map of indexes. A value that is NaN or an
-infinity, at any depth, is refused with a `DrivineError` that says so, where JSON text wrote null: the store layout
-holds no such number yet ([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)).
-The refusal comes before anything is written, `patchAll`'s first statement included.
+**Floats, bytes, typed arrays, NaN and the infinities.** On Oracle, Postgres and SQLite, wherever a save, `patch`,
+`patchAll` or `edges.relate` writes a value, it is held as a `CREATE` given the same value holds it: the shared
+compiler's module writes it for the store
+([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)), so a value saved and
+one a Cypher statement wrote read back alike.
+
+- **Floats.** On Oracle every float is held as a binary double, so a `cypherFloat(2)` saved reads back by Cypher as the
+  float `2.0`, not the number `2`. On Postgres a whole float is held with its fraction (`2.0`). A JavaScript number that
+  is whole is an integer, as in a statement's parameters: give `cypherFloat(n)` for a whole float.
+- **Bytes and typed arrays.** Bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are held as the list of their signed
+  values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255). A `Float32Array` or a `Float64Array`, such as
+  an embedding, is the list of its numbers, each a float; another typed array is the list of its numbers.
+- **NaN and the infinities.** Oracle holds them, as binary doubles, and SQLite holds an infinity (as `9e999`). Where the
+  store's JSON holds no such number, Postgres's NaN and infinities and SQLite's NaN, the value, at any depth, is refused
+  with a `DrivineError` with the message a `CREATE` given it is refused with, such as "A statement that writes is given
+  NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place." The
+  refusal comes before anything is written, `patchAll`'s first statement included.
 
 A load gives a field's whole numbers the type the model declares, not one their size picks. A field declared a
 `bigint` loads each as a `bigint`, with the digits Postgres and SQLite kept. Three things declare it:

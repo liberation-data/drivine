@@ -41,7 +41,7 @@ export class PostgresWrites {
                 const values = { ...bound.set, ...bound.vectors };
                 plan.patch(
                     plan.shape(model.labels, key),
-                    storedKey(bound.id),
+                    storedKey(bound.id, this.graph.store),
                     bound.id,
                     '0',
                     present(values),
@@ -76,7 +76,7 @@ export class PostgresWrites {
                     const values = { ...row.props, ...row.vectors };
                     plan.patch(
                         shape,
-                        storedKey(row.id),
+                        storedKey(row.id, this.graph.store),
                         row.id,
                         String(i),
                         present(values),
@@ -117,7 +117,7 @@ export class PostgresWrites {
                     shape,
                     key,
                     id,
-                    storedKey(id),
+                    storedKey(id, this.graph.store),
                     [...new Set(group.model.labels)],
                     { set: present(props), unset: absent(props), lower: group.model.lowerCopied },
                     index
@@ -185,7 +185,7 @@ export class PostgresWrites {
         const key = idProperty(node.model, "a node of it can't be referred to by id");
         return plan.ref(
             plan.shape([...new Set([...node.model.labels, ...(node.labels ?? [])])], key),
-            storedKey(node.id),
+            storedKey(node.id, this.graph.store),
             node.id
         );
     }

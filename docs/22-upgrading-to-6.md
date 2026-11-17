@@ -24,12 +24,17 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
   "…"}`), where 5.0 held its text. It reads back as its text, as before.
 - A property or map key whose name begins with `$` is held under one more `$` (`$$k` for `$k`), and reads back as it
   was.
+- Each value is held as a `CREATE` given it holds it, written by the shared compiler's module for the store
+  ([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)). On Oracle every float
+  is a binary double, where 5.0 held it as a `NUMBER`, so a whole float saved read back by Cypher as a whole number. On
+  Postgres a whole float (`cypherFloat(2)`) is held with its fraction.
 - Bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are held as the list of their signed values (`[1, 2, -1]` for 1,
   2, 255), and another typed array, such as a `Float32Array` embedding, as the list of its numbers, where 5.0 wrote a
   map of indexes.
-- NaN and the infinities, at any depth, are refused with a `DrivineError` that says so, before anything is written,
-  where 5.0 wrote null ([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)).
-  See [Object Manager](05-object-manager.md).
+- NaN and the infinities, where 5.0 wrote null, are held on Oracle, and an infinity on SQLite. Where the store's JSON
+  holds no such number, Postgres's NaN and infinities and SQLite's NaN, they are refused at any depth, before anything
+  is written, with a `DrivineError` that gives the message a `CREATE` given them is refused with. See
+  [Object Manager](05-object-manager.md).
 
 On SQLite a range index or a uniqueness constraint is over a value's kind and key, so a value is equal only to one of
 its kind: a uniqueness constraint no longer takes `1` and `'1'` for the same key.
