@@ -405,9 +405,10 @@ function temporalKind(value: object): string | undefined {
  * digits, and the module reads one of fewer than five with four (`-0005`, not `-000005`).
  */
 function temporalText(value: object): string {
-    const it = value as any;
+    // In the ISO calendar, as the store keeps no other: `toString()` annotates another (`2024-01-15[u-ca=hebrew]`).
+    const it = typeof (value as any).withCalendar === 'function' ? (value as any).withCalendar('iso8601') : value;
     const text = (
-        it[Symbol.toStringTag] === 'Temporal.ZonedDateTime' ? `${it.toPlainDateTime()}${it.offset}` : String(value)
+        it[Symbol.toStringTag] === 'Temporal.ZonedDateTime' ? `${it.toPlainDateTime()}${it.offset}` : String(it)
     ).replace(/^([+-])00(\d{4}-)/, '$1$2');
     const zone = text.indexOf('[');
     if (zone < 0) {

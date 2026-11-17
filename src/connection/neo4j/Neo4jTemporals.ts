@@ -26,8 +26,12 @@ export function withTemporalsAsDriverValues(value: any): any {
     return value;
 }
 
-/** The Neo4j driver's value of the `Temporal` value `it`; undefined where it is no `Temporal` value. */
-function driverValue(it: any): unknown {
+/**
+ * The Neo4j driver's value of the `Temporal` value `value`; undefined where it is no `Temporal` value. One in another
+ * calendar is read in the ISO one first, as Neo4j keeps none other: a hebrew date's `year` is 5784, not 2024.
+ */
+function driverValue(value: any): unknown {
+    const it = typeof value.withCalendar === 'function' ? value.withCalendar('iso8601') : value;
     switch (it[Symbol.toStringTag]) {
         case 'Temporal.PlainDate':
             return new DriverDate(it.year, it.month, it.day);
@@ -40,14 +44,18 @@ function driverValue(it: any): unknown {
         case 'Temporal.Instant':
             // At an offset of zero and no named zone, as Cypher's datetime('…Z') is.
             return dateTime(it.toZonedDateTimeISO('UTC'));
-        case 'Temporal.Duration':
+        case 'Temporal.Duration': {
+            // As bigints, the whole seconds of the fraction carried to the seconds: a duration's milliseconds may be
+            // past 2^53 nanoseconds, where a number would round, and past 2^63, where the driver's Integer wraps.
+            const fraction =
+                BigInt(it.milliseconds) * BigInt(1e6) + BigInt(it.microseconds) * BigInt(1e3) + BigInt(it.nanoseconds);
             return new Duration(
                 it.years * 12 + it.months,
                 it.weeks * 7 + it.days,
-                it.hours * 3600 + it.minutes * 60 + it.seconds,
-                // As a bigint: a duration's milliseconds may be past 2^53 nanoseconds, where a number would round.
-                BigInt(it.milliseconds) * BigInt(1e6) + BigInt(it.microseconds) * BigInt(1e3) + BigInt(it.nanoseconds)
+                BigInt(it.hours * 3600 + it.minutes * 60 + it.seconds) + fraction / BigInt(1e9),
+                fraction % BigInt(1e9)
             );
+        }
         default:
             return undefined;
     }

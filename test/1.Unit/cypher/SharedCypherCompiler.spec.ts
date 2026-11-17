@@ -142,6 +142,26 @@ describe('parametersJson', () => {
         });
     });
 
+    it('writes a Temporal value of another calendar in the ISO one, as the store keeps no other (#767)', () => {
+        // Temporal.PlainDate.from('2024-01-15').withCalendar('hebrew'), and a ZonedDateTime in the japanese calendar.
+        const hebrew = temporalLike('Temporal.PlainDate', '2024-01-15[u-ca=hebrew]', {
+            withCalendar: () => temporalLike('Temporal.PlainDate', '2024-01-15')
+        });
+        const japanese = temporalLike('Temporal.ZonedDateTime', '', {
+            toPlainDateTime: () => '2024-01-15T10:00:00[u-ca=japanese]',
+            offset: '+01:00',
+            withCalendar: () =>
+                temporalLike('Temporal.ZonedDateTime', '', {
+                    toPlainDateTime: () => '2024-01-15T10:00:00',
+                    offset: '+01:00'
+                })
+        });
+        expect(JSON.parse(parametersJson({ hebrew, japanese }))).toEqual({
+            hebrew: { $temporal: 'DATE', text: '2024-01-15' },
+            japanese: { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00+01:00' }
+        });
+    });
+
     it('writes a year before 1 with the four digits the module reads, and one past 9999 with its six (#767)', () => {
         expect(
             JSON.parse(
@@ -265,11 +285,24 @@ describe('A Temporal parameter on Neo4j', () => {
             });
         const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({
             long: duration({ milliseconds: 1e10, nanoseconds: 1 }),
+            // 1e22 nanoseconds, past the 2^63 of the driver's Integer.
+            longer: duration({ milliseconds: 1e16, nanoseconds: 1 }),
             negative: duration({ months: -2, days: -3, hours: -1, milliseconds: -5 })
         });
         const params = new Neo4jSpecCompiler(spec).formattedParams();
         expect(params.long.toString()).toEqual('P0M0DT10000000.000000001S');
+        expect(params.longer.toString()).toEqual('P0M0DT10000000000000.000000001S');
         expect(params.negative.toString()).toEqual('P-2M-3DT-3600.005000000S');
+    });
+
+    it('is a date of another calendar read in the ISO one, as Neo4j keeps no other (#767)', () => {
+        // Temporal.PlainDate.from('2024-01-15').withCalendar('hebrew'), whose year is 5784.
+        const hebrew = temporalLike('Temporal.PlainDate', '', {
+            ...{ year: 5784, month: 5, day: 5 },
+            withCalendar: () => temporalLike('Temporal.PlainDate', '', { year: 2024, month: 1, day: 15 })
+        });
+        const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({ hebrew });
+        expect(new Neo4jSpecCompiler(spec).formattedParams().hebrew.toString()).toEqual('2024-01-15');
     });
 });
 
