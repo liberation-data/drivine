@@ -89,8 +89,16 @@ const POSTGRES: TestContainerSpec = {
     })
 };
 
+/**
+ * Oracle's image, pinned by its digest to the 23-faststart build from before 2026-11-17. The build republished under
+ * that tag then writes OSON version 2, which node-oracledb can't read (NJS-126), and crashes its server mid-statement
+ * (ORA-03113). Unpin it, back to `gvenzl/oracle-free:23-faststart`, when node-oracledb reads OSON version 2 and the
+ * image's server no longer crashes. drivine-python pins the same digest.
+ */
+const ORACLE_IMAGE = 'gvenzl/oracle-free@sha256:33322969a450d72c507b08d7f690d9e1d9b60aebaebc35a75b7c0b8ab4baac77';
+
 const ORACLE: TestContainerSpec = {
-    image: 'gvenzl/oracle-free:23-faststart',
+    image: ORACLE_IMAGE,
     port: 1521,
     // The listener is up before the pluggable database is open and the user made in it.
     container: (image) =>

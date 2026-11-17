@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { DatabaseType } from '@liberation-data/drivine';
 import { getContainerRuntimeClient, ImageName, PullPolicy, StartedTestContainer } from 'testcontainers';
 import { DrivineLogger } from '@/logger';
@@ -46,7 +48,27 @@ describe('DrivineTestContainers', () => {
             expect(DrivineTestContainers.image(DatabaseType.MEMGRAPH, {})).toBe('memgraph/memgraph:latest');
             expect(DrivineTestContainers.image(DatabaseType.FALKORDB, {})).toBe('falkordb/falkordb:latest');
             expect(DrivineTestContainers.image(DatabaseType.POSTGRES, {})).toBe('pgvector/pgvector:pg16');
-            expect(DrivineTestContainers.image(DatabaseType.ORACLE, {})).toBe('gvenzl/oracle-free:23-faststart');
+            // Pinned by its digest until node-oracledb reads the OSON version 2 that the republished 23-faststart writes.
+            expect(DrivineTestContainers.image(DatabaseType.ORACLE, {})).toBe(
+                'gvenzl/oracle-free@sha256:33322969a450d72c507b08d7f690d9e1d9b60aebaebc35a75b7c0b8ab4baac77'
+            );
+            expect(DrivineTestContainers.movingTag(DrivineTestContainers.image(DatabaseType.ORACLE, {})!)).toBe(false);
+        });
+
+        it("pulls in CI the Oracle image DrivineTestContainers names, so the two can't drift apart", () => {
+            const action = fs.readFileSync(
+                path.join(__dirname, '../../../.github/actions/test-part/action.yml'),
+                'utf8'
+            );
+            expect(action).toContain(`docker pull ${DrivineTestContainers.image(DatabaseType.ORACLE, {})}\n`);
+        });
+
+        it('is ORACLE_TEST_IMAGE over the pinned Oracle image, so the current 23-faststart still runs where asked', () => {
+            expect(
+                DrivineTestContainers.image(DatabaseType.ORACLE, {
+                    ORACLE_TEST_IMAGE: 'gvenzl/oracle-free:23-faststart'
+                })
+            ).toBe('gvenzl/oracle-free:23-faststart');
         });
 
         it('is <TYPE>_TEST_IMAGE where it is set, for that type only', () => {
