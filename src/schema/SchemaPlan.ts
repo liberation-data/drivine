@@ -378,12 +378,14 @@ export class SchemaPlan {
                 logger = new DrivineLogger(line.logger);
                 loggers.set(line.logger, logger);
             }
+            // A line may name drivine4j's settings, as the failure does: it names SchemaOptions here too.
+            const message = withOptionNames(line.message);
             if (line.level === 'INFO') {
-                logger.log(line.message);
+                logger.log(message);
             } else if (line.level === 'WARN') {
-                logger.warn(line.message);
+                logger.warn(message);
             } else {
-                logger.error(line.message);
+                logger.error(message);
             }
         }
         if (report.rethrown) {

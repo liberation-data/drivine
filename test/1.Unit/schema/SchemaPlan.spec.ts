@@ -142,13 +142,22 @@ describe('SchemaPlan', () => {
         } finally {
             warn.mockRestore();
         }
-        // Under FAIL_FAST the owner fails, naming the index, and the options a TypeScript application sets.
-        const failed = planning.plan.run(
-            planRequest('default', ensure, { buildTimeoutMillis: 5 }, [], runtime),
-            planning.host
-        );
-        await expect(failed).rejects.toThrow(/Seeded_text_range' on Seeded\[text\] is still being built/);
-        await expect(failed).rejects.toThrow(/indexBuildTimeout longer/);
+        // Under FAIL_FAST the owner fails, naming the index, and the options a TypeScript application sets, in what it
+        // throws and in what it logs.
+        const error = jest.spyOn(DrivineLogger.prototype, 'error').mockImplementation(() => undefined);
+        try {
+            const failed = planning.plan.run(
+                planRequest('default', ensure, { buildTimeoutMillis: 5 }, [], runtime),
+                planning.host
+            );
+            await expect(failed).rejects.toThrow(/Seeded_text_range' on Seeded\[text\] is still being built/);
+            await expect(failed).rejects.toThrow(/indexBuildTimeout longer/);
+            const logged = error.mock.calls.map((it) => String(it[0]));
+            expect(logged.some((it) => it.includes('indexBuildTimeout longer'))).toBe(true);
+            expect(logged.filter((it) => it.includes('drivine.schema.'))).toEqual([]);
+        } finally {
+            error.mockRestore();
+        }
     });
 
     it('throws the error an action got, as it got it, where its failure ends the plan', async () => {
