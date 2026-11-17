@@ -175,13 +175,6 @@ export const HELD: Record<string, Record<string, Hold[]>> = {
                 mayPass: "the wasm stack's depth differs by platform: the step overflows it on macOS, not on CI's Linux"
             }
         ]
-    },
-    'temporal.yaml': {
-        // Neo4j refuses a sub-second field without a minute; the SQL stores write a moment's zero seconds.
-        'A nanosecond past the microsecond': [
-            { issue: 'drivine-cypher-spec#321', steps: [6, 8, 14], on: ['neo4j'] },
-            { issue: 'drivine-cypher-spec#321', steps: [8, 14], on: ['sql'] }
-        ]
     }
 };
 
