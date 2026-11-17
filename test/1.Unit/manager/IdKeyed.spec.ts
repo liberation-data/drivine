@@ -196,4 +196,12 @@ describe('an id on Oracle', () => {
         await gom.load(Gauge, null);
         expect(bound.map((it) => it.id)).toEqual(['"1e-7"', '7', null]);
     });
+
+    // A null id written as the JSON text 'null' was read by the block's find_node as JSON's null, so a patch could reach a
+    // node whose id is held as null, where a load or a delete by a null id finds none (#772).
+    it("binds a patch's null id as it is, so it finds no node, and a float id as the JSON Oracle holds it as", async () => {
+        await gom.patch(Gauge, null as any, { set: { name: 'x' } }).catch(() => undefined);
+        await gom.patch(Gauge, 1e-7, { set: { name: 'x' } }).catch(() => undefined);
+        expect(bound.map((it) => it.id)).toEqual([null, '{"$numberDouble":"1.0E-7"}']);
+    });
 });

@@ -16,7 +16,9 @@ export class LayoutBoundStatement extends GraphStatement {
                 bound[name] = writeProps(bound[name], 'oracle');
             }
         }
-        if (bound.id !== undefined) {
+        // A null id is bound as it is, as a load or a delete binds one (IdKeyedStatement): written, it would be the JSON
+        // text 'null', which the block's find_node reads as JSON's null and finds a node whose id is held as null (#772).
+        if (bound.id != null) {
             bound.id = writeLayout(bound.id, 'oracle');
         }
         if (Array.isArray(bound.rows)) {
