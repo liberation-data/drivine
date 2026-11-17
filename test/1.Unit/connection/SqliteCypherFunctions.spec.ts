@@ -45,14 +45,7 @@ describe('SqliteCypherFunctions', () => {
                 `SELECT drivine_upper(2.0), drivine_upper(1.0 / 3), drivine_upper(1e20), drivine_upper(1e-7), ` +
                     `drivine_upper(855.4482850851075), drivine_upper(12)`
             )
-        ).toEqual([
-            '2.0',
-            '0.333333333333333',
-            '1.0E+20',
-            '1.0E-07',
-            '855.448285085108',
-            '12'
-        ]);
+        ).toEqual(['2.0', '0.333333333333333', '1.0E+20', '1.0E-07', '855.448285085108', '12']);
     });
 
     describe('the text functions', () => {

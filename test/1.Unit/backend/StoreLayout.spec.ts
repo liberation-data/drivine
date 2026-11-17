@@ -3,6 +3,7 @@ import * as path from 'path';
 import { parse } from 'yaml';
 import { judgeLayout, layoutVerdict, StoreLayoutError } from '@/backend/sql/StoreLayout';
 import { ModuleStore, restampParameters, stampParameters, storeStatements } from '@/backend/StoreStatements';
+import * as drivine from '@liberation-data/drivine';
 
 /** The spec's marker.yaml (test/cypher), whose `storeLayout` cases pin the verdict on a graph by its layout. */
 const MARKER = parse(fs.readFileSync(path.join(__dirname, '../../cypher/marker.yaml'), 'utf8'));
@@ -87,6 +88,8 @@ describe('judgeLayout', () => {
         const refusal = judgeLayout('sqlite', graph, MADE, it.run);
         await expect(refusal).rejects.toThrow(StoreLayoutError);
         await expect(refusal).rejects.toThrow(/was written in store layout 1/);
+        // An application catches it by its class, as the package exports it.
+        expect(drivine.StoreLayoutError).toBe(StoreLayoutError);
         expect(it.ran).not.toContain(stamp.restampLayout);
     });
 
