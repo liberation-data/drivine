@@ -43,7 +43,7 @@ export interface SchemaOptions {
     replaceBlockingIndex?: boolean;
     /**
      * How many keys held more than once a constraint violation reports, and how many of the nodes that hold each it
-     * names; 0 skips the check. Defaults to 10.
+     * names; 0 reports none, though the data is still read to confirm a violation. Defaults to 10.
      */
     violationSampleSize?: number;
     /** Whether DrivineModule enforces the schema at startup. Defaults to true. */

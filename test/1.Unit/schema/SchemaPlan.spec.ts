@@ -13,6 +13,8 @@ import {
     withOptionNames
 } from '@/schema/SchemaPlan';
 import { falkorDbVectorOptions, rangeIndex, uniquenessConstraint, vectorIndex } from '@/schema/SchemaSpecs';
+import { ConstraintManager } from '@/schema/ConstraintManager';
+import { IndexManager } from '@/schema/IndexManager';
 import type { NativeOperation } from '@/schema/SchemaGrammar';
 import { planningOn } from './Planning';
 
@@ -180,6 +182,73 @@ describe('SchemaPlan', () => {
         } finally {
             useCypherCompiler(module);
         }
+    });
+
+    it("throws IndexManager's recreate where a table stands under the index's name, dropping nothing, as drivine4j", async () => {
+        const ran: string[] = [];
+        const executor = {
+            run: async (statement: string | NativeOperation): Promise<any[]> => {
+                ran.push(String(statement));
+                // Postgres's listing, which names a table that stands under the range index's name.
+                return Promise.resolve(
+                    String(statement).includes('SELECT listed')
+                        ? [
+                              {
+                                  type: 'r',
+                                  table: null,
+                                  where: null,
+                                  method: 'heap',
+                                  object: 'drivine_ix2_personname_44ce5436'
+                              }
+                          ]
+                        : []
+                );
+            }
+        };
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        try {
+            await expect(
+                new IndexManager(planningOn('postgres', executor)).recreate(rangeIndex('Person', 'name'))
+            ).rejects.toThrow(
+                "Could not recreate RANGE_INDEX on Person[name]: drivine_ix2_personname_44ce5436, an object Drivine didn't " +
+                    'make, stands under its name. Drop or rename it'
+            );
+        } finally {
+            warn.mockRestore();
+        }
+        expect(ran.some((it) => /DROP|CREATE/i.test(it))).toBe(false);
+    });
+
+    it('reads the data once the engine refuses a constraint, a sample size of 0 giving a VIOLATION with none', async () => {
+        const ran: string[] = [];
+        const executor = {
+            run: async (statement: string | NativeOperation): Promise<any[]> => {
+                const text = String(statement);
+                ran.push(text);
+                if (text.includes('CREATE UNIQUE INDEX')) {
+                    return Promise.reject(
+                        Object.assign(new Error('could not create unique index'), { code: '23505', severity: 'ERROR' })
+                    );
+                }
+                // The sample of the keys held more than once.
+                return Promise.resolve(
+                    text.includes("'count', COUNT(*)") ? [{ properties: { email: 'a' }, count: 2, nodes: [] }] : []
+                );
+            }
+        };
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+        try {
+            const result = await new ConstraintManager(planningOn('postgres', executor)).ensure(
+                uniquenessConstraint('Person', 'email'),
+                0
+            );
+            expect(result).toMatchObject({ status: 'VIOLATION', sample: [] });
+        } finally {
+            warn.mockRestore();
+        }
+        const created = ran.findIndex((it) => it.includes('CREATE UNIQUE INDEX'));
+        expect(created).toBeGreaterThanOrEqual(0);
+        expect(ran.findIndex((it) => it.includes("'count', COUNT(*)"))).toBeGreaterThan(created);
     });
 
     it("runs FalkorDB's GRAPH.CONSTRAINT as its driver's command", async () => {

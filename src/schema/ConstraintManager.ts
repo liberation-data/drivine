@@ -18,8 +18,9 @@ export const VIOLATION_SAMPLE = DEFAULT_VIOLATION_SAMPLE;
 const BUILD_POLL = 200;
 
 /**
- * Uniqueness constraints, made idempotently. Before making one, the data is checked: if two nodes already hold the same
- * values, nothing is made and the result is a VIOLATION with a sample of the keys, each naming the nodes that hold it.
+ * Uniqueness constraints, made idempotently. Where the engine refuses one for the data, and the data shows two nodes that
+ * hold the same values, nothing is made and the result is a VIOLATION with a sample of the keys, each naming the nodes
+ * that hold it.
  * On Neo4j a plain range index over the same label and properties is in the way of a constraint: the result is then
  * BLOCKED_BY_INDEX, naming it, unless replacing it is asked for.
  *
@@ -39,10 +40,11 @@ export class ConstraintManager {
     }
 
     /**
-     * Makes the constraint unless it is there. The data is checked first, and up to `sampleSize` keys held more than
-     * once are reported, each with up to `sampleSize` of the nodes that hold it; 0 skips the check, leaving the engine
-     * to refuse a constraint the data breaks. FalkorDB builds one in the background and marks a build the data breaks
-     * FAILED: the failed constraint is then dropped, and the result is a VIOLATION.
+     * Makes the constraint unless it is there. Where the engine refuses it for the data, the data is read, and a key
+     * held more than once makes the result a VIOLATION, reporting up to `sampleSize` such keys, each with up to
+     * `sampleSize` of the nodes that hold it (none at 0, though the data is still read to confirm it); a refusal no
+     * repeated key bears out is thrown. FalkorDB builds one in the background and marks a build the data breaks FAILED:
+     * the failed constraint is then dropped, and the result is a VIOLATION.
      *
      * @param replaceBlockingIndex drop a plain index in the way of the constraint and make the constraint, whose own
      * index takes its place, rather than returning BLOCKED_BY_INDEX (Neo4j). A key held more than once keeps the index
@@ -87,9 +89,12 @@ export class ConstraintManager {
     }
 
     /**
-     * Drops the constraint, whatever its state, and makes it again, as `ensure` does: the data is checked first, and a
-     * key held more than once is a VIOLATION. A constraint that ignores case fills the lowercased copies in again on
-     * every node of its label. The constraint made again keeps the aliases its record kept (see SchemaItem's `aliases`).
+     * Drops the constraint, whatever its state, and makes it again, as `ensure` does: a key held more than once is a
+     * VIOLATION. On Oracle, Postgres and SQLite the constraint's unique index is built anew beside the old one, which is
+     * dropped only once the new one is built, so a VIOLATION keeps the old one; the graph engines drop it first. Where
+     * something other than an index stands under the name Drivine gives its index (a table, say), it is left as it is,
+     * and the result is DRIFT. A constraint that ignores case fills the lowercased copies in again on every node of its
+     * label. The constraint made again keeps the aliases its record kept (see SchemaItem's `aliases`).
      */
     async recreate(
         spec: UniquenessConstraintSpec,

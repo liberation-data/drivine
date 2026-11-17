@@ -60,10 +60,24 @@ export class IndexManager {
     /**
      * Drops the index over the label and properties, whatever its shape, and makes it as the spec says. Destructive. An
      * index that ignores case fills the lowercased copies in again on every node of its label, recorded or not. The
-     * index made again keeps the aliases its record kept (see SchemaItem's `aliases`).
+     * index made again keeps the aliases its record kept (see SchemaItem's `aliases`). Where something other than an index
+     * stands under the name Drivine gives the index (on Oracle, Postgres and SQLite: a table, say), it is left as it is
+     * and a DrivineError is thrown, as drivine4j throws.
      */
     async recreate<S extends IndexSpec>(spec: S): Promise<EnsureResult<S>> {
-        return this.result('RECREATE', spec);
+        const result = await this.result('RECREATE', spec);
+        if (result.status === 'RECREATED') {
+            return result;
+        }
+        const index = `${moduleKind(spec.kind)} on ${spec.label}[${spec.properties.join(', ')}]`;
+        // The drift a recreate leaves: what stands under the index's name isn't an index, so it isn't dropped.
+        throw new DrivineError(
+            result.status === 'DRIFT'
+                ? `Could not recreate ${index}: ${(result.found as SchemaItem | undefined)
+                      ?.name}, an object Drivine didn't make, stands under ` +
+                  'its name. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it.'
+                : `Could not recreate ${index}: ${result.status}`
+        );
     }
 
     /**
