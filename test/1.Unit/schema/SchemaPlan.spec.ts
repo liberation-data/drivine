@@ -1,5 +1,7 @@
 import { Neo4jError } from 'neo4j-driver';
 import { DrivineLogger } from '@/logger';
+import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
+import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import {
     causes,
     ensureResult,
@@ -145,6 +147,39 @@ describe('SchemaPlan', () => {
         );
         await expect(failed).rejects.toThrow(/Seeded_text_range' on Seeded\[text\] is still being built/);
         await expect(failed).rejects.toThrow(/indexBuildTimeout longer/);
+    });
+
+    it('throws the error an action got, as it got it, where its failure ends the plan', async () => {
+        const reset = new Error('connection reset');
+        const executor = {
+            run: async (statement: string | NativeOperation): Promise<any[]> =>
+                typeof statement === 'string' && statement.startsWith('CREATE') ? Promise.reject(reset) : []
+        };
+        await expect(planItem(planningOn('neo4j', executor), 'ENSURE', rangeIndex('Person', 'name'))).rejects.toBe(
+            reset
+        );
+    });
+
+    it('throws a graph refused for every owner (ReusedIdsError) out of its round, unanswered, planning nothing more', async () => {
+        const module = cypherCompilerModule();
+        const asked: string[] = [];
+        useCypherCompiler({
+            ...module,
+            compile: (request: string) => {
+                asked.push(request);
+                return module.compile(request);
+            }
+        });
+        const refused = new ReusedIdsError('drivine', '/data/graph.db');
+        try {
+            const executor = { run: async (): Promise<any[]> => Promise.reject(refused) };
+            await expect(planItem(planningOn('sqlite', executor), 'ENSURE', rangeIndex('Person', 'name'))).rejects.toBe(
+                refused
+            );
+            expect(asked.some((it) => it.includes('"resume"'))).toBe(false);
+        } finally {
+            useCypherCompiler(module);
+        }
     });
 
     it("runs FalkorDB's GRAPH.CONSTRAINT as its driver's command", async () => {

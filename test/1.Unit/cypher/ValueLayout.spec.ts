@@ -1,5 +1,5 @@
 import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { readLayout, readLayoutAfter } from '@/cypher/ValueLayout';
+import { heldKey, readLayout, readLayoutAfter, writeLayout, writeProps } from '@/cypher/ValueLayout';
 
 /**
  * A column read in the store layout (readLayout): the module is asked of every text that holds `"$` or `$`, and
@@ -69,9 +69,58 @@ describe('readLayout', () => {
         ]);
     });
 
+    it("keeps a text that begins as a float's stand-in does the text it is, as SQLite's JSON can hold a NUL", () => {
+        const texts = ['\u0000drivine:float:5', '\u0000drivine:text:x', '\u0000other'];
+        expect(readLayoutAfter(JSON.stringify([...texts, { $$k: NaN }]), (value) => value)).toEqual([
+            ...texts,
+            { $k: null }
+        ]);
+    });
+
     it('keeps a whole number past 2^53 and an infinity in a text the module reads', () => {
         expect(readLayout('{"$$k":[9007199254740993,9e999,-9e999,"Infinity"]}')).toEqual({
             $k: [BigInt('9007199254740993'), Infinity, -Infinity, 'Infinity']
         });
+    });
+});
+
+/**
+ * A value a save writes, in the store layout (writeLayout): the module is asked only of a value that holds a `Date` or a
+ * map key that begins with `$`, at any depth, in a list or a set too, and each such key is held with one more `$`.
+ */
+describe('writeLayout', () => {
+    const module = cypherCompilerModule();
+    let asked: string[];
+
+    beforeEach(() => {
+        asked = [];
+        useCypherCompiler({
+            ...module,
+            compile: (request: string) => {
+                asked.push(request);
+                return module.compile(request);
+            }
+        });
+    });
+
+    afterAll(() => useCypherCompiler(module));
+
+    it('holds a value with no date and no key that begins with $ as it is, asking the module nothing', () => {
+        const value = { a: [1, 'b$', { c: '$d' }], e: new Uint8Array([1]) };
+        expect(writeLayout(value)).toBe(value);
+        expect(asked).toEqual([]);
+    });
+
+    it('escapes each key that begins with $ and tags each date, at any depth, a set read as a list', () => {
+        expect(writeLayout({ a: { $b: [{ $c: 1 }] }, s: new Set([new Date(0)]) })).toEqual({
+            a: { $$b: [{ $$c: 1 }] },
+            s: [{ $t: 'datetime', v: '1970-01-01T00:00:00Z', s: expect.any(String) }]
+        });
+        expect(asked).toHaveLength(1);
+    });
+
+    it("writes a save's properties, an undefined one as null, and a property's name as the layout holds it", () => {
+        expect(writeProps({ $k: 1, gone: undefined })).toEqual({ $$k: 1, gone: null });
+        expect([heldKey('$k'), heldKey('$$k'), heldKey('k$')]).toEqual(['$$k', '$$$k', 'k$']);
     });
 });

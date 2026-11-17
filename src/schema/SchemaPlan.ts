@@ -2,6 +2,7 @@ import { DrivineError } from '@/DrivineError';
 import { DrivineLogger } from '@/logger';
 import { ModuleStore } from '@/backend/StoreStatements';
 import { cypherCompilerModule } from '@/cypher/SharedCypherCompiler';
+import { ReusedIdsError } from '@/connection/sqlite/ReusedIdsError';
 import type { NativeOperation, SchemaItem } from '@/schema/SchemaGrammar';
 import {
     EngineVectorOptions,
@@ -394,13 +395,20 @@ export class SchemaPlan {
         return report;
     }
 
-    /** Runs a round's actions in order, up to and with the first that fails: what each did, and the error that ended it. */
+    /**
+     * Runs a round's actions in order, up to and with the first that fails: what each did, and the error that ended it. A
+     * graph refused for every owner alike (ReusedIdsError) is thrown out of the round as it is, unanswered, and plans
+     * nothing more, as drivine4j rethrows its `ReusedIdsException` past its owners' isolation.
+     */
     private async round(actions: PlanAction[], host: PlanHost): Promise<{ outcomes: any[]; error?: unknown }> {
         const outcomes: any[] = [];
         for (const action of actions) {
             try {
                 outcomes.push(await this.answer(action, host));
             } catch (e) {
+                if (e instanceof ReusedIdsError) {
+                    throw e;
+                }
                 outcomes.push({ type: 'failed', causes: causes(e) });
                 return { outcomes, error: e };
             }

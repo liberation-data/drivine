@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { parse } from 'yaml';
 import { judgeLayout, layoutVerdict, StoreLayoutError } from '@/backend/sql/StoreLayout';
-import { ModuleStore, restampParameters, storeStatements } from '@/backend/StoreStatements';
+import { ModuleStore, restampParameters, stampParameters, storeStatements } from '@/backend/StoreStatements';
 
 /** The spec's marker.yaml (test/cypher), whose `storeLayout` cases pin the verdict on a graph by its layout. */
 const MARKER = parse(fs.readFileSync(path.join(__dirname, '../../cypher/marker.yaml'), 'utf8'));
@@ -111,6 +111,33 @@ describe('judgeLayout', () => {
         expect(it.run).toHaveBeenCalledWith(stamp.restampLayout, restampParameters('sqlite', graph));
         // Asked again of the stamps read back, and found current.
         expect(it.ran.filter((s) => s === stamp.readStamps)).toHaveLength(2);
+    });
+
+    it('stamps again a graph of this layout whose stamp a clear deleted, as a stamp is first made', async () => {
+        const cleared = storeStatements('sqlite', 'drivine').stamp;
+        let stamped = false;
+        const it = store((statement) => {
+            if (statement === cleared.assignIfAbsent) {
+                stamped = true;
+            }
+            return statement === MADE
+                ? [{ made: 1 }]
+                : statement === cleared.readStamps
+                ? stamped
+                    ? [{ stamp: { id: 'a', assignedAt: 't', layout: 2 } }]
+                    : []
+                : statement === cleared.foreignNodes
+                ? [{ one: 1 }]
+                : statement === cleared.layoutObjects
+                ? [{ object: { name: 'drivine_lock2', type: 'TABLE' } }]
+                : [];
+        });
+        await judgeLayout('sqlite', 'drivine', MADE, it.run);
+        expect(it.ran).not.toContain(cleared.restampLayout);
+        const assigned = it.run.mock.calls.find(([statement]) => statement === cleared.assignIfAbsent);
+        const expected = stampParameters('sqlite', 'drivine', 'id', 'at', 'SQLITE');
+        expect(Object.keys(assigned![1]).sort()).toEqual(Object.keys(expected).sort());
+        expect(it.ran.filter((s) => s === cleared.readStamps)).toHaveLength(2);
     });
 
     it('refuses a graph whose stamp reads back in an earlier layout after it was restamped', async () => {

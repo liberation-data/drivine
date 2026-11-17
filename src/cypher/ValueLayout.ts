@@ -32,9 +32,15 @@ export function readLayout(text: string, parse: (text: string) => any = parseExa
 /**
  * What a float that JSON would misread stands for while it crosses to the module and back, its text after it: NaN and the
  * infinities, which JSON has no text of, and a whole float past 2^53, which a whole number's reader would read as an
- * integer (Oracle's `{"$numberDouble": 1e16}`, a float). No row's text holds a NUL, so none holds this.
+ * integer (Oracle's `{"$numberDouble": 1e16}`, a float).
  */
 const FLOAT = '\u0000drivine:float:';
+
+/**
+ * What a text value that begins as a stand-in does (see FLOAT) crosses with before it, so it comes back the text it was:
+ * SQLite's JSON can hold a text that begins with a NUL.
+ */
+const TEXT = '\u0000drivine:text:';
 
 /**
  * A column read in the store layout, as {@link readLayout} reads it, where the store writes some values its own way in
@@ -52,15 +58,21 @@ export function readLayoutAfter(text: string, raw: (value: any) => any): any {
     const marked = jsonText(value, (_, item) =>
         typeof item === 'number' && !Number.isSafeInteger(item) && !(Number.isFinite(item) && !Number.isInteger(item))
             ? `${FLOAT}${String(item)}`
+            : typeof item === 'string' && (item.startsWith(FLOAT) || item.startsWith(TEXT))
+            ? `${TEXT}${item}`
             : item
     );
     return unmarked(readLayout(marked));
 }
 
-/** `value` with each stand-in for a float the float again, at any depth. */
+/** `value` with each stand-in for a float the float again, and each text marked so the text it was, at any depth. */
 function unmarked(value: any): any {
     if (typeof value === 'string') {
-        return value.startsWith(FLOAT) ? Number(value.slice(FLOAT.length)) : value;
+        return value.startsWith(FLOAT)
+            ? Number(value.slice(FLOAT.length))
+            : value.startsWith(TEXT)
+            ? value.slice(TEXT.length)
+            : value;
     }
     if (Array.isArray(value)) {
         return value.map(unmarked);
