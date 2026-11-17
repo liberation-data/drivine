@@ -72,14 +72,19 @@ can't be pulled: give it a version tag. `npm test` prints the digest of the imag
 where it has none, whatever `DRIVINE_LOG_LEVEL` is (`neo4j:latest is neo4j@sha256:…`). `DrivineTestContainers.start()`
 keeps the same in its result's `ran`, for a runner of your own to print, and logs it at `INFO`.
 
-CI holds FalkorDB at the last release that passes, with `FALKORDB_TEST_IMAGE` in
-[`ci.yml`](.github/workflows/ci.yml): a run from a push, a pull request or the release gate takes
-`falkordb/falkordb:6.0.3`, as 6.0.4 makes a relationship twice where one `FOREACH` body `MERGE`s it twice
-([#717](https://github.com/liberation-data/drivine/issues/717)). CI's nightly run leaves the pin out, so it shows when
-the pin can go, and runs `ghcr.io/falkordb/falkordb:latest` in place of Docker Hub's: Docker Hub's `latest` is whichever
-release FalkorDB pushed last, and that was once an older line's backport, `v4.22.3` after `6.0.3`, which has no `=~`
-([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)), while ghcr.io's is FalkorDB's newest
-release. A FalkorDB release that breaks a pull request's run is pinned the same way until FalkorDB fixes it.
+CI holds FalkorDB at the last release that passes, with `FALKORDB_TEST_IMAGE` in [`ci.yml`](.github/workflows/ci.yml):
+every run, a push, a pull request, the release gate and the nightly, takes `falkordb/falkordb:6.0.3`, as 6.0.4 makes a
+relationship twice where one `FOREACH` body `MERGE`s it twice
+([#717](https://github.com/liberation-data/drivine/issues/717)). So a red nightly means something new. Beside it, the
+nightly's FalkorDB latest canary ([`nightly.yml`](.github/workflows/nightly.yml)) runs the tests that run on FalkorDB,
+and those alone, on `ghcr.io/falkordb/falkordb:latest`, with `DRIVINE_TEST_PART=falkordb`: the whole run's stages, each
+with a `--testNamePattern` of the tests whose names say `on FALKORDB`, and FalkorDbRepository's (`FALKORDB_TESTS` in
+`test/run-tests.ts`). The other stores' containers start too, as the suites read their datasources when they load, but
+none of their tests run. It never fails the nightly, and its summary says the image's digest and whether #717's test
+still fails: once it passes, the pin can go. It takes ghcr.io's `latest` in place of Docker Hub's: Docker Hub's `latest`
+is whichever release FalkorDB pushed last, and that was once an older line's backport, `v4.22.3` after `6.0.3`, which
+has no `=~` ([FalkorDB/FalkorDB#3551](https://github.com/FalkorDB/FalkorDB/issues/3551)), while ghcr.io's is FalkorDB's
+newest release. A FalkorDB release that breaks a pull request's run is pinned the same way until FalkorDB fixes it.
 
 ## The Cypher spec
 

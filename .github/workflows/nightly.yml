@@ -1,6 +1,8 @@
 # Each night, the full CI on master: every suite, the nightly ones a pull request leaves out among them (NIGHTLY in
-# test/run-tests.ts), on every store, and on the engines' latest images, without ci.yml's pins, so that an engine's
-# new release shows up here and not in a pull request's run. At 17:00 UTC, 03:00 in Brisbane.
+# test/run-tests.ts), on every store, and on the engines' latest images, so that an engine's new release shows up here
+# and not in a pull request's run. At 17:00 UTC, 03:00 in Brisbane. FalkorDB is the exception: ci.yml holds it at 6.0.3
+# in every run, this one too, for #717, so a red nightly means something new. falkordb-canary runs FalkorDB's newest
+# release beside it, on the FalkorDB tests alone, and never fails the nightly: once it passes, the pin can go.
 #
 # A failure opens an issue labelled `nightly`, or comments on the one open, naming the failed jobs, their failing
 # tests, and the commits since the last nightly that passed, among which is the one that broke it. A pass closes it.
@@ -91,7 +93,78 @@ jobs:
                   # Overwritten when the run is re-run, as an artifact's name is unique within a run.
                   overwrite: true
 
+    # FalkorDB's newest release on the tests that run on FalkorDB (DRIVINE_TEST_PART=falkordb, test/run-tests.ts),
+    # as ci.yml holds FalkorDB at 6.0.3 for #717. It takes ghcr.io's latest and not Docker Hub's: Docker Hub's is
+    # whichever release FalkorDB pushed last, and that was once an older line's backport, v4.22.3 after 6.0.3, which has
+    # no =~ (FalkorDB/FalkorDB#3551), while ghcr.io's is FalkorDB's newest release.
+    #
+    # It never fails the nightly: the tests' step continues on error, so the job passes whatever they concluded, and the
+    # report doesn't wait for it, count it or list it. What they concluded is in the job's summary and an annotation on
+    # the run, with the image's digest: a pass is the sign that a FalkorDB release has fixed #717 and ci.yml's pin can
+    # go; a failure of #717's test alone is the bug still there; any other failure is a new break to look at before the
+    # pin goes.
+    falkordb-canary:
+        name: FalkorDB latest canary
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        # Only for a step before the tests, such as npm ci, failing, which the tests' step can't cover.
+        continue-on-error: true
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: 24
+                  cache: npm
+            - run: npm ci
+            - name: Test on FalkorDB latest
+              id: test
+              continue-on-error: true
+              # Short of the job's 30, so a test that hangs ends here, as a failure, and the summary still says so.
+              timeout-minutes: 20
+              env:
+                  FALKORDB_TEST_IMAGE: ghcr.io/falkordb/falkordb:latest
+                  DRIVINE_TEST_PART: falkordb
+              run: |
+                  set -o pipefail
+                  npm test 2>&1 | tee falkordb-canary.log
+            - name: Say how FalkorDB latest did
+              if: always()
+              env:
+                  OUTCOME: ${{ steps.test.outcome }}
+              run: |
+                  # The digest npm test prints for each container (#702): "FALKORDB: <image> is <digest>".
+                  ran=$(grep -m1 '^FALKORDB: ' falkordb-canary.log 2> /dev/null | sed 's/^FALKORDB: .* is //' || true)
+                  image="FalkorDB latest (${ran:-no digest, as no container started})"
+                  # Jest's line for each failed test, as the report job reads them.
+                  failing=$(sed -E 's/\x1b\[[0-9;]*m//g' falkordb-canary.log 2> /dev/null | grep -E '^  ● ' |
+                      grep -v '● Console' | awk '!seen[$0]++' | head -40 || true)
+                  test717='StatelessGraphObjectManager saves on FALKORDB › should save a nested view, with its own relationships'
+                  if [ "$OUTCOME" = success ]; then
+                      level=notice
+                      line="$image passes every FalkorDB test: the 6.0.3 pin in ci.yml can go (drivine#717)."
+                  elif [ "$OUTCOME" != failure ]; then
+                      level=warning
+                      line="The canary's tests concluded $OUTCOME: a step before them failed, or the run was cancelled."
+                  elif [ -z "$failing" ]; then
+                      level=warning
+                      line="$image fails with no failing test in its log: before the tests, or at one that hangs past the step's 20 minutes; the step's log says where."
+                  elif grep -qxF "  ● $test717" <<< "$failing"; then
+                      level=warning
+                      others=$(grep -cvxF "  ● $test717" <<< "$failing" || true)
+                      line="$image still fails drivine#717's test, so ci.yml keeps FalkorDB at 6.0.3."
+                      [ "$others" -eq 0 ] || line="$line It fails $others other test(s) too, below: new breaks to look at."
+                  else
+                      level=warning
+                      line="$image fails, but not drivine#717's test: a new break, to look at before the 6.0.3 pin goes."
+                  fi
+                  echo "::$level title=FalkorDB latest canary::$line"
+                  {
+                      echo "$line"
+                      [ -z "$failing" ] || printf '\n```\n%s\n```\n' "$failing"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
     report:
+        # Not the canary, which says how it did in its own summary and never fails the nightly.
         needs: [ci, compiler-bench]
         if: always()
         runs-on: ubuntu-latest
@@ -148,8 +221,9 @@ jobs:
                   {
                       echo "The nightly on $GITHUB_SHA concluded $RESULT: $RUN_URL"
                       echo
+                      # Never the canary, whatever it concluded: it doesn't fail the nightly.
                       gh api --paginate "repos/$repo/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-                          -q ".jobs[] | select($picked) | \"\\(.id)\\t\\(.name)\\t\\(.conclusion)\\t\\(.html_url)\"" |
+                          -q ".jobs[] | select(.name != \"FalkorDB latest canary\") | select($picked) | \"\\(.id)\\t\\(.name)\\t\\(.conclusion)\\t\\(.html_url)\"" |
                           while IFS=$'\t' read -r id name conclusion url; do
                               if [ "$conclusion" = cancelled ]; then
                                   echo "### [$name]($url), cancelled or timed out"

@@ -15,7 +15,9 @@
  * - `cypher spec`: the Cypher spec, on each store, or `cypher spec on oracle` and `cypher spec on the rest` (CI's
  *   longest suite, split over two jobs with Oracle);
  * - `serial`: stage 2 without the nightly suites, then stage 3;
- * - `nightly`: the nightly suites, in their stages, but the write loops' timing, which is `write loop`.
+ * - `nightly`: the nightly suites, in their stages, but the write loops' timing, which is `write loop`;
+ * - `falkordb`: the tests that run on FalkorDB, in the whole run's stages (FALKORDB_TESTS), for nightly.yml's canary
+ *   on FalkorDB's newest image.
  * The parallel shards, a cypher spec part or two, and serial run every suite but the nightly ones exactly once; with
  * nightly and write loop, every suite.
  */
@@ -63,6 +65,15 @@ const NIGHTLY = [
     'test/2.Integration/manager/StatelessGraphObjectManager.longText'
 ];
 
+/**
+ * The tests that run on FalkorDB, as a pattern of their names (Jest's `--testNamePattern`): a shared suite's describe
+ * names its store, `on FALKORDB`, as `$type` or `$name` gives it, followed by the test's title or by `, indexed`
+ * (loadNearest's), and FalkorDbRepository is FalkorDB's own suite. Jest matches a name without regard to case, so the
+ * store is matched with what follows it: a Neo4j test's title that says "drift on FalkorDB, a second index" is not one of
+ * them. A suite with none of these tests runs no hooks, so starts nothing of its own.
+ */
+const FALKORDB_TESTS = 'on FALKORDB( |, indexed)|^FalkorDbRepository ';
+
 interface Stage {
     name: string;
     args: string[];
@@ -99,7 +110,11 @@ function stages(part: string | undefined): Stage[] {
             { name: 'nightly', args: NIGHTLY.filter((it) => !SERIAL.includes(it)) },
             schema(NIGHTLY.filter((it) => SERIAL.includes(it) && it !== WRITE_LOOP))
         ],
-        'write loop': [schema([WRITE_LOOP])]
+        'write loop': [schema([WRITE_LOOP])],
+        falkordb: stages(undefined).map((stage) => ({
+            ...stage,
+            args: [...stage.args, '--testNamePattern', FALKORDB_TESTS]
+        }))
     };
     if (!parts[part]) {
         throw new Error(`DRIVINE_TEST_PART is "${part}": not parallel i/n, or ${Object.keys(parts).join(', ')}`);
