@@ -14,8 +14,9 @@ describe('compiledSpecification', () => {
             new SharedCypherCompiler('oracle', { name: 'g' })
         );
         expect(compiled.spec.statement.language).toEqual('SQL');
-        expect(compiled.spec.statement.text).toContain('$_cy_1');
-        expect(compiled.spec.parameters).toEqual({ _cy_1: '"Keanu"' });
+        expect(compiled.spec.statement.text).toContain('$_cyk_1');
+        // Oracle compares a text with a key the statement gives as the text itself (`_cyk_`), not as its JSON.
+        expect(compiled.spec.parameters).toEqual({ _cyk_1: 'Keanu' });
         expect(compiled.setup).toEqual([]);
     });
 
