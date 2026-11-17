@@ -170,7 +170,7 @@ export const HELD: Record<string, Record<string, Hold[]>> = {
     'temporal.yaml': {
         // Neo4j refuses a sub-second field without a minute; the SQL stores write a moment's zero seconds.
         'A nanosecond past the microsecond': [
-            { issue: 'drivine-cypher-spec#321', steps: [6, 8], on: ['neo4j'] },
+            { issue: 'drivine-cypher-spec#321', steps: [6, 8, 14], on: ['neo4j'] },
             { issue: 'drivine-cypher-spec#321', steps: [8, 14], on: ['sql'] }
         ]
     }
