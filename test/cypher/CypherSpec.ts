@@ -158,8 +158,6 @@ export const HELD: Record<string, Record<string, Hold[]>> = {
         ...(SQLITE_CUTS_AT_NUL
             ? { 'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }] }
             : {}),
-        // Neo4j refuses toString() of a list of one kind, which the step pins an answer to.
-        'toString() of a list or a map': [{ issue: 'drivine-cypher-spec#296', steps: [4], on: ['neo4j'] }],
         // The module's regexp on wasm refuses a back reference by name, where Neo4j answers it.
         'A regular expression with a backreference': [
             { issue: 'drivine-cypher-spec#240', steps: [1, 3, 4], on: ['sqlite'] }
