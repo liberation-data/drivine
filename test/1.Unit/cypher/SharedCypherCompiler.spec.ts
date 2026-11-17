@@ -312,6 +312,15 @@ describe('A Temporal parameter on Neo4j', () => {
         expect(new Neo4jSpecCompiler(spec).formattedParams().hebrew.toString()).toEqual('2024-01-15');
     });
 
+    it("leaves a map with a withCalendar of its own as it is, and doesn't call it (#767)", () => {
+        const withCalendar = jest.fn(() => {
+            throw new Error('not a Temporal value');
+        });
+        const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({ m: { withCalendar } });
+        expect(new Neo4jSpecCompiler(spec).formattedParams().m.withCalendar).toBe(withCalendar);
+        expect(withCalendar).not.toHaveBeenCalled();
+    });
+
     it('is the driver value of its kind among positional parameters too (#767)', () => {
         const date = temporalLike('Temporal.PlainDate', '', { year: 2024, month: 1, day: 15 });
         const spec = new QuerySpecification({ text: 'RETURN $1', language: 'CYPHER' }).bind([date, [date]]);

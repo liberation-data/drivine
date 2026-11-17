@@ -28,10 +28,12 @@ export function withTemporalsAsDriverValues(value: any): any {
 
 /**
  * The Neo4j driver's value of the `Temporal` value `value`; undefined where it is no `Temporal` value. One in another
- * calendar is read in the ISO one first, as Neo4j keeps none other: a hebrew date's `year` is 5784, not 2024.
+ * calendar is read in the ISO one first, as Neo4j keeps none other: a hebrew date's `year` is 5784, not 2024. Only a
+ * `Temporal` value is, so a caller's own map or class with a `withCalendar` method isn't called.
  */
 function driverValue(value: any): unknown {
-    const it = typeof value.withCalendar === 'function' ? value.withCalendar('iso8601') : value;
+    const temporal = String(value[Symbol.toStringTag]).startsWith('Temporal.');
+    const it = temporal && typeof value.withCalendar === 'function' ? value.withCalendar('iso8601') : value;
     switch (it[Symbol.toStringTag]) {
         case 'Temporal.PlainDate':
             return new DriverDate(it.year, it.month, it.day);
