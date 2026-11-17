@@ -138,14 +138,22 @@ describe('parametersJson', () => {
         });
     });
 
-    it('writes a ZonedDateTime at its exact offset, which its toString() rounds to the minute (#767)', () => {
+    it('refuses a ZonedDateTime at an offset with seconds, which its toString() rounds to the minute (#767)', () => {
         // Temporal.ZonedDateTime.from('1971-01-01T00:00[Africa/Monrovia]'), whose toString() is …-00:45[Africa/Monrovia].
         const monrovia = temporalLike('Temporal.ZonedDateTime', '1971-01-01T00:00:00-00:45[Africa/Monrovia]', {
             toPlainDateTime: () => '1971-01-01T00:00:00',
             offset: '-00:44:30'
         });
-        expect(JSON.parse(parametersJson({ t: monrovia }))).toEqual({
-            t: { $temporal: 'DATE_TIME', text: '1971-01-01T00:00:00-00:44:30' }
+        // Not rounded to -00:45, a moment 30 s off, and refused by name, as the store holds an offset to the minute and
+        // the module bound a tag of one with seconds as a text (drivine-cypher-spec#357).
+        expect(() => parametersJson({ t: monrovia })).toThrow(
+            new DrivineError(
+                "A temporal parameter at an offset with seconds (1971-01-01T00:00:00-00:44:30) can't be bound on a SQL store, which holds an offset to the minute."
+            )
+        );
+        expect(() => parametersJson({ t: new neo4j.types.Time(10, 0, 0, 0, 3601) })).toThrow(/offset with seconds/);
+        expect(JSON.parse(parametersJson({ t: new neo4j.types.Time(10, 0, 0, 0, -3600) }))).toEqual({
+            t: { $temporal: 'TIME', text: '10:00:00-01:00' }
         });
     });
 

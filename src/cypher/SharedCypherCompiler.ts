@@ -405,6 +405,18 @@ function temporalKind(value: object): string | undefined {
  * digits, and the module reads one of fewer than five with four (`-0005`, not `-000005`).
  */
 function temporalText(value: object): string {
+    const text = zonedAtOffset(value);
+    // The module reads an offset to the minute, and bound a tag of one with seconds as a text (drivine-cypher-spec#357).
+    if (/[+-]\d\d:\d\d:\d\d$/.test(text)) {
+        throw new DrivineError(
+            `A temporal parameter at an offset with seconds (${text}) can't be bound on a SQL store, which holds an offset to the minute.`
+        );
+    }
+    return text;
+}
+
+/** The ISO 8601 text of `value`, a temporal value, in the ISO calendar, its named zone dropped to its offset (see temporalText). */
+function zonedAtOffset(value: object): string {
     // In the ISO calendar, as the store keeps no other: `toString()` annotates another (`2024-01-15[u-ca=hebrew]`).
     const it = typeof (value as any).withCalendar === 'function' ? (value as any).withCalendar('iso8601') : value;
     const text = (
