@@ -598,8 +598,10 @@ const page = await gom.loadAll(SessionView, (q) => ({
 }));
 ```
 
-- **The ordered properties must not be null.** A row whose key is null meets no comparison, so it drops out of every
-  page after the first.
+- **The ordered properties must not be null in the data.** A row whose key is null meets no comparison, so it drops out
+  of every page after the first, without a word. The stores don't agree on where nulls sort either, so what is lost
+  differs from one to another. Order by properties that always have a value, or leave the nulls out in `where`
+  (`q.rank.isNotNull()`).
 - `seek` is refused without a matching order, with a null cursor value, with `skip`, with an order that places its
   nulls, and with an expression.
 - **Index the cursor.** A keyset is cheap only where the engine can seek into an index and stop. The index mirrors the
