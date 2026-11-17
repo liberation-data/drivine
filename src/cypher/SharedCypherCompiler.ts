@@ -305,7 +305,10 @@ const LONG_RANGE = 2 ** 63;
  * - a `bigint` and the Neo4j driver's `Integer` are their digits, unquoted: a whole number however large.
  * - a {@link CypherFloat} is a float, `{"$float": "<text>"}`, even where it is whole: `cypherFloat(5)` is 5.0, and
  *   `cypherFloat(-0)` is -0.0, `{"$float": "-0"}`.
- * - a `Date` is `{"$temporal": "DATE_TIME", "text": <its toISOString()>}`, as Drivine binds it.
+ * - a `Date` is `{"$temporal": "DATE_TIME", "text": <its toISOString()>}`, as Drivine binds it. Each of the Neo4j
+ *   driver's temporal values (`Date`, `Time`, `LocalTime`, `LocalDateTime`, `DateTime`, `Duration`) and each `Temporal`
+ *   one (`PlainDate`, `PlainTime`, `PlainDateTime`, `ZonedDateTime`, `Instant`, `Duration`) is tagged by its kind, with
+ *   its ISO 8601 text (see temporalKind).
  * - bytes (`Buffer`, `Uint8Array`, `Int8Array`) are `{"$bytes": "<base64>"}`.
  * - any other iterable (a `Set`, a `Map`'s entries, a generator) is the list of its items; a map is its entries in
  *   order, those undefined left out, wrapped as `{"$map": {...}}` where a key starts with `$`, so no map a caller binds
@@ -358,6 +361,10 @@ function composite(value: object): string {
             ? 'null'
             : `{"$temporal":"DATE_TIME","text":${JSON.stringify(value.toISOString())}}`;
     }
+    const temporal = temporalKind(value);
+    if (temporal) {
+        return `{"$temporal":"${temporal}","text":${JSON.stringify(temporalText(value))}}`;
+    }
     if (value instanceof Uint8Array || value instanceof Int8Array) {
         return `{"$bytes":${JSON.stringify(base64(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)))}}`;
     }
@@ -371,6 +378,63 @@ function composite(value: object): string {
     const map = `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${written(item)}`).join(',')}}`;
     return entries.some(([key]) => key.startsWith('$')) ? `{"$map":${map}}` : map;
 }
+
+/**
+ * The kind the shared compiler's tag names (`{"$temporal": <kind>, "text": …}`) of `value`, where it is one of the Neo4j
+ * driver's temporal values or a `Temporal` one, each of which its `toString()` writes as ISO 8601 text; undefined for
+ * anything else (#767, a port of drivine4j#833: each was bound as a map of its fields). Told by the driver's own marker
+ * of each kind and by `Temporal`'s `Symbol.toStringTag`, not by importing either, so code that runs in a page needs
+ * neither, as {@link isInt} tells an integer. A `Temporal.Instant` is a datetime at UTC.
+ */
+function temporalKind(value: object): string | undefined {
+    const it = value as Record<string, unknown>;
+    for (const [marker, kind] of DRIVER_TEMPORAL_KINDS) {
+        if (it[marker] === true) {
+            return kind;
+        }
+    }
+    return TEMPORAL_KINDS[(value as any)[Symbol.toStringTag]];
+}
+
+/**
+ * The ISO 8601 text of `value`, a temporal value ([temporalKind]), as the store layout holds it: a datetime in a named
+ * zone at its offset, the zone dropped, as the store holds no named zone (the spec's README, "A time"). One in a named
+ * zone with no offset, as the Neo4j driver's `DateTime` may be, is refused by name: its offset isn't known here.
+ */
+function temporalText(value: object): string {
+    const text = String(value);
+    const zone = text.indexOf('[');
+    if (zone < 0) {
+        return text;
+    }
+    const kept = text.slice(0, zone);
+    if (!/(Z|[+-]\d\d:\d\d(:\d\d)?)$/.test(kept)) {
+        throw new DrivineError(
+            `A datetime parameter in a named zone with no offset (${text}) can't be bound on a SQL store, which holds a datetime's offset, not its zone: give its offset too.`
+        );
+    }
+    return kept;
+}
+
+/** Each of the Neo4j driver's temporal kinds by the property it marks its values with, and the tag's kind of it. */
+const DRIVER_TEMPORAL_KINDS: [string, string][] = [
+    ['__isDate__', 'DATE'],
+    ['__isTime__', 'TIME'],
+    ['__isLocalTime__', 'LOCAL_TIME'],
+    ['__isLocalDateTime__', 'LOCAL_DATE_TIME'],
+    ['__isDateTime__', 'DATE_TIME'],
+    ['__isDuration__', 'DURATION']
+];
+
+/** Each `Temporal` kind by its `Symbol.toStringTag`, and the tag's kind of it. */
+const TEMPORAL_KINDS: Record<string, string> = {
+    'Temporal.PlainDate': 'DATE',
+    'Temporal.PlainTime': 'LOCAL_TIME',
+    'Temporal.PlainDateTime': 'LOCAL_DATE_TIME',
+    'Temporal.ZonedDateTime': 'DATE_TIME',
+    'Temporal.Instant': 'DATE_TIME',
+    'Temporal.Duration': 'DURATION'
+};
 
 function float(value: number): string {
     return `{"$float":${JSON.stringify(Object.is(value, -0) ? '-0' : String(value))}}`;

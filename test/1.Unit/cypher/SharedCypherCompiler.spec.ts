@@ -12,6 +12,14 @@ import { CompiledCypher } from '@/cypher/CompiledCypher';
 const STORES: SharedStore[] = ['postgres', 'oracle', 'sqlite'];
 
 /**
+ * A stand-in for a `Temporal` value of `tag` (`Temporal.PlainDate`), its `toString()` `text` and its `fields`: Drivine
+ * runs on Node 22, which has no `Temporal`, and tells one by its `Symbol.toStringTag`.
+ */
+function temporalLike(tag: string, text: string, fields: Record<string, any> = {}): object {
+    return { ...fields, [Symbol.toStringTag]: tag, toString: () => text };
+}
+
+/**
  * A statement's parameters as the shared compiler reads them: tagged JSON that keeps the kinds plain JSON loses, so a
  * value the Neo4j driver would send is bound as it sends it (once `jsonText`, beside Drivine's own compiler).
  */
@@ -54,6 +62,69 @@ describe('parametersJson', () => {
         expect(parametersJson({ d: new Date(0), x: new Date(NaN) })).toEqual(
             '{"d":{"$temporal":"DATE_TIME","text":"1970-01-01T00:00:00.000Z"},"x":null}'
         );
+    });
+
+    it("writes each of the Neo4j driver's temporal values as its kind and its text, in a list or a map too (#767)", () => {
+        const {
+            Date: DriverDate,
+            DateTime,
+            Duration,
+            LocalDateTime,
+            LocalTime,
+            Time
+        }: typeof neo4j.types = neo4j.types;
+        expect(
+            JSON.parse(
+                parametersJson({
+                    d: new DriverDate(2024, 1, 15),
+                    t: new Time(10, 0, 0, 0, 0),
+                    lt: new LocalTime(10, 0, 0, 5),
+                    ldt: new LocalDateTime(2024, 1, 15, 10, 0, 0, 0),
+                    dt: new DateTime(2024, 1, 15, 10, 0, 0, 0, 3600),
+                    l: [new Duration(14, 3, 3600, 5)],
+                    m: { zoned: new DateTime(2024, 1, 15, 10, 0, 0, 0, 3600, 'Europe/Paris') }
+                })
+            )
+        ).toEqual({
+            d: { $temporal: 'DATE', text: '2024-01-15' },
+            t: { $temporal: 'TIME', text: '10:00:00Z' },
+            lt: { $temporal: 'LOCAL_TIME', text: '10:00:00.000000005' },
+            ldt: { $temporal: 'LOCAL_DATE_TIME', text: '2024-01-15T10:00:00' },
+            dt: { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00+01:00' },
+            l: [{ $temporal: 'DURATION', text: 'P14M3DT3600.000000005S' }],
+            // The store holds a datetime's offset, not its named zone.
+            m: { zoned: { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00+01:00' } }
+        });
+    });
+
+    it('refuses a datetime in a named zone with no offset by name, as its offset is not known (#767)', () => {
+        const zoneOnly = new neo4j.types.DateTime(2024, 1, 15, 10, 0, 0, 0, undefined, 'Europe/Paris');
+        expect(() => parametersJson({ t: zoneOnly })).toThrow(
+            new DrivineError(
+                "A datetime parameter in a named zone with no offset (2024-01-15T10:00:00[Europe/Paris]) can't be bound on a SQL store, which holds a datetime's offset, not its zone: give its offset too."
+            )
+        );
+    });
+
+    it('writes each Temporal value as its kind and its text, told by its Symbol.toStringTag (#767)', () => {
+        const values = Object.fromEntries(
+            [
+                ['Temporal.PlainDate', '2024-01-15'],
+                ['Temporal.PlainTime', '10:00:00'],
+                ['Temporal.PlainDateTime', '2024-01-15T10:00:00'],
+                ['Temporal.ZonedDateTime', '2024-01-15T10:00:00+01:00[Europe/Paris]'],
+                ['Temporal.Instant', '2024-01-15T10:00:00Z'],
+                ['Temporal.Duration', 'P1Y2M3DT1H']
+            ].map(([tag, text]) => [tag, temporalLike(tag, text)])
+        );
+        expect(JSON.parse(parametersJson(values))).toEqual({
+            'Temporal.PlainDate': { $temporal: 'DATE', text: '2024-01-15' },
+            'Temporal.PlainTime': { $temporal: 'LOCAL_TIME', text: '10:00:00' },
+            'Temporal.PlainDateTime': { $temporal: 'LOCAL_DATE_TIME', text: '2024-01-15T10:00:00' },
+            'Temporal.ZonedDateTime': { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00+01:00' },
+            'Temporal.Instant': { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00Z' },
+            'Temporal.Duration': { $temporal: 'DURATION', text: 'P1Y2M3DT1H' }
+        });
     });
 
     it('writes a CypherFloat as a float, whole or not, in a list or a map too', () => {
@@ -112,6 +183,42 @@ describe('cypherFloat', () => {
             f: 5,
             l: [2.5]
         });
+    });
+});
+
+describe('A Temporal parameter on Neo4j', () => {
+    it("is given to the driver as the driver's value of its kind, at any depth, where the driver wrote an empty map (#767)", () => {
+        const time = { hour: 10, minute: 30, second: 0, millisecond: 1, microsecond: 2, nanosecond: 3 };
+        const zoned = temporalLike('Temporal.ZonedDateTime', '', {
+            ...{ year: 2024, month: 1, day: 15 },
+            ...time,
+            offsetNanoseconds: 3600e9,
+            timeZoneId: 'Europe/Paris'
+        });
+        const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({
+            date: temporalLike('Temporal.PlainDate', '', { year: 2024, month: 1, day: 15 }),
+            l: [temporalLike('Temporal.PlainTime', '', time)],
+            m: {
+                at: temporalLike('Temporal.PlainDateTime', '', { year: 2024, month: 1, day: 15, ...time }),
+                zoned,
+                instant: temporalLike('Temporal.Instant', '', {
+                    toZonedDateTimeISO: () => ({ ...zoned, offsetNanoseconds: 0 })
+                }),
+                d: temporalLike('Temporal.Duration', '', {
+                    ...{ years: 1, months: 2, weeks: 1, days: 3, hours: 1, minutes: 2, seconds: 3 },
+                    ...{ milliseconds: 4, microseconds: 5, nanoseconds: 6 }
+                })
+            },
+            n: 1
+        });
+        const params = new Neo4jSpecCompiler(spec).formattedParams();
+        expect(params.date.toString()).toEqual('2024-01-15');
+        expect(params.l[0].toString()).toEqual('10:30:00.001002003');
+        expect(params.m.at.toString()).toEqual('2024-01-15T10:30:00.001002003');
+        expect(params.m.zoned.toString()).toEqual('2024-01-15T10:30:00.001002003+01:00[Europe/Paris]');
+        expect(params.m.instant.toString()).toEqual('2024-01-15T10:30:00.001002003Z');
+        expect(params.m.d.toString()).toEqual('P14M10DT3723.004005006S');
+        expect(params.n).toEqual(1);
     });
 });
 
