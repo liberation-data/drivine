@@ -33,7 +33,7 @@ export function readLayout(text: string, parse: (text: string) => any = parseExa
 
 /**
  * What a float that JSON would misread stands for while it crosses to the module and back, its text after it: NaN and the
- * infinities, which JSON has no text of, and a whole float past 2^53, which a whole number's reader would read as an
+ * infinities, which JSON has no text of, -0, which it writes 0, and a whole float past 2^53, which a whole number's reader would read as an
  * integer (Oracle's `{"$numberDouble": 1e16}`, a float).
  */
 const FLOAT = '\u0000drivine:float:';
@@ -56,9 +56,14 @@ export function readLayoutAfter(text: string, raw: (value: any) => any): any {
     if (!text.includes('"$') && !text.includes('\\u0024')) {
         return value;
     }
-    // A number here is a float, a whole number past 2^53 being a bigint: one JSON would misread crosses as its stand-in.
+    // A number here is a float, a whole number past 2^53 being a bigint: one JSON would misread crosses as its stand-in,
+    // -0 among them, which JSON writes 0.
     const marked = jsonText(value, (_, item) =>
-        typeof item === 'number' && !Number.isSafeInteger(item) && !(Number.isFinite(item) && !Number.isInteger(item))
+        Object.is(item, -0)
+            ? `${FLOAT}-0`
+            : typeof item === 'number' &&
+              !Number.isSafeInteger(item) &&
+              !(Number.isFinite(item) && !Number.isInteger(item))
             ? `${FLOAT}${String(item)}`
             : typeof item === 'string' && (item.startsWith(FLOAT) || item.startsWith(TEXT))
             ? `${TEXT}${item}`

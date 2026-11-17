@@ -70,6 +70,8 @@ describe('readLayout', () => {
             2.5,
             BigInt('9007199254740993')
         ]);
+        // -0 as it is read where the module isn't asked, which JSON would write 0.
+        expect(Object.is(readLayoutAfter('[{"$numberDouble":-0.0},{"$$k":1}]', floats)[0], -0)).toBe(true);
     });
 
     it("keeps a text that begins as a float's stand-in does the text it is, as SQLite's JSON can hold a NUL", () => {
