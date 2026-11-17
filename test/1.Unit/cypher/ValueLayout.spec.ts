@@ -239,6 +239,25 @@ describe('writeLayout', () => {
         expect(jsonText(dated)).toEqual('{"i":5,"l":4611686018427387905,"v":[0.5,1],"u":[1,2],"o":{"x":1}}');
     });
 
+    it('writes an object with a toJSON as its toJSON, and a Map as {}, whether or not a float beside them asks the module', () => {
+        class Reading {
+            constructor(private readonly at: number) {}
+            toJSON(): any {
+                return { reading: `at ${this.at}`, level: 0.5 };
+            }
+        }
+        const map = new Map([['a', 1]]);
+        expect(writeLayout({ r: new Reading(2), m: map }, 'postgres')).toEqual(
+            '{"r":{"reading":"at 2","level":0.5},"m":{}}'
+        );
+        expect(writeLayout({ r: new Reading(2.5), m: map, f: 0.25 }, 'postgres')).toEqual(
+            '{"r":{"reading":"at 2.5","level":0.5},"m":{},"f":0.25}'
+        );
+        expect(writeLayout({ r: new Reading(2.5) }, 'oracle')).toEqual(
+            '{"r":{"reading":"at 2.5","level":{"$numberDouble":"0.5"}}}'
+        );
+    });
+
     it("holds a user's map with the key $numberDouble under one more $, so no store reads it as a float", () => {
         expect(writeLayout({ m: { $numberDouble: 'NaN', n: new CypherFloat(2) } }, 'oracle')).toEqual(
             '{"m":{"$$numberDouble":"NaN","n":{"$numberDouble":"2.0"}}}'

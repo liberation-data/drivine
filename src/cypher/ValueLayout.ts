@@ -211,9 +211,10 @@ function bytes(value: any): boolean {
  * `Int8Array`, a `Buffer`) kept for the module, which writes them as the list of their signed values; a float typed array
  * (a `Float32Array`, a `Float64Array`) the list of its numbers, each a float, as drivine4j writes a `FloatArray`, and
  * another typed array the list of its numbers; the Neo4j driver's `Integer` its whole number, where JSON text would write
- * its fields; and an object of a class with no `toJSON` the map of its fields, as JSON text writes it. A `Date` and a
- * {@link CypherFloat} are kept for the module, and -0 is a float. A `Map`, a `DataView`, an `ArrayBuffer` and an object
- * with a `toJSON` are left as they are.
+ * its fields; an object with a `toJSON` what its `toJSON` gives, settled, and one of a class with no `toJSON` the map of
+ * its fields, as JSON text writes them; and a `Map`, a `DataView` and an `ArrayBuffer` the empty map JSON text writes. A
+ * `Date` and a {@link CypherFloat} are kept for the module, and -0 is a float. So a value is written alike whether the
+ * module is asked of it or not: the module writes an object's fields and a `Map`'s entries, and a float beside one asks it.
  */
 function settled(value: any): any {
     if (value === null || typeof value !== 'object') {
@@ -224,8 +225,12 @@ function settled(value: any): any {
         const whole = BigInt(value.toString());
         return Number.isSafeInteger(Number(whole)) ? Number(whole) : whole;
     }
-    if (value instanceof Date || value instanceof CypherFloat || keptAsIs(value)) {
+    if (keptForModule(value)) {
         return value;
+    }
+    const json = jsonOf(value);
+    if (json !== value) {
+        return settled(json);
     }
     if (value instanceof Float32Array || value instanceof Float64Array) {
         return Array.from(value, (item) => new CypherFloat(item));
@@ -241,13 +246,18 @@ function listed(value: object): boolean {
     return Array.isArray(value) || value instanceof Set || (ArrayBuffer.isView(value) && !(value instanceof DataView));
 }
 
-/** Whether `value` is left as it is, unsettled (see settled): bytes, for the module, or what JSON text writes as it is. */
-function keptAsIs(value: any): boolean {
-    return (
-        bytes(value) ||
-        value instanceof Map ||
-        value instanceof DataView ||
-        value instanceof ArrayBuffer ||
-        typeof value.toJSON === 'function'
-    );
+/**
+ * What JSON text writes `value` as in place of its fields: a `Map`, a `DataView` or an `ArrayBuffer` the empty map, and
+ * an object with a `toJSON` what its `toJSON` gives. Any other `value` is itself.
+ */
+function jsonOf(value: any): any {
+    if (value instanceof Map || value instanceof DataView || value instanceof ArrayBuffer) {
+        return {};
+    }
+    return typeof value.toJSON === 'function' ? value.toJSON('') : value;
+}
+
+/** Whether `value` is kept as it is for the module, which writes it (see settled): a `Date`, a {@link CypherFloat}, bytes. */
+function keptForModule(value: object): boolean {
+    return value instanceof Date || value instanceof CypherFloat || bytes(value);
 }
