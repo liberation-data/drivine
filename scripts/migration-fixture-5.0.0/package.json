@@ -1,0 +1,1 @@
+{ "name": "fixture500", "private": true, "dependencies": { "@liberation-data/drivine": "5.0.0", "reflect-metadata": "*" } }

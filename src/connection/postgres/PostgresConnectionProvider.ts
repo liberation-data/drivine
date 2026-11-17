@@ -9,6 +9,7 @@ import { PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { FirstConnection } from '@/connection/FirstConnection';
 import { ddlDeadlocked, whenNotContended } from '@/manager/Contention';
+import { QuerySpecification } from '@/query/QuerySpecification';
 import { INSPECT, maskedProperties, printable } from '@/connection/Masking';
 
 /** Connections to Postgres, from a pool of its own, through `pg`. */
@@ -68,6 +69,24 @@ export class PostgresConnectionProvider implements ConnectionProvider {
             await this.setSessionId(client);
         }
         return new PostgresConnection(client, new PostgresResultMapper(), this.graphName);
+    }
+
+    /**
+     * A connection that neither makes the graph's tables nor judges its store layout, as {@link connect} does first: what a
+     * store layout migration runs on, as the graph it migrates is one {@link connect} refuses (see StoreLayoutMigration).
+     */
+    async connectUnjudged(): Promise<Connection> {
+        const client = await this.pool.connect();
+        if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
+            await this.setSessionId(client);
+        }
+        return new PostgresConnection(client, new PostgresResultMapper(), this.graphName);
+    }
+
+    /** Makes the graph's tables on `connection` as a first connection makes them, without the layout's verdict. */
+    async prepareUnjudged(connection: Connection): Promise<void> {
+        const graph = new PostgresGraph(this.graphName);
+        await whenNotContended(async () => connection.query(new QuerySpecification(graph.ensuring)), ddlDeadlocked);
     }
 
     async end(): Promise<void> {

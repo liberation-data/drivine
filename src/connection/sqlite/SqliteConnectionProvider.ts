@@ -90,6 +90,20 @@ export class SqliteConnectionProvider implements ConnectionProvider {
         );
     }
 
+    /**
+     * A connection that neither makes the graph's tables nor judges its store layout, as {@link connect} does first: what a
+     * store layout migration runs on, as the graph it migrates is one {@link connect} refuses (see StoreLayoutMigration).
+     */
+    async connectUnjudged(): Promise<Connection> {
+        this.ended = false;
+        return this.connection(this.idle.pop() ?? (await this.open()));
+    }
+
+    /** Makes the graph's tables on `connection` as a first connection makes them, without the layout's verdict. */
+    async prepareUnjudged(connection: Connection): Promise<void> {
+        await connection.query(new QuerySpecification(new SqliteGraph(this.graphName).ensuring));
+    }
+
     /** Closes the idle connections, and each in use as it is given back. */
     async end(): Promise<void> {
         this.ended = true;
