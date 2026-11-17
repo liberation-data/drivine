@@ -105,7 +105,7 @@ one a Cypher statement wrote read back alike.
   is whole is an integer, as in a statement's parameters: give `cypherFloat(n)` for a whole float. -0 is the float
   `-0.0` (`0.0` on Postgres), as no integer is -0. A `@NodeId` that is a float is found by a load, a delete,
   `edges.relate` and `loadRelated` by the text the store holds it as, as a save finds it: `1e-7` is `1.0E-7` on SQLite
-  and `0.00000010` in Postgres's `jsonb`.
+  and `0.00000010` in Postgres's `jsonb`, and on Oracle it is compared as the binary double held.
 - **Bytes and typed arrays.** Bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are held as the list of their signed
   values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255). A `Float32Array` or a `Float64Array`, such as
   an embedding, is the list of its numbers, each a float; another typed array is the list of its numbers.

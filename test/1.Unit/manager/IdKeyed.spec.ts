@@ -1,13 +1,20 @@
 import {
+    CascadeType,
+    Direction,
     GraphBackend,
+    GraphRelationship,
+    GraphView,
     ModelRegistry,
     NodeFragment,
     NodeId,
     nodeRef,
+    OracleBackend,
+    OracleGraph,
     PersistenceManager,
     PostgresBackend,
     PostgresGraph,
     QuerySpecification,
+    Root,
     SqliteBackend,
     SqliteGraph,
     StatelessGraphObjectManager
@@ -20,6 +27,14 @@ import { openSqlite } from '@/connection/sqlite/SqliteDriver';
 class Gauge {
     @NodeId() id: number;
     name?: string;
+}
+
+/** A view that contains itself, so a cascading delete of it is checked first (cascadeDepthChecks). */
+@GraphView()
+class GaugeTree {
+    @Root() gauge: Gauge;
+    @GraphRelationship({ type: 'PART_OF', direction: Direction.INCOMING, target: () => GaugeTree, maxDepth: 1 })
+    parts: GaugeTree[];
 }
 
 describe('storedKey', () => {
@@ -100,5 +115,51 @@ describe.each([
         await gom.load(Gauge, '1e-7');
         await gom.load(Gauge, null);
         expect(bound.map((it) => it.id)).toEqual(['1e-7', null]);
+    });
+});
+
+/**
+ * On Oracle a float id is held as a binary double, extended JSON's (see writeLayout): a load, a delete, a cascade's check
+ * and the delete itself bind the id as that JSON text, which each reads `JSON($id EXTENDED)`, as a save finds the node. A
+ * NUMBER bound as it is, 1e-7, is not always equal to the binary double held.
+ */
+describe('an id on Oracle', () => {
+    let bound: { text: string; id: any }[];
+    let gom: StatelessGraphObjectManager;
+
+    beforeEach(() => {
+        bound = [];
+        const record = (spec: QuerySpecification<any>): void => {
+            bound.push({ text: spec.statement.text, id: (spec.parameters as any).id });
+        };
+        const pm = {
+            database: 'id-keyed',
+            query: async (spec: QuerySpecification<any>) => {
+                record(spec);
+                return Promise.resolve([]);
+            },
+            execute: async () => Promise.resolve(),
+            getOne: async (spec: QuerySpecification<any>) => {
+                record(spec);
+                return Promise.resolve(0);
+            }
+        } as unknown as PersistenceManager;
+        gom = new StatelessGraphObjectManager(pm, new OracleBackend(new OracleGraph()), new ModelRegistry());
+    });
+
+    it('is bound by a load, a delete and a cascade as the JSON Oracle holds it as, read EXTENDED', async () => {
+        await gom.load(Gauge, 1e-7);
+        await gom.load(GaugeTree, 1e-7);
+        await gom.delete(Gauge, 1e-7);
+        await gom.delete(GaugeTree, 1e-7, { cascade: CascadeType.DELETE_ALL });
+        expect(bound.map((it) => it.id)).toEqual(Array(5).fill('{"$numberDouble":"1.0E-7"}'));
+        expect(bound.every((it) => /PASSING JSON\(\S+ EXTENDED\) AS "id__"/.test(it.text))).toBe(true);
+    });
+
+    it('binds a text id as its JSON, and a null id as it is', async () => {
+        await gom.load(Gauge, '1e-7');
+        await gom.load(Gauge, 7);
+        await gom.load(Gauge, null);
+        expect(bound.map((it) => it.id)).toEqual(['"1e-7"', '7', null]);
     });
 });
