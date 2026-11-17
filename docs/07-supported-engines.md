@@ -600,6 +600,12 @@ const names = await pm.query<string>(
 - `truncate` takes each unit Neo4j does, from `millennium` to `microsecond`, and a map of fields to set on the value
   cut short (`date.truncate('month', d, {day: 2})`), but not yet a nanosecond, a week's or a quarter's field, or a
   named zone.
+- A temporal parameter, one of the Neo4j driver's (`Date`, `Time`, `LocalTime`, `LocalDateTime`, `DateTime`,
+  `Duration`) or of `Temporal`, is bound as that kind of value, as on Neo4j. A datetime in a named zone is bound at its
+  offset, the zone dropped, as the store holds a datetime's offset and not its zone; one with a zone and no offset is
+  refused by name ([#767](https://github.com/liberation-data/drivine/issues/767)). So is one at an offset with
+  seconds (a zone's local mean time, `-00:44:30`), as the store holds an offset to the minute
+  ([drivine-cypher-spec#357](https://github.com/liberation-data/drivine-cypher-spec/issues/357)).
 - A temporal value is its ISO 8601 text, where a graph engine's driver gives a value of its own. A year is numbered as
   Neo4j and ISO 8601 number it on every SQL store, where Oracle and Postgres keep no year 0: `0000` is 1 BC and `-0044`
   is 45 BC, made, read, worked out, truncated, written and read back
