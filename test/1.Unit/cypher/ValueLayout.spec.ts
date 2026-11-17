@@ -1,5 +1,7 @@
 import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { CypherFloat } from '@/cypher/CypherFloat';
+import { jsonText } from '@/utils/JsonText';
+import { int } from 'neo4j-driver';
 import { heldKey, NON_FINITE_SAVED, readLayout, readLayoutAfter, writeLayout, writeProps } from '@/cypher/ValueLayout';
 
 /**
@@ -149,6 +151,36 @@ describe('writeLayout of bytes and numbers JSON has no text of', () => {
             expect(() => writeLayout({ x: value, d: new Date('2024-01-01T00:00:00Z') })).toThrow(NON_FINITE_SAVED);
             expect(() => writeLayout({ x: new CypherFloat(value) })).toThrow(NON_FINITE_SAVED);
         }
-        expect(writeLayout({ x: 1.5, y: new CypherFloat(2) })).toEqual({ x: 1.5, y: new CypherFloat(2) });
+        expect(writeLayout({ x: 1.5, y: new CypherFloat(2.5) })).toEqual({ x: 1.5, y: 2.5 });
+    });
+
+    it('refuses NaN in a typed array and in an object of a class, which JSON text would write null', () => {
+        expect(() => writeLayout({ v: new Float32Array([NaN]) })).toThrow(NON_FINITE_SAVED);
+        expect(() =>
+            writeLayout({
+                o: new (class Point {
+                    x = Infinity;
+                })()
+            })
+        ).toThrow(NON_FINITE_SAVED);
+    });
+
+    it('writes each value alike beside a Date or not: a float, a driver integer and a typed array as numbers', () => {
+        const values = {
+            f: new CypherFloat(2),
+            i: int(5),
+            l: int('4611686018427387905'),
+            v: new Float32Array([0.5, 1]),
+            u: new Uint16Array([1, 2]),
+            o: new (class Point {
+                x = 1;
+            })()
+        };
+        const written = '{"f":2,"i":5,"l":4611686018427387905,"v":[0.5,1],"u":[1,2],"o":{"x":1}}';
+        expect(jsonText(writeLayout(values))).toEqual(written);
+        const dated: Record<string, any> = writeLayout({ ...values, d: new Date(0) });
+        expect(dated.d.$t).toEqual('datetime');
+        delete dated.d;
+        expect(jsonText(dated)).toEqual(written);
     });
 });

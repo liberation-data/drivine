@@ -2,6 +2,7 @@ import { DrivineError } from '@/DrivineError';
 import { CypherFloat } from '@/cypher/CypherFloat';
 import { cypherCompilerModule, parametersJson } from '@/cypher/SharedCypherCompiler';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { isInt } from '@/utils/Integers';
 import { jsonText } from '@/utils/JsonText';
 
 /**
@@ -139,33 +140,55 @@ export const NON_FINITE_SAVED =
     'A save is given NaN or an infinity, which the store layout holds as no number yet (drivine-cypher-spec#329): it would store another value in its place.';
 
 /**
- * `value` as a save writes it, at any depth: bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) the list of their signed
- * values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255), where JSON text would write a map of indexes;
- * and NaN or an infinity refused by name, where JSON text would write null (drivine-cypher-spec#329).
+ * `value` as a save writes it, at any depth, alike whether the module is asked of it or not: bytes (a `Uint8Array`, an
+ * `Int8Array`, a `Buffer`) the list of their signed values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2,
+ * 255), where JSON text would write a map of indexes; another typed array (a `Float32Array`) the list of its numbers; a
+ * {@link CypherFloat} its number, and the Neo4j driver's `Integer` its whole number, where JSON text would write their
+ * fields; an object of a class with no `toJSON` the map of its fields, as JSON text writes it; and NaN or an infinity
+ * refused by name, where JSON text would write null (drivine-cypher-spec#329). A `Map`, a `DataView`, an `ArrayBuffer`
+ * and an object with a `toJSON` are left as they are.
  */
 function settled(value: any): any {
-    if (value === null || typeof value !== 'object' || value instanceof Date || value instanceof CypherFloat) {
+    if (value === null || typeof value !== 'object' || value instanceof Date) {
         return finite(value);
+    }
+    if (value instanceof CypherFloat) {
+        return finite(value.value);
+    }
+    if (isInt(value)) {
+        const whole = BigInt(value.toString());
+        return Number.isSafeInteger(Number(whole)) ? Number(whole) : whole;
     }
     if (value instanceof Uint8Array || value instanceof Int8Array) {
         return Array.from(new Int8Array(value.buffer, value.byteOffset, value.byteLength));
     }
-    if (Array.isArray(value)) {
-        return value.map(settled);
+    if (listed(value)) {
+        return Array.from(value as Iterable<unknown>).map(settled);
     }
-    if (value instanceof Set) {
-        return [...value].map(settled);
-    }
-    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+    if (keptAsIs(value)) {
         return value;
     }
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settled(item)]));
 }
 
-/** `value`, refused by name where it is NaN or an infinity, a number or a {@link CypherFloat} (see settled). */
+/** Whether a save writes `value` as the list of its items: a list, a set, or a typed array other than bytes. */
+function listed(value: object): boolean {
+    return Array.isArray(value) || value instanceof Set || (ArrayBuffer.isView(value) && !(value instanceof DataView));
+}
+
+/** Whether `value` is written as JSON text writes it, unsettled (see settled). */
+function keptAsIs(value: any): boolean {
+    return (
+        value instanceof Map ||
+        value instanceof DataView ||
+        value instanceof ArrayBuffer ||
+        typeof value.toJSON === 'function'
+    );
+}
+
+/** `value`, refused by name where it is NaN or an infinity (see settled). */
 function finite(value: any): any {
-    const number = value instanceof CypherFloat ? value.value : value;
-    if (typeof number === 'number' && !Number.isFinite(number)) {
+    if (typeof value === 'number' && !Number.isFinite(value)) {
         throw new DrivineError(NON_FINITE_SAVED);
     }
     return value;

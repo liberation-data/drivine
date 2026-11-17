@@ -653,13 +653,13 @@ export class StatelessGraphObjectManager {
         // In order of id, so that two calls over the same nodes take their locks in the same order.
         const sorted = [...rows].sort((a, b) => inOrder(String(a.id), String(b.id)));
         const results = new Map<any, PatchResult>();
+        // Each statement bound before the first runs: one a SQL store refuses (a NaN) is refused with none written.
+        const statements: QuerySpecification<PatchResult & { id: any }>[] = [];
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
-            const chunk = sorted.slice(start, start + PATCH_ROWS);
-            const found = await this.whenUncontended(async () =>
-                this.persistenceManager.query<PatchResult & { id: any }>(
-                    this.backend.patchMany(root).spec({ rows: chunk })
-                )
-            );
+            statements.push(this.backend.patchMany(root).spec({ rows: sorted.slice(start, start + PATCH_ROWS) }));
+        }
+        for (const statement of statements) {
+            const found = await this.whenUncontended(async () => this.persistenceManager.query(statement));
             found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
         }
         return ids.map((id) => results.get(id)!);
