@@ -45,7 +45,8 @@ function driverValue(it: any): unknown {
                 it.years * 12 + it.months,
                 it.weeks * 7 + it.days,
                 it.hours * 3600 + it.minutes * 60 + it.seconds,
-                nanoseconds(it)
+                // As a bigint: a duration's milliseconds may be past 2^53 nanoseconds, where a number would round.
+                BigInt(it.milliseconds) * BigInt(1e6) + BigInt(it.microseconds) * BigInt(1e3) + BigInt(it.nanoseconds)
             );
         default:
             return undefined;
@@ -67,9 +68,7 @@ function dateTime(it: any, zone?: string): unknown {
     );
 }
 
-/** The nanoseconds of `it`'s second, from its milliseconds, microseconds and nanoseconds. */
+/** The nanoseconds of `it`'s second, from its millisecond, microsecond and nanosecond. */
 function nanoseconds(it: any): number {
-    return it.milliseconds !== undefined
-        ? it.milliseconds * 1e6 + it.microseconds * 1e3 + it.nanoseconds
-        : it.millisecond * 1e6 + it.microsecond * 1e3 + it.nanosecond;
+    return it.millisecond * 1e6 + it.microsecond * 1e3 + it.nanosecond;
 }

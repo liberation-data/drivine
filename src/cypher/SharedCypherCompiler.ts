@@ -399,10 +399,16 @@ function temporalKind(value: object): string | undefined {
 /**
  * The ISO 8601 text of `value`, a temporal value ([temporalKind]), as the store layout holds it: a datetime in a named
  * zone at its offset, the zone dropped, as the store holds no named zone (the spec's README, "A time"). One in a named
- * zone with no offset, as the Neo4j driver's `DateTime` may be, is refused by name: its offset isn't known here.
+ * zone with no offset, as the Neo4j driver's `DateTime` may be, is refused by name: its offset isn't known here. A
+ * `Temporal.ZonedDateTime` is written at its exact `offset`, as its `toString()` rounds one of seconds (a zone's
+ * local mean time, `-00:44:30`) to the minute. The driver and `Temporal` write a year before 1 or past 9999 with six
+ * digits, and the module reads one of fewer than five with four (`-0005`, not `-000005`).
  */
 function temporalText(value: object): string {
-    const text = String(value);
+    const it = value as any;
+    const text = (
+        it[Symbol.toStringTag] === 'Temporal.ZonedDateTime' ? `${it.toPlainDateTime()}${it.offset}` : String(value)
+    ).replace(/^([+-])00(\d{4}-)/, '$1$2');
     const zone = text.indexOf('[');
     if (zone < 0) {
         return text;

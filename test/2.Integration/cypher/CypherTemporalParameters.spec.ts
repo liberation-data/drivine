@@ -92,6 +92,15 @@ describe.each(stores())('A temporal parameter on $type', (store) => {
         ).toEqual([[true, true]]);
     });
 
+    it('should be a date or a datetime of a year before 1', async () => {
+        expect(
+            await query("RETURN [toString($d), $d = date('-0005-01-15'), toString($dt)]", {
+                d: new DriverDate(-5, 1, 15),
+                dt: new DateTime(-44, 3, 15, 10, 0, 0, 0, 0)
+            })
+        ).toEqual([['-0005-01-15', true, '-0044-03-15T10:00:00Z']]);
+    });
+
     it('should be written and read back as the value it is', async () => {
         await query('CREATE (:CyTemporalParameter {d: $d, t: $t})', {
             d: new Duration(0, 1, 0, 0),

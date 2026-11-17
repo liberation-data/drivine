@@ -117,6 +117,10 @@ describe('parametersJson', () => {
                 ['Temporal.Duration', 'P1Y2M3DT1H']
             ].map(([tag, text]) => [tag, temporalLike(tag, text)])
         );
+        values['Temporal.ZonedDateTime'] = temporalLike('Temporal.ZonedDateTime', '', {
+            toPlainDateTime: () => '2024-01-15T10:00:00',
+            offset: '+01:00'
+        });
         expect(JSON.parse(parametersJson(values))).toEqual({
             'Temporal.PlainDate': { $temporal: 'DATE', text: '2024-01-15' },
             'Temporal.PlainTime': { $temporal: 'LOCAL_TIME', text: '10:00:00' },
@@ -124,6 +128,37 @@ describe('parametersJson', () => {
             'Temporal.ZonedDateTime': { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00+01:00' },
             'Temporal.Instant': { $temporal: 'DATE_TIME', text: '2024-01-15T10:00:00Z' },
             'Temporal.Duration': { $temporal: 'DURATION', text: 'P1Y2M3DT1H' }
+        });
+    });
+
+    it('writes a ZonedDateTime at its exact offset, which its toString() rounds to the minute (#767)', () => {
+        // Temporal.ZonedDateTime.from('1971-01-01T00:00[Africa/Monrovia]'), whose toString() is …-00:45[Africa/Monrovia].
+        const monrovia = temporalLike('Temporal.ZonedDateTime', '1971-01-01T00:00:00-00:45[Africa/Monrovia]', {
+            toPlainDateTime: () => '1971-01-01T00:00:00',
+            offset: '-00:44:30'
+        });
+        expect(JSON.parse(parametersJson({ t: monrovia }))).toEqual({
+            t: { $temporal: 'DATE_TIME', text: '1971-01-01T00:00:00-00:44:30' }
+        });
+    });
+
+    it('writes a year before 1 with the four digits the module reads, and one past 9999 with its six (#767)', () => {
+        expect(
+            JSON.parse(
+                parametersJson({
+                    d: new neo4j.types.Date(-5, 1, 15),
+                    dt: new neo4j.types.DateTime(-44, 3, 15, 10, 0, 0, 0, 0),
+                    far: new neo4j.types.Date(-12345, 1, 1),
+                    late: new neo4j.types.Date(20000, 1, 1),
+                    plain: temporalLike('Temporal.PlainDate', '-000005-01-15')
+                })
+            )
+        ).toEqual({
+            d: { $temporal: 'DATE', text: '-0005-01-15' },
+            dt: { $temporal: 'DATE_TIME', text: '-0044-03-15T10:00:00Z' },
+            far: { $temporal: 'DATE', text: '-012345-01-01' },
+            late: { $temporal: 'DATE', text: '+020000-01-01' },
+            plain: { $temporal: 'DATE', text: '-0005-01-15' }
         });
     });
 
@@ -219,6 +254,22 @@ describe('A Temporal parameter on Neo4j', () => {
         expect(params.m.instant.toString()).toEqual('2024-01-15T10:30:00.001002003Z');
         expect(params.m.d.toString()).toEqual('P14M10DT3723.004005006S');
         expect(params.n).toEqual(1);
+    });
+
+    it('is a duration of exact nanoseconds past 2^53, and of a negative one (#767)', () => {
+        const duration = (fields: Record<string, number>) =>
+            temporalLike('Temporal.Duration', '', {
+                ...{ years: 0, months: 0, weeks: 0, days: 0, hours: 0, minutes: 0, seconds: 0 },
+                ...{ milliseconds: 0, microseconds: 0, nanoseconds: 0 },
+                ...fields
+            });
+        const spec = new QuerySpecification({ text: 'RETURN $p', language: 'CYPHER' }).bind({
+            long: duration({ milliseconds: 1e10, nanoseconds: 1 }),
+            negative: duration({ months: -2, days: -3, hours: -1, milliseconds: -5 })
+        });
+        const params = new Neo4jSpecCompiler(spec).formattedParams();
+        expect(params.long.toString()).toEqual('P0M0DT10000000.000000001S');
+        expect(params.negative.toString()).toEqual('P-2M-3DT-3600.005000000S');
     });
 });
 
