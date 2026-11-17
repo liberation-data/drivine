@@ -57,7 +57,7 @@ Each type is chosen alone: a local Neo4j can run beside a FalkorDB container. `<
 | Memgraph | `memgraph/memgraph:latest`        | no auth                                                      |
 | FalkorDB | `falkordb/falkordb:latest`        | the graph is the datasource's `DATABASE_NAME`                |
 | Postgres | `pgvector/pgvector:pg16`          | user `drivine`, password `drivine-test`, the datasource's database |
-| Oracle   | `gvenzl/oracle-free:23-faststart` | user `drivine`, password `drivine-test`, service `FREEPDB1`  |
+| Oracle   | `gvenzl/oracle-free@sha256:33322969…` (23-faststart, pinned until node-oracledb reads OSON version 2) | user `drivine`, password `drivine-test`, service `FREEPDB1`  |
 
 Neo4j, Memgraph and FalkorDB run their `latest` images, as drivine4j's and drivine-python's containers do, so a new
 engine release reaches the tests as soon as it is out. Drivine's own suite runs these defaults, the same images
