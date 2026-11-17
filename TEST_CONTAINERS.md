@@ -39,6 +39,10 @@ beside the flag in `.env.test.local`, which git ignores and which wins over `.en
 | Postgres | `USE_LOCAL_POSTGRES=true` | `POSTGRES_DATABASE_*`                                           |
 | Oracle   | `USE_LOCAL_ORACLE=true`   | `ORACLE_DATABASE_*`                                             |
 
+Oracle's image is pinned by its digest to the `23-faststart` build from before 2026-11-17. The build republished under
+that tag writes OSON version 2, which node-oracledb can't read (NJS-126). `ORACLE_TEST_IMAGE=gvenzl/oracle-free:23-faststart`
+runs the current build.
+
 ```bash
 # .env.test.local
 USE_LOCAL_NEO4J=true
