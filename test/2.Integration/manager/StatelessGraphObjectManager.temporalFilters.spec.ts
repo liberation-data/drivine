@@ -66,7 +66,7 @@ describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
     const found = async (where: (q: any) => any): Promise<string[]> =>
         (await gom.loadAll(Dated, (q) => ({ where: where(q) }))).map((it) => it.id).sort();
 
-    it('is refused by name in a comparison, an in, a hasItem, a seek and an order expression', async () => {
+    it("is refused by name in a comparison, an in, a hasItem, a seek, an order and a patch's where", async () => {
         for (const where of [
             (q: any) => q.at.eq(first),
             (q: any) => q.at.gt(first),
@@ -82,6 +82,10 @@ describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
         await expect(
             gom.loadAll(Dated, (q) => ({ orderBy: caseOf([above(q.at as any, first).then(1)], 2).asc() }))
         ).rejects.toThrow(REFUSED);
+        await expect(
+            gom.patch(Dated, 'd1', { set: { name: 'patched' }, where: (q: any) => q.at.eq(first) })
+        ).rejects.toThrow(REFUSED);
+        expect((await gom.load(Dated, 'd1'))?.name).toEqual('one');
     });
 
     it('leaves a filter of anything else, and a Cypher statement of a date, as they were', async () => {

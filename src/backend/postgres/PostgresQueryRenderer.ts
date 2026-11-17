@@ -79,7 +79,7 @@ export class PostgresQueryRenderer extends SqlQueryRenderer {
         return `${read} ${operator === '==' ? '=' : operator} ${value}`;
     }
 
-    /** A boolean as the text JSON writes it, which is what `->>` reads it back as; a date as ISO 8601 text. */
+    /** A boolean as the text JSON writes it, which `->>` reads it back as; a date is refused (see the base). */
     protected storable(value: unknown): unknown {
         return typeof value === 'boolean' ? String(value) : super.storable(value);
     }
