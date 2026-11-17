@@ -4,6 +4,8 @@ import {
     cypherFloat,
     DatabaseType,
     DrivineError,
+    GraphRelationship,
+    GraphView,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -12,6 +14,7 @@ import {
     PersistenceManager,
     PostgresGraph,
     QuerySpecification,
+    Root,
     SqliteGraph,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
@@ -41,6 +44,13 @@ class SavedValue {
 class SavedGauge {
     @NodeId() id: number;
     name: string;
+}
+
+/** A node and the gauges it reads, which a save with `replace` unlinks by the text the store holds each id as. */
+@GraphView()
+class SavedReadings {
+    @Root() reading: SavedValue;
+    @GraphRelationship({ type: 'READS', target: () => SavedGauge }) gauges: SavedGauge[];
 }
 
 /** A node that carries its stamp, which a save that changes nothing leaves as it was. */
@@ -260,18 +270,44 @@ describe.each(stores())('values a save writes on $type', (store) => {
             ]);
         }
         expect(found).toEqual(ids.map((id) => [id, 'two', [1], true, ['a']]));
-        // One whose shortest text has an exponent, which the store's text (1.0E-7) spells otherwise than JSON's (1e-7):
-        // a save finds it again. A load by it, which compares the id's text with JavaScript's, finds none on Postgres and
-        // SQLite, as before.
+        // One whose shortest text has an exponent, which the store spells otherwise than JavaScript's (1e-7): SQLite
+        // 1.0E-7, Postgres's jsonb 0.00000010. A save, a load, a relate, loadRelated and a delete each find it by the
+        // text the store holds it as (storedKey).
         const exponent = 1e-7;
         await gom.save(Object.assign(new SavedGauge(), { id: exponent, name: 'one' }));
         await gom.save(Object.assign(new SavedGauge(), { id: exponent, name: 'two' }));
         expect(
             await cypher('MATCH (n:SavedGauge) WHERE n.id = $id RETURN [count(n), collect(n.name)]', { id: exponent })
         ).toEqual([[1, ['two']]]);
+        expect([
+            (await gom.load(SavedGauge, exponent))?.name,
+            await gom.edges.relate(nodeRef(SavedGauge, exponent), nodeRef(SavedValue, 'a'), 'POINTS'),
+            (await gom.edges.loadRelated(nodeRef(SavedGauge, exponent), 'POINTS', undefined, SavedValue)).map(
+                (it) => it.id
+            )
+        ]).toEqual(['two', true, ['a']]);
         expect(await gom.count(SavedGauge)).toEqual(4);
         expect(await gom.delete(SavedGauge, 4.5)).toEqual(1);
-        expect(await gom.count(SavedGauge)).toEqual(3);
+        expect(await gom.delete(SavedGauge, exponent)).toEqual(1);
+        expect(await gom.count(SavedGauge)).toEqual(2);
+    });
+
+    // drivine4j's "a target whose id is a float with an exponent or a fraction is kept by a save that holds it": the
+    // write function compares each target's id, as the store reads it back, with the save's (storedKey).
+    it('keeps a target whose id is a float with an exponent or a fraction by a save that holds it, and drops one it does not', async () => {
+        const ids = [1e20, 0.1, 1e-7, 123456.789, 1 / 3, 0.1 + 0.2];
+        const gauges = ids.map((id) => Object.assign(new SavedGauge(), { id, name: `g${id}` }));
+        await gom.save(Object.assign(new SavedReadings(), { reading: value('r'), gauges }));
+        const held = async (): Promise<any[]> =>
+            cypher("MATCH (:SavedValue {id: 'r'})-[:READS]->(g:SavedGauge) RETURN g.id ORDER BY g.id");
+
+        await gom.save((await gom.load(SavedReadings, 'r'))!, { replace: ['gauges'] });
+        expect(await held()).toEqual([...ids].sort((a, b) => a - b));
+        const loaded = (await gom.load(SavedReadings, 'r'))!;
+        loaded.gauges = loaded.gauges.filter((it) => it.id !== 1e-7);
+        await gom.save(loaded, { replace: ['gauges'] });
+        expect(await held()).toEqual(ids.filter((it) => it !== 1e-7).sort((a, b) => a - b));
+        expect(await gom.count(SavedGauge)).toEqual(6);
     });
 
     it('patches a float in as a float, and NaN and the infinities as the store holds them, or refuses them as a save', async () => {

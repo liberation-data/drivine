@@ -90,7 +90,9 @@ packed field with a set compared it with `{}`, and matched nothing.
 **Whole numbers past 2^53.** A `bigint` is written as the whole number it is, with every digit, wherever a save,
 `patch`, `patchAll` or `edges.relate` writes a value: a property, a list's item, a property bag, a `@JsonPacked` field,
 a relationship's property and a `@NodeId`. A `where` compares a field with one as that number too. Before #739, a
-`bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite.
+`bigint` threw `Do not know how to serialize a BigInt` on Oracle, Postgres and SQLite. A JavaScript number past 2^53
+that is whole is written with its digits too, as a statement binds it: 2^60 as `1152921504606846976`, not as its
+shortest text, `1152921504606847000`.
 
 **Floats, bytes, typed arrays, NaN and the infinities.** On Oracle, Postgres and SQLite, wherever a save, `patch`,
 `patchAll` or `edges.relate` writes a value, it is held as a `CREATE` given the same value holds it: the shared
@@ -100,7 +102,10 @@ one a Cypher statement wrote read back alike.
 
 - **Floats.** On Oracle every float is held as a binary double, so a `cypherFloat(2)` saved reads back by Cypher as the
   float `2.0`, not the number `2`. On Postgres a whole float is held with its fraction (`2.0`). A JavaScript number that
-  is whole is an integer, as in a statement's parameters: give `cypherFloat(n)` for a whole float.
+  is whole is an integer, as in a statement's parameters: give `cypherFloat(n)` for a whole float. -0 is the float
+  `-0.0` (`0.0` on Postgres), as no integer is -0. A `@NodeId` that is a float is found by a load, a delete,
+  `edges.relate` and `loadRelated` by the text the store holds it as, as a save finds it: `1e-7` is `1.0E-7` on SQLite
+  and `0.00000010` in Postgres's `jsonb`.
 - **Bytes and typed arrays.** Bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are held as the list of their signed
   values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255). A `Float32Array` or a `Float64Array`, such as
   an embedding, is the list of its numbers, each a float; another typed array is the list of its numbers.

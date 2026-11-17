@@ -136,8 +136,8 @@ function unmarked(value: any): any {
  * value, and so does this, with the module's message: the message a `CREATE` given the value is refused with.
  *
  * The module is asked only of a value that holds something it writes otherwise than JSON text does (see heldOtherwise): a
- * date, a key that begins with `$`, bytes, a {@link CypherFloat}, or a number that isn't a whole one in a long's range,
- * which every float but a whole one is. Any other value is held as its JSON text on every store.
+ * date, a key that begins with `$`, bytes, a {@link CypherFloat}, or a number that isn't a safe integer, which every
+ * float but a whole one is. Any other value is held as its JSON text on every store.
  */
 export function writeLayout(given: any, store: SharedStore): string {
     const value = settled(given);
@@ -171,18 +171,18 @@ export function heldKey(name: string): string {
     return name.startsWith('$') ? `$${name}` : name;
 }
 
-const LONG_RANGE = 2 ** 63;
-
 /**
  * Whether `value`, settled, holds what the module writes otherwise than JSON text, at any depth: a `Date`, a map key that
- * begins with `$`, bytes, a {@link CypherFloat}, or a number that is not a whole one in a long's range (a float with a
- * fraction, NaN, an infinity, -0, a whole float past a long's range). Asked of each float on every store: JSON text writes
- * `1e-7` where the module writes `1.0E-7`, and `1e20` as a whole number, and on Oracle every float is extended JSON's
- * double. A whole number in a long's range is the integer it is on every store, and a `bigint`'s digits are the module's.
+ * begins with `$`, bytes, a {@link CypherFloat}, or a number that is not a safe integer (a float with a fraction, NaN, an
+ * infinity, -0, a whole number past 2^53). Asked of each float on every store: JSON text writes `1e-7` where the module
+ * writes `1.0E-7`, and `1e20` as a whole number, and on Oracle every float is extended JSON's double. Asked of a whole
+ * number past 2^53 too: JSON text writes 2^60 as `1152921504606847000`, its shortest text, where the module writes its
+ * digits, `1152921504606846976`, as a statement's parameter is. A safe integer is the integer it is on every store, and a
+ * `bigint`'s digits are the module's.
  */
 function heldOtherwise(value: any): boolean {
     if (typeof value === 'number') {
-        return !wholeInLong(value);
+        return !safeInteger(value);
     }
     if (value instanceof Date || value instanceof CypherFloat || bytes(value)) {
         return true;
@@ -196,9 +196,9 @@ function heldOtherwise(value: any): boolean {
     return Object.entries(value).some(([key, item]) => key.startsWith('$') || heldOtherwise(item));
 }
 
-/** Whether `value` is a whole number in a long's range, and not -0: what every store holds as the integer it is. */
-function wholeInLong(value: number): boolean {
-    return Number.isInteger(value) && value >= -LONG_RANGE && value < LONG_RANGE && !Object.is(value, -0);
+/** Whether `value` is a safe integer, and not -0: what JSON text writes as the digits the module writes it with. */
+function safeInteger(value: number): boolean {
+    return Number.isSafeInteger(value) && !Object.is(value, -0);
 }
 
 /** Whether `value` is bytes: a `Uint8Array`, an `Int8Array` or a `Buffer`. */

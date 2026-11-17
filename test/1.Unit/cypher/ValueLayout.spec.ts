@@ -162,6 +162,16 @@ describe('writeLayout', () => {
         expect(writeLayout(2.5, 'oracle')).toEqual('{"$numberDouble":"2.5"}');
     });
 
+    it('writes a whole number past 2^53 with its digits, as a statement binds it, where JSON text writes its shortest text', () => {
+        expect(JSON.stringify(2 ** 60)).toEqual('1152921504606847000');
+        for (const store of STORES) {
+            expect(writeLayout({ n: 2 ** 60, l: [-(2 ** 60)] }, store)).toEqual(
+                '{"n":1152921504606846976,"l":[-1152921504606846976]}'
+            );
+        }
+        expect(asked).toHaveLength(STORES.length);
+    });
+
     it('writes -0 as a float, as no integer is -0', () => {
         expect(writeLayout({ z: -0 }, 'sqlite')).toEqual('{"z":-0.0}');
         expect(writeLayout({ z: -0 }, 'oracle')).toEqual('{"z":{"$numberDouble":"-0.0"}}');

@@ -76,7 +76,7 @@ export class PostgresBackend implements GraphBackend {
     }
 
     loadFragment(model: FragmentModel): GraphStatement {
-        return this.loadAllFragments(model, this.idPredicate(model));
+        return this.byId(this.loadAllFragments(model, this.idPredicate(model)));
     }
 
     countFragments(model: FragmentModel, where?: string): GraphStatement {
@@ -102,7 +102,7 @@ export class PostgresBackend implements GraphBackend {
     }
 
     loadView(model: GraphViewModel, depth: Record<string, number> = {}): GraphStatement {
-        return this.loadAllViews(model, this.idPredicate(model.root), depth);
+        return this.byId(this.loadAllViews(model, this.idPredicate(model.root), depth));
     }
 
     countViews(model: GraphViewModel, where?: string, depth: Record<string, number> = {}): GraphStatement {
@@ -124,7 +124,7 @@ export class PostgresBackend implements GraphBackend {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const filter = this.deletedWhere(target, where);
         if (cascade === CascadeType.NONE) {
-            return this.deleting(root, filter);
+            return this.byId(this.deleting(root, filter));
         }
         if (target.kind !== 'GRAPH_VIEW') {
             throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
@@ -148,19 +148,21 @@ export class PostgresBackend implements GraphBackend {
                       `${orphans ? ' AND x.nid NOT IN (SELECT nid FROM cascade_kept)' : ''} RETURNING 1),`
               ]
             : [];
-        return new PostgresStatement(
-            [
-                `WITH ${orphans ? 'RECURSIVE ' : ''}cascade_roots AS (SELECT ${ROW_ALIAS}.nid ${this.from(
-                    root,
-                    filter
-                )}),`,
-                ...targets,
-                `deleted AS (DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM cascade_roots) RETURNING 1)`,
-                // Every node deleted, the roots and what the cascade took, as drivine4j counts them (#562).
-                `SELECT CAST((SELECT COUNT(*) FROM deleted)${
-                    cascaded.reached.length ? ' + (SELECT COUNT(*) FROM deleted_targets)' : ''
-                } AS integer) AS "deleted"`
-            ].join('\n')
+        return this.byId(
+            new PostgresStatement(
+                [
+                    `WITH ${orphans ? 'RECURSIVE ' : ''}cascade_roots AS (SELECT ${ROW_ALIAS}.nid ${this.from(
+                        root,
+                        filter
+                    )}),`,
+                    ...targets,
+                    `deleted AS (DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT nid FROM cascade_roots) RETURNING 1)`,
+                    // Every node deleted, the roots and what the cascade took, as drivine4j counts them (#562).
+                    `SELECT CAST((SELECT COUNT(*) FROM deleted)${
+                        cascaded.reached.length ? ' + (SELECT COUNT(*) FROM deleted_targets)' : ''
+                    } AS integer) AS "deleted"`
+                ].join('\n')
+            )
         );
     }
 
@@ -177,7 +179,7 @@ export class PostgresBackend implements GraphBackend {
             view,
             field,
             maxDepth,
-            statement: new PostgresStatement(beyondCount(roots, within, nodes))
+            statement: this.byId(new PostgresStatement(beyondCount(roots, within, nodes)))
         }));
     }
 
@@ -230,17 +232,21 @@ export class PostgresBackend implements GraphBackend {
     }
 
     heldProperties(model: FragmentModel): GraphStatement {
-        return new PostgresStatement(
-            [`SELECT ${ROW_ALIAS}.props AS "props"`, this.from(model, this.idPredicate(model))].join('\n')
+        return this.byId(
+            new PostgresStatement(
+                [`SELECT ${ROW_ALIAS}.props AS "props"`, this.from(model, this.idPredicate(model))].join('\n')
+            )
         );
     }
 
     foundStamp(model: FragmentModel): GraphStatement {
-        return new PostgresStatement(
-            [
-                `SELECT COALESCE(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
-                this.from(model, this.idPredicate(model))
-            ].join('\n')
+        return this.byId(
+            new PostgresStatement(
+                [
+                    `SELECT COALESCE(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
+                    this.from(model, this.idPredicate(model))
+                ].join('\n')
+            )
         );
     }
 
@@ -395,9 +401,14 @@ export class PostgresBackend implements GraphBackend {
         );
     }
 
+    /** `statement`, which finds a node by `$id`, binding the id as the text the store reads it back as (see storedKey). */
+    private byId(statement: GraphStatement): GraphStatement {
+        return PostgresStatement.of(statement).keyingId((id) => storedKey(id, 'postgres'));
+    }
+
     /**
      * The node whose id is `$id`, read as text, as a uniqueness constraint over the id holds it and as drivine4j finds a
-     * node: a number is its JSON text.
+     * node: a number is the text the store holds it as, as `byId` binds it.
      */
     private idPredicate(model: FragmentModel): string {
         if (!model.nodeIdProperty) {
