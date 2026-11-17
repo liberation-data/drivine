@@ -1,6 +1,6 @@
 import { DrivineError } from '@/DrivineError';
 import { exactInteger } from '@/utils/ExactIntegers';
-import { readLayout } from '@/cypher/ValueLayout';
+import { readLayout, readLayoutAfter } from '@/cypher/ValueLayout';
 
 /** Postgres's `json` and `jsonb`, by type OID. */
 const JSON_OID = 114;
@@ -132,13 +132,13 @@ export interface TypeParsers {
 
 /**
  * The type parsers a statement given NaN or an infinity runs with, as `pg`'s per-query `types`: `json` and `jsonb` read
- * by {@link readNonFiniteJson}, and each other type as `parsers`, the client's own, read it. Given to that statement
+ * by {@link readNonFiniteJson}, then in the store layout (see readLayoutAfter), and each other type as `parsers`, the client's own, read it. Given to that statement
  * alone, never set for the process: it would reach every statement, a user's own SQL and other libraries' too. Fails
  * before the statement runs where the numbers can't be read right.
  */
 export function nonFiniteTypes(parsers: TypeParsers): TypeParsers {
     requireSourceText();
-    return jsonTypes(parsers, (text) => readLayoutOr(text, readNonFiniteJson));
+    return jsonTypes(parsers, (text) => readLayoutAfter(text, (value) => value, readNonFiniteJson));
 }
 
 /**
@@ -159,16 +159,4 @@ function jsonTypes(parsers: TypeParsers, read: (text: string) => any): TypeParse
                 ? read
                 : parsers.getTypeParser(oid, format)
     };
-}
-
-/**
- * `text` read in the store layout (see readLayout), each number that stands for NaN or an infinity read by `read`: a text
- * that holds both such a number and a tag or an escaped key is not JSON the module reads, and is read by `read` alone.
- */
-function readLayoutOr(text: string, read: (text: string) => any): any {
-    try {
-        return readLayout(text, read);
-    } catch {
-        return read(text);
-    }
 }

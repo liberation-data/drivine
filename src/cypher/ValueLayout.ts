@@ -50,9 +50,16 @@ const TEXT = '\u0000drivine:text:';
  * those on the column as the store wrote it, where such a map's key has one `$` and a map of the user's with that key
  * has two, as the layout escapes it; the module then reads the rest. Read the other way round, the module's unescaping
  * would hand `raw` a user's map as the store's own.
+ *
+ * @param parse how the column is read before `raw` (Postgres's stand-ins for NaN and the infinities, which only their
+ * text tells apart): as JSON, keeping its whole numbers
  */
-export function readLayoutAfter(text: string, raw: (value: any) => any): any {
-    const value = raw(parseExactIntegers(text));
+export function readLayoutAfter(
+    text: string,
+    raw: (value: any) => any,
+    parse: (text: string) => any = parseExactIntegers
+): any {
+    const value = raw(parse(text));
     if (!text.includes('"$') && !text.includes('\\u0024')) {
         return value;
     }
