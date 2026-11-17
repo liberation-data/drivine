@@ -726,7 +726,7 @@ cases:
         error: "A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL db.labels() YIELD label WHERE … RETURN label."
 
   - name: "toString of a list or a map whose text isn't known"
-    description: "toString() of a list or a map is compiled (see queries.yaml), as Neo4j's Cypher 25 takes it, where its Cypher 5 refuses it (liberation-data/drivine4j#420). A list written of items of one kind, which Neo4j's Cypher 25 refuses, is refused as it refuses it (see queries.yaml's \"toString of a list or a map\"); where Neo4j's text of what it holds is not known here, a temporal value, a node or a relationship, or where a map's keys aren't, as of one a WITH binds or a parameter gives, it is refused by name; Neo4j gives WITH {a: 1} AS m RETURN toString(m) as {a: 1}."
+    description: "toString() of a list or a map is compiled (see queries.yaml), as Neo4j's Cypher 25 takes it, where its Cypher 5 refuses it (liberation-data/drivine4j#420). A list Neo4j's Cypher 25 types as narrower than List<Any>, of items of one kind, collect() of a property or a node, or a list of nodes or relationships, is refused as it refuses it (see queries.yaml's \"toString of a list or a map\"); where Neo4j's text of what it holds is not known here, a temporal value, or where a map's keys aren't, as of one a WITH binds or a parameter gives, it is refused by name, and a node or a relationship among other items fails by name as the statement runs; Neo4j gives WITH {a: 1} AS m RETURN toString(m) as {a: 1}."
     steps:
       - cypher: "WITH [localdatetime('2024-03-15T10:00:00')] AS l RETURN toString(l)"
         error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
@@ -734,8 +734,9 @@ cases:
         error: "toString() of a list or a map that holds a temporal value is Cypher, and is not compiled to SQL yet."
       - cypher: "RETURN toString({at: date('2024-03-15')})"
         error: "toString() of a list or a map that holds a temporal value is Cypher, and is not compiled to SQL yet."
-      - cypher: "MATCH (n) RETURN toString(collect(n))"
-        error: "toString() of a list of nodes or relationships is Cypher, and is not compiled to SQL yet."
+      - note: "Neo4j 2026.10.1 refuses it when it plans it: Type mismatch: expected … List<Any> … but was List<Node> (liberation-data/drivine-cypher-spec#296)."
+        cypher: "MATCH (n) RETURN toString(collect(n))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - cypher: "MATCH (n) RETURN toString(n {.*})"
         error: "toString() of a map projection of every property, as n {.*} is Cypher, and is not compiled to SQL yet."
       - cypher: "WITH {a: 1} AS m RETURN toString(m)"

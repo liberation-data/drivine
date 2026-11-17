@@ -925,6 +925,8 @@ tables:
                               RETURN;
                           EXCEPTION
                               WHEN e_exists THEN RETURN;
+                              -- The lock table's row, which another session inserted between this one's MERGE's look and its insert.
+                              WHEN DUP_VAL_ON_INDEX THEN RETURN;
                               WHEN e_busy THEN
                                   IF attempt = 300 THEN RAISE; END IF;
                                   DBMS_SESSION.SLEEP(0.1);

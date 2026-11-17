@@ -180,62 +180,52 @@ describe.each(sqlStores().map((it) => [it.name, it] as const))("a SQL store's fi
         expect(await tableCount(graph)).toEqual(1);
     });
 
-    // Held on Oracle: sessions making the store at once race on its lock table's row (drivine-cypher-spec#324).
-    (store.type === DatabaseType.ORACLE ? it.skip : it)(
-        'should make the tables once when connections, pools and an object manager first use them together',
-        async () => {
-            const graph = graphFor('race');
-            const one = managerOn(`${store.name}_FC_RACE_1`, graph);
-            const two = managerOn(`${store.name}_FC_RACE_2`, graph);
-            const manager = new GraphObjectManagerFactory(
-                new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance())
-            ).get(`${store.name}_FC_RACE_1`);
-            const written = Array.from({ length: 6 }, (_, i) => `n${i}`);
-            await Promise.all([
-                ...written.map(async (name, i) => merge(i % 2 === 0 ? one : two, name)),
-                manager.save(Object.assign(new FirstUse(), { id: 'om', name: 'om' }))
-            ]);
-            expect(await names(two)).toEqual([...written, 'om'].sort());
-            expect((await manager.load(FirstUse, 'om'))?.name).toEqual('om');
-        }
-    );
+    it('should make the tables once when connections, pools and an object manager first use them together', async () => {
+        const graph = graphFor('race');
+        const one = managerOn(`${store.name}_FC_RACE_1`, graph);
+        const two = managerOn(`${store.name}_FC_RACE_2`, graph);
+        const manager = new GraphObjectManagerFactory(
+            new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance())
+        ).get(`${store.name}_FC_RACE_1`);
+        const written = Array.from({ length: 6 }, (_, i) => `n${i}`);
+        await Promise.all([
+            ...written.map(async (name, i) => merge(i % 2 === 0 ? one : two, name)),
+            manager.save(Object.assign(new FirstUse(), { id: 'om', name: 'om' }))
+        ]);
+        expect(await names(two)).toEqual([...written, 'om'].sort());
+        expect((await manager.load(FirstUse, 'om'))?.name).toEqual('om');
+    });
 
     /**
      * Each pool makes the tables on its first connection while the others' first statements, compiled writes, and the
      * object managers' own making run: on Oracle, DDL over a table that other sessions' writes hold could deadlock on
      * its library cache lock (ORA-04020), and the first use failed (liberation-data/drivine#454).
      */
-    // Held on Oracle: sessions making the store at once race on its lock table's row (drivine-cypher-spec#324).
-    (store.type === DatabaseType.ORACLE ? it.skip : it)(
-        'should make the tables once when many pools and object managers first use them together, round after round',
-        async () => {
-            const factory = new GraphObjectManagerFactory(
-                new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance())
-            );
-            for (let round = 0; round < 3; round++) {
-                const graph = graphFor(`swarm${round}`);
-                const pools = Array.from({ length: 6 }, (_, i) => `${store.name}_FC_SWARM_${round}_${i}`);
-                const managers = pools.map((it) => managerOn(it, graph, 2));
-                const written = Array.from({ length: 24 }, (_, i) => `n${i}`);
-                const saved = pools.filter((_, i) => i % 2 === 0).map((it, i) => ({ id: `om${i}`, pool: it }));
-                try {
-                    await Promise.all([
-                        ...written.map(async (name, i) => merge(managers[i % managers.length], name)),
-                        ...saved.map(async (it) =>
-                            factory.get(it.pool).save(Object.assign(new FirstUse(), { id: it.id, name: it.id }))
-                        )
-                    ]);
-                    expect(await names(managers[0])).toEqual([...written, ...saved.map((it) => it.id)].sort());
-                    expect(await count(storeObjectCount(store, graph))).toEqual(
-                        store.type === DatabaseType.ORACLE ? 4 : 3
-                    );
-                } finally {
-                    // Ended each round, failed or not, so the pools don't hold the store's connections from the tests after.
-                    await Promise.all(pools.map(async (it) => registry.connectionProvider(it)?.end()));
-                }
+    it('should make the tables once when many pools and object managers first use them together, round after round', async () => {
+        const factory = new GraphObjectManagerFactory(
+            new PersistenceManagerFactory(registry, TransactionContextHolder.getInstance())
+        );
+        for (let round = 0; round < 3; round++) {
+            const graph = graphFor(`swarm${round}`);
+            const pools = Array.from({ length: 6 }, (_, i) => `${store.name}_FC_SWARM_${round}_${i}`);
+            const managers = pools.map((it) => managerOn(it, graph, 2));
+            const written = Array.from({ length: 24 }, (_, i) => `n${i}`);
+            const saved = pools.filter((_, i) => i % 2 === 0).map((it, i) => ({ id: `om${i}`, pool: it }));
+            try {
+                await Promise.all([
+                    ...written.map(async (name, i) => merge(managers[i % managers.length], name)),
+                    ...saved.map(async (it) =>
+                        factory.get(it.pool).save(Object.assign(new FirstUse(), { id: it.id, name: it.id }))
+                    )
+                ]);
+                expect(await names(managers[0])).toEqual([...written, ...saved.map((it) => it.id)].sort());
+                expect(await count(storeObjectCount(store, graph))).toEqual(store.type === DatabaseType.ORACLE ? 4 : 3);
+            } finally {
+                // Ended each round, failed or not, so the pools don't hold the store's connections from the tests after.
+                await Promise.all(pools.map(async (it) => registry.connectionProvider(it)?.end()));
             }
         }
-    );
+    });
 
     it('should leave the tables an object manager made first, and read them through a persistence manager', async () => {
         const graph = graphFor('om');

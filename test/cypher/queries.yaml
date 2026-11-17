@@ -1434,6 +1434,133 @@ cases:
       - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE m.released < 2000 RETURN m.title }"
         rows: [2]
 
+  - name: "EXISTS { } and COUNT { } of the row alone"
+    description: "An EXISTS { } or a COUNT { } whose query reads only the row it is in, as a MATCH of a node bound already with a label, is true or counted for each row as its query finds a row, as a WHERE, an item of a RETURN or a WITH, an order or within an expression (drivine4j#829)."
+    steps:
+      - note: "EXISTS { } and COUNT { } whose query reads only the row, its node's labels: as a WHERE, an item of a RETURN and a WITH, and an order. Oracle gave such an EXISTS null or false as a value, and sorted by it as if all were alike."
+        cypher: "MATCH (n) WHERE NOT n:Code AND EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, EXISTS { MATCH (n:Movie) RETURN n.title AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) RETURN n.title AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", false], ["Keanu", true], ["Laurence", true], ["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) RETURN n.title AS y } DESC, k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded", "Carrie", "Hugo", "Keanu", "Laurence"]
+      - note: "The query returns a new variable, a WITH's of the row's property."
+        cypher: "MATCH (n) WHERE NOT n:Code AND EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND NOT EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, NOT EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", false], ["Keanu", true], ["Laurence", true], ["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } DESC, k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded", "Carrie", "Hugo", "Keanu", "Laurence"]
+      - note: "The query reads the graph, a relationship to a new node, and returns that node's property: Oracle got these right."
+        cypher: "MATCH (n) WHERE NOT n:Code AND EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND NOT EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, NOT EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", false], ["Keanu", true], ["Laurence", true], ["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } DESC, k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded", "Carrie", "Hugo", "Keanu", "Laurence"]
+      - note: "A COUNT { } of the same queries, which Oracle got right."
+        cypher: "MATCH (n) WHERE NOT n:Code AND COUNT { MATCH (n:Movie) RETURN n.title AS y } >= 1 RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, COUNT { MATCH (n:Movie) RETURN n.title AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY COUNT { MATCH (n:Movie) RETURN n.title AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } >= 1 RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } >= 1 RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 3], ["The Matrix Reloaded", 2]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 3], ["The Matrix Reloaded", 2]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix Reloaded", "The Matrix"]
+      - note: "The statement drivine4j#819's table found: Oracle gave null for y."
+        cypher: "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Person) RETURN m1.title AS y } AS y ORDER BY title"
+        rows: [["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1) RETURN m1.title AS y } AS y ORDER BY title"
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - note: "Other queries of the row alone: none, a pattern, a node, a WHERE, a WITH, a LIMIT, an OPTIONAL MATCH, a UNION, and the EXISTS in a CASE, a comprehension and an AND."
+        cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { (n:Movie) } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WHERE n.released > 2000 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { WITH n WHERE n:Movie RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { WITH n MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WITH n WHERE n.released > 2000 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y ORDER BY y LIMIT 1 } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { OPTIONAL MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", true], ["Keanu", true], ["Laurence", true], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Person) RETURN n.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", true], ["Keanu", true], ["Laurence", true], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Code) RETURN n.code AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, CASE WHEN EXISTS { MATCH (n:Movie) RETURN n.title AS y } THEN 'y' ELSE 'n' END AS y ORDER BY k"
+        rows: [["Carrie", "n"], ["Hugo", "n"], ["Johnny Mnemonic", "y"], ["Keanu", "n"], ["Laurence", "n"], ["The Matrix", "y"], ["The Matrix Reloaded", "y"]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, [x IN [1] WHERE EXISTS { MATCH (n:Movie) RETURN n.title AS y }] AS y ORDER BY k"
+        rows: [["Carrie", []], ["Hugo", []], ["Johnny Mnemonic", [1]], ["Keanu", []], ["Laurence", []], ["The Matrix", [1]], ["The Matrix Reloaded", [1]]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, [x IN [1] | EXISTS { MATCH (n:Movie) RETURN n.title AS y }] AS y ORDER BY k"
+        rows: [["Carrie", [false]], ["Hugo", [false]], ["Johnny Mnemonic", [true]], ["Keanu", [false]], ["Laurence", [false]], ["The Matrix", [true]], ["The Matrix Reloaded", [true]]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y } AND n.released > 2000 AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+      - note: "A query of the row alone whose WHERE holds a subquery that reads the graph."
+        cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { WITH n WHERE n:Movie AND EXISTS { (n)<-[:ACTED_IN]-(:Person {name: 'Carrie'}) } RETURN 1 AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WHERE COUNT { (n)<--() } > 1 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - note: "Controls: a list's rows, a COUNT { } of a pattern, a pattern comprehension."
+        cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie) WHERE n.released > 2000 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 0], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 0], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { (n:Movie) } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, [(n:Movie)<-[:ACTED_IN]-(a) | a.name] AS y ORDER BY k"
+        rows: [["Carrie", []], ["Hugo", []], ["Johnny Mnemonic", ["Keanu"]], ["Keanu", []], ["Laurence", []], ["The Matrix", ["Carrie", "Laurence", "Keanu"]], ["The Matrix Reloaded", ["Keanu", "Carrie"]]]
+        unorderedLists: true
+
   - name: "EXISTS { } over UNWIND"
     description: "An EXISTS { } whose body unwinds a list is true where the body gives a row, in a RETURN, a WHERE, a CASE or a list comprehension, whatever order the body gives its rows in; an ORDER BY that a LIMIT or a SKIP of the body reads still picks the rows they keep (drivine4j#449)."
     steps:
@@ -6789,7 +6916,7 @@ cases:
         rows: [["2.5", "3", "a", "4.0"]]
 
   - name: "toString() of a list or a map"
-    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j's Cypher 25 writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list of items of one kind is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
+    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j's Cypher 25 writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list Neo4j types as narrower than List<Any>, of items of one kind or collect() of a property, is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
     steps:
       - note: "Neo4j 2026.10.1 gives these three."
         cypher: "RETURN [toString([1, 'a']), size(toString([1, 'a'])), toString({a: 1, b: 'x'}), toString([1.0, true, null])]"
@@ -6799,8 +6926,16 @@ cases:
         rows: [["[[1, x], {k: [true, 2.5]}, [], {}]", "[]", "{}", "{a: 2, b: 1}"]]
       - cypher: "RETURN toString({b: 'x', a: [{d: 1, c: 2.5}], c: null})"
         rows: ["{a: [{c: 2.5, d: 1}], b: x, c: null}"]
-      - cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"
-        rows: ["[1967, 1964, 1961]"]
+      - note: "Neo4j 2026.10.1 refuses toString() of collect() of a property when it plans the statement, as it types it a list of one kind or another, never List<Any>: Type mismatch: expected … List<Any> … but was List<Boolean>, List<Float>, … (liberation-data/drivine-cypher-spec#296). A SQL store gave its text."
+        only: [neo4j]
+        cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - note: "Neo4j 2026.10.1 gives these: a null is of no one kind, nor is a property, so a list of them is of any items."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toString([null, null]), toString([1, null]), toString([p.born, p.born])]"
+        rows: [["[null, null]", "[1, null]", "[1964, 1964]"]]
       - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toString([p.name, p.born, p.born / 2.0, p.nope]), toString(p {.name}), toString({n: p.name, l: [p.born]})]"
         rows: [["[Keanu, 1964, 982.0, null]", "{name: Keanu}", "{l: [1964], n: Keanu}"]]
       - note: "A map projection's entry written key: value and its variable, beside a property it selects, in the order of their keys."
@@ -6819,6 +6954,36 @@ cases:
         cypher: "RETURN [toString($l), toString($k)]"
         parameters: {l: [1, "a", [2, [true, null]], 2.5], k: [1, 2]}
         rows: [["[1, a, [2, [true, null]], 2.5]", "[1, 2]"]]
+      - note: "Neo4j 2026.10.1 plans a member of a map given as a parameter as a value of any kind, and gives a list there as its text. A SQL store gives its JSON text, as it gives toString() of a value whose kind is left open."
+        only: [neo4j]
+        cypher: "WITH $m AS m RETURN toString(m.l)"
+        parameters: {m: {l: [1, 2]}}
+        rows: ["[1, 2]"]
+      - note: "Neo4j 2026.10.1 gives these, lists of items of more than one kind (liberation-data/drivine-cypher-spec#296): tail(), a slice and reverse() of one, and two lists joined by + whose items are of two kinds."
+        cypher: "RETURN [toString([true, 1]), toString([[1], 1]), toString([{a: 1}, 1]), toString(tail([1, 'a', 2])), toString([1, 'a', 2][0..2]), toString(reverse([1, 'a'])), toString([1] + ['a'])]"
+        rows: [["[true, 1]", "[[1], 1]", "[{a: 1}, 1]", "[a, 2]", "[1, a]", "[a, 1]", "[1, a]"]]
+      - note: "Neo4j 2026.10.1 gives these: an item unwound from a list of lists of two kinds, and a UNION's column where one query's is a list of any items (liberation-data/drivine-cypher-spec#296)."
+        cypher: "UNWIND [[1], ['a']] AS x RETURN toString(x)"
+        rows: ["[1]", "[a]"]
+      - cypher: "CALL { RETURN [1, 2] AS l UNION RETURN [1, 'a'] AS l } RETURN toString(l)"
+        unordered: true
+        rows: ["[1, 2]", "[1, a]"]
+      - note: "Neo4j 2026.10.1 gives a comprehension over a list given as a parameter as a list of any items (liberation-data/drivine-cypher-spec#296)."
+        only: [neo4j, sql]
+        cypher: "RETURN toString([x IN $l | x])"
+        parameters: {l: [1, 2]}
+        rows: ["[1, 2]"]
+      - note: "Neo4j 2026.10.1 gives these (liberation-data/drivine-cypher-spec#296). A SQL store refuses a list that holds a temporal value by name (see refusals.yaml), and gives coalesce() of lists as its JSON text, as it gives toString() of a value whose kind is left open."
+        only: [neo4j]
+        cypher: "RETURN [toString([date('2024-01-02'), 1]), toString(coalesce([1, 'a'], [2]))]"
+        rows: [["[2024-01-02, 1]", "[1, a]"]]
+      - note: "Neo4j 2026.10.1 gives coalesce() with a null among its arguments as a list of any items (liberation-data/drivine-cypher-spec#296). A SQL store gives its JSON text, as it gives toString() of a value whose kind is left open (liberation-data/drivine-cypher-spec#297)."
+        only: [neo4j]
+        cypher: "RETURN toString(coalesce(null, [1, 2]))"
+        rows: ["[1, 2]"]
+      - note: "Neo4j 2026.10.1 gives a CASE one of whose values is a list of any items as a list of any items (liberation-data/drivine-cypher-spec#296)."
+        cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [1, 'a'] END)"
+        rows: ["[1, 2]"]
       - note: "Neo4j 2026.10.1 gives a map a WITH binds as it gives one written; a SQL store refuses it by name, as it knows no keys of it when compiling (see refusals.yaml)."
         only: [neo4j]
         cypher: "WITH {a: 1} AS m RETURN toString(m)"
@@ -8233,7 +8398,7 @@ cases:
         error: "Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL."
 
   - name: "toString of a list or a map"
-    description: "toString() of a list of items of one kind is refused, as Neo4j refuses it, written, bound by a WITH or gathered by collect(); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list of properties, it is run."
+    description: "toString() of a list Neo4j types as narrower than List<Any> is refused, as Neo4j refuses it when it plans the statement: a list written of items of one kind, integers and floats both numbers, a list of lists or of maps, collect() of a property, a node or a list, a list of maps, nodes or relationships, a list keys(), labels(), split(), range(), nodes() or relationships() gives, a comprehension of items of one kind, a pattern comprehension, tail(), reverse() or a slice of such a list, head(), last() or an item [i] of a list of such lists, two such lists of one kind joined by + or given to coalesce(), a CASE each of whose values, its ELSE too, is such a list of one kind, a UNION's column each of whose queries gives such a list, or one a WITH binds (liberation-data/drivine-cypher-spec#296); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list with a property or a null among its items, it is run."
     steps:
       - note: "Neo4j refuses both under Cypher 5. Neo4j 2026.10's default language, Cypher 25, gives toString({a: 1}) as '{a: 1}', and toString([1, 'a']) as '[1, a]' though it refuses toString([1, 2])."
         only: [neo4j]
@@ -8279,11 +8444,224 @@ cases:
       - only: [sql]
         cypher: "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)"
         error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - note: "Neo4j 2026.10.1 refuses each of these when it plans them, as it types each a list narrower than List<Any>: of numbers, integers and floats alike, of lists of any items, of maps, collect() of a property, keys(), labels(), split(), range(), a comprehension, and an item unwound from a list of lists of integers (liberation-data/drivine-cypher-spec#296). A SQL store gave the text of some of them."
+        only: [neo4j]
+        cypher: "RETURN toString([1, 2.5])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([[1], ['a']])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([[1], [2]])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([{a: 1}, {b: 2}])"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person) WITH collect(p.name) AS c RETURN toString(c)"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person) RETURN toString(collect(DISTINCT p.born))"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString(keys(p))"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString(labels(p))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(range(1, 3))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(split('a,b', ','))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([x IN [1, 2] | x])"
+        error: true
+      - only: [neo4j]
+        cypher: "UNWIND [[1], [2]] AS x RETURN toString(x)"
+        error: true
+      - only: [sql]
+        cypher: "RETURN toString([1, 2.5])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([[1], ['a']])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([[1], [2]])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([{a: 1}, {b: 2}])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person) WITH collect(p.name) AS c RETURN toString(c)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person) RETURN toString(collect(DISTINCT p.born))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString(keys(p))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString(labels(p))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(range(1, 3))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(split('a,b', ','))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([x IN [1, 2] | x])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "UNWIND [[1], [2]] AS x RETURN toString(x)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - only: [neo4j, sql]
         cypher: "RETURN toString({a: 1})"
         rows: ["{a: 1}"]
       - cypher: "UNWIND [1, 'a'] AS x RETURN toString(x)"
         rows: ["1", "a"]
+      - note: "Neo4j 2026.10.1 refuses each of these too when it plans them (liberation-data/drivine-cypher-spec#296): a map, a node and a relationship are of one kind here, as it says List<Map>, List<Node>, List<Relationship>; nodes(), relationships(), a variable-length relationship and a pattern comprehension are narrower than List<Any>, as collect() is; tail() and a slice keep their list's kind (and reverse(), below), two lists of one kind joined by + are of it, and a UNION's column is narrower than List<Any> where each of its queries' is, whatever their kinds."
+        only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'})-[r:KNOWS]->() RETURN toString([p, r])"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([p, {a: 1}])"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([p {}, p {.name}])"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH path = (:Person {name: 'Keanu'})-[:KNOWS]->() RETURN toString(nodes(path))"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH path = (:Person {name: 'Keanu'})-[:KNOWS]->() RETURN toString(relationships(path))"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r:KNOWS*]->() RETURN toString(r)"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([(p)-[:ACTED_IN]->(m) | m.title])"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person) RETURN toString(collect([p.born, 'x']))"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([keys(p), keys(p)])"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH keys(p) AS k RETURN toString(k)"
+        error: true
+      - only: [neo4j]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([CASE WHEN p.born > 1960 THEN 'a' ELSE 'b' END, 'c'])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([1.5, 2.5])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([x IN [1, 2] | x + 1])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(tail([1, 2]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([1, 2][0..1])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([1] + [2])"
+        error: true
+      - only: [neo4j]
+        cypher: "CALL { RETURN [1, 2] AS l UNION RETURN [1.5] AS l } RETURN toString(l)"
+        error: true
+      - only: [neo4j]
+        cypher: "CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'})-[r:KNOWS]->() RETURN toString([p, r])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([p, {a: 1}])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([p {}, p {.name}])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH path = (:Person {name: 'Keanu'})-[:KNOWS]->() RETURN toString(nodes(path))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH path = (:Person {name: 'Keanu'})-[:KNOWS]->() RETURN toString(relationships(path))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r:KNOWS*]->() RETURN toString(r)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([(p)-[:ACTED_IN]->(m) | m.title])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person) RETURN toString(collect([p.born, 'x']))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([keys(p), keys(p)])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH keys(p) AS k RETURN toString(k)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString([CASE WHEN p.born > 1960 THEN 'a' ELSE 'b' END, 'c'])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([1.5, 2.5])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([x IN [1, 2] | x + 1])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(tail([1, 2]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([1, 2][0..1])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([1] + [2])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "CALL { RETURN [1, 2] AS l UNION RETURN [1.5] AS l } RETURN toString(l)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - note: "Neo4j 2026.10.1 refuses each of these when it plans them, as List<Integer> (liberation-data/drivine-cypher-spec#296): reverse() keeps its list's kind, coalesce() of lists of one kind is of it, head() or an item [i] of a list of lists of one kind is a list of it, and a CASE each of whose values, its ELSE too, is a list of one kind is of it."
+        only: [neo4j]
+        cypher: "RETURN toString(reverse([1, 2]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(coalesce([1, 2], [3]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(head([[1], [2]]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([[1], [2]][0])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [3] END)"
+        error: true
+      - only: [sql]
+        cypher: "RETURN toString(reverse([1, 2]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(coalesce([1, 2], [3]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(head([[1], [2]]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([[1], [2]][0])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [3] END)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
 
   - name: "A keyword as a variable"
     description: "A word Cypher keeps for its clauses and operators, as end, match or case, may name a variable, as Neo4j takes it (drivine4j#635)."
