@@ -1,5 +1,6 @@
 import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCompiler';
-import { heldKey, readLayout, readLayoutAfter, writeLayout, writeProps } from '@/cypher/ValueLayout';
+import { CypherFloat } from '@/cypher/CypherFloat';
+import { heldKey, NON_FINITE_SAVED, readLayout, readLayoutAfter, writeLayout, writeProps } from '@/cypher/ValueLayout';
 
 /**
  * A column read in the store layout (readLayout): the module is asked of every text that holds `"$` or `$`, and
@@ -105,9 +106,12 @@ describe('writeLayout', () => {
 
     afterAll(() => useCypherCompiler(module));
 
-    it('holds a value with no date and no key that begins with $ as it is, asking the module nothing', () => {
-        const value = { a: [1, 'b$', { c: '$d' }], e: new Uint8Array([1]) };
-        expect(writeLayout(value)).toBe(value);
+    it('holds a value with no date and no key that begins with $ as it is, bytes as a list, asking the module nothing', () => {
+        // Bytes are the list of their signed values (drivine-cypher-spec#329), with no call.
+        expect(writeLayout({ a: [1, 'b$', { c: '$d' }], e: new Uint8Array([1]) })).toEqual({
+            a: [1, 'b$', { c: '$d' }],
+            e: [1]
+        });
         expect(asked).toEqual([]);
     });
 
@@ -122,5 +126,29 @@ describe('writeLayout', () => {
     it("writes a save's properties, an undefined one as null, and a property's name as the layout holds it", () => {
         expect(writeProps({ $k: 1, gone: undefined })).toEqual({ $$k: 1, gone: null });
         expect([heldKey('$k'), heldKey('$$k'), heldKey('k$')]).toEqual(['$$k', '$$$k', 'k$']);
+    });
+});
+
+/** What a save writes of bytes, NaN and the infinities until the module's write holds each store's (drivine-cypher-spec#329). */
+describe('writeLayout of bytes and numbers JSON has no text of', () => {
+    it('writes bytes as the list of their signed values, as drivine4j and Neo4j hold them, beside a Date or not', () => {
+        expect(writeLayout({ b: new Uint8Array([1, 2, 255]) })).toEqual({ b: [1, 2, -1] });
+        expect(writeLayout({ b: Buffer.from([1, 2, 255]), l: [new Int8Array([-1])] })).toEqual({
+            b: [1, 2, -1],
+            l: [[-1]]
+        });
+        const dated = writeLayout({ b: new Uint8Array([255]), d: new Date('2024-01-01T00:00:00Z') });
+        expect(dated.b).toEqual([-1]);
+        expect(dated.d.$t).toEqual('datetime');
+    });
+
+    it('refuses NaN and the infinities by name at any depth, beside a Date or not, and writes no null', () => {
+        for (const value of [NaN, Infinity, -Infinity]) {
+            expect(() => writeLayout({ x: value })).toThrow(NON_FINITE_SAVED);
+            expect(() => writeProps({ x: [1, { y: value }] })).toThrow(NON_FINITE_SAVED);
+            expect(() => writeLayout({ x: value, d: new Date('2024-01-01T00:00:00Z') })).toThrow(NON_FINITE_SAVED);
+            expect(() => writeLayout({ x: new CypherFloat(value) })).toThrow(NON_FINITE_SAVED);
+        }
+        expect(writeLayout({ x: 1.5, y: new CypherFloat(2) })).toEqual({ x: 1.5, y: new CypherFloat(2) });
     });
 });

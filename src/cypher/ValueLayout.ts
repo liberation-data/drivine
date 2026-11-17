@@ -1,4 +1,5 @@
 import { DrivineError } from '@/DrivineError';
+import { CypherFloat } from '@/cypher/CypherFloat';
 import { cypherCompilerModule, parametersJson } from '@/cypher/SharedCypherCompiler';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { jsonText } from '@/utils/JsonText';
@@ -87,9 +88,11 @@ function unmarked(value: any): any {
  * `value`, a value a save writes, as the store layout holds it, as the shared module writes it (its `write` request,
  * drivine4j's `CypherJson.valueToTree`): each `Date` its tag (`{"$t": "datetime", "v": …, "s": …}`), and each map key that
  * begins with `$` with one more `$` before it, at any depth. A value with neither in it is held as it is, and the module
- * is asked only of one that has.
+ * is asked only of one that has. Bytes are held as the list of their signed values, and NaN and the infinities are
+ * refused by name (see settled).
  */
-export function writeLayout(value: any): any {
+export function writeLayout(given: any): any {
+    const value = settled(given);
     if (!heldOtherwise(value)) {
         return value;
     }
@@ -125,4 +128,45 @@ function heldOtherwise(value: any): boolean {
         return [...value].some(heldOtherwise);
     }
     return Object.entries(value).some(([key, item]) => key.startsWith('$') || heldOtherwise(item));
+}
+
+/**
+ * What a save says of NaN or an infinity, which it refuses until the module's `write` holds each store's own spelling of
+ * one (drivine-cypher-spec#329): written as JSON text it would be null, and as the module writes it today, a text that
+ * a Cypher read gives back as one.
+ */
+export const NON_FINITE_SAVED =
+    'A save is given NaN or an infinity, which the store layout holds as no number yet (drivine-cypher-spec#329): it would store another value in its place.';
+
+/**
+ * `value` as a save writes it, at any depth: bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) the list of their signed
+ * values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2, 255), where JSON text would write a map of indexes;
+ * and NaN or an infinity refused by name, where JSON text would write null (drivine-cypher-spec#329).
+ */
+function settled(value: any): any {
+    if (value === null || typeof value !== 'object' || value instanceof Date || value instanceof CypherFloat) {
+        return finite(value);
+    }
+    if (value instanceof Uint8Array || value instanceof Int8Array) {
+        return Array.from(new Int8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
+    if (Array.isArray(value)) {
+        return value.map(settled);
+    }
+    if (value instanceof Set) {
+        return [...value].map(settled);
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+        return value;
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settled(item)]));
+}
+
+/** `value`, refused by name where it is NaN or an infinity, a number or a {@link CypherFloat} (see settled). */
+function finite(value: any): any {
+    const number = value instanceof CypherFloat ? value.value : value;
+    if (typeof number === 'number' && !Number.isFinite(number)) {
+        throw new DrivineError(NON_FINITE_SAVED);
+    }
+    return value;
 }
