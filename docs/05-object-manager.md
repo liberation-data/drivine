@@ -437,6 +437,26 @@ where: q.mentions.none((m) => m.resolvedId.eq(entityId))
 
 `gt`, `gte`, `lt` and `lte` are offered on numbers, texts and dates, and the text operators on texts alone.
 
+**A date on Oracle, Postgres or SQLite is refused.** There, a `Date` given to a condition (`eq`, `gt`, `in`, `hasItem`
+and the rest), a `seek` cursor, an order expression, a grouped read's `where` or filtered aggregate, or a `patch`'s
+`where` is refused with a `DrivineError` that names
+[drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235). The store holds a date as
+its tag (see [Upgrading to 6.0](22-upgrading-to-6.md#values-are-held-as-layout-2-holds-them)), which the query DSL's SQL
+doesn't compare yet, so it found nothing or the wrong rows; it will once the DSL's filters come from the shared
+compiler. Until then, compare a date in a [Cypher statement](04-cypher-on-a-relational-database.md), which compares
+dates as Neo4j does on every store:
+
+```typescript
+const ids = await pm.query<string>(
+    new QuerySpecification<string>(
+        cypherStatement('MATCH (t:Ticket) WHERE t.openedAt > $since RETURN t.id ORDER BY t.openedAt')
+    ).bind({ since: new Date('2026-01-01T00:00:00Z') })
+);
+```
+
+A date inside a `@JsonPacked` property is compared as the property's JSON text, as before, and Neo4j, Memgraph and
+FalkorDB compare dates in the query DSL as before.
+
 `eqIgnoreCase` and `containsIgnoreCase` lowercase the property, which no index reads. On a `@CaseInsensitive` field
 whose index ignores case, they compare with a lowercased copy instead, which the index serves: see
 [Lookups That Ignore Case](#lookups-that-ignore-case).
@@ -678,6 +698,9 @@ const ratings = await gom.groups.load(Feedback, (q) => ({
 }));
 // [{ page: '/install', votes: 3, likes: 2 }, …]: each row is typed by its keys and aggregates
 ```
+
+On Oracle, Postgres and SQLite the `createdAt.gte(march)` above is refused for now, since `march` is a `Date`: see
+[Operators](#operators).
 
 | Filter | Removes |
 | --- | --- |
