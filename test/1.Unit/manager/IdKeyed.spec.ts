@@ -14,6 +14,7 @@ import {
     PostgresBackend,
     PostgresGraph,
     QuerySpecification,
+    RelateMode,
     Root,
     SqliteBackend,
     SqliteGraph,
@@ -172,6 +173,21 @@ describe('an id on Oracle', () => {
             expect(statement.text).toMatch(/PASSING JSON\(\S+ EXTENDED\) AS "id__"/);
             expect((statement.spec({ id: 1e-7 }).parameters as any).id).toEqual('{"$numberDouble":"1.0E-7"}');
         }
+    });
+
+    it("binds loadRelated's, unrelateAll's and relate's ends as the JSON Oracle holds the id as, read EXTENDED", () => {
+        const backend = new OracleBackend(new OracleGraph());
+        const model = new ModelRegistry().fragment(Gauge);
+        const from = { model, id: 1e-7 };
+        const held = '{"$numberDouble":"1.0E-7"}';
+        const related = backend.related(from, 'POINTS', Direction.OUTGOING, model);
+        expect(related.text).toMatch(/PASSING JSON\(\$x_from EXTENDED\) AS "v"/);
+        expect((related.spec().parameters as any).x_from).toEqual(held);
+        expect((backend.unrelateAll(from, 'POINTS', Direction.OUTGOING).spec().parameters as any).x_from).toEqual(held);
+        const relate = backend.relate(from, { model, id: 4.5 }, 'POINTS', {}, RelateMode.MERGE).spec()
+            .parameters as any;
+        expect([relate.x_from, relate.x_to]).toEqual([held, '{"$numberDouble":"4.5"}']);
+        expect(relate.x_frommatch).toMatch(/PASSING JSON\(:1 EXTENDED\) AS "v"/);
     });
 
     it('binds a text id as its JSON, and a null id as it is', async () => {
