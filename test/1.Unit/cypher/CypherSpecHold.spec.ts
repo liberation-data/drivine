@@ -56,6 +56,21 @@ describe('The Cypher spec runner holds a step', () => {
         }
     });
 
+    it('that may pass where it says why, and fails otherwise as any hold does', async () => {
+        HELD['queries.yaml']['NaN worked out'] = [
+            { issue: 'drivine-cypher-spec#320', steps: [2], on: ['oracle'], mayPass: 'the stack differs by platform' }
+        ];
+        try {
+            await oracle(held(step), async () => await Promise.resolve([1]));
+            await oracle(held(step), async () => await Promise.resolve([2]));
+            const loop: Record<string, unknown> = {};
+            loop.self = loop;
+            await expect(oracle(held(step), async () => await Promise.resolve([loop]))).rejects.toThrow(RangeError);
+        } finally {
+            HELD['queries.yaml']['NaN worked out'] = [{ issue: 512, steps: [2], on: ['oracle'] }];
+        }
+    });
+
     it('only on the stores its hold names', async () => {
         await expect(
             check('queries.yaml', held(step), 1, 'neo4j', async () => await Promise.resolve([2]))
