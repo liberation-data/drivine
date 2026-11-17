@@ -190,6 +190,17 @@ describe('an id on Oracle', () => {
         expect(relate.x_frommatch).toMatch(/PASSING JSON\(:1 EXTENDED\) AS "v"/);
     });
 
+    it("binds loadRelated's, unrelateAll's and relate's null ends as they are, so they find no node (#772)", () => {
+        const backend = new OracleBackend(new OracleGraph());
+        const model = new ModelRegistry().fragment(Gauge);
+        const from = { model, id: null };
+        expect((backend.related(from, 'POINTS', Direction.OUTGOING, model).spec().parameters as any).x_from).toBeNull();
+        expect((backend.unrelateAll(from, 'POINTS', Direction.OUTGOING).spec().parameters as any).x_from).toBeNull();
+        const relate = backend.relate(from, { model, id: null }, 'POINTS', {}, RelateMode.MERGE).spec()
+            .parameters as any;
+        expect([relate.x_from, relate.x_to]).toEqual([null, null]);
+    });
+
     it('binds a text id as its JSON, and a null id as it is', async () => {
         await gom.load(Gauge, '1e-7');
         await gom.load(Gauge, 7);

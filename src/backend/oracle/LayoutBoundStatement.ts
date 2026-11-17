@@ -1,6 +1,7 @@
 import { GraphStatement } from '@/backend/GraphStatement';
 import { writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { oracleId } from '@/backend/oracle/IdKeyedStatement';
 
 /**
  * A block whose `$set` and `$vectors`, whose `$rows`, `{id, props, vectors}` each, and whose `$id`, bound by the manager as
@@ -16,10 +17,9 @@ export class LayoutBoundStatement extends GraphStatement {
                 bound[name] = writeProps(bound[name], 'oracle');
             }
         }
-        // A null id is bound as it is, as a load or a delete binds one (IdKeyedStatement): written, it would be the JSON
-        // text 'null', which the block's find_node reads as JSON's null and finds a node whose id is held as null (#772).
-        if (bound.id != null) {
-            bound.id = writeLayout(bound.id, 'oracle');
+        // A null id is bound as it is, as a load or a delete binds one (see oracleId, #772).
+        if (bound.id !== undefined) {
+            bound.id = oracleId(bound.id);
         }
         if (Array.isArray(bound.rows)) {
             bound.rows = writeLayout(

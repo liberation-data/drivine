@@ -8,12 +8,21 @@ import { QuerySpecification } from '@/query/QuerySpecification';
  * holds a binary double, which a NUMBER bound as it is (`1e-7`) is not always equal to. drivine4j's NodeIds keys an id so.
  * A null id is bound as it is, and finds no node.
  */
+/**
+ * A node's id as an Oracle statement binds it to find the node by: the JSON text Oracle's layout holds it as (see
+ * writeLayout), and a null id as it is, which finds no node. Written, a null would be the JSON text 'null', which a
+ * statement reads as JSON's null and finds a node whose id is held as null (#772).
+ */
+export function oracleId(id: unknown): unknown {
+    return id != null ? writeLayout(id, 'oracle') : id;
+}
+
 export class IdKeyedStatement extends GraphStatement {
     static of(statement: GraphStatement): IdKeyedStatement {
         return new IdKeyedStatement(statement.text, statement.bindings);
     }
 
     spec<T>(more: Record<string, any> = {}): QuerySpecification<T> {
-        return super.spec<T>(more.id != null ? { ...more, id: writeLayout(more.id, 'oracle') } : more);
+        return super.spec<T>(more.id != null ? { ...more, id: oracleId(more.id) } : more);
     }
 }
