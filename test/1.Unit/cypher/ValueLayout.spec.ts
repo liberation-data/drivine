@@ -1,16 +1,9 @@
 import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { CypherFloat } from '@/cypher/CypherFloat';
 import { jsonText } from '@/utils/JsonText';
+import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { int } from 'neo4j-driver';
-import {
-    heldKey,
-    NON_FINITE_SAVED,
-    readLayout,
-    readLayoutAfter,
-    readLayoutOf,
-    writeLayout,
-    writeProps
-} from '@/cypher/ValueLayout';
+import { heldKey, readLayout, readLayoutAfter, readLayoutOf, writeLayout, writeProps } from '@/cypher/ValueLayout';
 
 /**
  * A column read in the store layout (readLayout): the module is asked of every text that holds `"$` or `$`, and
@@ -108,8 +101,9 @@ describe('readLayout', () => {
 });
 
 /**
- * A value a save writes, in the store layout (writeLayout): the module is asked only of a value that holds a `Date` or a
- * map key that begins with `$`, at any depth, in a list or a set too, and each such key is held with one more `$`.
+ * A value a save writes, as each store's layout holds it, as JSON text (writeLayout): the module's write for the store
+ * (drivine-cypher-spec#329), asked only of a value that holds a `Date`, a map key that begins with `$`, bytes, a
+ * `CypherFloat` or a number that isn't a whole one in a long's range, at any depth, in a list or a set too.
  */
 describe('writeLayout', () => {
     const module = cypherCompilerModule();
@@ -128,66 +122,102 @@ describe('writeLayout', () => {
 
     afterAll(() => useCypherCompiler(module));
 
-    it('holds a value with no date and no key that begins with $ as it is, bytes as a list, asking the module nothing', () => {
-        // Bytes are the list of their signed values (drivine-cypher-spec#329), with no call.
-        expect(writeLayout({ a: [1, 'b$', { c: '$d' }], e: new Uint8Array([1]) })).toEqual({
-            a: [1, 'b$', { c: '$d' }],
-            e: [1]
-        });
+    const STORES = ['postgres', 'oracle', 'sqlite'] as const;
+
+    it('holds a value of no float, date, bytes or key that begins with $ as its JSON text on every store, asking nothing', () => {
+        for (const store of STORES) {
+            expect(
+                writeLayout({ a: [1, 'b$', { c: '$d' }], n: -7, big: BigInt('9223372036854775808') }, store)
+            ).toEqual('{"a":[1,"b$",{"c":"$d"}],"n":-7,"big":9223372036854775808}');
+        }
         expect(asked).toEqual([]);
     });
 
     it('escapes each key that begins with $ and tags each date, at any depth, a set read as a list', () => {
-        expect(writeLayout({ a: { $b: [{ $c: 1 }] }, s: new Set([new Date(0)]) })).toEqual({
+        const written = JSON.parse(writeLayout({ a: { $b: [{ $c: 1 }] }, s: new Set([new Date(0)]) }, 'postgres'));
+        expect(written).toEqual({
             a: { $$b: [{ $$c: 1 }] },
             s: [{ $t: 'datetime', v: '1970-01-01T00:00:00Z', s: expect.any(String) }]
         });
         expect(asked).toHaveLength(1);
+        expect(JSON.parse(asked[0])).toMatchObject({ store: 'postgres' });
     });
 
     it("writes a save's properties, an undefined one as null, and a property's name as the layout holds it", () => {
-        expect(writeProps({ $k: 1, gone: undefined })).toEqual({ $$k: 1, gone: null });
+        expect(writeProps({ $k: 1, gone: undefined }, 'sqlite')).toEqual('{"$$k":1,"gone":null}');
         expect([heldKey('$k'), heldKey('$$k'), heldKey('k$')]).toEqual(['$$k', '$$$k', 'k$']);
     });
-});
 
-/** What a save writes of bytes, NaN and the infinities until the module's write holds each store's (drivine-cypher-spec#329). */
-describe('writeLayout of bytes and numbers JSON has no text of', () => {
-    it('writes bytes as the list of their signed values, as drivine4j and Neo4j hold them, beside a Date or not', () => {
-        expect(writeLayout({ b: new Uint8Array([1, 2, 255]) })).toEqual({ b: [1, 2, -1] });
-        expect(writeLayout({ b: Buffer.from([1, 2, 255]), l: [new Int8Array([-1])] })).toEqual({
-            b: [1, 2, -1],
-            l: [[-1]]
-        });
-        const dated = writeLayout({ b: new Uint8Array([255]), d: new Date('2024-01-01T00:00:00Z') });
-        expect(dated.b).toEqual([-1]);
-        expect(dated.d.$t).toEqual('datetime');
+    it('writes each float as the store holds one: a whole one with its fraction, and on Oracle as a double', () => {
+        const values = { f: new CypherFloat(2), x: 1.5, e: 1e-7, big: 1e20, l: [new CypherFloat(3)] };
+        expect(writeLayout(values, 'postgres')).toEqual(
+            '{"f":2.0,"x":1.5,"e":1.0E-7,"big":100000000000000000000.0,"l":[3.0]}'
+        );
+        expect(writeLayout(values, 'sqlite')).toEqual('{"f":2.0,"x":1.5,"e":1.0E-7,"big":1.0E20,"l":[3.0]}');
+        expect(writeLayout(values, 'oracle')).toEqual(
+            '{"f":{"$numberDouble":"2.0"},"x":{"$numberDouble":"1.5"},"e":{"$numberDouble":"1.0E-7"},' +
+                '"big":{"$numberDouble":"1.0E20"},"l":[{"$numberDouble":"3.0"}]}'
+        );
+        // A float alone, not in a map, too.
+        expect(writeLayout(2.5, 'oracle')).toEqual('{"$numberDouble":"2.5"}');
     });
 
-    it('refuses NaN and the infinities by name at any depth, beside a Date or not, and writes no null', () => {
-        for (const value of [NaN, Infinity, -Infinity]) {
-            expect(() => writeLayout({ x: value })).toThrow(NON_FINITE_SAVED);
-            expect(() => writeProps({ x: [1, { y: value }] })).toThrow(NON_FINITE_SAVED);
-            expect(() => writeLayout({ x: value, d: new Date('2024-01-01T00:00:00Z') })).toThrow(NON_FINITE_SAVED);
-            expect(() => writeLayout({ x: new CypherFloat(value) })).toThrow(NON_FINITE_SAVED);
+    it('writes a whole number past 2^53 with its digits, as a statement binds it, where JSON text writes its shortest text', () => {
+        expect(JSON.stringify(2 ** 60)).toEqual('1152921504606847000');
+        for (const store of STORES) {
+            expect(writeLayout({ n: 2 ** 60, l: [-(2 ** 60)] }, store)).toEqual(
+                '{"n":1152921504606846976,"l":[-1152921504606846976]}'
+            );
         }
-        expect(writeLayout({ x: 1.5, y: new CypherFloat(2.5) })).toEqual({ x: 1.5, y: 2.5 });
+        expect(asked).toHaveLength(STORES.length);
     });
 
-    it('refuses NaN in a typed array and in an object of a class, which JSON text would write null', () => {
-        expect(() => writeLayout({ v: new Float32Array([NaN]) })).toThrow(NON_FINITE_SAVED);
+    it('writes -0 as a float, as no integer is -0', () => {
+        expect(writeLayout({ z: -0 }, 'sqlite')).toEqual('{"z":-0.0}');
+        expect(writeLayout({ z: -0 }, 'oracle')).toEqual('{"z":{"$numberDouble":"-0.0"}}');
+        expect(writeLayout({ z: new CypherFloat(-0) }, 'sqlite')).toEqual('{"z":-0.0}');
+    });
+
+    it('writes NaN and the infinities as the store holds them, and refuses them where it holds them as no number', () => {
+        const postgres =
+            "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place.";
+        const sqliteNaN =
+            "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place.";
+        for (const value of [NaN, Infinity, -Infinity]) {
+            expect(() => writeLayout({ x: value }, 'postgres')).toThrow(postgres);
+            expect(() => writeProps({ x: [1, { y: value }], d: new Date(0) }, 'postgres')).toThrow(postgres);
+            expect(() => writeLayout({ x: new CypherFloat(value) }, 'postgres')).toThrow(postgres);
+        }
+        expect(() => writeLayout({ x: NaN }, 'sqlite')).toThrow(sqliteNaN);
+        expect(writeLayout({ x: [Infinity, -Infinity] }, 'sqlite')).toEqual('{"x":[9e999,-9e999]}');
+        expect(writeLayout({ x: [NaN, Infinity, -Infinity] }, 'oracle')).toEqual(
+            '{"x":[{"$numberDouble":"NaN"},{"$numberDouble":"Infinity"},{"$numberDouble":"-Infinity"}]}'
+        );
+        // In a typed array and in an object of a class, which JSON text would write null.
+        expect(() => writeLayout({ v: new Float32Array([NaN]) }, 'postgres')).toThrow(postgres);
         expect(() =>
-            writeLayout({
-                o: new (class Point {
-                    x = Infinity;
-                })()
-            })
-        ).toThrow(NON_FINITE_SAVED);
+            writeLayout(
+                {
+                    o: new (class Point {
+                        x = Infinity;
+                    })()
+                },
+                'postgres'
+            )
+        ).toThrow(postgres);
     });
 
-    it('writes each value alike beside a Date or not: a float, a driver integer and a typed array as numbers', () => {
+    it('writes bytes as the list of their signed values on every store, as drivine4j and Neo4j hold them', () => {
+        for (const store of STORES) {
+            expect(writeLayout({ b: new Uint8Array([1, 2, 255]) }, store)).toEqual('{"b":[1,2,-1]}');
+            expect(writeLayout({ b: Buffer.from([1, 2, 255]), l: [new Int8Array([-1])] }, store)).toEqual(
+                '{"b":[1,2,-1],"l":[[-1]]}'
+            );
+        }
+    });
+
+    it('writes a float typed array as floats, and a driver integer, another typed array and an object as JSON text does', () => {
         const values = {
-            f: new CypherFloat(2),
             i: int(5),
             l: int('4611686018427387905'),
             v: new Float32Array([0.5, 1]),
@@ -196,11 +226,42 @@ describe('writeLayout of bytes and numbers JSON has no text of', () => {
                 x = 1;
             })()
         };
-        const written = '{"f":2,"i":5,"l":4611686018427387905,"v":[0.5,1],"u":[1,2],"o":{"x":1}}';
-        expect(jsonText(writeLayout(values))).toEqual(written);
-        const dated: Record<string, any> = writeLayout({ ...values, d: new Date(0) });
+        expect(writeLayout(values, 'postgres')).toEqual(
+            '{"i":5,"l":4611686018427387905,"v":[0.5,1.0],"u":[1,2],"o":{"x":1}}'
+        );
+        expect(writeLayout(values, 'oracle')).toEqual(
+            '{"i":5,"l":4611686018427387905,"v":[{"$numberDouble":"0.5"},{"$numberDouble":"1.0"}],"u":[1,2],"o":{"x":1}}'
+        );
+        // Beside a date, the rest is written alike.
+        const dated = parseExactIntegers(writeLayout({ ...values, d: new Date(0) }, 'sqlite'));
         expect(dated.d.$t).toEqual('datetime');
         delete dated.d;
-        expect(jsonText(dated)).toEqual(written);
+        expect(jsonText(dated)).toEqual('{"i":5,"l":4611686018427387905,"v":[0.5,1],"u":[1,2],"o":{"x":1}}');
+    });
+
+    it('writes an object with a toJSON as its toJSON, and a Map as {}, whether or not a float beside them asks the module', () => {
+        class Reading {
+            constructor(private readonly at: number) {}
+            toJSON(): any {
+                return { reading: `at ${this.at}`, level: 0.5 };
+            }
+        }
+        const map = new Map([['a', 1]]);
+        expect(writeLayout({ r: new Reading(2), m: map }, 'postgres')).toEqual(
+            '{"r":{"reading":"at 2","level":0.5},"m":{}}'
+        );
+        expect(writeLayout({ r: new Reading(2.5), m: map, f: 0.25 }, 'postgres')).toEqual(
+            '{"r":{"reading":"at 2.5","level":0.5},"m":{},"f":0.25}'
+        );
+        expect(writeLayout({ r: new Reading(2.5) }, 'oracle')).toEqual(
+            '{"r":{"reading":"at 2.5","level":{"$numberDouble":"0.5"}}}'
+        );
+    });
+
+    it("holds a user's map with the key $numberDouble under one more $, so no store reads it as a float", () => {
+        expect(writeLayout({ m: { $numberDouble: 'NaN', n: new CypherFloat(2) } }, 'oracle')).toEqual(
+            '{"m":{"$$numberDouble":"NaN","n":{"$numberDouble":"2.0"}}}'
+        );
+        expect(writeLayout({ m: { $numberDouble: 'NaN' } }, 'postgres')).toEqual('{"m":{"$$numberDouble":"NaN"}}');
     });
 });

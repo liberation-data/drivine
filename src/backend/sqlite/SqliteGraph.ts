@@ -45,6 +45,9 @@ export const JSON_ROWS = '/* drivine:json */';
  * {@link ensure}): there is no migration, as SQLite cannot change a table's key in place.
  */
 export class SqliteGraph extends SqlGraph implements WriteFunction {
+    /** The store whose layout a save's plan is written in (see WritePlan.text). */
+    readonly store = 'sqlite' as const;
+
     constructor(name: string = DEFAULT_GRAPH) {
         super(name, 'SQLite', MAX_OBJECT_NAME);
     }

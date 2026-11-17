@@ -554,6 +554,74 @@ cases:
       - cypher: "MATCH (p:Person) OPTIONAL MATCH (p)-[:ACTED_IN]->(m) RETURN [(p)-[:KNOWS]->(f) | f.name] AS knows, count(m) AS c ORDER BY c, size(knows)"
         rows: [[["Keanu"], 1], [[], 2], [["Carrie"], 3]]
 
+  - name: "An ordered DISTINCT keeps the first row of each kind where it came"
+    description: "A DISTINCT of rows that come in an order keeps each where the first of its kind came, as a SKIP, a LIMIT, collect() or the rows returned see them."
+    steps:
+      - note: "A LIMIT after a DISTINCT keeps the first rows of each kind, in the order they came (#316). 2,000 rows, so a store that hashes them would show it."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 1, 13]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k SKIP 32 RETURN k"
+        only: [neo4j, sql]
+        rows: [16, 28, 3, 15, 27]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k RETURN collect(k)"
+        only: [neo4j, sql]
+        rows: [[2, 14, 26, 1, 13, 25, 0, 12, 24, 36, 11, 23, 35, 10, 22, 34, 9, 21, 33, 8, 20, 32, 7, 19, 31, 6, 18, 30, 5, 17, 29, 4, 16, 28, 3, 15, 27]]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k WITH k LIMIT 5 RETURN collect(k)"
+        only: [neo4j, sql]
+        rows: [[2, 14, 26, 1, 13]]
+      - note: "The rows a WITH passes on are returned in their order; so is what reads collect()'s list."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k WITH k, 1 AS one RETURN k LIMIT 6"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 1, 13, 25]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k RETURN head(collect(k))"
+        only: [neo4j, sql]
+        rows: [2]
+      - note: "Each part of a UNION ALL keeps its own order."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 RETURN DISTINCT i % 37 AS k LIMIT 3 UNION ALL UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 RETURN DISTINCT i % 5 AS k"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 0, 4, 3, 2, 1]
+      - note: "The order an UNWIND gives its rows in is kept too."
+        cypher: "UNWIND [i IN range(1, 2000) | (i * 7919) % 2000] AS r WITH DISTINCT r % 37 AS k LIMIT 5 RETURN k"
+        only: [neo4j, sql]
+        rows: [32, 25, 18, 11, 4]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 RETURN DISTINCT i % 37 AS k"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 1, 13, 25, 0, 12, 24, 36, 11, 23, 35, 10, 22, 34, 9, 21, 33, 8, 20, 32, 7, 19, 31, 6, 18, 30, 5, 17, 29, 4, 16, 28, 3, 15, 27]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 RETURN DISTINCT i % 37 AS k LIMIT 5"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 1, 13]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 DESC WITH DISTINCT i % 37 AS k, i % 2 AS p LIMIT 5 RETURN k, p"
+        only: [neo4j, sql]
+        rows: [[25, 1], [13, 0], [1, 1], [26, 0], [14, 1]]
+      - note: "The order of rows a LIMIT picked, carried on through a WITH."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 DESC LIMIT 100 WITH i, 1 AS one WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k"
+        only: [neo4j, sql]
+        rows: [25, 13, 1, 26, 14]
+      - note: "A CALL's rows are read in its order."
+        cypher: "CALL { UNWIND [i IN range(1, 2000) | (i * 7919) % 2000] AS r RETURN DISTINCT r % 37 AS k } RETURN k LIMIT 5"
+        only: [neo4j, sql]
+        rows: [32, 25, 18, 11, 4]
+      - cypher: "UNWIND [1, 2] AS j CALL (j) { UNWIND [i IN range(1, 2000) | (i * 7919) % 2000] AS r WITH DISTINCT (r + j) % 37 AS k LIMIT 3 RETURN k } RETURN j, k"
+        only: [neo4j, sql]
+        rows: [[1, 33], [1, 26], [1, 19], [2, 34], [2, 27], [2, 20]]
+      - note: "Where only a count or a sum reads them, their order is not seen."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k RETURN count(k), sum(k)"
+        only: [neo4j, sql]
+        rows: [[37, 666]]
+      - note: "A later sort keeps the order its ties came in. The SQL stores' sorts aren't stable, so their ties lose the earlier order (liberation-data/drivine-cypher-spec#335, post-north-star)."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH i ORDER BY i % 3 WITH DISTINCT i % 37 AS k LIMIT 3 RETURN k"
+        except: [memgraph, falkordb, neptune, sql]
+        rows: [14, 26, 1]
+
+  - name: "DISTINCT keeps the order its rows come in"
+    description: "WITH DISTINCT keeps each value where its first row came, in the order the rows come in, and a LIMIT after it keeps the first of them (#316)."
+    steps:
+      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k RETURN collect(k)"
+        rows: [[3, 2, 1]]
+      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)"
+        rows: [[3, 2]]
+
   - name: "min and max of mixed kinds"
     description: "min() and max() of mixed kinds of values order them as Cypher does."
     steps:
@@ -5151,6 +5219,369 @@ cases:
         only: [neo4j, sql]
         rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
   # nesting.yaml's cells, to here.
+
+  # rebinding.yaml's cells, from here (drivine4j#819): generated, see README.md, "Rebinding a variable from outside a subquery".
+  - name: "Rebinding a variable from outside a subquery: CALL (x) importing it"
+    description: "rebinding.yaml's cells in CALL (x) importing it that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { WITH 'w' AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { WITH m1 AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { UNWIND [m1] AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+
+  - name: "Rebinding a variable from outside a subquery: CALL (*)"
+    description: "rebinding.yaml's cells in CALL (*) that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { WITH 'w' AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { WITH m1 AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { UNWIND [m1] AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+
+  - name: "Rebinding a variable from outside a subquery: CALL () at the top level"
+    description: "rebinding.yaml's cells in CALL () at the top level that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+
+  - name: "Rebinding a variable from outside a subquery: CALL () inside EXISTS"
+    description: "rebinding.yaml's cells in CALL () inside EXISTS that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+
+  - name: "Rebinding a variable from outside a subquery: CALL () inside COUNT"
+    description: "rebinding.yaml's cells in CALL () inside COUNT that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+
+  - name: "Rebinding a variable from outside a subquery: EXISTS"
+    description: "rebinding.yaml's cells in EXISTS that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { WITH 'w' AS m1 RETURN m1 AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { WITH m1 AS z RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { UNWIND [m1] AS z RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+
+  - name: "Rebinding a variable from outside a subquery: COUNT"
+    description: "rebinding.yaml's cells in COUNT that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { WITH 'w' AS m1 RETURN m1 AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { WITH m1 AS z RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { UNWIND [m1] AS z RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+
+  - name: "Rebinding a variable from outside a subquery: the depth-2 canary"
+    description: "rebinding.yaml's cells in the depth-2 canary that Neo4j gives rows for, and the SQL stores alike (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { RETURN COUNT { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { RETURN COUNT { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { CALL (*) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { RETURN EXISTS { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { RETURN COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { RETURN COUNT { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y } RETURN y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { RETURN EXISTS { WITH 'w' AS m1 RETURN m1 AS y } AS y } AS y ORDER BY title"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL (*) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { RETURN EXISTS { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } AS y } RETURN m1.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { RETURN COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y } RETURN m0.title AS title, y ORDER BY title, y"
+        only: [neo4j, sql]
+        rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  # rebinding.yaml's cells, to here.
+
+  - name: "Rebinding a variable a CALL { … }'s leading WITH imports"
+    description: "A name a CALL { … }'s leading WITH imports, WITH m1 or WITH *, is declared in the subquery's own scope, as at the top: a WITH's alias projects it anew, a CALL within may import it, a pattern reads it, and after a WITH that drops it an UNWIND binds a new one; and beside them what Neo4j takes that binds a name from outside a subquery, or one a WITH drops: a comprehension's or a reduce()'s variable, which binds it within the expression alone, at the top too, an UNWIND after a WITH at the top that drops it, and an EXISTS { … } in the WHERE of a WITH that groups, which reads the WITH's items alone; as Neo4j 2026.10.1 gives them. An UNWIND that binds a name a leading WITH imports again is refused (see refusals.yaml, \"Rebinding a variable from outside a subquery refused: after a WITH passes it on, and beyond the table\") (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (m1:Movie) CALL { WITH * WITH 'w' AS m1 RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["w", "w", "w"]
+      - cypher: "MATCH (m1:Movie) CALL { WITH * WITH m1.title AS m1 RETURN m1 AS y } RETURN y ORDER BY y"
+        only: [neo4j, sql]
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (m1:Movie) CALL { WITH m1 WITH 'w' AS m1 RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["w", "w", "w"]
+      - cypher: "MATCH (m1:Movie) CALL { WITH m1 CALL (m1) { RETURN 'x' AS z } RETURN z AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["x", "x", "x"]
+      - note: "No movie has a relationship to itself."
+        cypher: "MATCH (m1:Movie) CALL { WITH m1 MATCH (m1)-[]->(m1) RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: []
+      - note: "A WITH that drops m1 within the subquery: an UNWIND after it binds a new m1."
+        cypher: "MATCH (m1:Movie) CALL { WITH m1 WITH m1.title AS t UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["u", "u", "u"]
+      - note: "A comprehension's or a reduce()'s variable named after a name from outside the subquery binds it within the expression alone, as at the top."
+        cypher: "MATCH (m1:Movie) CALL (m1) { RETURN [m1 IN ['c'] | m1] AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: [["c"], ["c"], ["c"]]
+      - cypher: "MATCH (m1:Movie) CALL (m1) { RETURN reduce(m1 = 0, z IN [1] | m1 + z) AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: [1, 1, 1]
+      - cypher: "MATCH (m1:Movie) RETURN EXISTS { WITH [m1 IN ['c'] | m1] AS z RETURN z } AS y"
+        only: [neo4j, sql]
+        rows: [true, true, true]
+      - cypher: "MATCH (m1:Movie) RETURN [m1 IN ['c'] | m1] AS y"
+        only: [neo4j, sql]
+        rows: [["c"], ["c"], ["c"]]
+      - note: "A name a WITH drops at the top: an UNWIND after it binds a new one, and an EXISTS { … } in the WHERE of a WITH that groups, which reads the WITH's items alone, may bind it."
+        cypher: "MATCH (m1:Movie) WITH m1.title AS t UNWIND [1] AS m1 RETURN t, m1 ORDER BY t"
+        only: [neo4j, sql]
+        rows: [["Johnny Mnemonic", 1], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (q:Person), (m1:Movie) WITH q, count(*) AS c WHERE EXISTS { UNWIND [1] AS m1 RETURN m1 } RETURN q.name AS n ORDER BY n"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
 
   - name: "A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups"
     description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, a subquery's own variable that a CALL in a subquery within it names, in its WHERE or its items, a procedure's CALL whose WHERE reads a subquery's own variable, a subquery in an aggregate of the order, which reads what is bound before the projection, and one in the order or the WHERE of a WITH within the subquery, which reads what is in scope there; and, Neo4j's alone, a variable a WITH within the subquery drops, read in its WHERE (drivine4j#681, #426, #504)."

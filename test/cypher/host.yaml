@@ -577,6 +577,95 @@ cases:
       - read: {store: "sqlite", nonFinite: false, column: '[1,2.0,"NaN"]'}
         value: [1, 2.0, "NaN"]
 
+  - name: "Values a save writes"
+    description: "The JSON text each SQL store's layout holds a value as, which a library's save writes, the module's write for the store (StoreValues.text, the JSON request {\"write\": <value>, \"store\": <store>}): exactly what a compiled statement that writes binds the value as, so a value saved and one made by CREATE are held alike and read back alike. A float is held as the store holds one: on Postgres a whole float with its fraction, on Oracle every float as extended JSON's double, NaN and the infinities too, and on SQLite an infinity as 9e999. Where the store's JSON holds the float as no number, Postgres's NaN and infinities and SQLite's NaN, the write is refused by name, with the message a statement that writes is refused with, never written as null or a text in its place. Bytes are the list of their signed values on every store, as on a graph engine. A temporal value is its tag and a map's key that begins with $ is held with one more, as everywhere."
+    pairs:
+      writes.yaml: ["NaN and the infinities written"]
+    steps:
+      - write: {store: "postgres", value: {$float: "NaN"}}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: {$float: "NaN"}}
+        result: '{"$numberDouble":"NaN"}'
+      - write: {store: "sqlite", value: {$float: "NaN"}}
+        error: 'A statement that writes is given NaN, which SQLite''s JSON holds as no number: it would store another value in its place.'
+      - write: {store: "postgres", value: {$float: "Infinity"}}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: {$float: "Infinity"}}
+        result: '{"$numberDouble":"Infinity"}'
+      - write: {store: "sqlite", value: {$float: "Infinity"}}
+        result: '9e999'
+      - write: {store: "postgres", value: {$float: "-Infinity"}}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: {$float: "-Infinity"}}
+        result: '{"$numberDouble":"-Infinity"}'
+      - write: {store: "sqlite", value: {$float: "-Infinity"}}
+        result: '-9e999'
+      - note: "Bytes, [1, 2, 255], as the list of their signed values, as a graph engine holds them."
+        write: {store: "postgres", value: {$bytes: "AQL/"}}
+        result: '[1,2,-1]'
+      - write: {store: "oracle", value: {$bytes: "AQL/"}}
+        result: '[1,2,-1]'
+      - write: {store: "sqlite", value: {$bytes: "AQL/"}}
+        result: '[1,2,-1]'
+      - write: {store: "postgres", value: 1.5}
+        result: '1.5'
+      - write: {store: "oracle", value: 1.5}
+        result: '{"$numberDouble":"1.5"}'
+      - write: {store: "sqlite", value: 1.5}
+        result: '1.5'
+      - note: "A whole float: written out with its fraction on Postgres, whose jsonb would read 1.0E7 as a whole number."
+        write: {store: "postgres", value: {$float: "1.0E7"}}
+        result: '10000000.0'
+      - write: {store: "oracle", value: {$float: "1.0E7"}}
+        result: '{"$numberDouble":"1.0E7"}'
+      - write: {store: "sqlite", value: {$float: "1.0E7"}}
+        result: '1.0E7'
+      - write: {store: "postgres", value: [1, {$float: "Infinity"}, {$bytes: "AQL/"}]}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: [1, {$float: "Infinity"}, {$bytes: "AQL/"}]}
+        result: '[1,{"$numberDouble":"Infinity"},[1,2,-1]]'
+      - write: {store: "sqlite", value: [1, {$float: "Infinity"}, {$bytes: "AQL/"}]}
+        result: '[1,9e999,[1,2,-1]]'
+      - write: {store: "postgres", value: {x: [{$float: "-Infinity"}, 2.5], b: {$bytes: "AQL/"}}}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: {x: [{$float: "-Infinity"}, 2.5], b: {$bytes: "AQL/"}}}
+        result: '{"x":[{"$numberDouble":"-Infinity"},{"$numberDouble":"2.5"}],"b":[1,2,-1]}'
+      - write: {store: "sqlite", value: {x: [{$float: "-Infinity"}, 2.5], b: {$bytes: "AQL/"}}}
+        result: '{"x":[-9e999,2.5],"b":[1,2,-1]}'
+      - note: "Beside a date, which changes nothing."
+        write: {store: "postgres", value: {d: {$temporal: "DATE", text: "2024-01-01"}, x: {$float: "Infinity"}}}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: {d: {$temporal: "DATE", text: "2024-01-01"}, x: {$float: "Infinity"}}}
+        result: '{"d":{"$t":"date","v":"2024-01-01","s":"10000020240101"},"x":{"$numberDouble":"Infinity"}}'
+      - write: {store: "sqlite", value: {d: {$temporal: "DATE", text: "2024-01-01"}, x: {$float: "Infinity"}}}
+        result: '{"d":{"$t":"date","v":"2024-01-01","s":"10000020240101"},"x":9e999}'
+      - note: "Beside a datetime, which changes nothing."
+        write: {store: "postgres", value: {at: {$temporal: "DATE_TIME", text: "2024-03-15T10:30:00.5+02:00"}, n: {$float: "NaN"}, f: {$float: "2.0"}}}
+        error: 'A statement that writes is given NaN or an infinity, which Postgres''s `jsonb` holds as no number: it would store another value in its place.'
+      - write: {store: "oracle", value: {at: {$temporal: "DATE_TIME", text: "2024-03-15T10:30:00.5+02:00"}, n: {$float: "NaN"}, f: {$float: "2.0"}}}
+        result: '{"at":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"n":{"$numberDouble":"NaN"},"f":{"$numberDouble":"2.0"}}'
+      - write: {store: "sqlite", value: {at: {$temporal: "DATE_TIME", text: "2024-03-15T10:30:00.5+02:00"}, n: {$float: "NaN"}, f: {$float: "2.0"}}}
+        error: 'A statement that writes is given NaN, which SQLite''s JSON holds as no number: it would store another value in its place.'
+      - write: {store: "postgres", value: {at: {$temporal: "DATE_TIME", text: "2024-03-15T10:30:00.5+02:00"}, f: {$float: "2.0"}}}
+        result: '{"at":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"f":2.0}'
+      - write: {store: "oracle", value: {at: {$temporal: "DATE_TIME", text: "2024-03-15T10:30:00.5+02:00"}, f: {$float: "2.0"}}}
+        result: '{"at":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"f":{"$numberDouble":"2.0"}}'
+      - write: {store: "sqlite", value: {at: {$temporal: "DATE_TIME", text: "2024-03-15T10:30:00.5+02:00"}, f: {$float: "2.0"}}}
+        result: '{"at":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"f":2.0}'
+      - note: "A user's map with the key $numberDouble: the key is held with one more $, so no store reads the map as a float."
+        write: {store: "postgres", value: {$map: {$numberDouble: "NaN", n: {$float: "2.0"}}}}
+        result: '{"$$numberDouble":"NaN","n":2.0}'
+      - write: {store: "oracle", value: {$map: {$numberDouble: "NaN", n: {$float: "2.0"}}}}
+        result: '{"$$numberDouble":"NaN","n":{"$numberDouble":"2.0"}}'
+      - write: {store: "sqlite", value: {$map: {$numberDouble: "NaN", n: {$float: "2.0"}}}}
+        result: '{"$$numberDouble":"NaN","n":2.0}'
+      - note: "The store is required: each holds a value otherwise."
+        write: {value: 1}
+        error: "A write request gives the store: postgres, oracle or sqlite."
+      - note: "A graph engine holds its own values, in no layout this writes."
+        write: {store: "neo4j", value: 1}
+        error: "A write request gives the store as postgres, oracle or sqlite, not neo4j."
+
   - name: "Temporal values' sort keys"
     description: "The sort key s of a temporal value's tag, worked out of its canonical text v alone, as Temporals.key works it out and each store's SQL does (see README.md, Values in the store): digits of one width for each kind, which order two values of a kind as Neo4j does; a zoned time by its UTC nanoseconds of the day plus 18 hours, with no wrap at midnight. A duration has none."
     pairs:

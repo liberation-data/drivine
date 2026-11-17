@@ -9,8 +9,11 @@ import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresResultMapper } from '@/connection/postgres/PostgresResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { CompiledCypher } from '@/cypher/CompiledCypher';
-import { cypherCompilerModule, SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
+import { cypherCompilerModule, SharedCypherCompiler, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { CompiledSpecification } from '@/cypher/CompiledSpecification';
+import { CypherFloat } from '@/cypher/CypherFloat';
+import { writeLayout } from '@/cypher/ValueLayout';
+import { DrivineError } from '@/DrivineError';
 import { loadSpec, runsOn, valuesFor } from '../../cypher/CypherSpec';
 import { compiledAs } from '../../CompiledAs';
 
@@ -18,9 +21,11 @@ import { compiledAs } from '../../CompiledAs';
  * The spec's `host.yaml` (test/cypher): what Drivine's own code does with the values compiled SQL hands it, with no
  * store, as drivine4j's `HostSpecTest` runs it. Each `function` step calls one of the functions Drivine registers on
  * SQLite, on an in-memory database; each `read` step reads a column's text as a connection reads a compiled
- * statement's rows. Each case's `pairs` name store cases of the other spec files whose statements rely on its steps:
- * one of them compiles on SQLite to SQL that calls each function its steps call, and one compiles on each store its
- * steps read with the `nonFinite` each read step says. The three libraries read the same file.
+ * statement's rows; and each `write` step writes a value as a save writes it on its store (writeLayout, the module's
+ * write for the store), its refusal the error a save throws. Each case's `pairs` name store cases of the other spec files
+ * whose statements rely on its steps: one of them compiles on SQLite to SQL that calls each function its steps call, one
+ * compiles on each store its steps read with the `nonFinite` each read step says, and for each store its `write` steps
+ * name, one runs on that store and writes. The three libraries read the same file.
  *
  * A case or step that can't pass yet is held: see {@link HELD}.
  */
@@ -40,17 +45,25 @@ interface Read {
 }
 
 /**
- * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read, and a
- * temporal value's sort key.
+ * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read, a
+ * temporal value's sort key, and a value a store's layout writes or refuses.
  */
 const SHAPES = [
     ['function', 'args', 'result'],
     ['function', 'args', 'error'],
     ['function', 'ascending'],
     ['read', 'value'],
-    ['key', 'result']
+    ['key', 'result'],
+    ['write', 'result'],
+    ['write', 'error']
 ];
 const READ = ['store', 'nonFinite', 'column'];
+/** A write's keys: the store's left out of a step that is refused for it. */
+const WRITE = ['store', 'value'];
+/** The stores a save writes a value in a layout of: a write step for another is the module's request's to refuse. */
+const WRITTEN_STORES = ['postgres', 'oracle', 'sqlite'];
+/** A statement that writes, as a pair of a `write` step: whether it compiles on the store or is refused. */
+const WRITES = /\b(?:CREATE|MERGE|SET)\b/i;
 const KEY = ['kind', 'v'];
 /** A call in Cypher that makes a temporal value of a kind with a sort key, as a statement runs. */
 const TEMPORAL_CALL = /\b(?:date|localtime|time|localdatetime|datetime)\s*\(/i;
@@ -236,6 +249,36 @@ describe('The host.yaml runner', () => {
         expect(holdsRegexp(`SELECT '${"''".repeat(100_000)} REGEXP'`)).toBe(false);
     });
 
+    it('should give a write step the text a save writes, or the refusal it throws, exactly, and pair it by a write on its store', async () => {
+        const pairs = { 'writes.yaml': ['NaN and the infinities written'] };
+        const infinity = { write: { store: 'sqlite', value: { $float: 'Infinity' } }, result: '9e999' };
+        await checkStep(infinity, 'write');
+        await checkStep({ write: { store: 'oracle', value: { $bytes: 'AQL/' } }, result: '[1,2,-1]' }, 'write');
+        await checkStep({ write: { store: 'postgres', value: { $float: '2.0' } }, result: '2.0' }, 'write');
+        await expect(checkStep({ ...infinity, result: '9E999' }, 'write')).rejects.toThrow();
+        const refused = { write: { store: 'postgres', value: { $float: 'NaN' } } };
+        const message =
+            "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place.";
+        await checkStep({ ...refused, error: message }, 'refused');
+        // The message is compared whole, not as a part of it.
+        await expect(
+            checkStep({ ...refused, error: 'A statement that writes is given NaN' }, 'refused')
+        ).rejects.toThrow();
+        await expect(checkStep({ ...refused, result: 'null' }, 'refused')).rejects.toThrow(/refused/);
+        // A store left out, or a graph engine's, is refused by the module's request, and needs no pair.
+        await checkStep(
+            { write: { value: BigInt(1) }, error: 'A write request gives the store: postgres, oracle or sqlite.' },
+            'no store'
+        );
+        await expect(checkStep({ write: { store: 'sqlite', valu: BigInt(1) }, result: '1' }, 'write')).rejects.toThrow(
+            /a write has the keys/
+        );
+        paired({ name: 'write', pairs, steps: [infinity] });
+        expect(() =>
+            paired({ name: 'write', pairs: { 'queries.yaml': ['Returning nodes and properties'] }, steps: [infinity] })
+        ).toThrow(/runs on sqlite and writes/);
+    });
+
     it('should fail a hold whose steps pass, and not hide the runner failing otherwise than the spec says', async () => {
         await expect(held(1, 'a held step', () => undefined)).rejects.toThrow(/held for #1, and passes/);
         await held(1, 'a held step', async () => checkStep({ ...add, result: '4' }, 'add'));
@@ -295,6 +338,10 @@ async function checkStep(step: Record<string, any>, where: string): Promise<void
     }
     if ('key' in step) {
         checkKey(step, where);
+        return;
+    }
+    if ('write' in step) {
+        checkWrite(step, where);
         return;
     }
     const db = openSqlite(':memory:');
@@ -367,6 +414,104 @@ function checkKey(step: Record<string, any>, where: string): void {
         throw new Mismatch(`${where}: ${answer.error}`);
     }
     expect([where, answer.key]).toEqual([where, step.result]);
+}
+
+/**
+ * The step's `write`, a value written on a store, is the JSON text `result`, exactly, or is refused with the message
+ * `error`, exactly: as a save writes the value on the store (writeLayout), its refusal the DrivineError a save throws. A
+ * value is given as a save is given it: a float a {@link CypherFloat}, bytes a `Uint8Array`, a map with a key that
+ * begins with `$` the map. A step that names no store a save writes in, or a temporal value, which a save here is given
+ * only as a `Date`, in UTC, is the module's JSON request's, `{"write": <value>, "store": <store>}`, as the step gives it.
+ */
+function checkWrite(step: Record<string, any>, where: string): void {
+    const write = step.write;
+    if (
+        typeof write !== 'object' ||
+        write === null ||
+        !(sameKeys(WRITE, Object.keys(write)) || sameKeys(['value'], Object.keys(write)))
+    ) {
+        throw new Error(
+            `${where}: a write has the keys ${JSON.stringify(WRITE)}, the store's only where it is refused`
+        );
+    }
+    const { written, refusal }: { written?: string; refusal?: string } = writtenBy(write);
+    if ('error' in step) {
+        if (typeof step.error !== 'string') {
+            throw new Error(`${where}: error is a text, not ${JSON.stringify(step.error, replacer)}`);
+        }
+        if (refusal === undefined) {
+            throw new Mismatch(`${where}: refused with "${step.error}", but wrote ${written}`);
+        }
+        expect([where, refusal]).toEqual([where, step.error]);
+        return;
+    }
+    if (refusal !== undefined) {
+        throw new Mismatch(`${where}: refused: ${refusal}`);
+    }
+    expect([where, written]).toEqual([where, step.result]);
+}
+
+/** The text a write step's value is written as on its store, or its refusal: see checkWrite. */
+function writtenBy(write: { store?: string; value: any }): { written?: string; refusal?: string } {
+    if (!WRITTEN_STORES.includes(write.store!) || temporal(write.value)) {
+        return moduleWrite(write.value, write.store);
+    }
+    try {
+        return { written: writeLayout(saved(write.value), write.store as SharedStore) };
+    } catch (e) {
+        if (!(e instanceof DrivineError)) {
+            throw e;
+        }
+        return { refusal: e.message };
+    }
+}
+
+/** The module's JSON request's write of `value` on `store`: its text, unparsed, as writeLayout reads it, or its refusal. */
+function moduleWrite(value: any, store: string | undefined): { written?: string; refusal?: string } {
+    const answer = cypherCompilerModule().compile(
+        `{"write":${JSON.stringify(value, replacer)}${store === undefined ? '' : `,"store":${JSON.stringify(store)}`}}`
+    );
+    return answer.startsWith('{"value":')
+        ? { written: answer.slice('{"value":'.length, -1) }
+        : { refusal: JSON.parse(answer).error };
+}
+
+/** Whether a write step's value holds a temporal value, `{$temporal: <kind>, text: …}`, at any depth. */
+function temporal(value: any): boolean {
+    if (Array.isArray(value)) {
+        return value.some(temporal);
+    }
+    return value !== null && typeof value === 'object' && ('$temporal' in value || Object.values(value).some(temporal));
+}
+
+/**
+ * A write step's value as a save is given it: a whole number the number, or a `bigint` past 2^53; a float, `{$float:
+ * "2.0"}` or a number the YAML gives, a {@link CypherFloat}, as the YAML reads each whole number as a `bigint`; bytes,
+ * `{$bytes: "<base64>"}`, a `Uint8Array`; and `{$map: {…}}` the map it holds, its keys as they are.
+ */
+function saved(value: any): any {
+    if (typeof value === 'bigint') {
+        return Number.isSafeInteger(Number(value)) ? Number(value) : value;
+    }
+    if (typeof value === 'number') {
+        return new CypherFloat(value);
+    }
+    if (Array.isArray(value)) {
+        return value.map(saved);
+    }
+    if (value !== null && typeof value === 'object') {
+        const [only, ...more] = Object.keys(value);
+        const tag = more.length ? undefined : only;
+        if (tag === '$float') {
+            return new CypherFloat(Number(value.$float));
+        }
+        if (tag === '$bytes') {
+            return new Uint8Array(Buffer.from(value.$bytes, 'base64'));
+        }
+        const map = tag === '$map' ? value.$map : value;
+        return Object.fromEntries(Object.entries(map).map(([key, item]) => [key, saved(item)]));
+    }
+    return value;
 }
 
 /** The one value `sql` gives, run with `args`: a whole number as a bigint, so one SQLite holds as an integer is told from a real. */
@@ -509,6 +654,26 @@ function paired(hostCase: HostCase): void {
         }
     }
     keyPaired(hostCase, steps);
+    writePaired(hostCase, steps);
+}
+
+/**
+ * For each store a `write` step names that a save writes in, one of the pairs' `steps` runs on the store and writes, by
+ * `CREATE`, `MERGE` or `SET`: it binds its values as the step writes them, whether it compiles there or is refused. A step
+ * with no store, or a graph engine's, is refused before any store is written, and needs no pair.
+ */
+function writePaired(hostCase: HostCase, steps: Record<string, any>[]): void {
+    const stores = new Set(
+        hostCase.steps
+            .filter((it) => 'write' in it)
+            .map((it) => it.write?.store)
+            .filter((it) => WRITTEN_STORES.includes(it))
+    );
+    for (const store of stores) {
+        if (!steps.some((it) => runsOn(it as any, store) && WRITES.test(String(it.cypher)))) {
+            throw new Mismatch(`${hostCase.name}: no step of its pairs runs on ${store} and writes`);
+        }
+    }
 }
 
 /** Where the case has `key` steps, one of its pairs' `steps` compiles on SQLite and makes a temporal value as it runs. */

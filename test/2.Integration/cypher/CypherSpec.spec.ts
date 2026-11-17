@@ -5498,9 +5498,10 @@ describe.each(
         ).toEqual([2]);
     });
 
-    it("a parameter of a Buffer or an Int8Array, the Neo4j driver's bytes, is its base64 text, as drivine4j writes a byte array", async () => {
-        expect(await query('RETURN $bytes', { bytes: Buffer.from([1, 2, 255]) })).toEqual(['AQL/']);
-        expect(await query('RETURN $bytes', { bytes: new Int8Array([1, 2, -1]) })).toEqual(['AQL/']);
+    it("a parameter of a Buffer or an Int8Array, the Neo4j driver's bytes, is the list of its signed values, as a save holds bytes", async () => {
+        // As drivine4j writes a byte array, and as the module writes bytes on every store (drivine-cypher-spec#329).
+        expect(await query('RETURN $bytes', { bytes: Buffer.from([1, 2, 255]) })).toEqual([[1, 2, -1]]);
+        expect(await query('RETURN $bytes', { bytes: new Int8Array([1, 2, -1]) })).toEqual([[1, 2, -1]]);
     });
 
     it('a parameter of a Set is the list of its items, as the Neo4j driver sends it', async () => {

@@ -66,12 +66,13 @@ if (JSON.stringify(rows) !== JSON.stringify(expected)) {
     console.error(`The browser bundle read back ${JSON.stringify(rows)}, not ${JSON.stringify(expected)}.`);
     process.exit(1);
 }
-// A float a SQLite function gives back stays a float, and bytes are bound with no Buffer.
+// A float a SQLite function gives back stays a float, and bytes are bound with no Buffer, and read back as the list of
+// their signed values, as the store layout holds them (compiler 0.50.0).
 const kinds = await manager.query(
     cypher('RETURN toString(sqrt(4.0)) AS root, $bytes AS bytes', { bytes: new Uint8Array([1, 2]) })
 );
-if (JSON.stringify(kinds) !== JSON.stringify([['2.0', 'AQI=']])) {
-    console.error(`The browser bundle read back ${JSON.stringify(kinds)}, not [["2.0","AQI="]].`);
+if (JSON.stringify(kinds) !== JSON.stringify([['2.0', [1, 2]]])) {
+    console.error(`The browser bundle read back ${JSON.stringify(kinds)}, not [["2.0",[1,2]]].`);
     process.exit(1);
 }
 // The shared compiler's own host functions, which SQL compiled on SQLite calls, run in the page through its hostCall.

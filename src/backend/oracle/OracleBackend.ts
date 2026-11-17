@@ -38,6 +38,7 @@ import { MatchedNode } from '@/backend/EdgeStatements';
 import { Direction } from '@/annotation/Metadata';
 import { RelateMode } from '@/manager/NodeRef';
 import { Stamps } from '@/model/Stamps';
+import { IdKeyedStatement } from '@/backend/oracle/IdKeyedStatement';
 
 /** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
 export const ROW_ALIAS = 'n';
@@ -70,7 +71,7 @@ export class OracleBackend implements GraphBackend {
     }
 
     loadFragment(model: FragmentModel): GraphStatement {
-        return this.loadAllFragments(model, this.idPredicate(model));
+        return IdKeyedStatement.of(this.loadAllFragments(model, this.idPredicate(model)));
     }
 
     countFragments(model: FragmentModel, where?: string, tested: string[] = []): GraphStatement {
@@ -95,7 +96,7 @@ export class OracleBackend implements GraphBackend {
     }
 
     loadView(model: GraphViewModel, depth: Record<string, number> = {}): GraphStatement {
-        return this.loadAllViews(model, this.idPredicate(model.root), depth);
+        return IdKeyedStatement.of(this.loadAllViews(model, this.idPredicate(model.root), depth));
     }
 
     countViews(
@@ -121,7 +122,7 @@ export class OracleBackend implements GraphBackend {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const filter = this.deletedWhere(target, where);
         if (cascade === CascadeType.NONE) {
-            return this.deleting(root, filter);
+            return IdKeyedStatement.of(this.deleting(root, filter));
         }
         if (target.kind !== 'GRAPH_VIEW') {
             throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
@@ -143,7 +144,8 @@ export class OracleBackend implements GraphBackend {
                   `    SELECT nid BULK COLLECT INTO v_targets FROM cascade_targets WHERE nid NOT IN (SELECT nid FROM cascade_kept);`
               ].join('\n')
             : `SELECT DISTINCT nid BULK COLLECT INTO v_targets FROM (${reached});`;
-        return new GraphStatement(`DECLARE
+        return IdKeyedStatement.of(
+            new GraphStatement(`DECLARE
     v_roots SYS.ODCINUMBERLIST;
     v_targets SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
     v_deleted NUMBER;
@@ -157,7 +159,8 @@ BEGIN
     v_deleted := v_deleted + SQL%ROWCOUNT;
     OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
     DBMS_SQL.RETURN_RESULT(c);
-END;`);
+END;`)
+        );
     }
 
     cascadeDepthChecks(target: TargetModel, where?: string): CascadeDepthCheck[] {
@@ -170,7 +173,7 @@ END;`);
             view,
             field,
             maxDepth,
-            statement: new GraphStatement(beyondCount(roots, within, nodes))
+            statement: IdKeyedStatement.of(new GraphStatement(beyondCount(roots, within, nodes)))
         }));
     }
 
@@ -236,20 +239,24 @@ END;`);
      * 2, which the thin drivers can't read (oracle/node-oracledb#1796, oracle/python-oracledb#622).
      */
     heldProperties(model: FragmentModel): GraphStatement {
-        return new GraphStatement(
-            [
-                `SELECT JSON_TRANSFORM(${ROW_ALIAS}.props, KEEP '$') AS "props"`,
-                this.from(model, this.idPredicate(model))
-            ].join('\n')
+        return IdKeyedStatement.of(
+            new GraphStatement(
+                [
+                    `SELECT JSON_TRANSFORM(${ROW_ALIAS}.props, KEEP '$') AS "props"`,
+                    this.from(model, this.idPredicate(model))
+                ].join('\n')
+            )
         );
     }
 
     foundStamp(model: FragmentModel): GraphStatement {
-        return new GraphStatement(
-            [
-                `SELECT NVL(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
-                this.from(model, this.idPredicate(model))
-            ].join('\n')
+        return IdKeyedStatement.of(
+            new GraphStatement(
+                [
+                    `SELECT NVL(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
+                    this.from(model, this.idPredicate(model))
+                ].join('\n')
+            )
         );
     }
 
@@ -398,14 +405,17 @@ BEGIN
 END;`);
     }
 
-    /** The node whose id is `$id`, compared as JSON compares, so a number is not taken for text. */
+    /**
+     * The node whose id is `$id`, compared as JSON compares, so a number is not taken for text. The id is bound as the
+     * JSON text Oracle's layout holds it as, read `EXTENDED`, as a save finds the node (see IdKeyedStatement).
+     */
     private idPredicate(model: FragmentModel): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
         return `JSON_EXISTS(${ROW_ALIAS}.props, '$?(@${jsonKey(
             model.nodeIdProperty
-        )} == $id__)' PASSING $id AS "id__")`;
+        )} == $id__)' PASSING JSON($id EXTENDED) AS "id__")`;
     }
 
     private page(page: Page): string[] {

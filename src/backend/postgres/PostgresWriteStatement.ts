@@ -19,6 +19,9 @@ export interface WriteFunction {
     /** The graph's node table, which the query a `patch` step asks reads. */
     readonly nodes: string;
 
+    /** The store whose layout the plan's values are written in: see WritePlan.text. */
+    readonly store: 'postgres' | 'sqlite';
+
     /** The statement that calls the function, whose rows are each a text, or a number for a count. */
     writeCall(returns: WriteReturns): string;
 }
@@ -50,10 +53,10 @@ export class PostgresWriteStatement extends GraphStatement {
         );
     }
 
-    /** The values a plan is bound with. */
-    static bindings(plan: WritePlan, patchedIf?: string): Record<string, any> {
+    /** The values a plan is bound with: its steps as `store`'s layout holds their values (see WritePlan.text). */
+    static bindings(plan: WritePlan, store: 'postgres' | 'sqlite', patchedIf?: string): Record<string, any> {
         return {
-            [WritePlan.PLAN]: jsonText(plan.plan),
+            [WritePlan.PLAN]: plan.text(store),
             [SHAPES]: jsonText(plan.shapesBound),
             [WritePlan.MARK]: plan.mark,
             [PATCHED_IF]: patchedIf ?? null
@@ -65,7 +68,7 @@ export class PostgresWriteStatement extends GraphStatement {
      * @param reshaped the rows the function gives back, each a text, as the manager reads the statement's result
      */
     constructor(
-        graph: WriteFunction,
+        private readonly graph: WriteFunction,
         returns: WriteReturns,
         private readonly planned: (bound: Record<string, any>) => { plan: WritePlan; patchedIf?: string },
         private readonly reshaped: (rows: string[], bound: Record<string, any>) => any[]
@@ -77,7 +80,7 @@ export class PostgresWriteStatement extends GraphStatement {
         const bound = { ...this.bindings, ...more };
         const { plan, patchedIf }: { plan: WritePlan; patchedIf?: string } = this.planned(bound);
         return new QuerySpecification<T>(this.text)
-            .bind(PostgresWriteStatement.bindings(plan, patchedIf))
+            .bind(PostgresWriteStatement.bindings(plan, this.graph.store, patchedIf))
             .addPostProcessors({
                 apply: (rows: any[]) => this.reshaped(rows.map(columnValue), bound)
             });

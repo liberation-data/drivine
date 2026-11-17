@@ -17,6 +17,9 @@ const MAX_OBJECT_NAME = 63;
  * `contracts_node`, and is the same graph as one called `contracts`.
  */
 export class PostgresGraph extends SqlGraph implements WriteFunction {
+    /** The store whose layout a save's plan is written in (see WritePlan.text). */
+    readonly store = 'postgres' as const;
+
     /** What the node table's comment says of a store this version made: the module's version of the store. */
     static get VERSION(): string {
         const version = /COMMENT ON TABLE \w+ IS '([^']+)'/.exec(

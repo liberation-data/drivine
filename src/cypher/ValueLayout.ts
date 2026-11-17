@@ -1,6 +1,6 @@
 import { DrivineError } from '@/DrivineError';
 import { CypherFloat } from '@/cypher/CypherFloat';
-import { cypherCompilerModule, parametersJson } from '@/cypher/SharedCypherCompiler';
+import { cypherCompilerModule, parametersJson, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { isInt } from '@/utils/Integers';
 import { jsonText } from '@/utils/JsonText';
@@ -123,30 +123,47 @@ function unmarked(value: any): any {
 }
 
 /**
- * `value`, a value a save writes, as the store layout holds it, as the shared module writes it (its `write` request,
- * drivine4j's `CypherJson.valueToTree`): each `Date` its tag (`{"$t": "datetime", "v": …, "s": …}`), and each map key that
- * begins with `$` with one more `$` before it, at any depth. A value with neither in it is held as it is, and the module
- * is asked only of one that has. Bytes are held as the list of their signed values, and NaN and the infinities are
- * refused by name (see settled).
+ * `value`, a value a save writes, as `store`'s layout holds it, as JSON text: the shared module's write for the store (its
+ * `write` request, `{"write": <value>, "store": <store>}`, drivine4j's `CypherCompile.storeText`), the text a compiled
+ * statement that writes binds the value as, so a value saved is held as one `CREATE` made (drivine-cypher-spec#329). Each
+ * `Date` is its tag (`{"$t": "datetime", "v": …, "s": …}`), and each map key that begins with `$` has one more `$` before
+ * it, at any depth. A float is the store's: on Postgres a whole one with its fraction (`2.0`), on Oracle every one extended
+ * JSON's double (`{"$numberDouble": "2.5"}`, NaN and the infinities too), which Oracle reads `JSON(… EXTENDED)`, and on
+ * SQLite an infinity `9e999`. Bytes are the list of their signed values (`[1, 2, -1]` for 1, 2, 255), as drivine4j and
+ * Neo4j hold them.
+ *
+ * Where the store's JSON holds a float as no number, Postgres's NaN and infinities and SQLite's NaN, the module refuses the
+ * value, and so does this, with the module's message: the message a `CREATE` given the value is refused with.
+ *
+ * The module is asked only of a value that holds something it writes otherwise than JSON text does (see heldOtherwise): a
+ * date, a key that begins with `$`, bytes, a {@link CypherFloat}, or a number that isn't a safe integer, which every
+ * float but a whole one is. Any other value is held as its JSON text on every store.
  */
-export function writeLayout(given: any): any {
+export function writeLayout(given: any, store: SharedStore): string {
     const value = settled(given);
     if (!heldOtherwise(value)) {
-        return value;
+        return jsonText(value);
     }
-    const answer = parseExactIntegers(cypherCompilerModule().compile(`{"write":${parametersJson(value)}}`));
-    if (answer && typeof answer === 'object' && 'error' in answer) {
-        throw new DrivineError(`A value can't be written in the store layout: ${answer.error}`);
+    const answer = cypherCompilerModule().compile(
+        `{"write":${parametersJson(value)},"store":${JSON.stringify(store)}}`
+    );
+    // The value's text as the module wrote it, unparsed: JSON.parse would read 2.0 as 2, and 1.0E16 as a whole number.
+    if (answer.startsWith(WRITTEN) && answer.endsWith('}')) {
+        return answer.slice(WRITTEN.length, -1);
     }
-    return answer.value;
+    const refused = JSON.parse(answer);
+    throw new DrivineError(refused?.error ?? `The shared module wrote no value: ${answer}`);
 }
 
+/** How the module's answer to a write begins, the value's text after it. */
+const WRITTEN = '{"value":';
+
 /**
- * The properties a save writes, each by its name, as the store layout holds them (see writeLayout): one undefined
- * written null, as a save clears it.
+ * The properties a save writes, each by its name, as `store`'s layout holds them, as JSON text (see writeLayout): one
+ * undefined written null, as a save clears it.
  */
-export function writeProps(props: Record<string, any>): Record<string, any> {
-    return writeLayout(Object.fromEntries(Object.entries(props).map(([name, value]) => [name, value ?? null])));
+export function writeProps(props: Record<string, any>, store: SharedStore): string {
+    return writeLayout(Object.fromEntries(Object.entries(props).map(([name, value]) => [name, value ?? null])), store);
 }
 
 /** A property's name as the store layout holds it: one more `$` before a name that begins with one. */
@@ -154,9 +171,20 @@ export function heldKey(name: string): string {
     return name.startsWith('$') ? `$${name}` : name;
 }
 
-/** Whether `value` holds a `Date`, or a map key that begins with `$`, at any depth: what the layout holds otherwise. */
+/**
+ * Whether `value`, settled, holds what the module writes otherwise than JSON text, at any depth: a `Date`, a map key that
+ * begins with `$`, bytes, a {@link CypherFloat}, or a number that is not a safe integer (a float with a fraction, NaN, an
+ * infinity, -0, a whole number past 2^53). Asked of each float on every store: JSON text writes `1e-7` where the module
+ * writes `1.0E-7`, and `1e20` as a whole number, and on Oracle every float is extended JSON's double. Asked of a whole
+ * number past 2^53 too: JSON text writes 2^60 as `1152921504606847000`, its shortest text, where the module writes its
+ * digits, `1152921504606846976`, as a statement's parameter is. A safe integer is the integer it is on every store, and a
+ * `bigint`'s digits are the module's.
+ */
 function heldOtherwise(value: any): boolean {
-    if (value instanceof Date) {
+    if (typeof value === 'number') {
+        return !safeInteger(value);
+    }
+    if (value instanceof Date || value instanceof CypherFloat || bytes(value)) {
         return true;
     }
     if (value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) {
@@ -168,42 +196,47 @@ function heldOtherwise(value: any): boolean {
     return Object.entries(value).some(([key, item]) => key.startsWith('$') || heldOtherwise(item));
 }
 
-/**
- * What a save says of NaN or an infinity, which it refuses until the module's `write` holds each store's own spelling of
- * one (drivine-cypher-spec#329): written as JSON text it would be null, and as the module writes it today, a text that
- * a Cypher read gives back as one.
- */
-export const NON_FINITE_SAVED =
-    'A save is given NaN or an infinity, which the store layout holds as no number yet (drivine-cypher-spec#329): it would store another value in its place.';
+/** Whether `value` is a safe integer, and not -0: what JSON text writes as the digits the module writes it with. */
+function safeInteger(value: number): boolean {
+    return Number.isSafeInteger(value) && !Object.is(value, -0);
+}
+
+/** Whether `value` is bytes: a `Uint8Array`, an `Int8Array` or a `Buffer`. */
+function bytes(value: any): boolean {
+    return value instanceof Uint8Array || value instanceof Int8Array;
+}
 
 /**
  * `value` as a save writes it, at any depth, alike whether the module is asked of it or not: bytes (a `Uint8Array`, an
- * `Int8Array`, a `Buffer`) the list of their signed values, as drivine4j and Neo4j hold them (`[1, 2, -1]` for 1, 2,
- * 255), where JSON text would write a map of indexes; another typed array (a `Float32Array`) the list of its numbers; a
- * {@link CypherFloat} its number, and the Neo4j driver's `Integer` its whole number, where JSON text would write their
- * fields; an object of a class with no `toJSON` the map of its fields, as JSON text writes it; and NaN or an infinity
- * refused by name, where JSON text would write null (drivine-cypher-spec#329). A `Map`, a `DataView`, an `ArrayBuffer`
- * and an object with a `toJSON` are left as they are.
+ * `Int8Array`, a `Buffer`) kept for the module, which writes them as the list of their signed values; a float typed array
+ * (a `Float32Array`, a `Float64Array`) the list of its numbers, each a float, as drivine4j writes a `FloatArray`, and
+ * another typed array the list of its numbers; the Neo4j driver's `Integer` its whole number, where JSON text would write
+ * its fields; an object with a `toJSON` what its `toJSON` gives, settled, and one of a class with no `toJSON` the map of
+ * its fields, as JSON text writes them; and a `Map`, a `DataView` and an `ArrayBuffer` the empty map JSON text writes. A
+ * `Date` and a {@link CypherFloat} are kept for the module, and -0 is a float. So a value is written alike whether the
+ * module is asked of it or not: the module writes an object's fields and a `Map`'s entries, and a float beside one asks it.
  */
 function settled(value: any): any {
-    if (value === null || typeof value !== 'object' || value instanceof Date) {
-        return finite(value);
-    }
-    if (value instanceof CypherFloat) {
-        return finite(value.value);
+    if (value === null || typeof value !== 'object') {
+        // -0 a float, as no integer is -0: the module's request reads a number -0 as the integer 0.
+        return Object.is(value, -0) ? new CypherFloat(-0) : value;
     }
     if (isInt(value)) {
         const whole = BigInt(value.toString());
         return Number.isSafeInteger(Number(whole)) ? Number(whole) : whole;
     }
-    if (value instanceof Uint8Array || value instanceof Int8Array) {
-        return Array.from(new Int8Array(value.buffer, value.byteOffset, value.byteLength));
+    if (keptForModule(value)) {
+        return value;
+    }
+    const json = jsonOf(value);
+    if (json !== value) {
+        return settled(json);
+    }
+    if (value instanceof Float32Array || value instanceof Float64Array) {
+        return Array.from(value, (item) => new CypherFloat(item));
     }
     if (listed(value)) {
         return Array.from(value as Iterable<unknown>).map(settled);
-    }
-    if (keptAsIs(value)) {
-        return value;
     }
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settled(item)]));
 }
@@ -213,20 +246,18 @@ function listed(value: object): boolean {
     return Array.isArray(value) || value instanceof Set || (ArrayBuffer.isView(value) && !(value instanceof DataView));
 }
 
-/** Whether `value` is written as JSON text writes it, unsettled (see settled). */
-function keptAsIs(value: any): boolean {
-    return (
-        value instanceof Map ||
-        value instanceof DataView ||
-        value instanceof ArrayBuffer ||
-        typeof value.toJSON === 'function'
-    );
+/**
+ * What JSON text writes `value` as in place of its fields: a `Map`, a `DataView` or an `ArrayBuffer` the empty map, and
+ * an object with a `toJSON` what its `toJSON` gives. Any other `value` is itself.
+ */
+function jsonOf(value: any): any {
+    if (value instanceof Map || value instanceof DataView || value instanceof ArrayBuffer) {
+        return {};
+    }
+    return typeof value.toJSON === 'function' ? value.toJSON('') : value;
 }
 
-/** `value`, refused by name where it is NaN or an infinity (see settled). */
-function finite(value: any): any {
-    if (typeof value === 'number' && !Number.isFinite(value)) {
-        throw new DrivineError(NON_FINITE_SAVED);
-    }
-    return value;
+/** Whether `value` is kept as it is for the module, which writes it (see settled): a `Date`, a {@link CypherFloat}, bytes. */
+function keptForModule(value: object): boolean {
+    return value instanceof Date || value instanceof CypherFloat || bytes(value);
 }
