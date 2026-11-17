@@ -63,6 +63,31 @@ export function readLayoutAfter(
     if (!text.includes('"$') && !text.includes('\\u0024')) {
         return value;
     }
+    return readLayoutThrough(value);
+}
+
+/**
+ * A column a driver hands over parsed already (Oracle's JSON type, which node-oracledb reads as an object), read in the
+ * store layout as {@link readLayout} reads its text: through the module where a map in it, at any depth, has a key that
+ * begins with `$`, a tag's or an escaped key's, and as it is otherwise.
+ */
+export function readLayoutOf(value: any): any {
+    return keyedWithDollar(value) ? readLayoutThrough(value) : value;
+}
+
+/** Whether a map in `value`, at any depth, has a key that begins with `$`. */
+function keyedWithDollar(value: any): boolean {
+    if (value === null || typeof value !== 'object' || value instanceof Date || ArrayBuffer.isView(value)) {
+        return false;
+    }
+    if (Array.isArray(value)) {
+        return value.some(keyedWithDollar);
+    }
+    return Object.entries(value).some(([key, item]) => key.startsWith('$') || keyedWithDollar(item));
+}
+
+/** `value`, parsed already, read in the store layout by the module, each float JSON would misread kept as it is. */
+function readLayoutThrough(value: any): any {
     // A number here is a float, a whole number past 2^53 being a bigint: one JSON would misread crosses as its stand-in,
     // -0 among them, which JSON writes 0.
     const marked = jsonText(value, (_, item) =>

@@ -14,7 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
-import { readLayoutAfter } from '@/cypher/ValueLayout';
+import { readLayoutAfter, readLayoutOf } from '@/cypher/ValueLayout';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
 const EXECUTE_OPTIONS: oracledb.ExecuteOptions = {
@@ -148,7 +148,13 @@ export class OracleConnection implements Connection {
         new StatementLogger(this.sessionId()).log(spec, hrStart);
         const rows =
             result.rows ?? implicitRows(result.implicitResults?.[0] as any[] | undefined, cypher !== undefined);
-        const returned = !cypher ? rows : result.rows ? rows.map(readRow) : returnedRows(rows, cypher.rows);
+        const returned = !cypher
+            ? finalized._exactIntegers
+                ? rows.map(ownRow)
+                : rows
+            : result.rows
+            ? rows.map(readRow)
+            : returnedRows(rows, cypher.rows);
         return this.resultMapper.mapQueryResults<T>(returned, finalized);
     }
 }
@@ -178,6 +184,14 @@ function readRow(row: Record<string, unknown>): Record<string, unknown> {
             value === null || value === undefined ? value : readLayoutAfter(String(value), withFloats)
         ])
     );
+}
+
+/**
+ * A row of the object manager's own statement (#741): each column the driver read, a JSON column as the object it
+ * holds, read in the store layout (see readLayoutOf), as Postgres and SQLite read it. A user's own SQL is not.
+ */
+function ownRow(row: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, readLayoutOf(value)]));
 }
 
 /** Oracle's names in its extended JSON for NaN and the infinities, and the numbers they are. */

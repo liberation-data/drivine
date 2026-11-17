@@ -2,7 +2,15 @@ import { cypherCompilerModule, useCypherCompiler } from '@/cypher/SharedCypherCo
 import { CypherFloat } from '@/cypher/CypherFloat';
 import { jsonText } from '@/utils/JsonText';
 import { int } from 'neo4j-driver';
-import { heldKey, NON_FINITE_SAVED, readLayout, readLayoutAfter, writeLayout, writeProps } from '@/cypher/ValueLayout';
+import {
+    heldKey,
+    NON_FINITE_SAVED,
+    readLayout,
+    readLayoutAfter,
+    readLayoutOf,
+    writeLayout,
+    writeProps
+} from '@/cypher/ValueLayout';
 
 /**
  * A column read in the store layout (readLayout): the module is asked of every text that holds `"$` or `$`, and
@@ -80,6 +88,16 @@ describe('readLayout', () => {
             ...texts,
             { $k: null }
         ]);
+    });
+
+    it('reads a value a driver parsed already through the module only where a key in it begins with $', () => {
+        const parsed = { a: ['$5', { b: 1.5 }], c: '"$d' };
+        expect(readLayoutOf(parsed)).toBe(parsed);
+        expect(asked).toEqual([]);
+        const read = readLayoutOf([{ $$k: { $t: 'date', v: '2024-01-01', s: '10000020240101' } }, -0, NaN, 1e16]);
+        expect(read).toEqual([{ $k: '2024-01-01' }, -0, NaN, 1e16]);
+        expect(Object.is(read[1], -0)).toBe(true);
+        expect(asked).toHaveLength(1);
     });
 
     it('keeps a whole number past 2^53 and an infinity in a text the module reads', () => {
