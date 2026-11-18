@@ -7,6 +7,7 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { dateOf, NO_NODE } from '@/backend/sql/NodeIds';
 
 /**
  * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
@@ -292,22 +293,21 @@ export function declaredDate(type: Function, mapping: FieldMapping, field: strin
     return mapping.dates.has(field) || Reflect.getMetadata('design:type', type.prototype, field) === Date;
 }
 
-/** The start of an ISO 8601 date or datetime: a year, a month and a day, then a time or nothing. */
-const ISO_DATE = /^[+-]?\d{4,6}-\d{2}-\d{2}(T|$)/;
-
 /**
- * Internal: a value of a property declared a `Date` as a `Date`: one a SQL store gives as its text (the module's
- * canonical text, `2026-01-01T00:00:00Z`, or a FalkorDB datetime's), as the instant it names, to the millisecond, as a
- * `Date` holds it. A `Date` a graph engine's driver gave is as it is, and so is anything else: a text that isn't ISO
- * 8601, which JavaScript's parser would guess a date of (`'5'`), and one that names no instant a `Date` can be given as
- * text (`-0044-03-15T00:00:00Z`).
+ * Internal: a value of a property declared a `Date` as a `Date`: ISO 8601 text, as a SQL store gives one (the module's
+ * canonical text, `2026-01-01T00:00:00Z`, at an offset, with nine digits of the second, or a year before 1 or past 9999,
+ * `-0044` and `+12345`, as Java writes them), as the instant it names, read as an id's text is ({@link dateOf}): a time
+ * with no offset at UTC, and to the millisecond, as a `Date` holds it. A `Date` a graph engine's driver gave is as it
+ * is, and so is anything else: a text that isn't ISO 8601, which JavaScript's parser would guess a date of (`'5'`), and
+ * a day the month hasn't (`2026-02-30`).
  */
 export function asDate(value: any): any {
-    if (typeof value !== 'string' || !ISO_DATE.test(value)) {
+    if (typeof value !== 'string') {
         return value;
     }
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date;
+    // dateOf reads a signed year of five or six digits, and a fraction no finer than a millisecond.
+    const date = dateOf(value.replace(/^([+-])(\d{4})-/, '$100$2-').replace(/(\.\d{3})\d+/, '$1'));
+    return date === NO_NODE ? value : date;
 }
 
 /**

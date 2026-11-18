@@ -65,7 +65,7 @@ const READERS: [Function, (text: string) => unknown][] = [
  * JavaScript rolls into the next (`2024-02-30` is 1 March), and for the year -0, which JavaScript reads as another
  * (`-000000-01-01` is 1 January 2001), as drivine4j's strict ISO reading refuses them.
  */
-function dateOf(text: string): unknown {
+export function dateOf(text: string): unknown {
     const parts = ISO_DATE.exec(text);
     if (
         !parts ||
