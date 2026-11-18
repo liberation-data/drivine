@@ -197,4 +197,50 @@ describe('a grouped read run on SQLite', () => {
             '2023-12-31T23:00:00.000Z'
         ]);
     });
+
+    it('compares, orders and filters a least or greatest value at its node, before the page is taken', async () => {
+        await gom.saveAll(
+            [
+                { id: 'a', shelf: 'one', value: 3, name: 'x' },
+                { id: 'b', shelf: 'one', value: 7, name: 'y' },
+                { id: 'c', shelf: 'two', value: 5, name: 'x' },
+                { id: 'd', shelf: 'three' },
+                { id: 'e', shelf: 'four', value: 1, name: 'y' }
+            ].map((it) => Object.assign(new Item(), it))
+        );
+        const top = async (spec: object): Promise<unknown[]> =>
+            gom.groups.load(Item, { keys: { shelf: key('shelf') }, aggregates: { top: max('value') }, ...spec });
+        // A group with no value is last ascending and first descending, as Cypher orders a null.
+        expect(await top({ orderBy: [['top', 'asc']] })).toEqual([
+            { shelf: 'four', top: 1 },
+            { shelf: 'two', top: 5 },
+            { shelf: 'one', top: 7 },
+            { shelf: 'three' }
+        ]);
+        expect((await top({ orderBy: [['top', 'desc']] })).map((it: any) => it.shelf)).toEqual([
+            'three',
+            'one',
+            'two',
+            'four'
+        ]);
+        // The having is a condition over the joined node, outside the grouping, and the page is taken after it.
+        const kept = { having: [['top', 'gte', 5]], orderBy: [['shelf', 'asc']] };
+        expect(await top(kept)).toEqual([
+            { shelf: 'one', top: 7 },
+            { shelf: 'two', top: 5 }
+        ]);
+        expect(await top({ ...kept, skip: 1, limit: 1 })).toEqual([{ shelf: 'two', top: 5 }]);
+        // A filtered least value is of the nodes that meet the filter: none in a group is no value.
+        const filtered = await gom.groups.load(Item, (q: any) => ({
+            keys: { shelf: key(q.shelf) },
+            aggregates: { low: min(q.value, q.name.eq('y')) },
+            orderBy: [['low', 'asc']]
+        }));
+        expect(filtered).toEqual([
+            { shelf: 'four', low: 1 },
+            { shelf: 'one', low: 7 },
+            { shelf: 'three' },
+            { shelf: 'two' }
+        ]);
+    });
 });
