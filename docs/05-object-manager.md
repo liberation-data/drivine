@@ -82,6 +82,22 @@ tags: Set<string>;                               // neither: TypeScript records 
 
 Loading a set without `@EmptyWhenAbsent` as a `Set` is a change from 3.2, which loaded it as the array the store held.
 
+**Dates.** A field declared a `Date` loads as a `Date` on every store, as Neo4j's and Memgraph's drivers give one, in a
+fragment, a view's root and its relationships, a nested view, a relationship fragment, a path's end and a `@NodeId`,
+through `load`, `loadAll`, `loadNearest`, `loadMatching`, `edges.loadRelated` and `update`
+([#807](https://github.com/liberation-data/drivine/issues/807)). Oracle, Postgres, SQLite and FalkorDB hold a date as
+its ISO 8601 text, which loaded as that text before. Drivine knows a field is declared a `Date` as it knows a field
+holds a set: where TypeScript records its type, for a decorated field, whatever the decorator, or where the class
+initializes the field with a `Date`. A field neither decorated nor initialized, or declared with a union such as
+`Date | null`, loads as the store gives it: a `Date` on Neo4j and Memgraph, its text elsewhere. A null loads as null,
+and a text that is no ISO 8601 date, or a day the month hasn't, as the text.
+
+```typescript
+@GraphProperty('due_at') due: Date;   // decorated: loads as a Date
+openedAt = new Date(0);               // initialized: loads as a Date
+seenAt: Date;                         // neither: a Date on Neo4j and Memgraph, its text on the other stores
+```
+
 `save`, `patch`, `patchAll` and `edges.relate` all write a set as the list of its items, and a `@JsonPacked` one as the
 JSON text of that list, which is also what a `where` compares a packed set field with. In 3.2, `patch` wrote a packed
 set as `{}`, and on Postgres and Oracle so did `patch` and `relate` any set, losing its items; a `where` comparing a
