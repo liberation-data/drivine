@@ -42,7 +42,7 @@ const ISSUES = 20_000;
  * drivine4j#65: Oracle takes a test of a node's labels for a lookup of one row, so a filter on a property with a range
  * index read every node of the label. An equality every root meets is written over the index's expression, which tests
  * the label too: the shared module's fragment writes it so for the labels it is given (drivine-cypher-spec#235, step 4),
- * over drivine4j's expression, which Oracle reads through the index once this library makes the index over it (#696).
+ * over the expressions layout 2's labelled index (lx2) and unique index (uq2) are made over, so Oracle reads them (#696).
  */
 describeOnOracle('filters read through labelled indexes on Oracle', () => {
     let pm: PersistenceManager;
@@ -135,7 +135,7 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
     });
 
     // The DSL's equality is the module's fragment (drivine-cypher-spec#235), over the expression layout 2's labelled index
-    // is made over, the module's and drivine4j's (#696).
+    // is made over by the module's schema plan, as drivine4j makes it (#696).
     it('should read the index, and not the label, for a comparison every root meets', async () => {
         await gom.indexes.ensure(byRepo);
         const labelled = new OracleGraph().objectName('lx2', ['OraIssue', 'repoKey']).toUpperCase();

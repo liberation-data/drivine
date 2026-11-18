@@ -34,8 +34,8 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
   Cypher's `NOT n.p IN []` does. On Postgres the query DSL compares and orders text by its code points, as Neo4j does
   (`B, a, b`), where 5.0 used the database's collation (see [Postgres](07-supported-engines.md#postgres)); Oracle did
   so already. On Oracle `matches` reads a backreference as compiled Cypher's `=~` does, and refuses one it can't read
-  as Java does, and an equality of an indexed property is written over drivine4j's index expression, which this
-  library's index isn't made over yet ([#696](https://github.com/liberation-data/drivine/issues/696)).
+  as Java does, and an equality of an indexed property is read through layout 2's index of the label: a range index's
+  labelled index, or a uniqueness constraint's unique index.
 - A property or map key whose name begins with `$` is held under one more `$` (`$$k` for `$k`), and reads back as it
   was. The query DSL filters, orders and groups by one as it is held. A raw `where` that names one as Cypher writes it,
   ``n.`$k` ``, reads it as it is held on every SQL store; SQL of your own over `n.props` names it `$$k`.

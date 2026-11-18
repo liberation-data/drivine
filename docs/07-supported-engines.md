@@ -130,8 +130,8 @@ Notes:
   (`<graph>_lx2_…`), which an equality on the label's nodes, as the compiler writes it given the store's indexed
   properties, is read through. The query DSL's equality is read through it, and through a uniqueness constraint's unique
   index ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)); a Cypher
-  statement isn't yet, as it is compiled without them ([#753](https://github.com/liberation-data/drivine/issues/753)). A uniqueness constraint is a unique index over the label's nodes that
-  have its properties (`<graph>_uq2_…`). A value is equal only to one of its kind: `1` and `'1'` are two keys. It comes
+  statement isn't yet, as it is compiled without them ([#753](https://github.com/liberation-data/drivine/issues/753)).
+  A uniqueness constraint is a unique index over the label's nodes that have its properties (`<graph>_uq2_…`). A value is equal only to one of its kind: `1` and `'1'` are two keys. It comes
   with a range index over its properties, which stays when the constraint is dropped; over one property, its unique
   index stands for the labelled index. An index Drivine 5.0 made, under layout 1's names, is dropped as its graph is
   stamped layout 2: see [Upgrading to 6.0](22-upgrading-to-6.md#oracles-indexes-are-drivine4js).

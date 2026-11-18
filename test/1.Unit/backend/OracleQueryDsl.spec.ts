@@ -24,6 +24,10 @@ import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { SqlFragments } from '@/cypher/SqlFragments';
 import { GroupOperations } from '@/manager/GroupOperations';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { ConstraintManager } from '@/schema/ConstraintManager';
+import { IndexManager } from '@/schema/IndexManager';
+import { rangeIndex, uniquenessConstraint } from '@/schema/SchemaSpecs';
+import { planningOn } from '../schema/Planning';
 
 @NodeFragment({ labels: ['Scored'] })
 class Scored {
@@ -212,6 +216,47 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(either.labelsTested).toEqual([]);
         // A range comparison is not read through the index: the module reads an equality alone through it.
         expect(backend.renderQuery((q: any) => ({ where: q.name.gte('A') }), scored, indexed).labelsTested).toEqual([]);
+    });
+
+    it("writes an indexed equality over the expressions of layout 2's labelled and unique indexes, as the plan makes them", async () => {
+        const ran: string[] = [];
+        const recorder = {
+            run: async (statement: unknown): Promise<any[]> => {
+                ran.push(String(statement));
+                return Promise.resolve([]);
+            }
+        };
+        await new IndexManager(planningOn('oracle', recorder)).ensure(rangeIndex('Scored', 'name'));
+        await new ConstraintManager(planningOn('oracle', recorder)).ensure(uniquenessConstraint('Scored', 'name'));
+        /** The expressions the index of the kind (lx2, uq2) is made over, over the DSL's row. */
+        const columns = (kind: string): string[] => {
+            const made = ran
+                .join('\n')
+                .match(
+                    new RegExp(`INDEX IF NOT EXISTS drivine_${kind}_Scoredname_\\w+ ON drivine_node n \\((.*)\\)';`)
+                );
+            expect(made).not.toBeNull();
+            const ddl = made![1].replace(/''/g, "'").replace(/\bn\./g, 'n_.');
+            const split: string[] = [];
+            let depth = 0;
+            let start = 0;
+            for (let i = 0; i < ddl.length; i++) {
+                depth += ddl[i] === '(' ? 1 : ddl[i] === ')' ? -1 : 0;
+                if (ddl[i] === ',' && depth === 0) {
+                    split.push(ddl.slice(start, i).trim());
+                    start = i + 1;
+                }
+            }
+            return [...split, ddl.slice(start).trim()];
+        };
+        const where = backend.renderQuery((q: any) => ({ where: q.name.eq('Ada') }), scored, [
+            { label: 'Scored', properties: ['name'] }
+        ]).where!;
+        for (const kind of ['lx2', 'uq2']) {
+            const [type, value] = columns(kind);
+            expect(where).toContain(`${type} = 'string'`);
+            expect(where).toContain(`${value} = $_cyk__q0`);
+        }
     });
 
     it('says which stored functions a statement calls, for the connection to make sure of them', () => {
