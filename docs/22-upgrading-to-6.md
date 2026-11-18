@@ -32,7 +32,8 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
   and `max` are the value of a node of the group in Cypher's order, of any kind, where 5.0 gave a number's alone, and
   its groups are ordered by a key as Cypher orders it, a text before a boolean before a number, where Postgres ordered
   them as `jsonb` orders, a number before a boolean. `notIn([])` matches a node that lacks the property, as Cypher's
-  `NOT n.p IN []` does.
+  `NOT n.p IN []` does. On Postgres the query DSL compares and orders text by its code points, as Neo4j does (`B, a,
+  b`), where 5.0 used the database's collation (see [Postgres](07-supported-engines.md#postgres)).
 - A property or map key whose name begins with `$` is held under one more `$` (`$$k` for `$k`), and reads back as it
   was. On SQLite and Postgres the query DSL filters, orders and groups by one as it is held; on Oracle it doesn't
   yet, and finds nothing by one.

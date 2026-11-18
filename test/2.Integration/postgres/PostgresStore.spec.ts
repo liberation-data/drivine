@@ -317,6 +317,19 @@ describe.each(postgres)('a store on $name', (store) => {
         await gom.deleteAll(Ticket);
     });
 
+    // The DSL's text is the module's, in the C collation (drivine-cypher-spec#235, step 3): by code point, as Neo4j
+    // compares and orders it, where 5.0's SQL used the database's collation (`a, b, B`).
+    it('should compare and order text in the query DSL by its code points: B before a', async () => {
+        await gom.deleteAll(Ticket);
+        await gom.saveAll(['a', 'B', 'b'].map((title) => Object.assign(new Ticket(), { id: `c-${title}`, title })));
+        const titles = async (fn: (q: any) => any): Promise<string[]> =>
+            (await gom.loadAll(Ticket, fn)).map((it) => it.title!);
+        expect(await titles((q) => ({ orderBy: [q.title.asc()] }))).toEqual(['B', 'a', 'b']);
+        expect(await titles((q) => ({ where: q.title.gt('B'), orderBy: [q.title.asc()] }))).toEqual(['a', 'b']);
+        expect(await titles((q) => ({ orderBy: [q.title.asc()], seek: [q.title.after('B')] }))).toEqual(['a', 'b']);
+        await gom.deleteAll(Ticket);
+    });
+
     it('should report the values a uniqueness constraint would refuse, and refuse a second node once it is made', async () => {
         await seed.node(['Ticket'], { id: 'u1', title: 'same' });
         await seed.node(['Ticket'], { id: 'u2', title: 'same' });

@@ -1,4 +1,6 @@
 import {
+    above,
+    caseOf,
     count,
     key,
     max,
@@ -83,6 +85,16 @@ describe("The query DSL on Postgres, as the module's fragments", () => {
         expect(query.bindings).toEqual({ _cy__q0: '"Ada"' });
     });
 
+    it('compares and orders text by its code points, in the C collation, not the database collation', () => {
+        const query = backend.renderQuery(
+            (q: any) => ({ where: q.name.gt('B'), orderBy: [q.name.asc()], seek: [q.name.after('B')] }),
+            scored
+        );
+        expect(query.where).toContain(`(n_.props ->> 'name') COLLATE "C" > (CAST($_cy__q0 AS jsonb) #>> '{}')`);
+        expect(query.where).toContain(`(n_.props ->> 'name') COLLATE "C" > (CAST($_cy__q1 AS jsonb) #>> '{}')`);
+        expect(query.orderBy).toContain(`(n_.props ->> 'name') END) COLLATE "C"`);
+    });
+
     it("filters and orders by a node's stamp as its row's stamp column, not a property of it", () => {
         const stamped: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Stamped) };
         const query = backend.renderQuery(
@@ -101,6 +113,22 @@ describe("The query DSL on Postgres, as the module's fragments", () => {
             true
         );
         expect(query.bindings).toEqual({});
+        // An order that binds values binds them in its null term (f1) and in its own terms (f2), each named apart.
+        const bound = backend.renderQuery(
+            (q: any) => ({ orderBy: [caseOf([above(q.$score, 3).then(1)], 2).asc().nullsFirst()] }),
+            scored
+        );
+        expect(bound.orderBy!.startsWith('(COALESCE(jsonb_typeof(CASE WHEN')).toBe(true);
+        expect(bound.orderBy).toContain('$_cy_f1__q0');
+        expect(bound.orderBy).toContain('$_cy_f2__q0');
+        expect(bound.bindings).toEqual({
+            _cy_f1__q0: '3',
+            _cy_f1__q1: '1',
+            _cy_f1__q2: '2',
+            _cy_f2__q0: '3',
+            _cy_f2__q1: '1',
+            _cy_f2__q2: '2'
+        });
     });
 
     it('counts and deletes over n_, and reads a raw where over n as n_', () => {
