@@ -93,4 +93,10 @@ describe.each(sqlStores())('A property whose name begins with $ in the query DSL
             { score: 1, nodes: 1, total: 1 }
         ]);
     });
+    // A raw where names it as Cypher writes it, in backticks, and reads the key layout 2 holds it under (#793).
+    it('reads it in a raw where by the key it is held under', async () => {
+        const found = await gom.loadAll(Ranked, { where: 'n.`$score` IS NOT NULL' });
+        expect(found.map((it) => it.id).sort()).toEqual(['r1', 'r2', 'r3']);
+        expect(await gom.loadAll(Ranked, { where: 'n.`$score` IS NULL' })).toEqual([]);
+    });
 });
