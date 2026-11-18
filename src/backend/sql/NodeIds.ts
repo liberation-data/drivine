@@ -27,8 +27,11 @@ const NUMBER = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
 /** A whole number's text. */
 const INTEGER = /^-?(0|[1-9]\d*)$/;
 
-/** ISO 8601 text of a date, or of a date and time: what a `Date` id is given as. */
-const ISO_DATE = /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})(T(\d{2}):\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+/**
+ * ISO 8601 text of a date, or of a date and time: what a `Date` id is given as, and what a SQL store's tag reads one back
+ * as, a year past 9999 with five digits (`+12345`), as Java writes it.
+ */
+const ISO_DATE = /^([+-]\d{5,6}|\d{4})-(\d{2})-(\d{2})(T(\d{2}):\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 /**
  * `given` as a node of `model` holds its id: text given for an id of another type read as that type, as TypeScript
@@ -65,7 +68,8 @@ function dateOf(text: string): unknown {
     if (!parts || Number(parts[5] ?? 0) > 23 || !isCalendarDay(Number(parts[1]), Number(parts[2]), Number(parts[3]))) {
         return NO_NODE;
     }
-    const date = new Date(text);
+    // JavaScript reads a signed year of six digits only.
+    const date = new Date(text.replace(/^([+-])(\d{5})-/, '$10$2-'));
     return Number.isNaN(date.getTime()) ? NO_NODE : date;
 }
 

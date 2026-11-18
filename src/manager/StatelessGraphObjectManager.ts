@@ -51,6 +51,7 @@ import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecificat
 import { cypherStatement } from '@/query/Statement';
 import { columnValue } from '@/backend/postgres/PostgresStatement';
 import { lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
+import { rootOf } from '@/backend/sql/SqlSaves';
 import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
 /**
@@ -547,6 +548,7 @@ export class StatelessGraphObjectManager {
         attempts: number = UPDATE_ATTEMPTS
     ): Promise<T | undefined> {
         const target = this.modelOf(type);
+        const root = rootOf(target);
         const id = this.lookupId(target, given);
         if (id === NO_NODE) {
             return undefined;
@@ -565,10 +567,11 @@ export class StatelessGraphObjectManager {
             try {
                 return await this.write(changed, options, false);
             } catch (failure) {
-                // By value (see readBackKey): the save's id is the loaded object's, another Date than a Date id given.
+                // By value (see readBackKey): the save's id is the loaded object's, another Date than a Date id given,
+                // or on a SQL store the tag's text.
                 if (
                     !(failure instanceof StaleObjectException) ||
-                    readBackKey(failure.id) !== readBackKey(id) ||
+                    readBackKey(failure.id, root) !== readBackKey(id, root) ||
                     attempt >= attempts
                 ) {
                     throw failure;
@@ -926,7 +929,8 @@ export class StatelessGraphObjectManager {
             throw new DrivineError(`The ${name} given as from has no root fragment.`);
         }
         const [loadedId, id] = [loadedRoot[model.nodeIdField!], root[model.nodeIdField!]];
-        if (String(loadedId) !== String(id)) {
+        // By value (see readBackKey): a SQL store loads a Date id as its tag's text, and a Date's String has no milliseconds.
+        if (String(readBackKey(loadedId, model)) !== String(readBackKey(id, model))) {
             throw new DrivineError(
                 `from is the ${name} '${String(loadedId)}', and the object saved '${String(id)}'. Give the object as ` +
                     `it was loaded.`
@@ -963,8 +967,9 @@ export class StatelessGraphObjectManager {
             target.kind === 'GRAPH_VIEW'
                 ? [before[target.model.rootField], changed[target.model.rootField]]
                 : [before, changed];
-        // By value (see readBackKey): the copy taken before the change holds a Date id as another Date.
-        if (readBackKey(rootAfter?.[root.nodeIdField!]) !== readBackKey(rootBefore[root.nodeIdField!])) {
+        // By value (see readBackKey): the copy taken before the change holds a Date id as another Date, and a SQL store
+        // loads one as its tag's text.
+        if (readBackKey(rootAfter?.[root.nodeIdField!], root) !== readBackKey(rootBefore[root.nodeIdField!], root)) {
             throw new DrivineError(
                 `An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`
             );
@@ -986,8 +991,8 @@ export class StatelessGraphObjectManager {
             target.kind === 'GRAPH_VIEW'
                 ? target.model.relationships
                       .filter((rel) => {
-                          const after = new Set(relatedIds(rel, changed[rel.field]).map((it) => readBackKey(it)));
-                          return relatedIds(rel, before[rel.field]).some((it) => !after.has(readBackKey(it)));
+                          const after = new Set(relatedIds(rel, changed[rel.field]));
+                          return relatedIds(rel, before[rel.field]).some((it) => !after.has(it));
                       })
                       .map((rel) => rel.field)
                 : [];
@@ -1384,6 +1389,7 @@ function relatedIds(rel: RelationshipModel, value: any): any[] {
     return [value ?? []].flat().map((item: any) => {
         const node = related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[related.model.targetField] : item;
         const fragment = into.kind === 'GRAPH_VIEW' ? node?.[into.model.rootField] : node;
-        return fragment?.[root.nodeIdField!];
+        // By value (see readBackKey): a loaded Date id is another Date, or on a SQL store its tag's text.
+        return readBackKey(fragment?.[root.nodeIdField!], root);
     });
 }

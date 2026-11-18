@@ -717,6 +717,81 @@ describe('a Date id matched by its time', () => {
         expect([saved?.note, writes]).toEqual(['y', 2]);
     });
 
+    // A SQL store loads a Date id as its tag's text, `v`.
+    const text = (): string => JSON.parse(writeLayout(on(), 'sqlite')).v;
+
+    it("is loaded again and saved again by an update whose save was stale, where a SQL store loaded it as its tag's text", async () => {
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new SqliteBackend(new SqliteGraph()),
+            new ModelRegistry()
+        );
+        const loaded = (): StampedDay => Object.assign(new StampedDay(), { on: text(), stamp: `${'a'.repeat(16)}:` });
+        (gom as any).loadRow = async () => Promise.resolve({ object: loaded() });
+        let writes = 0;
+        (gom as any).write = async (object: StampedDay) => {
+            writes++;
+            if (writes === 1) {
+                throw new StaleObjectException(StampedDay, object.on, 'a', 'b', false);
+            }
+            return Promise.resolve(object);
+        };
+        const saved = await gom.update(StampedDay, on(), (it) => {
+            it.note = 'y';
+        });
+        expect([saved?.note, writes]).toEqual(['y', 2]);
+    });
+
+    it("is an update's same id and related target, where a SQL store loaded it as its tag's text", () => {
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new SqliteBackend(new SqliteGraph()),
+            new ModelRegistry()
+        );
+        const model = new ModelRegistry().fragment(StampedDay);
+        const day = Object.assign(new StampedDay(), { on: text(), note: 'x' });
+        const changed = Object.assign(new StampedDay(), { on: on(), note: 'y' });
+        expect((gom as any).changeOf({ kind: 'NODE_FRAGMENT', model }, day, changed).only).toEqual(['note']);
+        const view = (id: unknown): DialDays =>
+            Object.assign(new DialDays(), {
+                dial: Object.assign(new Dial(), { id: 1, name: 'x' }),
+                days: [Object.assign(new StampedDay(), { on: id })]
+            });
+        const target = { kind: 'GRAPH_VIEW', model: new ModelRegistry().view(DialDays) };
+        expect((gom as any).changeOf(target, view(text()), view(on())).replace).toBeUndefined();
+    });
+
+    it("is the id of a save's from, where a SQL store loaded it as its tag's text, and not a Date a millisecond on", () => {
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new SqliteBackend(new SqliteGraph()),
+            new ModelRegistry()
+        );
+        const target = { kind: 'NODE_FRAGMENT', model: new ModelRegistry().fragment(StampedDay) };
+        const from = Object.assign(new StampedDay(), { on: text(), stamp: `${'a'.repeat(16)}:` });
+        const saved = Object.assign(new StampedDay(), { on: on(), note: 'y' });
+        expect((gom as any).loadedAs(target, saved, from).root).toBe(from);
+        const later = Object.assign(new StampedDay(), { on: new Date(on().getTime() + 1) });
+        expect(() => (gom as any).loadedAs(target, later, from)).toThrow('Give the object as it was loaded.');
+    });
+
+    it('hands a stamped node of a Date id past the year 9999 its stamp by the five-digit year Oracle reads it back as', () => {
+        const model = new ModelRegistry().fragment(StampedDay);
+        const day = Object.assign(new StampedDay(), { on: new Date('+012345-01-03T00:00:00.000Z') });
+        const id = JSON.parse(writeLayout(day.on, 'oracle')).v;
+        expect(id).toEqual('+12345-01-03T00:00:00Z');
+        const stamp = `${'a'.repeat(16)}:${'b'.repeat(16)}`;
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new OracleBackend(new OracleGraph()),
+            new ModelRegistry()
+        );
+        (gom as any).handBackFragments([{ model, objects: [day] }], {
+            groups: [{ before: [], after: [{ id, stamp }] }]
+        });
+        expect(day.stamp).toEqual(stamp);
+    });
+
     it('is one node of a save that holds it twice, as two objects, each with a Date of its own', () => {
         const handed = new Map([
             ['0', { group: 0, id: on() }],
