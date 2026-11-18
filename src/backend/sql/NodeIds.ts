@@ -28,7 +28,7 @@ const NUMBER = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
 const INTEGER = /^-?(0|[1-9]\d*)$/;
 
 /** ISO 8601 text of a date, or of a date and time: what a `Date` id is given as. */
-const ISO_DATE = /^([+-]\d{6}|\d{4})-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+const ISO_DATE = /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})(T(\d{2}):\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 /**
  * `given` as a node of `model` holds its id: text given for an id of another type read as that type, as TypeScript
@@ -56,10 +56,24 @@ const READERS: [Function, (text: string) => unknown][] = [
     [Boolean, (text) => (text === 'true' ? true : text === 'false' ? false : NO_NODE)]
 ];
 
-/** ISO text as the `Date` it is; NO_NODE for any other text. */
+/**
+ * ISO text as the `Date` it is; NO_NODE for any other text, and for a day the month hasn't or the hour 24, which
+ * JavaScript rolls into the next (`2024-02-30` is 1 March), as drivine4j's strict ISO reading refuses them.
+ */
 function dateOf(text: string): unknown {
-    const date = ISO_DATE.test(text) ? new Date(text) : undefined;
-    return date && !Number.isNaN(date.getTime()) ? date : NO_NODE;
+    const parts = ISO_DATE.exec(text);
+    if (!parts || Number(parts[5] ?? 0) > 23 || !isCalendarDay(Number(parts[1]), Number(parts[2]), Number(parts[3]))) {
+        return NO_NODE;
+    }
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? NO_NODE : date;
+}
+
+/** Whether the month of the year has the day. */
+function isCalendarDay(year: number, month: number, day: number): boolean {
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
+    return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 /** Whether `backend` keeps its graph in SQL tables, where an id is found as {@link typedId} reads it. */

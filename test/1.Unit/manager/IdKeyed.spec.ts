@@ -379,6 +379,14 @@ describe.each([
         expect(bound.map((it) => it.parameters.id)).toEqual([writeLayout(new Date('2024-01-02T03:04:05.000Z'), store)]);
     });
 
+    it('runs nothing for an ISO text of no calendar day or hour, which JavaScript would roll into the next', async () => {
+        for (const nothing of ['2024-02-30', '2023-02-29', '2024-04-31T00:00:00Z', '2024-01-01T24:00:00Z']) {
+            expect(await gom.load(Dated, nothing)).toBeUndefined();
+        }
+        await gom.load(Dated, '2024-02-29');
+        expect(bound.map((it) => it.parameters.id)).toEqual([writeLayout(new Date('2024-02-29'), store)]);
+    });
+
     it("reads a bigint id's text as its digits, and a boolean id's as the boolean, running nothing for other text", async () => {
         const big = BigInt('1152921504606846976');
         await gom.load(Counted, '1152921504606846976');
