@@ -29,7 +29,7 @@ export class PostgresWrites {
 
     /**
      * Writes `$set` (a merge patch, `$vectors` beside it) to the node with id `$id`, if it meets `where`, a condition
-     * over its row `n`: `{found, applied, changed}`.
+     * over its row (see `meeting`): `{found, applied, changed}`.
      */
     patchOne(model: FragmentModel, where?: string): GraphStatement {
         const key = idProperty(model, "it can't be patched by id");
@@ -191,15 +191,18 @@ export class PostgresWrites {
     }
 
     /**
-     * The query a patch step asks of the node it found, by its `nid`, the function's `$1`: whether its row `n` meets
-     * `where`. The function runs it on its own, where no value can be bound, so each value `where` names is written in.
+     * The query a patch step asks of the node it found, by its `nid`, the function's `$1`: whether its row meets `where`,
+     * `n`, or on SQLite `n_`, the row the query DSL's fragments read (see SqliteBackend's ROW_ALIAS). The function runs it
+     * on its own, where no value can be bound, so each value `where` names is written in. A name within a quoted text, as
+     * the path of a property whose name begins with `$` is (`'$."$$id"'`), is the text's, not a value's.
      */
     private meeting(where: string, bound: Record<string, any>): string {
         const names = Object.keys(bound).sort((a, b) => b.length - a.length);
-        const written = where.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name: string) =>
-            names.includes(name) ? literal(bound[name]) : match
+        const written = where.replace(/'(?:[^']|'')*'|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name?: string) =>
+            name !== undefined && names.includes(name) ? literal(bound[name]) : match
         );
-        return `SELECT COUNT(*) FROM ${this.graph.nodes} n WHERE n.nid = $1 AND (${written})`;
+        const row = this.graph.store === 'sqlite' ? 'n_' : 'n';
+        return `SELECT COUNT(*) FROM ${this.graph.nodes} ${row} WHERE ${row}.nid = $1 AND (${written})`;
     }
 }
 

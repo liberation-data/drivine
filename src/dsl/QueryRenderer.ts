@@ -35,6 +35,24 @@ export interface RenderedQuery {
     labelsTested?: string[];
 }
 
+/** A part of a query's Cypher, with the values it binds by their names in it (`_q0`, …). */
+export interface WrittenPart {
+    cypher: string;
+    bindings: Record<string, any>;
+}
+
+/** A query's Cypher in its parts (see QueryRenderer.parts). */
+export interface QueryParts {
+    /** The query's `where`, as the condition it is. */
+    filter?: WrittenPart;
+    /** The condition that continues after the query's cursor. */
+    keyset?: WrittenPart;
+    /** The expression each order of the roots sorts by, with its term: its direction and where it places its nulls. */
+    orders: (WrittenPart & { term: OrderTerm })[];
+    /** What else the rendered query says: all but its `where` and its `orderBy`. */
+    rendered: Omit<RenderedQuery, 'where' | 'orderBy'>;
+}
+
 /** The aliases a path's conditions are written against: the node, and the relationship a relationship fragment holds. */
 interface Aliases {
     node: string;
@@ -65,39 +83,59 @@ export class QueryRenderer {
 
     /** Asks the query of the class's references and writes what it gives. */
     static render<T>(fn: QueryFn<T>, model: TargetModel, grammar: CypherGrammar, alias: string): RenderedQuery {
+        const parts = QueryRenderer.parts(fn, model, grammar, alias);
+        return {
+            ...parts.rendered,
+            where:
+                [parts.filter, parts.keyset]
+                    .filter((it) => it !== undefined)
+                    .map((it) => it!.cypher)
+                    .join(' AND ') || undefined,
+            orderBy: parts.orders.length ? parts.orders.map((it) => order(it.term, it.cypher)).join(', ') : undefined
+        };
+    }
+
+    /**
+     * The query `fn` asks of the class's references as the parts of its Cypher over the root, bound to `alias`: its
+     * filter and its seek, each the condition it is, and the expression of each of its orders, each with the values it
+     * binds, in the order {@link render} binds them; and what else a rendered query says of it. A SQL store compiles each
+     * part by the shared module (SqliteQueryRenderer).
+     */
+    static parts<T>(fn: QueryFn<T>, model: TargetModel, grammar: CypherGrammar, alias: string): QueryParts {
         const scope = scopeOf(model);
         const query: Query = fn(rootRefs<T>(scope));
         const renderer = new QueryRenderer(grammar, query.depth ?? {});
         const condition = query.where !== undefined ? allOfOne(query.where) : undefined;
-        const filter = condition ? renderer.where(condition, scope, alias) : undefined;
+        const filter = condition ? renderer.bound(() => renderer.where(condition, scope, alias)) : undefined;
         const terms = listOf<OrderTerm>(query.orderBy).map((it) => classify(it, scope));
         const keys = terms.filter((it): it is RootKey => it.kind === 'ROOT');
         const seek = listOf<SeekValue>(query.seek);
-        const keyset = query.seek !== undefined ? renderer.keyset(keys, seek, query, alias) : undefined;
+        const keyset =
+            query.seek !== undefined ? renderer.bound(() => renderer.keyset(keys, seek, query, alias)) : undefined;
         const byExpression = keys.some((it) => it.term.expression);
+        const orders = keys.map((it) => ({
+            term: it.term,
+            ...renderer.bound(() =>
+                it.term.expression
+                    ? renderer.expression(it.term.expression, scope, alias)
+                    : `${alias}.${quoteName(it.property!)}`
+            )
+        }));
         return {
-            where: [filter, keyset].filter((it) => it !== undefined).join(' AND ') || undefined,
-            orderBy: keys.length
-                ? keys
-                      .map((it) =>
-                          order(
-                              it.term,
-                              it.term.expression
-                                  ? renderer.expression(it.term.expression, scope, alias)
-                                  : `${alias}.${quoteName(it.property!)}`
-                          )
-                      )
-                      .join(', ')
-                : undefined,
-            collectionSorts: terms.filter((it): it is CollectionSort => it.kind === 'COLLECTION'),
-            limit: count('limit', query.limit),
-            skip: count('skip', query.skip),
-            depth: query.depth ?? {},
-            bindings: renderer.bindings,
-            ordered: byExpression ? [] : keys.map((it) => it.property!),
-            pinned: condition ? pinnedProperties(condition, scope) : [],
-            seeks: query.seek !== undefined,
-            paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined)
+            filter,
+            keyset,
+            orders,
+            rendered: {
+                collectionSorts: terms.filter((it): it is CollectionSort => it.kind === 'COLLECTION'),
+                limit: count('limit', query.limit),
+                skip: count('skip', query.skip),
+                depth: query.depth ?? {},
+                bindings: renderer.bindings,
+                ordered: byExpression ? [] : keys.map((it) => it.property!),
+                pinned: condition ? pinnedProperties(condition, scope) : [],
+                seeks: query.seek !== undefined,
+                paged: [query.orderBy, query.limit, query.skip, query.seek].some((it) => it !== undefined)
+            }
         };
     }
 
@@ -109,6 +147,16 @@ export class QueryRenderer {
     /** The values the conditions written so far bind, by parameter name. */
     get boundValues(): Record<string, any> {
         return { ...this.bindings };
+    }
+
+    /** The Cypher `write` gives, with the values it binds: those it adds to what the renderer bound before. */
+    bound(write: () => string): WrittenPart {
+        const before = new Set(Object.keys(this.bindings));
+        const cypher = write();
+        return {
+            cypher,
+            bindings: Object.fromEntries(Object.entries(this.bindings).filter(([name]) => !before.has(name)))
+        };
     }
 
     /**

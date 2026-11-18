@@ -17,6 +17,8 @@ import {
     GraphView,
     inDrivineContext,
     key,
+    max,
+    min,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -290,7 +292,7 @@ describe('a SQLite store', () => {
             expect((await gom.load(Ticket, 't1'))!.stamp).not.toEqual(stamp);
         });
 
-        it('should order groups by a key as Postgres orders jsonb: a text, a number, a boolean, and no value last', async () => {
+        it('should order groups by a key as Cypher orders it: a text, a boolean, a number, and no value last', async () => {
             for (const props of [
                 { title: 'b' },
                 { title: true },
@@ -314,9 +316,60 @@ describe('a SQLite store', () => {
                         orderBy: [['title', direction]]
                     })
                 ).map((it: any) => it.title);
-            // A boolean after a number, false before true, as jsonb orders them.
-            expect(await titles('asc')).toEqual(['a', 'b', 9, 10, false, true, undefined]);
-            expect(await titles('desc')).toEqual([undefined, true, false, 10, 9, 'b', 'a']);
+            // A boolean before a number, false before true, as Cypher orders them (drivine4j's SqliteSelect.groups).
+            expect(await titles('asc')).toEqual(['a', 'b', false, true, 9, 10, undefined]);
+            expect(await titles('desc')).toEqual([undefined, 10, 9, true, false, 'b', 'a']);
+        });
+
+        it('should order groups by a date key by its moment, and give a least and greatest text and date as text', async () => {
+            // A date as the tag a save writes, its text first: by its text, `.5Z` would sort before `Z`, and the offset
+            // last.
+            const tags = [
+                ['2024-01-01T00:00:00.5Z', '10000020240101000000500000000064800'],
+                ['2024-01-01T00:00:00Z', '10000020240101000000000000000064800'],
+                ['2024-01-01T01:00:00+02:00', '10000020231231230000000000000072000']
+            ];
+            for (const [i, [v, sorted]] of tags.entries()) {
+                await pm.execute(
+                    new QuerySpecification(
+                        `INSERT INTO drivine_node (labels, props) VALUES ('["SqliteStore","Moment"]', $props)`
+                    ).bind({ props: JSON.stringify({ id: `m${i}`, at: { $t: 'datetime', v, s: sorted } }) })
+                );
+            }
+            const ids = async (direction: 'asc' | 'desc'): Promise<unknown[]> =>
+                (
+                    await gom.groups.load(Moment, {
+                        keys: { at: key('at') },
+                        aggregates: { id: min('id') },
+                        orderBy: [['at', direction]]
+                    })
+                ).map((it: any) => it.id);
+            expect(await ids('asc')).toEqual(['m2', 'm1', 'm0']);
+            expect(await ids('desc')).toEqual(['m0', 'm1', 'm2']);
+            await gom.saveAll([
+                ticket('t1', { priority: 1, title: 'pear', openedAt: new Date('2026-03-01T00:00:00.000Z') }),
+                ticket('t2', { priority: 1, title: 'apple', openedAt: new Date('2026-01-01T00:00:00.000Z') }),
+                ticket('t3', { priority: 1, title: 'quince', openedAt: new Date('2026-02-01T00:00:00.000Z') })
+            ]);
+            expect(
+                await gom.groups.load(Ticket, {
+                    keys: { priority: key('priority') },
+                    aggregates: {
+                        first: min('title'),
+                        last: max('title'),
+                        earliest: min('openedAt'),
+                        latest: max('openedAt')
+                    }
+                })
+            ).toEqual([
+                {
+                    priority: 1,
+                    first: 'apple',
+                    last: 'quince',
+                    earliest: '2026-01-01T00:00:00Z',
+                    latest: '2026-03-01T00:00:00Z'
+                }
+            ]);
         });
 
         it('should find a node by a whole number id, which node:sqlite binds as a real', async () => {
@@ -342,10 +395,9 @@ describe('a SQLite store', () => {
             expect((await gom.load(Ticket, 't1'))!.openedAt).toEqual('2026-11-02T10:30:00.123Z');
         });
 
-        // Held: a filter's SQL is still TypeScript's own, which compared a date as text where layout 2 holds
-        // its tag, so the DSL now refuses a date by name (#771, StatelessGraphObjectManager.temporalFilters.spec).
-        // Lifted when the DSL's filters come from the module's fragments (drivine-cypher-spec#235).
-        it.skip('should compare, seek and patch a boolean and a date as a save stores them: as JSON text', async () => {
+        // The DSL's filters, seeks and orders are the module's fragments (drivine-cypher-spec#235), which compare a
+        // date by the tag layout 2 holds it as (#771).
+        it('should compare, seek and patch a boolean and a date as a save stores them', async () => {
             const first = new Date('2026-01-01T00:00:00.000Z');
             const second = new Date('2026-02-01T00:00:00.000Z');
             const moment = (id: string, fields: Partial<Moment>): Moment =>
@@ -390,8 +442,20 @@ describe('a SQLite store', () => {
             expect(await patched((q: any) => q.open.in([true]))).toBe(true);
             expect(await patched((q: any) => q.days.hasItem(first))).toBe(true);
             expect(await patched((q: any) => q.open.eq(false))).toBe(false);
-            expect(await patched('n.at = $when', { when: first })).toBe(true);
             expect(await patched('n.open = $open', { open: true })).toBe(true);
+        });
+
+        // Held: a raw where is SQL, not the query DSL, so the module's fragments don't write it. `n.at` reads the
+        // property's JSON, which layout 2 holds a date as the tag of, and the date is written in as its ISO text, so the
+        // two are never equal. The DSL's `q.at.eq(first)` above compares them; a raw where that compares a date needs
+        // a way of its own to read the tag.
+        it.failing('should compare a date in a raw where, n.at = $when, as a save stores it', async () => {
+            const first = new Date('2026-01-01T00:00:00.000Z');
+            await gom.save(Object.assign(new Moment(), { id: 'm1', at: first }));
+            expect(
+                (await gom.patch(Moment, 'm1', { set: { count: 3 }, where: 'n.at = $when', bindings: { when: first } }))
+                    .applied
+            ).toBe(true);
         });
 
         it('should mint the store identity once, as a node of the graph', async () => {

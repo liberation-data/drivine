@@ -21,11 +21,12 @@ import { classLabels } from '@/model/InstanceOf';
 import { TargetModel } from '@/model/RelationshipModel';
 
 /**
- * What a query's filter, seek or order value says of a date on a SQL store (see SqlQueryRenderer.storable): the DSL
- * compares one wrongly there until its filters come from the shared module's fragments.
+ * What a query's filter, seek or order value says of a date on Postgres and Oracle (see SqlQueryRenderer.storable): the
+ * DSL compares one wrongly there until its filters come from the shared module's fragments, as SQLite's do
+ * (SqliteQueryRenderer).
  */
 export const TEMPORAL_FILTER_REFUSED =
-    "A query's filter, seek or order is given a date, which the query DSL doesn't compare on a SQL store yet (drivine-cypher-spec#235): compare it in a Cypher statement.";
+    "A query's filter, seek or order is given a date, which the query DSL doesn't compare on Oracle or Postgres yet (drivine-cypher-spec#235): compare it in a Cypher statement.";
 
 /** The row a path's conditions read: the node's, and the relationship's that a relationship fragment holds. */
 export interface Rows {
@@ -46,7 +47,8 @@ export interface Compared {
 }
 
 /**
- * Writes a query over a class's references as SQL over a SQL store's tables, the root's row bound to `alias`. A
+ * Writes a query over a class's references as SQL over Postgres's or Oracle's tables, the root's row bound to `alias`
+ * (SQLite's is the shared module's: SqliteQueryRenderer). A
  * condition across a relationship is an EXISTS over the relationship table. Values are bound (`$_q0`, …), never written
  * in. What is each store's own is how it compares a property, tests labels and reads a property for an order or an
  * expression.
@@ -117,7 +119,7 @@ export abstract class SqlQueryRenderer {
      * layout holds one as its tag (`{"$t": "datetime", "v": …, "s": …}`), and the DSL's SQL here compares a property's
      * text with the date's ISO text, so an equality, an `in` or a `hasItem` found nothing and an order (`gt`, a seek) gave
      * the wrong rows (#771). The DSL's filters get a date right once they come from the shared module's fragments
-     * (drivine-cypher-spec#235); until then a Cypher statement compares dates as Neo4j does.
+     * (drivine-cypher-spec#235), as SQLite's do; until then a Cypher statement compares dates as Neo4j does.
      */
     protected storable(value: unknown): unknown {
         if (value instanceof Date) {

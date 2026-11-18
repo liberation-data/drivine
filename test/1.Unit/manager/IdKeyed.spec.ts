@@ -33,6 +33,8 @@ import {
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
+import { DSL_ROW } from '@/backend/sqlite/SqliteQueryRenderer';
+import { GraphStatement } from '@/backend/GraphStatement';
 import { openSqlite } from '@/connection/sqlite/SqliteDriver';
 import { idSql } from '@/cypher/SharedCypherCompiler';
 import { writeLayout } from '@/cypher/ValueLayout';
@@ -305,7 +307,10 @@ interface LookupStore {
     store: 'postgres' | 'sqlite' | 'oracle';
     backend: () => GraphBackend;
     json: (parameter: string) => string;
-    labels: string;
+    /** The row a load and a delete by id read the node as. */
+    row: string;
+    /** The test of each of Dial's labels on the row `row`. */
+    labels: (row: string) => string;
 }
 
 /**
@@ -318,28 +323,31 @@ describe.each([
         store: 'postgres' as const,
         backend: (): GraphBackend => new PostgresBackend(new PostgresGraph()),
         json: (parameter: string): string => parameter,
-        labels: `n.labels @> '["Dial"]' AND n.labels @> '["Meter"]'`
+        row: 'n',
+        labels: (row: string): string => `${row}.labels @> '["Dial"]' AND ${row}.labels @> '["Meter"]'`
     },
     {
         name: 'SQLite',
         store: 'sqlite' as const,
         backend: (): GraphBackend => new SqliteBackend(new SqliteGraph()),
         json: (parameter: string): string => parameter,
-        labels: `instr(n.labels, '"Dial"') > 0 AND instr(n.labels, '"Meter"') > 0`
+        // A load and a delete read the node as the query DSL's row, which a fragment's variable ends with `_`.
+        row: DSL_ROW,
+        labels: (row: string): string => `instr(${row}.labels, '"Dial"') > 0 AND instr(${row}.labels, '"Meter"') > 0`
     },
     {
         name: 'Oracle',
         store: 'oracle' as const,
         backend: (): GraphBackend => new OracleBackend(new OracleGraph()),
         json: (parameter: string): string => `JSON(${parameter} EXTENDED)`,
-        labels:
-            `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"Dial","') > 0 AND ` +
-            `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"Meter","') > 0`
+        row: 'n',
+        labels: (row: string): string =>
+            `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(${row}.labels), ']'), '[') || ',"', ',"Dial","') > 0 AND ` +
+            `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(${row}.labels), ']'), '[') || ',"', ',"Meter","') > 0`
     }
-])('a lookup by id on $name', ({ store, backend, json, labels }: LookupStore) => {
+])('a lookup by id on $name', ({ store, backend, json, row, labels }: LookupStore) => {
     const registry = new ModelRegistry();
     const dial = registry.fragment(Dial);
-    const hasId = idSql(store, 'hasId', 'n', 'id', json('$id'));
 
     let bound: { text: string; parameters: Record<string, any> }[];
     let gom: StatelessGraphObjectManager;
@@ -366,19 +374,21 @@ describe.each([
 
     it("compares the id as the module writes it, beside a test of each label by the labels' text where it must be", () => {
         const view = registry.view(DialView);
-        const statements = [
-            backend().loadFragment(dial),
-            backend().loadView(view),
-            backend().delete({ kind: 'NODE_FRAGMENT', model: dial }),
-            backend().delete({ kind: 'GRAPH_VIEW', model: view }, undefined, CascadeType.DELETE_ALL),
-            backend().heldProperties(dial),
-            backend().foundStamp(dial)
+        // A write's reads, heldProperties and foundStamp, read the node as `n` on every store.
+        const statements: [GraphStatement, string][] = [
+            [backend().loadFragment(dial), row],
+            [backend().loadView(view), row],
+            [backend().delete({ kind: 'NODE_FRAGMENT', model: dial }), row],
+            [backend().delete({ kind: 'GRAPH_VIEW', model: view }, undefined, CascadeType.DELETE_ALL), row],
+            [backend().heldProperties(dial), 'n'],
+            [backend().foundStamp(dial), 'n']
         ];
-        for (const statement of statements) {
+        for (const [statement, alias] of statements) {
+            const hasId = idSql(store, 'hasId', alias, 'id', json('$id'));
             // A view's requirements are joined to the id's test, which is in parentheses of its own there.
-            expect(statement.text.split(`${labels} AND ((${hasId}`).join(`${labels} AND (${hasId}`)).toContain(
-                `${labels} AND (${hasId}`
-            );
+            expect(
+                statement.text.split(`${labels(alias)} AND ((${hasId}`).join(`${labels(alias)} AND (${hasId}`)
+            ).toContain(`${labels(alias)} AND (${hasId}`);
         }
     });
 
@@ -390,7 +400,7 @@ describe.each([
             registry.fragment(Coded)
         );
         expect(related.text).toContain(
-            `${idSql(store, 'hasId', 'a', 'id', json('$x_from'))} AND ${labels.replace(/\bn\.labels/g, 'a.labels')}`
+            `${idSql(store, 'hasId', 'a', 'id', json('$x_from'))} AND ${labels('a')}`
         );
         expect((related.spec().parameters as any).x_from).toEqual('7');
     });
@@ -515,7 +525,7 @@ describe.each([
 
     it('finds a node of a $-named id by the key the layout holds it under', () => {
         const priced = registry.fragment(Priced);
-        expect(backend().loadFragment(priced).text).toContain(idSql(store, 'hasId', 'n', '$$code', json('$id')));
+        expect(backend().loadFragment(priced).text).toContain(idSql(store, 'hasId', row, '$$code', json('$id')));
     });
 });
 
@@ -591,10 +601,30 @@ describe('a lookup by id on SQLite, planned', () => {
         const index = (alias: string): RegExp =>
             new RegExp(`SEARCH ${alias} USING (COVERING )?INDEX drivine_${made}_\\w+ \\(<expr>=\\? AND <expr>=\\?\\)`);
         const bound = { id: writeLayout(id, 'sqlite') };
-        expect(await plan(backend.loadFragment(model).text, bound)).toMatch(index('n'));
-        expect(await plan(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(index('n'));
+        expect(await plan(backend.loadFragment(model).text, bound)).toMatch(index(DSL_ROW));
+        expect(await plan(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(index(DSL_ROW));
         const related = backend.related({ model, id }, 'READS', Direction.OUTGOING, registry.fragment(Coded));
         expect(await plan(related.text, related.bindings)).toMatch(index('a'));
+    });
+
+    it("reads the index by the row each by-id statement's FROM declares: a view's load and deletes, a write's reads", async () => {
+        const model = registry.fragment(Dial);
+        const view = registry.view(DialView);
+        const index = (alias: string): RegExp =>
+            new RegExp(`SEARCH ${alias} USING (COVERING )?INDEX drivine_ix2_Dialid_\\w+ \\(<expr>=\\? AND <expr>=\\?\\)`);
+        const bound = { id: writeLayout(7, 'sqlite') };
+        const target = { kind: 'GRAPH_VIEW' as const, model: view };
+        for (const statement of [
+            backend.loadView(view),
+            backend.delete(target),
+            backend.delete(target, undefined, CascadeType.DELETE_ALL),
+            backend.delete(target, undefined, CascadeType.DELETE_ORPHAN)
+        ]) {
+            expect(await plan(statement.text, bound)).toMatch(index(DSL_ROW));
+        }
+        // A write's reads of the node it saves read it as `n`, as the write itself does.
+        expect(await plan(backend.heldProperties(model).text, bound)).toMatch(index('n'));
+        expect(await plan(backend.foundStamp(model).text, bound)).toMatch(index('n'));
     });
 });
 
