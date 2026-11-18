@@ -23,6 +23,7 @@ import {
     PostgresGraph,
     QuerySpecification,
     RelateMode,
+    RemovedTargets,
     Root,
     SqliteBackend,
     SqliteGraph,
@@ -46,6 +47,12 @@ import { TransactionContextHolder } from '@/transaction/TransactonContextHolder'
 
 /** The comparison an Oracle lookup by `$id` makes of Gauge's id, as the shared module writes it. */
 const ORACLE_HAS_ID = idSql('oracle', 'hasId', 'n', 'id', 'JSON($id EXTENDED)');
+
+/** The row an Oracle write block's find binds its one id in, as `i.v`, read EXTENDED. */
+const ONE_ID = '(SELECT JSON(:1 EXTENDED) v FROM dual) i';
+
+/** The comparison an Oracle write block makes of the node `f`'s id `key` with the bound row's `i.v`. */
+const writeHasId = (key: string, alias: string = 'f'): string => idSql('oracle', 'hasId', alias, key, 'i.v');
 
 @NodeFragment({ labels: ['Gauge'] })
 class Gauge {
@@ -218,7 +225,7 @@ describe('an id on Oracle', () => {
         const relate = backend.relate(from, { model, id: 4.5 }, 'POINTS', {}, RelateMode.MERGE).spec()
             .parameters as any;
         expect([relate.x_from, relate.x_to]).toEqual([held, '{"$numberDouble":"4.5"}']);
-        expect(relate.x_frommatch).toMatch(/PASSING JSON\(:1 EXTENDED\) AS "v"/);
+        expect(relate.x_frommatch).toContain(`${ONE_ID} CROSS JOIN drivine_node f WHERE ${writeHasId('id')}`);
     });
 
     it("binds loadRelated's, unrelateAll's, relate's and unrelate's null ends as they are, so they find no node (#772)", () => {
@@ -871,5 +878,113 @@ describe('a Date id and its text, where the id field takes both', () => {
             { found: true, applied: true, changed: true },
             { found: false, applied: false, changed: false }
         ]);
+    });
+});
+
+/**
+ * Each Oracle write block finds a node by its id as the shared module's hasId compares it, the property's class and key
+ * with the id's, which the index over the id is made over (#754): the id bound once, in a row of its own, read EXTENDED,
+ * since the comparison reads it more than once and a dynamic statement's binds are by position. A list of ids, a fragment
+ * batch's or a save's stamped related nodes, or a trim's, is a row for each id, read EXTENDED, so a float is the binary
+ * double the node holds.
+ */
+describe("an Oracle write block's id", () => {
+    const backend = new OracleBackend(new OracleGraph());
+    const registry = new ModelRegistry();
+    const occurrences = (text: string, needle: string): number => text.split(needle).length - 1;
+    /** Each id list's rows, bound as `list`. */
+    const rows = (list: string): string => `JSON_TABLE(JSON(${list} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) i`;
+
+    /** The bound match of a find_node or a write_node: the node of `labels` whose id `key` is the one bound `:1`. */
+    const expectMatch = (match: string, key: string, labels: string[]): void => {
+        expect(match).toEqual(
+            `n.nid IN (SELECT f.nid FROM ${ONE_ID} CROSS JOIN drivine_node f WHERE ${writeHasId(key)} AND ${labels
+                .map((it) => `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(f.labels), ']'), '[') || ',"', ',"${it}","') > 0`)
+                .join(' AND ')})`
+        );
+        expect(occurrences(match, ':1')).toBe(1);
+        expect(match).not.toContain('PASSING');
+    };
+
+    /** The bound texts among `parameters` that are a find_node's or a write_node's match. */
+    const matches = (parameters: Record<string, any>): string[] =>
+        Object.values(parameters).filter((it): it is string => typeof it === 'string' && it.includes(ONE_ID));
+
+    it("finds a patch's, a patchAll's, a relate's, an unrelate's and an unrelateAll's node by hasId, the id bound once", () => {
+        const priced = registry.fragment(Priced);
+        const dated = registry.fragment(Dated);
+        expectMatch((backend.patchOne(priced).spec({ id: 'p', set: {} }).parameters as any).x_match, '$$code', [
+            'Priced'
+        ]);
+        expectMatch((backend.patchMany(dated).spec({ rows: [] }).parameters as any).x_match, 'on', ['Dated']);
+        const from = { model: priced, id: 'p' };
+        const to = { model: dated, id: new Date('2024-01-02T00:00:00.000Z') };
+        for (const statement of [
+            backend.relate(from, to, 'ON', {}, RelateMode.MERGE),
+            backend.relate(from, to, 'ON', {}, RelateMode.CREATE),
+            backend.unrelate(from, to, 'ON')
+        ]) {
+            const parameters = statement.spec().parameters as any;
+            expectMatch(parameters.x_frommatch, '$$code', ['Priced']);
+            expectMatch(parameters.x_tomatch, 'on', ['Dated']);
+            expect(parameters.x_to).toEqual(writeLayout(to.id, 'oracle'));
+        }
+        const all = backend.unrelateAll(from, 'ON', Direction.OUTGOING).spec().parameters as any;
+        expectMatch(all.x_frommatch, '$$code', ['Priced']);
+        // Each of a node's labels is told by its text, as a lookup by id tells them.
+        expectMatch(
+            (backend.patchOne(registry.fragment(Dial)).spec({ id: 1, set: {} }).parameters as any).x_match,
+            'id',
+            ['Dial', 'Meter']
+        );
+    });
+
+    it("finds each node of a fragment batch by hasId, and reads their stamps by hasId over each id's row", () => {
+        const model = registry.fragment(StampedDay);
+        const days = ['2024-01-02', '2024-01-03'].map((it) =>
+            Object.assign(new StampedDay(), { on: new Date(`${it}T00:00:00.000Z`) })
+        );
+        const statement = backend.fragmentBatch([{ model, objects: days }], {});
+        const parameters = statement.spec().parameters as Record<string, any>;
+        const found = matches(parameters);
+        expect(found).toHaveLength(2);
+        found.forEach((it) => expectMatch(it, 'on', ['StampedDay']));
+        // Read before and after the writes, each id of the list a row, which finds its node through the index.
+        const reads = `n.nid IN (SELECT f.nid FROM ${rows('$x_1')} CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`;
+        expect(statement.text).toContain(reads);
+        expect(occurrences(statement.text, `CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`)).toBe(2);
+        expect(parameters.x_1).toEqual(writeLayout([days[0].on, days[1].on], 'oracle'));
+        expect(statement.text).not.toContain('PASSING t.v');
+    });
+
+    it("finds a save's nodes by hasId, trims a replaced list by hasId over each id kept, and reads related stamps so", () => {
+        const view = registry.view(DialDays);
+        const kept = Object.assign(new StampedDay(), { on: new Date('2024-01-02T00:00:00.000Z') });
+        const object = Object.assign(new DialDays(), { dial: Object.assign(new Dial(), { id: 1.5 }), days: [kept] });
+        const statement = backend.save({ kind: 'GRAPH_VIEW', model: view }, object, {
+            replace: ['days'],
+            removedTargets: RemovedTargets.DELETE_UNREFERENCED
+        });
+        const parameters = statement.spec().parameters as Record<string, any>;
+        const found = matches(parameters);
+        expect(found).toHaveLength(2);
+        expectMatch(found[0], 'id', ['Dial', 'Meter']);
+        expectMatch(found[1], 'on', ['StampedDay']);
+
+        // The trim's two statements test each target joined to the root against the rows of the ids kept, bound :2.
+        const trims = Object.values(parameters).filter(
+            (it): it is string => typeof it === 'string' && it.includes(writeHasId('on', 'x'))
+        );
+        expect(trims).toHaveLength(2);
+        for (const trim of trims) {
+            expect(trim).toContain(`NOT EXISTS (SELECT 1 FROM ${rows(':2')} WHERE ${writeHasId('on', 'x')})`);
+            expect(occurrences(trim, ':2')).toBe(1);
+            expect(trim).not.toContain('PASSING');
+        }
+        // The stamps of the related days, read before and after, each id a row found through the index.
+        const reads = `n.nid IN (SELECT f.nid FROM ${rows('$x_')}`;
+        expect(occurrences(statement.text.replace(/\$x_\d+/g, '$x_'), reads)).toBe(2);
+        expect(occurrences(statement.text, `CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`)).toBe(2);
+        expect(statement.text).not.toContain('PASSING t.v');
     });
 });

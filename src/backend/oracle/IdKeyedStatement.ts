@@ -1,4 +1,6 @@
 import { GraphStatement } from '@/backend/GraphStatement';
+import { carriesLabels } from '@/backend/oracle/OracleGraph';
+import { hasId } from '@/backend/sql/NodeIds';
 import { writeLayout } from '@/cypher/ValueLayout';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
@@ -9,6 +11,53 @@ import { QuerySpecification } from '@/query/QuerySpecification';
  */
 export function oracleId(id: unknown): unknown {
     return id != null ? writeLayout(id, 'oracle') : id;
+}
+
+/**
+ * The one row `i.v` of the id bound as `sql`, the JSON text Oracle's layout holds it as (see oracleId), read `EXTENDED`
+ * so a float is the binary double the node holds. The module's comparison reads the id more than once, and a dynamic
+ * statement's binds are by position, so the id is bound once, here, and the comparison reads the row's `v`.
+ */
+export function boundIdRow(sql: string): string {
+    return `(SELECT JSON(${sql} EXTENDED) v FROM dual)`;
+}
+
+/**
+ * A row `i.v` for each id of the JSON array bound as `sql`, each the JSON Oracle's layout holds it as, read `EXTENDED`
+ * as {@link boundIdRow} reads one. Not the module's `hasIdIn`: that reads each id's JSON text without `EXTENDED`, so a
+ * float, held as a binary double, would be no id of the list.
+ */
+export function boundIdRows(sql: string): string {
+    return `JSON_TABLE(JSON(${sql} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$'))`;
+}
+
+/**
+ * Whether the node row `alias` is a node of `labels` whose id, the property `property`, is one of the ids `rows` holds
+ * ({@link boundIdRow}, {@link boundIdRows}): each id finds its node through the index over the id, compared as the
+ * shared module writes the comparison (see NodeIds' hasId), and the node is joined after, as drivine4j's
+ * `OracleWriteBlock.identified` finds a step's node. The labels are told by their text ({@link carriesLabels}), so Oracle
+ * reads that index, and not every node of the first label.
+ */
+export function foundByIds(nodes: string, alias: string, property: string, labels: string[], rows: string): string {
+    const tests = [hasId('oracle', 'f', property, 'i.v'), carriesLabels('f', labels)].filter((it) => it);
+    return `${alias}.nid IN (SELECT f.nid FROM ${rows} i CROSS JOIN ${nodes} f WHERE ${tests.join(' AND ')})`;
+}
+
+/**
+ * Whether the id, the property `property`, of the node row `alias`, found some other way, is one of the ids `rows`
+ * holds ({@link boundIdRows}), compared as the shared module writes the comparison (see NodeIds' hasId).
+ */
+export function holdsIdAmong(alias: string, property: string, rows: string): string {
+    return `EXISTS (SELECT 1 FROM ${rows} i WHERE ${hasId('oracle', alias, property, 'i.v')})`;
+}
+
+/**
+ * The match `find_node` and `write_node` run, `SELECT nid FROM nodes n WHERE <match>`, for the node of `labels` whose id,
+ * the property `property`, is the dynamic statement's one bind, `:1`: the id bound once, in a row of its own
+ * ({@link boundIdRow}), since the shared module's comparison reads it more than once (see foundByIds).
+ */
+export function idMatch(nodes: string, property: string, labels: string[]): string {
+    return foundByIds(nodes, 'n', property, labels, boundIdRow(':1'));
 }
 
 /**
