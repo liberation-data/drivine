@@ -59,8 +59,9 @@ describe('Full-text search from the shared module', () => {
             });
             const statement = backend.matching(shelf, search('graph -relational', index));
             expect(statement.text).toContain(
-                // SQLite's hit is the row a read of the query DSL calls its root, which a filter of the DSL reads.
-                store === 'sqlite'
+                // SQLite's and Postgres's hit is the row a read of the query DSL calls its root, which a filter of the
+                // DSL reads.
+                store !== 'oracle'
                     ? `FROM (${planned.statement}) s JOIN ${graphs[store].nodes} n_ ON n_.nid = s.nid`
                     : `FROM (${planned.statement}) s JOIN ${graphs[store].nodes} n ON n.nid = s.nid`
             );

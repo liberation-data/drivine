@@ -28,15 +28,15 @@ class Dated {
     days?: Date[];
 }
 
-const REFUSED = /the query DSL doesn't compare on Oracle or Postgres yet \(drivine-cypher-spec#235\)/;
+const REFUSED = /the query DSL doesn't compare on Oracle yet \(drivine-cypher-spec#235\)/;
 
 /**
- * A query DSL filter, seek or order given a date (#771). On SQLite it is the shared module's fragment
- * (drivine-cypher-spec#235, step 2), which compares a date by the tag the store layout holds it as, so `eq`, `in`,
- * `hasItem`, `gt`, a seek, an order and a patch's or a grouped read's condition give the rows Neo4j does. On Postgres and
- * Oracle it is refused by name until theirs are (#235, steps 3 and 4): the DSL's SQL there compared a property's text with
- * the date's ISO text, so `eq`, `in` and `hasItem` found nothing and `gt` gave the wrong rows. A Cypher statement compares
- * dates as Neo4j does on each, and a filter of anything else is as it was.
+ * A query DSL filter, seek or order given a date (#771). On SQLite and Postgres it is the shared module's fragment
+ * (drivine-cypher-spec#235, steps 2 and 3), which compares a date by the tag the store layout holds it as, so `eq`, `in`,
+ * `hasItem`, `gt`, a seek, an order and a patch's or a grouped read's condition give the rows Neo4j does. On Oracle it is
+ * refused by name until its are (#235, step 4): the DSL's SQL there compared a property's text with the date's ISO text,
+ * so `eq`, `in` and `hasItem` found nothing and `gt` gave the wrong rows. A Cypher statement compares dates as Neo4j does
+ * on each, and a filter of anything else is as it was.
  */
 describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
     let pm: PersistenceManager;
@@ -71,7 +71,7 @@ describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
     const found = async (where: (q: any) => any): Promise<string[]> =>
         (await gom.loadAll(Dated, (q) => ({ where: where(q) }))).map((it) => it.id).sort();
 
-    if (store.type === DatabaseType.SQLITE) {
+    if (store.type !== DatabaseType.ORACLE) {
         it('compares a date by its tag in a comparison, an in, a hasItem, a seek and an order', async () => {
             expect(await found((q) => q.at.eq(first))).toEqual(['d1']);
             expect(await found((q) => q.at.gt(first))).toEqual(['d2']);

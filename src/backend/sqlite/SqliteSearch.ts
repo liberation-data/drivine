@@ -2,7 +2,7 @@ import { MatchingSearch, NearestSearch, searchedLabels } from '@/backend/GraphBa
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonType, jsonValue, nodeDocument, path, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
-import { DSL_ROW as ROW_ALIAS } from '@/backend/sqlite/SqliteQueryRenderer';
+import { DSL_ROW as ROW_ALIAS } from '@/backend/sql/FragmentQueryRenderer';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
 import { TargetModel } from '@/model/RelationshipModel';

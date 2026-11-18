@@ -280,10 +280,9 @@ describe.each(postgres)('a store on $name', (store) => {
         expect(await gom.load(Owner, 'other')).toBeDefined();
     });
 
-    // Held: a filter's SQL is still TypeScript's own, which reads the property as text where layout 2's index is over its
-    // JSON, so Postgres reads every node. Lifted when the DSL's filters come from the module's fragments
-    // (drivine-cypher-spec#235).
-    it.skip('should record an index as drivine4j does, read a filter through it, and drop what it recorded', async () => {
+    // A DSL filter is the module's fragment, given the node's labels, which compares the property's JSON, the expression
+    // layout 2's index is over (drivine-cypher-spec#235, step 3), so Postgres reads it through the index.
+    it('should record an index as drivine4j does, read a filter through it, and drop what it recorded', async () => {
         await pm.execute(
             new QuerySpecification(
                 `INSERT INTO ${graph.nodes} (labels, props) SELECT '["PgStore", "Ticket"]', ` +
@@ -315,6 +314,19 @@ describe.each(postgres)('a store on $name', (store) => {
         await gom.indexes.drop(spec);
         expect(await exists(name)).toBe(false);
         expect(await gom.indexes.list('RANGE')).not.toContainEqual(expect.objectContaining({ label: 'Ticket' }));
+        await gom.deleteAll(Ticket);
+    });
+
+    // The DSL's text is the module's, in the C collation (drivine-cypher-spec#235, step 3): by code point, as Neo4j
+    // compares and orders it, where 5.0's SQL used the database's collation (`a, b, B`).
+    it('should compare and order text in the query DSL by its code points: B before a', async () => {
+        await gom.deleteAll(Ticket);
+        await gom.saveAll(['a', 'B', 'b'].map((title) => Object.assign(new Ticket(), { id: `c-${title}`, title })));
+        const titles = async (fn: (q: any) => any): Promise<string[]> =>
+            (await gom.loadAll(Ticket, fn)).map((it) => it.title!);
+        expect(await titles((q) => ({ orderBy: [q.title.asc()] }))).toEqual(['B', 'a', 'b']);
+        expect(await titles((q) => ({ where: q.title.gt('B'), orderBy: [q.title.asc()] }))).toEqual(['a', 'b']);
+        expect(await titles((q) => ({ orderBy: [q.title.asc()], seek: [q.title.after('B')] }))).toEqual(['a', 'b']);
         await gom.deleteAll(Ticket);
     });
 
@@ -381,10 +393,9 @@ describe.each(postgres)('a store on $name', (store) => {
         expect(await trigram()).toBe(false);
     });
 
-    // Held: a filter's SQL is still TypeScript's own, which compared a date as text where layout 2 holds
-    // its tag, so the DSL now refuses a date by name (#771, StatelessGraphObjectManager.temporalFilters.spec).
-    // Lifted when the DSL's filters come from the module's fragments (drivine-cypher-spec#235).
-    it.skip('should compare, seek and patch a boolean and a date as a save stores them: as JSON text', async () => {
+    // A DSL filter, seek and order is the module's fragment (drivine-cypher-spec#235, step 3), which compares a date by the
+    // tag layout 2 holds it as (#771) and a boolean as the JSON boolean it is.
+    it('should compare, seek and patch a boolean and a date as a save stores them', async () => {
         const first = new Date('2026-01-01T00:00:00.000Z');
         const second = new Date('2026-02-01T00:00:00.000Z');
         const moment = (id: string, fields: Partial<Moment>): Moment => Object.assign(new Moment(), { id, ...fields });
@@ -428,8 +439,25 @@ describe.each(postgres)('a store on $name', (store) => {
         expect(await patched((q: any) => q.open.in([true]))).toBe(true);
         expect(await patched((q: any) => q.days.hasItem(first))).toBe(true);
         expect(await patched((q: any) => q.open.eq(false))).toBe(false);
-        expect(await patched("(n.props ->> 'at') = $when", { when: first })).toBe(true);
         expect(await patched("(n.props ->> 'open') = $open", { open: true })).toBe(true);
+    });
+
+    // Held: a raw where is SQL, not the query DSL, so the module's fragments don't write it. `n.props ->> 'at'` reads the
+    // property's JSON text, which layout 2 holds a date as the tag of, and the date is written in as its ISO text, so the
+    // two are never equal. The DSL's `q.at.eq(first)` above compares them; a raw where that compares a date needs a way
+    // of its own to read the tag. As on SQLite (SqliteStore.spec).
+    it.failing("should compare a date in a raw where, (n.props ->> 'at') = $when, as a save stores it", async () => {
+        const first = new Date('2026-01-01T00:00:00.000Z');
+        await gom.save(Object.assign(new Moment(), { id: 'm1', at: first }));
+        expect(
+            (
+                await gom.patch(Moment, 'm1', {
+                    set: { count: 3 },
+                    where: "(n.props ->> 'at') = $when",
+                    bindings: { when: first }
+                })
+            ).applied
+        ).toBe(true);
     });
 
     it('should mint the store identity once, as a node of the graph', async () => {

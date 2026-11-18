@@ -16,7 +16,7 @@ import { hasId } from '@/backend/sql/NodeIds';
 import { writeLayout } from '@/cypher/ValueLayout';
 import { SqliteGroups } from '@/backend/sqlite/SqliteGroups';
 import { hasLabels, JSON_ROWS, nodeDocument, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
-import { DSL_ROW, SqliteQueryRenderer } from '@/backend/sqlite/SqliteQueryRenderer';
+import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
 import { SqliteSearch } from '@/backend/sqlite/SqliteSearch';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
 import { sqliteContended } from '@/connection/sqlite/SqliteDriver';
@@ -44,7 +44,7 @@ const NODE_ROW = 'n';
  * Node and from Python is one. A load returns the rows the graph engines do, `{props, labels}` for a fragment, as JSON
  * text the connection reads (see JSON_ROWS). A raw `where` is an SQL predicate over the node's row, `n` (its `labels`,
  * `props` and `stamp`), in which a property of the node may be written as Cypher writes it, `n.name` (see `written`).
- * A filter, a seek and an order of the query DSL are the shared module's SQL (SqliteQueryRenderer), over the row
+ * A filter, a seek and an order of the query DSL are the shared module's SQL (FragmentQueryRenderer), over the row
  * `n_`.
  *
  * A save, a patch and a relationship are the plan Postgres's write function carries out, carried out by `drivine_write`,
@@ -225,7 +225,7 @@ export class SqliteBackend implements GraphBackend {
     }
 
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
-        return SqliteQueryRenderer.render(fn, target, this.graph.name, ROW_ALIAS);
+        return FragmentQueryRenderer.render('sqlite', fn, target, this.graph.name, ROW_ALIAS);
     }
 
     /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
@@ -234,7 +234,7 @@ export class SqliteBackend implements GraphBackend {
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
-        return SqliteQueryRenderer.renderWhere(fn, target, this.graph.name, ROW_ALIAS);
+        return FragmentQueryRenderer.renderWhere('sqlite', fn, target, this.graph.name, ROW_ALIAS);
     }
 
     patchOne(model: FragmentModel, where?: string): GraphStatement {

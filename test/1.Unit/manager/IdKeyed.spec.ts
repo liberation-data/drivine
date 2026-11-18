@@ -33,7 +33,7 @@ import {
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
-import { DSL_ROW } from '@/backend/sqlite/SqliteQueryRenderer';
+import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { openSqlite } from '@/connection/sqlite/SqliteDriver';
 import { idSql } from '@/cypher/SharedCypherCompiler';
@@ -323,7 +323,8 @@ describe.each([
         store: 'postgres' as const,
         backend: (): GraphBackend => new PostgresBackend(new PostgresGraph()),
         json: (parameter: string): string => parameter,
-        row: 'n',
+        // A load and a delete read the node as the query DSL's row, which a fragment's variable ends with `_`.
+        row: DSL_ROW,
         labels: (row: string): string => `${row}.labels @> '["Dial"]' AND ${row}.labels @> '["Meter"]'`
     },
     {

@@ -1,6 +1,6 @@
 import { NEO4J_GRAMMAR } from '@/backend/CypherGrammar';
 import { ConditionWriter } from '@/backend/GroupStatement';
-import { FragmentVariable } from '@/cypher/SharedCypherCompiler';
+import { FragmentVariable, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { SqlFragments } from '@/cypher/SqlFragments';
 import { Scope, scopeOf } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
@@ -18,21 +18,27 @@ const ROOT = 'n';
 export const DSL_ROW = 'n_';
 
 /**
- * Writes a query of the DSL on SQLite as the shared module compiles it (drivine-cypher-spec#235, its fragments; drivine4j's
- * `SqlitePredicates`): the Cypher the DSL writes for Neo4j (QueryRenderer), its filter and its seek each compiled whole as
+ * Writes a query of the DSL on SQLite and Postgres as the shared module compiles it (drivine-cypher-spec#235, its
+ * fragments; drivine4j's `SqlitePredicates` and `PostgresPredicates`): the Cypher the DSL writes for Neo4j (QueryRenderer), its filter and its seek each compiled whole as
  * one condition over the root's row, their parameters by the renderer's names (`$_q0`, bound as `_cy__q0`), and each of
  * its orders as the terms the module sorts it by, named apart (`$f1__q0`), a null placed by a term of its own before it.
  * So a value is compared and ordered as Cypher compares and orders it, whatever its kind, a date included (#771), and a
  * property whose name begins with `$` is read as the layout holds it. The root's row ends with `_`, as the module asks of
  * a row of the library's own SQL.
  */
-export class SqliteQueryRenderer implements ConditionWriter {
+export class FragmentQueryRenderer implements ConditionWriter {
     /** The Cypher of the conditions written so far, as the DSL writes them for Neo4j, its values numbered on. */
     private readonly cypher = new QueryRenderer(NEO4J_GRAMMAR);
 
-    /** The query `fn` makes of the model's references, over the root's row `row` of the graph `graph`. */
-    static render<T>(fn: QueryFn<T>, model: TargetModel, graph: string, row: string): RenderedQuery {
-        const fragments = new SqlFragments('sqlite', { name: graph });
+    /** The query `fn` makes of the model's references, over the root's row `row` of `store`'s graph `graph`. */
+    static render<T>(
+        store: SharedStore,
+        fn: QueryFn<T>,
+        model: TargetModel,
+        graph: string,
+        row: string
+    ): RenderedQuery {
+        const fragments = new SqlFragments(store, { name: graph });
         const variables = { [ROOT]: rootRow(row, model) };
         const parts = QueryRenderer.parts(fn, model, NEO4J_GRAMMAR, ROOT);
         const where = [parts.filter, parts.keyset]
@@ -50,15 +56,16 @@ export class SqliteQueryRenderer implements ConditionWriter {
         };
     }
 
-    /** The condition `fn` makes of the model's references, over the root's row `row` of the graph `graph`. */
+    /** The condition `fn` makes of the model's references, over the root's row `row` of `store`'s graph `graph`. */
     static renderWhere<T>(
+        store: SharedStore,
         fn: WhereFn<T>,
         model: TargetModel,
         graph: string,
         row: string
     ): { where: string; bindings: Record<string, any> } {
-        const renderer = new SqliteQueryRenderer(
-            new SqlFragments('sqlite', { name: graph }),
+        const renderer = new FragmentQueryRenderer(
+            new SqlFragments(store, { name: graph }),
             row,
             rootRow(row, model).labels
         );

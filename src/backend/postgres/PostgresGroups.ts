@@ -1,20 +1,30 @@
-import { jsonValue, PostgresGraph } from '@/backend/postgres/PostgresGraph';
-import { PostgresQueryRenderer } from '@/backend/postgres/PostgresQueryRenderer';
+import { jsonValue, numberOf, PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
-import { SqlGroups } from '@/backend/sql/SqlGroups';
+import { FragmentGroups } from '@/backend/sql/FragmentGroups';
+import { heldKey } from '@/cypher/ValueLayout';
 
-/** A grouped read on Postgres (see SqlGroups): a property key held as its `jsonb` value. */
-export class PostgresGroups extends SqlGroups {
+/**
+ * A grouped read on Postgres (see FragmentGroups; drivine4j's `PostgresSelect.groups`): a property key held as the
+ * `jsonb` value the module gives; a sum or a mean adds a property where a number is stored, read by the name the layout
+ * holds it by. A least or greatest value is the group's column itself, the first of the group's values in Cypher's
+ * order, and the node that has it is joined back only where the groups are ordered or filtered by it.
+ */
+export class PostgresGroups extends FragmentGroups {
+    protected readonly store = 'postgres' as const;
+
+    protected readonly givesValue = true;
+
     protected views(): PostgresViews {
         return new PostgresViews(this.graph as PostgresGraph);
     }
 
-    protected renderer(views: PostgresViews): PostgresQueryRenderer {
-        return new PostgresQueryRenderer(views);
+    /** The property where a number is stored, null otherwise, by the name the layout holds it by (`$$score`). */
+    protected aggregated(_views: PostgresViews, property: string): string {
+        return numberOf(this.row, heldKey(property));
     }
 
-    protected keyColumn(property: string): string {
-        return jsonValue('n', property);
+    protected first(of: string, order: string, kept: string): string {
+        return `(array_agg(${of} ORDER BY ${order}) FILTER (WHERE ${kept}))[1]`;
     }
 
     protected keyValue(column: string): string {
@@ -22,7 +32,7 @@ export class PostgresGroups extends SqlGroups {
     }
 
     protected idValue(property: string): string {
-        return jsonValue('p', property);
+        return jsonValue('p', heldKey(property));
     }
 
     /**

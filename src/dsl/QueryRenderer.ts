@@ -99,7 +99,7 @@ export class QueryRenderer {
      * The query `fn` asks of the class's references as the parts of its Cypher over the root, bound to `alias`: its
      * filter and its seek, each the condition it is, and the expression of each of its orders, each with the values it
      * binds, in the order {@link render} binds them; and what else a rendered query says of it. A SQL store compiles each
-     * part by the shared module (SqliteQueryRenderer).
+     * part by the shared module (FragmentQueryRenderer).
      */
     static parts<T>(fn: QueryFn<T>, model: TargetModel, grammar: CypherGrammar, alias: string): QueryParts {
         const scope = scopeOf(model);
