@@ -47,8 +47,7 @@ import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
 import { rangeIndex } from '@/schema/SchemaSpecs';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 
-/** The comparison an Oracle lookup by `$id` makes of Gauge's id, as the shared module writes it. */
-/** A load and a delete find the node as the query DSL's row, `n_`. */
+/** The comparison an Oracle load or delete by `$id` makes of Gauge's id, as the shared module writes it, over the query DSL's row `n_`. */
 const ORACLE_HAS_ID = idSql('oracle', 'hasId', DSL_ROW, 'id', 'JSON($id EXTENDED)');
 
 /** The row an Oracle write block's find binds its one id in, as `i.v`, read EXTENDED. */
