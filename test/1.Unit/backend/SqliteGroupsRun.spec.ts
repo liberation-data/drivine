@@ -7,6 +7,7 @@ import {
     DatabaseRegistry,
     DatabaseType,
     key,
+    max,
     min,
     ModelRegistry,
     NodeFragment,
@@ -22,11 +23,15 @@ import {
 class Item {
     @NodeId() id: string;
     value?: unknown;
+    name?: string;
+    at?: Date;
+    shelf?: string;
 }
 
 /**
  * A grouped read run on SQLite, which Node bundles, so no container: a property key ordered as Cypher orders it, read
- * through a node of the group that has it (drivine4j's `SqliteSelect.groups`).
+ * through a node of the group that has it (drivine4j's `SqliteSelect.groups`), and a least or greatest value of its own
+ * kind.
  */
 describe('a grouped read run on SQLite', () => {
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-sqlite-groups-'));
@@ -102,5 +107,29 @@ describe('a grouped read run on SQLite', () => {
         ]);
         const groups = await gom.groups.load(Item, { keys: { value: key('value') }, aggregates: { first: min('id') } });
         expect(groups.map((it: any) => it.first)).toEqual(['i1', 'i0']);
+    });
+
+    it("gives a least and a greatest text and date as a text, in Cypher's order of each, not as a number", async () => {
+        await gom.saveAll(
+            [
+                { id: 'a', name: 'pear', at: new Date('2026-03-01T00:00:00.000Z') },
+                { id: 'b', name: 'apple', at: new Date('2026-01-01T00:00:00.000Z') },
+                { id: 'c', name: 'quince', at: new Date('2026-02-01T00:00:00.000Z') },
+                { id: 'd' }
+            ].map((it) => Object.assign(new Item(), { shelf: 'one', ...it }))
+        );
+        const [group] = await gom.groups.load(Item, {
+            keys: { shelf: key('shelf') },
+            aggregates: { first: min('name'), last: max('name'), earliest: min('at'), latest: max('at') }
+        });
+        // A date is given as its text, Cypher's, as the temporal filters' grouped read reads one: not a Date, and not
+        // the text the save wrote, `.000Z`.
+        expect(group).toEqual({
+            shelf: 'one',
+            first: 'apple',
+            last: 'quince',
+            earliest: '2026-01-01T00:00:00Z',
+            latest: '2026-03-01T00:00:00Z'
+        });
     });
 });

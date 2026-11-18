@@ -17,6 +17,7 @@ import {
     GraphView,
     inDrivineContext,
     key,
+    max,
     min,
     ModelRegistry,
     NodeFragment,
@@ -320,7 +321,7 @@ describe('a SQLite store', () => {
             expect(await titles('desc')).toEqual([undefined, 10, 9, true, false, 'b', 'a']);
         });
 
-        it('should order groups by a date key by its moment, not by its text', async () => {
+        it('should order groups by a date key by its moment, and give a least and greatest text and date as text', async () => {
             // A date as the tag a save writes, its text first: by its text, `.5Z` would sort before `Z`, and the offset
             // last.
             const tags = [
@@ -345,6 +346,30 @@ describe('a SQLite store', () => {
                 ).map((it: any) => it.id);
             expect(await ids('asc')).toEqual(['m2', 'm1', 'm0']);
             expect(await ids('desc')).toEqual(['m0', 'm1', 'm2']);
+            await gom.saveAll([
+                ticket('t1', { priority: 1, title: 'pear', openedAt: new Date('2026-03-01T00:00:00.000Z') }),
+                ticket('t2', { priority: 1, title: 'apple', openedAt: new Date('2026-01-01T00:00:00.000Z') }),
+                ticket('t3', { priority: 1, title: 'quince', openedAt: new Date('2026-02-01T00:00:00.000Z') })
+            ]);
+            expect(
+                await gom.groups.load(Ticket, {
+                    keys: { priority: key('priority') },
+                    aggregates: {
+                        first: min('title'),
+                        last: max('title'),
+                        earliest: min('openedAt'),
+                        latest: max('openedAt')
+                    }
+                })
+            ).toEqual([
+                {
+                    priority: 1,
+                    first: 'apple',
+                    last: 'quince',
+                    earliest: '2026-01-01T00:00:00Z',
+                    latest: '2026-03-01T00:00:00Z'
+                }
+            ]);
         });
 
         it('should find a node by a whole number id, which node:sqlite binds as a real', async () => {
