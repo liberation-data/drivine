@@ -1,5 +1,5 @@
 import { Direction } from '@/annotation/Metadata';
-import { oracleId } from '@/backend/oracle/IdKeyedStatement';
+import { boundIdRows, foundByIds, idMatch, NO_JSON_TABLE_TRANSFORM, oracleId } from '@/backend/oracle/IdKeyedStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
@@ -120,15 +120,23 @@ export class OracleWrites {
                 if (when === 'before') {
                     declarations.push(`${variable} CLOB;`, `v_after${i} CLOB;`);
                 }
+                const ids = bind(
+                    writeLayout(
+                        group.objects.map((it) => idOf(group.model, it)),
+                        'oracle'
+                    )
+                );
+                // Hinted as the lookup is: it reads the node's props beside the lookup's, once Oracle unnests the lookup.
                 body.push(
-                    `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
-                        `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
-                        `WHERE ${hasLabels('n', group.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${bind(
-                            writeLayout(
-                                group.objects.map((it) => idOf(group.model, it)),
-                                'oracle'
-                            )
-                        )} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
+                    `SELECT ${NO_JSON_TABLE_TRANSFORM} NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), ` +
+                        `'stamp' VALUE NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
+                        `WHERE ${foundByIds(
+                            this.graph.nodes,
+                            'n',
+                            group.model.nodeIdProperty!,
+                            group.model.labels,
+                            boundIdRows(ids)
+                        )};`
                 );
             });
         reads('before');
@@ -282,11 +290,7 @@ export class OracleWrites {
 
     private matchOf(node: MatchedNode, name: string = 'x_frommatch'): string {
         const labels = [...new Set([...node.model.labels, ...(node.labels ?? [])])];
-        const k = jsonKey(heldKey(idProperty(node.model)));
-        this.pending[name] = `${hasLabels(
-            'n',
-            labels
-        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
+        this.pending[name] = idMatch(this.graph.nodes, idProperty(node.model), labels);
         if (name === 'x_frommatch') {
             this.pending.x_from = oracleId(node.id);
         } else {
@@ -301,11 +305,7 @@ export class OracleWrites {
     }
 
     private matchText(model: FragmentModel): string {
-        const k = jsonKey(heldKey(idProperty(model)));
-        return `${hasLabels(
-            'n',
-            model.labels
-        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
+        return idMatch(this.graph.nodes, idProperty(model), model.labels);
     }
 
     /**

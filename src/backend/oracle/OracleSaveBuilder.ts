@@ -2,6 +2,13 @@ import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
 import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
+import {
+    boundIdRows,
+    foundByIds,
+    holdsIdAmong,
+    idMatch,
+    NO_JSON_TABLE_TRANSFORM
+} from '@/backend/oracle/IdKeyedStatement';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -215,10 +222,8 @@ export class OracleSaveBuilder {
                 .flatMap((it) =>
                     items(it, object[it.field]).map((item) => idOf(rootOf(targetOf(it)), fragmentOf(it, item)))
                 );
-            const k = jsonKey(heldKey(into.nodeIdProperty!));
-            const notIn = (list: string): string =>
-                `NOT EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${list} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t ` +
-                `WHERE JSON_EXISTS(x.props, '$?(@${k} == $v)' PASSING t.v AS "v"))`;
+            // Whether x, a target the root is joined to, holds none of the ids bound as `list`.
+            const notIn = (list: string): string => `NOT ${holdsIdAmong('x', into.nodeIdProperty!, boundIdRows(list))}`;
             const side =
                 rel.direction === Direction.INCOMING
                     ? { on: 'x.nid = e.src', root: 'e.dst = q.r' }
@@ -227,14 +232,16 @@ export class OracleSaveBuilder {
                     : { on: 'x.nid = e.dst', root: 'e.src = q.r' };
             // The root's id once, from a row of its own: a dynamic statement's binds are by position.
             const dropped =
-                `SELECT e.eid, x.nid FROM (SELECT :1 AS r FROM dual) q CROSS JOIN ${this.graph.edges} e ` +
+                `SELECT ${NO_JSON_TABLE_TRANSFORM} e.eid, x.nid FROM (SELECT :1 AS r FROM dual) q CROSS JOIN ${this.graph.edges} e ` +
                 `JOIN ${this.graph.nodes} x ON ${side.on} ` +
                 `WHERE ${side.root} AND e.type = ${sqlText(rel.type)} AND ${hasLabels('x', into.labels)} AND ${notIn(
                     ':2'
                 )}`;
             const unreferenced =
                 this.options.removedTargets === RemovedTargets.DELETE_UNREFERENCED
-                    ? `SELECT COUNT(*) FROM ${this.graph.nodes} x WHERE x.nid = :1 AND ${notIn(':2')} AND NOT EXISTS ` +
+                    ? `SELECT ${NO_JSON_TABLE_TRANSFORM} COUNT(*) FROM ${
+                          this.graph.nodes
+                      } x WHERE x.nid = :1 AND ${notIn(':2')} AND NOT EXISTS ` +
                       `(SELECT 1 FROM ${this.graph.edges} r WHERE ${referencedAs(rel.direction)})`
                     : null;
             this.body.push(
@@ -252,12 +259,17 @@ export class OracleSaveBuilder {
             if (!this.declarations.includes(`${variable} CLOB;`)) {
                 this.declarations.push(`${variable} CLOB;`);
             }
+            // Hinted as the lookup is: it reads the node's props beside the lookup's, once Oracle unnests the lookup.
             return (
-                `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
-                `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
-                `WHERE ${hasLabels('n', it.model.labels)} AND EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${this.bind(
-                    writeLayout(it.ids, 'oracle')
-                )} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t WHERE JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING t.v AS "v"));`
+                `SELECT ${NO_JSON_TABLE_TRANSFORM} NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), ` +
+                `'stamp' VALUE NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
+                `WHERE ${foundByIds(
+                    this.graph.nodes,
+                    'n',
+                    it.model.nodeIdProperty!,
+                    it.model.labels,
+                    boundIdRows(this.bind(writeLayout(it.ids, 'oracle')))
+                )};`
             );
         });
     }
@@ -309,13 +321,8 @@ END;`;
     }
 
     private nodeParams(write: NodeWrite): Record<string, string> {
-        const k = jsonKey(heldKey(write.model.nodeIdProperty!));
-        const match = `${hasLabels(
-            'n',
-            write.model.labels
-        )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
         return {
-            match: this.bind(match),
+            match: this.bind(idMatch(this.graph.nodes, write.model.nodeIdProperty!, write.model.labels)),
             id: this.bind(writeLayout(write.id, 'oracle')),
             labels: this.bind(JSON.stringify([...new Set(write.labels)])),
             props: this.bind(writeProps(write.props, 'oracle')),
