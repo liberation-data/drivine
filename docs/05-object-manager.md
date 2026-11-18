@@ -446,14 +446,21 @@ where: q.mentions.none((m) => m.resolvedId.eq(entityId))
 
 `gt`, `gte`, `lt` and `lte` are offered on numbers, texts and dates, and the text operators on texts alone.
 
-**A date on Oracle, Postgres or SQLite is refused.** There, a `Date` given to a condition (`eq`, `gt`, `in`, `hasItem`
-and the rest), a `seek` cursor, an order expression, a grouped read's `where` or filtered aggregate, or a `patch`'s
-`where` is refused with a `DrivineError` that names
+**A date on SQLite is compared as Neo4j compares it.** There the query DSL's conditions, `seek` cursors, orders, grouped
+reads and a `patch`'s `where` are the shared compiler's SQL for the Cypher the DSL writes for Neo4j
+([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), so a `Date` is compared
+and ordered by the tag the store holds it as (see
+[Upgrading to 6.0](22-upgrading-to-6.md#values-are-held-as-layout-2-holds-them)), and any value as Cypher compares and
+orders it. A property whose name begins with `$` is read as the store holds it too. A grouped read's `min` and `max` are
+the value of a node of the group, in Cypher's order, of any kind: a text or a date as well as a number.
+
+**A date on Oracle or Postgres is refused.** There, a `Date` given to a condition (`eq`, `gt`, `in`, `hasItem` and the
+rest), a `seek` cursor, an order expression, a grouped read's `where` or filtered aggregate, or a `patch`'s `where` is
+refused with a `DrivineError` that names
 [drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235). The store holds a date as
-its tag (see [Upgrading to 6.0](22-upgrading-to-6.md#values-are-held-as-layout-2-holds-them)), which the query DSL's SQL
-doesn't compare yet, so it found nothing or the wrong rows; it will once the DSL's filters come from the shared
-compiler. Until then, compare a date in a [Cypher statement](04-cypher-on-a-relational-database.md), which compares
-dates as Neo4j does on every store:
+its tag, which the query DSL's SQL there doesn't compare yet, so it found nothing or the wrong rows; it will once the
+DSL's filters there come from the shared compiler, as SQLite's do. Until then, compare a date in a
+[Cypher statement](04-cypher-on-a-relational-database.md), which compares dates as Neo4j does on every store:
 
 ```typescript
 const ids = await pm.query<string>(
@@ -710,8 +717,8 @@ const ratings = await gom.groups.load(Feedback, (q) => ({
 // [{ page: '/install', votes: 3, likes: 2 }, …]: each row is typed by its keys and aggregates
 ```
 
-On Oracle, Postgres and SQLite the `createdAt.gte(march)` above is refused for now, since `march` is a `Date`: see
-[Operators](#operators).
+On Oracle and Postgres the `createdAt.gte(march)` above is refused for now, since `march` is a `Date`: see
+[Operators](#operators). SQLite compares it as Neo4j does.
 
 | Filter | Removes |
 | --- | --- |
