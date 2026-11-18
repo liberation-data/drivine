@@ -750,7 +750,8 @@ What every engine agrees on:
 - An aggregate's filter never takes a node out of its group: a group none of whose nodes meet it still has 0.
 - Ties are broken by the keys, ascending, so a top 5 is the same five on every engine.
 
-Where Oracle differs: `min` and `max` of a text skip a value stored as `""`, which Oracle reads as no value.
+`min` and `max` of a text keep a value stored as `""`, as Cypher does, on Oracle too: the `min` of `""` and `"a"` is
+`""`.
 
 On Oracle and Postgres, a `sum` or an `avg` of decimals is worked out in exact decimal, so it is more accurate:
 0.1 + 0.2 is 0.3 there, where doubles give 0.30000000000000004. It differs from a graph engine's only around its 16th

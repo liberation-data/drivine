@@ -133,6 +133,27 @@ describe.each(oracle)('a grouped read run on $name', (store) => {
         });
     });
 
+    it('keeps a text stored as "" in a least and a greatest text, as Cypher does: min of "" and "a" is ""', async () => {
+        for (const [id, shelf, name] of [
+            ['e1', 'mixed', ''],
+            ['e2', 'mixed', 'a'],
+            ['e3', 'mixed', 'b'],
+            ['e4', 'empty', ''],
+            ['e5', 'empty', undefined]
+        ]) {
+            await seed.node(['Item'], { id, shelf, ...(name === undefined ? {} : { name }) });
+        }
+        const groups = await gom.groups.load(Item, {
+            keys: { shelf: key('shelf') },
+            aggregates: { first: min('name'), last: max('name') },
+            orderBy: [['shelf', 'asc']]
+        });
+        expect(groups).toEqual([
+            { shelf: 'empty', first: '', last: '' },
+            { shelf: 'mixed', first: '', last: 'b' }
+        ]);
+    });
+
     /** The groups of each item's shelf, ordered by it `direction`, as the shelves' ids. */
     async function shelves(direction: 'asc' | 'desc'): Promise<unknown[]> {
         const groups = await gom.groups.load(Item, {
