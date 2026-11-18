@@ -84,7 +84,9 @@ dropped, with the catalog records (`<graph>_schema`) that name it, and the graph
 application's nodes is refused, as above. The schema marker keeps the shape all three libraries read: its inventory
 still lists each item, and `ensure` makes again each one it doesn't find.
 
-To see whether a graph holds an index 5.0 made, list them by name, the graph's name in place of `DRIVINE`:
+To see whether a graph holds an index 5.0 made for a range index or a uniqueness constraint, list them by name, the
+graph's name in place of `DRIVINE` (5.0's full-text and vector indexes, `drivine_t_…` and `drivine_v_…`, are not
+listed here):
 
 ```sql
 SELECT index_name FROM user_indexes
