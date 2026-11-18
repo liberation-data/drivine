@@ -19,6 +19,12 @@ describe('CypherShorthand', () => {
         expect(rewrite('n.`a.b` = 1')).toEqual('JSON_VALUE(n_.props, \'$."a.b"\') = 1');
     });
 
+    it('should read a property whose name begins with $ by the key layout 2 holds it under, the $ doubled (#793)', () => {
+        expect(rewrite('n.`$score` > 1')).toEqual('JSON_VALUE(n_.props, \'$."$$score"\') > 1');
+        expect(rewrite('n.`$open` = true')).toEqual('JSON_VALUE(n_.props, \'$."$$open"\') = \'true\'');
+        expect(rewrite("n.`a$b` = 'x'")).toEqual('JSON_VALUE(n_.props, \'$."a$b"\') = \'x\'');
+    });
+
     it("should read the row's own columns as the columns", () => {
         expect(rewrite('n.stamp IS NULL')).toEqual('n_.stamp IS NULL');
         expect(rewrite("JSON_EXISTS(n.props, '$.x')")).toEqual("JSON_EXISTS(n_.props, '$.x')");
