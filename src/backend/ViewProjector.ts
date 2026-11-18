@@ -121,16 +121,15 @@ export class ViewProjector {
         const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
         const match = `${pattern(rel, from, relAlias, `${targetAlias}:${labelsOf(into)}`)}${where}`;
 
-        if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
+        // Where the grammar projects inline, a view nested here with a CALL of its own, an ordered path's, is read in a
+        // CALL too: a pattern comprehension has nowhere to put one.
+        if (this.grammar.viewProjection === 'CALL_SUBQUERY' || inner.calls.length) {
             const collected = `collect(CASE WHEN ${targetAlias} IS NOT NULL THEN ${item} END)`;
             const value = `v${n}`;
             const call =
                 `CALL { WITH ${from} OPTIONAL MATCH ${match}${inner.calls.map((it) => ` ${it}`).join('')} ` +
                 `RETURN ${rel.isCollection ? collected : `head(${collected})`} AS ${value} }`;
             return { calls: [call], expression: value };
-        }
-        if (inner.calls.length) {
-            throw new Error('An inline projection has no CALL blocks.');
         }
         const comprehension = `[${match} | ${item}]`;
         return { calls: [], expression: rel.isCollection ? comprehension : `head(${comprehension})` };
@@ -139,36 +138,64 @@ export class ViewProjector {
     /**
      * The nodes at the far end of a path, each once, in the order one of its hops names where one does. Where the
      * grammar says so, the far node's labels are tested as each is collected, after the match.
+     *
+     * An ordered path is read in a CALL on every engine, its rows sorted by ORDER BY before they are collected, as
+     * drivine4j reads it: a pattern comprehension has no ORDER BY.
      */
     private path(path: PathModel, from: string): ViewProjection {
         const n = ++this.aliasCount;
         const t = `t${n}`;
         const order = pathOrder(path, t, n);
+        const value = `v${n}`;
         if (this.grammar.viewProjection === 'CALL_SUBQUERY') {
             const after = this.grammar.farLabelsAfterMatch;
             const match = pathPattern(path, from, t, !after, order?.node);
             const kept = after ? labelTest(t, farLabels(path)) : `${t} IS NOT NULL`;
-            // collect(DISTINCT …) keeps each node where it first occurs, so sorting the rows first orders the list.
-            const sorted = order
-                ? ` WITH ${[...new Set([from, t, order.node])].join(', ')} ORDER BY ${order.key} IS NULL, ` +
-                  `${order.key} ${order.ascending ? 'ASC' : 'DESC'}`
-                : '';
             const collected = `collect(DISTINCT CASE WHEN ${kept} THEN ${fragment(t)} END)`;
-            const value = `v${n}`;
             return {
                 calls: [
-                    `CALL { WITH ${from} OPTIONAL MATCH ${match}${sorted} ` +
+                    `CALL { WITH ${from} OPTIONAL MATCH ${match}${this.sorted(from, t, order)} ` +
                         `RETURN ${path.isCollection ? collected : `head(${collected})`} AS ${value} }`
                 ],
                 expression: value
             };
         }
-        const reached = order
-            ? sortedByKey(pathPattern(path, from, t, true, order.node), t, order, n)
-            : `[${pathPattern(path, from, t, true)} | ${t}]`;
+        const x = `x${n}`;
+        if (order) {
+            // collect(DISTINCT …) of the nodes, not of their maps: Memgraph's DISTINCT leaves equal maps apart.
+            const nodes = `s${n}`;
+            const list = `[${x} IN ${nodes} | ${fragment(x)}]`;
+            return {
+                calls: [
+                    `CALL { WITH ${from} OPTIONAL MATCH ${pathPattern(path, from, t, true, order.node)}` +
+                        `${this.sorted(from, t, order)} WITH collect(DISTINCT ${t}) AS ${nodes} ` +
+                        `RETURN ${path.isCollection ? list : `head(${list})`} AS ${value} }`
+                ],
+                expression: value
+            };
+        }
+        const reached = `[${pathPattern(path, from, t, true)} | ${t}]`;
         const distinct = `reduce(acc = [], y IN ${reached} | CASE WHEN y IN acc THEN acc ELSE acc + y END)`;
-        const list = `[x${n} IN ${distinct} | ${fragment(`x${n}`)}]`;
+        const list = `[${x} IN ${distinct} | ${fragment(x)}]`;
         return { calls: [], expression: path.isCollection ? list : `head(${list})` };
+    }
+
+    /**
+     * The rows of a path's match sorted by the key of its order, where it has one: collect(DISTINCT …) keeps each node
+     * where it first occurs, so sorting the rows first orders the list. A node without the key comes last whichever way
+     * the path is read: the engines put a null last lowest first and first highest first, so the sort asks whether the
+     * key is null before it reads the key. Values of several kinds are left to the engine's ORDER BY: Cypher's order on
+     * Neo4j and Memgraph, FalkorDB's own on FalkorDB.
+     */
+    private sorted(from: string, far: string, order?: PathOrder): string {
+        if (!order) {
+            return '';
+        }
+        const way = order.ascending ? 'ASC' : 'DESC';
+        return (
+            ` WITH ${[...new Set([from, far, order.node])].join(', ')} ORDER BY ${order.key} IS NULL, ` +
+            `${order.key} ${way}`
+        );
     }
 
     /** An aggregate over the nodes one relationship type leads to from `from`. */
@@ -283,29 +310,6 @@ function pathOrder(path: PathModel, far: string, n: number): PathOrder | undefin
     const hop = path.hops[at];
     const node = at === path.hops.length - 1 ? far : `h${n}`;
     return { node, key: `${node}.${quoteName(hop.orderBy!)}`, ascending: hop.ascending };
-}
-
-/**
- * The far nodes `far` of `pattern`, in the order of the key: an insertion sort, since a pattern comprehension has no
- * ORDER BY and an inline projection has nowhere to put a CALL. Each node reached is paired with its key, `k`, and with
- * whether that key is a text, `s`, which `toString` gives back unchanged. Each pair goes after every pair already placed
- * that it does not come before, so equal keys keep the order they were reached in. As Neo4j's ORDER BY reads them, a
- * text comes before a number, lowest first, and a null key comes last whichever way the path is read, as it does on
- * every backend.
- */
-function sortedByKey(pattern: string, far: string, order: PathOrder, n: number): string {
-    const [s, y, a, z] = [`s${n}`, `y${n}`, `a${n}`, `z${n}`];
-    const pairs = `[${pattern} | {k: ${order.key}, s: toString(${order.key}) = ${order.key}, n: ${far}}]`;
-    const [first, compares] = order.ascending
-        ? [`${a}.s AND NOT ${y}.s`, `${a}.k <= ${y}.k`]
-        : [`${y}.s AND NOT ${a}.s`, `${a}.k >= ${y}.k`];
-    const before =
-        `${y}.k IS NULL OR (${a}.k IS NOT NULL AND ((${first}) OR ` +
-        `(${a}.s = ${y}.s AND coalesce(${compares}, false))))`;
-    const sorted =
-        `reduce(${s} = [], ${y} IN ${pairs} | ` +
-        `[${a} IN ${s} WHERE ${before}] + [${y}] + [${a} IN ${s} WHERE NOT (${before})])`;
-    return `[${z} IN ${sorted} | ${z}.n]`;
 }
 
 /** The labels a path's far node carries: its last hop's, and its target's. */
