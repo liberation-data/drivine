@@ -103,14 +103,18 @@ describeOnOracle("An earlier version's Oracle index over a property, made again 
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
 
-    /** The objects Oracle's plan of `SELECT … WHERE <the module's equality>` reads: tables and indexes. */
-    const planOf = async (property: string, value: string): Promise<string[]> => {
+    /**
+     * The objects Oracle's plan of `SELECT … WHERE <the module's equality>` reads, tables and indexes, told to read it
+     * through the index `index`: Oracle takes the hint only where the index is over the expression the equality
+     * compares, so the plan shows whether it is, whatever a cost would choose over the few rows here.
+     */
+    const planOf = async (property: string, value: string, index: string): Promise<string[]> => {
         const fragments = new SqlFragments('oracle', {
             name: GRAPH,
             indexedProperties: [[LABEL, property]]
         });
         const term = fragments.condition({ n: { node: 'n_', labels: [LABEL] } }, `n.${property} = $v`, { v: value });
-        const hints = [...fragments.hints].join(' ');
+        const hints = [...fragments.hints, `INDEX(n_ ${index})`].join(' ');
         const id = `d696_${property}`;
         // On one session, as plan_table is the session's own (see oraclePlan).
         const connection = await DatabaseRegistry.getInstance().connectionProvider(`ORACLE_${GRAPH}`)!.connect();
@@ -211,10 +215,10 @@ describeOnOracle("An earlier version's Oracle index over a property, made again 
                 unique
             ])
         );
-        const byRepo = await planOf('repoKey', 'r7');
+        const byRepo = await planOf('repoKey', 'r7', labelled);
         expect(byRepo).toContain(labelled);
         expect(byRepo).not.toContain(`${GRAPH}_NODE_LABELS`.toUpperCase());
-        const byCode = await planOf('code', 'c42');
+        const byCode = await planOf('code', 'c42', unique);
         expect(byCode).toContain(unique);
         expect(byCode).not.toContain(`${GRAPH}_NODE_LABELS`.toUpperCase());
     });
