@@ -18,7 +18,8 @@ import {
     times
 } from '@liberation-data/drivine';
 import { called, hinted, noted } from '@/backend/oracle/OracleFragments';
-import { LocationHierarchy } from '../golden/GoldenModels';
+import { Account, LocationHierarchy } from '../golden/GoldenModels';
+import { loweredQuery } from '@/dsl/LowerCopyLookups';
 import { sameKey } from '@/backend/oracle/OracleGraph';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { SqlFragments } from '@/cypher/SqlFragments';
@@ -216,6 +217,40 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(either.labelsTested).toEqual([]);
         // A range comparison is not read through the index: the module reads an equality alone through it.
         expect(backend.renderQuery((q: any) => ({ where: q.name.gte('A') }), scored, indexed).labelsTested).toEqual([]);
+    });
+
+    it('tests the label of an ignore-case equality read through the index over a lowercased copy (drivine-cypher-spec#373)', () => {
+        const account: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Account) };
+        const indexed = [{ label: 'Account', properties: ['__drivine.lower.email'] }];
+        const lowered = backend.renderQuery(
+            loweredQuery((q: any) => ({ where: q.email.eqIgnoreCase('Ada@X.com') }), account, new Set(['email'])),
+            account,
+            indexed
+        );
+        // The module reads the copy through the labelled index, but past 4,000 bytes its term holds for any node: the
+        // statement tests the label itself.
+        expect(lowered.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "Account")') THEN`);
+        expect(lowered.labelsTested).toEqual([]);
+        const statement = backend.loadAllFragments(account.model as any, lowered.where, {}, lowered.labelsTested);
+        expect(statement.text).toContain(`WHERE JSON_EXISTS(n_.labels, '$?(@ == "Account")') AND (`);
+        // An equality of the copy's own value, not lowered, still tests the label through the index.
+        const plain = backend.renderQuery(
+            (q: any) => ({ where: q.property('__drivine.lower.email').eq('ada@x.com') }),
+            account,
+            indexed
+        );
+        expect(plain.labelsTested).toEqual(['Account']);
+        // As does a plain indexed equality beside the lowered one.
+        const both = backend.renderQuery(
+            loweredQuery(
+                (q: any) => ({ where: [q.email.eqIgnoreCase('Ada@X.com'), q.name.eq('Ada')] }),
+                account,
+                new Set(['email'])
+            ),
+            account,
+            [...indexed, { label: 'Account', properties: ['name'] }]
+        );
+        expect(both.labelsTested).toEqual(['Account']);
     });
 
     it('compares a text past 4,000 bytes as a CLOB, not through the index, which holds none, and tests the label', () => {

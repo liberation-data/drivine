@@ -287,12 +287,13 @@ describe('@CaseInsensitive', () => {
             expect(plain.where).toContain(`n_.props, '$."__drivine.lower.email"`);
             expect(plain.where).not.toContain(`'$[*]?(@ == "CiAccount")'`);
             expect(plain.labelsTested).toEqual([]);
-            // Through the labelled index over the copy, which the module's equality reads, and which tests the label.
+            // Through the labelled index over the copy, which the module's equality reads; past 4,000 bytes its term holds
+            // for any node, so the statement still tests the label (drivine-cypher-spec#373).
             const indexed = oracle.renderQuery(loweredQuery(fn, account, filled), account, [
                 { label: 'CiAccount', properties: ['__drivine.lower.email'] }
             ]);
             expect(indexed.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "CiAccount")') THEN`);
-            expect(indexed.labelsTested).toEqual(['CiAccount']);
+            expect(indexed.labelsTested).toEqual([]);
             // Postgres's is the module's fragment over the row `n_`: the copy compared, as JSON, with the value lowered.
             const postgres = new PostgresBackend(new PostgresGraph());
             expect(postgres.renderQuery(loweredQuery(fn, account, filled), account).where).toContain(

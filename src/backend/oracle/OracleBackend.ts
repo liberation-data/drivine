@@ -311,7 +311,7 @@ END;`)
             ...query,
             where: noted(query.where, fragments),
             orderBy: noted(query.orderBy, fragments),
-            labelsTested: labelsImplied(query.where, root.labels)
+            labelsTested: labelsImplied(query.where, root.labels, query.pinned, indexed)
         };
     }
 
@@ -508,7 +508,19 @@ END;`);
  * The labels of `labels` the condition `where`, as the shared module's fragments write it, tests at its top: those of
  * whose properties an equality is read through a labelled index there (see moduleLabelTest), as drivine4j's
  * `OraclePredicates.predicate` finds them. None for no condition.
+ *
+ * Only a plain equality at the top of the DSL's filter (`pinned`) of an `indexed` property of the label implies it. An
+ * ignore-case equality of a lowercased copy (`EQ_LOWERED`, see LowerCopyLookups) is read through the same index, but past
+ * 4,000 bytes the module's term holds for every node, the label's test inside it then not deciding it: the statement
+ * tests the label itself. Retires once the module keeps the label's test inside that guard
+ * (liberation-data/drivine-cypher-spec#373).
  */
-function labelsImplied(where: string | undefined, labels: string[]): string[] {
-    return where ? labels.filter((it) => where.includes(moduleLabelTest(ROW_ALIAS, it))) : [];
+function labelsImplied(where: string | undefined, labels: string[], pinned: string[], indexed: SchemaItem[]): string[] {
+    return where
+        ? labels.filter(
+              (label) =>
+                  where.includes(moduleLabelTest(ROW_ALIAS, label)) &&
+                  indexed.some((it) => it.label === label && pinned.includes(it.properties[0]))
+          )
+        : [];
 }

@@ -1,11 +1,13 @@
 import {
     backendFor,
+    CaseInsensitive,
     DatabaseRegistry,
     DatabaseType,
     ModelRegistry,
     NodeFragment,
     NodeId,
     PersistenceManager,
+    rangeIndex,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { describeOnOracle, oraclePersistenceManager } from '../support/Oracle';
@@ -19,6 +21,18 @@ class Note {
     title?: string;
     meta?: Record<string, any>;
     tags?: unknown[];
+}
+
+@NodeFragment({ labels: ['OraDslCiA'] })
+class CiA {
+    @NodeId() id: string;
+    @CaseInsensitive() email?: string;
+}
+
+@NodeFragment({ labels: ['OraDslCiB'] })
+class CiB {
+    @NodeId() id: string;
+    @CaseInsensitive() email?: string;
 }
 
 /**
@@ -37,11 +51,11 @@ describeOnOracle('the query DSL on Oracle, as the module writes it', () => {
     });
 
     beforeEach(async () => {
-        await new OracleSeed(pm, 'OraDsl').clear();
+        await Promise.all(['OraDsl', 'OraDslCiA', 'OraDslCiB'].map(async (it) => new OracleSeed(pm, it).clear()));
     });
 
     afterAll(async () => {
-        await new OracleSeed(pm, 'OraDsl').clear();
+        await Promise.all(['OraDsl', 'OraDslCiA', 'OraDslCiB'].map(async (it) => new OracleSeed(pm, it).clear()));
         await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
         DatabaseRegistry.tearDown();
     });
@@ -92,5 +106,30 @@ describeOnOracle('the query DSL on Oracle, as the module writes it', () => {
         expect((await gom.loadAll(Note, (q: any) => ({ where: q.meta.eq({ a: 1 }) }))).map((it) => it.id)).toEqual([
             'one'
         ]);
+    });
+
+    // drivine-cypher-spec#373: past 4,000 bytes the module's term over the copy holds for any node, so the statement
+    // tests the label itself, and a node of another label with the same copy is not found.
+    it('finds by eqIgnoreCase through the index over the copy past 4,000 bytes the nodes of its own label alone', async () => {
+        const index = rangeIndex('OraDslCiA', 'email', { ignoreCase: true });
+        await gom.indexes.ensure(index);
+        try {
+            const long = 'Ab'.repeat(2_500);
+            await gom.saveAll([
+                Object.assign(new CiA(), { id: 'a-long', email: long }),
+                Object.assign(new CiA(), { id: 'a-short', email: 'Ann@X.com' })
+            ]);
+            await gom.saveAll([
+                Object.assign(new CiB(), { id: 'b-long', email: long.toUpperCase() }),
+                Object.assign(new CiB(), { id: 'b-short', email: 'ann@x.com' })
+            ]);
+            const found = async (email: string): Promise<string[]> =>
+                (await gom.loadAll(CiA, (q) => ({ where: q.email.eqIgnoreCase(email) }))).map((it) => it.id);
+            expect(await found(long.toUpperCase())).toEqual(['a-long']);
+            expect(await found('ANN@x.com')).toEqual(['a-short']);
+            expect(await gom.count(CiA, (q: any) => ({ where: q.email.eqIgnoreCase(long) }))).toEqual(1);
+        } finally {
+            await gom.indexes.drop(index);
+        }
     });
 });
