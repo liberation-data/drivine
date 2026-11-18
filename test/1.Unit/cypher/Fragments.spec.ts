@@ -102,6 +102,38 @@ describe('fragment', () => {
         expect(fragments.nonFinite).toBe(false);
     });
 
+    it('compiles a whole condition with its parameters by their own names, not counted among those named apart', () => {
+        const fragments = new SqlFragments('sqlite', { name: 'g' });
+        const filter = fragments.whole(PEOPLE, 'n.name = $_q0 AND n.age > $_q1', { _q0: 'Ada', _q1: 36 });
+        expect(filter).toContain('$_cy__q0');
+        expect(filter).toContain('$_cy__q1');
+        expect(filter).not.toContain('$_cy_f');
+        // The next fragment named apart is the first.
+        expect(fragments.condition(PEOPLE, 'n.age < $p', { p: 90 })).toContain('$_cy_f1_p');
+        expect(fragments.parameters).toEqual({ _cy__q0: '"Ada"', _cy__q1: '36', _cy_f1_p: '90' });
+        expect(() => fragments.whole(PEOPLE, 'count(n) > 1')).toThrow(DrivineError);
+    });
+
+    it('places nulls by a term of their own before the order, first descending and last ascending, each named apart', () => {
+        const fragments = new SqlFragments('sqlite', { name: 'g' });
+        const plain = new SqlFragments('sqlite', { name: 'g' });
+        const isNull = (descending: boolean): string[] =>
+            plain.order(PEOPLE, 'n.age + $p IS NULL', descending, { p: 1 });
+        const term = (descending: boolean): string[] => plain.order(PEOPLE, 'n.age + $p', descending, { p: 1 });
+        const named = (terms: string[], n: number): string[] =>
+            terms.map((it) => it.replace(/_cy_f\d+_p/g, `_cy_f${n}_p`));
+        expect(fragments.ordered(PEOPLE, 'n.age + $p', false, 'FIRST', { p: 1 })).toEqual([
+            ...named(isNull(true), 1),
+            ...named(term(false), 2)
+        ]);
+        expect(fragments.ordered(PEOPLE, 'n.age + $p', true, 'LAST', { p: 1 })).toEqual([
+            ...named(isNull(false), 3),
+            ...named(term(true), 4)
+        ]);
+        expect(fragments.ordered(PEOPLE, 'n.age + $p', true, undefined, { p: 1 })).toEqual(named(term(true), 5));
+        expect(Object.keys(fragments.parameters)).toEqual(['_cy_f1_p', '_cy_f2_p', '_cy_f3_p', '_cy_f4_p', '_cy_f5_p']);
+    });
+
     it("renames a parameter's name whole, and not in a quoted text or a name in backticks", () => {
         const fragments = new SqlFragments('postgres', { name: 'g' });
         const term = fragments.condition(PEOPLE, "n.id = $id AND n.`$id` = '$id' AND n.ids = $idList", {

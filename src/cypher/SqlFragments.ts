@@ -57,6 +57,16 @@ export class SqlFragments {
         return single(this.taken((text) => ({ value: text }), variables, cypher, parameters));
     }
 
+    /**
+     * The one term of the condition `cypher` over `variables`, compiled whole with `parameters` by their own names: the
+     * query DSL's filter or seek, as its Cypher binds them (`$_q0`, bound as `_cy__q0`), not named apart and not counted
+     * among the fragments {@link condition}, {@link value} and {@link order} name apart. Its names are the renderer's
+     * own, which no other fragment of the statement binds by.
+     */
+    whole(variables: Record<string, FragmentVariable>, cypher: string, parameters: Record<string, any> = {}): string {
+        return single(this.kept(fragment(this.store, this.graph, { condition: cypher }, variables, parameters)));
+    }
+
     /** The terms an `ORDER BY` sorts by `cypher` over `variables`, descending where `descending` is true. */
     order(
         variables: Record<string, FragmentVariable>,
@@ -65,6 +75,23 @@ export class SqlFragments {
         parameters: Record<string, any> = {}
     ): string[] {
         return this.taken((text) => ({ order: text, descending }), variables, cypher, parameters).terms;
+    }
+
+    /**
+     * The terms an `ORDER BY` sorts by `cypher` over `variables`, descending where `descending` is true, its nulls first
+     * or last where `nulls` places them: before the term, a term of whether it is null, which sorts true after false, so
+     * descending for nulls first and ascending for last (drivine4j's `Fragments.ordered`). Each term is a fragment of its
+     * own, `parameters` named apart in each.
+     */
+    ordered(
+        variables: Record<string, FragmentVariable>,
+        cypher: string,
+        descending: boolean,
+        nulls?: 'FIRST' | 'LAST',
+        parameters: Record<string, any> = {}
+    ): string[] {
+        const placed = nulls ? this.order(variables, `${cypher} IS NULL`, nulls === 'FIRST', parameters) : [];
+        return [...placed, ...this.order(variables, cypher, descending, parameters)];
     }
 
     /** The next fragment compiled, its parameters named apart, and what it binds, its hints and its calls kept. */
@@ -80,7 +107,11 @@ export class SqlFragments {
                 ? renamed(cypher, Object.keys(parameters), prefix)
                 : cypher((it) => `$${prefix}${it}`);
         const given = Object.fromEntries(Object.entries(parameters).map(([name, value]) => [prefix + name, value]));
-        const compiled = fragment(this.store, this.graph, part(text), variables, given);
+        return this.kept(fragment(this.store, this.graph, part(text), variables, given));
+    }
+
+    /** `compiled`, what it binds, its hints and its calls kept for the statement. */
+    private kept(compiled: SqlFragment): SqlFragment {
         Object.assign(this.parameters, compiled.parameters);
         compiled.hints.forEach((it) => this.hints.add(it));
         this.nonFinite ||= compiled.nonFinite;
