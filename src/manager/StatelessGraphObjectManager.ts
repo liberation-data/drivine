@@ -582,16 +582,6 @@ export class StatelessGraphObjectManager {
      */
     async patch<T>(type: ClassRef<T>, given: unknown, options: PatchOptions<T>): Promise<PatchResult> {
         const target = this.modelOf(type);
-        const id = this.lookupId(target, given);
-        if (id === NO_NODE) {
-            // A null id, or text that is no value of the id's type, finds no node (#773): nothing is run.
-            return { found: false, applied: false, changed: false };
-        }
-        const filter = this.condition(
-            target,
-            await this.lookups(options.where, target, loweredWhere),
-            options.bindings
-        );
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const set: Record<string, any> = {};
         const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
@@ -602,6 +592,17 @@ export class StatelessGraphObjectManager {
                 root.jsonPacked.has(field)
             );
         }
+        // After the fields are checked, so a patch no store takes is refused whatever its id finds.
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            // A null id, or text that is no value of the id's type, finds no node (#773): nothing is run.
+            return { found: false, applied: false, changed: false };
+        }
+        const filter = this.condition(
+            target,
+            await this.lookups(options.where, target, loweredWhere),
+            options.bindings
+        );
         const statement = this.backend.patchOne(root, filter.where);
         const split = splitVectors(root, set);
         return this.whenUncontended(async () =>

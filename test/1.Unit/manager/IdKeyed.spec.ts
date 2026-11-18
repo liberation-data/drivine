@@ -439,6 +439,16 @@ describe.each([
         expect(bound).toEqual([]);
     });
 
+    it('refuses a patch of a field no patch writes by an id that finds no node, as by one that finds one', async () => {
+        for (const id of [null, 'abc', 7]) {
+            await expect(gom.patch(Dial, id, { set: { id: 5 } })).rejects.toThrow("A patch can't write id of Dial.");
+            await expect(gom.patch(Dial, id, { set: { name: 'a' }, clear: ['name'] })).rejects.toThrow(
+                'A patch names each field once.'
+            );
+        }
+        expect(bound).toEqual([]);
+    });
+
     it('finds a node of a $-named id by the key the layout holds it under', () => {
         const priced = registry.fragment(Priced);
         expect(backend().loadFragment(priced).text).toContain(idSql(store, 'hasId', 'n', '$$code', json('$id')));
