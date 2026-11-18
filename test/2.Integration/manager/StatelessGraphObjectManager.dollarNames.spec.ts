@@ -28,12 +28,12 @@ class Ranked {
  * A query DSL filter, order and grouped read of a property whose name begins with `$`, which store layout 2 holds as
  * `$$score` (drivine-cypher-spec#161). The DSL's own SQL named it as it is, `$score`, so it found no node, ordered by
  * nothing and grouped every node under no value, silently. The shared module's fragments read it as the layout holds it:
- * on SQLite since drivine-cypher-spec#235 step 2.
+ * on SQLite since drivine-cypher-spec#235 step 2, and on Postgres since step 3.
  */
 describe.each(sqlStores())('A property whose name begins with $ in the query DSL on $type', (store) => {
-    // Held where the DSL's SQL is still the library's own, which names the property as it is: Postgres until
-    // drivine-cypher-spec#235 step 3, Oracle until step 4. Make them it() again as each step lands.
-    const held = store.type === DatabaseType.SQLITE ? it : it.failing;
+    // Held where the DSL's SQL is still the library's own, which names the property as it is: Oracle until
+    // drivine-cypher-spec#235 step 4. Make it it() again when that step lands.
+    const held = store.type === DatabaseType.ORACLE ? it.failing : it;
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
 
