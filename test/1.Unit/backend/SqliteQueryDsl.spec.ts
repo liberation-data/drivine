@@ -7,7 +7,6 @@ import {
     NEO4J_GRAMMAR,
     NodeFragment,
     NodeId,
-    PostgresBackend,
     SqliteBackend,
     sum,
     TargetModel
@@ -27,7 +26,7 @@ const scored: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Sc
 const backend = new SqliteBackend();
 
 /** The grouped read `spec` asks of Scored on `on`, as the statement it is written as. */
-async function grouped(spec: (q: any) => any, on: SqliteBackend | PostgresBackend = backend): Promise<any> {
+async function grouped(spec: (q: any) => any, on: SqliteBackend = backend): Promise<any> {
     const statements: any[] = [];
     const groups = new GroupOperations(
         registry,
@@ -141,15 +140,6 @@ describe("The query DSL on SQLite, as the module's fragments", () => {
         // in the order they are written: the key (f1), each held value's presence and order (f2 to f5), the having (f6).
         expect(Object.keys(statement.bindings).sort()).toEqual(['_cy__q0', '_cy__q1', '_cy_f6_value', '_having1']);
         expect(statement.bindings._cy_f6_value).toEqual('3');
-    });
-
-    it("leaves Postgres's grouped read as it was: a least value as a number, no node joined back", async () => {
-        const statement = await grouped(
-            (q: any) => ({ keys: { name: key(q.name) }, aggregates: { high: max(q.$score) } }),
-            new PostgresBackend()
-        );
-        expect(statement.text).not.toContain('LEFT JOIN');
-        expect(statement.text).toContain('MAX(');
     });
 
     it("writes a patch's condition over n_, a value in the path of a property whose name begins with $ left as it is", () => {

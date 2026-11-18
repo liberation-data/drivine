@@ -290,9 +290,10 @@ describe('@CaseInsensitive', () => {
             ]);
             expect(indexed.where).toMatch(/END = LOWER\(\$_q0\) AND JSON_VALUE/);
             expect(indexed.labelsTested).toEqual(['CiAccount']);
+            // Postgres's is the module's fragment over the row `n_`: the copy compared, as JSON, with the value lowered.
             const postgres = new PostgresBackend(new PostgresGraph());
             expect(postgres.renderQuery(loweredQuery(fn, account, filled), account).where).toContain(
-                `(n.props ->> '__drivine.lower.email') = lower(CAST($_q0 AS text))`
+                `(n_.props -> '__drivine.lower.email') = to_jsonb(lower(`
             );
         });
 

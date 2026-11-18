@@ -29,13 +29,11 @@ const registry = new ModelRegistry();
 const dated: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Dated) };
 const first = new Date('2026-01-01T00:00:00.000Z');
 
-// The query DSL refuses a date on Postgres and Oracle by name, until their filters come from the module's fragments
-// (drivine-cypher-spec#235, steps 3 and 4): it compared a property's text with the date's ISO text, where layout 2 holds
-// the tag (#771). SQLite's come from the fragments: see below.
-describe.each([
-    ['Postgres', new PostgresBackend()],
-    ['Oracle', new OracleBackend()]
-] as [string, GraphBackend][])('A date in a query DSL value on %s', (_, backend) => {
+// The query DSL refuses a date on Oracle by name, until its filters come from the module's fragments
+// (drivine-cypher-spec#235, step 4): it compared a property's text with the date's ISO text, where layout 2 holds the tag
+// (#771). SQLite's and Postgres's come from the fragments: see below.
+describe('A date in a query DSL value on Oracle', () => {
+    const backend: GraphBackend = new OracleBackend();
     const where = (fn: (q: any) => any) => () => backend.renderWhere(fn, dated);
     const query = (fn: (q: any) => any) => () => backend.renderQuery(fn, dated);
 
@@ -85,11 +83,12 @@ describe.each([
 /** The JSON a fragment binds a date as: the tag layout 2 holds it as (drivine-cypher-spec#161). */
 const TAGGED = JSON.stringify({ $t: 'datetime', v: '2026-01-01T00:00:00Z', s: '10000020260101000000000000000064800' });
 
-// On SQLite the query DSL's filters, seeks and orders are the shared module's fragments (drivine-cypher-spec#235, step 2),
-// which compare a date by its tag, so a date is no longer refused (#771).
-describe('A date in a query DSL value on SQLite', () => {
-    const backend = new SqliteBackend();
-
+// On SQLite and Postgres the query DSL's filters, seeks and orders are the shared module's fragments
+// (drivine-cypher-spec#235, steps 2 and 3), which compare a date by its tag, so a date is no longer refused (#771).
+describe.each([
+    ['SQLite', new SqliteBackend()],
+    ['Postgres', new PostgresBackend()]
+] as [string, GraphBackend][])('A date in a query DSL value on %s', (_, backend) => {
     it("is compared by its tag in eq, gt, in, notIn and hasItem, bound by the renderer's names", () => {
         for (const fn of [
             (q: any) => q.at.eq(first),

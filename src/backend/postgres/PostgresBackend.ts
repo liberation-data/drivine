@@ -13,7 +13,6 @@ import {
 import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGroups } from '@/backend/postgres/PostgresGroups';
 import { hasLabels, nodeDocument, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
-import { PostgresQueryRenderer } from '@/backend/postgres/PostgresQueryRenderer';
 import { PostgresSaveBuilder } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresSearch } from '@/backend/postgres/PostgresSearch';
 import { PostgresStatement } from '@/backend/postgres/PostgresStatement';
@@ -23,6 +22,7 @@ import { SaveStatement } from '@/backend/SaveStatement';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
+import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
 import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
 import { selfLoopOnce } from '@/backend/sql/SqlGraph';
@@ -41,14 +41,18 @@ import { ModelRegistry } from '@/model/ModelRegistry';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 
-/** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
-export const ROW_ALIAS = 'n';
+/** What a read of the query DSL calls its root's row (see DSL_ROW). A raw `where` is SQL over `n`, which `written` reads as it. */
+export const ROW_ALIAS = DSL_ROW;
+
+/** What the statements that read a node by its id alone call its row. */
+const NODE_ROW = 'n';
 
 /**
  * Statements for Postgres, over the tables of a PostgresGraph: drivine4j's store, so a graph written from the JVM and
  * from Node is one. A load returns the rows the graph engines do, `{props, labels}` for a fragment, as `jsonb`. A raw
  * `where` is an SQL predicate over the node's row, `n` (its `labels`, `props` and `stamp`), in which a property of the
- * node may be written as Cypher writes it, `n.name` (see `written`).
+ * node may be written as Cypher writes it, `n.name` (see `written`). A filter, a seek and an order of the query DSL are
+ * the shared module's SQL (FragmentQueryRenderer), over the row `n_`.
  *
  * The store is made on the connection provider's first connection, and by the object manager before its first
  * statement, for a backend of another graph than the provider's: see `ensuring`.
@@ -236,7 +240,10 @@ export class PostgresBackend implements GraphBackend {
     heldProperties(model: FragmentModel): GraphStatement {
         return this.byId(
             new PostgresStatement(
-                [`SELECT ${ROW_ALIAS}.props AS "props"`, this.from(model, this.idPredicate(model))].join('\n')
+                [
+                    `SELECT ${NODE_ROW}.props AS "props"`,
+                    this.from(model, this.idPredicate(model, NODE_ROW), NODE_ROW)
+                ].join('\n')
             )
         );
     }
@@ -245,23 +252,24 @@ export class PostgresBackend implements GraphBackend {
         return this.byId(
             new PostgresStatement(
                 [
-                    `SELECT COALESCE(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
-                    this.from(model, this.idPredicate(model))
+                    `SELECT COALESCE(${NODE_ROW}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
+                    this.from(model, this.idPredicate(model, NODE_ROW), NODE_ROW)
                 ].join('\n')
             )
         );
     }
 
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
-        return PostgresQueryRenderer.render(fn, target, (depth) => new PostgresViews(this.graph, depth), ROW_ALIAS);
+        return FragmentQueryRenderer.render('postgres', fn, target, this.graph.name, ROW_ALIAS);
     }
 
+    /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
     written(predicate: string): string {
-        return new CypherShorthand(ROW_ALIAS, ROW_ALIAS, textOf).rewrite(predicate);
+        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate);
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
-        return PostgresQueryRenderer.renderWhere(fn, target, new PostgresViews(this.graph), ROW_ALIAS);
+        return FragmentQueryRenderer.renderWhere('postgres', fn, target, this.graph.name, ROW_ALIAS);
     }
 
     patchOne(model: FragmentModel, where?: string): GraphStatement {
@@ -391,10 +399,10 @@ export class PostgresBackend implements GraphBackend {
         return parts.length ? parts.join(' AND ') : undefined;
     }
 
-    /** The nodes of the fragment's labels that meet `where`, as the row `n`. */
-    private from(model: FragmentModel, where?: string): string {
-        const tests = [hasLabels(ROW_ALIAS, model.labels), ...(where ? [`(${where})`] : [])];
-        return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${tests.join(' AND ')}`;
+    /** The nodes of the fragment's labels that meet `where`, as the row `row`. */
+    private from(model: FragmentModel, where?: string, row: string = ROW_ALIAS): string {
+        const tests = [hasLabels(row, model.labels), ...(where ? [`(${where})`] : [])];
+        return `FROM ${this.graph.nodes} ${row}\nWHERE ${tests.join(' AND ')}`;
     }
 
     /** Deletes the nodes `where` selects, with their relationships, and returns how many: `{deleted}`. */
@@ -414,11 +422,11 @@ export class PostgresBackend implements GraphBackend {
      * The node whose id is `$id`, the JSON the node holds it as, as `byId` binds it: the property's JSON compared with it,
      * as the shared module writes the comparison, which the index over the id answers (see NodeIds).
      */
-    private idPredicate(model: FragmentModel): string {
+    private idPredicate(model: FragmentModel, row: string = ROW_ALIAS): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return hasId('postgres', ROW_ALIAS, model.nodeIdProperty, '$id');
+        return hasId('postgres', row, model.nodeIdProperty, '$id');
     }
 
     private page(page: Page): string[] {

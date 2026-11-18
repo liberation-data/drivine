@@ -6,6 +6,7 @@ import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { absent, present, storedKey, withoutKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
+import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { WritePlan } from '@/backend/sql/WritePlan';
 import { DrivineError } from '@/DrivineError';
@@ -191,8 +192,8 @@ export class PostgresWrites {
     }
 
     /**
-     * The query a patch step asks of the node it found, by its `nid`, the function's `$1`: whether its row meets `where`,
-     * `n`, or on SQLite `n_`, the row the query DSL's fragments read (see SqliteBackend's ROW_ALIAS). The function runs it
+     * The query a patch step asks of the node it found, by its `nid`, the function's `$1`: whether its row `n_`, the row
+     * the query DSL's fragments read (see DSL_ROW), meets `where`. The function runs it
      * on its own, where no value can be bound, so each value `where` names is written in. A name within a quoted text, as
      * the path of a property whose name begins with `$` is (`'$."$$id"'`), is the text's, not a value's.
      */
@@ -201,8 +202,7 @@ export class PostgresWrites {
         const written = where.replace(/'(?:[^']|'')*'|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name?: string) =>
             name !== undefined && names.includes(name) ? literal(bound[name]) : match
         );
-        const row = this.graph.store === 'sqlite' ? 'n_' : 'n';
-        return `SELECT COUNT(*) FROM ${this.graph.nodes} ${row} WHERE ${row}.nid = $1 AND (${written})`;
+        return `SELECT COUNT(*) FROM ${this.graph.nodes} ${DSL_ROW} WHERE ${DSL_ROW}.nid = $1 AND (${written})`;
     }
 }
 
