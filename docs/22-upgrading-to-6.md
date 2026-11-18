@@ -28,8 +28,9 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
   date's text and found nothing or the wrong rows. See [Object Manager](05-object-manager.md#operators).
 - A raw `where` is still SQL over the node's row `n`: a read of the query DSL calls that row `n_`, and reads `n.name`,
   `n.props`, `n.labels` and `n.stamp` in a raw `where` as that row's. A grouped read's `min` and `max` are the value of
-  a node of the group in Cypher's order, of any kind, where 5.0 gave a number's alone, and its groups are ordered by a
-  key as Cypher orders it, a text before a boolean before a number, where Postgres ordered them as `jsonb` orders, a
+  a node of the group in Cypher's order, of any kind, where 5.0 gave a number's alone; one of a property declared a
+  `Date` is a `Date` on every store, FalkorDB included, where FalkorDB gave the date's text
+  ([#785](https://github.com/liberation-data/drivine/issues/785)). Its groups are ordered by a key as Cypher orders it, a text before a boolean before a number, where Postgres ordered them as `jsonb` orders, a
   number before a boolean, and Oracle as its JSON orders. `notIn([])` matches a node that lacks the property, as
   Cypher's `NOT n.p IN []` does. On Postgres the query DSL compares and orders text by its code points, as Neo4j does
   (`B, a, b`), where 5.0 used the database's collation (see [Postgres](07-supported-engines.md#postgres)); Oracle did
