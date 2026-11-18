@@ -123,6 +123,16 @@ describe('fragment', () => {
         expect(fragments.nonFinite).toBe(true);
     });
 
+    it('throws a fragment the module refuses, and gathers nothing of it, so the statement binds none of its names', () => {
+        const fragments = new SqlFragments('oracle', { name: 'g' });
+        expect(() => fragments.condition(PEOPLE, 'count(n) > $p AND n.a = [1, null]', { p: 1 })).toThrow(DrivineError);
+        expect(fragments.parameters).toEqual({});
+        expect([...fragments.hints]).toEqual([]);
+        expect(fragments.callsStoredNullsEqual).toBe(false);
+        expect(fragments.condition(PEOPLE, 'n.age > $p', { p: 36 })).toContain('$_cy_f2_p');
+        expect(fragments.parameters).toEqual({ _cy_f2_p: '36' });
+    });
+
     it('renames a parameter named by a number, `$0`, as the module takes one', () => {
         const fragments = new SqlFragments('postgres', { name: 'g' });
         const term = fragments.condition(PEOPLE, 'n.x = $0 AND n.y = $10', { '0': 'a', '10': 'b' });
