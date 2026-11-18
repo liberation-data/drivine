@@ -98,8 +98,9 @@ stamped with a later layout is refused too.
 
 Notes:
 
-- A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher. A statement that writes and returns
-  rows is a PL/SQL block that hands them back with `DBMS_SQL.RETURN_RESULT`.
+- A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher; a `$name` in quoted text or a
+  comment, such as the JSON path `'$."$t"'`, is none. A statement that writes and returns rows is a PL/SQL block that
+  hands them back with `DBMS_SQL.RETURN_RESULT`.
 - A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
   engine gives: see [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database) to start, and
   [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
@@ -182,7 +183,7 @@ on [Oracle](#oracle).
 Notes:
 
 - A statement you write yourself is SQL. Parameters are named `$name`, as in Cypher, and a statement is bound only the
-  ones it names.
+  ones it names outside quoted text and comments: the `$t` of `'$t'` or `$q$ $t $q$` is none.
 - A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
   engine gives: see [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database) to start, and
   [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
@@ -347,7 +348,8 @@ the graph into it again.
 
 Notes:
 
-- A statement you write yourself is SQL; parameters are named `$name`, and a statement is bound only the ones it names.
+- A statement you write yourself is SQL; parameters are named `$name`, and a statement is bound only the ones it names
+  outside quoted text and comments, so the `$t` of a JSON path's `'$."$t"'` is none.
   A statement Drivine writes whose text values are each JSON opens with `/* drivine:json */`, and is read as JSON.
 - SQLite's JSON writes an infinity as `9e999`, which reads back as the infinity, and holds no NaN: Drivine's functions,
   and the rows of a `/* drivine:json */` statement, take the map `{"$numberDouble": "NaN"}`, exactly, as NaN, as

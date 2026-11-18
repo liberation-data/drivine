@@ -59,6 +59,28 @@ describe('PostgresSpecCompiler', () => {
         expect(compiled.parameters).toEqual(['Moon Girl']);
     });
 
+    it("should leave a parameter's name in quoted text as it is: a temporal tag's '$t', and a '$$score' key (#789)", () => {
+        const spec = new QuerySpecification(
+            `select ((n.props -> 'at') ->> '$t'), n.props ->> '$$score', "$t" from t where kind = $t and s = $score`
+        )
+            .bind({ t: 'a', score: 1 })
+            .finalizedCopy('SQL');
+        const compiled = new PostgresSpecCompiler(spec).compile();
+        expect(compiled.statement).toEqual(
+            `select ((n.props -> 'at') ->> '$t'), n.props ->> '$$score', "$t" from t where kind = $2 and s = $1`
+        );
+        expect(compiled.parameters).toEqual([1, 'a']);
+    });
+
+    it('should bind no parameter named only in quoted text, a dollar quote or a comment', () => {
+        const spec = new QuerySpecification(`select '$t', $q$ $u $q$ /* $v */ -- $w\nfrom t where id = $id`)
+            .bind({ t: 1, u: 2, v: 3, w: 4, id: 5 })
+            .finalizedCopy('SQL');
+        const compiled = new PostgresSpecCompiler(spec).compile();
+        expect(compiled.statement).toEqual(`select '$t', $q$ $u $q$ /* $v */ -- $w\nfrom t where id = $1`);
+        expect(compiled.parameters).toEqual([5]);
+    });
+
     it('should apply skip and limit as OFFSET and LIMIT', () => {
         const spec = new QuerySpecification(`select * from t`).skip(10).limit(5).finalizedCopy('SQL');
         const compiled = new PostgresSpecCompiler(spec).compile();

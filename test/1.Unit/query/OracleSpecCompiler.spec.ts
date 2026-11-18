@@ -36,4 +36,24 @@ describe('OracleSpecCompiler', () => {
         expect(compiled.statement).toEqual('select :b0, $größer from dual');
         expect(compiled.parameters).toEqual({ b0: 3 });
     });
+
+    it("leaves a parameter's name in a JSON path, a q'[…]' literal or a quoted identifier as it is (#789)", () => {
+        const spec = new QuerySpecification(
+            `select json_value(n.props, '$."$t"'), q'[$u]', "$t" from n where kind = $t and v$u = $u`
+        )
+            .bind({ t: 'a', u: 2 })
+            .finalizedCopy('SQL');
+        const compiled = new OracleSpecCompiler(spec).compile();
+        expect(compiled.statement).toEqual(
+            `select json_value(n.props, '$."$t"'), q'[$u]', "$t" from n where kind = :b0 and v$u = :b1`
+        );
+        expect(compiled.parameters).toEqual({ b0: 'a', b1: 2 });
+    });
+
+    it('binds no parameter named only in quoted text', () => {
+        const spec = new QuerySpecification(`select '$."$t"' from dual`).bind({ t: 'a' }).finalizedCopy('SQL');
+        const compiled = new OracleSpecCompiler(spec).compile();
+        expect(compiled.statement).toEqual(`select '$."$t"' from dual`);
+        expect(compiled.parameters).toEqual({});
+    });
 });

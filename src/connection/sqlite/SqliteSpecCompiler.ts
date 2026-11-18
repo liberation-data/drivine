@@ -3,19 +3,12 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
 import type { SqliteValue } from '@/connection/sqlite/SqliteDriver';
 import { jsonText } from '@/utils/JsonText';
+import { parameterNames, replaceParameters } from '@/utils/SqlParameters';
 
 /**
- * A named parameter, `$name`, as Postgres's compiler reads one: the longest name, so `$id` is not read in `$idList`.
- * SQLite reads `$name` itself, so the statement is run as it is written.
- */
-const PARAMETER = /\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*)/gu;
-
-/** A named parameter read as text, as a node's id is: `CAST($id AS TEXT)`. */
-const TEXT_PARAMETER = /CAST\(\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*) AS TEXT\)/gu;
-
-/**
- * A statement for SQLite, which reads `$name` parameters as they are written: only the names the statement uses are
- * bound, as SQLite refuses a value for a name it does not hold. A value is bound as SQLite holds one: a boolean as 1 or
+ * A statement for SQLite, which reads `$name` parameters as they are written: only the names the statement uses outside
+ * its quoted text are bound, as Postgres's compiler reads them (see [parameterNames]), as SQLite refuses a value for a
+ * name it does not hold, such as the `t` of a quoted `'$."$t"'`. A value is bound as SQLite holds one: a boolean as 1 or
  * 0, a date as ISO 8601 text, a list or a map as its JSON, as drivine4j's driver binds them.
  */
 export class SqliteSpecCompiler extends QuerySpecificationCompiler {
@@ -37,7 +30,7 @@ export class SqliteSpecCompiler extends QuerySpecificationCompiler {
             return this.spec.parameters.map(sqliteValue);
         }
         const text = this.spec.statement.text;
-        const used = new Set([...text.matchAll(PARAMETER)].map((it) => it[1]));
+        const used = parameterNames(text);
         const parameters = this.spec.parameters as Record<string, any>;
         return Object.fromEntries(
             Object.keys(parameters)
@@ -55,10 +48,13 @@ export class SqliteSpecCompiler extends QuerySpecificationCompiler {
     }
 }
 
-/** Whether the statement reads the parameter only as text, `CAST($name AS TEXT)`. */
+/**
+ * Whether the statement reads the parameter only as text, as a node's id is, `CAST($name AS TEXT)`: a quoted `'$name'`
+ * or `'CAST($name AS TEXT)'` is no reading.
+ */
 function readAsText(text: string, name: string): boolean {
-    const count = (pattern: RegExp): number => [...text.matchAll(pattern)].filter((it) => it[1] === name).length;
-    return count(TEXT_PARAMETER) === count(PARAMETER);
+    const marked = replaceParameters(text, (it) => (it === name ? '\u0000' : undefined));
+    return marked.split('CAST(\u0000 AS TEXT)').length === marked.split('\u0000').length;
 }
 
 /**
