@@ -186,7 +186,7 @@ function integer(value: number, what: string): number {
     return value;
 }
 
-/** The stored name of a group key's or an aggregate's property: given as it, or as a reference to a root property. */
+/** Internal: the stored name of a group key's or an aggregate's property: given as it, or as a reference to a root property. */
 export function storedName(property: unknown, scope: Scope, what: string): string {
     return typeof property === 'string' ? property : rootProperty(pathOf(property), scope, what);
 }

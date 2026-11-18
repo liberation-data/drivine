@@ -193,7 +193,8 @@ describe.each(STORES)('A grouped min or max of a Date property on %s', (type) =>
                 a1: '2026-01-01T00:00:00Z',
                 a2: '2026-01-01T00:00:00Z',
                 a3: '2026-01-01T00:00:00Z',
-                a4: 3
+                a4: 3,
+                a5: '2026-01-01T00:00:00Z'
             }
         ];
         const [group] = await groups().load(Dated, (q: any) => ({
@@ -205,7 +206,9 @@ describe.each(STORES)('A grouped min or max of a Date property on %s', (type) =>
                 name: max(q.name),
                 // A property no field is declared for.
                 other: min('other'),
-                score: max(q.score)
+                score: max(q.score),
+                // The field's name of a field stored under another: a property the field isn't.
+                fieldName: max('openedAt')
             }
         }));
         expect(group).toEqual({
@@ -214,7 +217,8 @@ describe.each(STORES)('A grouped min or max of a Date property on %s', (type) =>
             union: '2026-01-01T00:00:00Z',
             name: '2026-01-01T00:00:00Z',
             other: '2026-01-01T00:00:00Z',
-            score: 3
+            score: 3,
+            fieldName: '2026-01-01T00:00:00Z'
         });
     });
 

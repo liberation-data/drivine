@@ -100,7 +100,9 @@ export class GroupOperations {
                 .filter(([, it]) => (it.function === 'MIN' || it.function === 'MAX') && it.property !== undefined)
                 .filter(([, it]) => {
                     const stored = storedName(it.property, scope, 'An aggregate');
-                    return declaredDate(model.type, model, fields.get(stored) ?? stored);
+                    // A field stored under another name is not the property of its own name.
+                    const field = fields.get(stored) ?? (model.graphProperties.has(stored) ? undefined : stored);
+                    return field !== undefined && declaredDate(model.type, model, field);
                 })
                 .map(([name]) => name)
         );

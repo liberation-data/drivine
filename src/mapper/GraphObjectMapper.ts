@@ -286,7 +286,7 @@ function declaredBigInt(type: Function, mapping: FieldMapping, field: string): b
 }
 
 /**
- * Whether the field is declared a `Date`: as the model records it, or as TypeScript records it for a field only another
+ * Internal: whether the field is declared a `Date`: as the model records it, or as TypeScript records it for a field only another
  * library's decorator marks, which the model doesn't know of (as {@link declaredSet}).
  */
 export function declaredDate(type: Function, mapping: FieldMapping, field: string): boolean {
