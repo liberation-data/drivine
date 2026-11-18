@@ -240,11 +240,11 @@ export class SessionStarter {
 ```
 
 A node of the ordered hop without the property comes last, whichever way the path is read. Targets whose first nodes
-hold equal values come in no set order. The property should hold values of one type: every backend reads the order the
-same way where it does, a text of digits such as `'0100'` is ordered as text, and an empty text is a text, the lowest
-one. Where it holds texts on some nodes and
-numbers on others, every backend reads every text before every number lowest first, and after them highest first, as
-Neo4j's ORDER BY does. A group key's path names no order: `pathKey` refuses one.
+hold equal values come in no set order. Every backend orders the property as Cypher's ORDER BY does, whatever it holds:
+a date by its moment, an offset's included, a text of digits such as `'0100'` as text, and an empty text as a text, the
+lowest one. Where it holds values of several kinds, every backend reads every text before every boolean before every
+number lowest first, and after them highest first, as Neo4j does. A group key's path names no order: `pathKey` refuses
+one.
 
 #### 6. Aggregates: Counting and Summarising Without Loading
 

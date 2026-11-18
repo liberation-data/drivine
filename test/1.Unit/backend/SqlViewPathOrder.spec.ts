@@ -13,7 +13,8 @@ import {
     PostgresGraph,
     Root,
     SqliteBackend,
-    SqliteGraph
+    SqliteGraph,
+    TargetModel
 } from '@liberation-data/drivine';
 import { SqlFragments } from '@/cypher/SqlFragments';
 import { SharedStore } from '@/cypher/SharedCypherCompiler';
@@ -84,7 +85,27 @@ describe.each(STORES)("A view's path ordered by a hop on %s", (store, backendOf)
         expect(statement.text).not.toMatch(/order_kind|order_number|order_text/);
     });
 
+    it("orders a view's path the same way in a search whose root is the view", () => {
+        const target: TargetModel = { kind: 'GRAPH_VIEW', model };
+        const search = { label: 'PathOrderActor', property: 'embedding', similarity: 'COSINE' as const, k: 5 };
+        const found = backendOf().nearest(target, search);
+        const searched = found.text.replace(/\b[kswr]\d+_\./g, 'ROW_.');
+        expect(searched).toContain(`ORDER BY ${moduleOrder(store, false)}, x`);
+        expect(searched).toContain(`ORDER BY ${moduleOrder(store, true)}, x`);
+        if (store === 'oracle') {
+            expect(found.text).toMatch(/^SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM \*\/ JSON_OBJECT\('value'/);
+        }
+    });
+
     if (store === 'oracle') {
+        it("carries a filter's hints and calls beside the view's, once each, on its outermost SELECT", () => {
+            const where = '/*drivine:hint NO_JSON_TABLE_TRANSFORM*//*drivine:hint OTHER*//*drivine:calls era*/1 = 1';
+            const filtered = backendOf().loadAllViews(model, where);
+            expect(filtered.text).toMatch(/^SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM OTHER \*\/ JSON_OBJECT/);
+            expect(filtered.text).not.toContain('/*drivine:');
+            expect(filtered.calls).toEqual(expect.objectContaining({ era: true }));
+        });
+
         it('carries the hints the fragments ask for on its outermost SELECT, and joins the hop node back by its keys', () => {
             expect(statement.text).toMatch(/^SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM \*\/ JSON_OBJECT/);
             expect(statement.text).toMatch(

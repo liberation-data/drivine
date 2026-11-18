@@ -152,6 +152,16 @@ describe("A view's path ordered by a hop's property, run on SQLite", () => {
         });
     });
 
+    it('orders an empty text as a text, the lowest, and targets of equal values by their node', async () => {
+        await create(['', 'a', undefined, '']);
+        expect(await loaded()).toEqual({
+            lowestFirst: ['d0', 'd3', 'd1', 'd2'],
+            highestFirst: ['d1', 'd0', 'd3', 'd2'],
+            lowest: 'd0',
+            highest: 'd1'
+        });
+    });
+
     it('keeps for a node reached by several hop nodes the first of them, a date and a number apart', async () => {
         // d0 is reached through a date and a number: lowest first it keeps the date, highest first the number.
         await create([
