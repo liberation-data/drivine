@@ -17,6 +17,7 @@ import {
     GraphView,
     inDrivineContext,
     key,
+    min,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -290,7 +291,7 @@ describe('a SQLite store', () => {
             expect((await gom.load(Ticket, 't1'))!.stamp).not.toEqual(stamp);
         });
 
-        it('should order groups by a key as Postgres orders jsonb: a text, a number, a boolean, and no value last', async () => {
+        it('should order groups by a key as Cypher orders it: a text, a boolean, a number, and no value last', async () => {
             for (const props of [
                 { title: 'b' },
                 { title: true },
@@ -314,9 +315,36 @@ describe('a SQLite store', () => {
                         orderBy: [['title', direction]]
                     })
                 ).map((it: any) => it.title);
-            // A boolean after a number, false before true, as jsonb orders them.
-            expect(await titles('asc')).toEqual(['a', 'b', 9, 10, false, true, undefined]);
-            expect(await titles('desc')).toEqual([undefined, true, false, 10, 9, 'b', 'a']);
+            // A boolean before a number, false before true, as Cypher orders them (drivine4j's SqliteSelect.groups).
+            expect(await titles('asc')).toEqual(['a', 'b', false, true, 9, 10, undefined]);
+            expect(await titles('desc')).toEqual([undefined, 10, 9, true, false, 'b', 'a']);
+        });
+
+        it('should order groups by a date key by its moment, not by its text', async () => {
+            // A date as the tag a save writes, its text first: by its text, `.5Z` would sort before `Z`, and the offset
+            // last.
+            const tags = [
+                ['2024-01-01T00:00:00.5Z', '10000020240101000000500000000064800'],
+                ['2024-01-01T00:00:00Z', '10000020240101000000000000000064800'],
+                ['2024-01-01T01:00:00+02:00', '10000020231231230000000000000072000']
+            ];
+            for (const [i, [v, sorted]] of tags.entries()) {
+                await pm.execute(
+                    new QuerySpecification(
+                        `INSERT INTO drivine_node (labels, props) VALUES ('["SqliteStore","Moment"]', $props)`
+                    ).bind({ props: JSON.stringify({ id: `m${i}`, at: { $t: 'datetime', v, s: sorted } }) })
+                );
+            }
+            const ids = async (direction: 'asc' | 'desc'): Promise<unknown[]> =>
+                (
+                    await gom.groups.load(Moment, {
+                        keys: { at: key('at') },
+                        aggregates: { id: min('id') },
+                        orderBy: [['at', direction]]
+                    })
+                ).map((it: any) => it.id);
+            expect(await ids('asc')).toEqual(['m2', 'm1', 'm0']);
+            expect(await ids('desc')).toEqual(['m0', 'm1', 'm2']);
         });
 
         it('should find a node by a whole number id, which node:sqlite binds as a real', async () => {

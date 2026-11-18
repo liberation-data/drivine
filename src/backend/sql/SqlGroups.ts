@@ -72,6 +72,9 @@ export abstract class SqlGroups {
         const value = (aggregate: GroupAggregate): string =>
             aggregate.property ? this.aggregated(views, aggregate.property as string) : '1';
         const held = aggregates.map(([, aggregate]) => this.held(aggregate));
+        const heldKeys = keys.map(([, key]) =>
+            key.kind === 'property' ? this.heldKey(key.property as string) : undefined
+        );
         const filtered = (aggregate: GroupAggregate, of: string): string =>
             aggregate.filter ? `CASE WHEN ${aggregate.filter as string} THEN ${of} END` : of;
         const aggregateColumns = aggregates.map(([, aggregate], i) => {
@@ -93,6 +96,7 @@ export abstract class SqlGroups {
         keys.forEach(([name], i) => names.set(name, `k${i}`));
         aggregates.forEach(([name], i) => names.set(name, `a${i}`));
         const holder = (index: number): string => `a${index}_`;
+        const keyHolder = (index: number): string => `k${index}_`;
         const heldHaving: string[] = [];
         const having = (query.having ?? []).flatMap(
             ([name, comparison, compared]: [string, string, number], i: number) => {
@@ -127,6 +131,9 @@ export abstract class SqlGroups {
             if (column.startsWith('a') && held[index]) {
                 return held[index]!.order(holder(index), direction).join(', ');
             }
+            if (column.startsWith('k') && heldKeys[index]) {
+                return heldKeys[index]!(keyHolder(index), direction).join(', ');
+            }
             return (column.startsWith('k') ? keyOf(index) : [`g.${column}`])
                 .map((it) => this.orderTerm(it, direction))
                 .join(', ');
@@ -150,14 +157,20 @@ export abstract class SqlGroups {
             ),
             ...aggregates.map((_, i): [string, string] => [`a${i}`, held[i] ? held[i]!.value(holder(i)) : `g.a${i}`])
         ];
-        const holders = held.flatMap((it, i) =>
-            it ? [`LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${holder(i)}.nid = g.a${i}`] : []
-        );
+        const holders = [
+            ...heldKeys.flatMap((it, i) =>
+                it ? [`LEFT JOIN ${this.graph.nodes} ${keyHolder(i)} ON ${keyHolder(i)}.nid = g.k${i}r`] : []
+            ),
+            ...held.flatMap((it, i) =>
+                it ? [`LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${holder(i)}.nid = g.a${i}`] : []
+            )
+        ];
+        const representatives = heldKeys.flatMap((it, i) => (it ? [`MIN(${n}.nid) AS k${i}r`] : []));
         const keyNames = keys.map((_, i) => `m.k${i}`);
         const text = [
             `SELECT ${views.object(projected)} AS "row"`,
             `FROM (`,
-            `    SELECT ${[...keyNames, ...aggregateColumns].join(', ')}`,
+            `    SELECT ${[...keyNames, ...aggregateColumns, ...representatives].join(', ')}`,
             `    FROM (SELECT DISTINCT ${n}.nid, ${keyColumns.join(', ')} ${froms.join(' ')} WHERE ${wheres.join(
                 ' AND '
             )}) m`,
@@ -186,6 +199,16 @@ export abstract class SqlGroups {
 
     /** How a least or greatest value is read through the node that has it, where the store does so; undefined otherwise. */
     protected held(_aggregate: GroupAggregate): HeldAggregate | undefined {
+        return undefined;
+    }
+
+    /**
+     * How a property key is ordered through a node of the group that has its value, as drivine4j's SQLite orders one:
+     * the statement gives the group's least `nid` as the key's column with `r` after it, joins that node back as the
+     * row `holder`, and orders by the terms this gives for `property` there. Undefined where the store orders the
+     * key's column itself ({@link keyOrder}).
+     */
+    protected heldKey(_property: string): ((holder: string, direction: 'ASC' | 'DESC') => string[]) | undefined {
         return undefined;
     }
 

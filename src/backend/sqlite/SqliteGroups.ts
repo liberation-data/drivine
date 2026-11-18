@@ -15,8 +15,8 @@ import { GraphStatement } from '@/backend/GraphStatement';
  * property key is the property's value as the store holds it, so values Cypher tells apart are grouped apart; a sum or
  * a mean adds that value where it is a number. A least or greatest value is a node of the group that has it, the first
  * in Cypher's order of those that have one, joined back: the value is given, compared by a `having` and ordered there
- * as Cypher does, whatever its kind, a date included. A key is ordered as `jsonb` orders on Postgres: a text before a
- * number, each as the value it is, and a node with no value last ascending.
+ * as Cypher does, whatever its kind, a date included. A key is ordered as Cypher orders it, through a node of the group
+ * that has its value, joined back so too.
  */
 export class SqliteGroups extends SqlGroups {
     protected readonly row = DSL_ROW;
@@ -85,15 +85,12 @@ export class SqliteGroups extends SqlGroups {
     }
 
     /**
-     * A key orders by the kind of its JSON first, as `jsonb` orders on Postgres: a text before a number, a number
-     * before a boolean. Then by its value, as the SQL value it is.
+     * A key is ordered as Cypher orders it, whatever its kind, a date included: read through the group's node of least
+     * `nid`, which has the key's value, as drivine4j's SQLite reads it.
      */
-    protected keyOrder(column: string): string[] {
-        return [
-            `CASE json_type(${column}) WHEN 'null' THEN 0 WHEN 'text' THEN 1 WHEN 'integer' THEN 2 WHEN 'real' THEN 2 ` +
-                `WHEN 'false' THEN 3 WHEN 'true' THEN 3 WHEN 'array' THEN 4 WHEN 'object' THEN 5 END`,
-            `(${column} ->> '$')`
-        ];
+    protected heldKey(property: string): (holder: string, direction: 'ASC' | 'DESC') => string[] {
+        return (holder, direction) =>
+            this.fragments.ordered(this.node(holder), cypherOf(property), direction === 'DESC');
     }
 
     /** A null last ascending and first descending, as Postgres places it: SQLite would place it first ascending. */

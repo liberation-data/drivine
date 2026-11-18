@@ -451,8 +451,10 @@ reads and a `patch`'s `where` are the shared compiler's SQL for the Cypher the D
 ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), so a `Date` is compared
 and ordered by the tag the store holds it as (see
 [Upgrading to 6.0](22-upgrading-to-6.md#values-are-held-as-layout-2-holds-them)), and any value as Cypher compares and
-orders it. A property whose name begins with `$` is read as the store holds it too. A grouped read's `min` and `max` are
-the value of a node of the group, in Cypher's order, of any kind: a text or a date as well as a number.
+orders it. A property whose name begins with `$` is read as the store holds it too. A grouped read orders its groups by
+a property key as Cypher orders it, a date by its moment, and a text before a boolean before a number. Its `min` and
+`max` are the value of a node of the group, in Cypher's order, of any kind: a text, or a date given back as its text,
+as well as a number.
 
 **A date on Oracle or Postgres is refused.** There, a `Date` given to a condition (`eq`, `gt`, `in`, `hasItem` and the
 rest), a `seek` cursor, an order expression, a grouped read's `where` or filtered aggregate, or a `patch`'s `where` is
