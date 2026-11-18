@@ -184,18 +184,17 @@ export class ViewProjector {
      * The rows of a path's match sorted by the key of its order, where it has one: collect(DISTINCT …) keeps each node
      * where it first occurs, so sorting the rows first orders the list. A node without the key comes last whichever way
      * the path is read: the engines put a null last lowest first and first highest first, so the sort asks whether the
-     * key is null before it reads the key. Where the engine's ORDER BY orders no values of two kinds, their kinds are
-     * ranked first (see CypherGrammar.kindRank).
+     * key is null before it reads the key. Values of several kinds are left to the engine's ORDER BY: Cypher's order on
+     * Neo4j and Memgraph, FalkorDB's own on FalkorDB.
      */
     private sorted(from: string, far: string, order?: PathOrder): string {
         if (!order) {
             return '';
         }
         const way = order.ascending ? 'ASC' : 'DESC';
-        const rank = this.grammar.kindRank ? `${this.grammar.kindRank(order.key)} ${way}, ` : '';
         return (
             ` WITH ${[...new Set([from, far, order.node])].join(', ')} ORDER BY ${order.key} IS NULL, ` +
-            `${rank}${order.key} ${way}`
+            `${order.key} ${way}`
         );
     }
 

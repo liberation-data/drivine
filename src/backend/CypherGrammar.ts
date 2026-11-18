@@ -31,13 +31,6 @@ export interface CypherGrammar {
     readonly farLabelsAfterMatch: boolean;
 
     /**
-     * Where the engine's ORDER BY refuses to order values of two kinds, as Memgraph's does, the rank of the kind of the
-     * value `expression` gives, which a path ordered by a hop's property is sorted by before the value: so that no two
-     * values of different ranks are compared. Undefined where ORDER BY orders kinds itself.
-     */
-    readonly kindRank?: (expression: string) => string;
-
-    /**
      * Whether a keyset predicate constrains each key with `IS NOT NULL`: where indexes leave out null-valued nodes
      * (Neo4j), that is what lets a composite index serve the page. On Memgraph it costs the range bound.
      */
@@ -166,11 +159,6 @@ export const MEMGRAPH_GRAMMAR: CypherGrammar = {
     someMatch: someMatchSubquery,
     viewProjection: 'INLINE',
     farLabelsAfterMatch: false,
-    // Cypher's order of the kinds a property holds, as far as Memgraph tells them apart without refusing: a text, a
-    // boolean, then any other value, a number, a temporal value or a list. Memgraph refuses to order two of those last
-    // beside each other, as it refuses to compare them.
-    kindRank: (expression) =>
-        `CASE WHEN toString(${expression}) = ${expression} THEN 0 WHEN ${expression} IN [true, false] THEN 1 ELSE 2 END`,
     contended: transientOverBolt,
     orphanDeleteLimit: 'Memgraph takes an existence check only in a WHERE clause, not in the list of nodes to delete'
 };

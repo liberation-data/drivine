@@ -96,20 +96,15 @@ describe('Ordered path statements', () => {
         );
     });
 
-    it("should rank the key's kind before the key on Memgraph, which orders no two kinds", () => {
+    it('should sort the rows in a CALL before collecting the nodes on Memgraph, as on Neo4j', () => {
         expect(new CypherBackend(MEMGRAPH_GRAMMAR).loadAllViews(model).text).toEqual(
             'MATCH (n:Person)\n' +
                 'WHERE EXISTS { MATCH (n)-[:ACTED_IN]->(:Movie)-[:DIRECTED_BY]->(:Director) }\n' +
                 'CALL { WITH n OPTIONAL MATCH (n)-[:ACTED_IN]->(h1:Movie)-[:DIRECTED_BY]->(t1:Director) ' +
-                'WITH n, t1, h1 ORDER BY h1.year IS NULL, ' +
-                'CASE WHEN toString(h1.year) = h1.year THEN 0 WHEN h1.year IN [true, false] THEN 1 ELSE 2 END ASC, ' +
-                'h1.year ASC WITH collect(DISTINCT t1) AS s1 ' +
+                'WITH n, t1, h1 ORDER BY h1.year IS NULL, h1.year ASC WITH collect(DISTINCT t1) AS s1 ' +
                 'RETURN [x1 IN s1 | {props: properties(x1), labels: labels(x1)}] AS v1 }\n' +
                 'CALL { WITH n OPTIONAL MATCH (n)<-[:DIRECTED]-(t2:Movie) ' +
-                'WITH n, t2 ORDER BY t2.`release year` IS NULL, ' +
-                'CASE WHEN toString(t2.`release year`) = t2.`release year` THEN 0 ' +
-                'WHEN t2.`release year` IN [true, false] THEN 1 ELSE 2 END DESC, ' +
-                't2.`release year` DESC WITH collect(DISTINCT t2) AS s2 ' +
+                'WITH n, t2 ORDER BY t2.`release year` IS NULL, t2.`release year` DESC WITH collect(DISTINCT t2) AS s2 ' +
                 'RETURN head([x2 IN s2 | {props: properties(x2), labels: labels(x2)}]) AS v2 }\n' +
                 'RETURN {root: {props: properties(n), labels: labels(n)}, rels: {directors: v1, latest: v2}} AS result'
         );
@@ -168,7 +163,7 @@ class Partner {
 describe('A single relationship to a view with an ordered path', () => {
     const model = new ModelRegistry().view(Partner);
 
-    it("should read its first target in a CALL on Memgraph, the key's kind ranked, and page the roots after", () => {
+    it('should read its first target in a CALL on Memgraph, and page the roots after', () => {
         expect(
             new CypherBackend(MEMGRAPH_GRAMMAR).loadAllViews(
                 model,
@@ -181,15 +176,10 @@ describe('A single relationship to a view with an ordered path', () => {
                 'CALL { WITH n OPTIONAL MATCH (n)-[r1:MARRIED_TO]->(t1:Person) ' +
                 'WHERE EXISTS { MATCH (t1)-[:ACTED_IN]->(:Movie)-[:DIRECTED_BY]->(:Director) } ' +
                 'CALL { WITH t1 OPTIONAL MATCH (t1)-[:ACTED_IN]->(h2:Movie)-[:DIRECTED_BY]->(t2:Director) ' +
-                'WITH t1, t2, h2 ORDER BY h2.year IS NULL, ' +
-                'CASE WHEN toString(h2.year) = h2.year THEN 0 WHEN h2.year IN [true, false] THEN 1 ELSE 2 END ASC, ' +
-                'h2.year ASC WITH collect(DISTINCT t2) AS s2 ' +
+                'WITH t1, t2, h2 ORDER BY h2.year IS NULL, h2.year ASC WITH collect(DISTINCT t2) AS s2 ' +
                 'RETURN [x2 IN s2 | {props: properties(x2), labels: labels(x2)}] AS v2 } ' +
                 'CALL { WITH t1 OPTIONAL MATCH (t1)<-[:DIRECTED]-(t3:Movie) ' +
-                'WITH t1, t3 ORDER BY t3.`release year` IS NULL, ' +
-                'CASE WHEN toString(t3.`release year`) = t3.`release year` THEN 0 ' +
-                'WHEN t3.`release year` IN [true, false] THEN 1 ELSE 2 END DESC, ' +
-                't3.`release year` DESC WITH collect(DISTINCT t3) AS s3 ' +
+                'WITH t1, t3 ORDER BY t3.`release year` IS NULL, t3.`release year` DESC WITH collect(DISTINCT t3) AS s3 ' +
                 'RETURN head([x3 IN s3 | {props: properties(x3), labels: labels(x3)}]) AS v3 } ' +
                 'RETURN head(collect(CASE WHEN t1 IS NOT NULL THEN {root: {props: properties(t1), labels: labels(t1)}, ' +
                 'rels: {directors: v2, latest: v3}} END)) AS v1 }\n' +
