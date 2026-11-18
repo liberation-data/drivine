@@ -1,13 +1,8 @@
 import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
+import { parameterNames, replaceParameters } from '@/utils/SqlParameters';
 
 const assert = require('assert');
-
-/**
- * A named parameter, `$name`: the longest name, so `$id` is not read in `$idList`. A name is as Cypher's grammar reads
- * one, past ASCII too (`$größe`), but for the currency symbols it allows after the first character: a `$` ends it.
- */
-const PARAMETER = /\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*)/gu;
 
 export class PostgresSpecCompiler extends QuerySpecificationCompiler {
     private readonly paramKeys: string[] = [];
@@ -22,8 +17,8 @@ export class PostgresSpecCompiler extends QuerySpecificationCompiler {
         assert(this.spec.statement.language === 'SQL', `${this.spec.statement.language} is not supported on Postgres.`);
 
         if (!Array.isArray(this.spec.parameters)) {
-            // Only the names the statement uses: Postgres refuses a parameter its statement does not name.
-            const used = new Set([...this.spec.statement.text.matchAll(PARAMETER)].map((it) => it[1]));
+            // Only the names the statement uses outside its quoted text: Postgres refuses a parameter its statement does not name.
+            const used = parameterNames(this.spec.statement.text);
             this.paramKeys = Object.keys(this.spec.parameters)
                 .filter((key) => used.has(key))
                 .sort();
@@ -34,17 +29,17 @@ export class PostgresSpecCompiler extends QuerySpecificationCompiler {
     }
 
     /**
-     * Rewrites named parameters ($name) to positional ones ($1). Every occurrence is rewritten, and a name is never
-     * matched as the prefix of a longer one ($id does not match $idList).
+     * Rewrites named parameters ($name) to positional ones ($1). Every occurrence outside quoted text is rewritten, and a
+     * name is never matched as the prefix of a longer one ($id does not match $idList): see [replaceParameters].
      */
     formattedStatement(): string {
         const result = this.appliedStatement();
         if (this.paramKeys.length === 0) {
             return result;
         }
-        return result.replace(PARAMETER, (match: string, key: string) => {
+        return replaceParameters(result, (key) => {
             const index = this.paramKeys.indexOf(key);
-            return index >= 0 ? `$${index + 1}` : match;
+            return index >= 0 ? `$${index + 1}` : undefined;
         });
     }
 

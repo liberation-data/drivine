@@ -3,12 +3,7 @@ import { QuerySpecificationCompiler } from '@/query/QuerySpecificationCompiler';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { DrivineError } from '@/DrivineError';
 import { jsonText } from '@/utils/JsonText';
-
-/**
- * A named parameter, `$name`: the longest name. A name is as Cypher's grammar reads one, past ASCII too (`$größe`), but
- * for the currency symbols it allows after the first character: a `$` ends it.
- */
-const PARAMETER = /\$([\p{ID_Start}\p{Pc}]\p{ID_Continue}*)/gu;
+import { parameterNames, replaceParameters } from '@/utils/SqlParameters';
 
 /**
  * Compiles a specification for Oracle: `$name` parameters become `:name` binds, and skip and limit an
@@ -27,22 +22,23 @@ export class OracleSpecCompiler extends QuerySpecificationCompiler {
 
     /**
      * Every `$name` the parameters hold becomes a bind, `:b0`, `:b1`, … (an Oracle bind name may not begin with `_`, as
-     * Drivine's own parameters do); a name is never matched as the prefix of a longer one.
+     * Drivine's own parameters do); a name is never matched as the prefix of a longer one, nor inside quoted text, such
+     * as the JSON path `'$."$t"'`: see [replaceParameters].
      */
     formattedStatement(): string {
         const names = Object.keys(this.named());
-        return this.appliedStatement().replace(PARAMETER, (match: string, name: string) => {
+        return replaceParameters(this.appliedStatement(), (name) => {
             const index = names.indexOf(name);
-            return index >= 0 ? `:b${index}` : match;
+            return index >= 0 ? `:b${index}` : undefined;
         });
     }
 
     formattedParams(): Record<string, any> {
-        const statement = this.spec.statement.text;
+        const used = parameterNames(this.spec.statement.text);
         const params: Record<string, any> = {};
         Object.entries(this.named()).forEach(([name, value], index) => {
             // Oracle refuses a bind the statement doesn't name.
-            if (new RegExp(`\\$${name}(?!\\p{ID_Continue})`, 'u').test(statement)) {
+            if (used.has(name)) {
                 params[`b${index}`] = bindable(value);
             }
         });
