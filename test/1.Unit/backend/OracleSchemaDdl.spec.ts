@@ -11,9 +11,9 @@ import type { NativeOperation } from '@/schema/SchemaGrammar';
  * The indexes and constraints this library makes on Oracle, held to drivine4j's (#696). `store.yaml` holds drivine4j's
  * statements for each schema case, the reference, which the shared module writes byte for byte: this runs `ensure` of
  * each case's spec as an index or constraint manager plans it, on a store that has nothing yet, and holds what it runs to
- * them, item for item. It then holds the query DSL's equality on an indexed property, the module's fragment, to the
- * expressions the labelled index or the unique index is made over, as Oracle reads a filter through a function-based
- * index only where its expression is the index's.
+ * them, item for item. It then holds the module's equality on an indexed property, the fragment compiled Cypher writes
+ * (not yet the query DSL's on Oracle, OracleQueryRenderer's), to the expressions the labelled index or the unique index
+ * is made over, as Oracle reads a filter through a function-based index only where its expression is the index's.
  */
 const STORE = parse(fs.readFileSync(path.join(__dirname, '../../cypher/store.yaml'), 'utf8'));
 
@@ -68,7 +68,7 @@ function columns(statement: string, index: string): string[] {
         .map((it) => it.replace(/\bn\.(labels|props)\b/g, 'n_.$1'));
 }
 
-/** The module's condition `n.<property> = $v`, the query DSL's equality, over a root of `label` with the property indexed. */
+/** The module's condition `n.<property> = $v`, as compiled Cypher's equality, over a root of `label` with the property indexed. */
 function equality(label: string, property: string): string {
     const answer = JSON.parse(
         cypherCompilerModule().compile(
@@ -217,12 +217,20 @@ describe("Oracle's indexes and constraints, as drivine4j makes them", () => {
             for (const name of names) {
                 expect(current).toContain(` ${name} ON drivine_node`);
             }
+            // Beside 5.0's on a graph being stamped: only 5.0's are dropped.
             const verdict = layoutVerdict('ORACLE', 'drivine', {
-                stamps: [{ layout: 2 }],
-                foreignNodes: true,
-                objects: names.map((it) => ({ name: it.toLowerCase(), type: 'INDEX' }))
+                stamps: [{ layout: null }],
+                foreignNodes: false,
+                objects: [...objects, ...names.map((it) => ({ name: it.toLowerCase(), type: 'INDEX' }))]
             });
-            expect(verdict).toEqual({ verdict: 'current' });
+            expect(verdict.verdict).toEqual('stamp');
+            const drops = (verdict as Extract<LayoutVerdict, { verdict: 'stamp' }>).drops.join('\n');
+            for (const name of made50) {
+                expect(drops).toContain(`DROP INDEX IF EXISTS ${name}`);
+            }
+            for (const name of names) {
+                expect(drops).not.toContain(name.toLowerCase());
+            }
         });
     });
 });
