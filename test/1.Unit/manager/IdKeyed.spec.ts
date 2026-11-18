@@ -898,7 +898,9 @@ describe("an Oracle write block's id", () => {
     /** The bound match of a find_node or a write_node: the node of `labels` whose id `key` is the one bound `:1`. */
     const expectMatch = (match: string, key: string, labels: string[]): void => {
         expect(match).toEqual(
-            `n.nid IN (SELECT f.nid FROM ${ONE_ID} CROSS JOIN drivine_node f WHERE ${writeHasId(key)} AND ${labels
+            `n.nid IN (SELECT /*+ NO_JSON_TABLE_TRANSFORM */ f.nid + 0 FROM ${ONE_ID} CROSS JOIN drivine_node f WHERE ${writeHasId(
+                key
+            )} AND ${labels
                 .map((it) => `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(f.labels), ']'), '[') || ',"', ',"${it}","') > 0`)
                 .join(' AND ')})`
         );
@@ -950,7 +952,9 @@ describe("an Oracle write block's id", () => {
         expect(found).toHaveLength(2);
         found.forEach((it) => expectMatch(it, 'on', ['StampedDay']));
         // Read before and after the writes, each id of the list a row, which finds its node through the index.
-        const reads = `n.nid IN (SELECT f.nid FROM ${rows('$x_1')} CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`;
+        const reads = `n.nid IN (SELECT /*+ NO_JSON_TABLE_TRANSFORM */ f.nid + 0 FROM ${rows(
+            '$x_1'
+        )} CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`;
         expect(statement.text).toContain(reads);
         expect(occurrences(statement.text, `CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`)).toBe(2);
         expect(parameters.x_1).toEqual(writeLayout([days[0].on, days[1].on], 'oracle'));
@@ -971,20 +975,29 @@ describe("an Oracle write block's id", () => {
         expectMatch(found[0], 'id', ['Dial', 'Meter']);
         expectMatch(found[1], 'on', ['StampedDay']);
 
-        // The trim's two statements test each target joined to the root against the rows of the ids kept, bound :2.
+        // The trim's two statements test each target joined to the root against the rows of the ids kept, bound :2, each
+        // planned without Oracle's JSON table transformation, which lost a node's tests beside another table (spec#415).
         const trims = Object.values(parameters).filter(
             (it): it is string => typeof it === 'string' && it.includes(writeHasId('on', 'x'))
         );
         expect(trims).toHaveLength(2);
         for (const trim of trims) {
-            expect(trim).toContain(`NOT EXISTS (SELECT 1 FROM ${rows(':2')} WHERE ${writeHasId('on', 'x')})`);
+            expect(trim).toContain(
+                `NOT EXISTS (SELECT /*+ NO_JSON_TABLE_TRANSFORM */ 1 FROM ${rows(':2')} WHERE ${writeHasId('on', 'x')})`
+            );
             expect(occurrences(trim, ':2')).toBe(1);
+            expect(trim).toMatch(/^SELECT \/\*\+ NO_JSON_TABLE_TRANSFORM \*\/ /);
             expect(trim).not.toContain('PASSING');
         }
         // The stamps of the related days, read before and after, each id a row found through the index.
-        const reads = `n.nid IN (SELECT f.nid FROM ${rows('$x_')}`;
+        const reads = `n.nid IN (SELECT /*+ NO_JSON_TABLE_TRANSFORM */ f.nid + 0 FROM ${rows('$x_')}`;
         expect(occurrences(statement.text.replace(/\$x_\d+/g, '$x_'), reads)).toBe(2);
         expect(occurrences(statement.text, `CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`)).toBe(2);
         expect(statement.text).not.toContain('PASSING t.v');
+        // Each lookup hands its node back as `f.nid + 0`: Oracle eliminates a join of the node table to a view of it on a
+        // bare nid, and the filter on the view with it (drivine-cypher-spec#160).
+        for (const text of [statement.text, ...found]) {
+            expect(text).not.toMatch(/SELECT (\/\*\+ [A-Z_ ]+ \*\/ )?f\.nid FROM/);
+        }
     });
 });

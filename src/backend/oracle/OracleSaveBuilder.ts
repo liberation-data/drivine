@@ -2,7 +2,13 @@ import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
 import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
-import { boundIdRows, foundByIds, holdsIdAmong, idMatch } from '@/backend/oracle/IdKeyedStatement';
+import {
+    boundIdRows,
+    foundByIds,
+    holdsIdAmong,
+    idMatch,
+    NO_JSON_TABLE_TRANSFORM
+} from '@/backend/oracle/IdKeyedStatement';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -226,14 +232,16 @@ export class OracleSaveBuilder {
                     : { on: 'x.nid = e.dst', root: 'e.src = q.r' };
             // The root's id once, from a row of its own: a dynamic statement's binds are by position.
             const dropped =
-                `SELECT e.eid, x.nid FROM (SELECT :1 AS r FROM dual) q CROSS JOIN ${this.graph.edges} e ` +
+                `SELECT ${NO_JSON_TABLE_TRANSFORM} e.eid, x.nid FROM (SELECT :1 AS r FROM dual) q CROSS JOIN ${this.graph.edges} e ` +
                 `JOIN ${this.graph.nodes} x ON ${side.on} ` +
                 `WHERE ${side.root} AND e.type = ${sqlText(rel.type)} AND ${hasLabels('x', into.labels)} AND ${notIn(
                     ':2'
                 )}`;
             const unreferenced =
                 this.options.removedTargets === RemovedTargets.DELETE_UNREFERENCED
-                    ? `SELECT COUNT(*) FROM ${this.graph.nodes} x WHERE x.nid = :1 AND ${notIn(':2')} AND NOT EXISTS ` +
+                    ? `SELECT ${NO_JSON_TABLE_TRANSFORM} COUNT(*) FROM ${
+                          this.graph.nodes
+                      } x WHERE x.nid = :1 AND ${notIn(':2')} AND NOT EXISTS ` +
                       `(SELECT 1 FROM ${this.graph.edges} r WHERE ${referencedAs(rel.direction)})`
                     : null;
             this.body.push(

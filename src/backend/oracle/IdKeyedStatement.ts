@@ -32,23 +32,43 @@ export function boundIdRows(sql: string): string {
 }
 
 /**
+ * The hint each query that compares a node's id carries: a comparison reads several JSON values of the node's properties,
+ * which Oracle 23's JSON table transformation reads by one `JSON_TABLE`, and so rewritten, a node's table beside another
+ * table, or beside a subquery of one, lost the tests of its labels and properties (drivine-cypher-spec#415). The shared
+ * module's statements carry it on Oracle for the same reason.
+ */
+export const NO_JSON_TABLE_TRANSFORM = '/*+ NO_JSON_TABLE_TRANSFORM */';
+
+/**
  * Whether the node row `alias` is a node of `labels` whose id, the property `property`, is one of the ids `rows` holds
- * ({@link boundIdRow}, {@link boundIdRows}): each id finds its node through the index over the id, compared as the
- * shared module writes the comparison (see NodeIds' hasId), and the node is joined after, as drivine4j's
- * `OracleWriteBlock.identified` finds a step's node. The labels are told by their text ({@link carriesLabels}), so Oracle
- * reads that index, and not every node of the first label.
+ * ({@link boundIdRow}, {@link boundIdRows}): each id finds its node `f` through the index over the id, compared as the
+ * shared module writes the comparison (see NodeIds' hasId), and `alias` is the node found, by its `nid`. The `nid` is
+ * handed back as `f.nid + 0`, the shared module's form of a node equality: Oracle 23.26 eliminates a join of the node
+ * table to a view of it on a bare `nid`, the filter on the view with it, and then ends the server process as it parses a
+ * statement given a bound value, or gives every row for a literal one (drivine-cypher-spec#160). The labels are told by
+ * their text ({@link carriesLabels}), so Oracle reads the index over the id, and not every node of the first label.
  */
 export function foundByIds(nodes: string, alias: string, property: string, labels: string[], rows: string): string {
     const tests = [hasId('oracle', 'f', property, 'i.v'), carriesLabels('f', labels)].filter((it) => it);
-    return `${alias}.nid IN (SELECT f.nid FROM ${rows} i CROSS JOIN ${nodes} f WHERE ${tests.join(' AND ')})`;
+    return (
+        `${alias}.nid IN (SELECT ${NO_JSON_TABLE_TRANSFORM} f.nid + 0 FROM ${rows} i CROSS JOIN ${nodes} f ` +
+        `WHERE ${tests.join(' AND ')})`
+    );
 }
 
 /**
  * Whether the id, the property `property`, of the node row `alias`, found some other way, is one of the ids `rows`
- * holds ({@link boundIdRows}), compared as the shared module writes the comparison (see NodeIds' hasId).
+ * holds ({@link boundIdRows}), compared as the shared module writes the comparison (see NodeIds' hasId). The subquery
+ * carries {@link NO_JSON_TABLE_TRANSFORM}, and so does the query that finds the node, beside which it reads the node's
+ * properties.
  */
 export function holdsIdAmong(alias: string, property: string, rows: string): string {
-    return `EXISTS (SELECT 1 FROM ${rows} i WHERE ${hasId('oracle', alias, property, 'i.v')})`;
+    return `EXISTS (SELECT ${NO_JSON_TABLE_TRANSFORM} 1 FROM ${rows} i WHERE ${hasId(
+        'oracle',
+        alias,
+        property,
+        'i.v'
+    )})`;
 }
 
 /**
