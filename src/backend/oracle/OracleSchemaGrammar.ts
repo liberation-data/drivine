@@ -103,8 +103,16 @@ END;`;
 }
 
 /**
- * Indexes and constraints on Oracle, made and recorded as drivine4j makes and records them, so a store's schema is one
- * whichever library made it. A property is a path into the JSON column `props`, so each index is over an expression:
+ * Indexes and constraints on Oracle as Drivine 5.0 made and recorded them, in store layout 1.
+ *
+ * No manager runs these statements now. Since layout 2 an index or a constraint is made, listed and dropped by the shared
+ * module's schema plan (SchemaPlan), with drivine4j's statements, byte for byte, over each property's class and key and
+ * under layout 2's names (`<graph>_ix2_…`, `<graph>_lx2_…`, `<graph>_uq2_…`); `OracleSchemaDdl.spec` holds them to
+ * `store.yaml`. The layout verdict drops what these made on a graph that holds no node of the application (#696). They
+ * are kept for the golden statements drivine-python checks against. What a manager still reads here is
+ * `labelledIndexes` and the lowercased copies' statements.
+ *
+ * As 5.0 made them, a property is a path into the JSON column `props`, so each index is over an expression:
  *
  * - a range index is two indexes. One reads the properties as text whatever the label, so two labels that index a
  *   property of one name share it. The other, the labelled index, reads the properties of the label's nodes and is

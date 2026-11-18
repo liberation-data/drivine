@@ -225,9 +225,14 @@ function escapedLabel(label: string): string {
 }
 
 /**
- * A property of the node row `alias` as a range index or a uniqueness constraint over the label holds it: as text, for
- * the label's nodes alone, and null for every other node, for a value that isn't a scalar, and for one longer than
- * 4,000 bytes. A predicate over this expression implies the label.
+ * A property of the node row `alias` as Drivine 5.0's range index or uniqueness constraint over the label held it (store
+ * layout 1): as text, for the label's nodes alone, and null for every other node, for a value that isn't a scalar, and
+ * for one longer than 4,000 bytes. A predicate over this expression implies the label.
+ *
+ * No index this version makes holds it. Since layout 2 the shared module's schema plan makes them, with drivine4j's
+ * statements, over the property's class and key (the module's `OracleSql.labelledIndex` and `uniqueIndex`), and the
+ * layout verdict drops 5.0's on an empty graph (#696). The query DSL still writes this for a filter on an indexed
+ * property, as the label's test and the property, until its filters are the module's fragments (#771).
  */
 export function labelledValue(alias: string, label: string, property: string): string {
     return (
