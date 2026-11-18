@@ -1,6 +1,6 @@
 import neo4j from 'neo4j-driver';
 import { DrivineError } from '@/DrivineError';
-import { fragment, FragmentVariable, SharedGraph, SharedStore } from '@/cypher/SharedCypherCompiler';
+import { fragment, FragmentPart, FragmentVariable, SharedGraph, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { SqlFragments } from '@/cypher/SqlFragments';
 import { digestOf, loadFragmentsSpec, parametersOf, partOf } from '../../cypher/FragmentsSpec';
 
@@ -61,6 +61,14 @@ describe('fragment', () => {
                 /A fragment's variable n is a row whose name ends with _/
             );
         });
+
+        it("throws a request the module can't read as a DrivineError that says so", () => {
+            expect(() => fragment(store, graph, {} as FragmentPart, PEOPLE)).toThrow(
+                new DrivineError(
+                    "The Cypher compiler can't read the fragment's request: A fragment gives one of condition, value and order."
+                )
+            );
+        });
     });
 
     it('names the parameters of two fragments of one statement apart, and gathers what they bind and their hints', () => {
@@ -94,6 +102,25 @@ describe('fragment', () => {
         const fragments = new SqlFragments('postgres', { name: 'g' });
         fragments.condition(PEOPLE, 'n.x = $p', { p: NaN });
         expect(fragments.nonFinite).toBe(true);
+        // A later fragment that gives none leaves it so: the statement still binds the first's NaN.
+        fragments.condition(PEOPLE, 'n.x = $p', { p: 1.5 });
+        expect(fragments.nonFinite).toBe(true);
+    });
+
+    it('renames a parameter named by a number, `$0`, as the module takes one', () => {
+        const fragments = new SqlFragments('postgres', { name: 'g' });
+        const term = fragments.condition(PEOPLE, 'n.x = $0 AND n.y = $10', { '0': 'a', '10': 'b' });
+        expect(term).toContain('CAST($_cy_f1_0 AS jsonb)');
+        expect(term).toContain('CAST($_cy_f1_10 AS jsonb)');
+        expect(fragments.parameters).toEqual({ _cy_f1_0: '"a"', _cy_f1_10: '"b"' });
+    });
+
+    it("gathers whether a fragment calls Oracle's stored nullsEqual, and keeps it past a fragment that doesn't", () => {
+        const fragments = new SqlFragments('oracle', { name: 'g' });
+        expect(fragments.condition(PEOPLE, 'n.a = [1, null]')).toContain('g_nulls_equal(');
+        fragments.condition(PEOPLE, 'n.a = 1');
+        expect(fragments.callsStoredNullsEqual).toBe(true);
+        expect(fragments.callsStoredEra).toBe(false);
     });
 });
 
