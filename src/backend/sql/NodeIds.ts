@@ -29,9 +29,10 @@ const INTEGER = /^-?(0|[1-9]\d*)$/;
 
 /**
  * ISO 8601 text of a date, or of a date and time: what a `Date` id is given as, and what a SQL store's tag reads one back
- * as, a year past 9999 with five digits (`+12345`), as Java writes it.
+ * as, a year past 9999 with five digits (`+12345`), as Java writes it. A fraction of a second no finer than a millisecond,
+ * as a `Date` holds no finer one: JavaScript drops the rest (`.1239` is `.123`).
  */
-const ISO_DATE = /^([+-]\d{5,6}|\d{4})-(\d{2})-(\d{2})(T(\d{2}):\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+const ISO_DATE = /^([+-]\d{5,6}|\d{4})-(\d{2})-(\d{2})(T(\d{2}):\d{2}(:\d{2}(\.\d{1,3}0*)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 /**
  * `given` as a node of `model` holds its id: text given for an id of another type read as that type, as TypeScript
@@ -74,8 +75,8 @@ function dateOf(text: string): unknown {
     ) {
         return NO_NODE;
     }
-    // JavaScript reads a signed year of six digits only.
-    const date = new Date(text.replace(/^([+-])(\d{5})-/, '$10$2-'));
+    // JavaScript reads a signed year of six digits only, and a time with no offset as local time: it is UTC, as a day is.
+    const date = new Date(text.replace(/^([+-])(\d{5})-/, '$10$2-') + (parts[4] && !parts[8] ? 'Z' : ''));
     return Number.isNaN(date.getTime()) ? NO_NODE : date;
 }
 

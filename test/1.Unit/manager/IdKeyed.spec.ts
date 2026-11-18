@@ -409,6 +409,17 @@ describe.each([
         expect(bound.map((it) => it.parameters.id)).toEqual([writeLayout(new Date('2024-01-02T03:04:05.000Z'), store)]);
     });
 
+    it('reads an ISO text with no offset as UTC, as a day is, and a fraction past milliseconds as no Date', async () => {
+        // JavaScript reads a time with no offset as local time, and drops a fraction's digits past the third.
+        await gom.load(Dated, '2024-01-02T03:04:05');
+        await gom.load(Dated, '2024-01-02T03:04:05.1230');
+        expect(await gom.load(Dated, '2024-01-02T03:04:05.1239Z')).toBeUndefined();
+        expect(bound.map((it) => it.parameters.id)).toEqual([
+            writeLayout(new Date('2024-01-02T03:04:05.000Z'), store),
+            writeLayout(new Date('2024-01-02T03:04:05.123Z'), store)
+        ]);
+    });
+
     it('runs nothing for an ISO text of no calendar day or hour, which JavaScript would roll into the next', async () => {
         // A year of -0 too, which ISO 8601 has no sign for: JavaScript reads '-000000-01-01' as 1 January 2001.
         for (const nothing of [
