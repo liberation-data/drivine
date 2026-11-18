@@ -2,13 +2,14 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 
 /**
  * The stored functions of the Oracle graph `graph` a statement calls, as the shared module's fragments in it say
- * (`SqlFragments.callsStoredNullsEqual`, `callsStoredEra`): the connection makes sure the session may call them before it
- * runs the statement (see OracleConnection).
+ * (`SqlFragments.callsStoredNullsEqual`, `callsStoredEra`, `callsStoredTemporalArithmetic`): the connection makes sure
+ * the session may call them before it runs the statement (see OracleConnection).
  */
 export interface StoredFunctionCalls {
     graph: string;
     nullsEqual: boolean;
     era: boolean;
+    temporalArithmetic: boolean;
 }
 
 /**

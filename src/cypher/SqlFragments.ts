@@ -31,6 +31,8 @@ export class SqlFragments {
     callsStoredNullsEqual = false;
     /** Whether a fragment written so far calls the graph's stored `era` function (Oracle). */
     callsStoredEra = false;
+    /** Whether a fragment written so far calls the graph's stored function of temporal arithmetic (Oracle). */
+    callsStoredTemporalArithmetic = false;
 
     private count = 0;
 
@@ -117,6 +119,7 @@ export class SqlFragments {
         this.nonFinite ||= compiled.nonFinite;
         this.callsStoredNullsEqual ||= compiled.storedFunctions.nullsEqual;
         this.callsStoredEra ||= compiled.storedFunctions.era;
+        this.callsStoredTemporalArithmetic ||= compiled.storedFunctions.temporalArithmetic;
         return compiled;
     }
 }

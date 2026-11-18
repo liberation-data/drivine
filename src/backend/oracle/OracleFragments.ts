@@ -29,7 +29,8 @@ export function noted(sql: string | undefined, fragments: SqlFragments): string 
     const notes = [
         ...[...fragments.hints].map((it) => `/*drivine:hint ${it}*/`),
         ...(fragments.callsStoredNullsEqual ? ['/*drivine:calls nullsEqual*/'] : []),
-        ...(fragments.callsStoredEra ? ['/*drivine:calls era*/'] : [])
+        ...(fragments.callsStoredEra ? ['/*drivine:calls era*/'] : []),
+        ...(fragments.callsStoredTemporalArithmetic ? ['/*drivine:calls temporalArithmetic*/'] : [])
     ];
     return notes.join('') + sql;
 }
@@ -67,17 +68,22 @@ export function hinted(sql: string, more: Iterable<string> = []): string {
 export function called(
     text: string,
     graph: string,
-    more?: { callsStoredNullsEqual: boolean; callsStoredEra: boolean }
+    more?: { callsStoredNullsEqual: boolean; callsStoredEra: boolean; callsStoredTemporalArithmetic: boolean }
 ): { text: string; calls?: StoredFunctionCalls } {
     let nullsEqual = more?.callsStoredNullsEqual ?? false;
     let era = more?.callsStoredEra ?? false;
+    let temporalArithmetic = more?.callsStoredTemporalArithmetic ?? false;
     const taken = text.replace(NOTE, (note: string, kind: string, name: string) => {
         if (kind !== 'calls') {
             return note;
         }
         nullsEqual ||= name === 'nullsEqual';
         era ||= name === 'era';
+        temporalArithmetic ||= name === 'temporalArithmetic';
         return '';
     });
-    return { text: taken, ...(nullsEqual || era ? { calls: { graph, nullsEqual, era } } : {}) };
+    return {
+        text: taken,
+        ...(nullsEqual || era || temporalArithmetic ? { calls: { graph, nullsEqual, era, temporalArithmetic } } : {})
+    };
 }

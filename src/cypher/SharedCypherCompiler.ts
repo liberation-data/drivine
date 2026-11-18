@@ -257,7 +257,7 @@ export interface SqlFragment {
     parameters: Record<string, any>;
     nonFinite: boolean;
     hints: string[];
-    storedFunctions: { nullsEqual: boolean; era: boolean };
+    storedFunctions: { nullsEqual: boolean; era: boolean; temporalArithmetic: boolean };
 }
 
 /**
@@ -294,7 +294,8 @@ export function fragment(
         hints: answer.hints ?? [],
         storedFunctions: {
             nullsEqual: answer.storedFunctions?.nullsEqual ?? false,
-            era: answer.storedFunctions?.era ?? false
+            era: answer.storedFunctions?.era ?? false,
+            temporalArithmetic: answer.storedFunctions?.temporalArithmetic ?? false
         }
     };
 }
@@ -304,7 +305,7 @@ interface FragmentAnswer {
     parameters: Record<string, any>;
     nonFinite?: boolean;
     hints?: string[];
-    storedFunctions?: { nullsEqual?: boolean; era?: boolean };
+    storedFunctions?: { nullsEqual?: boolean; era?: boolean; temporalArithmetic?: boolean };
 }
 
 interface SearchAnswer {

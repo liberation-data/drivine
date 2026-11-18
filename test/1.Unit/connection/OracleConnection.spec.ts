@@ -1,13 +1,25 @@
-import { ModelRegistry, NodeFragment, NodeId, OracleBackend, OracleGraph, TargetModel } from '@liberation-data/drivine';
+import {
+    ModelRegistry,
+    NodeFragment,
+    NodeId,
+    OracleBackend,
+    OracleGraph,
+    TargetModel,
+    times
+} from '@liberation-data/drivine';
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
 /**
- * A session whose check of the graph's nulls_equal gives `check`, and of its era functions `era`, and whose every other
- * statement gives no rows.
+ * A session whose check of the graph's nulls_equal gives `check`, of its era functions `era`, and of its temporal
+ * arithmetic `arithmetic`, and whose every other statement gives no rows.
  */
-function session(check: 'found' | number, era: 'found' | number = 'found'): { execute: jest.Mock } {
+function session(
+    check: 'found' | number,
+    era: 'found' | number = 'found',
+    arithmetic: 'found' | number = 'found'
+): { execute: jest.Mock } {
     const outcome = async (it: 'found' | number): Promise<unknown> =>
         it === 'found'
             ? Promise.resolve({ rows: [[1]] })
@@ -19,6 +31,9 @@ function session(check: 'found' | number, era: 'found' | number = 'found'): { ex
             }
             if (sql.startsWith('SELECT ') && sql.includes("_era('0000-01-01')")) {
                 return outcome(era);
+            }
+            if (sql.startsWith('SELECT ') && sql.includes("_temporal_arith('+', JSON(")) {
+                return outcome(arithmetic);
             }
             return Promise.resolve({ rows: [] });
         })
@@ -179,6 +194,23 @@ describe('OracleConnection', () => {
             expect(it.execute).toHaveBeenCalledTimes(1);
         });
 
+        it("should be refused where it calls the graph's temporal arithmetic and the session may not call it", async () => {
+            const g = graph();
+            const backend = new OracleBackend(new OracleGraph(g));
+            const model = new ModelRegistry().fragment(Metered);
+            const query = backend.renderQuery((q: any) => ({ orderBy: times(q.size, 2).asc() }), {
+                kind: 'NODE_FRAGMENT',
+                model
+            });
+            const it = session('found', 'found', 904);
+            await expect(
+                new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(
+                    backend.loadAllFragments(model, query.where, { orderBy: query.orderBy }).spec(query.bindings)
+                )
+            ).rejects.toThrow(`calls ${g}_temporal_arith, a function the Oracle graph '${g}' keeps`);
+            expect(it.execute).toHaveBeenCalledTimes(1);
+        });
+
         it('should ask nothing of one that calls none', async () => {
             const it = session(904);
             await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', graph(), 'db|me').query(
@@ -193,4 +225,5 @@ describe('OracleConnection', () => {
 class Metered {
     @NodeId() id: string;
     meta?: Record<string, any>;
+    size?: number;
 }

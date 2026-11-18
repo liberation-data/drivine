@@ -1,5 +1,6 @@
 import {
     anyOf,
+    CascadeType,
     count,
     GraphView,
     key,
@@ -13,9 +14,11 @@ import {
     pathKey,
     Root,
     sum,
-    TargetModel
+    TargetModel,
+    times
 } from '@liberation-data/drivine';
 import { called, hinted, noted } from '@/backend/oracle/OracleFragments';
+import { LocationHierarchy } from '../golden/GoldenModels';
 import { sameKey } from '@/backend/oracle/OracleGraph';
 import { OracleSpecCompiler } from '@/connection/oracle/OracleSpecCompiler';
 import { SqlFragments } from '@/cypher/SqlFragments';
@@ -43,6 +46,7 @@ class Judge {
 const registry = new ModelRegistry();
 const scored: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Scored) };
 const view: TargetModel = { kind: 'GRAPH_VIEW', model: registry.view(ScoredView) };
+const hierarchy: TargetModel = { kind: 'GRAPH_VIEW', model: registry.view(LocationHierarchy) };
 const backend = new OracleBackend(new OracleGraph());
 
 /** The hint the module's fragments on Oracle ask the statement they are in to carry. */
@@ -132,6 +136,18 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(backend.deleteAll(scored, backend.written("n.name = 'Ada'")).text).not.toContain('/*+');
     });
 
+    it("hints a cascade's roots and a depth check's on the statement of the block that reads the filter", () => {
+        const where = backend.renderWhere((q: any) => q.location.name.eq('Ada'), hierarchy).where;
+        const cascade = backend.delete(hierarchy, where, CascadeType.DELETE_ALL).text;
+        expect(cascade).toContain(`    SELECT ${HINT} n_.nid BULK COLLECT INTO v_roots FROM drivine_node n_\nWHERE `);
+        expect(cascade.split(HINT)).toHaveLength(2);
+        expect(cascade).not.toContain('drivine:');
+        const check = backend.cascadeDepthChecks(hierarchy, where)[0].statement.text;
+        expect(check).toContain(`WITH cascade_roots AS (SELECT ${HINT} n_.nid FROM drivine_node n_\nWHERE `);
+        expect(check.split(HINT)).toHaveLength(2);
+        expect(check).not.toContain('drivine:');
+    });
+
     it('takes each hint once, in the order first asked, after the first SELECT or DELETE alone', () => {
         const fragments = new SqlFragments('oracle', { name: 'drivine' });
         fragments.hints.add('A').add('B');
@@ -151,7 +167,7 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         const calls = called(hinted(`SELECT 1 FROM t WHERE ${noted('p', fragments)}`), 'g');
         expect(calls).toEqual({
             text: 'SELECT /*+ A B */ 1 FROM t WHERE p',
-            calls: { graph: 'g', nullsEqual: false, era: true }
+            calls: { graph: 'g', nullsEqual: false, era: true, temporalArithmetic: false }
         });
         expect(called('SELECT 1 FROM dual', 'g')).toEqual({ text: 'SELECT 1 FROM dual' });
     });
@@ -207,9 +223,14 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
             backend.deleteAll(scored, where),
             backend.patchOne(scored.model as any, where)
         ]) {
-            expect(statement.calls).toEqual({ graph: 'drivine', nullsEqual: true, era: false });
+            expect(statement.calls).toEqual({
+                graph: 'drivine',
+                nullsEqual: true,
+                era: false,
+                temporalArithmetic: false
+            });
             expect(statement.text).not.toContain('drivine:');
-            expect(statement.spec()._storedFunctions).toEqual({ graph: 'drivine', nullsEqual: true, era: false });
+            expect(statement.spec()._storedFunctions).toEqual(statement.calls);
             expect(statement.spec().finalizedCopy('SQL')._storedFunctions).toEqual(statement.calls);
         }
         expect(
@@ -217,6 +238,15 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
                 .calls
         ).toBeUndefined();
         expect(new QuerySpecification('SELECT 1 FROM dual')._storedFunctions).toBeUndefined();
+    });
+
+    it("says a statement calls the graph's temporal arithmetic, where an order by arithmetic of a property does", () => {
+        // A property's value may be a date, so the module works out the arithmetic by the graph's function.
+        const query = backend.renderQuery((q: any) => ({ orderBy: times(q.$score, 2).desc() }), scored);
+        expect(query.orderBy).toContain('drivine_temporal_arith(');
+        const statement = backend.loadAllFragments(scored.model as any, query.where, { orderBy: query.orderBy });
+        expect(statement.calls).toEqual({ graph: 'drivine', nullsEqual: false, era: false, temporalArithmetic: true });
+        expect(statement.text).not.toContain('drivine:');
     });
 
     it('reads a regular expression as the module does, and takes its refusal of one it cannot answer', () => {

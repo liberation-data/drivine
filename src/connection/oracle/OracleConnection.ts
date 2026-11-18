@@ -147,6 +147,10 @@ export class OracleConnection implements Connection {
                 : []),
             ...(calls.era && !(await OracleStoredFunctions.era(this.connection, this.database, calls.graph))
                 ? [`${calls.graph}_era`]
+                : []),
+            ...(calls.temporalArithmetic &&
+            !(await OracleStoredFunctions.temporalArithmetic(this.connection, this.database, calls.graph))
+                ? [`${calls.graph}_temporal_arith`]
                 : [])
         ];
         if (missing.length) {

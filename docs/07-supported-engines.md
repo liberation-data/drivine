@@ -113,9 +113,10 @@ Notes:
 - The query DSL's conditions, orders, seeks and grouped reads are the shared compiler's SQL for the Cypher the DSL writes
   for Neo4j ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), as in
   compiled Cypher: a date is compared by its moment, and text is compared and ordered by its code points (`B, a, b`),
-  as before. Each statement carries the optimizer hints that SQL asks for. Where a comparison calls one of the graph's
-  functions (a list or a map that holds a null, compared with another), a session that may not call it is refused
-  with a `DrivineError` that says so, where compiled Cypher is compiled again without it.
+  as before. Each statement carries the optimizer hints that SQL asks for. Where it calls one of the graph's
+  functions (a comparison of a list or a map that holds a null with another, or an order by arithmetic of a property,
+  which may hold a date), a session that may not call it is refused with a `DrivineError` that says so, where compiled
+  Cypher is compiled again without a comparison's function.
 - A save is one block and checks the stamp, as on the graph engines. A save turned away by a deadlock (`ORA-00060`) or
   a serialization failure (`ORA-08177`) is run again. Another writer that changes a node in SQL should give it a new
   stamp: the first sixteen characters of `stamp` for its properties or labels, the last sixteen for its relationships.
