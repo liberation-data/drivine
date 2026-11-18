@@ -57,6 +57,51 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
 On SQLite a range index or a uniqueness constraint is over a value's kind and key, so a value is equal only to one of
 its kind: a uniqueness constraint no longer takes `1` and `'1'` for the same key.
 
+### Oracle's indexes are drivine4j's
+
+On Oracle a range index and a uniqueness constraint are made with the shared compiler's statements, as drivine4j makes
+them, byte for byte: over the property's kind and key as layout 2 holds it, and under layout 2's names. For
+`rangeIndex('Person', 'name')` that is `drivine_ix2_name_…` over the property of every node and `drivine_lx2_Personname_…`
+over the nodes of the label, each column of which is
+
+```sql
+CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') THEN <the kind, or the key, of JSON_VALUE(n.props, '$.name')> END
+```
+
+and for `uniquenessConstraint('Person', 'email')`, `drivine_uq2_Personemail_…`, over the label's nodes that have the
+property. As on SQLite, a value is equal only to one of its kind. 5.0 made them over an expression of its own, under
+layout 1's names (`drivine_ix_…`, `drivine_lx_…`, `drivine_uq_…`):
+
+```sql
+CASE WHEN JSON_EXISTS(n.labels, '$?(@ == "Person")') THEN JSON_VALUE(n.props, '$."name"' RETURNING VARCHAR2(4000) NULL ON ERROR) END
+```
+
+which the shared compiler's SQL, drivine4j's, never reads through
+([#696](https://github.com/liberation-data/drivine/issues/696)). As with the values above, nothing is migrated in
+place. On a 5.0 graph's first connection, where it holds no node of the application, each index under a layout-1 name is
+dropped, with the catalog records (`<graph>_schema`) that name it, and the graph is stamped layout 2; the next `ensure`,
+`SchemaManager`'s or a manager's, finds no such item and makes it as drivine4j does. A graph that holds the
+application's nodes is refused, as above. The schema marker keeps the shape all three libraries read: its inventory
+still lists each item, and `ensure` makes again each one it doesn't find.
+
+To see whether a graph holds an index 5.0 made for a range index or a uniqueness constraint, list them by name, the
+graph's name in place of `DRIVINE` (5.0's full-text and vector indexes, `drivine_t_…` and `drivine_v_…`, are not
+listed here):
+
+```sql
+SELECT index_name FROM user_indexes
+WHERE table_name = 'DRIVINE_NODE' AND REGEXP_LIKE(index_name, '^DRIVINE_(IX|LX|UQ)_');
+```
+
+Where one is there on a graph of layout 2, say one a 5.0 process wrote to after 6.0 stamped it, drop each by hand,
+`DROP INDEX <name>`, and the records that name them, as the first connection does; then `ensure` makes what is missing:
+
+```sql
+DELETE FROM drivine_schema
+WHERE REGEXP_LIKE(UPPER(object_name), '^DRIVINE_(IX|LX|UQ)_')
+   OR REGEXP_LIKE(UPPER(JSON_VALUE(details, '$.labelled')), '^DRIVINE_(IX|LX|UQ)_');
+```
+
 ### An id given as text is read as the id's type
 
 On Oracle, Postgres and SQLite, `load`, `update`, `patch`, `delete` and `edges` read an id given as text as the
