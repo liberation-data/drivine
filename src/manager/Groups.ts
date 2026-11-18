@@ -36,6 +36,7 @@ export function key(property: string | ValueRef<any>): PropertyKey {
 /**
  * Groups by the node of `target` the source reaches through the hops. The key comes back as that node, mapped. A key is
  * the node at the end, which every way to it gives alike, so no hop may name an order.
+ * Its groups are ordered by the node's id, so `target` needs a `@NodeId`: a grouped read refuses one with none.
  */
 export function pathKey<T>(target: ClassRef<T>, hops: Hop[]): PathKey<T> {
     if (hops.some((it) => it.orderBy)) {

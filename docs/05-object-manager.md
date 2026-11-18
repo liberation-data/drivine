@@ -738,6 +738,9 @@ const top = await gom.groups.load(Message, (q) => ({
 top.map((it) => [it.user.username, it.messages]);
 ```
 
+A path key's groups are ordered by its node's id, so its class needs a `@NodeId`. One with none is refused by
+name, before anything is run: `GuideUser has no @NodeId field, which a path key is ordered by.`
+
 The aggregates are `count(filter?)`, `sum(property, filter?)`, `avg`, `min` and `max`. `having` compares an aggregate
 with a number by `eq`, `neq`, `gt`, `gte`, `lt` or `lte`, its entries joined by AND.
 
