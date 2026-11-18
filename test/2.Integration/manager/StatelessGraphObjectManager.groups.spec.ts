@@ -261,9 +261,11 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
         expect(group.soonest).toEqual(new Date('2026-01-01T00:00:00.000Z'));
         expect(group.last).toEqual(new Date('2026-03-01T00:00:01.000Z'));
         expect(group.none).toBeUndefined();
-        // A load gives a Date on a graph engine and the text the save wrote on a SQL store, of the same instant.
-        expect(group.soonest).toEqual(new Date((await gom.load(DatedItem, 'd1'))!.due!));
-        expect(group.last).toEqual(new Date((await gom.load(DatedItem, 'd0'))!.due!));
+        // A load gives the declared Date on every store, of the same instant (#807).
+        const [soonest, last] = [(await gom.load(DatedItem, 'd1'))!.due, (await gom.load(DatedItem, 'd0'))!.due];
+        expect(soonest).toBeInstanceOf(Date);
+        expect(group.soonest).toEqual(soonest);
+        expect(group.last).toEqual(last);
         // A property TypeScript records no type of is given as the store gives it: a Date on a graph engine whose
         // driver reads one, the module's text on a SQL store.
         expect(new Date(group.undeclared as any)).toEqual(new Date('2026-01-01T00:00:00.000Z'));
