@@ -1,4 +1,5 @@
 import { Direction } from '@/annotation/Metadata';
+import { oracleId } from '@/backend/oracle/IdKeyedStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
@@ -242,7 +243,7 @@ export class OracleWrites {
                 'END IF;',
                 'OPEN c FOR SELECT v_removed AS "removed" FROM dual;'
             ],
-            { x_type: type, x_from: writeLayout(from.id, 'oracle') }
+            { x_type: type, x_from: oracleId(from.id) }
         );
     }
 
@@ -267,7 +268,7 @@ export class OracleWrites {
                     idProperty(from.model),
                     'JSON($x_from EXTENDED)'
                 )} AND ${carriesLabels('a', labels)} AND ${hasLabels('x', target.labels)})`,
-            { x_type: type, x_from: writeLayout(from.id, 'oracle') }
+            { x_type: type, x_from: oracleId(from.id) }
         );
     }
 
@@ -287,9 +288,9 @@ export class OracleWrites {
             labels
         )} AND JSON_EXISTS(n.props, '$?(@${k} == $v)' PASSING JSON(:1 EXTENDED) AS "v")`;
         if (name === 'x_frommatch') {
-            this.pending.x_from = writeLayout(node.id, 'oracle');
+            this.pending.x_from = oracleId(node.id);
         } else {
-            this.pending.x_to = writeLayout(node.id, 'oracle');
+            this.pending.x_to = oracleId(node.id);
         }
         return `$${name}`;
     }

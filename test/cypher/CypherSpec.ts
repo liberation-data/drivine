@@ -158,9 +158,11 @@ export const HELD: Record<string, Record<string, Hold[]>> = {
         ...(SQLITE_CUTS_AT_NUL
             ? { 'toFloat() of a text, as Neo4j reads it': [{ issue: 699, steps: [7], on: ['sqlite'] }] }
             : {}),
-        // CI's Neo4j gives four rows where the box's, the same 2026.10.2, gives none: under investigation (#764).
+        // CI's Neo4j gives four rows where the box's, the same 2026.10.2, gives none, for a dropped p read in a WITH's
+        // WHERE, alone (step 11) or one list deeper (step 110): Neo4j's own answer, not another case's nodes, as each case
+        // empties the graph first and the graph holds one Keanu (#764).
         'Nesting of a dropped variable: a WITH that drops p and groups, in its WHERE': [
-            { issue: 764, steps: [11], on: ['neo4j'], mayPass: 'it passes on the test box, and fails on CI' }
+            { issue: 764, steps: [11, 110], on: ['neo4j'], mayPass: 'it passes on the test box, and fails on CI' }
         ],
         // The module's regexp on wasm refuses a back reference by name, where Neo4j answers it.
         'A regular expression with a backreference': [

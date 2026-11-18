@@ -216,11 +216,33 @@ describe('an id on Oracle', () => {
         expect(relate.x_frommatch).toMatch(/PASSING JSON\(:1 EXTENDED\) AS "v"/);
     });
 
+    it("binds loadRelated's, unrelateAll's, relate's and unrelate's null ends as they are, so they find no node (#772)", () => {
+        const backend = new OracleBackend(new OracleGraph());
+        const model = new ModelRegistry().fragment(Gauge);
+        const from = { model, id: null };
+        expect((backend.related(from, 'POINTS', Direction.OUTGOING, model).spec().parameters as any).x_from).toBeNull();
+        expect((backend.unrelateAll(from, 'POINTS', Direction.OUTGOING).spec().parameters as any).x_from).toBeNull();
+        const relate = backend.relate(from, { model, id: null }, 'POINTS', {}, RelateMode.MERGE).spec()
+            .parameters as any;
+        expect([relate.x_from, relate.x_to]).toEqual([null, null]);
+        const unrelate = backend.unrelate(from, { model, id: null }, 'POINTS').spec().parameters as any;
+        expect([unrelate.x_from, unrelate.x_to]).toEqual([null, null]);
+    });
+
     it("binds a text id as the number id's JSON, and runs nothing for a null id", async () => {
         await gom.load(Gauge, '1e-7');
         await gom.load(Gauge, 7);
         await gom.load(Gauge, null);
         expect(bound.map((it) => it.id)).toEqual(['{"$numberDouble":"1.0E-7"}', '7']);
+    });
+
+    // A null id written as the JSON text 'null' was read by the block's find_node as JSON's null, so a patch could reach a
+    // node whose id is held as null, where a load or a delete by a null id finds none (#772). A null id now runs no
+    // statement at all, and a float id is bound as the JSON Oracle holds it as.
+    it("runs no statement for a patch's null id, and binds a float id as the JSON Oracle holds it as", async () => {
+        await gom.patch(Gauge, null as any, { set: { name: 'x' } }).catch(() => undefined);
+        await gom.patch(Gauge, 1e-7, { set: { name: 'x' } }).catch(() => undefined);
+        expect(bound.map((it) => it.id)).toEqual(['{"$numberDouble":"1.0E-7"}']);
     });
 });
 
