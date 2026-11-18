@@ -67,8 +67,9 @@ describe('CypherShorthand', () => {
         expect(new CypherShorthand('claim', 'claim_', oracle).rewrite("claim.id = 'c1'")).toEqual(
             "JSON_VALUE(claim_.props, '$.id') = 'c1'"
         );
+        // Over `n_`, the row a read of the query DSL calls its root.
         expect(new OracleBackend().written("n.id = 'c1' AND people.name = 'x'")).toEqual(
-            "JSON_VALUE(n.props, '$.id') = 'c1' AND people.name = 'x'"
+            "JSON_VALUE(n_.props, '$.id') = 'c1' AND people.name = 'x'"
         );
     });
 

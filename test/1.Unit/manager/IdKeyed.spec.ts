@@ -48,7 +48,8 @@ import { rangeIndex } from '@/schema/SchemaSpecs';
 import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 
 /** The comparison an Oracle lookup by `$id` makes of Gauge's id, as the shared module writes it. */
-const ORACLE_HAS_ID = idSql('oracle', 'hasId', 'n', 'id', 'JSON($id EXTENDED)');
+/** A load and a delete find the node as the query DSL's row, `n_`. */
+const ORACLE_HAS_ID = idSql('oracle', 'hasId', DSL_ROW, 'id', 'JSON($id EXTENDED)');
 
 /** The row an Oracle write block's find binds its one id in, as `i.v`, read EXTENDED. */
 const ONE_ID = '(SELECT JSON(:1 EXTENDED) v FROM dual) i';
@@ -209,8 +210,9 @@ describe('an id on Oracle', () => {
     it("binds a save's reads of the node's properties and stamp as the JSON Oracle holds the id as", () => {
         const backend = new OracleBackend(new OracleGraph());
         const model = new ModelRegistry().fragment(Gauge);
+        // A write's own reads keep the row `n`.
         for (const statement of [backend.heldProperties(model), backend.foundStamp(model)]) {
-            expect(statement.text).toContain(ORACLE_HAS_ID);
+            expect(statement.text).toContain(idSql('oracle', 'hasId', 'n', 'id', 'JSON($id EXTENDED)'));
             expect((statement.spec({ id: 1e-7 }).parameters as any).id).toEqual('{"$numberDouble":"1.0E-7"}');
         }
     });
@@ -341,7 +343,8 @@ describe.each([
         store: 'oracle' as const,
         backend: (): GraphBackend => new OracleBackend(new OracleGraph()),
         json: (parameter: string): string => `JSON(${parameter} EXTENDED)`,
-        row: 'n',
+        // A load and a delete read the node as the query DSL's row, which a fragment's variable ends with `_`.
+        row: DSL_ROW,
         labels: (row: string): string =>
             `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(${row}.labels), ']'), '[') || ',"', ',"Dial","') > 0 AND ` +
             `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(${row}.labels), ']'), '[') || ',"', ',"Meter","') > 0`
@@ -400,9 +403,7 @@ describe.each([
             Direction.OUTGOING,
             registry.fragment(Coded)
         );
-        expect(related.text).toContain(
-            `${idSql(store, 'hasId', 'a', 'id', json('$x_from'))} AND ${labels('a')}`
-        );
+        expect(related.text).toContain(`${idSql(store, 'hasId', 'a', 'id', json('$x_from'))} AND ${labels('a')}`);
         expect((related.spec().parameters as any).x_from).toEqual('7');
     });
 
@@ -612,7 +613,9 @@ describe('a lookup by id on SQLite, planned', () => {
         const model = registry.fragment(Dial);
         const view = registry.view(DialView);
         const index = (alias: string): RegExp =>
-            new RegExp(`SEARCH ${alias} USING (COVERING )?INDEX drivine_ix2_Dialid_\\w+ \\(<expr>=\\? AND <expr>=\\?\\)`);
+            new RegExp(
+                `SEARCH ${alias} USING (COVERING )?INDEX drivine_ix2_Dialid_\\w+ \\(<expr>=\\? AND <expr>=\\?\\)`
+            );
         const bound = { id: writeLayout(7, 'sqlite') };
         const target = { kind: 'GRAPH_VIEW' as const, model: view };
         for (const statement of [

@@ -88,11 +88,11 @@ import { loweredQuery } from '@/dsl/LowerCopyLookups';
 const GOLDEN = path.join(__dirname, 'statements.json');
 
 /**
- * A filter in the store's own language: Cypher over `n`, or SQL over the node row `n` on Oracle, and on SQLite and
- * Postgres over `n_`, the row a read of the query DSL calls its root, as their backends' `written` gives a filter over `n`.
+ * A filter in the store's own language: Cypher over `n`, or on Oracle, SQLite and Postgres SQL over `n_`, the row a read
+ * of the query DSL calls its root, as their backends' `written` gives a filter over `n`.
  */
 const CYPHER_WHERE = 'n.name = $name';
-const SQL_WHERE = "JSON_VALUE(n.props, '$.name') = $name";
+const SQL_WHERE = "JSON_VALUE(n_.props, '$.name') = $name";
 const POSTGRES_WHERE = "(n_.props ->> 'name') = $name";
 const SQLITE_WHERE = "(n_.props ->> '$.name') = $name";
 

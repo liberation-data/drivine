@@ -10,6 +10,8 @@ import { RowOrderedStatement } from '@/backend/oracle/RowOrderedStatement';
 import { carriesLabels, hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { hasId } from '@/backend/sql/NodeIds';
 import { prelude } from '@/backend/oracle/OracleSaveBuilder';
+import { called, hinted } from '@/backend/oracle/OracleFragments';
+import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
 import { Stamps } from '@/model/Stamps';
@@ -28,12 +30,17 @@ export class OracleWrites {
 
     constructor(private readonly graph: OracleGraph) {}
 
-    /** Writes `$set` (a merge patch) to the node with id `$id` if it meets `where`: `{found, applied, changed}`. */
+    /**
+     * Writes `$set` (a merge patch) to the node with id `$id` if it meets `where`, over its row `n_`, the row the query
+     * DSL's fragments read (see DSL_ROW), with the hints they ask for: `{found, applied, changed}`.
+     */
     patchOne(model: FragmentModel, where?: string): GraphStatement {
         const condition = where
-            ? `SELECT COUNT(*) INTO v_meets FROM ${this.graph.nodes} n WHERE n.nid = v_root AND (${where});`
+            ? `${hinted(
+                  `SELECT COUNT(*) INTO v_meets FROM ${this.graph.nodes} ${DSL_ROW} WHERE ${DSL_ROW}.nid = v_root AND (${where})`
+              )};`
             : 'v_meets := 1;';
-        return this.block(
+        const block = this.block(
             ['v_meets NUMBER;', 'v_changed BOOLEAN := FALSE;', 'v_id VARCHAR2(4000);', 'v_patch CLOB;'],
             [
                 'v_id := $id;',
@@ -56,6 +63,8 @@ export class OracleWrites {
                     '\'changed\' VALUE v_changed RETURNING CLOB) AS "result:json" FROM dual;'
             ]
         );
+        const made = called(block.text, this.graph.name);
+        return new LayoutBoundStatement(made.text, block.bindings, made.calls);
     }
 
     /**

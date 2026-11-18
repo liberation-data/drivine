@@ -1,3 +1,4 @@
+import { ModelRegistry, NodeFragment, NodeId, OracleBackend, OracleGraph, TargetModel } from '@liberation-data/drivine';
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -146,4 +147,50 @@ describe('OracleConnection', () => {
         ).rejects.toMatchObject({ errorNum: 3113 });
         expect(it.execute).toHaveBeenCalledTimes(1);
     });
+
+    describe("an object manager's statement that the query DSL's fragments say calls the graph's functions", () => {
+        /** The DSL's count of a map property equal to one holding a null, which the module compares by nulls_equal. */
+        const counted = (g: string): QuerySpecification<unknown> => {
+            const backend = new OracleBackend(new OracleGraph(g));
+            const target: TargetModel = { kind: 'NODE_FRAGMENT', model: new ModelRegistry().fragment(Metered) };
+            const where = backend.renderWhere((q: any) => q.meta.eq({ a: null }), target);
+            return backend.countFragments(target.model as any, where.where).spec(where.bindings);
+        };
+
+        it('should run where the session may call them, asking once', async () => {
+            const g = graph();
+            const it = session('found');
+            const connection = new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me');
+            await connection.query(counted(g));
+            await connection.query(counted(g));
+            const run = it.execute.mock.calls.map(([sql]) => sql as string);
+            expect(run).toHaveLength(3);
+            expect(run[1]).toContain(`${g}_nulls_equal(`);
+        });
+
+        it('should be refused, saying why, where the session may not call them, and not run', async () => {
+            const g = graph();
+            const it = session(904);
+            await expect(
+                new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(counted(g))
+            ).rejects.toThrow(
+                `calls ${g}_nulls_equal, a function the Oracle graph '${g}' keeps, which this session may not call`
+            );
+            expect(it.execute).toHaveBeenCalledTimes(1);
+        });
+
+        it('should ask nothing of one that calls none', async () => {
+            const it = session(904);
+            await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', graph(), 'db|me').query(
+                new QuerySpecification('SELECT 1 FROM dual')
+            );
+            expect(it.execute).toHaveBeenCalledTimes(1);
+        });
+    });
 });
+
+@NodeFragment({ labels: ['Metered'] })
+class Metered {
+    @NodeId() id: string;
+    meta?: Record<string, any>;
+}
