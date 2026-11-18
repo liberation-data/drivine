@@ -12,6 +12,7 @@ import {
     ModelRegistry,
     NodeFragment,
     NodeId,
+    pathKey,
     PersistenceManager,
     PersistenceManagerFactory,
     QuerySpecification,
@@ -26,6 +27,11 @@ class Item {
     name?: string;
     at?: Date;
     shelf?: string;
+}
+
+@NodeFragment({ labels: ['GroupRun', 'Shelf'] })
+class Shelf {
+    @NodeId() id: unknown;
 }
 
 /**
@@ -131,5 +137,64 @@ describe('a grouped read run on SQLite', () => {
             earliest: '2026-01-01T00:00:00Z',
             latest: '2026-03-01T00:00:00Z'
         });
+    });
+
+    /** The groups of each item's shelf, ordered by it `direction`, as the shelves' ids. */
+    async function shelves(direction: 'asc' | 'desc'): Promise<unknown[]> {
+        const groups = await gom.groups.load(Item, {
+            keys: { shelf: pathKey(Shelf, [{ type: 'ON' }]) },
+            aggregates: { all: count() },
+            orderBy: [['shelf', direction]]
+        });
+        return groups.map((it: any) => it.shelf.id);
+    }
+
+    it("orders a path key by its node's id as Cypher orders it: a text before a number", async () => {
+        await pm.execute(
+            new QuerySpecification({
+                text:
+                    "CREATE (:GroupRun:Item {id: 'i0'})-[:ON]->(:GroupRun:Shelf {id: 10}), " +
+                    "(:GroupRun:Item {id: 'i1'})-[:ON]->(:GroupRun:Shelf {id: 'b'}), " +
+                    "(:GroupRun:Item {id: 'i2'})-[:ON]->(:GroupRun:Shelf {id: 9})",
+                language: 'CYPHER'
+            })
+        );
+        expect(await shelves('asc')).toEqual(['b', 9, 10]);
+        expect(await shelves('desc')).toEqual([10, 9, 'b']);
+    });
+
+    it("orders a path key whose node's id is a date by the moment, not by its tag's text", async () => {
+        const at = [
+            datetime('2024-01-01T00:00:00.5Z', '10000020240101000000500000000064800'),
+            datetime('2024-01-01T00:00:00Z', '10000020240101000000000000000064800'),
+            datetime('2024-01-01T01:00:00+02:00', '10000020231231230000000000000072000')
+        ];
+        for (const [i, id] of at.entries()) {
+            await pm.execute(
+                new QuerySpecification({
+                    text: `CREATE (:GroupRun:Item {id: 'i${i}'})-[:ON]->(:GroupRun:Shelf {id: 's${i}'})`,
+                    language: 'CYPHER'
+                })
+            );
+            // The date's tag as a save writes it, its text first, which a Cypher CREATE writes after its sort key.
+            await pm.execute(
+                new QuerySpecification(`UPDATE drivine_node SET props = $props WHERE props ->> '$.id' = $was`).bind({
+                    props: JSON.stringify({ id }),
+                    was: `s${i}`
+                })
+            );
+        }
+        const moments = async (direction: 'asc' | 'desc'): Promise<string[]> =>
+            (await shelves(direction)).map((id) => new Date(id as Date).toISOString());
+        expect(await moments('asc')).toEqual([
+            '2023-12-31T23:00:00.000Z',
+            '2024-01-01T00:00:00.000Z',
+            '2024-01-01T00:00:00.500Z'
+        ]);
+        expect(await moments('desc')).toEqual([
+            '2024-01-01T00:00:00.500Z',
+            '2024-01-01T00:00:00.000Z',
+            '2023-12-31T23:00:00.000Z'
+        ]);
     });
 });

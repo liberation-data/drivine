@@ -93,6 +93,19 @@ export class SqliteGroups extends SqlGroups {
             this.fragments.ordered(this.node(holder), cypherOf(property), direction === 'DESC');
     }
 
+    /**
+     * A path key is ordered as Cypher orders its node's id, whatever its kind, a date included: read on the node, joined
+     * back, as drivine4j's SQLite reads it.
+     */
+    protected heldPath(target: FragmentModel): (holder: string, direction: 'ASC' | 'DESC') => string[] {
+        return (holder, direction) =>
+            this.fragments.ordered(
+                { n: { node: holder, labels: [...target.labels] } },
+                cypherOf(target.nodeIdProperty!),
+                direction === 'DESC'
+            );
+    }
+
     /** A null last ascending and first descending, as Postgres places it: SQLite would place it first ascending. */
     protected orderTerm(expression: string, direction: 'ASC' | 'DESC'): string {
         return `${expression} ${direction} NULLS ${direction === 'ASC' ? 'LAST' : 'FIRST'}`;

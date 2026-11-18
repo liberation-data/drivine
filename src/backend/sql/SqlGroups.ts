@@ -72,9 +72,11 @@ export abstract class SqlGroups {
         const value = (aggregate: GroupAggregate): string =>
             aggregate.property ? this.aggregated(views, aggregate.property as string) : '1';
         const held = aggregates.map(([, aggregate]) => this.held(aggregate));
-        const heldKeys = keys.map(([, key]) =>
-            key.kind === 'property' ? this.heldKey(key.property as string) : undefined
+        const heldKeys = keys.map(([name, key]) =>
+            key.kind === 'property' ? this.heldKey(key.property as string) : this.heldPath(pathTargets.get(name)!)
         );
+        /** The column of the node a held key is ordered through: a property key's representative, a path key's own. */
+        const heldBy = (i: number): string => (keys[i][1].kind === 'property' ? `g.k${i}r` : `g.k${i}`);
         const filtered = (aggregate: GroupAggregate, of: string): string =>
             aggregate.filter ? `CASE WHEN ${aggregate.filter as string} THEN ${of} END` : of;
         const aggregateColumns = aggregates.map(([, aggregate], i) => {
@@ -159,13 +161,15 @@ export abstract class SqlGroups {
         ];
         const holders = [
             ...heldKeys.flatMap((it, i) =>
-                it ? [`LEFT JOIN ${this.graph.nodes} ${keyHolder(i)} ON ${keyHolder(i)}.nid = g.k${i}r`] : []
+                it ? [`LEFT JOIN ${this.graph.nodes} ${keyHolder(i)} ON ${keyHolder(i)}.nid = ${heldBy(i)}`] : []
             ),
             ...held.flatMap((it, i) =>
                 it ? [`LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${holder(i)}.nid = g.a${i}`] : []
             )
         ];
-        const representatives = heldKeys.flatMap((it, i) => (it ? [`MIN(${n}.nid) AS k${i}r`] : []));
+        const representatives = heldKeys.flatMap((it, i) =>
+            it && keys[i][1].kind === 'property' ? [`MIN(${n}.nid) AS k${i}r`] : []
+        );
         const keyNames = keys.map((_, i) => `m.k${i}`);
         const text = [
             `SELECT ${views.object(projected)} AS "row"`,
@@ -209,6 +213,15 @@ export abstract class SqlGroups {
      * key's column itself ({@link keyOrder}).
      */
     protected heldKey(_property: string): ((holder: string, direction: 'ASC' | 'DESC') => string[]) | undefined {
+        return undefined;
+    }
+
+    /**
+     * How a path key is ordered through its node, `target`, joined back by the key's column as the row `holder`, as
+     * drivine4j's SQLite orders one: by the terms this gives for the node's id there. Undefined where the store orders
+     * the key by its node's id value ({@link idValue}).
+     */
+    protected heldPath(_target: FragmentModel): ((holder: string, direction: 'ASC' | 'DESC') => string[]) | undefined {
         return undefined;
     }
 
