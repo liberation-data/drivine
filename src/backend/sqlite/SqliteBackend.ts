@@ -17,6 +17,7 @@ import { writeLayout } from '@/cypher/ValueLayout';
 import { SqliteGroups } from '@/backend/sqlite/SqliteGroups';
 import { hasLabels, JSON_ROWS, nodeDocument, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
 import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
+import { SqlFragments } from '@/cypher/SqlFragments';
 import { SqliteSearch } from '@/backend/sqlite/SqliteSearch';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
 import { sqliteContended } from '@/connection/sqlite/SqliteDriver';
@@ -225,7 +226,12 @@ export class SqliteBackend implements GraphBackend {
     }
 
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
-        return FragmentQueryRenderer.render('sqlite', fn, target, this.graph.name, ROW_ALIAS);
+        return FragmentQueryRenderer.render(
+            new SqlFragments('sqlite', { name: this.graph.name }),
+            fn,
+            target,
+            ROW_ALIAS
+        );
     }
 
     /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
@@ -234,7 +240,12 @@ export class SqliteBackend implements GraphBackend {
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
-        return FragmentQueryRenderer.renderWhere('sqlite', fn, target, this.graph.name, ROW_ALIAS);
+        return FragmentQueryRenderer.renderWhere(
+            new SqlFragments('sqlite', { name: this.graph.name }),
+            fn,
+            target,
+            ROW_ALIAS
+        );
     }
 
     patchOne(model: FragmentModel, where?: string): GraphStatement {

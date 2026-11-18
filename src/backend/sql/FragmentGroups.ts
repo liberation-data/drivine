@@ -9,7 +9,7 @@ import { FragmentModel } from '@/model/FragmentModel';
 
 /**
  * A grouped read whose values are the shared module's (drivine-cypher-spec#235, its fragments; drivine4j's
- * `SqliteSelect.groups` and `PostgresSelect.groups`), on SQLite and Postgres: a filter is the module's SQL for the
+ * `SqliteSelect.groups`, `PostgresSelect.groups` and `OracleSelect.groups`), on each SQL store: a filter is the module's SQL for the
  * Cypher the DSL writes, over the row `n_`; a property key is the property's value as the store holds it, so values
  * Cypher tells apart are grouped apart. A least or greatest value is the first of the group's nodes in Cypher's order of
  * those that have one, joined back to be compared by a `having` and ordered there as Cypher does, whatever its kind, a
@@ -38,7 +38,12 @@ export abstract class FragmentGroups extends SqlGroups {
         this.fragments = new SqlFragments(this.store, { name: this.graph.name });
         this.labels = [...source.labels];
         const statement = super.build(source, given, pathTargets);
-        return new GraphStatement(statement.text, { ...statement.bindings, ...this.fragments.parameters });
+        return this.made(statement.text, { ...statement.bindings, ...this.fragments.parameters });
+    }
+
+    /** The statement of the text built and what it binds: what the fragments ask of it is the store's to write in. */
+    protected made(text: string, bindings: Record<string, any>): GraphStatement {
+        return new GraphStatement(text, bindings);
     }
 
     protected renderer(): FragmentQueryRenderer {

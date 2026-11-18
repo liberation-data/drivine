@@ -23,6 +23,7 @@ import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
+import { SqlFragments } from '@/cypher/SqlFragments';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
 import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
 import { selfLoopOnce } from '@/backend/sql/SqlGraph';
@@ -260,7 +261,12 @@ export class PostgresBackend implements GraphBackend {
     }
 
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
-        return FragmentQueryRenderer.render('postgres', fn, target, this.graph.name, ROW_ALIAS);
+        return FragmentQueryRenderer.render(
+            new SqlFragments('postgres', { name: this.graph.name }),
+            fn,
+            target,
+            ROW_ALIAS
+        );
     }
 
     /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
@@ -269,7 +275,12 @@ export class PostgresBackend implements GraphBackend {
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
-        return FragmentQueryRenderer.renderWhere('postgres', fn, target, this.graph.name, ROW_ALIAS);
+        return FragmentQueryRenderer.renderWhere(
+            new SqlFragments('postgres', { name: this.graph.name }),
+            fn,
+            target,
+            ROW_ALIAS
+        );
     }
 
     patchOne(model: FragmentModel, where?: string): GraphStatement {
