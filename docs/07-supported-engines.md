@@ -358,7 +358,8 @@ Notes:
   is the map it is.
 - A predicate you write yourself is SQL over the root's row: its `props`, `labels` and `stamp`, e.g.
   `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name`, and is read
-  as that property, as text, as on Postgres. SQLite's own `->>` reads `true` as `1` and a number as a number.
+  as that property, as text, as on Postgres. One whose name begins with `$`, ``n.`$k` ``, is read as it is held, under
+  `$$k`. SQLite's own `->>` reads `true` as `1` and a number as a number.
 - Each connection registers the functions Drivine's statements call, by drivine4j's names: `drivine_write`,
   `drivine_delete`, `drivine_lower_copies`, `drivine_similarity`, `drivine_epoch` (a moment as nanoseconds since the
   epoch), `drivine_lower` (a Unicode `lower`), `drivine_regexp_count`, and `regexp`, which SQLite's `REGEXP` calls.
