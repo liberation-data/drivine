@@ -568,7 +568,7 @@ export class StatelessGraphObjectManager {
                 return await this.write(changed, options, false);
             } catch (failure) {
                 // By value (see readBackKey): the save's id is the loaded object's, another Date than a Date id given,
-                // or on a SQL store the tag's text.
+                // or the text an id given as text is.
                 if (
                     !(failure instanceof StaleObjectException) ||
                     readBackKey(failure.id, root) !== readBackKey(id, root) ||
@@ -927,7 +927,8 @@ export class StatelessGraphObjectManager {
             throw new DrivineError(`The ${name} given as from has no root fragment.`);
         }
         const [loadedId, id] = [loadedRoot[model.nodeIdField!], root[model.nodeIdField!]];
-        // By value (see readBackKey): a SQL store loads a Date id as its tag's text, and a Date's String has no milliseconds.
+        // By value (see readBackKey): a Date id may be given as its text, as a copy may hold it, and a Date's String has no
+        // milliseconds.
         if (String(readBackKey(loadedId, model)) !== String(readBackKey(id, model))) {
             throw new DrivineError(
                 `from is the ${name} '${String(loadedId)}', and the object saved '${String(id)}'. Give the object as ` +
@@ -965,8 +966,8 @@ export class StatelessGraphObjectManager {
             target.kind === 'GRAPH_VIEW'
                 ? [before[target.model.rootField], changed[target.model.rootField]]
                 : [before, changed];
-        // By value (see readBackKey): the copy taken before the change holds a Date id as another Date, and a SQL store
-        // loads one as its tag's text.
+        // By value (see readBackKey): the copy taken before the change holds a Date id as another Date, and a change may
+        // give it as its text.
         if (readBackKey(rootAfter?.[root.nodeIdField!], root) !== readBackKey(rootBefore[root.nodeIdField!], root)) {
             throw new DrivineError(
                 `An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`
@@ -1401,7 +1402,7 @@ function relatedIds(rel: RelationshipModel, value: any): any[] {
     return [value ?? []].flat().map((item: any) => {
         const node = related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[related.model.targetField] : item;
         const fragment = into.kind === 'GRAPH_VIEW' ? node?.[into.model.rootField] : node;
-        // By value (see readBackKey): a loaded Date id is another Date, or on a SQL store its tag's text.
+        // By value (see readBackKey): a loaded Date id is another Date, or the text a related object was given.
         return readBackKey(fragment?.[root.nodeIdField!], root);
     });
 }
