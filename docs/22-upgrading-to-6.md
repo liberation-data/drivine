@@ -22,17 +22,20 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
 
 - A `Date` is held as a tagged map of its ISO 8601 text and the key it orders by (`{"$t": "datetime", "v": "…", "s":
   "…"}`), where 5.0 held its text. It reads back as its text, as before.
-  On SQLite the query DSL compares a `Date` by its tag, in a condition, a `seek`, an order, a grouped read and a
-  `patch`'s `where`, as Neo4j compares it: its SQL there is the shared compiler's
-  ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)). On Oracle and
-  Postgres it refuses a `Date` there by name, where it compared the date's text and found nothing or the wrong rows;
-  compare dates in a Cypher statement there until #235 reaches them. See [Object Manager](05-object-manager.md#operators).
-- On SQLite a raw `where` is still SQL over the node's row `n`: a read of the query DSL calls that row `n_`, and reads
-  `n.name`, `n.props`, `n.labels` and `n.stamp` in a raw `where` as that row's. A grouped read's `min` and `max` are the
-  value of a node of the group in Cypher's order, of any kind, where 5.0 gave a number's alone.
+  On SQLite and Postgres the query DSL compares a `Date` by its tag, in a condition, a `seek`, an order, a grouped
+  read and a `patch`'s `where`, as Neo4j compares it: its SQL there is the shared compiler's
+  ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)). On Oracle it refuses
+  a `Date` there by name, where it compared the date's text and found nothing or the wrong rows; compare dates in a
+  Cypher statement there until #235 reaches it. See [Object Manager](05-object-manager.md#operators).
+- On SQLite and Postgres a raw `where` is still SQL over the node's row `n`: a read of the query DSL calls that row
+  `n_`, and reads `n.name`, `n.props`, `n.labels` and `n.stamp` in a raw `where` as that row's. A grouped read's `min`
+  and `max` are the value of a node of the group in Cypher's order, of any kind, where 5.0 gave a number's alone, and
+  its groups are ordered by a key as Cypher orders it, a text before a boolean before a number, where Postgres ordered
+  them as `jsonb` orders, a number before a boolean. `notIn([])` matches a node that lacks the property, as Cypher's
+  `NOT n.p IN []` does.
 - A property or map key whose name begins with `$` is held under one more `$` (`$$k` for `$k`), and reads back as it
-  was. On SQLite the query DSL filters, orders and groups by one as it is held; on Oracle and Postgres it doesn't yet,
-  and finds nothing by one.
+  was. On SQLite and Postgres the query DSL filters, orders and groups by one as it is held; on Oracle it doesn't
+  yet, and finds nothing by one.
 - Each value is held as a `CREATE` given it holds it, written by the shared compiler's module for the store
   ([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)). On Oracle every float
   is a binary double, where 5.0 held it as a `NUMBER`, so a whole float saved read back by Cypher as a whole number. On
