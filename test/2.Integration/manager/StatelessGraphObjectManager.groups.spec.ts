@@ -50,8 +50,7 @@ class User {
 }
 
 /**
- * A dated item, made by Cypher on each store: `due` is declared a Date where TypeScript records it, and `undeclared`
- * where it doesn't.
+ * A dated item: `due` is declared a Date where TypeScript records it, and `undeclared` where it doesn't.
  */
 @NodeFragment({ labels: ['GroupTest', 'DatedItem'] })
 class DatedItem {
@@ -229,27 +228,26 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
             new Date('2026-01-01T00:00:00.000Z'),
             new Date('2026-02-01T00:00:00.000Z')
         ];
-        // Made by Cypher's datetime(), as the Neo4j driver sends a JavaScript Date as an empty map, which a save can't
-        // write on a graph engine; each SQL store compiles the same statement to its tag. Whole seconds with no fraction, as
-        // Memgraph's datetime() reads no fraction before `Z`.
-        for (const [i, due] of dates.entries()) {
-            await pm.execute(
-                new QuerySpecification({
-                    text:
-                        `CREATE (:GroupTest:DatedItem {id: 'd${i}', shelf: 'one', due_at: datetime('${due
-                            .toISOString()
-                            .replace('.000Z', 'Z')}'), ` +
-                        `undeclared: datetime('${due.toISOString().replace('.000Z', 'Z')}')})`,
-                    language: 'CYPHER'
-                })
+        if ([DatabaseType.NEO4J, DatabaseType.MEMGRAPH].includes(engine.type)) {
+            // Made by Cypher's datetime() on Neo4j and Memgraph, whose drivers send a JavaScript Date as an empty map, which
+            // a save can't write. Whole seconds with no fraction, as Memgraph's datetime() reads no fraction before `Z`.
+            for (const [i, due] of dates.entries()) {
+                const at = `datetime('${due.toISOString().replace('.000Z', 'Z')}')`;
+                await pm.execute(
+                    new QuerySpecification({
+                        text: `CREATE (:GroupTest:DatedItem {id: 'd${i}', shelf: 'one', due_at: ${at}, undeclared: ${at}})`,
+                        language: 'CYPHER'
+                    })
+                );
+            }
+            await gom.save(Object.assign(new DatedItem(), { id: 'd3', shelf: 'one' }));
+        } else {
+            await gom.saveAll(
+                [...dates.map((due, i) => ({ id: `d${i}`, due, undeclared: due })), { id: 'd3' }].map((it) =>
+                    Object.assign(new DatedItem(), { shelf: 'one', ...it })
+                )
             );
         }
-        await pm.execute(
-            new QuerySpecification({
-                text: "CREATE (:GroupTest:DatedItem {id: 'd3', shelf: 'one'})",
-                language: 'CYPHER'
-            })
-        );
         const [group] = await gom.groups.load(DatedItem, (q: any) => ({
             keys: { shelf: key(q.shelf) },
             aggregates: {
