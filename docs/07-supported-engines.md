@@ -104,11 +104,18 @@ Notes:
 - A Cypher statement, `cypherStatement('MATCH …')`, is compiled to SQL over the graph's tables and gives the rows a graph
   engine gives: see [Cypher on a relational database](04-cypher-on-a-relational-database.md#cypher-on-a-relational-database) to start, and
   [Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres) for how it differs.
-- A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`.
-  A property of the root may be written as Cypher writes it, `n.name = $name` (or ``n.`a name` ``), and is read as that
-  property, as text; a property compared with `true` or `false` is compared with the text a JSON boolean is read as. To
-  compare one with a number, read it as a number in SQL. One whose name begins with `$`, ``n.`$k` ``, is read as it is
-  held, under `$$k`.
+- A predicate you write yourself, for a load or a delete, is SQL over the root's row `n`: its `props`, `labels` and
+  `stamp`. A read of the query DSL calls that row `n_`, and reads `n.props`, `n.labels` and `n.stamp` in your predicate
+  as that row's. A property of the root may be written as Cypher writes it, `n.name = $name` (or ``n.`a name` ``), and
+  is read as that property, as text; a property compared with `true` or `false` is compared with the text a JSON
+  boolean is read as. To compare one with a number, read it as a number in SQL. One whose name begins with `$`,
+  ``n.`$k` ``, is read as it is held, under `$$k`.
+- The query DSL's conditions, orders, seeks and grouped reads are the shared compiler's SQL for the Cypher the DSL writes
+  for Neo4j ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), as in
+  compiled Cypher: a date is compared by its moment, and text is compared and ordered by its code points (`B, a, b`),
+  as before. Each statement carries the optimizer hints that SQL asks for. Where a comparison calls one of the graph's
+  functions (a list or a map that holds a null, compared with another), a session that may not call it is refused
+  with a `DrivineError` that says so, where compiled Cypher is compiled again without it.
 - A save is one block and checks the stamp, as on the graph engines. A save turned away by a deadlock (`ORA-00060`) or
   a serialization failure (`ORA-08177`) is run again. Another writer that changes a node in SQL should give it a new
   stamp: the first sixteen characters of `stamp` for its properties or labels, the last sixteen for its relationships.
@@ -118,18 +125,17 @@ Notes:
   store either library made has the same indexes. A range index is two indexes, each over the property's kind and key as
   store layout 2 holds it: one whatever the label (`<graph>_ix2_…`), and one over the label's nodes alone
   (`<graph>_lx2_…`), which an equality on the label's nodes, as the compiler writes it given the store's indexed
-  properties, is read through. Nothing here reads it yet: a Cypher statement is compiled without them
-  ([#753](https://github.com/liberation-data/drivine/issues/753)), and a filter of the query DSL is written over 5.0's
-  expression (drivine-cypher-spec#235, step 4). A uniqueness constraint is a unique index over the label's nodes that
+  properties, is read through. The query DSL's equality is read through it, and through a uniqueness constraint's unique
+  index ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)); a Cypher
+  statement isn't yet, as it is compiled without them ([#753](https://github.com/liberation-data/drivine/issues/753)). A uniqueness constraint is a unique index over the label's nodes that
   have its properties (`<graph>_uq2_…`). A value is equal only to one of its kind: `1` and `'1'` are two keys. It comes
   with a range index over its properties, which stays when the constraint is dropped; over one property, its unique
   index stands for the labelled index. An index Drivine 5.0 made, under layout 1's names, is dropped as its graph is
   stamped layout 2: see [Upgrading to 6.0](22-upgrading-to-6.md#oracles-indexes-are-drivine4js).
 - Oracle reads an empty string as null, so a comparison with `''` in the DSL is written to find a property stored empty.
-- `matches` takes a regular expression in Oracle's POSIX dialect, matched against the whole value. A leading `(?i)`
-  ignores case; what Java adds, such as `(?:…)`, a look-around or `\b`, is not read. A backreference names the group the
-  expression numbers it by, `\1` to `\8`; `\9` is refused, as the group that anchors the expression would make it the
-  tenth, which POSIX does not have.
+- `matches` takes a regular expression as compiled Cypher's `=~` does, matched against the whole value, in Oracle's
+  POSIX dialect. A leading `(?i)` ignores case. A backreference is read as Java reads it only where it is `\1` to `\8`,
+  to a simple group; the shared compiler refuses any other, with why.
 - A vector index is a table of embeddings beside the nodes, kept in step by a trigger, with an Oracle vector index over
   it by neighbour partitions. The table holds the embeddings of the index's size; a node written with another size is
   left out, not refused. `loadNearest` is approximate through it. With no index made, or one of another size than the
