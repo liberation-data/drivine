@@ -194,6 +194,24 @@ describe('A property declared a Date, loaded on SQLite', () => {
         expectEvent(saved, 2);
     });
 
+    it('saves a node loaded with a Date back as a Date, so a where on the date still finds it', async () => {
+        // Before #807 the loaded text was saved back as a text, in place of the Date's tag, and the where found nothing.
+        const loaded = (await gom.load(Event, 'e1'))!;
+        await gom.save(Object.assign(loaded, { name: 'resaved' }));
+        await gom.update(Event, 'e2', (it) => {
+            it.name = 'updated';
+        });
+        for (const [id, day] of [
+            ['e1', 1],
+            ['e2', 2]
+        ] as const) {
+            const found = await gom.loadAll(Event, (q) => ({
+                where: [q.at.eq(moment(day)), q.due.eq(moment(day + 1)), q.at.gt(SINCE)]
+            }));
+            expect(found.map((it) => it.id)).toEqual([id]);
+        }
+    });
+
     it('gives a Date id as a Date, which finds the node again', async () => {
         await gom.save(Object.assign(new Day(), { id: moment(5), name: 'fifth' }));
         const day = (await gom.load(Day, '2026-01-05'))!;
