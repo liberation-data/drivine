@@ -52,9 +52,12 @@ class ActorDirectors {
  * (#788): a date by its moment, an offset's included, and kinds in Cypher's order, a temporal, a text, a boolean, a number,
  * no value last. On the SQL stores the path is ordered by the shared module's order fragments over the hop's node, as
  * drivine4j orders it; the library's own SQL before ordered a date by its tag's text (`.5Z` before `Z`) and kinds out of
- * Cypher's order. Memgraph and FalkorDB, which order temporals and mixed kinds by their own rules, are left out.
+ * Cypher's order. On the graph engines the rows are sorted by ORDER BY before they are collected (#799). Memgraph,
+ * which orders no values of two kinds, ranks a text before a boolean before any other value first, so it is held to
+ * the mixed kinds without a temporal value. FalkorDB, which orders temporals and mixed kinds by its own rules, is left
+ * out.
  */
-describe.each(allStores().filter((it) => ![DatabaseType.MEMGRAPH, DatabaseType.FALKORDB].includes(it.type)))(
+describe.each(allStores().filter((it) => it.type !== DatabaseType.FALKORDB))(
     "A view's path ordered by a hop's date or mixed kinds on $type",
     (store) => {
         let pm: PersistenceManager;
@@ -111,7 +114,10 @@ describe.each(allStores().filter((it) => ![DatabaseType.MEMGRAPH, DatabaseType.F
             };
         }
 
-        it("orders a date hop property by its moment, an offset's included, not by its text", async () => {
+        // Not on Memgraph, which orders a zoned date by its own rules, and refuses to order a date beside a number.
+        const dated = store.type === DatabaseType.MEMGRAPH ? it.skip : it;
+
+        dated("orders a date hop property by its moment, an offset's included, not by its text", async () => {
             await create([
                 "datetime('2024-01-01T00:00:00.5Z')",
                 "datetime('2024-01-01T00:00:00Z')",
@@ -128,8 +134,9 @@ describe.each(allStores().filter((it) => ![DatabaseType.MEMGRAPH, DatabaseType.F
 
         // Held on Postgres, where the pinned compiler (0.50.0) orders kinds in jsonb's order, a number before a boolean and
         // a temporal after a text (liberation-data/drivine-cypher-spec#371, fixed by #374 after 0.50.0: unfail at the
-        // bump); and on Neo4j, whose view path is sorted by the library's own Cypher, which puts every text first (#799).
-        const mixed = [DatabaseType.POSTGRES, DatabaseType.NEO4J].includes(store.type) ? it.failing : it;
+        // bump).
+        const mixed = store.type === DatabaseType.POSTGRES ? it.failing : it;
+        const mixedAndDated = store.type === DatabaseType.MEMGRAPH ? it.skip : mixed;
 
         mixed(
             'orders a hop property of mixed kinds as Cypher does: a text, a boolean, a number, no value last',
@@ -144,22 +151,25 @@ describe.each(allStores().filter((it) => ![DatabaseType.MEMGRAPH, DatabaseType.F
             }
         );
 
-        mixed('keeps for a node reached by a date and a number the date lowest first, the number highest', async () => {
-            await create(["datetime('2024-01-01T00:00:00.5Z')", "'x'", "datetime('2024-01-01T00:00:00Z')"]);
-            await pm.execute(
-                new QuerySpecification({
-                    text:
-                        "MATCH (a:OrderedPathKind:Actor {id: 'a'}), (d:OrderedPathKind:Director {id: 'd0'}) " +
-                        "CREATE (a)-[:ACTED_IN]->(:OrderedPathKind:Movie {id: 'm9', value: 7})-[:DIRECTED_BY]->(d)",
-                    language: 'CYPHER'
-                })
-            );
-            expect(await loaded()).toEqual({
-                lowestFirst: ['d2', 'd0', 'd1'],
-                highestFirst: ['d0', 'd1', 'd2'],
-                lowest: 'd2',
-                highest: 'd0'
-            });
-        });
+        mixedAndDated(
+            'keeps for a node reached by a date and a number the date lowest first, the number highest',
+            async () => {
+                await create(["datetime('2024-01-01T00:00:00.5Z')", "'x'", "datetime('2024-01-01T00:00:00Z')"]);
+                await pm.execute(
+                    new QuerySpecification({
+                        text:
+                            "MATCH (a:OrderedPathKind:Actor {id: 'a'}), (d:OrderedPathKind:Director {id: 'd0'}) " +
+                            "CREATE (a)-[:ACTED_IN]->(:OrderedPathKind:Movie {id: 'm9', value: 7})-[:DIRECTED_BY]->(d)",
+                        language: 'CYPHER'
+                    })
+                );
+                expect(await loaded()).toEqual({
+                    lowestFirst: ['d2', 'd0', 'd1'],
+                    highestFirst: ['d0', 'd1', 'd2'],
+                    lowest: 'd2',
+                    highest: 'd0'
+                });
+            }
+        );
     }
 );
