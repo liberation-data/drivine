@@ -251,6 +251,21 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
             [...indexed, { label: 'Account', properties: ['name'] }]
         );
         expect(both.labelsTested).toEqual(['Account']);
+        // But not an equality of an indexed property the module reads through no index, a list's or "": its term holds
+        // no label test, and the lowered one's doesn't decide it.
+        for (const value of [['Ada'], '']) {
+            const unread = backend.renderQuery(
+                loweredQuery(
+                    (q: any) => ({ where: [q.email.eqIgnoreCase('Ada@X.com'), q.name.eq(value)] }),
+                    account,
+                    new Set(['email'])
+                ),
+                account,
+                [...indexed, { label: 'Account', properties: ['name'] }]
+            );
+            expect(unread.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "Account")') THEN`);
+            expect(unread.labelsTested).toEqual([]);
+        }
     });
 
     it('compares a text past 4,000 bytes as a CLOB, not through the index, which holds none, and tests the label', () => {

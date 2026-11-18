@@ -39,8 +39,10 @@ import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
-import { RenderedQuery } from '@/dsl/QueryRenderer';
-import { QueryFn, WhereFn } from '@/dsl/Refs';
+import { pinnedProperties, RenderedQuery } from '@/dsl/QueryRenderer';
+import { allOfOne, Condition, QueryFn, WhereFn } from '@/dsl/Refs';
+import { scopeOf } from '@/dsl/ModelScope';
+import { rootRefs } from '@/dsl/QueryRefs';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GroupQuery } from '@/manager/Groups';
 import { SchemaItem } from '@/schema/SchemaGrammar';
@@ -311,7 +313,11 @@ END;`)
             ...query,
             where: noted(query.where, fragments),
             orderBy: noted(query.orderBy, fragments),
-            labelsTested: labelsImplied(query.where, root.labels, query.pinned, indexed)
+            labelsTested: labelsImplied(
+                query.where,
+                root.labels,
+                indexedEqualities(this.graph.name, fn, target, indexed)
+            )
         };
     }
 
@@ -509,18 +515,50 @@ END;`);
  * whose properties an equality is read through a labelled index there (see moduleLabelTest), as drivine4j's
  * `OraclePredicates.predicate` finds them. None for no condition.
  *
- * Only a plain equality at the top of the DSL's filter (`pinned`) of an `indexed` property of the label implies it. An
- * ignore-case equality of a lowercased copy (`EQ_LOWERED`, see LowerCopyLookups) is read through the same index, but past
- * 4,000 bytes the module's term holds for every node, the label's test inside it then not deciding it: the statement
- * tests the label itself. Retires once the module keeps the label's test inside that guard
- * (liberation-data/drivine-cypher-spec#373).
+ * Only a plain equality at the top of the DSL's filter of an indexed property of the label, read through the index
+ * (`equalities`, see indexedEqualities), implies it. An ignore-case equality of a lowercased copy
+ * (`EQ_LOWERED`, see LowerCopyLookups) is read through the same index, but past 4,000 bytes the module's term holds for
+ * every node, the label's test inside it then not deciding it: the statement tests the label itself. Retires once the
+ * module keeps the label's test inside that guard (liberation-data/drivine-cypher-spec#373).
  */
-function labelsImplied(where: string | undefined, labels: string[], pinned: string[], indexed: SchemaItem[]): string[] {
-    return where
+function labelsImplied(where: string | undefined, labels: string[], equalities: string | undefined): string[] {
+    return where && equalities
         ? labels.filter(
               (label) =>
                   where.includes(moduleLabelTest(ROW_ALIAS, label)) &&
-                  indexed.some((it) => it.label === label && pinned.includes(it.properties[0]))
+                  equalities.includes(moduleLabelTest(ROW_ALIAS, label))
           )
         : [];
+}
+
+/**
+ * The plain equalities at the top of the query's filter of a property `indexed` for a label of the root, as the
+ * shared module's fragments write them alone: none when there are none. The module reads some values through the
+ * index (a label test in their term) and others not (a list, a map, `""`), as it alone knows.
+ */
+function indexedEqualities<T>(
+    graph: string,
+    fn: QueryFn<T>,
+    target: TargetModel,
+    indexed: SchemaItem[]
+): string | undefined {
+    const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+    const properties = indexed.filter((it) => root.labels.includes(it.label)).map((it) => it.properties[0]);
+    const scope = scopeOf(target);
+    const query = fn(rootRefs<T>(scope));
+    const equalities = (condition: Condition): Condition[] =>
+        condition.kind === 'AND'
+            ? condition.conditions.flatMap(equalities)
+            : pinnedProperties(condition, scope).some((it) => properties.includes(it))
+            ? [condition]
+            : [];
+    const pinned = query.where !== undefined && properties.length ? equalities(allOfOne(query.where)) : [];
+    if (!pinned.length) {
+        return undefined;
+    }
+    const fragments = new SqlFragments('oracle', {
+        name: graph,
+        indexedProperties: indexed.map((it) => [it.label, it.properties[0]] as const)
+    });
+    return FragmentQueryRenderer.renderWhere(fragments, () => pinned, target, ROW_ALIAS).where;
 }
