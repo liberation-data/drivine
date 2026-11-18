@@ -1,3 +1,5 @@
+import { heldKey } from '@/cypher/ValueLayout';
+
 /** `alias.name` or ``alias.`a name` ``, matched where it starts. */
 const SHORTHAND = /([A-Za-z_][A-Za-z0-9_]*)\.(?:`([^`]+)`|([A-Za-z_][A-Za-z0-9_]*))/y;
 
@@ -31,7 +33,8 @@ export class CypherShorthand {
     /**
      * @param alias what the predicate calls the root
      * @param row what the statement calls the root's row
-     * @param property how the store reads the property of a row, given the row and the property's name
+     * @param property how the store reads the property of a row, given the row and the key the property is held under
+     * (see heldKey), so it escapes none itself
      */
     constructor(
         private readonly alias: string,
@@ -77,14 +80,17 @@ export class CypherShorthand {
         if (COLUMNS.has(key)) {
             return { text: `${this.row}.${key}`, end };
         }
+        // A property whose name begins with `$` is held under its key with the `$` doubled (heldKey), as drivine4j
+        // reads it (#793).
+        const property = this.property(this.row, heldKey(key));
         // A property compared with a boolean is compared with the boolean's text, which is what a property is read as.
         const compared = matchAt(BOOLEAN_COMPARED, predicate, end);
         return compared
             ? {
-                  text: `${this.property(this.row, key)}${compared[1]}'${compared[2].toLowerCase()}'`,
+                  text: `${property}${compared[1]}'${compared[2].toLowerCase()}'`,
                   end: end + compared[0].length
               }
-            : { text: this.property(this.row, key), end };
+            : { text: property, end };
     }
 
     /** The index after the string literal that opens at `start`; a doubled quote is part of it. */

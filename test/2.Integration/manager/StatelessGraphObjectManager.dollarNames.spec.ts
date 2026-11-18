@@ -93,4 +93,27 @@ describe.each(sqlStores())('A property whose name begins with $ in the query DSL
             { score: 1, nodes: 1, total: 1 }
         ]);
     });
+    // A raw where names it as Cypher writes it, in backticks, and reads the key layout 2 holds it under (#793).
+    it('reads it in a raw where by the key it is held under', async () => {
+        const found = await gom.loadAll(Ranked, { where: 'n.`$score` IS NOT NULL' });
+        expect(found.map((it) => it.id).sort()).toEqual(['r1', 'r2', 'r3']);
+        expect(await gom.loadAll(Ranked, { where: 'n.`$score` IS NULL' })).toEqual([]);
+        // A patch's raw where, which Postgres and SQLite run with its values written in (PostgresWrites' meeting).
+        expect((await gom.patch(Ranked, 'r2', { set: { $score: 20 }, where: 'n.`$score` IS NOT NULL' })).applied).toBe(
+            true
+        );
+        expect((await gom.load(Ranked, 'r2'))?.$score).toEqual(20);
+        // A grouped read's raw where and raw aggregate filter.
+        const groups = await gom.groups.load(Ranked, {
+            where: 'n.`$score` IS NOT NULL',
+            keys: { id: key('id') },
+            aggregates: { scored: count('n.`$score` IS NOT NULL') },
+            orderBy: [['id', 'asc']]
+        });
+        expect(groups).toEqual([
+            { id: 'r1', scored: 1 },
+            { id: 'r2', scored: 1 },
+            { id: 'r3', scored: 1 }
+        ]);
+    });
 });
