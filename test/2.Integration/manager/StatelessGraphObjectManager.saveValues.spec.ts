@@ -29,6 +29,9 @@ import { isSqlStore, sqlStores } from '../support/SqlStores';
 
 jest.setTimeout(60_000);
 
+/** A decorator of another library, which records the field's type as any decorator does, and tells Drivine nothing. */
+const Marked = (): PropertyDecorator => () => undefined;
+
 @NodeFragment({ labels: ['SavedValue'] })
 class SavedValue {
     @NodeId() id: string;
@@ -36,7 +39,8 @@ class SavedValue {
     l?: (number | CypherFloat)[];
     m?: Record<string, any>;
     b?: Uint8Array;
-    at?: Date;
+    /** Declared a Date where TypeScript records it, so a load gives it as one on every store (#807). */
+    @Marked() at?: Date;
 }
 
 /** A node whose id is a float, which Oracle holds as a binary double. */
@@ -145,7 +149,7 @@ describe.each(stores())('values a save writes on $type', (store) => {
                     expect(Object.is(await read(saved.id, 'n.d'), d)).toBe(true);
                     const loaded = await gom.load(SavedValue, saved.id);
                     expect(Object.is(loaded?.d, d)).toBe(true);
-                    expect(loaded?.at && new Date(loaded.at).getTime()).toEqual(saved.at?.getTime());
+                    expect(loaded?.at).toEqual(saved.at);
                 }
             }
         }
@@ -200,7 +204,9 @@ describe.each(stores())('values a save writes on $type', (store) => {
         await gom.save(value('t', { at }));
         await cypher('CREATE (n:SavedValue {id: $id, at: $at})', { id: 'c', at });
 
-        expect(new Date((await gom.load(SavedValue, 't'))!.at!).getTime()).toEqual(at.getTime());
+        const loaded = (await gom.load(SavedValue, 't'))!.at;
+        expect(loaded).toBeInstanceOf(Date);
+        expect(loaded).toEqual(at);
         expect(
             (
                 await cypher(

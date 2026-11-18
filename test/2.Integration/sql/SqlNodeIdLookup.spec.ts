@@ -150,8 +150,10 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
             make(LookupDate, { id: day('2024-01-03'), name: 'batch second' })
         ]);
         expect(await names(LookupDate)).toEqual(['batch second']);
-        // A datetime loads as its text, as a load reads every datetime.
-        expect(new Date((await gom.load(LookupDate, '2024-01-03'))!.id)).toEqual(day('2024-01-03'));
+        // A Date id loads as a Date (#807).
+        const loaded = (await gom.load(LookupDate, '2024-01-03'))!.id;
+        expect(loaded).toBeInstanceOf(Date);
+        expect(loaded).toEqual(day('2024-01-03'));
     });
 
     // ----- Load, delete by id and loadRelated, for a number, a Date and a string id -----

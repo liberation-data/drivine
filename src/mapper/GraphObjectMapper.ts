@@ -220,6 +220,7 @@ export class GraphObjectMapper {
             fields[field] = mapping.jsonPacked.has(field) ? unpacked(value) : value;
         }
         wholeNumbersAsDeclared(type, mapping, fields);
+        datesAsDeclared(type, mapping, fields);
         const instance = plainToInstance(type as any, fields) as any;
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         loadCollections(type, mapping, instance, Object.keys(fields));
@@ -274,6 +275,20 @@ function asSet(value: any): any {
 function wholeNumbersAsDeclared(type: Function, mapping: FieldMapping, fields: Record<string, any>): void {
     for (const field of Object.keys(fields)) {
         fields[field] = wholeNumbers(fields[field], declaredBigInt(type, mapping, field));
+    }
+}
+
+/**
+ * Each field declared a `Date` as one, on every store (#807): a SQL store, and FalkorDB, give one as its ISO 8601 text,
+ * where Neo4j's and Memgraph's drivers give a `Date`, which is left as it is ({@link asDate}). A field of a renamed
+ * property is the field's own name here, as the properties are by then. A field TypeScript records no type for, one
+ * neither decorated nor initialized, or one declared with a union, such as `Date | null`, is left as the store gives it.
+ */
+function datesAsDeclared(type: Function, mapping: FieldMapping, fields: Record<string, any>): void {
+    for (const field of Object.keys(fields)) {
+        if (fields[field] != null && declaredDate(type, mapping, field)) {
+            fields[field] = asDate(fields[field]);
+        }
     }
 }
 

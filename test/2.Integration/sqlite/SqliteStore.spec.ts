@@ -391,7 +391,8 @@ describe('a SQLite store', () => {
                 v: '2026-11-02T10:30:00.123Z',
                 s: '10000020261102103000123000000064800'
             });
-            // Read back as its text, as a save of a moment was before layout 2.
+            // Read back as its text, as a save of a moment was before layout 2: TypeScript records no type of the field,
+            // so it isn't known to be a Date (#807).
             expect((await gom.load(Ticket, 't1'))!.openedAt).toEqual('2026-11-02T10:30:00.123Z');
         });
 

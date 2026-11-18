@@ -21,7 +21,9 @@ a later layout is refused too. See [Oracle](07-supported-engines.md#oracle).
 On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.relate` writes a value:
 
 - A `Date` is held as a tagged map of its ISO 8601 text and the key it orders by (`{"$t": "datetime", "v": "…", "s":
-  "…"}`), where 5.0 held its text. It reads back as its text, as before.
+  "…"}`), where 5.0 held its text. A field declared a `Date` loads it as a `Date`, where 5.0 gave its text (see
+  [A property declared a `Date` loads as a `Date`](#a-property-declared-a-date-loads-as-a-date)); any other field
+  loads its text, as before.
   On Oracle, Postgres and SQLite the query DSL compares a `Date` by its tag, in a condition, a `seek`, an order, a
   grouped read and a `patch`'s `where`, as Neo4j compares it: its SQL there is the shared compiler's
   ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), where it compared the
@@ -103,6 +105,18 @@ DELETE FROM drivine_schema
 WHERE REGEXP_LIKE(UPPER(object_name), '^DRIVINE_(IX|LX|UQ)_')
    OR REGEXP_LIKE(UPPER(JSON_VALUE(details, '$.labelled')), '^DRIVINE_(IX|LX|UQ)_');
 ```
+
+### A property declared a `Date` loads as a `Date`
+
+On Oracle, Postgres, SQLite and FalkorDB, a field declared a `Date` loads as a `Date`, as it does on Neo4j and Memgraph,
+where 5.0 gave the date's ISO 8601 text, so `node.at.getTime()` threw there
+([#807](https://github.com/liberation-data/drivine/issues/807)). This holds in a fragment, a view and each relationship
+and nested view of it, a relationship fragment, a path's end and a `Date` `@NodeId`. Drivine knows a field is declared a
+`Date` where TypeScript records its type, for a decorated field, whatever the decorator, or where the class initializes
+it with a `Date`; a field neither decorated nor initialized, or declared `Date | null`, still loads as the store gives
+it, and so does a list of dates (`Date[]`). Code that read such a field with `new Date(node.at)` keeps working; code
+that compared it with a text, or called a string method on it, now has a `Date`. See
+[Object Manager](05-object-manager.md#1-nodefragment-a-node).
 
 ### An id given as text is read as the id's type
 

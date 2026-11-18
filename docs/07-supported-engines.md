@@ -90,10 +90,12 @@ refused, saying which (see the notes below).
 **A graph an earlier Drivine wrote.** Oracle, Postgres and SQLite hold each value in store layout 2, as the shared
 compiler writes it, and as drivine4j and drivine-python write it: a `Date` a save writes, and a temporal value a Cypher
 statement writes, as a tagged map of its ISO 8601 text and the key it orders by (`{"$t": "datetime", "v": "…", "s":
-"…"}`), read back as its text, and a property or map key whose name begins with `$` under one more `$`. The graph's
-stamp, its `DrivineStore` node, names its layout, and the provider reads it on its first connection, before anything
-is made. A graph an earlier Drivine wrote in layout 1 that holds no node but Drivine's own, its stamp and its schema
-marker, has that layout's indexes dropped and is stamped layout 2. One that holds the application's nodes is refused,
+"…"}`), read back as its text, which a field declared a `Date` loads as a `Date` (see
+[Object Manager](05-object-manager.md#1-nodefragment-a-node)), and a property or map key whose name begins with `$`
+under one more `$`. The graph's stamp, its `DrivineStore` node, names its layout, and the provider reads it on its
+first connection, before anything is made. A graph an earlier Drivine wrote in layout 1 that holds no node but
+Drivine's own, its stamp and its schema marker, has that layout's indexes dropped and is stamped layout 2. One that
+holds the application's nodes is refused,
 on that connection and every one after it, with a `StoreLayoutError` that names the graph and says what to do: export
 it with the Drivine version that wrote it, and import it with this one. Nothing is migrated. A graph a later Drivine
 stamped with a later layout is refused too.

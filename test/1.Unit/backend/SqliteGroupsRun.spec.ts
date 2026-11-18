@@ -161,9 +161,11 @@ describe('a grouped read run on SQLite', () => {
             last: new Date('2026-03-01T00:00:00.250Z'),
             none: undefined
         });
-        // A load on SQLite gives the text the save wrote, of the same instant.
-        expect(group.soonest).toEqual(new Date((await gom.load(Item, 'b'))!.dueAt!));
-        expect(group.last).toEqual(new Date((await gom.load(Item, 'a'))!.dueAt!));
+        // A load on SQLite gives the declared Date too, of the same instant (#807).
+        const soonest = (await gom.load(Item, 'b'))!.dueAt;
+        expect(soonest).toBeInstanceOf(Date);
+        expect(group.soonest).toEqual(soonest);
+        expect(group.last).toEqual((await gom.load(Item, 'a'))!.dueAt);
     });
 
     /** The groups of each item's shelf, ordered by it `direction`, as the shelves' ids. */

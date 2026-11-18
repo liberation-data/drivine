@@ -27,7 +27,7 @@ const Marked = (): PropertyDecorator => () => undefined;
 class Dated {
     @NodeId() id: string;
     name?: string;
-    /** Declared a Date where TypeScript records it, so a grouped read's max of it is a Date (#785). */
+    /** Declared a Date where TypeScript records it, so a load gives it and a grouped read's max of it as a Date (#785, #807). */
     @Marked() at?: Date;
     days?: Date[];
 }
@@ -113,10 +113,27 @@ describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
             { name: 'patched', later: 0, last: first },
             { name: 'two', later: 1, last: second }
         ]);
-        expect(groups[0].last).toEqual(new Date((await gom.load(Dated, 'd1'))!.at!));
+        // A load gives the declared Date too, the same instant, on every store (#807).
+        const loaded = (await gom.load(Dated, 'd1'))!.at;
+        expect(loaded).toBeInstanceOf(Date);
+        expect(groups[0].last).toEqual(loaded);
         expect(
             await gom.groups.load(Dated, (q: any) => ({ where: q.at.gt(first), keys: { name: key(q.name) } }))
         ).toEqual([{ name: 'two' }]);
+    });
+
+    it('updates a node loaded with a Date: an unchanged one is kept, and a changed one written and found by the DSL', async () => {
+        await gom.update(Dated, 'd1', (it) => {
+            it.name = 'renamed';
+        });
+        const renamed = (await gom.load(Dated, 'd1'))!;
+        expect([renamed.name, renamed.at]).toEqual(['renamed', first]);
+        await gom.update(Dated, 'd1', (it) => {
+            it.at = new Date(it.at!.getTime() + 500);
+        });
+        const later = new Date('2026-01-01T00:00:00.500Z');
+        expect((await gom.load(Dated, 'd1'))!.at).toEqual(later);
+        expect(await found((q) => q.at.eq(later))).toEqual(['d1']);
     });
 
     it('leaves a filter of anything else, and a Cypher statement of a date, as they were', async () => {
