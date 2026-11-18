@@ -61,11 +61,17 @@ const READERS: [Function, (text: string) => unknown][] = [
 
 /**
  * ISO text as the `Date` it is; NO_NODE for any other text, and for a day the month hasn't or the hour 24, which
- * JavaScript rolls into the next (`2024-02-30` is 1 March), as drivine4j's strict ISO reading refuses them.
+ * JavaScript rolls into the next (`2024-02-30` is 1 March), and for the year -0, which JavaScript reads as another
+ * (`-000000-01-01` is 1 January 2001), as drivine4j's strict ISO reading refuses them.
  */
 function dateOf(text: string): unknown {
     const parts = ISO_DATE.exec(text);
-    if (!parts || Number(parts[5] ?? 0) > 23 || !isCalendarDay(Number(parts[1]), Number(parts[2]), Number(parts[3]))) {
+    if (
+        !parts ||
+        Number(parts[5] ?? 0) > 23 ||
+        Object.is(Number(parts[1]), -0) ||
+        !isCalendarDay(Number(parts[1]), Number(parts[2]), Number(parts[3]))
+    ) {
         return NO_NODE;
     }
     // JavaScript reads a signed year of six digits only.

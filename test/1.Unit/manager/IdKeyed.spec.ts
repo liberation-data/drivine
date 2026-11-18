@@ -410,7 +410,15 @@ describe.each([
     });
 
     it('runs nothing for an ISO text of no calendar day or hour, which JavaScript would roll into the next', async () => {
-        for (const nothing of ['2024-02-30', '2023-02-29', '2024-04-31T00:00:00Z', '2024-01-01T24:00:00Z']) {
+        // A year of -0 too, which ISO 8601 has no sign for: JavaScript reads '-000000-01-01' as 1 January 2001.
+        for (const nothing of [
+            '2024-02-30',
+            '2023-02-29',
+            '2024-04-31T00:00:00Z',
+            '2024-01-01T24:00:00Z',
+            '-000000-01-01',
+            '-00000-01-01'
+        ]) {
             expect(await gom.load(Dated, nothing)).toBeUndefined();
         }
         await gom.load(Dated, '2024-02-29');
