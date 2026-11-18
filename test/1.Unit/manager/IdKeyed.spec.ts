@@ -56,6 +56,14 @@ describe('storedKey', () => {
         ]);
     });
 
+    it("is a temporal id's tag text, as the module reads a stored target's id back (keyText)", () => {
+        const day = new Date('2024-01-02T03:04:05.000Z');
+        expect([storedKey(day, 'postgres'), storedKey(day, 'sqlite')]).toEqual([
+            '2024-01-02T03:04:05Z',
+            '2024-01-02T03:04:05Z'
+        ]);
+    });
+
     it('is on SQLite the JSON text the module writes, which SQLite reads the property back as', () => {
         expect([1e-7, 1e21, Infinity, 4.5, 7].map((it) => storedKey(it, 'sqlite'))).toEqual([
             '1.0E-7',

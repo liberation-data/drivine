@@ -24,6 +24,7 @@ import { ModelRegistry } from '@/model/ModelRegistry';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 import { writeLayout } from '@/cypher/ValueLayout';
+import { temporalText } from '@/backend/sql/NodeIds';
 
 /**
  * Writes a save as one plan for drivine4j's write function (Postgres's, or SQLite's: see WriteFunction), applied whole or not at all, with or without a transaction.
@@ -241,18 +242,20 @@ export class PostgresSaveBuilder {
 }
 
 /**
- * An id as the store reads its property back as text (`->>` on Postgres, and on SQLite the JSON text as it was written):
- * text as it is, and anything else as the JSON text `store`'s layout holds it as (see writeLayout), as a save writes it,
- * so a float id is keyed by the text it is held as (`1.0E-7` on SQLite, where JSON text writes `1e-7`). On Postgres a
- * number is the text `jsonb` gives back for it, `numeric`'s, with no exponent (`0.00000010` for `1.0E-7`): `jsonb` holds
- * a number as a `numeric`, not as the text it was written as.
+ * An id as the text a write plan keys its node by, within the plan (a step's `k`, an unlink's `ids` and `held`), which is
+ * how the store's write reads a stored target's id back (the module's `keyText`): text as it is; a temporal value as its
+ * tag's text `v`, as the module writes it (drivine4j's `NodeIds.temporalText`); and anything else as the JSON text
+ * `store`'s layout holds it as (see writeLayout), as a save writes it, so a float id is keyed by the text it is held as
+ * (`1.0E-7` on SQLite, where JSON text writes `1e-7`). On Postgres a number is the text `jsonb` gives back for it,
+ * `numeric`'s, with no exponent (`0.00000010` for `1.0E-7`): `jsonb` holds a number as a `numeric`, not as the text it was
+ * written as. A node is found by its id's JSON, not by this text: see NodeIds.
  */
 export function storedKey(id: unknown, store: 'postgres' | 'sqlite'): string {
     if (typeof id === 'string') {
         return id;
     }
     const text = writeLayout(id, store);
-    return store === 'postgres' ? numericText(text) : text;
+    return temporalText(text) ?? (store === 'postgres' ? numericText(text) : text);
 }
 
 /**
