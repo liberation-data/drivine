@@ -145,3 +145,48 @@ export function readBackKey(id: unknown, model?: FragmentModel): unknown {
     }
     return typeof it === 'bigint' && Number.isSafeInteger(Number(it)) ? Number(it) : it;
 }
+
+/**
+ * `id` as itself, by value: a `Date` by its time, and any other value by its type and value, so that two ids that
+ * {@link readBackKey} reads alike (a `Date` and its text, where the id's field takes both) stay apart, as a store that
+ * hands each id back as it was given (Postgres, SQLite, Neo4j, Memgraph) holds them apart.
+ */
+export function exactKey(id: unknown): unknown {
+    if (id instanceof Date) {
+        return `date:${id.getTime()}`;
+    }
+    return id !== null && (typeof id === 'object' || typeof id === 'function') ? id : `${typeof id}:${String(id)}`;
+}
+
+/**
+ * What a statement hands back for each node, by its id, found by the id an object holds: by the id exactly first
+ * ({@link exactKey}), and by {@link readBackKey} only where that misses, as Oracle reads the id from the node and FalkorDB
+ * gives a date as its text (drivine-python's `_keyed`).
+ */
+export class HandedBack<V> {
+    private readonly exact = new Map<unknown, V>();
+    private readonly read = new Map<unknown, V>();
+
+    constructor(
+        private readonly model?: FragmentModel,
+        entries: Iterable<[unknown, V]> = []
+    ) {
+        for (const [id, value] of entries) {
+            this.set(id, value);
+        }
+    }
+
+    set(id: unknown, value: V): void {
+        this.exact.set(exactKey(id), value);
+        this.read.set(readBackKey(id, this.model), value);
+    }
+
+    has(id: unknown): boolean {
+        return this.exact.has(exactKey(id)) || this.read.has(readBackKey(id, this.model));
+    }
+
+    get(id: unknown): V | undefined {
+        const key = exactKey(id);
+        return this.exact.has(key) ? this.exact.get(key) : this.read.get(readBackKey(id, this.model));
+    }
+}

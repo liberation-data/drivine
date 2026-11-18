@@ -801,3 +801,56 @@ describe('a Date id matched by its time', () => {
         expect([held.before.map((it) => it.stamp), held.after.map((it) => it.stamp)]).toEqual([['a:'], ['c:']]);
     });
 });
+
+/** An id whose field takes a Date and text alike (design:type Object): a Date and its ISO text are two nodes. */
+@NodeFragment({ labels: ['StampedMark'] })
+class StampedMark {
+    @NodeId() mark: string | Date;
+    @NodeStamp() stamp?: string;
+    note?: string;
+}
+
+describe('a Date id and its text, where the id field takes both', () => {
+    const on = (): Date => new Date('2024-01-03T00:00:00.000Z');
+    const marks = (): StampedMark[] => [
+        Object.assign(new StampedMark(), { mark: on(), note: 'x' }),
+        Object.assign(new StampedMark(), { mark: on().toISOString(), note: 'x' })
+    ];
+
+    it('are two nodes of a save, each handed its own stamp, where Postgres hands each id back as it was given', () => {
+        const handed = new Map([
+            ['0', { group: 0, id: on() }],
+            ['1', { group: 0, id: on().toISOString() }]
+        ]);
+        const [held] = FoundStamp.grouped(['0/=a:', '1/=b:'], 1, handed);
+        expect(held.after.map((it) => it.stamp)).toEqual(['a:', 'b:']);
+        const objects = marks();
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new PostgresBackend(new PostgresGraph()),
+            new ModelRegistry()
+        );
+        const model = new ModelRegistry().fragment(StampedMark);
+        (gom as any).handBackFragments([{ model, objects }], { groups: [held] });
+        expect(objects.map((it) => it.stamp)).toEqual(['a:', 'b:']);
+        const related = marks();
+        (gom as any).handBackRelated({ related }, { stampedModels: [model] }, { related: [held] });
+        expect(related.map((it) => it.stamp)).toEqual(['a:', 'b:']);
+    });
+
+    it('are two nodes of a patchAll, each matched to its own result', async () => {
+        const pm = {
+            database: 'id-keyed',
+            query: async () =>
+                Promise.resolve([
+                    { id: on().toISOString(), found: false, changed: false },
+                    { id: on(), found: true, changed: true }
+                ])
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new PostgresBackend(new PostgresGraph()), new ModelRegistry());
+        expect(await gom.patchAll(marks(), { only: ['note'] })).toEqual([
+            { found: true, applied: true, changed: true },
+            { found: false, applied: false, changed: false }
+        ]);
+    });
+});

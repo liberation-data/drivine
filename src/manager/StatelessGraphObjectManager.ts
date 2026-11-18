@@ -50,7 +50,7 @@ import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
 import { columnValue } from '@/backend/postgres/PostgresStatement';
-import { lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
+import { exactKey, HandedBack, lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
 import { rootOf } from '@/backend/sql/SqlSaves';
 import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
@@ -665,14 +665,14 @@ export class StatelessGraphObjectManager {
             );
             return { id, ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR)) };
         });
-        // Each id as a store reads it back (see readBackKey): a Date is one id by its time.
-        const ids = rows.map((it) => readBackKey(it.id, root));
-        if (new Set(ids).size !== ids.length) {
+        // Each id by its value (see exactKey): a Date is one id by its time.
+        const ids = rows.map((it) => it.id);
+        if (new Set(ids.map(exactKey)).size !== ids.length) {
             throw new DrivineError('patchAll takes each id once.');
         }
         // In order of id, so that two calls over the same nodes take their locks in the same order.
         const sorted = [...rows].sort((a, b) => inOrder(String(a.id), String(b.id)));
-        const results = new Map<any, PatchResult>();
+        const results = new HandedBack<PatchResult>(root);
         // Each statement bound before the first runs: one a SQL store refuses (a NaN) is refused with none written.
         const statements: QuerySpecification<PatchResult & { id: any }>[] = [];
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
@@ -680,9 +680,7 @@ export class StatelessGraphObjectManager {
         }
         for (const statement of statements) {
             const found = await this.whenUncontended(async () => this.persistenceManager.query(statement));
-            found.forEach((it) =>
-                results.set(readBackKey(it.id, root), { found: it.found, applied: it.found, changed: it.changed })
-            );
+            found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
         }
         return ids.map((id) => results.get(id)!);
     }
@@ -1082,11 +1080,18 @@ export class StatelessGraphObjectManager {
             if (!group.model.stampField) {
                 return;
             }
-            // Each id as the batch reads it back (see readBackKey), so a Date or bigint id matches its node's.
-            const found = new Map(result.groups[i].before.map((it) => [readBackKey(it.id, group.model), it.stamp]));
-            const now = new Map(result.groups[i].after.map((it) => [readBackKey(it.id, group.model), it.stamp]));
+            // Each id as it was given, or as the batch reads it back (see HandedBack), so a Date or bigint id matches
+            // its node's.
+            const found = new HandedBack(
+                group.model,
+                result.groups[i].before.map((it) => [it.id, it.stamp])
+            );
+            const now = new HandedBack(
+                group.model,
+                result.groups[i].after.map((it) => [it.id, it.stamp])
+            );
             for (const object of group.objects) {
-                const id = readBackKey(object[group.model.nodeIdField!], group.model);
+                const id = object[group.model.nodeIdField!];
                 object[group.model.stampField] = Stamps.handedBack(
                     object[group.model.stampField],
                     found.get(id) ?? '',
@@ -1323,11 +1328,18 @@ export class StatelessGraphObjectManager {
     private handBackRelated(object: any, statement: SaveStatement, result: SaveResult): void {
         statement.stampedModels.forEach((model, index) => {
             const { before, after }: SaveResult['related'][number] = result.related[index];
-            // Each id as the save reads it back (see readBackKey), so a Date or bigint id matches its node's.
-            const found = new Map(before.map((it) => [readBackKey(it.id, model), it.stamp]));
-            const now = new Map(after.map((it) => [readBackKey(it.id, model), it.stamp]));
+            // Each id as it was given, or as the save reads it back (see HandedBack), so a Date or bigint id matches
+            // its node's.
+            const found = new HandedBack(
+                model,
+                before.map((it) => [it.id, it.stamp])
+            );
+            const now = new HandedBack(
+                model,
+                after.map((it) => [it.id, it.stamp])
+            );
             for (const node of this.nodesOf(object, model)) {
-                const id = readBackKey(node[model.nodeIdField!], model);
+                const id = node[model.nodeIdField!];
                 if (now.has(id)) {
                     node[model.stampField!] = Stamps.handedBack(
                         node[model.stampField!],

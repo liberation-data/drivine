@@ -1,4 +1,4 @@
-import { readBackKey } from '@/backend/sql/NodeIds';
+import { exactKey } from '@/backend/sql/NodeIds';
 
 /**
  * One node of what drivine4j's write function hands back, `index/found=stamp`: the index a step gave it, what it carried
@@ -30,8 +30,8 @@ export class FoundStamp {
         for (const entry of entries.map((it) => FoundStamp.of(it))) {
             const node = handed.get(entry.index)!;
             const { before, after }: { before: Stamped; after: Stamped } = related[node.group];
-            // By value (see readBackKey): a node held twice may be two objects, each holding a Date id of its own.
-            const key = readBackKey(node.id);
+            // By value (see exactKey): a node held twice may be two objects, each holding a Date id of its own.
+            const key = exactKey(node.id);
             if (!before.has(key)) {
                 before.set(key, { id: node.id, stamp: entry.found });
             }
