@@ -102,8 +102,9 @@ function single(compiled: SqlFragment): string {
 
 /**
  * `cypher` with each of `parameters`, `$p`, named `$<prefix>p`. A name is matched whole, so `$id` is not read in
- * `$idList`, and not within a quoted text or a name in backticks. A parameter whose own name is in backticks
- * (`` $`p` ``) isn't renamed: write the Cypher by a function ({@link FragmentCypher}) for one.
+ * `$idList`, and not within a quoted text or a name in backticks; a name may be a number, `$0`, as Cypher's may. A
+ * parameter whose own name is in backticks (`` $`p` ``) isn't renamed: write the Cypher by a function
+ * ({@link FragmentCypher}) for one. A parameter missed is never bound by its own name, so the module refuses it.
  */
 function renamed(cypher: string, parameters: string[], prefix: string): string {
     if (parameters.length === 0) {
@@ -111,7 +112,7 @@ function renamed(cypher: string, parameters: string[], prefix: string): string {
     }
     const names = new Set(parameters);
     return cypher.replace(
-        /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`]|``)*`|\$([\p{L}_][\p{L}\p{N}_]*)/gu,
+        /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`]|``)*`|\$([\p{L}\p{N}_]+)/gu,
         (whole, name: string | undefined) => (name !== undefined && names.has(name) ? `$${prefix}${name}` : whole)
     );
 }
