@@ -81,7 +81,7 @@ export class PostgresSearch {
                 `ORDER BY s.score DESC, ${ROW_ALIAS}.nid`,
                 ...(search.limit !== undefined ? [`FETCH FIRST ${search.limit} ROWS ONLY`] : [])
             ].join('\n'),
-            bindings
+            { ...bindings, ...views.fragments.parameters }
         );
     }
 }

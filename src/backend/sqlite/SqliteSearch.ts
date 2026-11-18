@@ -67,7 +67,7 @@ export class SqliteSearch {
                 `ORDER BY s.score DESC, ${ROW_ALIAS}.nid`,
                 ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
             ].join('\n'),
-            bindings
+            { ...bindings, ...views.fragments.parameters }
         );
     }
 }

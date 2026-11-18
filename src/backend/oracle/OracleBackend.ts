@@ -115,7 +115,8 @@ export class OracleBackend implements GraphBackend {
                 `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
                 this.from(model.root, this.viewWhere(model, where, depth), tested),
                 ...this.page(page)
-            ].join('\n')
+            ].join('\n'),
+            views.fragments
         );
     }
 
@@ -126,7 +127,8 @@ export class OracleBackend implements GraphBackend {
                 [
                     `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
                     this.foundById(model.root, this.viewWhere(model, this.idPredicate(model.root), depth))
-                ].join('\n')
+                ].join('\n'),
+                views.fragments
             )
         );
     }
@@ -488,10 +490,12 @@ END;`);
     /**
      * The statement `text`, with the hints the fragments in it ask for written after its first `SELECT` or `DELETE`, and
      * the stored functions they call said (see OracleFragments). A block hints each of its statements itself first.
+     * `fragments`, a view's (see SqlViews), are written into it beside those noted in it: their hints, their calls, and
+     * what they bind, bound.
      */
-    private statement(text: string, bindings: Record<string, any> = {}): GraphStatement {
-        const made = called(hinted(text), this.graph.name);
-        return new GraphStatement(made.text, bindings, made.calls);
+    private statement(text: string, fragments?: SqlFragments): GraphStatement {
+        const made = called(hinted(text, fragments?.hints), this.graph.name, fragments);
+        return new GraphStatement(made.text, fragments?.parameters ?? {}, made.calls);
     }
 
     /**

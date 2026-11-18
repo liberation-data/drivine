@@ -1,14 +1,14 @@
 import { Direction } from '@/annotation/Metadata';
 import {
     hasLabels,
-    holding,
     jsonKey,
     nodeDocument,
     OracleGraph,
     relatedSubquery,
+    sameKey,
     sqlText
 } from '@/backend/oracle/OracleGraph';
-import { byId, NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
+import { byId, NodesOf, SqlViews } from '@/backend/sql/SqlViews';
 
 /**
  * Writes a view on Oracle (see SqlViews): each relationship's nodes aggregated with JSON_ARRAYAGG, and a relationship
@@ -18,7 +18,7 @@ export class OracleViews extends SqlViews {
     protected readonly emptyObject = `JSON('{}')`;
 
     constructor(graph: OracleGraph, depth: Record<string, number> = {}) {
-        super(graph, depth);
+        super(graph, depth, 'oracle');
     }
 
     object(entries: [string, string][]): string {
@@ -94,14 +94,22 @@ export class OracleViews extends SqlViews {
         return `SELECT /*+ ${hint} */ `;
     }
 
-    /** `JSON_VALUE` reads a stored `""` as null, so whether the node holds one is read on its own. */
-    protected orderReads(node: string, property: string): OrderReads {
-        const key = `$${jsonKey(property)}`;
-        const read = holding(node, property);
-        return {
-            num: `JSON_VALUE(${read}, '${key}.numberOnly()' RETURNING NUMBER)`,
-            txt: `JSON_VALUE(${read}, '${key}')`,
-            emp: `CASE WHEN JSON_EXISTS(${read}, '${key}?(@ == "")') THEN 1 END`
-        };
+    /**
+     * The first hop of each node reached in the order `terms`, over the properties of the hop's node each way carries:
+     * by a window over the ways, `FIRST_VALUE` and not `KEEP (DENSE_RANK FIRST …)`, which ends Oracle's (23.26) server
+     * process ordered by a value of JSON (drivine4j's `OracleSelect.pathOrder`).
+     */
+    protected firstOfWays(ways: string, terms: (row: string) => string): string {
+        const w = `${this.nextAlias('w')}_`;
+        const r = this.nextAlias('r');
+        return (
+            `SELECT ${r}.nid, MIN(${r}.hop) AS hop FROM (SELECT ${w}.nid, FIRST_VALUE(${w}.hop) OVER ` +
+            `(PARTITION BY ${w}.nid ORDER BY ${terms(w)}) AS hop FROM (${ways}) ${w}) ${r} GROUP BY ${r}.nid`
+        );
+    }
+
+    /** By the keys Oracle keeps, as the module's compiler joins a node back ({@link sameKey}). */
+    protected sameNode(a: string, b: string): string {
+        return sameKey(a, b);
     }
 }

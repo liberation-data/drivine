@@ -1,8 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
-import { hasLabels, jsonValue, nodeDocument, numberOf, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
+import { hasLabels, nodeDocument, numberOf, PostgresGraph } from '@/backend/postgres/PostgresGraph';
 import { sqlText } from '@/backend/sql/SqlGraph';
-import { NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
-import { Stamps } from '@/model/Stamps';
+import { NodesOf, SqlViews } from '@/backend/sql/SqlViews';
 
 /**
  * Writes a view on Postgres (see SqlViews): each relationship's nodes aggregated with `jsonb_agg`, and a relationship
@@ -12,7 +11,7 @@ export class PostgresViews extends SqlViews {
     protected readonly emptyObject = `'{}'::jsonb`;
 
     constructor(graph: PostgresGraph, depth: Record<string, number> = {}) {
-        super(graph, depth);
+        super(graph, depth, 'postgres');
     }
 
     object(entries: [string, string][]): string {
@@ -70,16 +69,16 @@ export class PostgresViews extends SqlViews {
         return 'SELECT ';
     }
 
-    /** `->>` reads a stored `""` as `""`, so it is a text and needs no reading of its own. */
-    protected orderReads(node: string, property: string): OrderReads {
-        const text =
-            property === Stamps.PROPERTY
-                ? textOf(node, property)
-                : `CASE WHEN jsonb_typeof(${jsonValue(node, property)}) = 'string' THEN ${textOf(node, property)} END`;
-        return {
-            num: property === Stamps.PROPERTY ? 'CAST(NULL AS numeric)' : numberOf(node, property),
-            txt: text,
-            emp: 'CAST(NULL AS integer)'
-        };
+    /**
+     * The first hop of each node reached in the order `terms`, over the node of the hop joined back by its id: the
+     * first of the ids gathered in that order (drivine4j's `PostgresSelect.pathOrder`).
+     */
+    protected firstOfWays(ways: string, terms: (row: string) => string): string {
+        const w = this.nextAlias('w');
+        const s = `${this.nextAlias('s')}_`;
+        return (
+            `SELECT ${w}.nid, (array_agg(${s}.nid ORDER BY ${terms(s)}))[1] AS hop ` +
+            `FROM (${ways}) ${w} JOIN ${this.graph.nodes} ${s} ON ${s}.nid = ${w}.hop GROUP BY ${w}.nid`
+        );
     }
 }
