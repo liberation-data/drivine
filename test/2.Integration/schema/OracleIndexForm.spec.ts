@@ -112,18 +112,24 @@ describeOnOracle("An earlier version's Oracle index over a property, made again 
         const term = fragments.condition({ n: { node: 'n_', labels: [LABEL] } }, `n.${property} = $v`, { v: value });
         const hints = [...fragments.hints].join(' ');
         const id = `d696_${property}`;
-        await pm.execute(
-            new QuerySpecification(
-                `EXPLAIN PLAN SET STATEMENT_ID = '${id}' FOR SELECT /*+ ${hints} */ n_.nid FROM ${GRAPH}_node n_ WHERE ${term}`
-            ).bind(fragments.parameters)
-        );
-        const rows = await pm.query<string>(
-            new QuerySpecification(
-                `SELECT object_name AS "name" FROM plan_table WHERE statement_id = '${id}' AND object_name IS NOT NULL`
-            )
-        );
-        await pm.execute(new QuerySpecification(`DELETE FROM plan_table WHERE statement_id = '${id}'`));
-        return rows;
+        // On one session, as plan_table is the session's own (see oraclePlan).
+        const connection = await DatabaseRegistry.getInstance().connectionProvider(`ORACLE_${GRAPH}`)!.connect();
+        try {
+            await connection.query(
+                new QuerySpecification(
+                    `EXPLAIN PLAN SET STATEMENT_ID = '${id}' FOR SELECT /*+ ${hints} */ n_.nid FROM ${GRAPH}_node n_ WHERE ${term}`
+                ).bind(fragments.parameters)
+            );
+            const rows = await connection.query(
+                new QuerySpecification(
+                    `SELECT object_name AS "name" FROM plan_table WHERE statement_id = '${id}' AND object_name IS NOT NULL`
+                )
+            );
+            await connection.query(new QuerySpecification(`DELETE FROM plan_table WHERE statement_id = '${id}'`));
+            return rows.map((it: any) => it.name ?? it.NAME ?? it);
+        } finally {
+            await connection.release();
+        }
     };
 
     beforeAll(async () => {
