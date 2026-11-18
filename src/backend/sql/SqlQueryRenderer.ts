@@ -26,7 +26,7 @@ import { TargetModel } from '@/model/RelationshipModel';
  * (SqliteQueryRenderer).
  */
 export const TEMPORAL_FILTER_REFUSED =
-    "A query's filter, seek or order is given a date, which the query DSL doesn't compare on a SQL store yet (drivine-cypher-spec#235): compare it in a Cypher statement.";
+    "A query's filter, seek or order is given a date, which the query DSL doesn't compare on Oracle or Postgres yet (drivine-cypher-spec#235): compare it in a Cypher statement.";
 
 /** The row a path's conditions read: the node's, and the relationship's that a relationship fragment holds. */
 export interface Rows {

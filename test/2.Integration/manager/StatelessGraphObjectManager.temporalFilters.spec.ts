@@ -28,7 +28,7 @@ class Dated {
     days?: Date[];
 }
 
-const REFUSED = /the query DSL doesn't compare on a SQL store yet \(drivine-cypher-spec#235\)/;
+const REFUSED = /the query DSL doesn't compare on Oracle or Postgres yet \(drivine-cypher-spec#235\)/;
 
 /**
  * A query DSL filter, seek or order given a date (#771). On SQLite it is the shared module's fragment
