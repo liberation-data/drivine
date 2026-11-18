@@ -12,8 +12,8 @@
  * CI splits the run over jobs, each with containers of its own (.github/workflows/ci.yml), and leaves the suites
  * NIGHTLY names out of a pull request's run. DRIVINE_TEST_PART names a job's part:
  * - `parallel i/n`: shard i of n of stage 1 (Jest's `--shard`), without the Cypher spec and the nightly suites;
- * - `cypher spec`: the Cypher spec, on each store, or `cypher spec on oracle` and `cypher spec on the rest` (CI's
- *   longest suite, split over two jobs with Oracle);
+ * - `cypher spec`: the Cypher spec, and its fragments' runner, on each store, or `cypher spec on oracle` and `cypher spec
+ *   on the rest` (CI's longest suite, split over two jobs with Oracle);
  * - `serial`: stage 2 without the nightly suites, then stage 3;
  * - `nightly`: the nightly suites, in their stages, but the write loops' timing, which is `write loop`;
  * - `falkordb`: the tests that run on FalkorDB, in the whole run's stages (FALKORDB_TESTS), for nightly.yml's canary
@@ -43,6 +43,8 @@ const SERIAL = [
 const SAMPLE = `^${process.cwd()}/sample/`;
 
 const CYPHER_SPEC = 'test/2.Integration/cypher/CypherSpec';
+/** The spec's fragments.yaml, run beside the Cypher spec, on the stores it runs on. */
+const FRAGMENTS_SPEC = 'test/2.Integration/cypher/FragmentsSpec';
 const WRITE_LOOP = 'test/2.Integration/cypher/CypherWriteLoopTime';
 
 /**
@@ -88,7 +90,7 @@ const schema = (paths: string[]): Stage => ({ name: 'schema', args: ['--runInBan
 const sample: Stage = { name: 'sample', args: ['--runInBand', SAMPLE] };
 const cypherSpec = (stores?: string): Stage => ({
     name: stores ? `cypher spec on ${stores}` : 'cypher spec',
-    args: [CYPHER_SPEC],
+    args: [CYPHER_SPEC, FRAGMENTS_SPEC],
     env: stores ? { CYPHER_SPEC_STORES: stores } : {}
 });
 
@@ -99,7 +101,7 @@ function stages(part: string | undefined): Stage[] {
     }
     const shard = /^parallel (\d+\/\d+)$/.exec(part);
     if (shard) {
-        return [parallel([CYPHER_SPEC, ...NIGHTLY], [`--shard=${shard[1]}`])];
+        return [parallel([CYPHER_SPEC, FRAGMENTS_SPEC, ...NIGHTLY], [`--shard=${shard[1]}`])];
     }
     const parts: Record<string, Stage[]> = {
         'cypher spec': [cypherSpec()],
