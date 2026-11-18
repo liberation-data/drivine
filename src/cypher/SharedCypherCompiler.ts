@@ -199,6 +199,82 @@ export function fullTextIndexLookup(
         : undefined;
 }
 
+/**
+ * A row of the library's own SQL that a fragment's Cypher names as a variable: a node, `{node: "<alias>", labels}`, where
+ * `labels` are those the statement knows it has, so an equality of its property is answered by that label's index; or a
+ * relationship, `{relationship: "<alias>"}`. The alias ends with `_`, as none the compiler names its own rows does: the
+ * module refuses another.
+ */
+export type FragmentVariable = { node: string; labels?: string[] } | { relationship: string };
+
+/**
+ * The part of a statement a fragment is, as the module's `fragment` request gives it: a `condition` for a `WHERE` to keep
+ * rows by, a `value` for the library's SQL to group or bind by, or an `order`, descending where `descending` is true. Each
+ * is a Cypher expression over the {@link FragmentVariable}s, of the forms the module's README lists ("Fragments").
+ */
+export type FragmentPart = { condition: string } | { value: string } | { order: string; descending?: boolean };
+
+/**
+ * A fragment as the module compiles it: its `terms`, one for a condition or a value and an order's in their order; the
+ * `parameters` they bind, `$p` as `_cy_p` and on Oracle `_cyk_p` (the key a property is compared with it by); whether a
+ * value they give may be NaN or an infinity (`nonFinite`); the optimizer `hints` the statement's outermost `SELECT` is to
+ * carry (Oracle's); and on Oracle which of the graph's stored functions the terms call.
+ */
+export interface SqlFragment {
+    terms: string[];
+    parameters: Record<string, any>;
+    nonFinite: boolean;
+    hints: string[];
+    storedFunctions: { nullsEqual: boolean; era: boolean };
+}
+
+/**
+ * The fragment `part`, a Cypher expression over `variables`, rows of the library's own SQL, with `parameters`, as the
+ * shared module compiles it for `store`'s layout of `graph` (its README, "Fragments"; liberation-data/drivine-cypher-spec#161),
+ * so a filter or an order the library writes itself compares, sorts and binds a value as a compiled statement does. The
+ * parameters are written as a statement's are ({@link parametersJson}). Throws the module's refusal of a form it doesn't
+ * take as a DrivineError. One statement's fragments are named apart by {@link SqlFragments}.
+ */
+export function fragment(
+    store: SharedStore,
+    graph: SharedGraph,
+    part: FragmentPart,
+    variables: Record<string, FragmentVariable>,
+    parameters: Record<string, any> = {}
+): SqlFragment {
+    const request = `{"store":${JSON.stringify(store)},"graph":${JSON.stringify(
+        graphJson(store, graph)
+    )},"fragment":${JSON.stringify({ ...part, variables })},"parameters":${parametersJson(parameters)}}`;
+    const answer = answerOf(compileFunction()(request)) as unknown as
+        | FragmentAnswer
+        | { refusal: string }
+        | { error: string };
+    if ('refusal' in answer) {
+        throw new DrivineError(answer.refusal);
+    }
+    if ('error' in answer) {
+        throw new DrivineError(`The Cypher compiler can't read the fragment's request: ${answer.error}`);
+    }
+    return {
+        terms: answer.terms,
+        parameters: decoded(answer.parameters),
+        nonFinite: answer.nonFinite ?? false,
+        hints: answer.hints ?? [],
+        storedFunctions: {
+            nullsEqual: answer.storedFunctions?.nullsEqual ?? false,
+            era: answer.storedFunctions?.era ?? false
+        }
+    };
+}
+
+interface FragmentAnswer {
+    terms: string[];
+    parameters: Record<string, any>;
+    nonFinite?: boolean;
+    hints?: string[];
+    storedFunctions?: { nullsEqual?: boolean; era?: boolean };
+}
+
 interface SearchAnswer {
     sql?: string | null;
     cypher?: string;
