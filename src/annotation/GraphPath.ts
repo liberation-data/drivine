@@ -18,7 +18,7 @@ export interface Hop {
      * digits is ordered as text, and an empty text is the lowest text. On Neo4j and the SQL backends a date is ordered
      * by its moment. Values of several kinds are ordered by kind as Cypher's ORDER BY does on Neo4j, SQLite and Oracle;
      * on Postgres as jsonb does until liberation-data/drivine-cypher-spec#371's fix, on Memgraph a text, a boolean, then
-     * a number, and on FalkorDB by its own ORDER BY. See docs/05.
+     * any other value, and on FalkorDB by its own ORDER BY. See docs/05.
      */
     orderBy?: string;
     /** Whether `orderBy` reads lowest first. Defaults to true. */

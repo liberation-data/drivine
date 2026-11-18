@@ -158,3 +158,43 @@ describe('A view nested with an ordered path', () => {
         );
     });
 });
+
+@GraphView()
+class Partner {
+    @Root() person: Person;
+    @GraphRelationship({ type: 'MARRIED_TO', target: () => Filmography }) spouse?: Filmography;
+}
+
+describe('A single relationship to a view with an ordered path', () => {
+    const model = new ModelRegistry().view(Partner);
+
+    it("should read its first target in a CALL on Memgraph, the key's kind ranked, and page the roots after", () => {
+        expect(
+            new CypherBackend(MEMGRAPH_GRAMMAR).loadAllViews(
+                model,
+                undefined,
+                {},
+                { orderBy: 'n.uuid', skip: 1, limit: 2 }
+            ).text
+        ).toEqual(
+            'MATCH (n:Person)\n' +
+                'CALL { WITH n OPTIONAL MATCH (n)-[r1:MARRIED_TO]->(t1:Person) ' +
+                'WHERE EXISTS { MATCH (t1)-[:ACTED_IN]->(:Movie)-[:DIRECTED_BY]->(:Director) } ' +
+                'CALL { WITH t1 OPTIONAL MATCH (t1)-[:ACTED_IN]->(h2:Movie)-[:DIRECTED_BY]->(t2:Director) ' +
+                'WITH t1, t2, h2 ORDER BY h2.year IS NULL, ' +
+                'CASE WHEN toString(h2.year) = h2.year THEN 0 WHEN h2.year IN [true, false] THEN 1 ELSE 2 END ASC, ' +
+                'h2.year ASC WITH collect(DISTINCT t2) AS s2 ' +
+                'RETURN [x2 IN s2 | {props: properties(x2), labels: labels(x2)}] AS v2 } ' +
+                'CALL { WITH t1 OPTIONAL MATCH (t1)<-[:DIRECTED]-(t3:Movie) ' +
+                'WITH t1, t3 ORDER BY t3.`release year` IS NULL, ' +
+                'CASE WHEN toString(t3.`release year`) = t3.`release year` THEN 0 ' +
+                'WHEN t3.`release year` IN [true, false] THEN 1 ELSE 2 END DESC, ' +
+                't3.`release year` DESC WITH collect(DISTINCT t3) AS s3 ' +
+                'RETURN head([x3 IN s3 | {props: properties(x3), labels: labels(x3)}]) AS v3 } ' +
+                'RETURN head(collect(CASE WHEN t1 IS NOT NULL THEN {root: {props: properties(t1), labels: labels(t1)}, ' +
+                'rels: {directors: v2, latest: v3}} END)) AS v1 }\n' +
+                'RETURN {root: {props: properties(n), labels: labels(n)}, rels: {spouse: v1}} AS result\n' +
+                'ORDER BY n.uuid\nSKIP 1\nLIMIT 2'
+        );
+    });
+});
