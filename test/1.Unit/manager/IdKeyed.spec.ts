@@ -243,6 +243,9 @@ describe('an id on Oracle', () => {
         await gom.patch(Gauge, null as any, { set: { name: 'x' } }).catch(() => undefined);
         await gom.patch(Gauge, 1e-7, { set: { name: 'x' } }).catch(() => undefined);
         expect(bound.map((it) => it.id)).toEqual(['{"$numberDouble":"1.0E-7"}']);
+        // The block itself, reached with a null id, binds it as it is, never as the text 'null'.
+        const patch = new OracleBackend(new OracleGraph()).patchOne(new ModelRegistry().fragment(Gauge));
+        expect((patch.spec({ id: null, set: {} }).parameters as any).id).toBeNull();
     });
 });
 
