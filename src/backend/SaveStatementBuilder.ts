@@ -11,7 +11,8 @@ import { RemovedTargets, SaveOptions } from '@/manager/SaveOptions';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { Stamps } from '@/model/Stamps';
 import { LowerCopies } from '@/model/LowerCopies';
-import { FORBIDDEN_KEYS, knownProperties, RESERVED_PREFIX } from '@/mapper/GraphObjectMapper';
+import { FORBIDDEN_KEYS, heldTagsOf, knownProperties, RESERVED_PREFIX } from '@/mapper/GraphObjectMapper';
+import { HeldAsLoaded } from '@/cypher/ValueLayout';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 import { plainToInstance } from 'class-transformer';
 import { splitVectors, vectorClauses } from '@/backend/VectorWrites';
@@ -728,11 +729,18 @@ export function idOf(model: FragmentModel, object: any): any {
 }
 
 /**
- * The properties an object writes: its own fields that are not null, under their graph names, leaving out transient
- * ones and those named in `excluded`.
+ * The properties a save writes of an object (of a view, its root), as the options' null policy, `only` and `except` say.
+ *
+ * @param asLoaded whether a property unchanged since a SQL store's load, which held a temporal tag in it, is written as
+ * the store held it (see propsOf): a SQL store's save says so. The object's own load is looked to, or, for a changed
+ * copy, the load of the root the options hold as loaded (`from`, or `update`'s).
  */
-/** The properties a save writes of an object (of a view, its root), as the options' null policy, `only` and `except` say. */
-export function objectProps(model: FragmentModel, object: any, options: SaveOptions<any>): Record<string, any> {
+export function objectProps(
+    model: FragmentModel,
+    object: any,
+    options: SaveOptions<any>,
+    asLoaded: boolean = false
+): Record<string, any> {
     const { only, except, nullPolicy }: SaveOptions<any> = options;
     if (only && except) {
         throw new DrivineError('Give only or except, not both.');
@@ -741,12 +749,25 @@ export function objectProps(model: FragmentModel, object: any, options: SaveOpti
     if (reserved.length) {
         throw new DrivineError(`only names ${reserved.join(' and ')}, which a save does not write from the object.`);
     }
-    const props = propsOf(model, object, stampExcluded(model), nullPolicy === NullPolicy.CLEAR);
+    const held = asLoaded
+        ? heldTagsOf(object) ?? (options.loaded != null ? heldTagsOf(options.loaded) : undefined)
+        : undefined;
+    const props = propsOf(model, object, stampExcluded(model), nullPolicy === NullPolicy.CLEAR, held);
     const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
     const byGraphName = new Map([...model.graphProperties].map(([field, name]) => [name, field]));
     return Object.fromEntries(Object.entries(props).filter(([name]) => keep(byGraphName.get(name) ?? name)));
 }
 
+/**
+ * The properties an object writes: its own fields that are not null (or each, given `clearNulls`), under their graph
+ * names, leaving out transient ones and those named in `excluded`.
+ *
+ * @param asLoaded what a SQL store's load read of each field whose property held a temporal tag (see GraphObjectMapper's
+ * heldTagsOf), or `true` for the object's own load: a field whose value is unchanged since then, by deep equality, is
+ * written as the store held it, a {@link HeldAsLoaded}, so a date an undecorated field loaded as its text stays a date,
+ * and a datetime keeps its nanoseconds and its offset (#811). Every property is still written. Only a SQL store's save
+ * gives it: a graph engine's load gives typed values, and its driver would write the marker as a map.
+ */
 export function propsOf(
     model: {
         graphProperties: Map<string, string>;
@@ -757,18 +778,35 @@ export function propsOf(
     },
     object: any,
     excluded: string[],
-    clearNulls: boolean = false
+    clearNulls: boolean = false,
+    asLoaded: boolean | Map<string, { value: any; held: any }> | undefined = false
 ): Record<string, any> {
+    const held = asLoaded === true ? heldTagsOf(object ?? {}) : asLoaded || undefined;
     const props: Record<string, any> = {};
     for (const [field, value] of Object.entries(object ?? {})) {
         if (typeof value === 'function' || skipped(model, field, excluded)) {
             continue;
         }
         if (value != null || clearNulls) {
-            props[model.graphProperties.get(field) ?? field] = storedValue(value, !!model.jsonPacked?.has(field));
+            const packed = !!model.jsonPacked?.has(field);
+            props[model.graphProperties.get(field) ?? field] = asLoadedOr(
+                storedValue(value, packed),
+                value,
+                packed ? undefined : held?.get(field)
+            );
         }
     }
     return props;
+}
+
+/**
+ * `stored`, a field's value as a save writes it, or what the store held for it as `loaded` says, where `value` is the
+ * value the load gave it still (see propsOf).
+ */
+function asLoadedOr(stored: any, value: any, loaded: { value: any; held: any } | undefined): any {
+    return loaded && value != null && ObjectUtils.deepEqual(value, loaded.value)
+        ? new HeldAsLoaded(stored, loaded.held)
+        : stored;
 }
 
 /**

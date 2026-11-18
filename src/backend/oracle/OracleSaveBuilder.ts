@@ -98,7 +98,7 @@ export class OracleSaveBuilder {
         const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
         const clear = this.options.nullPolicy === NullPolicy.CLEAR;
         const held = this.options.heldProperties ?? {};
-        const props: Record<string, any> = { ...objectProps(model, object, this.options) };
+        const props: Record<string, any> = { ...objectProps(model, object, this.options, true) };
         bagEntries(model, object, Object.keys(held), clear, keep).forEach((value, key) => (props[key] = value));
         const write = nodeWrite(
             model,
@@ -166,7 +166,9 @@ export class OracleSaveBuilder {
                 const root = rootOf(into);
                 const concrete = concreteModel(this.registry, root, nodeObject);
                 this.stampedId(root, idOf(root, nodeObject));
-                const props: Record<string, any> = { ...propsOf(concrete, nodeObject, stampExcluded(concrete)) };
+                const props: Record<string, any> = {
+                    ...propsOf(concrete, nodeObject, stampExcluded(concrete), false, true)
+                };
                 bagEntries(concrete, nodeObject).forEach((value, key) => (props[key] = value));
                 const write = nodeWrite(concrete, nodeObject, props, concrete.nodeLabels ? false : undefined, {}, root);
                 const p = this.nodeParams(write);
@@ -178,7 +180,10 @@ export class OracleSaveBuilder {
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
                         ? this.bind(
-                              writeProps(propsOf(rel.related.model, item, [rel.related.model.targetField]), 'oracle')
+                              writeProps(
+                                  propsOf(rel.related.model, item, [rel.related.model.targetField], false, true),
+                                  'oracle'
+                              )
                           )
                         : 'NULL';
                 out.push(
