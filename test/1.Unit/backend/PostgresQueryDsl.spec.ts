@@ -6,6 +6,7 @@ import {
     ModelRegistry,
     NodeFragment,
     NodeId,
+    NodeStamp,
     pathKey,
     PostgresBackend,
     sum,
@@ -18,6 +19,12 @@ class Scored {
     @NodeId() id: string;
     name?: string;
     $score?: number;
+}
+
+@NodeFragment({ labels: ['Stamped'] })
+class Stamped {
+    @NodeId() id: string;
+    @NodeStamp() stamp?: string;
 }
 
 @NodeFragment({ labels: ['Judge'] })
@@ -74,6 +81,17 @@ describe("The query DSL on Postgres, as the module's fragments", () => {
         const query = backend.renderQuery((q: any) => ({ where: q.name.eq('Ada') }), scored);
         expect(query.where).toEqual(`(n_.props -> 'name') = CAST($_cy__q0 AS jsonb)`);
         expect(query.bindings).toEqual({ _cy__q0: '"Ada"' });
+    });
+
+    it("filters and orders by a node's stamp as its row's stamp column, not a property of it", () => {
+        const stamped: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Stamped) };
+        const query = backend.renderQuery(
+            (q: any) => ({ where: q.stamp.eq('a:b'), orderBy: [q.stamp.asc()] }),
+            stamped
+        );
+        expect(query.where).toEqual('to_jsonb(n_.stamp) = CAST($_cy__q0 AS jsonb)');
+        expect(query.orderBy).toContain('to_jsonb(n_.stamp)');
+        expect(`${query.where} ${query.orderBy}`).not.toContain('__drivine.stamp');
     });
 
     it("places an order's nulls by a term of whether it is null before it, its parameters named apart in each", () => {

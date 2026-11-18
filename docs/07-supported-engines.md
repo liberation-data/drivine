@@ -229,10 +229,11 @@ Notes:
   literals, maps, lists and parameters, as APOC's export writes its rows. A list's numbers may be stored at any scale,
   so a row that may hold a list is compared as JSON alone, as before. A statement is compiled for the rows it is given
   each time it runs, so the same statement given a list later finds it.
-- Text is ordered by the database's collation, so a page of mixed-case text may not be in the order Neo4j gives
-  (`a, b, B` rather than `B, a, b`). The range indexes are made in that collation, so an order and a seek are read
-  through them. Compiled Cypher orders text by its code points instead
-  ([Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)).
+- Text is compared and ordered by its code points, as Neo4j orders it (`B, a, b`), in the query DSL's conditions,
+  orders, seeks and grouped reads, as in compiled Cypher ([Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)):
+  their SQL is the shared compiler's
+  ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), where 5.0 ordered
+  text by the database's collation.
 - A save checks the stamp, as on the graph engines. A save turned away by a serialization failure (`40001`) or a
   deadlock (`40P01`) is run again.
 - Index the id of each class you save: a range index or a uniqueness constraint is a partial index over the label's
@@ -369,7 +370,7 @@ Notes:
   JavaScript reads them, where drivine4j reads them as Unicode
   ([#560](https://github.com/liberation-data/drivine/issues/560)).
 - Text compares and sorts by SQLite's `BINARY` collation, the order of its code points, so a page of mixed-case text is
-  in the order Neo4j gives (`B, a, b`), not by a collation as on Postgres.
+  in the order Neo4j gives (`B, a, b`), as on Postgres.
 - A whole number past 2^53 that a statement gives back is refused by Node's driver; one a save leaves alone keeps its
   digits.
 
