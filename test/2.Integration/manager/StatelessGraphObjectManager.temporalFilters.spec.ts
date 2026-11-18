@@ -20,11 +20,15 @@ import { sqlStores } from '../support/SqlStores';
 
 jest.setTimeout(60_000);
 
+/** A decorator of another library, which records the field's type as any decorator does, and tells Drivine nothing. */
+const Marked = (): PropertyDecorator => () => undefined;
+
 @NodeFragment({ labels: ['DatedFilter'] })
 class Dated {
     @NodeId() id: string;
     name?: string;
-    at?: Date;
+    /** Declared a Date where TypeScript records it, so a grouped read's max of it is a Date (#785). */
+    @Marked() at?: Date;
     days?: Date[];
 }
 
@@ -104,11 +108,12 @@ describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
             aggregates: { later: count(q.at.gt(first)), last: max(q.at) },
             orderBy: [['name', 'asc']]
         }));
-        // A date is read back as its text, as a load reads it.
+        // A date of a property declared a Date is a Date, the instant a load reads (#785).
         expect(groups).toEqual([
-            { name: 'patched', later: 0, last: '2026-01-01T00:00:00Z' },
-            { name: 'two', later: 1, last: '2026-02-01T00:00:00Z' }
+            { name: 'patched', later: 0, last: first },
+            { name: 'two', later: 1, last: second }
         ]);
+        expect(groups[0].last).toEqual(new Date((await gom.load(Dated, 'd1'))!.at!));
         expect(
             await gom.groups.load(Dated, (q: any) => ({ where: q.at.gt(first), keys: { name: key(q.name) } }))
         ).toEqual([{ name: 'two' }]);

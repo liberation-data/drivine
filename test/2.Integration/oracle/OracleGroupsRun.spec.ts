@@ -128,8 +128,9 @@ const oracle: SqlStore[] = sqlStores().filter((it) => it.type === DatabaseType.O
                 keys: { shelf: key('shelf') },
                 aggregates: { first: min('name'), last: max('name'), earliest: min('at'), latest: max('at') }
             });
-            // A date is given as its text, Cypher's, as on SQLite and Postgres: not a Date, and not the text the save wrote,
-            // `.000Z`.
+            // A date of a field TypeScript records no type of is given as its text, Cypher's, as on SQLite and Postgres:
+            // not a Date, and not the text the save wrote, `.000Z`. One declared a Date is a Date (#785): see the groups
+            // spec.
             expect(group).toEqual({
                 shelf: 'one',
                 first: 'apple',
