@@ -25,7 +25,7 @@ describe('CypherShorthand', () => {
         expect(rewrite('n.`$open` = true')).toEqual('JSON_VALUE(n_.props, \'$."$$open"\') = \'true\'');
         expect(rewrite("n.`a$b` = 'x'")).toEqual('JSON_VALUE(n_.props, \'$."a$b"\') = \'x\'');
         // Each SQL store's raw where reads it so.
-        expect(new OracleBackend().written('n.`$score` > 1')).toEqual('JSON_VALUE(n.props, \'$."$$score"\') > 1');
+        expect(new OracleBackend().written('n.`$score` > 1')).toEqual('JSON_VALUE(n_.props, \'$."$$score"\') > 1');
         expect(new PostgresBackend().written('n.`$score` > 1')).toEqual("(n_.props ->> '$$score') > 1");
         expect(new SqliteBackend().written('n.`$score` > 1')).toEqual(
             "(CASE json_type(n_.props, '$.\"$$score\"') WHEN 'text' THEN n_.props ->> '$.\"$$score\"' " +
