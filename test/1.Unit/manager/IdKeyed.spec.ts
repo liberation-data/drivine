@@ -23,6 +23,10 @@ import {
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
 import { openSqlite } from '@/connection/sqlite/SqliteDriver';
+import { idSql } from '@/cypher/SharedCypherCompiler';
+
+/** The comparison an Oracle lookup by `$id` makes of Gauge's id, as the shared module writes it. */
+const ORACLE_HAS_ID = idSql('oracle', 'hasId', 'n', 'id', 'JSON($id EXTENDED)');
 
 @NodeFragment({ labels: ['Gauge'] })
 class Gauge {
@@ -74,11 +78,11 @@ describe('storedKey', () => {
 });
 
 /**
- * A load, a delete and a relate by a float id, on Postgres and SQLite, bind the id as the text the store reads the node's
- * id back as (storedKey): JavaScript's text of 1e-7 is `1e-7`, which no node holds.
+ * A load, a delete and a relate by a float id, on Postgres and SQLite, bind the id as the JSON text the node holds it as
+ * (writeLayout), which the module's hasId compares the property's JSON with: JavaScript's text of 1e-7 is `1e-7`.
  */
 describe.each([
-    ['Postgres', (): GraphBackend => new PostgresBackend(new PostgresGraph()), '0.00000010'],
+    ['Postgres', (): GraphBackend => new PostgresBackend(new PostgresGraph()), '1.0E-7'],
     ['SQLite', (): GraphBackend => new SqliteBackend(new SqliteGraph()), '1.0E-7']
 ])('a float id on %s', (_, backend, key) => {
     let bound: Record<string, any>[];
@@ -101,7 +105,7 @@ describe.each([
         gom = new StatelessGraphObjectManager(pm, backend(), new ModelRegistry());
     });
 
-    it('is bound by a load, a delete and a cascade as the text the store holds it as', async () => {
+    it('is bound by a load, a delete and a cascade as the JSON the node holds it as', async () => {
         await gom.load(Gauge, 1e-7);
         await gom.load(GaugeTree, 1e-7);
         await gom.delete(Gauge, 1e-7);
@@ -109,22 +113,22 @@ describe.each([
         expect(bound.map((it) => it.id)).toEqual(Array(5).fill(key));
     });
 
-    it("is bound by a save's reads of the node's properties and stamp as the text the store holds it as", () => {
+    it("is bound by a save's reads of the node's properties and stamp as the JSON the node holds it as", () => {
         const model = new ModelRegistry().fragment(Gauge);
         const held = backend().heldProperties(model).spec({ id: 1e-7 });
         const found = backend().foundStamp(model).spec({ id: 1e-7 });
         expect([(held.parameters as any).id, (found.parameters as any).id]).toEqual([key, key]);
     });
 
-    it('is bound by loadRelated as the text the store holds it as', async () => {
+    it('is bound by loadRelated as the JSON the node holds it as', async () => {
         await gom.edges.loadRelated(nodeRef(Gauge, 1e-7), 'POINTS', undefined, Gauge);
         expect(bound.map((it) => it.x_from)).toEqual([key]);
     });
 
-    it('leaves a text id and a null id as they are', async () => {
+    it('reads a text id as the number a number id is, and runs nothing for a null id', async () => {
         await gom.load(Gauge, '1e-7');
         await gom.load(Gauge, null);
-        expect(bound.map((it) => it.id)).toEqual(['1e-7', null]);
+        expect(bound.map((it) => it.id)).toEqual([key]);
     });
 });
 
@@ -163,14 +167,14 @@ describe('an id on Oracle', () => {
         await gom.delete(Gauge, 1e-7);
         await gom.delete(GaugeTree, 1e-7, { cascade: CascadeType.DELETE_ALL });
         expect(bound.map((it) => it.id)).toEqual(Array(5).fill('{"$numberDouble":"1.0E-7"}'));
-        expect(bound.every((it) => /PASSING JSON\(\S+ EXTENDED\) AS "id__"/.test(it.text))).toBe(true);
+        expect(bound.every((it) => it.text.includes(ORACLE_HAS_ID))).toBe(true);
     });
 
     it("binds a save's reads of the node's properties and stamp as the JSON Oracle holds the id as", () => {
         const backend = new OracleBackend(new OracleGraph());
         const model = new ModelRegistry().fragment(Gauge);
         for (const statement of [backend.heldProperties(model), backend.foundStamp(model)]) {
-            expect(statement.text).toMatch(/PASSING JSON\(\S+ EXTENDED\) AS "id__"/);
+            expect(statement.text).toContain(ORACLE_HAS_ID);
             expect((statement.spec({ id: 1e-7 }).parameters as any).id).toEqual('{"$numberDouble":"1.0E-7"}');
         }
     });
@@ -181,7 +185,7 @@ describe('an id on Oracle', () => {
         const from = { model, id: 1e-7 };
         const held = '{"$numberDouble":"1.0E-7"}';
         const related = backend.related(from, 'POINTS', Direction.OUTGOING, model);
-        expect(related.text).toMatch(/PASSING JSON\(\$x_from EXTENDED\) AS "v"/);
+        expect(related.text).toContain(idSql('oracle', 'hasId', 'a', 'id', 'JSON($x_from EXTENDED)'));
         expect((related.spec().parameters as any).x_from).toEqual(held);
         expect((backend.unrelateAll(from, 'POINTS', Direction.OUTGOING).spec().parameters as any).x_from).toEqual(held);
         const relate = backend.relate(from, { model, id: 4.5 }, 'POINTS', {}, RelateMode.MERGE).spec()
@@ -190,10 +194,10 @@ describe('an id on Oracle', () => {
         expect(relate.x_frommatch).toMatch(/PASSING JSON\(:1 EXTENDED\) AS "v"/);
     });
 
-    it('binds a text id as its JSON, and a null id as it is', async () => {
+    it("binds a text id as the number id's JSON, and runs nothing for a null id", async () => {
         await gom.load(Gauge, '1e-7');
         await gom.load(Gauge, 7);
         await gom.load(Gauge, null);
-        expect(bound.map((it) => it.id)).toEqual(['"1e-7"', '7', null]);
+        expect(bound.map((it) => it.id)).toEqual(['{"$numberDouble":"1.0E-7"}', '7']);
     });
 });

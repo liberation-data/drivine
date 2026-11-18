@@ -50,6 +50,7 @@ import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
 import { columnValue } from '@/backend/postgres/PostgresStatement';
+import { lookupId, NO_NODE } from '@/backend/sql/NodeIds';
 import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
 /**
@@ -541,11 +542,15 @@ export class StatelessGraphObjectManager {
      */
     async update<T extends object>(
         type: ClassRef<T>,
-        id: unknown,
+        given: unknown,
         change: (loaded: T) => T | void | Promise<T | void>,
         attempts: number = UPDATE_ATTEMPTS
     ): Promise<T | undefined> {
         const target = this.modelOf(type);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            return undefined;
+        }
         for (let attempt = 1; ; attempt++) {
             const found = await this.loadRow(type, id);
             if (found === undefined) {
@@ -575,8 +580,13 @@ export class StatelessGraphObjectManager {
      * It never makes a node, is not checked against a stamp, and hands none back: a node it changed has a new stamp,
      * so an object loaded before is refused when saved. On a view, the fields are its root's.
      */
-    async patch<T>(type: ClassRef<T>, id: unknown, options: PatchOptions<T>): Promise<PatchResult> {
+    async patch<T>(type: ClassRef<T>, given: unknown, options: PatchOptions<T>): Promise<PatchResult> {
         const target = this.modelOf(type);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            // A null id, or text that is no value of the id's type, finds no node (#773): nothing is run.
+            return { found: false, applied: false, changed: false };
+        }
         const filter = this.condition(
             target,
             await this.lookups(options.where, target, loweredWhere),
@@ -745,10 +755,14 @@ export class StatelessGraphObjectManager {
      */
     async delete<T>(
         type: ClassRef<T>,
-        id: unknown,
+        given: unknown,
         options: { where?: string | WhereFn<T>; bindings?: Record<string, any>; cascade?: CascadeType } = {}
     ): Promise<number> {
         const target = this.modelOf(type);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            return 0;
+        }
         const filter = this.condition(target, options.where, options.bindings);
         const statement = this.backend.delete(target, filter.where, options.cascade);
         const bindings = { ...filter.bindings, id };
@@ -798,10 +812,14 @@ export class StatelessGraphObjectManager {
     /** The object with the id, and the row it was mapped from; undefined when there is none. */
     private async loadRow<T>(
         type: ClassRef<T>,
-        id: unknown,
+        given: unknown,
         depth?: LoadOptions['depth']
     ): Promise<{ object: T; row: any } | undefined> {
         const target = this.modelOf(type);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            return undefined;
+        }
         const statement =
             target.kind === 'GRAPH_VIEW'
                 ? this.backend.loadView(target.model, depth)
@@ -818,6 +836,14 @@ export class StatelessGraphObjectManager {
                 ? this.mapper.view<T>(target.model, rows[0])
                 : this.mapper.fragment<T>(target.model, rows[0]);
         return { object, row: rows[0] };
+    }
+
+    /**
+     * The id a lookup of the target's root by `given` binds: on a SQL store read as the `@NodeId` field's type, and
+     * NO_NODE where no node can have it, for which no statement is run (see NodeIds).
+     */
+    private lookupId(target: TargetModel, given: unknown): unknown {
+        return lookupId(this.backend, target.kind === 'GRAPH_VIEW' ? target.model.root : target.model, given);
     }
 
     /**

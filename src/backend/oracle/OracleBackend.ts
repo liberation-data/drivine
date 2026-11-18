@@ -8,7 +8,8 @@ import {
     Page
 } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import { hasLabels, jsonKey, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
+import { carriesLabels, hasLabels, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
+import { hasId } from '@/backend/sql/NodeIds';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
@@ -71,7 +72,13 @@ export class OracleBackend implements GraphBackend {
     }
 
     loadFragment(model: FragmentModel): GraphStatement {
-        return IdKeyedStatement.of(this.loadAllFragments(model, this.idPredicate(model)));
+        return IdKeyedStatement.of(
+            new GraphStatement(
+                [`SELECT ${nodeDocument(ROW_ALIAS)} AS "result"`, this.foundById(model, this.idPredicate(model))].join(
+                    '\n'
+                )
+            )
+        );
     }
 
     countFragments(model: FragmentModel, where?: string, tested: string[] = []): GraphStatement {
@@ -96,7 +103,15 @@ export class OracleBackend implements GraphBackend {
     }
 
     loadView(model: GraphViewModel, depth: Record<string, number> = {}): GraphStatement {
-        return IdKeyedStatement.of(this.loadAllViews(model, this.idPredicate(model.root), depth));
+        const views = new OracleViews(this.graph, depth);
+        return IdKeyedStatement.of(
+            new GraphStatement(
+                [
+                    `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
+                    this.foundById(model.root, this.viewWhere(model, this.idPredicate(model.root), depth))
+                ].join('\n')
+            )
+        );
     }
 
     countViews(
@@ -122,7 +137,7 @@ export class OracleBackend implements GraphBackend {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const filter = this.deletedWhere(target, where);
         if (cascade === CascadeType.NONE) {
-            return IdKeyedStatement.of(this.deleting(root, filter));
+            return IdKeyedStatement.of(this.deleting(root, filter, [], true));
         }
         if (target.kind !== 'GRAPH_VIEW') {
             throw new DrivineError(`A cascade follows a view's relationships. ${root.type.name} is a @NodeFragment.`);
@@ -151,7 +166,7 @@ export class OracleBackend implements GraphBackend {
     v_deleted NUMBER;
     c SYS_REFCURSOR;
 BEGIN
-    SELECT ${ROW_ALIAS}.nid BULK COLLECT INTO v_roots ${this.from(root, filter)};
+    SELECT ${ROW_ALIAS}.nid BULK COLLECT INTO v_roots ${this.foundById(root, filter)};
     ${targets}
     DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT column_value FROM TABLE(v_roots));
     v_deleted := SQL%ROWCOUNT;
@@ -167,7 +182,7 @@ END;`)
         if (target.kind !== 'GRAPH_VIEW') {
             return [];
         }
-        const roots = `SELECT ${ROW_ALIAS}.nid ${this.from(target.model.root, this.deletedWhere(target, where))}`;
+        const roots = `SELECT ${ROW_ALIAS}.nid ${this.foundById(target.model.root, this.deletedWhere(target, where))}`;
         const cascaded = new OracleViews(this.graph).cascade(target.model, 'n.nid IN (SELECT nid FROM cascade_roots)');
         return cascaded.beyond.map(({ view, field, maxDepth, nodes, within }: CascadeBeyond) => ({
             view,
@@ -243,7 +258,7 @@ END;`)
             new GraphStatement(
                 [
                     `SELECT JSON_TRANSFORM(${ROW_ALIAS}.props, KEEP '$') AS "props"`,
-                    this.from(model, this.idPredicate(model))
+                    this.foundById(model, this.idPredicate(model))
                 ].join('\n')
             )
         );
@@ -254,7 +269,7 @@ END;`)
             new GraphStatement(
                 [
                     `SELECT NVL(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
-                    this.from(model, this.idPredicate(model))
+                    this.foundById(model, this.idPredicate(model))
                 ].join('\n')
             )
         );
@@ -392,13 +407,21 @@ END;`)
         return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${tests.join(' AND ')}`;
     }
 
-    /** Deletes the nodes `where` selects, with their relationships, and returns how many: `{deleted}`. */
-    private deleting(model: FragmentModel, where?: string, tested: string[] = []): GraphStatement {
+    /**
+     * Deletes the nodes `where` selects, with their relationships, and returns how many: `{deleted}`. `byId` says `where`
+     * finds the node by its id (see foundById).
+     */
+    private deleting(
+        model: FragmentModel,
+        where?: string,
+        tested: string[] = [],
+        byId: boolean = false
+    ): GraphStatement {
         return new GraphStatement(`DECLARE
     v_deleted NUMBER;
     c SYS_REFCURSOR;
 BEGIN
-    DELETE ${this.from(model, where, tested)};
+    DELETE ${byId ? this.foundById(model, where) : this.from(model, where, tested)};
     v_deleted := SQL%ROWCOUNT;
     OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
     DBMS_SQL.RETURN_RESULT(c);
@@ -406,16 +429,26 @@ END;`);
     }
 
     /**
-     * The node whose id is `$id`, compared as JSON compares, so a number is not taken for text. The id is bound as the
-     * JSON text Oracle's layout holds it as, read `EXTENDED`, as a save finds the node (see IdKeyedStatement).
+     * The node of the fragment's labels found by its id in `where` (see idPredicate), as the row `n`: each label told by
+     * the labels' text ({@link carriesLabels}), so Oracle reads the index over the id for the one node, and not every node
+     * of the first label, as drivine4j's `OracleSelect.hasId` narrows it.
+     */
+    private foundById(model: FragmentModel, where?: string): string {
+        const tests = [carriesLabels(ROW_ALIAS, model.labels), ...(where ? [`(${where})`] : [])];
+        return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${tests.join(' AND ')}`;
+    }
+
+    /**
+     * The node whose id is `$id`, compared as the shared module writes the comparison: the property's class and key with
+     * the id's, which the index over the property of every node is made over and answers (see NodeIds). The id is bound
+     * as the JSON text Oracle's layout holds it as, read `EXTENDED`, as a save finds the node (see IdKeyedStatement); the
+     * comparison reads it more than once, so it is bound by name.
      */
     private idPredicate(model: FragmentModel): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return `JSON_EXISTS(${ROW_ALIAS}.props, '$?(@${jsonKey(
-            model.nodeIdProperty
-        )} == $id__)' PASSING JSON($id EXTENDED) AS "id__")`;
+        return hasId('oracle', ROW_ALIAS, model.nodeIdProperty, 'JSON($id EXTENDED)');
     }
 
     private page(page: Page): string[] {

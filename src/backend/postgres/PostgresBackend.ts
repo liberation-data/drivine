@@ -14,7 +14,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { PostgresGroups } from '@/backend/postgres/PostgresGroups';
 import { hasLabels, nodeDocument, PostgresGraph, textOf } from '@/backend/postgres/PostgresGraph';
 import { PostgresQueryRenderer } from '@/backend/postgres/PostgresQueryRenderer';
-import { PostgresSaveBuilder, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
+import { PostgresSaveBuilder } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresSearch } from '@/backend/postgres/PostgresSearch';
 import { PostgresStatement } from '@/backend/postgres/PostgresStatement';
 import { PostgresViews } from '@/backend/postgres/PostgresViews';
@@ -26,6 +26,8 @@ import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { CATALOG_KINDS, catalogProperties } from '@/backend/sql/SqlCatalog';
 import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
 import { selfLoopOnce } from '@/backend/sql/SqlGraph';
+import { hasId } from '@/backend/sql/NodeIds';
+import { writeLayout } from '@/cypher/ValueLayout';
 import { DrivineError } from '@/DrivineError';
 import { RenderedQuery } from '@/dsl/QueryRenderer';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
@@ -297,15 +299,17 @@ export class PostgresBackend implements GraphBackend {
                 ? [this.graph.bothWays(), `e.a = a.nid AND ${selfLoopOnce('e')} AND x.nid = e.b`]
                 : [this.graph.edges, 'e.src = a.nid AND x.nid = e.dst'];
         const labels = [...new Set([...from.model.labels, ...(from.labels ?? [])])];
+        // The node it is from found by its id's JSON, as the index over the id is made (see NodeIds).
         return new PostgresStatement(
             `SELECT ${nodeDocument('n')} AS "result" FROM ${this.graph.nodes} n WHERE n.nid IN (` +
                 `SELECT x.nid FROM ${this.graph.nodes} a JOIN ${edges} e ON e.type = CAST($x_type AS text) ` +
-                `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasLabels('a', labels)} AND ` +
-                `${textOf('a', from.model.nodeIdProperty)} = CAST($x_from AS text) AND ${hasLabels(
-                    'x',
-                    target.labels
-                )})`,
-            { x_type: type, x_from: storedKey(from.id, 'postgres') }
+                `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasId(
+                    'postgres',
+                    'a',
+                    from.model.nodeIdProperty,
+                    '$x_from'
+                )} AND ${hasLabels('a', labels)} AND ${hasLabels('x', target.labels)})`,
+            { x_type: type, x_from: idJson(from.id) }
         );
     }
 
@@ -401,20 +405,20 @@ export class PostgresBackend implements GraphBackend {
         );
     }
 
-    /** `statement`, which finds a node by `$id`, binding the id as the text the store reads it back as (see storedKey). */
+    /** `statement`, which finds a node by `$id`, binding the id as the JSON text the node holds it as (see idJson). */
     private byId(statement: GraphStatement): GraphStatement {
-        return PostgresStatement.of(statement).keyingId((id) => storedKey(id, 'postgres'));
+        return PostgresStatement.of(statement).keyingId(idJson);
     }
 
     /**
-     * The node whose id is `$id`, read as text, as a uniqueness constraint over the id holds it and as drivine4j finds a
-     * node: a number is the text the store holds it as, as `byId` binds it.
+     * The node whose id is `$id`, the JSON the node holds it as, as `byId` binds it: the property's JSON compared with it,
+     * as the shared module writes the comparison, which the index over the id answers (see NodeIds).
      */
     private idPredicate(model: FragmentModel): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return `${textOf(ROW_ALIAS, model.nodeIdProperty)} = CAST($id AS text)`;
+        return hasId('postgres', ROW_ALIAS, model.nodeIdProperty, '$id');
     }
 
     private page(page: Page): string[] {
@@ -424,4 +428,9 @@ export class PostgresBackend implements GraphBackend {
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];
     }
+}
+
+/** An id as the JSON text a node on Postgres holds it as, as a save writes it (see writeLayout): what finds the node. */
+function idJson(id: unknown): string {
+    return writeLayout(id, 'postgres');
 }

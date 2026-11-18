@@ -199,6 +199,38 @@ export function fullTextIndexLookup(
         : undefined;
 }
 
+/**
+ * What the module's `idSql` request writes (its `IdSql`): `hasId`, whether the node's id is the id whose JSON, as the node
+ * holds it, is `json`; `keyText`, the id held as the text a write plan keys a node by (a temporal value's tag read as its
+ * text `v`); `property`, the property read as text, which a range index is made over; and `hasProperty`, whether the node
+ * has the property at all.
+ */
+export type IdSqlHelper = 'hasId' | 'keyText' | 'property' | 'hasProperty';
+
+/** The SQL the module wrote for each request asked of {@link idSql}, by the request: it is the same every time. */
+const idSqlWritten = new Map<string, string>();
+
+/**
+ * The SQL of `helper` over the property `key` of the node row `alias` on `store`, as the shared module writes it, each
+ * comparison of an id written over the expressions the store's range index and uniqueness constraint are made over, so
+ * the index answers it, and a temporal id's tag is equal only to the same value's (liberation-data/drivine-cypher-spec#107).
+ * `key` is given as the node holds it (see heldKey). `json`, for `hasId`, is the SQL of the id's JSON as it is bound,
+ * written in as given: on Oracle and SQLite more than once, so it is bound by name. Cached, since the SQL is static.
+ */
+export function idSql(store: SharedStore, helper: IdSqlHelper, alias: string, key: string, json?: string): string {
+    const request = JSON.stringify({ idSql: { store, helper, alias, key, ...(json !== undefined ? { json } : {}) } });
+    let sql = idSqlWritten.get(request);
+    if (sql === undefined) {
+        const answer = JSON.parse(compileFunction()(request)) as { sql?: string; error?: string };
+        if (typeof answer.sql !== 'string') {
+            throw new DrivineError(`The shared module wrote no ${helper} for ${store}: ${answer.error ?? 'no SQL'}`);
+        }
+        sql = answer.sql;
+        idSqlWritten.set(request, sql);
+    }
+    return sql;
+}
+
 interface SearchAnswer {
     sql?: string | null;
     cypher?: string;

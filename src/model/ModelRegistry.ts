@@ -188,6 +188,7 @@ export class ModelRegistry {
             labels: [...labels],
             nodeIdField,
             nodeIdProperty: nodeIdField ? graphProperties.get(nodeIdField) ?? nodeIdField : undefined,
+            nodeIdType: nodeIdField ? properties.get(nodeIdField)?.designType : undefined,
             stampField,
             propertyBags: this.propertyBags(type, properties),
             fullTextIndexes: [

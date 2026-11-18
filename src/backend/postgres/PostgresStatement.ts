@@ -27,9 +27,9 @@ export class PostgresStatement extends GraphStatement {
     }
 
     /**
-     * This statement, which finds a node by the id bound as `$id`, binding the id it is given as `key` writes it: the text
-     * the store reads the node's id back as (see storedKey), so a float id is found by the text it is held as, not by the
-     * text the driver writes the number as (`1e-7`). A null id is bound as it is, and finds no node.
+     * This statement, which finds a node by the id bound as `$id`, binding the id it is given as `key` writes it: the JSON
+     * text the node holds its id as (see NodeIds), so a float id is found as it is held, not by the text the driver writes
+     * the number as (`1e-7`), and a temporal id by its tag. A null id is bound as it is, and finds no node.
      */
     keyingId(key: (id: unknown) => string): PostgresStatement {
         return new PostgresStatement(this.text, this.bindings, key);
