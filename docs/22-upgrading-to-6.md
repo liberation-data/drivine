@@ -114,8 +114,9 @@ where 5.0 gave the date's ISO 8601 text, so `node.at.getTime()` threw there
 and nested view of it, a relationship fragment, a path's end and a `Date` `@NodeId`. Drivine knows a field is declared a
 `Date` where TypeScript records its type, for a decorated field, whatever the decorator, or where the class initializes
 it with a `Date`; a field neither decorated nor initialized, or declared `Date | null`, still loads as the store gives
-it. Code that read such a field with `new Date(node.at)` keeps working; code that compared it with a text, or called a
-string method on it, now has a `Date`. See [Object Manager](05-object-manager.md#1-nodefragment-a-node).
+it, and so does a list of dates (`Date[]`). Code that read such a field with `new Date(node.at)` keeps working; code
+that compared it with a text, or called a string method on it, now has a `Date`. See
+[Object Manager](05-object-manager.md#1-nodefragment-a-node).
 
 ### An id given as text is read as the id's type
 

@@ -89,8 +89,9 @@ through `load`, `loadAll`, `loadNearest`, `loadMatching`, `edges.loadRelated` an
 its ISO 8601 text, which loaded as that text before. Drivine knows a field is declared a `Date` as it knows a field
 holds a set: where TypeScript records its type, for a decorated field, whatever the decorator, or where the class
 initializes the field with a `Date`. A field neither decorated nor initialized, or declared with a union such as
-`Date | null`, loads as the store gives it: a `Date` on Neo4j and Memgraph, its text elsewhere. A null loads as null,
-and a text that is no ISO 8601 date, or a day the month hasn't, as the text.
+`Date | null`, loads as the store gives it: a `Date` on Neo4j and Memgraph, its text elsewhere. So does a list of dates
+(`Date[]`), which TypeScript records as an `Array`, and a row a `QuerySpecification`'s `.transform` maps, which is not
+the object manager's. A null loads as null, and a text that is no ISO 8601 date, or a day the month hasn't, as the text.
 
 ```typescript
 @GraphProperty('due_at') due: Date;   // decorated: loads as a Date

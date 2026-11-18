@@ -144,6 +144,29 @@ describe('A property declared a Date, loaded on SQLite', () => {
         expectEvent(diary.after[0], 2);
     });
 
+    it("orders a view's list by a Date field by its instant, as the Dates it loads", async () => {
+        const [early, middle, late] = [moment(1), moment(2), moment(3)];
+        await gom.save(
+            Object.assign(new EventView(), {
+                event: event('e5', 5),
+                followers: [
+                    Object.assign(event('f1', 1), { at: middle }),
+                    Object.assign(event('f2', 1), { at: late }),
+                    Object.assign(event('f3', 1), { at: early })
+                ]
+            })
+        );
+        for (const [order, ids] of [
+            ['asc', ['f3', 'f1', 'f2']],
+            ['desc', ['f2', 'f1', 'f3']]
+        ] as const) {
+            const views = await gom.loadAll(EventView, (q) => ({ orderBy: q.followers.at[order]() }));
+            const followers = views.find((it) => it.event.id === 'e5')!.followers;
+            expect(followers.map((it) => it.id)).toEqual(ids);
+            followers.forEach((it) => expect(it.at).toBeInstanceOf(Date));
+        }
+    });
+
     it('gives loadRelated a Date', async () => {
         const related = await gom.edges.loadRelated(nodeRef(Person, 'p'), 'ATTENDS', Direction.OUTGOING, Event);
         expectEvent(related[0], 4);
