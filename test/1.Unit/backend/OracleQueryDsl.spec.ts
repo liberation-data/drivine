@@ -266,6 +266,22 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
             expect(unread.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "Account")') THEN`);
             expect(unread.labelsTested).toEqual([]);
         }
+        // The query is made once, so the label is implied by the very equality the statement compiles: not by one a
+        // second call makes, read through the index where the first was too long to be.
+        let calls = 0;
+        const changing = backend.renderQuery(
+            loweredQuery(
+                (q: any) => ({
+                    where: [q.email.eqIgnoreCase('Ada@X.com'), q.name.eq(calls++ ? 'Ada' : 'a'.repeat(4001))]
+                }),
+                account,
+                new Set(['email'])
+            ),
+            account,
+            [...indexed, { label: 'Account', properties: ['name'] }]
+        );
+        expect(calls).toBe(1);
+        expect(changing.labelsTested).toEqual([]);
     });
 
     it('compares a text past 4,000 bytes as a CLOB, not through the index, which holds none, and tests the label', () => {

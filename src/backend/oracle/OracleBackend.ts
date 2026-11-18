@@ -40,7 +40,7 @@ import { SaveOptions } from '@/manager/SaveOptions';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { pinnedProperties, RenderedQuery } from '@/dsl/QueryRenderer';
-import { allOfOne, Condition, QueryFn, WhereFn } from '@/dsl/Refs';
+import { allOfOne, Condition, Query, QueryFn, WhereFn } from '@/dsl/Refs';
 import { scopeOf } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
@@ -307,7 +307,9 @@ END;`)
             name: this.graph.name,
             indexedProperties: indexed.map((it) => [it.label, it.properties[0]] as const)
         });
-        const query = FragmentQueryRenderer.render(fragments, fn, target, ROW_ALIAS);
+        // Made once: the labels implied are read from the very conditions the statement compiles.
+        const made = fn(rootRefs<T>(scopeOf(target)));
+        const query = FragmentQueryRenderer.render(fragments, () => made, target, ROW_ALIAS);
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         return {
             ...query,
@@ -316,7 +318,7 @@ END;`)
             labelsTested: labelsImplied(
                 query.where,
                 root.labels,
-                indexedEqualities(this.graph.name, fn, target, indexed)
+                indexedEqualities(this.graph.name, made, target, indexed)
             )
         };
     }
@@ -536,16 +538,15 @@ function labelsImplied(where: string | undefined, labels: string[], equalities: 
  * shared module's fragments write them alone: none when there are none. The module reads some values through the
  * index (a label test in their term) and others not (a list, a map, `""`), as it alone knows.
  */
-function indexedEqualities<T>(
+function indexedEqualities(
     graph: string,
-    fn: QueryFn<T>,
+    query: Query,
     target: TargetModel,
     indexed: SchemaItem[]
 ): string | undefined {
     const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
     const properties = indexed.filter((it) => root.labels.includes(it.label)).map((it) => it.properties[0]);
     const scope = scopeOf(target);
-    const query = fn(rootRefs<T>(scope));
     const equalities = (condition: Condition): Condition[] =>
         condition.kind === 'AND'
             ? condition.conditions.flatMap(equalities)
