@@ -246,11 +246,12 @@ export function sameKey(a: string, b: string): string {
 /**
  * A property of the node row `alias` as Drivine 5.0's range index or uniqueness constraint over the label held it (store
  * layout 1): as text, for the label's nodes alone, and null for every other node, for a value that isn't a scalar, and
- * for one longer than 4,000 bytes. A predicate over this expression implies the label.
+ * for one longer than 4,000 bytes.
  *
- * No index this version makes holds it. Since layout 2 the shared module's schema plan makes them, with drivine4j's
- * statements, over the property's class and key (the module's `OracleSql.labelledIndex` and `uniqueIndex`), and the
- * layout verdict drops 5.0's on an empty graph (#696). The query DSL's filters are the module's fragments
+ * Only OracleSchemaGrammar's statements of 5.0, kept for the golden statements, write it now: no statement this version
+ * runs reads it, and no index it makes holds it. Since layout 2 the shared module's schema plan makes them, with
+ * drivine4j's statements, over the property's class and key (the module's `OracleSql.labelledIndex` and `uniqueIndex`),
+ * and the layout verdict drops 5.0's on an empty graph (#696). The query DSL's filters are the module's fragments
  * (drivine-cypher-spec#235), which read layout 2's indexes.
  */
 export function labelledValue(alias: string, label: string, property: string): string {

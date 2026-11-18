@@ -131,10 +131,11 @@ Notes:
   properties, is read through. The query DSL's equality is read through it, and through a uniqueness constraint's unique
   index ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)); a Cypher
   statement isn't yet, as it is compiled without them ([#753](https://github.com/liberation-data/drivine/issues/753)).
-  A uniqueness constraint is a unique index over the label's nodes that have its properties (`<graph>_uq2_…`). A value is equal only to one of its kind: `1` and `'1'` are two keys. It comes
-  with a range index over its properties, which stays when the constraint is dropped; over one property, its unique
-  index stands for the labelled index. An index Drivine 5.0 made, under layout 1's names, is dropped as its graph is
-  stamped layout 2: see [Upgrading to 6.0](22-upgrading-to-6.md#oracles-indexes-are-drivine4js).
+  A uniqueness constraint is a unique index over the label's nodes that have its properties (`<graph>_uq2_…`). A value
+  is equal only to one of its kind: `1` and `'1'` are two keys. It comes with a range index over its properties, which
+  stays when the constraint is dropped; over one property, its unique index stands for the labelled index. An index
+  Drivine 5.0 made, under layout 1's names, is dropped as its graph is stamped layout 2: see
+  [Upgrading to 6.0](22-upgrading-to-6.md#oracles-indexes-are-drivine4js).
 - Oracle reads an empty string as null, so a comparison with `''` in the DSL is written to find a property stored empty.
 - `matches` takes a regular expression as compiled Cypher's `=~` does, matched against the whole value, in Oracle's
   POSIX dialect. A leading `(?i)` ignores case. A backreference is read as Java reads it only where it is `\1` to `\8`,
