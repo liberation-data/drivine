@@ -103,10 +103,10 @@ On Oracle, Postgres and SQLite, a save writes each property it leaves as a load 
 byte for byte ([#811](https://github.com/liberation-data/drivine/issues/811)). So an undecorated `Date` field, which
 loads as its text, is saved back as the date, not as a string, and a datetime keeps the nanoseconds and the offset a
 `Date` can't hold, a field declared a `Date` included. This holds for every save of an object a load made: `save`,
-`save` with `from`, `saveAll` and `update`, of a fragment and of a view, its root, its related nodes, its nested views
-and its relationship fragments, a list of dates among them. A property is unchanged where its value deep-equals what
-the load gave, a `Date` by its time; one changed, in place or given anew, is written as any value is, and every
-property is still written. These cases aren't recognised, and their undecorated dates are saved as their text:
+`save` with `from`, `saveAll`, `update` and `patchAll`, of a fragment and of a view, its root, its related nodes, its
+nested views and its relationship fragments, a list of dates among them. A property is unchanged where its value
+deep-equals what the load gave, a `Date` by its time; one changed, in place or given anew, is written as any value is,
+and every property is still written. These cases aren't recognised, and their undecorated dates are saved as their text:
 
 - An object copied out of what a load returned, by a spread or `structuredClone`, is a new object to the save. Save the
   loaded object, or give it as `from`. `from` stands for a view's root only: a related node of a view's copy must be

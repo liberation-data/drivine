@@ -766,7 +766,9 @@ export function objectProps(
  * heldTagsOf), or `true` for the object's own load: a field whose value is unchanged since then, by deep equality, is
  * written as the store held it, a {@link HeldAsLoaded}, so a date an undecorated field loaded as its text stays a date,
  * and a datetime keeps its nanoseconds and its offset (#811). Every property is still written. Only a SQL store's save
- * gives it: a graph engine's load gives typed values, and its driver would write the marker as a map.
+ * gives it: a graph engine's load gives typed values, and its driver would write the marker as a map. The id is written
+ * as given, as the save finds the node by it: Oracle's save writes it among the properties, Postgres's and SQLite's as
+ * the key, and a tag kept there would give a node made for a text id the id of the node the text was loaded from.
  */
 export function propsOf(
     model: {
@@ -775,6 +777,7 @@ export function propsOf(
         jsonPacked?: Set<string>;
         propertyBags?: PropertyBagModel[];
         nodeLabels?: { field: string };
+        nodeIdField?: string;
     },
     object: any,
     excluded: string[],
@@ -792,11 +795,20 @@ export function propsOf(
             props[model.graphProperties.get(field) ?? field] = asLoadedOr(
                 storedValue(value, packed),
                 value,
-                packed ? undefined : held?.get(field)
+                heldFor(field, packed || field === model.nodeIdField, held)
             );
         }
     }
     return props;
+}
+
+/** What a load read of `field`, which a save writes as the store held it (see propsOf), unless `fresh`. */
+function heldFor(
+    field: string,
+    fresh: boolean,
+    held: Map<string, { value: any; held: any }> | undefined
+): { value: any; held: any } | undefined {
+    return fresh ? undefined : held?.get(field);
 }
 
 /**

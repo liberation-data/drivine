@@ -5,7 +5,7 @@ import { IndexAdvicePolicy, QueryIndexAdvisor } from '@/dsl/QueryIndexAdvisor';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
-import { FragmentRow, GraphObjectMapper, packedTextOf, ViewRow } from '@/mapper/GraphObjectMapper';
+import { FragmentRow, GraphObjectMapper, heldTagsOf, packedTextOf, ViewRow } from '@/mapper/GraphObjectMapper';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
@@ -50,7 +50,7 @@ import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
 import { columnValue } from '@/backend/postgres/PostgresStatement';
-import { exactKey, HandedBack, lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
+import { exactKey, HandedBack, isSqlBackend, lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
 import { rootOf } from '@/backend/sql/SqlSaves';
 import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
@@ -663,7 +663,12 @@ export class StatelessGraphObjectManager {
                         root.nodeLabels?.field !== field
                 )
             );
-            return { id, ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR)) };
+            // A field unchanged since a SQL store's load written as the store held it, as a save writes it (#811).
+            const held = isSqlBackend(this.backend) ? heldTagsOf(fragment) : undefined;
+            return {
+                id,
+                ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR, held))
+            };
         });
         // Each id by its value (see exactKey): a Date is one id by its time.
         const ids = rows.map((it) => it.id);

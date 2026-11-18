@@ -53,6 +53,13 @@ class Day {
     @Marked() name?: string;
 }
 
+/** A node whose id a Cypher statement stored as a date: declared a text, so it loads as the date's text. */
+@NodeFragment({ labels: ['DateLoadRun', 'TextKeyed'] })
+class TextKeyed {
+    @NodeId() id: string;
+    @Marked() name?: string;
+}
+
 @RelationshipFragment()
 class Attendance {
     @Marked() since?: Date;
@@ -439,6 +446,36 @@ describe('A property declared a Date, loaded on SQLite', () => {
             await gom.save(loaded);
             expect((await gom.load(Event, 'e1'))!.mixed).toEqual(new Set(['2026-01-01', 'a']));
             expect((await stored()).e1).toContain('"mixed":["2026-01-01","a"]');
+        });
+
+        it('in a patchAll of nodes as loaded, each field it writes as loaded', async () => {
+            const before = await stored();
+            const loaded = await gom.loadAll(Event);
+            loaded.forEach((it) => (it.name = `${it.id}!`));
+            await gom.patchAll(loaded, { except: ['at'] });
+            const after = await stored();
+            for (const id of ['e1', 'e2', 'e3', 'e4']) {
+                expect(after[id]).toEqual(before[id].replace(`"name":"${id}"`, `"name":"${id}!"`));
+            }
+        });
+
+        it('writes an id as given, never the tag a text id was loaded from: the save finds the node by it', async () => {
+            await pm.execute(
+                new QuerySpecification({
+                    text: "CREATE (:DateLoadRun:TextKeyed {id: date('2026-01-05'), name: 'x'})",
+                    language: 'CYPHER'
+                })
+            );
+            const [loaded] = await gom.loadAll(TextKeyed);
+            expect(loaded.id).toEqual('2026-01-05');
+            const registry = new ModelRegistry();
+            const target: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(TextKeyed) };
+            // Oracle's save writes the id among the properties, and finds the node by the id as given.
+            const oracle = backendFor(DatabaseType.ORACLE).save(target, loaded, {}, false, registry);
+            const written = Object.values(oracle.bindings).filter(
+                (it) => typeof it === 'string' && it.includes('"id"')
+            );
+            expect(written).toContain('{"id":"2026-01-05","name":"x"}');
         });
 
         it('recognises a copy given what it was loaded as, and not a copy saved without it', async () => {
