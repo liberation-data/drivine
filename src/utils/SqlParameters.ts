@@ -131,7 +131,9 @@ function literalPrefix(sql: string, start: number): string | undefined {
 /**
  * The tag of a Postgres dollar quote that opens at [start], `$$` or `$tag$`, the dollars and all, where one does. A
  * quote is one only where the tag comes again to close it: so `$a$b` is still the parameter `a` and the text `$b`, as
- * Oracle reads it. `$$` before a name is a PL/SQL inquiry directive (`$$PLSQL_UNIT`), not a quote.
+ * Oracle reads it. `$$` before a name is a PL/SQL inquiry directive (`$$PLSQL_UNIT`), not a quote. That is Oracle's
+ * rule, and it is kept on Postgres too, as drivine4j keeps it: there a body written `$$BEGIN … $$` is not skipped, so
+ * its `$name`s are read as parameters. No statement Drivine writes opens a dollar quote so.
  */
 function dollarTag(sql: string, start: number): string | undefined {
     if (sql[start] !== '$' || continuesIdentifier(sql, start)) {
