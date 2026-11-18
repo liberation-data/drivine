@@ -26,13 +26,17 @@ import {
     Root,
     SqliteBackend,
     SqliteGraph,
+    StaleObjectException,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
+import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
 import { openSqlite } from '@/connection/sqlite/SqliteDriver';
 import { idSql } from '@/cypher/SharedCypherCompiler';
 import { writeLayout } from '@/cypher/ValueLayout';
+import { FALKORDB_GRAMMAR } from '@/backend/CypherGrammar';
+import { toFixedWidthIso } from '@/connection/falkordb/FalkorDbParameterCoercer';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 import { ClassType } from '@/query/QuerySpecification';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
@@ -636,6 +640,12 @@ describe('a batch handing back stamps', () => {
     });
 });
 
+@GraphView()
+class DialDays {
+    @Root() dial: Dial;
+    @GraphRelationship({ type: 'ON', target: () => StampedDay }) days: StampedDay[] = [];
+}
+
 describe('a Date id matched by its time', () => {
     const on = (): Date => new Date('2024-01-03T00:00:00.000Z');
 
@@ -652,6 +662,23 @@ describe('a Date id matched by its time', () => {
         ).rejects.toThrow('patchAll takes each id once.');
     });
 
+    // FalkorDB holds a Date as its text with nine digits of the second, and hands that text back: a patch's row id as
+    // bound, and a batch's id as the node holds it.
+    it('is matched to its patch result and its stamp by the text FalkorDB hands a Date id back as', async () => {
+        const pm = {
+            database: 'id-keyed',
+            query: async () => Promise.resolve([{ id: toFixedWidthIso(on()), found: true, changed: true }])
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new CypherBackend(FALKORDB_GRAMMAR), new ModelRegistry());
+        const day = Object.assign(new StampedDay(), { on: on(), note: 'x' });
+        expect(await gom.patchAll([day], { only: ['note'] })).toEqual([{ found: true, applied: true, changed: true }]);
+        const stamp = `${'a'.repeat(16)}:${'b'.repeat(16)}`;
+        (gom as any).handBackFragments([{ model: new ModelRegistry().fragment(StampedDay), objects: [day] }], {
+            groups: [{ before: [], after: [{ id: toFixedWidthIso(on()), stamp }] }]
+        });
+        expect(day.stamp).toEqual(stamp);
+    });
+
     it("is an update's same id, where the copy taken before the change holds it as another Date", () => {
         const model = new ModelRegistry().fragment(StampedDay);
         const gom = new StatelessGraphObjectManager({} as any, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
@@ -659,5 +686,43 @@ describe('a Date id matched by its time', () => {
         const before = Object.assign(new StampedDay(), { ...day, on: on() });
         day.note = 'y';
         expect((gom as any).changeOf({ kind: 'NODE_FRAGMENT', model }, before, day).only).toEqual(['note']);
+    });
+
+    it('is the same related target after an update, where the copy taken before the change holds it as another Date', () => {
+        const model = new ModelRegistry().view(DialDays);
+        const gom = new StatelessGraphObjectManager({} as any, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+        const view = (): DialDays =>
+            Object.assign(new DialDays(), {
+                dial: Object.assign(new Dial(), { id: 1, name: 'x' }),
+                days: [Object.assign(new StampedDay(), { on: on() })]
+            });
+        expect((gom as any).changeOf({ kind: 'GRAPH_VIEW', model }, view(), view()).replace).toBeUndefined();
+    });
+
+    it('is loaded again and saved again by an update whose save was stale, where the save holds it as another Date', async () => {
+        const gom = new StatelessGraphObjectManager({} as any, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+        const loaded = (): StampedDay => Object.assign(new StampedDay(), { on: on(), stamp: `${'a'.repeat(16)}:` });
+        (gom as any).loadRow = async () => Promise.resolve({ object: loaded() });
+        let writes = 0;
+        (gom as any).write = async (object: StampedDay) => {
+            writes++;
+            if (writes === 1) {
+                throw new StaleObjectException(StampedDay, on(), 'a', 'b', false);
+            }
+            return Promise.resolve(object);
+        };
+        const saved = await gom.update(StampedDay, on(), (it) => {
+            it.note = 'y';
+        });
+        expect([saved?.note, writes]).toEqual(['y', 2]);
+    });
+
+    it('is one node of a save that holds it twice, as two objects, each with a Date of its own', () => {
+        const handed = new Map([
+            ['0', { group: 0, id: on() }],
+            ['1', { group: 0, id: on() }]
+        ]);
+        const [held] = FoundStamp.grouped(['0/a:=b:', '1/b:=c:'], 1, handed);
+        expect([held.before.map((it) => it.stamp), held.after.map((it) => it.stamp)]).toEqual([['a:'], ['c:']]);
     });
 });

@@ -1,3 +1,5 @@
+import { readBackKey } from '@/backend/sql/NodeIds';
+
 /**
  * One node of what drivine4j's write function hands back, `index/found=stamp`: the index a step gave it, what it carried
  * before the save (empty for a node the save made, `-` for one that was there without a stamp, or a patch's outcome),
@@ -23,21 +25,21 @@ export class FoundStamp {
         groups: number,
         handed: Map<string, { group: number; id: any }>
     ): { before: { id: any; stamp: string }[]; after: { id: any; stamp: string }[] }[] {
-        const related = Array.from({ length: groups }, () => ({
-            before: new Map<any, string>(),
-            after: new Map<any, string>()
-        }));
+        type Stamped = Map<unknown, { id: any; stamp: string }>;
+        const related = Array.from({ length: groups }, () => ({ before: new Map(), after: new Map() }));
         for (const entry of entries.map((it) => FoundStamp.of(it))) {
             const node = handed.get(entry.index)!;
-            const { before, after }: { before: Map<any, string>; after: Map<any, string> } = related[node.group];
-            if (!before.has(node.id)) {
-                before.set(node.id, entry.found);
+            const { before, after }: { before: Stamped; after: Stamped } = related[node.group];
+            // By value (see readBackKey): a node held twice may be two objects, each holding a Date id of its own.
+            const key = readBackKey(node.id);
+            if (!before.has(key)) {
+                before.set(key, { id: node.id, stamp: entry.found });
             }
-            after.set(node.id, entry.stamp);
+            after.set(key, { id: node.id, stamp: entry.stamp });
         }
-        return related.map(({ before, after }: { before: Map<any, string>; after: Map<any, string> }) => ({
-            before: [...before].map(([id, stamp]) => ({ id, stamp })),
-            after: [...after].map(([id, stamp]) => ({ id, stamp }))
+        return related.map(({ before, after }: { before: Stamped; after: Stamped }) => ({
+            before: [...before.values()],
+            after: [...after.values()]
         }));
     }
 

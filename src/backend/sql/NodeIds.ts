@@ -1,6 +1,6 @@
 import type { GraphBackend } from '@/backend/GraphBackend';
 import { idSql, SharedStore } from '@/cypher/SharedCypherCompiler';
-import { heldKey, writeLayout } from '@/cypher/ValueLayout';
+import { heldKey } from '@/cypher/ValueLayout';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 import { FragmentModel } from '@/model/FragmentModel';
 
@@ -127,13 +127,17 @@ export function temporalText(layout: string): string | undefined {
 
 /**
  * `id` as a store reads a node's id back, where the manager matches what a statement hands back to its objects: a `Date`
- * as its tag's text `v`, which is what Oracle reads a tag as, a `bigint` within 2^53 as the number Oracle and Neo4j read
- * it as, and any other id as it is. A `Map` finds a `Date` by the object, never by its value, and a `bigint` never by a
- * number, so the object's id and the id read back are matched as this reads both.
+ * by its time, as its ISO text; a `bigint` within 2^53 as the number Oracle and Neo4j read it as; and, given the node's
+ * `model`, text read as the id's type first ({@link typedId}), as Oracle reads a date back as its tag's text `v` and
+ * FalkorDB as the text with nine digits of the second it holds it as. Any other id is as it is. A `Map` finds a `Date` by
+ * the object, never by its value, and a `bigint` never by a number, so the object's id and the id read back are matched
+ * as this reads both.
  */
-export function readBackKey(id: unknown): unknown {
-    if (id instanceof Date) {
-        return temporalText(writeLayout(id, 'sqlite')) ?? id;
+export function readBackKey(id: unknown, model?: FragmentModel): unknown {
+    const typed = model && typeof id === 'string' ? typedId(model, id) : id;
+    const it = typed === NO_NODE ? id : typed;
+    if (it instanceof Date) {
+        return Number.isNaN(it.getTime()) ? String(it) : it.toISOString();
     }
-    return typeof id === 'bigint' && Number.isSafeInteger(Number(id)) ? Number(id) : id;
+    return typeof it === 'bigint' && Number.isSafeInteger(Number(it)) ? Number(it) : it;
 }
