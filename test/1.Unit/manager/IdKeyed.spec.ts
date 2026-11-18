@@ -33,7 +33,7 @@ import {
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
-import { DSL_ROW } from '@/backend/sqlite/SqliteQueryRenderer';
+import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { openSqlite } from '@/connection/sqlite/SqliteDriver';
 import { idSql } from '@/cypher/SharedCypherCompiler';

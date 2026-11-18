@@ -11,13 +11,17 @@ import { GroupAggregate, GroupKey, GroupQuery } from '@/manager/Groups';
 export const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
 
 /**
- * A least or greatest value a store reads through the node of the group that has it, as drivine4j's SQLite does: the
- * aggregate's column is that node's `nid`, and the statement joins the node back, as the row `holder`, to give, compare
- * and order the value there.
+ * A least or greatest value a store reads through the node of the group that has it, as drivine4j's SQLite and Postgres
+ * do: the statement joins that node back, as the row `holder`, to compare and order the value there. On SQLite the
+ * aggregate's column is that node's `nid`, and the value is given there too. Where the store {@link given gives} the
+ * value as the aggregate's column itself, as drivine4j's Postgres does, the node's `nid` is a column of its own, with
+ * `r` after the aggregate's, and the node is joined only where the groups are ordered or filtered by the value.
  */
 export interface HeldAggregate {
     /** The `nid` of the group's first node in the order the aggregate takes, of those that meet `filter`; null for none. */
     column(filter?: string): string;
+    /** The value of that node, as the group's column gives it, where the store gives it so. */
+    given?(filter?: string): string;
     /** The value, as the JSON the group's row gives. */
     value(holder: string): string;
     /** The condition of a `having` that compares the value by `comparison` (`gte`, …) with `value`, which it binds. */
@@ -72,6 +76,12 @@ export abstract class SqlGroups {
         const value = (aggregate: GroupAggregate): string =>
             aggregate.property ? this.aggregated(views, aggregate.property as string) : '1';
         const held = aggregates.map(([, aggregate]) => this.held(aggregate));
+        /** Whether the groups are ordered or filtered by the aggregate: a given value is then joined back by its node. */
+        const compared = aggregates.map(([name]) =>
+            [...(query.orderBy ?? []), ...(query.having ?? [])].some((it) => it[0] === name)
+        );
+        /** Whether the aggregate's value is read through its node, joined back as its holder. */
+        const holds = (i: number): boolean => held[i] !== undefined && (!held[i]!.given || compared[i]);
         const heldKeys = keys.map(([name, key]) =>
             key.kind === 'property' ? this.heldKey(key.property as string) : this.heldPath(pathTargets.get(name)!)
         );
@@ -80,8 +90,16 @@ export abstract class SqlGroups {
         const filtered = (aggregate: GroupAggregate, of: string): string =>
             aggregate.filter ? `CASE WHEN ${aggregate.filter as string} THEN ${of} END` : of;
         const aggregateColumns = aggregates.map(([, aggregate], i) => {
-            if (held[i]) {
-                return `${held[i]!.column(aggregate.filter as string | undefined)} AS a${i}`;
+            const heldAggregate = held[i];
+            if (heldAggregate?.given) {
+                const filter = aggregate.filter as string | undefined;
+                return [
+                    `${heldAggregate.given(filter)} AS a${i}`,
+                    ...(compared[i] ? [`${heldAggregate.column(filter)} AS a${i}r`] : [])
+                ].join(', ');
+            }
+            if (heldAggregate) {
+                return `${heldAggregate.column(aggregate.filter as string | undefined)} AS a${i}`;
             }
             switch (aggregate.function) {
                 case 'COUNT':
@@ -126,7 +144,9 @@ export abstract class SqlGroups {
                 return this.keyOrder(`g.k${i}`);
             }
             const target = pathTargets.get(keys[i][0])!;
-            return [`(SELECT ${this.idValue(target.nodeIdProperty!)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`];
+            return [
+                `(SELECT ${this.idValue(target.nodeIdProperty!)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`
+            ];
         };
         const columnOrder = (column: string, direction: 'ASC' | 'DESC'): string => {
             const index = Number(column.slice(1));
@@ -157,14 +177,23 @@ export abstract class SqlGroups {
                     ? [`k${i}`, this.keyValue(`g.k${i}`)]
                     : [`k${i}`, `(SELECT ${views.nodeDocument('p')} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`]
             ),
-            ...aggregates.map((_, i): [string, string] => [`a${i}`, held[i] ? held[i]!.value(holder(i)) : `g.a${i}`])
+            ...aggregates.map((_, i): [string, string] => [
+                `a${i}`,
+                held[i] && !held[i]!.given ? held[i]!.value(holder(i)) : `g.a${i}`
+            ])
         ];
         const holders = [
             ...heldKeys.flatMap((it, i) =>
                 it ? [`LEFT JOIN ${this.graph.nodes} ${keyHolder(i)} ON ${keyHolder(i)}.nid = ${heldBy(i)}`] : []
             ),
             ...held.flatMap((it, i) =>
-                it ? [`LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${holder(i)}.nid = g.a${i}`] : []
+                holds(i)
+                    ? [
+                          `LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${holder(i)}.nid = g.a${i}${
+                              it!.given ? 'r' : ''
+                          }`
+                      ]
+                    : []
             )
         ];
         const representatives = heldKeys.flatMap((it, i) =>
