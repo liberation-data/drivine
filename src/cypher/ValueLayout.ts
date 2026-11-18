@@ -18,17 +18,115 @@ import { jsonText } from '@/utils/JsonText';
  * nor a key (a text value `"$5"`) costs a call, never a wrong value. The module's ValueLayoutTest pins that every tag and
  * escaped key it writes holds `"$`, and that its read changes no text that holds neither.
  *
+ * A text the module reads is parsed as plain JSON too, and each map the read gives whose key held a tag is recorded with
+ * what the key held (see tagsHeldBy), so a save of a value unchanged since its load can write the tag back as it was
+ * (#811). What the read gives is the same either way.
+ *
  * @param parse how a column with nothing of the layout in it is read: as JSON, keeping its whole numbers
  */
 export function readLayout(text: string, parse: (text: string) => any = parseExactIntegers): any {
     if (!text.includes('"$') && !text.includes('\\u0024')) {
         return parse(text);
     }
+    return recordingTags(moduleRead(text), parseExactIntegers(text));
+}
+
+/** The JSON text `text` read in the store layout by the module (see readLayout). */
+function moduleRead(text: string): any {
     const answer = parseExactIntegers(cypherCompilerModule().compile(JSON.stringify({ read: text, typed: false })));
     if (answer && typeof answer === 'object' && 'error' in answer) {
         throw new DrivineError(`A row's value can't be read in the store layout: ${answer.error}`);
     }
     return answer.value;
+}
+
+/**
+ * The temporal tags each map a read gave held under its keys, as the store holds them (#811): for each map of what
+ * {@link readLayout}, {@link readLayoutAfter} or {@link readLayoutOf} returned, at any depth, whose key held a tag, or a
+ * list or map holding one, the value the column held under that key, read as plain JSON, its tags still the maps they
+ * are (`{"$t": "date", "v": …, "s": …}`). The read gives a tag as its text, which tells it from a string no more; the
+ * object manager's mapper looks a node's properties up here, so that a save can write a value unchanged since its load
+ * as the store held it (see HeldAsLoaded). Kept only as long as the map is.
+ */
+const tagsHeld = new WeakMap<object, Map<string, any>>();
+
+/**
+ * Internal: what each key of `read`, a map a column's read gave, held as the store holds it, for each key that held a
+ * temporal tag, at any depth: see {@link tagsHeld}. Undefined for a map no read gave, or one with no tag in it.
+ */
+export function tagsHeldBy(read: object): Map<string, any> | undefined {
+    return tagsHeld.get(read);
+}
+
+/** `read`, what the module read of the column `raw` holds as plain JSON, its tags recorded (see tagsHeld). */
+function recordingTags(read: any, raw: any): any {
+    recordTags(read, raw);
+    return read;
+}
+
+/**
+ * Records, of each map of `read` whose keys held a tag in `raw` (the same value as plain JSON), what each such key
+ * held, walking the two side by side: a key `$$k` in `raw` is the key `$k` read. Gives whether `raw` holds a tag.
+ */
+function recordTags(read: any, raw: any): boolean {
+    if (raw === null || typeof raw !== 'object') {
+        return false;
+    }
+    if (Array.isArray(raw)) {
+        // Each item recorded, whether or not one before it held a tag.
+        return raw.map((item, i) => recordTags(Array.isArray(read) ? read[i] : undefined, item)).includes(true);
+    }
+    return isTag(raw) || recordMapTags(read, raw);
+}
+
+/** Records what each key of `read`, a map, held in `raw` where it held a tag (see recordTags). */
+function recordMapTags(read: any, raw: Record<string, any>): boolean {
+    if (read === null || typeof read !== 'object' || Array.isArray(read)) {
+        return false;
+    }
+    const held = new Map<string, any>();
+    for (const [key, item] of Object.entries(raw)) {
+        const name = key.startsWith('$$') ? key.slice(1) : key;
+        const child = Object.prototype.hasOwnProperty.call(read, name) ? read[name] : undefined;
+        if (recordTags(child, item)) {
+            held.set(name, item);
+        }
+    }
+    if (held.size) {
+        tagsHeld.set(read, held);
+    }
+    return held.size > 0;
+}
+
+/**
+ * Whether `value`, a map as the store holds it, is a temporal value's tag: a map with the key `$t`, one `$` before it,
+ * where a map of the user's with that key holds it as `$$t`.
+ */
+export function isTag(value: any): boolean {
+    return (
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.prototype.hasOwnProperty.call(value, '$t')
+    );
+}
+
+/**
+ * A property a save writes as the store held it when it was loaded (#811): its value is unchanged since the load, and
+ * the load read a temporal tag in it, which the load gave as its text. `value` is the value as a save would write it
+ * otherwise, and `held` what the store held, as plain JSON: {@link writeLayout} writes each tag in `held` as it is, and
+ * the rest of `value` as it writes any value. Only a SQL store's save makes one, as only its reads record tags. Given
+ * to anything else, it is its value.
+ */
+export class HeldAsLoaded {
+    constructor(
+        readonly value: any,
+        readonly held: any
+    ) {}
+
+    toJSON(): any {
+        return this.value;
+    }
 }
 
 /**
@@ -63,7 +161,7 @@ export function readLayoutAfter(
     if (!text.includes('"$') && !text.includes('\\u0024')) {
         return value;
     }
-    return readLayoutThrough(value);
+    return recordingTags(readLayoutThrough(value), value);
 }
 
 /**
@@ -72,7 +170,7 @@ export function readLayoutAfter(
  * begins with `$`, a tag's or an escaped key's, and as it is otherwise.
  */
 export function readLayoutOf(value: any): any {
-    return keyedWithDollar(value) ? readLayoutThrough(value) : value;
+    return keyedWithDollar(value) ? recordingTags(readLayoutThrough(value), value) : value;
 }
 
 /** Whether a map in `value`, at any depth, has a key that begins with `$`. */
@@ -101,7 +199,7 @@ function readLayoutThrough(value: any): any {
             ? `${TEXT}${item}`
             : item
     );
-    return unmarked(readLayout(marked));
+    return unmarked(moduleRead(marked));
 }
 
 /** `value` with each stand-in for a float the float again, and each text marked so the text it was, at any depth. */
@@ -135,12 +233,22 @@ function unmarked(value: any): any {
  * Where the store's JSON holds a float as no number, Postgres's NaN and infinities and SQLite's NaN, the module refuses the
  * value, and so does this, with the module's message: the message a `CREATE` given the value is refused with.
  *
+ * A {@link HeldAsLoaded} in `given`, at any depth, is written as its value is, but for each temporal tag the store held
+ * in it, which is written as the store held it, byte for byte: each stands in as a text while the rest is written, and
+ * its JSON text is put in its place after.
+ *
  * The module is asked only of a value that holds something it writes otherwise than JSON text does (see heldOtherwise): a
  * date, a key that begins with `$`, bytes, a {@link CypherFloat}, or a number that isn't a safe integer, which every
  * float but a whole one is. Any other value is held as its JSON text on every store.
  */
 export function writeLayout(given: any, store: SharedStore): string {
-    const value = settled(given);
+    const tags: string[] = [];
+    const value = settled(given, tags);
+    return tags.length ? withTags(written(value, store), tags) : written(value, store);
+}
+
+/** `value`, settled, as `store`'s layout holds it, as JSON text (see writeLayout). */
+function written(value: any, store: SharedStore): string {
     if (!heldOtherwise(value)) {
         return jsonText(value);
     }
@@ -216,7 +324,10 @@ function bytes(value: any): boolean {
  * `Date` and a {@link CypherFloat} are kept for the module, and -0 is a float. So a value is written alike whether the
  * module is asked of it or not: the module writes an object's fields and a `Map`'s entries, and a float beside one asks it.
  */
-function settled(value: any): any {
+function settled(value: any, tags: string[]): any {
+    if (value instanceof HeldAsLoaded) {
+        return keptTags(value.value, value.held, tags);
+    }
     if (value === null || typeof value !== 'object') {
         // -0 a float, as no integer is -0: the module's request reads a number -0 as the integer 0.
         return Object.is(value, -0) ? new CypherFloat(-0) : value;
@@ -230,16 +341,67 @@ function settled(value: any): any {
     }
     const json = jsonOf(value);
     if (json !== value) {
-        return settled(json);
+        return settled(json, tags);
     }
     if (value instanceof Float32Array || value instanceof Float64Array) {
         return Array.from(value, (item) => new CypherFloat(item));
     }
     if (listed(value)) {
-        return Array.from(value as Iterable<unknown>).map(settled);
+        return Array.from(value as Iterable<unknown>).map((item) => settled(item, tags));
     }
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settled(item)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, settled(item, tags)]));
 }
+
+/**
+ * `value`, settled, with each place `held` holds a temporal tag at a stand-in for the tag, which {@link withTags} puts the
+ * tag's text in place of once the rest is written: `tags` takes each tag's text, its stand-in naming its place in
+ * `tags`. Where `value` and `held` differ in shape, as they don't for a value unchanged since its load, `value` there is
+ * written as any value is.
+ */
+function keptTags(value: any, held: any, tags: string[]): any {
+    if (isTag(held)) {
+        tags.push(jsonText(held));
+        return `${TAG}${tags.length - 1}`;
+    }
+    if (Array.isArray(held) && Array.isArray(value) && value.length === held.length) {
+        return value.map((item, i) => keptTags(item, held[i], tags));
+    }
+    if (
+        held !== null &&
+        typeof held === 'object' &&
+        !Array.isArray(held) &&
+        value !== null &&
+        typeof value === 'object' &&
+        Object.getPrototypeOf(value) === Object.prototype
+    ) {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [
+                key,
+                keptTags(
+                    item,
+                    Object.prototype.hasOwnProperty.call(held, heldKey(key)) ? held[heldKey(key)] : undefined,
+                    tags
+                )
+            ])
+        );
+    }
+    return settled(value, tags);
+}
+
+/**
+ * What a temporal tag a save writes as the store held it stands in for while the rest of the value is written (see
+ * keptTags): its number in the write's tags after it. The text holds no character JSON escapes, so it is written as it
+ * is, and a random part, so no text of a user's is it.
+ */
+const TAG = `drivine:held-tag:${Math.random().toString(36).slice(2)}:`;
+
+/** `text`, a value written with stand-ins for tags (see keptTags), with each tag's text in place of its stand-in. */
+function withTags(text: string, tags: string[]): string {
+    return text.replace(STAND_IN, (_, i: string) => tags[Number(i)]);
+}
+
+/** A stand-in for a tag as JSON text writes it (see TAG): its characters are letters, digits and colons. */
+const STAND_IN = new RegExp(`"${TAG}(\\d+)"`, 'g');
 
 /** Whether a save writes `value` as the list of its items: a list, a set, or a typed array other than bytes. */
 function listed(value: object): boolean {
