@@ -53,8 +53,8 @@ class ActorDirectors {
  * no value last. On the SQL stores the path is ordered by the shared module's order fragments over the hop's node, as
  * drivine4j orders it; the library's own SQL before ordered a date by its tag's text (`.5Z` before `Z`) and kinds out of
  * Cypher's order. On Neo4j and Memgraph the rows are sorted by the engine's own ORDER BY before they are collected
- * (#799), which on both orders the kinds as Cypher does. FalkorDB, which orders temporals and mixed kinds by its own
- * rules, is left out.
+ * (#799), which on both orders the kinds as Cypher does; Memgraph's datetime() refuses the dates the date cases write,
+ * so those two are skipped there. FalkorDB, which orders temporals and mixed kinds by its own rules, is left out.
  */
 describe.each(allStores().filter((it) => it.type !== DatabaseType.FALKORDB))(
     "A view's path ordered by a hop's date or mixed kinds on $type",
