@@ -1,10 +1,13 @@
 import { Direction } from '@/annotation/Metadata';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
+import { quoteName } from '@/backend/Cypher';
 import { SqlGraph, sqlText } from '@/backend/sql/SqlGraph';
 import { rootOf } from '@/backend/sql/SqlSaves';
 import { target } from '@/backend/ViewProjector';
 import { AggregateModel, GraphViewModel, PathHop, PathModel } from '@/model/GraphViewModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
+import { SharedStore } from '@/cypher/SharedCypherCompiler';
+import { SqlFragments } from '@/cypher/SqlFragments';
 
 /** The FROM and WHERE of a path, and the row each of its hops reaches. */
 interface PathRows {
@@ -39,13 +42,6 @@ export interface NodesOf {
     hint: string;
 }
 
-/** What a path ordered by a hop reads of the hop's node: its value as a number, as text, and whether it is `""`. */
-export interface OrderReads {
-    num: string;
-    txt: string;
-    emp: string;
-}
-
 /**
  * Writes a view as one JSON document per root, `{root, rels}`, as the graph engines return it: each relationship a
  * correlated subquery over the relationship table, its nodes aggregated into a JSON array. A relationship is followed
@@ -56,6 +52,12 @@ export interface OrderReads {
  * Oracle's subqueries carry.
  */
 export abstract class SqlViews {
+    /**
+     * The shared module's fragments the views write (a path ordered by a hop's property): what they bind is to be bound
+     * beside the statement's own, and on Oracle what they ask of the statement written into it (see OracleFragments).
+     */
+    readonly fragments: SqlFragments;
+
     private aliasCount = 0;
 
     /** An empty JSON object. */
@@ -63,8 +65,11 @@ export abstract class SqlViews {
 
     protected constructor(
         protected readonly graph: SqlGraph,
-        protected readonly depth: Record<string, number> = {}
-    ) {}
+        protected readonly depth: Record<string, number> = {},
+        store: SharedStore
+    ) {
+        this.fragments = new SqlFragments(store, { name: graph.name });
+    }
 
     // ----- Views -----
 
@@ -143,6 +148,11 @@ export abstract class SqlViews {
             : direction === Direction.INCOMING
             ? `(SELECT eid, dst AS a, src AS b ${typed})`
             : `(SELECT eid, src AS a, dst AS b ${typed})`;
+    }
+
+    /** Whether the node keys `a` and `b` are equal, as the store joins a node back to the node table by its key. */
+    protected sameNode(a: string, b: string): string {
+        return `${a} = ${b}`;
     }
 
     /** What ends a query that reads its first row only. */
@@ -257,50 +267,48 @@ export abstract class SqlViews {
                 : `(${this.select(hint)}${this.nodeDocument(x)} ${nodes} ${this.firstRow()})`;
         }
         const o = this.nextAlias('o');
-        const direction = ordered.ascending ? 'ASC' : 'DESC';
-        const nodes = `FROM ${this.graph.nodes} ${x} JOIN (${this.orderedPathNodes(
-            path,
-            from,
-            ordered
-        )}) ${o} ON ${o}.nid = ${x}.nid`;
-        const order =
-            `${o}.order_kind ${direction} NULLS LAST, ${o}.order_number ${direction} NULLS LAST, ` +
-            `${o}.order_text ${direction} NULLS ${ordered.ascending ? 'FIRST' : 'LAST'}, ${x}.nid`;
+        const kept = `${this.nextAlias('k')}_`;
+        const terms = this.pathTerms(ordered);
+        const nodes =
+            `FROM ${this.graph.nodes} ${x} JOIN (${this.orderedPathNodes(path, from, ordered, terms)}) ${o} ` +
+            `ON ${o}.nid = ${x}.nid JOIN ${this.graph.nodes} ${kept} ON ${this.sameNode(`${kept}.nid`, `${o}.hop`)}`;
+        const order = `${terms(kept)}, ${x}.nid`;
         return path.isCollection
             ? `(SELECT ${this.arrayOf(this.nodeDocument(x), order)} ${nodes})`
             : `(SELECT ${this.nodeDocument(x)} ${nodes} ORDER BY ${order} ${this.firstRow()})`;
     }
 
     /**
-     * The nodes at the far end of a path, each with the value the hop the path is ordered by keeps for it: that of the
-     * first node of the hop that leads to it, the lowest or, read highest first, the highest. The node the hop reaches
-     * is mapped to no class, so its property's type is not known: it is read as a number, which is null for a value
-     * that is not a JSON number (a text of digits included), and as text. `order_kind` is 0 for a text, 1 for a number
-     * and null for a node without the property, so a text comes before a number read lowest first, as the graph engines
-     * order them, and a node without the property last, whichever way the path is read. Only the kind kept is read
-     * further: a node reached through a text and a number keeps the text, read lowest first, and the number, read
-     * highest first. Where the store reads a stored `""` as null (Oracle), whether the node holds one is read on its
-     * own: it is a text, and the lowest. `order_text` is null for it, and orders first among the texts read lowest
-     * first.
+     * The terms that order the node row `row`, of a node of the hop a path is ordered by, as Cypher orders the hop's
+     * property: the shared module's (drivine-cypher-spec#235, its fragments; drivine4j's `pathOrder`), whatever its
+     * kind, a date included, read highest first where the hop reads so, and a node without the property last
+     * whichever way the path is read.
      */
-    private orderedPathNodes(path: PathModel, from: string, ordered: PathHop): string {
+    private pathTerms(ordered: PathHop): (row: string) => string {
+        return (row) =>
+            this.fragments
+                .ordered(
+                    { n: { node: row, labels: [] } },
+                    `n.${quoteName(ordered.orderBy!)}`,
+                    !ordered.ascending,
+                    'LAST'
+                )
+                .join(', ');
+    }
+
+    /**
+     * The nodes at the far end of a path, each once, as `nid`, with as `hop` the node of the hop the path is ordered by
+     * that it keeps: the first of those that lead to it in Cypher's order of the hop's property, `terms`, the lowest or,
+     * read highest first, the highest. A node of the hop without the property is kept only where none that leads to it
+     * has it.
+     */
+    private orderedPathNodes(path: PathModel, from: string, ordered: PathHop, terms: (row: string) => string): string {
         const { body, nodes }: PathRows = this.pathRows(path, from);
         const node = nodes[path.hops.indexOf(ordered)];
         const last = nodes[nodes.length - 1];
-        const r = this.nextAlias('r');
-        const keep = ordered.ascending ? 'MIN' : 'MAX';
-        const reads = this.orderReads(node, ordered.orderBy!);
-        const kind =
-            `${keep}(CASE WHEN ${r}.num IS NOT NULL THEN 1 ` + `WHEN ${r}.txt IS NOT NULL OR ${r}.emp = 1 THEN 0 END)`;
-        const text = `CASE WHEN ${r}.num IS NULL THEN ${r}.txt END`;
-        // Read lowest first, a node that a "" leads to keeps no text, which orders first among the texts.
-        const kept = ordered.ascending ? `CASE WHEN MAX(${r}.emp) IS NULL THEN MIN(${text}) END` : `MAX(${text})`;
-        return (
-            `SELECT ${r}.nid, ${kind} AS order_kind, ` +
-            `CASE WHEN ${kind} = 1 THEN ${keep}(${r}.num) END AS order_number, ` +
-            `CASE WHEN ${kind} = 0 THEN ${kept} END AS order_text ` +
-            `FROM (SELECT ${last}.nid AS nid, ${reads.num} AS num, ${reads.txt} AS txt, ${reads.emp} AS emp ${body}) ` +
-            `${r} GROUP BY ${r}.nid`
+        return this.firstOfWays(
+            `SELECT ${last}.nid AS nid, ${node}.nid AS hop, ${node}.props AS props, ${node}.stamp AS stamp ${body}`,
+            terms
         );
     }
 
@@ -375,8 +383,13 @@ export abstract class SqlViews {
     /** The SELECT keyword with `hint`, where the store reads one. */
     protected abstract select(hint: string): string;
 
-    /** The property of the node row `node` that a path is ordered by, read as a number, as text, and as whether it is `""`. */
-    protected abstract orderReads(node: string, property: string): OrderReads;
+    /**
+     * The ways `ways` reaches the nodes at the far end of a path, rows of `nid`, `hop`, `props` and `stamp`, the node
+     * reached and the node of the ordered hop the way passes through, with its properties and stamp (which a path
+     * ordered by the stamp reads): grouped by `nid`, each with as `hop` the first of its ways' by `terms`, which order a
+     * row of the node of the hop.
+     */
+    protected abstract firstOfWays(ways: string, terms: (row: string) => string): string;
 }
 
 /** The hint that has Oracle read the node row `x` by its id, through the primary key. */

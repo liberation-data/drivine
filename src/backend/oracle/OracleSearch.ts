@@ -83,14 +83,19 @@ export class OracleSearch {
             hinted(
                 [
                     `SELECT JSON_OBJECT('value' VALUE ${value}, 'score' VALUE s.score RETURNING JSON) AS "result"`,
-                    `FROM (${candidates}) s JOIN ${this.graph.nodes} ${ROW_ALIAS} ON ${sameKey(`${ROW_ALIAS}.nid`, 's.nid')}`,
+                    `FROM (${candidates}) s JOIN ${this.graph.nodes} ${ROW_ALIAS} ON ${sameKey(
+                        `${ROW_ALIAS}.nid`,
+                        's.nid'
+                    )}`,
                     `WHERE ${filters.join(' AND ')}`,
                     'ORDER BY s.score DESC',
                     ...(search.limit !== undefined ? [`FETCH FIRST ${search.limit} ROWS ONLY`] : [])
-                ].join('\n')
+                ].join('\n'),
+                views.fragments.hints
             ),
-            this.graph.name
+            this.graph.name,
+            views.fragments
         );
-        return new GraphStatement(made.text, bindings, made.calls);
+        return new GraphStatement(made.text, { ...bindings, ...views.fragments.parameters }, made.calls);
     }
 }

@@ -1,8 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
-import { hasLabels, jsonType, nodeDocument, numberOf, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
+import { hasLabels, nodeDocument, numberOf, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { sqlText } from '@/backend/sql/SqlGraph';
-import { NodesOf, OrderReads, SqlViews } from '@/backend/sql/SqlViews';
-import { Stamps } from '@/model/Stamps';
+import { NodesOf, SqlViews } from '@/backend/sql/SqlViews';
 
 /**
  * Writes a view on SQLite (see SqlViews): each relationship's nodes aggregated with `json_group_array`, and a
@@ -13,7 +12,7 @@ export class SqliteViews extends SqlViews {
     protected readonly emptyObject = `'{}'`;
 
     constructor(graph: SqliteGraph, depth: Record<string, number> = {}) {
-        super(graph, depth);
+        super(graph, depth, 'sqlite');
     }
 
     object(entries: [string, string][]): string {
@@ -76,16 +75,16 @@ export class SqliteViews extends SqlViews {
         return 'LIMIT 1';
     }
 
-    /** A stored `""` reads as `""`, so it is a text and needs no reading of its own. */
-    protected orderReads(node: string, property: string): OrderReads {
-        const text =
-            property === Stamps.PROPERTY
-                ? textOf(node, property)
-                : `CASE WHEN ${jsonType(node, property)} = 'text' THEN ${textOf(node, property)} END`;
-        return {
-            num: property === Stamps.PROPERTY ? 'CAST(NULL AS REAL)' : numberOf(node, property),
-            txt: text,
-            emp: 'CAST(NULL AS INTEGER)'
-        };
+    /**
+     * The first hop of each node reached in the order `terms`, over the node of the hop joined back by its id: the
+     * first of the ids gathered in that order (drivine4j's `SqliteSelect.pathOrder`).
+     */
+    protected firstOfWays(ways: string, terms: (row: string) => string): string {
+        const w = this.nextAlias('w');
+        const s = `${this.nextAlias('s')}_`;
+        return (
+            `SELECT ${w}.nid, json_group_array(${s}.nid ORDER BY ${terms(s)}) ->> '$[0]' AS hop ` +
+            `FROM (${ways}) ${w} JOIN ${this.graph.nodes} ${s} ON ${s}.nid = ${w}.hop GROUP BY ${w}.nid`
+        );
     }
 }

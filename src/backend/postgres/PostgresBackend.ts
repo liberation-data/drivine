@@ -104,7 +104,8 @@ export class PostgresBackend implements GraphBackend {
                 `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
                 this.from(model.root, this.viewWhere(model, where, depth)),
                 ...this.page(page)
-            ].join('\n')
+            ].join('\n'),
+            views.fragments.parameters
         );
     }
 

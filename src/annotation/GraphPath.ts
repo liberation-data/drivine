@@ -14,10 +14,11 @@ export interface Hop {
      * A property of the node this hop reaches, to read the path in its order: a list holds its targets in the order of
      * the first node of this hop that leads to each, and a single holds the one the first such node leads to. One hop
      * of a path may name one, and a path a group key is read by may name none. A node without the property comes last
-     * whichever way the path is read, and targets whose first nodes hold equal values come in no set order. The
-     * property should hold values of one type. A text of digits is ordered as text, and an empty text is the lowest
-     * text. Where some nodes hold a text and others a number, every backend reads every text before every number lowest
-     * first, and after them highest first.
+     * whichever way the path is read, and targets whose first nodes hold equal values come in no set order. A text of
+     * digits is ordered as text, and an empty text is the lowest text. On Neo4j and the SQL backends a date is ordered
+     * by its moment. Values of several kinds are ordered by kind as Cypher's ORDER BY does on SQLite and Oracle; on
+     * Postgres as jsonb does until liberation-data/drivine-cypher-spec#371's fix, and on the graph engines with every
+     * text first lowest first, last highest first. See docs/05.
      */
     orderBy?: string;
     /** Whether `orderBy` reads lowest first. Defaults to true. */
