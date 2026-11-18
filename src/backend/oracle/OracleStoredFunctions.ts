@@ -79,6 +79,26 @@ export class OracleStoredFunctions {
         );
     }
 
+    /**
+     * Whether `connection` may call the function the graph `graph` works out `+`, `-`, `*` and `/` of a temporal value
+     * read from the store by, as {@link nullsEqual} asks of its own: asked of apart, as a store made by a version before
+     * it has the others.
+     *
+     * @param database the database and the user the session is of, which with the graph keys what is remembered
+     * @throws where calling it fails for any reason but there being no function it may call
+     */
+    static async temporalArithmetic(connection: Executes, database: string, graph: string): Promise<boolean> {
+        return this.asked(
+            connection,
+            database,
+            graph,
+            `${graph}_temporal_arith`,
+            probe(graph, 'temporalArithmeticStored'),
+            "Until the graph is ensured by such a user, an order of the query DSL by arithmetic of a property's value " +
+                'is refused.'
+        );
+    }
+
     /** Asks again, of every session, whether it may call the functions of `graph`: it has just been ensured. */
     static ensured(graph: string): void {
         for (const key of [...this.absent.keys()]) {

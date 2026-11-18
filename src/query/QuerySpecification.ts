@@ -5,6 +5,7 @@ import { MapPostProcessor } from '@/mapper/MapPostProcessor';
 import { TransformPostProcessor } from '@/mapper/TransformPostProcessor';
 import { FilterPostProcessor } from '@/mapper/FilterPostProcessor';
 import { QueryLanguage } from '@/query/QueryLanguage';
+import type { StoredFunctionCalls } from '@/backend/GraphStatement';
 
 /** The count, if it is a whole number of at least 0: a value from a request, say, would otherwise be written as text. */
 function wholeNumber(count: number | undefined, what: string): number | undefined {
@@ -32,6 +33,11 @@ export class QuerySpecification<T> {
      * statement of a user's own is read as before.
      */
     _exactIntegers = false;
+    /**
+     * The stored functions of an Oracle graph the statement calls, where the object manager wrote it and the shared
+     * module's fragments in it call any: the connection makes sure its session may call them first (see OracleConnection).
+     */
+    _storedFunctions?: StoredFunctionCalls;
 
     static withStatement<T>(statement?: string | Statement): QuerySpecification<T> {
         return new QuerySpecification<T>(statement);
@@ -114,12 +120,19 @@ export class QuerySpecification<T> {
             .bind(this.parameters)
             .addPostProcessors(...this.postProcessors);
         copy._exactIntegers = this._exactIntegers;
+        copy._storedFunctions = this._storedFunctions;
         return Object.freeze(copy);
     }
 
     /** Has the statement's JSON read with its whole numbers past 2^53 as bigints: see {@link _exactIntegers}. */
     exactIntegers(): this {
         this._exactIntegers = true;
+        return this;
+    }
+
+    /** Says which stored functions of an Oracle graph the statement calls: see {@link _storedFunctions}. */
+    callsStoredFunctions(calls: StoredFunctionCalls): this {
+        this._storedFunctions = calls;
         return this;
     }
 }

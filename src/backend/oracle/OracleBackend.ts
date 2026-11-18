@@ -8,13 +8,22 @@ import {
     Page
 } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import { carriesLabels, hasLabels, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
+import {
+    carriesLabels,
+    hasLabels,
+    moduleLabelTest,
+    nodeDocument,
+    OracleGraph,
+    textOf
+} from '@/backend/oracle/OracleGraph';
+import { called, hinted, noted } from '@/backend/oracle/OracleFragments';
+import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
+import { SqlFragments } from '@/cypher/SqlFragments';
 import { hasId } from '@/backend/sql/NodeIds';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { OracleViews } from '@/backend/oracle/OracleViews';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CascadeBeyond } from '@/backend/CascadeTargets';
-import { OracleQueryRenderer } from '@/backend/oracle/OracleQueryRenderer';
 import { OracleSaveBuilder } from '@/backend/oracle/OracleSaveBuilder';
 import { OracleWrites } from '@/backend/oracle/OracleWrites';
 import { OracleSearch } from '@/backend/oracle/OracleSearch';
@@ -30,8 +39,10 @@ import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
-import { RenderedQuery } from '@/dsl/QueryRenderer';
-import { QueryFn, WhereFn } from '@/dsl/Refs';
+import { pinnedProperties, RenderedQuery } from '@/dsl/QueryRenderer';
+import { allOfOne, Condition, Query, QueryFn, WhereFn } from '@/dsl/Refs';
+import { scopeOf } from '@/dsl/ModelScope';
+import { rootRefs } from '@/dsl/QueryRefs';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GroupQuery } from '@/manager/Groups';
 import { SchemaItem } from '@/schema/SchemaGrammar';
@@ -41,13 +52,19 @@ import { RelateMode } from '@/manager/NodeRef';
 import { Stamps } from '@/model/Stamps';
 import { IdKeyedStatement } from '@/backend/oracle/IdKeyedStatement';
 
-/** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
-export const ROW_ALIAS = 'n';
+/** What a read of the query DSL calls its root's row (see DSL_ROW). A raw `where` is SQL over `n`, which `written` reads as it. */
+export const ROW_ALIAS = DSL_ROW;
+
+/** What the statements that read a node by its id alone call its row. */
+const NODE_ROW = 'n';
 
 /**
  * Statements for Oracle, over the tables of an OracleGraph. A load returns the rows the graph engines do, `{props,
  * labels}` for a fragment, as JSON. A raw `where` is an SQL predicate over the node's row, `n` (its `labels`, `props`
- * and `stamp`), in which a property of the node may be written as Cypher writes it, `n.name` (see `written`).
+ * and `stamp`), in which a property of the node may be written as Cypher writes it, `n.name` (see `written`). A filter,
+ * a seek and an order of the query DSL are the shared module's SQL (FragmentQueryRenderer), over the row `n_`; what its
+ * fragments ask of the statement, its hints and the stored functions they call, travels with their text and is written
+ * into each statement here (see OracleFragments).
  */
 export class OracleBackend implements GraphBackend {
     /** The store's stamp and schema marker, the shared module's statements. */
@@ -64,7 +81,7 @@ export class OracleBackend implements GraphBackend {
     constructor(readonly graph: OracleGraph = new OracleGraph()) {}
 
     loadAllFragments(model: FragmentModel, where?: string, page: Page = {}, tested: string[] = []): GraphStatement {
-        return new GraphStatement(
+        return this.statement(
             [`SELECT ${nodeDocument(ROW_ALIAS)} AS "result"`, this.from(model, where, tested), ...this.page(page)].join(
                 '\n'
             )
@@ -73,7 +90,7 @@ export class OracleBackend implements GraphBackend {
 
     loadFragment(model: FragmentModel): GraphStatement {
         return IdKeyedStatement.of(
-            new GraphStatement(
+            this.statement(
                 [`SELECT ${nodeDocument(ROW_ALIAS)} AS "result"`, this.foundById(model, this.idPredicate(model))].join(
                     '\n'
                 )
@@ -82,7 +99,7 @@ export class OracleBackend implements GraphBackend {
     }
 
     countFragments(model: FragmentModel, where?: string, tested: string[] = []): GraphStatement {
-        return new GraphStatement([`SELECT COUNT(*) AS "count"`, this.from(model, where, tested)].join('\n'));
+        return this.statement([`SELECT COUNT(*) AS "count"`, this.from(model, where, tested)].join('\n'));
     }
 
     loadAllViews(
@@ -93,7 +110,7 @@ export class OracleBackend implements GraphBackend {
         tested: string[] = []
     ): GraphStatement {
         const views = new OracleViews(this.graph, depth);
-        return new GraphStatement(
+        return this.statement(
             [
                 `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
                 this.from(model.root, this.viewWhere(model, where, depth), tested),
@@ -105,7 +122,7 @@ export class OracleBackend implements GraphBackend {
     loadView(model: GraphViewModel, depth: Record<string, number> = {}): GraphStatement {
         const views = new OracleViews(this.graph, depth);
         return IdKeyedStatement.of(
-            new GraphStatement(
+            this.statement(
                 [
                     `SELECT ${views.document(model, ROW_ALIAS)} AS "result"`,
                     this.foundById(model.root, this.viewWhere(model, this.idPredicate(model.root), depth))
@@ -120,7 +137,7 @@ export class OracleBackend implements GraphBackend {
         depth: Record<string, number> = {},
         tested: string[] = []
     ): GraphStatement {
-        return new GraphStatement(
+        return this.statement(
             [`SELECT COUNT(*) AS "count"`, this.from(model.root, this.viewWhere(model, where, depth), tested)].join(
                 '\n'
             )
@@ -159,14 +176,15 @@ export class OracleBackend implements GraphBackend {
                   `    SELECT nid BULK COLLECT INTO v_targets FROM cascade_targets WHERE nid NOT IN (SELECT nid FROM cascade_kept);`
               ].join('\n')
             : `SELECT DISTINCT nid BULK COLLECT INTO v_targets FROM (${reached});`;
+        const roots = hinted(`SELECT ${ROW_ALIAS}.nid BULK COLLECT INTO v_roots ${this.foundById(root, filter)};`);
         return IdKeyedStatement.of(
-            new GraphStatement(`DECLARE
+            this.statement(`DECLARE
     v_roots SYS.ODCINUMBERLIST;
     v_targets SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
     v_deleted NUMBER;
     c SYS_REFCURSOR;
 BEGIN
-    SELECT ${ROW_ALIAS}.nid BULK COLLECT INTO v_roots ${this.foundById(root, filter)};
+    ${roots}
     ${targets}
     DELETE FROM ${this.graph.nodes} WHERE nid IN (SELECT column_value FROM TABLE(v_roots));
     v_deleted := SQL%ROWCOUNT;
@@ -182,13 +200,15 @@ END;`)
         if (target.kind !== 'GRAPH_VIEW') {
             return [];
         }
-        const roots = `SELECT ${ROW_ALIAS}.nid ${this.foundById(target.model.root, this.deletedWhere(target, where))}`;
+        const roots = hinted(
+            `SELECT ${ROW_ALIAS}.nid ${this.foundById(target.model.root, this.deletedWhere(target, where))}`
+        );
         const cascaded = new OracleViews(this.graph).cascade(target.model, 'n.nid IN (SELECT nid FROM cascade_roots)');
         return cascaded.beyond.map(({ view, field, maxDepth, nodes, within }: CascadeBeyond) => ({
             view,
             field,
             maxDepth,
-            statement: IdKeyedStatement.of(new GraphStatement(beyondCount(roots, within, nodes)))
+            statement: IdKeyedStatement.of(this.statement(beyondCount(roots, within, nodes)))
         }));
     }
 
@@ -257,8 +277,8 @@ END;`)
         return IdKeyedStatement.of(
             new GraphStatement(
                 [
-                    `SELECT JSON_TRANSFORM(${ROW_ALIAS}.props, KEEP '$') AS "props"`,
-                    this.foundById(model, this.idPredicate(model))
+                    `SELECT JSON_TRANSFORM(${NODE_ROW}.props, KEEP '$') AS "props"`,
+                    this.foundById(model, this.idPredicate(model, NODE_ROW), NODE_ROW)
                 ].join('\n')
             )
         );
@@ -268,29 +288,51 @@ END;`)
         return IdKeyedStatement.of(
             new GraphStatement(
                 [
-                    `SELECT NVL(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
-                    this.foundById(model, this.idPredicate(model))
+                    `SELECT NVL(${NODE_ROW}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
+                    this.foundById(model, this.idPredicate(model, NODE_ROW), NODE_ROW)
                 ].join('\n')
             )
         );
     }
 
+    /**
+     * The query, as the shared module's fragments write it (FragmentQueryRenderer), what they ask of its statement noted
+     * on its filter and its order (see OracleFragments). An equality of a property the first property of a range index or
+     * a uniqueness constraint of one of the root's labels is (`indexed`) is read through the index's expression, as the
+     * module writes it for the labels the root is given (drivine4j#65): a label that such an equality at the top of the
+     * filter tests is then not tested again by the statement (`labelsTested`, see `from`).
+     */
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel, indexed: SchemaItem[] = []): RenderedQuery {
-        return OracleQueryRenderer.render(
-            fn,
-            target,
-            (depth) => new OracleViews(this.graph, depth),
-            ROW_ALIAS,
-            indexed
-        );
+        const fragments = new SqlFragments('oracle', {
+            name: this.graph.name,
+            indexedProperties: indexed.map((it) => [it.label, it.properties[0]] as const)
+        });
+        // Made once: the labels implied are read from the very conditions the statement compiles.
+        const made = fn(rootRefs<T>(scopeOf(target)));
+        const query = FragmentQueryRenderer.render(fragments, () => made, target, ROW_ALIAS);
+        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        return {
+            ...query,
+            where: noted(query.where, fragments),
+            orderBy: noted(query.orderBy, fragments),
+            labelsTested: labelsImplied(
+                query.where,
+                root.labels,
+                indexedEqualities(this.graph.name, made, target, indexed)
+            )
+        };
     }
 
+    /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
     written(predicate: string): string {
-        return new CypherShorthand(ROW_ALIAS, ROW_ALIAS, textOf).rewrite(predicate);
+        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate);
     }
 
+    /** The condition, as the shared module's fragments write it, what they ask of its statement noted on it. */
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
-        return OracleQueryRenderer.renderWhere(fn, target, new OracleViews(this.graph), ROW_ALIAS);
+        const fragments = new SqlFragments('oracle', { name: this.graph.name });
+        const rendered = FragmentQueryRenderer.renderWhere(fragments, fn, target, ROW_ALIAS);
+        return { where: noted(rendered.where, fragments)!, bindings: rendered.bindings };
     }
 
     patchOne(model: FragmentModel, where?: string): GraphStatement {
@@ -392,7 +434,7 @@ END;`)
     }
 
     /**
-     * The nodes of the fragment's labels that meet `where`, as the row `n`. A label `where` tests itself (`tested`) is
+     * The nodes of the fragment's labels that meet `where`, as the row `n_`. A label `where` tests itself (`tested`) is
      * not tested again. Beside one, the others are tested in a form no index serves: Oracle takes a label's test for a
      * lookup of one row, and would read that label's nodes in place of the index `where` is read through.
      */
@@ -417,11 +459,12 @@ END;`)
         tested: string[] = [],
         byId: boolean = false
     ): GraphStatement {
-        return new GraphStatement(`DECLARE
+        const deleted = hinted(`DELETE ${byId ? this.foundById(model, where) : this.from(model, where, tested)}`);
+        return this.statement(`DECLARE
     v_deleted NUMBER;
     c SYS_REFCURSOR;
 BEGIN
-    DELETE ${byId ? this.foundById(model, where) : this.from(model, where, tested)};
+    ${deleted};
     v_deleted := SQL%ROWCOUNT;
     OPEN c FOR SELECT v_deleted AS "deleted" FROM dual;
     DBMS_SQL.RETURN_RESULT(c);
@@ -429,13 +472,22 @@ END;`);
     }
 
     /**
-     * The node of the fragment's labels found by its id in `where` (see idPredicate), as the row `n`: each label told by
+     * The node of the fragment's labels found by its id in `where` (see idPredicate), as the row `row` (`n_` unless given): each label told by
      * the labels' text ({@link carriesLabels}), so Oracle reads the index over the id for the one node, and not every node
      * of the first label, as drivine4j's `OracleSelect.hasId` narrows it.
      */
-    private foundById(model: FragmentModel, where?: string): string {
-        const tests = [carriesLabels(ROW_ALIAS, model.labels), ...(where ? [`(${where})`] : [])];
-        return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${tests.join(' AND ')}`;
+    private foundById(model: FragmentModel, where?: string, row: string = ROW_ALIAS): string {
+        const tests = [carriesLabels(row, model.labels), ...(where ? [`(${where})`] : [])];
+        return `FROM ${this.graph.nodes} ${row}\nWHERE ${tests.join(' AND ')}`;
+    }
+
+    /**
+     * The statement `text`, with the hints the fragments in it ask for written after its first `SELECT` or `DELETE`, and
+     * the stored functions they call said (see OracleFragments). A block hints each of its statements itself first.
+     */
+    private statement(text: string, bindings: Record<string, any> = {}): GraphStatement {
+        const made = called(hinted(text), this.graph.name);
+        return new GraphStatement(made.text, bindings, made.calls);
     }
 
     /**
@@ -444,11 +496,11 @@ END;`);
      * as the JSON text Oracle's layout holds it as, read `EXTENDED`, as a save finds the node (see IdKeyedStatement); the
      * comparison reads it more than once, so it is bound by name.
      */
-    private idPredicate(model: FragmentModel): string {
+    private idPredicate(model: FragmentModel, row: string = ROW_ALIAS): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return hasId('oracle', ROW_ALIAS, model.nodeIdProperty, 'JSON($id EXTENDED)');
+        return hasId('oracle', row, model.nodeIdProperty, 'JSON($id EXTENDED)');
     }
 
     private page(page: Page): string[] {
@@ -458,4 +510,56 @@ END;`);
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];
     }
+}
+
+/**
+ * The labels of `labels` the condition `where`, as the shared module's fragments write it, tests at its top: those of
+ * whose properties an equality is read through a labelled index there (see moduleLabelTest), as drivine4j's
+ * `OraclePredicates.predicate` finds them. None for no condition.
+ *
+ * Only a plain equality at the top of the DSL's filter of an indexed property of the label, read through the index
+ * (`equalities`, see indexedEqualities), implies it. An ignore-case equality of a lowercased copy
+ * (`EQ_LOWERED`, see LowerCopyLookups) is read through the same index, but past 4,000 bytes the module's term holds for
+ * every node, the label's test inside it then not deciding it: the statement tests the label itself. Retires once the
+ * module keeps the label's test inside that guard (liberation-data/drivine-cypher-spec#373).
+ */
+function labelsImplied(where: string | undefined, labels: string[], equalities: string | undefined): string[] {
+    return where && equalities
+        ? labels.filter(
+              (label) =>
+                  where.includes(moduleLabelTest(ROW_ALIAS, label)) &&
+                  equalities.includes(moduleLabelTest(ROW_ALIAS, label))
+          )
+        : [];
+}
+
+/**
+ * The plain equalities at the top of the query's filter of a property `indexed` for a label of the root, as the
+ * shared module's fragments write them alone: none when there are none. The module reads some values through the
+ * index (a label test in their term) and others not (a list, a map, `""`), as it alone knows.
+ */
+function indexedEqualities(
+    graph: string,
+    query: Query,
+    target: TargetModel,
+    indexed: SchemaItem[]
+): string | undefined {
+    const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+    const properties = indexed.filter((it) => root.labels.includes(it.label)).map((it) => it.properties[0]);
+    const scope = scopeOf(target);
+    const equalities = (condition: Condition): Condition[] =>
+        condition.kind === 'AND'
+            ? condition.conditions.flatMap(equalities)
+            : pinnedProperties(condition, scope).some((it) => properties.includes(it))
+            ? [condition]
+            : [];
+    const pinned = query.where !== undefined && properties.length ? equalities(allOfOne(query.where)) : [];
+    if (!pinned.length) {
+        return undefined;
+    }
+    const fragments = new SqlFragments('oracle', {
+        name: graph,
+        indexedProperties: indexed.map((it) => [it.label, it.properties[0]] as const)
+    });
+    return FragmentQueryRenderer.renderWhere(fragments, () => pinned, target, ROW_ALIAS).where;
 }

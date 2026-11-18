@@ -225,15 +225,34 @@ function escapedLabel(label: string): string {
 }
 
 /**
+ * The test the shared module writes of whether the node row `alias` carries `label`, where it reads an equality of the
+ * node's property through the labelled index of the label (`CASE WHEN <test> THEN …`): a condition that holds it at its
+ * top implies the label, so a statement needn't test the label again (see OracleBackend's `labelsImplied`).
+ */
+export function moduleLabelTest(alias: string, label: string): string {
+    return `CASE WHEN JSON_EXISTS(${alias}.labels, '$[*]?(@ == "${escapedLabel(label)}")') THEN`;
+}
+
+/**
+ * The node keys `a` and `b` equal, compared with `+ 0` on one side and again the other way round, as the module's
+ * compiler joins a node back to the node table: compared column to column, Oracle (23.26) may eliminate the join and
+ * read the other row by the key it dropped, or end the server process where a filter reads an indexed property of it
+ * (`ORA-07445`). drivine4j's `OracleSql.sameKey`.
+ */
+export function sameKey(a: string, b: string): string {
+    return `(${a} = ${b} + 0 AND ${b} = ${a} + 0)`;
+}
+
+/**
  * A property of the node row `alias` as Drivine 5.0's range index or uniqueness constraint over the label held it (store
  * layout 1): as text, for the label's nodes alone, and null for every other node, for a value that isn't a scalar, and
- * for one longer than 4,000 bytes. A predicate over this expression implies the label.
+ * for one longer than 4,000 bytes.
  *
- * No index this version makes holds it. Since layout 2 the shared module's schema plan makes them, with drivine4j's
- * statements, over the property's class and key (the module's `OracleSql.labelledIndex` and `uniqueIndex`), and the
- * layout verdict drops 5.0's on an empty graph (#696). The query DSL still writes this for a filter on an indexed
- * property, as the label's test and the property, so such a filter reads none of layout 2's indexes, until its filters
- * are the module's fragments (drivine-cypher-spec#235, step 4).
+ * Only OracleSchemaGrammar's statements of 5.0, kept for the golden statements, write it now: no statement this version
+ * runs reads it, and no index it makes holds it. Since layout 2 the shared module's schema plan makes them, with
+ * drivine4j's statements, over the property's class and key (the module's `OracleSql.labelledIndex` and `uniqueIndex`),
+ * and the layout verdict drops 5.0's on an empty graph (#696). The query DSL's filters are the module's fragments
+ * (drivine-cypher-spec#235), which read layout 2's indexes.
  */
 export function labelledValue(alias: string, label: string, property: string): string {
     return (

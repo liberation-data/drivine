@@ -1,7 +1,9 @@
 import { MatchingSearch, NearestSearch, searchedLabels } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
+import { hasLabels, jsonKey, nodeDocument, OracleGraph, sameKey } from '@/backend/oracle/OracleGraph';
 import { OracleViews } from '@/backend/oracle/OracleViews';
+import { called, hinted } from '@/backend/oracle/OracleFragments';
+import { DSL_ROW as ROW_ALIAS } from '@/backend/sql/FragmentQueryRenderer';
 import { TargetModel } from '@/model/RelationshipModel';
 import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
 
@@ -17,7 +19,9 @@ import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
  * the index, exact without. A full-text search's candidates are the shared module's (`fullTextSearch`), its query the
  * core of Lucene's syntax: Oracle Text scores through the index, each property's score added, and sees only what has
  * been committed; without one, each term is counted as a whole word and the counts scored by BM25, as Neo4j's index
- * scores them. Either is scaled by the best hit.
+ * scores them. Either is scaled by the best hit. A hit's row is the root's of a read of the query DSL, `n_`, which its
+ * `where` reads, joined back by the keys Oracle keeps ({@link sameKey}), with the hints the DSL's fragments in it ask
+ * for (see OracleFragments).
  */
 export class OracleSearch {
     constructor(private readonly graph: OracleGraph) {}
@@ -69,21 +73,24 @@ export class OracleSearch {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const views = new OracleViews(this.graph, search.depth ?? {});
         const filters = [
-            hasLabels('n', root.labels),
+            hasLabels(ROW_ALIAS, root.labels),
             ...(search.threshold ? ['s.score >= $_threshold'] : []),
             ...(search.where ? [`(${search.where})`] : []),
-            ...(target.kind === 'GRAPH_VIEW' ? views.requirements(target.model, 'n') : [])
+            ...(target.kind === 'GRAPH_VIEW' ? views.requirements(target.model, ROW_ALIAS) : [])
         ];
-        const value = target.kind === 'GRAPH_VIEW' ? views.document(target.model, 'n') : nodeDocument('n');
-        return new GraphStatement(
-            [
-                `SELECT JSON_OBJECT('value' VALUE ${value}, 'score' VALUE s.score RETURNING JSON) AS "result"`,
-                `FROM (${candidates}) s JOIN ${this.graph.nodes} n ON n.nid = s.nid`,
-                `WHERE ${filters.join(' AND ')}`,
-                'ORDER BY s.score DESC',
-                ...(search.limit !== undefined ? [`FETCH FIRST ${search.limit} ROWS ONLY`] : [])
-            ].join('\n'),
-            bindings
+        const value = target.kind === 'GRAPH_VIEW' ? views.document(target.model, ROW_ALIAS) : nodeDocument(ROW_ALIAS);
+        const made = called(
+            hinted(
+                [
+                    `SELECT JSON_OBJECT('value' VALUE ${value}, 'score' VALUE s.score RETURNING JSON) AS "result"`,
+                    `FROM (${candidates}) s JOIN ${this.graph.nodes} ${ROW_ALIAS} ON ${sameKey(`${ROW_ALIAS}.nid`, 's.nid')}`,
+                    `WHERE ${filters.join(' AND ')}`,
+                    'ORDER BY s.score DESC',
+                    ...(search.limit !== undefined ? [`FETCH FIRST ${search.limit} ROWS ONLY`] : [])
+                ].join('\n')
+            ),
+            this.graph.name
         );
+        return new GraphStatement(made.text, bindings, made.calls);
     }
 }

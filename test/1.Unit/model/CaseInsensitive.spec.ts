@@ -282,40 +282,23 @@ describe('@CaseInsensitive', () => {
         it("should lowercase the value in the store on Oracle and Postgres, and read Oracle's copy through its index", () => {
             const fn = (q: any): any => ({ where: q.email.eqIgnoreCase('A') });
             const oracle = new OracleBackend(new OracleGraph());
-            expect(oracle.renderQuery(loweredQuery(fn, account, filled), account).where).toContain(
-                `JSON_VALUE(n.props, '$."__drivine.lower.email"') = LOWER($_q0)`
-            );
+            // Oracle's is the module's fragment over the row `n_`: the copy compared with the value lowered.
+            const plain = oracle.renderQuery(loweredQuery(fn, account, filled), account);
+            expect(plain.where).toContain(`n_.props, '$."__drivine.lower.email"`);
+            expect(plain.where).not.toContain(`'$[*]?(@ == "CiAccount")'`);
+            expect(plain.labelsTested).toEqual([]);
+            // Through the labelled index over the copy, which the module's equality reads; past 4,000 bytes its term holds
+            // for any node, so the statement still tests the label (drivine-cypher-spec#373).
             const indexed = oracle.renderQuery(loweredQuery(fn, account, filled), account, [
                 { label: 'CiAccount', properties: ['__drivine.lower.email'] }
             ]);
-            expect(indexed.where).toMatch(/END = LOWER\(\$_q0\) AND JSON_VALUE/);
-            expect(indexed.labelsTested).toEqual(['CiAccount']);
+            expect(indexed.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "CiAccount")') THEN`);
+            expect(indexed.labelsTested).toEqual([]);
             // Postgres's is the module's fragment over the row `n_`: the copy compared, as JSON, with the value lowered.
             const postgres = new PostgresBackend(new PostgresGraph());
             expect(postgres.renderQuery(loweredQuery(fn, account, filled), account).where).toContain(
                 `(n_.props -> '__drivine.lower.email') = to_jsonb(lower(`
             );
-        });
-
-        it("should compare Oracle's copy as a CLOB, and not through its index, for a value that may lowercase past 4,000 bytes", () => {
-            const oracle = new OracleBackend(new OracleGraph());
-            const lowered = (length: number): { where?: string; labelsTested?: string[] } =>
-                oracle.renderQuery(
-                    loweredQuery((q: any) => ({ where: q.email.eqIgnoreCase('a'.repeat(length)) }), account, filled),
-                    account,
-                    [{ label: 'CiAccount', properties: ['__drivine.lower.email'] }]
-                );
-            const long = lowered(1_334);
-            expect(long.where).toContain(
-                `DBMS_LOB.COMPARE(JSON_VALUE(n.props, '$."__drivine.lower.email"' RETURNING CLOB), LOWER(TO_CLOB($_q0))) = 0`
-            );
-            expect(long.where).not.toContain('CASE WHEN');
-            expect(long.labelsTested ?? []).toEqual([]);
-            const short = lowered(1_333);
-            expect(short.where).toMatch(
-                /END = LOWER\(\$_q0\) AND JSON_VALUE\(n\.props, '\$\."__drivine\.lower\.email"'\) = LOWER\(\$_q1\)$/
-            );
-            expect(short.labelsTested).toEqual(['CiAccount']);
         });
     });
 

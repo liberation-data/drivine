@@ -88,7 +88,7 @@ export function idMatch(nodes: string, property: string, labels: string[]): stri
  */
 export class IdKeyedStatement extends GraphStatement {
     static of(statement: GraphStatement): IdKeyedStatement {
-        return new IdKeyedStatement(statement.text, statement.bindings);
+        return new IdKeyedStatement(statement.text, statement.bindings, statement.calls);
     }
 
     spec<T>(more: Record<string, any> = {}): QuerySpecification<T> {

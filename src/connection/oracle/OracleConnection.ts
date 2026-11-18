@@ -14,6 +14,7 @@ import { SharedCypherCompiler } from '@/cypher/SharedCypherCompiler';
 import { DEFAULT_GRAPH } from '@/backend/sql/SqlGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { DrivineError } from '@/DrivineError';
+import { StoredFunctionCalls } from '@/backend/GraphStatement';
 import { readLayoutAfter, readLayoutOf } from '@/cypher/ValueLayout';
 
 /** What every statement is run with: rows as objects, CLOBs read as text. */
@@ -63,6 +64,9 @@ export class OracleConnection implements Connection {
             throw new DrivineError(this.cypherRefusal, undefined, spec);
         }
         const compiled = cypher ? await this.compiled(given) : undefined;
+        if (!cypher && given._storedFunctions) {
+            await this.callable(given._storedFunctions, spec);
+        }
         return this.run(spec, compiled?.spec ?? given, compiled);
     }
 
@@ -127,6 +131,39 @@ export class OracleConnection implements Connection {
             new SharedCypherCompiler('oracle', { name: this.graph, nullsEqualStored: nullsEqual, eraStored: era }),
             parameters
         );
+    }
+
+    /**
+     * Makes sure the session may call the stored functions of the graph that the object manager's statement calls, as
+     * the shared module's fragments in it say (`calls`): the module compiles a fragment to call those a graph is made
+     * with, and the library's own SQL can't be compiled again without them, as a Cypher statement is (see
+     * {@link compiled}). Where it may not call one, the statement is refused, saying why, before it runs.
+     */
+    private async callable<T>(calls: StoredFunctionCalls, spec: QuerySpecification<T>): Promise<void> {
+        const missing = [
+            ...(calls.nullsEqual &&
+            !(await OracleStoredFunctions.nullsEqual(this.connection, this.database, calls.graph))
+                ? [`${calls.graph}_nulls_equal`]
+                : []),
+            ...(calls.era && !(await OracleStoredFunctions.era(this.connection, this.database, calls.graph))
+                ? [`${calls.graph}_era`, `${calls.graph}_era_date`, `${calls.graph}_temporal_key`]
+                : []),
+            ...(calls.temporalArithmetic &&
+            !(await OracleStoredFunctions.temporalArithmetic(this.connection, this.database, calls.graph))
+                ? [`${calls.graph}_temporal_arith`]
+                : [])
+        ];
+        if (missing.length) {
+            throw new DrivineError(
+                `The query DSL's statement calls ${listed(missing)}, ${
+                    missing.length > 1 ? 'functions' : 'a function'
+                } the Oracle graph '${calls.graph}' ` +
+                    `keeps, which this session may not call. Ensure the graph as a user who may make a function ` +
+                    `(CREATE PROCEDURE, which the RESOURCE role grants), or compare the value in a Cypher statement.`,
+                undefined,
+                spec
+            );
+        }
     }
 
     private async run<T>(
@@ -246,4 +283,9 @@ function implicitRows(rows: any[] | undefined, exact: boolean): any[] {
         }
         return out;
     });
+}
+
+/** The names, the last joined by `and`, the others by commas, as OracleStoredFunctions names the era functions. */
+function listed(names: string[]): string {
+    return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
 }

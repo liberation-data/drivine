@@ -40,8 +40,9 @@ const ISSUES = 20_000;
 
 /**
  * drivine4j#65: Oracle takes a test of a node's labels for a lookup of one row, so a filter on a property with a range
- * index read every node of the label. A comparison with text that every root meets is now read through the index's
- * expression, which tests the label too.
+ * index read every node of the label. An equality every root meets is written over the index's expression, which tests
+ * the label too: the shared module's fragment writes it so for the labels it is given (drivine-cypher-spec#235, step 4),
+ * over the expressions layout 2's labelled index (lx2) and unique index (uq2) are made over, so Oracle reads them (#696).
  */
 describeOnOracle('filters read through labelled indexes on Oracle', () => {
     let pm: PersistenceManager;
@@ -133,11 +134,11 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
         expect(views.map((it) => it.issue.id).sort()).toEqual(without[0]);
     });
 
-    // Held: a filter's SQL is still TypeScript's own, not the module's fragment, so it doesn't read the layout-2 index
-    // (#696). Lifted when the DSL's filters come from the module's fragments (drivine-cypher-spec#235).
-    it.skip('should read the index, and not the label, for a comparison every root meets', async () => {
+    // The DSL's equality is the module's fragment (drivine-cypher-spec#235), over the expression layout 2's labelled index
+    // is made over by the module's schema plan, as drivine4j makes it (#696).
+    it('should read the index, and not the label, for a comparison every root meets', async () => {
         await gom.indexes.ensure(byRepo);
-        const labelled = new OracleGraph().objectName('lx', ['OraIssue', 'repoKey']).toUpperCase();
+        const labelled = new OracleGraph().objectName('lx2', ['OraIssue', 'repoKey']).toUpperCase();
         const indexed = await planOf((q) => ({ where: [q.repoKey.eq('r7'), q.state.eq('closed')] }));
         expect(indexed).toContain(labelled);
         expect(indexed).not.toContain('DRIVINE_NODE_LABELS');
@@ -146,12 +147,10 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
         expect(either).not.toContain(labelled);
     });
 
-    // Held: a filter's SQL is still TypeScript's own, not the module's fragment, so it doesn't read the layout-2 index
-    // (#696). Lifted when the DSL's filters come from the module's fragments (drivine-cypher-spec#235).
-    it.skip('should read a uniqueness constraint over the property as it reads a range index', async () => {
+    it('should read a uniqueness constraint over the property as it reads a range index', async () => {
         await gom.constraints.ensure(uniqueCode);
         const plan = await planOf((q) => ({ where: q.code.eq('c42') }));
-        expect(plan).toContain(new OracleGraph().objectName('uq', ['OraIssue', 'code']).toUpperCase());
+        expect(plan).toContain(new OracleGraph().objectName('uq2', ['OraIssue', 'code']).toUpperCase());
         expect(plan).not.toContain('DRIVINE_NODE_LABELS');
         expect(await ids((q) => ({ where: q.code.eq('c42') }))).toEqual(['i42']);
     });

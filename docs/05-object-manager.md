@@ -446,23 +446,17 @@ where: q.mentions.none((m) => m.resolvedId.eq(entityId))
 
 `gt`, `gte`, `lt` and `lte` are offered on numbers, texts and dates, and the text operators on texts alone.
 
-**A date on SQLite and Postgres is compared as Neo4j compares it.** There the query DSL's conditions, `seek` cursors,
-orders, grouped reads and a `patch`'s `where` are the shared compiler's SQL for the Cypher the DSL writes for Neo4j
-([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), so a `Date` is compared
-and ordered by the tag the store holds it as (see
+**A date is compared as Neo4j compares it on Oracle, Postgres and SQLite.** There the query DSL's conditions, `seek`
+cursors, orders, grouped reads and a `patch`'s `where` are the shared compiler's SQL for the Cypher the DSL writes for
+Neo4j ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), so a `Date` is
+compared and ordered by the tag the store holds it as (see
 [Upgrading to 6.0](22-upgrading-to-6.md#values-are-held-as-layout-2-holds-them)), and any value as Cypher compares and
 orders it. A property whose name begins with `$` is read as the store holds it too. A grouped read orders its groups by
 a property key, or a path key by its node's id, as Cypher orders it, a date by its moment, and a text before a boolean
 before a number. Its `min` and `max` are the value of a node of the group, in Cypher's order, of any kind: a text, or
-a date given back as its text, as well as a number.
-
-**A date on Oracle is refused.** There, a `Date` given to a condition (`eq`, `gt`, `in`, `hasItem` and the rest), a
-`seek` cursor, an order expression, a grouped read's `where` or filtered aggregate, or a `patch`'s `where` is refused
-with a `DrivineError` that names
-[drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235). The store holds a date as
-its tag, which the query DSL's SQL there doesn't compare yet, so it found nothing or the wrong rows; it will once the
-DSL's filters there come from the shared compiler, as SQLite's and Postgres's do. Until then, compare a date in a
-[Cypher statement](04-cypher-on-a-relational-database.md), which compares dates as Neo4j does on every store:
+a date given back as its text, as well as a number. A raw `where` is still SQL, and compares a date as the SQL you
+write compares it; outside the DSL, a [Cypher statement](04-cypher-on-a-relational-database.md) compares dates as
+Neo4j does on every store:
 
 ```typescript
 const ids = await pm.query<string>(
@@ -515,9 +509,9 @@ await gom.loadAll(Account, (q) => ({ where: q.email.eqIgnoreCase('Ada@Example.co
   for an empty value or a related node's field, they lowercase the property, as for any field: the same answer, without
   the index. A manager knows at once what it recorded, and reads what another recorded at least once a minute.
 - **A long text.** On Oracle the copy is written whole, as a CLOB, however long the text, but an index over it holds no
-  copy past 4,000 bytes. So a lookup by a value that may lowercase past that, one of more than 1,333 characters,
-  compares the copy as a CLOB on every node of the label instead of reading the index. Neo4j refuses to save a text too
-  large for its range index over the copy.
+  copy past 4,000 bytes. So a lookup by a value that lowercases past that compares the copy as a CLOB on every node of
+  the label instead of reading the index; a shorter one, however many characters, reads the index. Neo4j refuses to
+  save a text too large for its range index over the copy.
 - <a id="cypher-of-your-own"></a>**Cypher of your own keeps no copy, on any store.** Drivine runs a statement you send
   as written on the graph engines, and on Oracle, Postgres and SQLite compiles it to SQL and adds nothing to it. So a
   `SET`, `CREATE`, `MERGE` or `REMOVE` of the property leaves the copy as it was, or leaves the node without one, and so
@@ -719,8 +713,7 @@ const ratings = await gom.groups.load(Feedback, (q) => ({
 // [{ page: '/install', votes: 3, likes: 2 }, …]: each row is typed by its keys and aggregates
 ```
 
-On Oracle the `createdAt.gte(march)` above is refused for now, since `march` is a `Date`: see
-[Operators](#operators). SQLite and Postgres compare it as Neo4j does.
+The `createdAt.gte(march)` above compares a `Date` as Neo4j does on every store: see [Operators](#operators).
 
 | Filter | Removes |
 | --- | --- |
@@ -757,7 +750,8 @@ What every engine agrees on:
 - An aggregate's filter never takes a node out of its group: a group none of whose nodes meet it still has 0.
 - Ties are broken by the keys, ascending, so a top 5 is the same five on every engine.
 
-Where Oracle differs: `min` and `max` of a text skip a value stored as `""`, which Oracle reads as no value.
+`min` and `max` of a text keep a value stored as `""`, as Cypher does, on Oracle too: the `min` of `""` and `"a"` is
+`""`.
 
 On Oracle and Postgres, a `sum` or an `avg` of decimals is worked out in exact decimal, so it is more accurate:
 0.1 + 0.2 is 0.3 there, where doubles give 0.30000000000000004. It differs from a graph engine's only around its 16th

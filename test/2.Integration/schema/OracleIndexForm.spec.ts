@@ -90,7 +90,7 @@ function labelled50(label: string, property: string): string {
  * #696 on a store an earlier Drivine made: an empty graph Drivine 5.0 left with its range index and uniqueness
  * constraint, over its own expressions under layout 1's names, has them dropped on the first connection of this version,
  * with their records, so the first `ensure` makes them again as drivine4j makes them, under layout 2's names; and the
- * shared module's equality, which compiled Cypher writes, is then read through the index Oracle has, not the label's.
+ * shared module's equality, which the query DSL writes, is then read through the index Oracle has, not the label's.
  */
 describeOnOracle("An earlier version's Oracle index over a property, made again in drivine4j's form", () => {
     const graph = new OracleGraph(GRAPH);

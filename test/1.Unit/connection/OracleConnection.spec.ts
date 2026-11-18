@@ -1,12 +1,25 @@
+import {
+    ModelRegistry,
+    NodeFragment,
+    NodeId,
+    OracleBackend,
+    OracleGraph,
+    TargetModel,
+    times
+} from '@liberation-data/drivine';
 import { OracleConnection } from '@/connection/oracle/OracleConnection';
 import { OracleResultMapper } from '@/connection/oracle/OracleResultMapper';
 import { QuerySpecification } from '@/query/QuerySpecification';
 
 /**
- * A session whose check of the graph's nulls_equal gives `check`, and of its era functions `era`, and whose every other
- * statement gives no rows.
+ * A session whose check of the graph's nulls_equal gives `check`, of its era functions `era`, and of its temporal
+ * arithmetic `arithmetic`, and whose every other statement gives no rows.
  */
-function session(check: 'found' | number, era: 'found' | number = 'found'): { execute: jest.Mock } {
+function session(
+    check: 'found' | number,
+    era: 'found' | number = 'found',
+    arithmetic: 'found' | number = 'found'
+): { execute: jest.Mock } {
     const outcome = async (it: 'found' | number): Promise<unknown> =>
         it === 'found'
             ? Promise.resolve({ rows: [[1]] })
@@ -18,6 +31,9 @@ function session(check: 'found' | number, era: 'found' | number = 'found'): { ex
             }
             if (sql.startsWith('SELECT ') && sql.includes("_era('0000-01-01')")) {
                 return outcome(era);
+            }
+            if (sql.startsWith('SELECT ') && sql.includes("_temporal_arith('+', JSON(")) {
+                return outcome(arithmetic);
             }
             return Promise.resolve({ rows: [] });
         })
@@ -146,4 +162,103 @@ describe('OracleConnection', () => {
         ).rejects.toMatchObject({ errorNum: 3113 });
         expect(it.execute).toHaveBeenCalledTimes(1);
     });
+
+    describe("an object manager's statement that the query DSL's fragments say calls the graph's functions", () => {
+        /** The DSL's count of a map property equal to one holding a null, which the module compares by nulls_equal. */
+        const counted = (g: string): QuerySpecification<unknown> => {
+            const backend = new OracleBackend(new OracleGraph(g));
+            const target: TargetModel = { kind: 'NODE_FRAGMENT', model: new ModelRegistry().fragment(Metered) };
+            const where = backend.renderWhere((q: any) => q.meta.eq({ a: null }), target);
+            return backend.countFragments(target.model as any, where.where).spec(where.bindings);
+        };
+
+        it('should run where the session may call them, asking once', async () => {
+            const g = graph();
+            const it = session('found');
+            const connection = new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me');
+            await connection.query(counted(g));
+            await connection.query(counted(g));
+            const run = it.execute.mock.calls.map(([sql]) => sql as string);
+            expect(run).toHaveLength(3);
+            expect(run[1]).toContain(`${g}_nulls_equal(`);
+        });
+
+        it('should be refused, saying why, where the session may not call them, and not run', async () => {
+            const g = graph();
+            const it = session(904);
+            await expect(
+                new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(counted(g))
+            ).rejects.toThrow(
+                `calls ${g}_nulls_equal, a function the Oracle graph '${g}' keeps, which this session may not call`
+            );
+            expect(it.execute).toHaveBeenCalledTimes(1);
+        });
+
+        it("should be refused where it calls the graph's temporal arithmetic and the session may not call it", async () => {
+            const g = graph();
+            const backend = new OracleBackend(new OracleGraph(g));
+            const model = new ModelRegistry().fragment(Metered);
+            const query = backend.renderQuery((q: any) => ({ orderBy: times(q.size, 2).asc() }), {
+                kind: 'NODE_FRAGMENT',
+                model
+            });
+            const it = session('found', 'found', 904);
+            await expect(
+                new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(
+                    backend.loadAllFragments(model, query.where, { orderBy: query.orderBy }).spec(query.bindings)
+                )
+            ).rejects.toThrow(`calls ${g}_temporal_arith, a function the Oracle graph '${g}' keeps`);
+            expect(it.execute).toHaveBeenCalledTimes(1);
+        });
+
+        it("should be refused, naming each of the graph's era functions, where it calls them and the session may not", async () => {
+            const g = graph();
+            const it = session('found', 904);
+            const spec = new QuerySpecification('SELECT 1 FROM dual').callsStoredFunctions({
+                graph: g,
+                nullsEqual: false,
+                era: true,
+                temporalArithmetic: false
+            });
+            await expect(
+                new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(spec)
+            ).rejects.toThrow(
+                `calls ${g}_era, ${g}_era_date and ${g}_temporal_key, functions the Oracle graph '${g}' keeps, ` +
+                    'which this session may not call'
+            );
+            expect(it.execute).toHaveBeenCalledTimes(1);
+            expect(it.execute.mock.calls[0][0]).toContain(`${g}_era('0000-01-01')`);
+        });
+
+        it('should run one that calls the era functions where the session may call them', async () => {
+            const g = graph();
+            const it = session(904, 'found');
+            const spec = new QuerySpecification('SELECT 1 FROM dual').callsStoredFunctions({
+                graph: g,
+                nullsEqual: false,
+                era: true,
+                temporalArithmetic: false
+            });
+            await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(spec);
+            expect(it.execute.mock.calls.map(([sql]) => sql as string)).toEqual([
+                expect.stringContaining(`${g}_era('0000-01-01')`),
+                'SELECT 1 FROM dual'
+            ]);
+        });
+
+        it('should ask nothing of one that calls none', async () => {
+            const it = session(904);
+            await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', graph(), 'db|me').query(
+                new QuerySpecification('SELECT 1 FROM dual')
+            );
+            expect(it.execute).toHaveBeenCalledTimes(1);
+        });
+    });
 });
+
+@NodeFragment({ labels: ['Metered'] })
+class Metered {
+    @NodeId() id: string;
+    meta?: Record<string, any>;
+    size?: number;
+}

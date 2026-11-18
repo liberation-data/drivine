@@ -11,9 +11,9 @@ import type { NativeOperation } from '@/schema/SchemaGrammar';
  * The indexes and constraints this library makes on Oracle, held to drivine4j's (#696). `store.yaml` holds drivine4j's
  * statements for each schema case, the reference, which the shared module writes byte for byte: this runs `ensure` of
  * each case's spec as an index or constraint manager plans it, on a store that has nothing yet, and holds what it runs to
- * them, item for item. It then holds the module's equality on an indexed property, the fragment compiled Cypher writes
- * (not yet the query DSL's on Oracle, OracleQueryRenderer's), to the expressions the labelled index or the unique index
- * is made over, as Oracle reads a filter through a function-based index only where its expression is the index's.
+ * them, item for item. It then holds the module's equality on an indexed property, the fragment the query DSL writes on
+ * Oracle (drivine-cypher-spec#235; not yet compiled Cypher's, #753), to the expressions the labelled index or the unique
+ * index is made over, as Oracle reads a filter through a function-based index only where its expression is the index's.
  */
 const STORE = parse(fs.readFileSync(path.join(__dirname, '../../cypher/store.yaml'), 'utf8'));
 

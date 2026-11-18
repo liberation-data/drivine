@@ -40,9 +40,19 @@ export abstract class SqlGroups {
     /** What the statement calls the row of a node of the source. */
     protected readonly row: string = 'n';
 
+    /**
+     * The key columns of the rows grouped, `m.k0, …`, which a {@link window} over them is partitioned by: set as the
+     * statement is built.
+     */
+    protected grouping = '';
+
+    /** The windows over the rows grouped, each with its column's name, asked for so far (see {@link window}). */
+    private windows: string[] = [];
+
     constructor(protected readonly graph: SqlGraph) {}
 
     build(source: FragmentModel, given: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+        this.windows = [];
         const views = this.views();
         const query = GroupStatement.resolved(source, given, this.renderer(views));
         const keys: [string, GroupKey][] = Object.entries(query.keys);
@@ -73,6 +83,8 @@ export abstract class SqlGroups {
             });
             return `${at}.nid AS k${i}`;
         });
+        const keyNames = keys.map((_, i) => `m.k${i}`);
+        this.grouping = keyNames.join(', ');
         const value = (aggregate: GroupAggregate): string =>
             aggregate.property ? this.aggregated(views, aggregate.property as string) : '1';
         const held = aggregates.map(([, aggregate]) => this.held(aggregate));
@@ -184,14 +196,22 @@ export abstract class SqlGroups {
         ];
         const holders = [
             ...heldKeys.flatMap((it, i) =>
-                it ? [`LEFT JOIN ${this.graph.nodes} ${keyHolder(i)} ON ${keyHolder(i)}.nid = ${heldBy(i)}`] : []
+                it
+                    ? [
+                          `LEFT JOIN ${this.graph.nodes} ${keyHolder(i)} ON ${this.sameNode(
+                              `${keyHolder(i)}.nid`,
+                              heldBy(i)
+                          )}`
+                      ]
+                    : []
             ),
             ...held.flatMap((it, i) =>
                 holds(i)
                     ? [
-                          `LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${holder(i)}.nid = g.a${i}${
-                              it!.given ? 'r' : ''
-                          }`
+                          `LEFT JOIN ${this.graph.nodes} ${holder(i)} ON ${this.sameNode(
+                              `${holder(i)}.nid`,
+                              `g.a${i}${it!.given ? 'r' : ''}`
+                          )}`
                       ]
                     : []
             )
@@ -199,16 +219,27 @@ export abstract class SqlGroups {
         const representatives = heldKeys.flatMap((it, i) =>
             it && keys[i][1].kind === 'property' ? [`MIN(${n}.nid) AS k${i}r`] : []
         );
-        const keyNames = keys.map((_, i) => `m.k${i}`);
+        const pairs = `(SELECT DISTINCT ${n}.nid, ${keyColumns.join(', ')} ${froms.join(' ')} WHERE ${wheres.join(
+            ' AND '
+        )}) m`;
+        const joined = `JOIN ${this.graph.nodes} ${n} ON ${this.sameNode(`${n}.nid`, 'm.nid')}`;
+        // With windows, the rows grouped are each node's row with its keys and its windows' columns, under its own name.
+        const grouped = this.windows.length ? keys.map((_, i) => `${n}.k${i}`) : keyNames;
+        const rows = this.windows.length
+            ? [
+                  `    FROM (`,
+                  `        SELECT ${[...keyNames, `${n}.*`, ...this.windows].join(', ')}`,
+                  `        FROM ${pairs}`,
+                  `        ${joined}`,
+                  `    ) ${n}`
+              ]
+            : [`    FROM ${pairs}`, `    ${joined}`];
         const text = [
             `SELECT ${views.object(projected)} AS "row"`,
             `FROM (`,
-            `    SELECT ${[...keyNames, ...aggregateColumns, ...representatives].join(', ')}`,
-            `    FROM (SELECT DISTINCT ${n}.nid, ${keyColumns.join(', ')} ${froms.join(' ')} WHERE ${wheres.join(
-                ' AND '
-            )}) m`,
-            `    JOIN ${this.graph.nodes} ${n} ON ${n}.nid = m.nid`,
-            `    GROUP BY ${keyNames.join(', ')}`,
+            `    SELECT ${[...grouped, ...aggregateColumns, ...representatives].join(', ')}`,
+            ...rows,
+            `    GROUP BY ${grouped.join(', ')}`,
             ...(having.length ? [`    HAVING ${having.join(' AND ')}`] : []),
             `) g`,
             ...holders,
@@ -228,6 +259,23 @@ export abstract class SqlGroups {
      */
     protected aggregated(views: SqlViews, property: string): string {
         return views.number(this.row, property);
+    }
+
+    /**
+     * The column of a window over the rows grouped, `expression` (`FIRST_VALUE(…) OVER (PARTITION BY …)`, partitioned
+     * by {@link grouping}), which the statement then computes over each node's row before it groups them, and an
+     * aggregate reads, on the row of the node, `n_`: for a store that takes a group's first node by a window, as
+     * drivine4j's Oracle does.
+     */
+    protected window(expression: string): string {
+        const column = `w${this.windows.length}`;
+        this.windows.push(`${expression} AS ${column}`);
+        return `${this.row}.${column}`;
+    }
+
+    /** Whether the nodes `a` and `b`, each a node's `nid`, are one: a node is joined back to its row so. */
+    protected sameNode(a: string, b: string): string {
+        return `${a} = ${b}`;
     }
 
     /** How a least or greatest value is read through the node that has it, where the store does so; undefined otherwise. */
