@@ -657,7 +657,8 @@ export class StatelessGraphObjectManager {
             );
             return { id, ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR)) };
         });
-        const ids = rows.map((it) => it.id);
+        // Each id as a store reads it back (see readBackKey): a Date is one id by its time, as Neo4j hands it back.
+        const ids = rows.map((it) => readBackKey(it.id));
         if (new Set(ids).size !== ids.length) {
             throw new DrivineError('patchAll takes each id once.');
         }
@@ -671,7 +672,9 @@ export class StatelessGraphObjectManager {
         }
         for (const statement of statements) {
             const found = await this.whenUncontended(async () => this.persistenceManager.query(statement));
-            found.forEach((it) => results.set(it.id, { found: it.found, applied: it.found, changed: it.changed }));
+            found.forEach((it) =>
+                results.set(readBackKey(it.id), { found: it.found, applied: it.found, changed: it.changed })
+            );
         }
         return ids.map((id) => results.get(id)!);
     }
@@ -955,7 +958,8 @@ export class StatelessGraphObjectManager {
             target.kind === 'GRAPH_VIEW'
                 ? [before[target.model.rootField], changed[target.model.rootField]]
                 : [before, changed];
-        if (rootAfter?.[root.nodeIdField!] !== rootBefore[root.nodeIdField!]) {
+        // By value (see readBackKey): the copy taken before the change holds a Date id as another Date.
+        if (readBackKey(rootAfter?.[root.nodeIdField!]) !== readBackKey(rootBefore[root.nodeIdField!])) {
             throw new DrivineError(
                 `An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`
             );
@@ -977,8 +981,8 @@ export class StatelessGraphObjectManager {
             target.kind === 'GRAPH_VIEW'
                 ? target.model.relationships
                       .filter((rel) => {
-                          const after = new Set(relatedIds(rel, changed[rel.field]));
-                          return relatedIds(rel, before[rel.field]).some((it) => !after.has(it));
+                          const after = new Set(relatedIds(rel, changed[rel.field]).map(readBackKey));
+                          return relatedIds(rel, before[rel.field]).some((it) => !after.has(readBackKey(it)));
                       })
                       .map((rel) => rel.field)
                 : [];
@@ -1068,7 +1072,7 @@ export class StatelessGraphObjectManager {
             if (!group.model.stampField) {
                 return;
             }
-            // Each id as the batch reads it back, a date's as its tag's text, so a Date id matches its node's.
+            // Each id as the batch reads it back (see readBackKey), so a Date or bigint id matches its node's.
             const found = new Map(result.groups[i].before.map((it) => [readBackKey(it.id), it.stamp]));
             const now = new Map(result.groups[i].after.map((it) => [readBackKey(it.id), it.stamp]));
             for (const object of group.objects) {
@@ -1309,10 +1313,11 @@ export class StatelessGraphObjectManager {
     private handBackRelated(object: any, statement: SaveStatement, result: SaveResult): void {
         statement.stampedModels.forEach((model, index) => {
             const { before, after }: SaveResult['related'][number] = result.related[index];
-            const found = new Map(before.map((it) => [it.id, it.stamp]));
-            const now = new Map(after.map((it) => [it.id, it.stamp]));
+            // Each id as the save reads it back (see readBackKey), so a Date or bigint id matches its node's.
+            const found = new Map(before.map((it) => [readBackKey(it.id), it.stamp]));
+            const now = new Map(after.map((it) => [readBackKey(it.id), it.stamp]));
             for (const node of this.nodesOf(object, model)) {
-                const id = node[model.nodeIdField!];
+                const id = readBackKey(node[model.nodeIdField!]);
                 if (now.has(id)) {
                     node[model.stampField!] = Stamps.handedBack(
                         node[model.stampField!],

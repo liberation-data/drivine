@@ -117,19 +117,23 @@ export function hasId(store: SharedStore, alias: string, property: string, json:
  * layout holds it as: a temporal value's tag (`{"$t": …, "v": …}`) as its text `v`, as the module writes it and reads a
  * stored target's id back as (drivine4j's `NodeIds.temporalText`); undefined for any other id.
  */
-/**
- * `id` as a batch reads a node's id back from the store, where it hands each object its stamp: a `Date` as its tag's text
- * `v`, which is what a tag is read as, and any other id as it is. A `Map` finds a `Date` by the object, never by its
- * value, so the object's id and the id read back are matched by that text.
- */
-export function readBackKey(id: unknown): unknown {
-    return id instanceof Date ? temporalText(writeLayout(id, 'sqlite')) ?? id : id;
-}
-
 export function temporalText(layout: string): string | undefined {
     if (!layout.startsWith('{"$t"')) {
         return undefined;
     }
     const tag = JSON.parse(layout);
     return typeof tag?.v === 'string' ? tag.v : undefined;
+}
+
+/**
+ * `id` as a store reads a node's id back, where the manager matches what a statement hands back to its objects: a `Date`
+ * as its tag's text `v`, which is what Oracle reads a tag as, a `bigint` within 2^53 as the number Oracle and Neo4j read
+ * it as, and any other id as it is. A `Map` finds a `Date` by the object, never by its value, and a `bigint` never by a
+ * number, so the object's id and the id read back are matched as this reads both.
+ */
+export function readBackKey(id: unknown): unknown {
+    if (id instanceof Date) {
+        return temporalText(writeLayout(id, 'sqlite')) ?? id;
+    }
+    return typeof id === 'bigint' && Number.isSafeInteger(Number(id)) ? Number(id) : id;
 }

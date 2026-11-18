@@ -572,6 +572,13 @@ describe('a lookup by id on SQLite, planned', () => {
 class StampedDay {
     @NodeId() on: Date;
     @NodeStamp() stamp?: string;
+    note?: string;
+}
+
+@NodeFragment({ labels: ['StampedCount'] })
+class StampedCount {
+    @NodeId() n: bigint;
+    @NodeStamp() stamp?: string;
 }
 
 describe('a batch handing back stamps', () => {
@@ -592,5 +599,65 @@ describe('a batch handing back stamps', () => {
             groups: [{ before: [], after: [{ id: text, stamp }] }]
         });
         expect(days.map((it) => it.stamp)).toEqual([stamp, stamp]);
+    });
+
+    it('hands a stamped node with a bigint id its stamp by the number Oracle reads it back as', () => {
+        const model = new ModelRegistry().fragment(StampedCount);
+        const count = Object.assign(new StampedCount(), { n: BigInt(5) });
+        const stamp = `${'a'.repeat(16)}:${'b'.repeat(16)}`;
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new OracleBackend(new OracleGraph()),
+            new ModelRegistry()
+        );
+        (gom as any).handBackFragments([{ model, objects: [count] }], {
+            groups: [{ before: [], after: [{ id: 5, stamp }] }]
+        });
+        expect(count.stamp).toEqual(stamp);
+    });
+
+    it("hands a stamped related node with a Date id its stamp by its id's text, as Oracle reads it back", () => {
+        const model = new ModelRegistry().fragment(StampedDay);
+        const day = Object.assign(new StampedDay(), { on: new Date('2024-01-03T00:00:00.000Z') });
+        const stamp = `${'a'.repeat(16)}:${'b'.repeat(16)}`;
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new OracleBackend(new OracleGraph()),
+            new ModelRegistry()
+        );
+        (gom as any).handBackRelated(
+            { day },
+            { stampedModels: [model] },
+            {
+                related: [{ before: [], after: [{ id: JSON.parse(writeLayout(day.on, 'oracle')).v, stamp }] }]
+            }
+        );
+        expect(day.stamp).toEqual(stamp);
+    });
+});
+
+describe('a Date id matched by its time', () => {
+    const on = (): Date => new Date('2024-01-03T00:00:00.000Z');
+
+    it('is matched to its patch result where Neo4j hands the id back as another Date, and taken once', async () => {
+        const pm = {
+            database: 'id-keyed',
+            query: async () => Promise.resolve([{ id: on(), found: true, changed: true }])
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+        const day = Object.assign(new StampedDay(), { on: on(), note: 'x' });
+        expect(await gom.patchAll([day], { only: ['note'] })).toEqual([{ found: true, applied: true, changed: true }]);
+        await expect(
+            gom.patchAll([day, Object.assign(new StampedDay(), { on: on() })], { only: ['note'] })
+        ).rejects.toThrow('patchAll takes each id once.');
+    });
+
+    it("is an update's same id, where the copy taken before the change holds it as another Date", () => {
+        const model = new ModelRegistry().fragment(StampedDay);
+        const gom = new StatelessGraphObjectManager({} as any, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+        const day = Object.assign(new StampedDay(), { on: on(), stamp: `${'a'.repeat(16)}:`, note: 'x' });
+        const before = Object.assign(new StampedDay(), { ...day, on: on() });
+        day.note = 'y';
+        expect((gom as any).changeOf({ kind: 'NODE_FRAGMENT', model }, before, day).only).toEqual(['note']);
     });
 });
