@@ -136,7 +136,11 @@ describe.each(allStores().filter((it) => it.type !== DatabaseType.FALKORDB))(
             };
         }
 
-        it("orders a date hop property by its moment, an offset's included, not by its text", async () => {
+        // Memgraph's datetime() reads neither a fraction of a second before `Z` nor an offset (`.5Z`, `+02:00`), so the
+        // dates these cases write can't be made there; its ORDER BY of other kinds is held to Neo4j's above.
+        const dated = store.type === DatabaseType.MEMGRAPH ? it.skip : it;
+
+        dated("orders a date hop property by its moment, an offset's included, not by its text", async () => {
             await create([
                 "datetime('2024-01-01T00:00:00.5Z')",
                 "datetime('2024-01-01T00:00:00Z')",
@@ -169,22 +173,27 @@ describe.each(allStores().filter((it) => it.type !== DatabaseType.FALKORDB))(
             }
         );
 
-        mixed('keeps for a node reached by a date and a number the date lowest first, the number highest', async () => {
-            await create(["datetime('2024-01-01T00:00:00.5Z')", "'x'", "datetime('2024-01-01T00:00:00Z')"]);
-            await pm.execute(
-                new QuerySpecification({
-                    text:
-                        "MATCH (a:OrderedPathKind:Actor {id: 'a'}), (d:OrderedPathKind:Director {id: 'd0'}) " +
-                        "CREATE (a)-[:ACTED_IN]->(:OrderedPathKind:Movie {id: 'm9', value: 7})-[:DIRECTED_BY]->(d)",
-                    language: 'CYPHER'
-                })
-            );
-            expect(await loaded()).toEqual({
-                lowestFirst: ['d2', 'd0', 'd1'],
-                highestFirst: ['d0', 'd1', 'd2'],
-                lowest: 'd2',
-                highest: 'd0'
-            });
-        });
+        const mixedAndDated = store.type === DatabaseType.MEMGRAPH ? it.skip : mixed;
+
+        mixedAndDated(
+            'keeps for a node reached by a date and a number the date lowest first, the number highest',
+            async () => {
+                await create(["datetime('2024-01-01T00:00:00.5Z')", "'x'", "datetime('2024-01-01T00:00:00Z')"]);
+                await pm.execute(
+                    new QuerySpecification({
+                        text:
+                            "MATCH (a:OrderedPathKind:Actor {id: 'a'}), (d:OrderedPathKind:Director {id: 'd0'}) " +
+                            "CREATE (a)-[:ACTED_IN]->(:OrderedPathKind:Movie {id: 'm9', value: 7})-[:DIRECTED_BY]->(d)",
+                        language: 'CYPHER'
+                    })
+                );
+                expect(await loaded()).toEqual({
+                    lowestFirst: ['d2', 'd0', 'd1'],
+                    highestFirst: ['d0', 'd1', 'd2'],
+                    lowest: 'd2',
+                    highest: 'd0'
+                });
+            }
+        );
     }
 );
