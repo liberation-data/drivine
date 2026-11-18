@@ -2,6 +2,7 @@ import { MatchingSearch, NearestSearch, searchedLabels } from '@/backend/GraphBa
 import { GraphStatement } from '@/backend/GraphStatement';
 import { hasLabels, jsonType, jsonValue, nodeDocument, path, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
+import { DSL_ROW as ROW_ALIAS } from '@/backend/sqlite/SqliteQueryRenderer';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { fullTextSearch } from '@/cypher/SharedCypherCompiler';
 import { TargetModel } from '@/model/RelationshipModel';
@@ -9,6 +10,7 @@ import { TargetModel } from '@/model/RelationshipModel';
 /**
  * Vector and full-text search on SQLite, each as one statement returning `{value, score}` per hit, best first, as the
  * graph engines do: the candidates first, then the filters (threshold, `where`, a view's requirements), then the trim.
+ * A hit's row is the root's of a read of the query DSL, `n_`, which its `where` reads.
  *
  * SQLite has no vector index and a full-text index is not made yet, so a search measures every node it may find. A
  * vector search scores, by `drivine_similarity`, each node of the label that holds an embedding of the vector's size,
@@ -51,18 +53,18 @@ export class SqliteSearch {
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const views = new SqliteViews(this.graph, search.depth ?? {});
         const filters = [
-            hasLabels('n', root.labels),
+            hasLabels(ROW_ALIAS, root.labels),
             ...(search.threshold ? ['s.score >= $_threshold'] : []),
             ...(search.where ? [`(${search.where})`] : []),
-            ...(target.kind === 'GRAPH_VIEW' ? views.requirements(target.model, 'n') : [])
+            ...(target.kind === 'GRAPH_VIEW' ? views.requirements(target.model, ROW_ALIAS) : [])
         ];
-        const value = target.kind === 'GRAPH_VIEW' ? views.document(target.model, 'n') : nodeDocument('n');
+        const value = target.kind === 'GRAPH_VIEW' ? views.document(target.model, ROW_ALIAS) : nodeDocument(ROW_ALIAS);
         return new GraphStatement(
             [
                 `SELECT json_object('value', json(${value}), 'score', s.score) AS "result"`,
-                `FROM (${candidates}) s JOIN ${this.graph.nodes} n ON n.nid = s.nid`,
+                `FROM (${candidates}) s JOIN ${this.graph.nodes} ${ROW_ALIAS} ON ${ROW_ALIAS}.nid = s.nid`,
                 `WHERE ${filters.join(' AND ')}`,
-                'ORDER BY s.score DESC, n.nid',
+                `ORDER BY s.score DESC, ${ROW_ALIAS}.nid`,
                 ...(search.limit !== undefined ? [`LIMIT ${search.limit}`] : [])
             ].join('\n'),
             bindings

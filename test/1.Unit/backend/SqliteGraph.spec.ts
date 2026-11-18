@@ -121,8 +121,10 @@ describe('SqliteBackend', () => {
         expect(backend.markerItems('a\nb')).toEqual(['a', 'b']);
     });
 
-    it('should read a property written as Cypher writes it as the text the store reads', () => {
-        expect(backend.written("n.title = 'x'")).toEqual(`${textOf('n', 'title')} = 'x'`);
+    it('should read a property written as Cypher writes it as the text the store reads, over the row a read calls n_', () => {
+        expect(backend.written("n.title = 'x'")).toEqual(`${textOf('n_', 'title')} = 'x'`);
+        // A column of the row is the row's, which a read of the query DSL calls n_ (see SqliteBackend's ROW_ALIAS).
+        expect(backend.written("n.props ->> '$.title' = 'x'")).toEqual("n_.props ->> '$.title' = 'x'");
     });
 });
 

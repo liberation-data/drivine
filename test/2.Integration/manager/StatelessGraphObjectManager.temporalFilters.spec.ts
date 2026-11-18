@@ -2,7 +2,10 @@ import {
     above,
     backendFor,
     caseOf,
+    count,
     DatabaseType,
+    key,
+    max,
     ModelRegistry,
     NodeFragment,
     NodeId,
@@ -28,10 +31,12 @@ class Dated {
 const REFUSED = /the query DSL doesn't compare on a SQL store yet \(drivine-cypher-spec#235\)/;
 
 /**
- * A query DSL filter, seek or order given a date is refused by name on a SQL store (#771): the store layout holds a date
- * as its tag, and the DSL's SQL compared a property's text with the date's ISO text, so `eq`, `in` and `hasItem` found
- * nothing and `gt` gave the wrong rows. A Cypher statement compares dates as Neo4j does, and a filter of anything else is
- * as it was. Lifted when the DSL's filters come from the shared module's fragments (drivine-cypher-spec#235).
+ * A query DSL filter, seek or order given a date (#771). On SQLite it is the shared module's fragment
+ * (drivine-cypher-spec#235, step 2), which compares a date by the tag the store layout holds it as, so `eq`, `in`,
+ * `hasItem`, `gt`, a seek, an order and a patch's or a grouped read's condition give the rows Neo4j does. On Postgres and
+ * Oracle it is refused by name until theirs are (#235, steps 3 and 4): the DSL's SQL there compared a property's text with
+ * the date's ISO text, so `eq`, `in` and `hasItem` found nothing and `gt` gave the wrong rows. A Cypher statement compares
+ * dates as Neo4j does on each, and a filter of anything else is as it was.
  */
 describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
     let pm: PersistenceManager;
@@ -66,27 +71,74 @@ describe.each(sqlStores())('A date in a query DSL filter on $type', (store) => {
     const found = async (where: (q: any) => any): Promise<string[]> =>
         (await gom.loadAll(Dated, (q) => ({ where: where(q) }))).map((it) => it.id).sort();
 
-    it("is refused by name in a comparison, an in, a hasItem, a seek, an order and a patch's where", async () => {
-        for (const where of [
-            (q: any) => q.at.eq(first),
-            (q: any) => q.at.gt(first),
-            (q: any) => q.at.in([second]),
-            (q: any) => q.at.notIn([second]),
-            (q: any) => q.days.hasItem(second)
-        ]) {
-            await expect(found(where)).rejects.toThrow(REFUSED);
-        }
-        await expect(
-            gom.loadAll(Dated, (q) => ({ orderBy: q.at.asc(), seek: (q.at as any).after(first) }))
-        ).rejects.toThrow(REFUSED);
-        await expect(
-            gom.loadAll(Dated, (q) => ({ orderBy: caseOf([above(q.at as any, first).then(1)], 2).asc() }))
-        ).rejects.toThrow(REFUSED);
-        await expect(
-            gom.patch(Dated, 'd1', { set: { name: 'patched' }, where: (q: any) => q.at.eq(first) })
-        ).rejects.toThrow(REFUSED);
-        expect((await gom.load(Dated, 'd1'))?.name).toEqual('one');
-    });
+    if (store.type === DatabaseType.SQLITE) {
+        it('compares a date by its tag in a comparison, an in, a hasItem, a seek and an order', async () => {
+            expect(await found((q) => q.at.eq(first))).toEqual(['d1']);
+            expect(await found((q) => q.at.gt(first))).toEqual(['d2']);
+            expect(await found((q) => q.at.in([second]))).toEqual(['d2']);
+            expect(await found((q) => q.at.notIn([second]))).toEqual(['d1']);
+            expect(await found((q) => q.days.hasItem(second))).toEqual(['d2']);
+            expect(
+                (await gom.loadAll(Dated, (q) => ({ orderBy: q.at.asc(), seek: (q.at as any).after(first) }))).map(
+                    (it) => it.id
+                )
+            ).toEqual(['d2']);
+            expect(
+                (
+                    await gom.loadAll(Dated, (q) => ({
+                        orderBy: caseOf([above(q.at as any, first).then(1)], 2).asc()
+                    }))
+                ).map((it) => it.id)
+            ).toEqual(['d2', 'd1']);
+            expect(await gom.count(Dated, (q: any) => ({ where: q.at.gte(second) }))).toEqual(1);
+        });
+
+        it("compares a date by its tag in a patch's where, and in a grouped read's where and aggregate", async () => {
+            expect(
+                (await gom.patch(Dated, 'd1', { set: { name: 'missed' }, where: (q: any) => q.at.eq(second) })).applied
+            ).toBe(false);
+            expect(
+                (await gom.patch(Dated, 'd1', { set: { name: 'patched' }, where: (q: any) => q.at.eq(first) })).applied
+            ).toBe(true);
+            expect((await gom.load(Dated, 'd1'))?.name).toEqual('patched');
+            const groups = await gom.groups.load(Dated, (q: any) => ({
+                where: q.at.gte(first),
+                keys: { name: key(q.name) },
+                aggregates: { later: count(q.at.gt(first)), last: max(q.at) },
+                orderBy: [['name', 'asc']]
+            }));
+            // A date is read back as its text, as a load reads it.
+            expect(groups).toEqual([
+                { name: 'patched', later: 0, last: '2026-01-01T00:00:00Z' },
+                { name: 'two', later: 1, last: '2026-02-01T00:00:00Z' }
+            ]);
+            expect(
+                await gom.groups.load(Dated, (q: any) => ({ where: q.at.gt(first), keys: { name: key(q.name) } }))
+            ).toEqual([{ name: 'two' }]);
+        });
+    } else {
+        it("is refused by name in a comparison, an in, a hasItem, a seek, an order and a patch's where", async () => {
+            for (const where of [
+                (q: any) => q.at.eq(first),
+                (q: any) => q.at.gt(first),
+                (q: any) => q.at.in([second]),
+                (q: any) => q.at.notIn([second]),
+                (q: any) => q.days.hasItem(second)
+            ]) {
+                await expect(found(where)).rejects.toThrow(REFUSED);
+            }
+            await expect(
+                gom.loadAll(Dated, (q) => ({ orderBy: q.at.asc(), seek: (q.at as any).after(first) }))
+            ).rejects.toThrow(REFUSED);
+            await expect(
+                gom.loadAll(Dated, (q) => ({ orderBy: caseOf([above(q.at as any, first).then(1)], 2).asc() }))
+            ).rejects.toThrow(REFUSED);
+            await expect(
+                gom.patch(Dated, 'd1', { set: { name: 'patched' }, where: (q: any) => q.at.eq(first) })
+            ).rejects.toThrow(REFUSED);
+            expect((await gom.load(Dated, 'd1'))?.name).toEqual('one');
+        });
+    }
 
     it('leaves a filter of anything else, and a Cypher statement of a date, as they were', async () => {
         expect(await found((q) => q.name.eq('two'))).toEqual(['d2']);

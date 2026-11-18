@@ -342,10 +342,9 @@ describe('a SQLite store', () => {
             expect((await gom.load(Ticket, 't1'))!.openedAt).toEqual('2026-11-02T10:30:00.123Z');
         });
 
-        // Held: a filter's SQL is still TypeScript's own, which compared a date as text where layout 2 holds
-        // its tag, so the DSL now refuses a date by name (#771, StatelessGraphObjectManager.temporalFilters.spec).
-        // Lifted when the DSL's filters come from the module's fragments (drivine-cypher-spec#235).
-        it.skip('should compare, seek and patch a boolean and a date as a save stores them: as JSON text', async () => {
+        // The DSL's filters, seeks and orders are the module's fragments (drivine-cypher-spec#235), which compare a
+        // date by the tag layout 2 holds it as (#771).
+        it('should compare, seek and patch a boolean and a date as a save stores them', async () => {
             const first = new Date('2026-01-01T00:00:00.000Z');
             const second = new Date('2026-02-01T00:00:00.000Z');
             const moment = (id: string, fields: Partial<Moment>): Moment =>

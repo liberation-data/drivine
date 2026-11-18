@@ -16,7 +16,7 @@ import { hasId } from '@/backend/sql/NodeIds';
 import { writeLayout } from '@/cypher/ValueLayout';
 import { SqliteGroups } from '@/backend/sqlite/SqliteGroups';
 import { hasLabels, JSON_ROWS, nodeDocument, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
-import { SqliteQueryRenderer } from '@/backend/sqlite/SqliteQueryRenderer';
+import { DSL_ROW, SqliteQueryRenderer } from '@/backend/sqlite/SqliteQueryRenderer';
 import { SqliteSearch } from '@/backend/sqlite/SqliteSearch';
 import { SqliteViews } from '@/backend/sqlite/SqliteViews';
 import { sqliteContended } from '@/connection/sqlite/SqliteDriver';
@@ -33,14 +33,19 @@ import { ModelRegistry } from '@/model/ModelRegistry';
 import { TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 
-/** What a statement over a fragment calls its node's row. A raw `where` is SQL over it. */
-export const ROW_ALIAS = 'n';
+/** What a read of the query DSL calls its root's row (see DSL_ROW). A raw `where` is SQL over `n`, which `written` reads as it. */
+export const ROW_ALIAS = DSL_ROW;
+
+/** What the statements that read a node by its id alone call its row. */
+const NODE_ROW = 'n';
 
 /**
  * Statements for SQLite, over the tables of a SqliteGraph: drivine4j's store, so a file written from the JVM, from
  * Node and from Python is one. A load returns the rows the graph engines do, `{props, labels}` for a fragment, as JSON
  * text the connection reads (see JSON_ROWS). A raw `where` is an SQL predicate over the node's row, `n` (its `labels`,
  * `props` and `stamp`), in which a property of the node may be written as Cypher writes it, `n.name` (see `written`).
+ * A filter, a seek and an order of the query DSL are the shared module's SQL (SqliteQueryRenderer), over the row
+ * `n_`.
  *
  * A save, a patch and a relationship are the plan Postgres's write function carries out, carried out by `drivine_write`,
  * a function each connection registers (see SqlitePlanWriter). A delete that counts selects what it deletes and hands
@@ -199,7 +204,12 @@ export class SqliteBackend implements GraphBackend {
 
     heldProperties(model: FragmentModel): GraphStatement {
         return this.byId(
-            json([`SELECT ${ROW_ALIAS}.props AS "props"`, this.from(model, this.idPredicate(model))].join('\n'))
+            json(
+                [
+                    `SELECT ${NODE_ROW}.props AS "props"`,
+                    this.from(model, this.idPredicate(model, NODE_ROW), NODE_ROW)
+                ].join('\n')
+            )
         );
     }
 
@@ -207,23 +217,24 @@ export class SqliteBackend implements GraphBackend {
         return this.byId(
             new PostgresStatement(
                 [
-                    `SELECT COALESCE(${ROW_ALIAS}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
-                    this.from(model, this.idPredicate(model))
+                    `SELECT COALESCE(${NODE_ROW}.stamp, '${Stamps.NEVER_STAMPED}') AS "found"`,
+                    this.from(model, this.idPredicate(model, NODE_ROW), NODE_ROW)
                 ].join('\n')
             )
         );
     }
 
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel): RenderedQuery {
-        return SqliteQueryRenderer.render(fn, target, (depth) => new SqliteViews(this.graph, depth), ROW_ALIAS);
+        return SqliteQueryRenderer.render(fn, target, this.graph.name, ROW_ALIAS);
     }
 
+    /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
     written(predicate: string): string {
-        return new CypherShorthand(ROW_ALIAS, ROW_ALIAS, textOf).rewrite(predicate);
+        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate);
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {
-        return SqliteQueryRenderer.renderWhere(fn, target, new SqliteViews(this.graph), ROW_ALIAS);
+        return SqliteQueryRenderer.renderWhere(fn, target, this.graph.name, ROW_ALIAS);
     }
 
     patchOne(model: FragmentModel, where?: string): GraphStatement {
@@ -355,10 +366,10 @@ export class SqliteBackend implements GraphBackend {
         return parts.length ? parts.join(' AND ') : undefined;
     }
 
-    /** The nodes of the fragment's labels that meet `where`, as the row `n`. */
-    private from(model: FragmentModel, where?: string): string {
-        const tests = [hasLabels(ROW_ALIAS, model.labels), ...(where ? [`(${where})`] : [])];
-        return `FROM ${this.graph.nodes} ${ROW_ALIAS}\nWHERE ${tests.join(' AND ')}`;
+    /** The nodes of the fragment's labels that meet `where`, as the row `row`. */
+    private from(model: FragmentModel, where?: string, row: string = ROW_ALIAS): string {
+        const tests = [hasLabels(row, model.labels), ...(where ? [`(${where})`] : [])];
+        return `FROM ${this.graph.nodes} ${row}\nWHERE ${tests.join(' AND ')}`;
     }
 
     /**
@@ -382,11 +393,11 @@ export class SqliteBackend implements GraphBackend {
      * compared with the id's, as the shared module writes the comparison, which the index over the id answers (see
      * NodeIds). It reads `$id` more than once, which is bound by name.
      */
-    private idPredicate(model: FragmentModel): string {
+    private idPredicate(model: FragmentModel, row: string = ROW_ALIAS): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return hasId('sqlite', ROW_ALIAS, model.nodeIdProperty, '$id');
+        return hasId('sqlite', row, model.nodeIdProperty, '$id');
     }
 
     /** SQLite pages with `LIMIT … OFFSET …`, and an offset needs a limit before it: -1 for none. */

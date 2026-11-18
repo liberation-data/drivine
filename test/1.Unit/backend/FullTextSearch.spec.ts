@@ -59,7 +59,10 @@ describe('Full-text search from the shared module', () => {
             });
             const statement = backend.matching(shelf, search('graph -relational', index));
             expect(statement.text).toContain(
-                `FROM (${planned.statement}) s JOIN ${graphs[store].nodes} n ON n.nid = s.nid`
+                // SQLite's hit is the row a read of the query DSL calls its root, which a filter of the DSL reads.
+                store === 'sqlite'
+                    ? `FROM (${planned.statement}) s JOIN ${graphs[store].nodes} n_ ON n_.nid = s.nid`
+                    : `FROM (${planned.statement}) s JOIN ${graphs[store].nodes} n ON n.nid = s.nid`
             );
             expect(statement.bindings).toEqual(planned.parameters);
             expect(Object.keys(statement.bindings).every((it) => /^_cy_ft[0-9]+$/.test(it))).toBe(true);
