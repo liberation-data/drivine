@@ -426,7 +426,7 @@ END;`)
     }
 
     /**
-     * The nodes of the fragment's labels that meet `where`, as the row `n`. A label `where` tests itself (`tested`) is
+     * The nodes of the fragment's labels that meet `where`, as the row `n_`. A label `where` tests itself (`tested`) is
      * not tested again. Beside one, the others are tested in a form no index serves: Oracle takes a label's test for a
      * lookup of one row, and would read that label's nodes in place of the index `where` is read through.
      */
@@ -464,7 +464,7 @@ END;`);
     }
 
     /**
-     * The node of the fragment's labels found by its id in `where` (see idPredicate), as the row `n`: each label told by
+     * The node of the fragment's labels found by its id in `where` (see idPredicate), as the row `row` (`n_` unless given): each label told by
      * the labels' text ({@link carriesLabels}), so Oracle reads the index over the id for the one node, and not every node
      * of the first label, as drivine4j's `OracleSelect.hasId` narrows it.
      */

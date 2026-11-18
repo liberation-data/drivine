@@ -72,10 +72,11 @@ they do elsewhere. A node's stamp is the `stamp` column. A third table, `<graph>
 constraints Drivine made, as drivine4j records them. The layout is drivine4j's, so the JVM, Node and Python read one
 store, and each sees and drops the indexes the others made, and makes none beside them.
 
-Beside the tables the graph is made with three functions: `<graph>_nulls_equal`, by which a compiled Cypher statement
+Beside the tables the graph is made with functions: `<graph>_nulls_equal`, by which a compiled Cypher statement
 compares two lists or maps that may hold a null (see the notes in
-[Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)), and `<graph>_era` and `<graph>_era_date`, which
-renumber a year before 1 between Cypher's numbering and Oracle's as a date or a moment is read and written. Making them
+[Cypher on Oracle and Postgres](#cypher-on-oracle-and-postgres)), `<graph>_era` and `<graph>_era_date`, which
+renumber a year before 1 between Cypher's numbering and Oracle's as a date or a moment is read and written, and
+`<graph>_temporal_arith`, which works out `+`, `-`, `*` and `/` of a temporal value read from the store. Making them
 takes `CREATE PROCEDURE`, which the `RESOURCE` role grants, as well as the `CREATE TABLE` the tables take. A store an
 earlier version made gains those it lacks the next time a connection to the graph first connects. Where the user that
 makes the graph may not make a function, the graph is made without them, and Drivine logs a warning once for the graph
@@ -83,7 +84,8 @@ when a statement would call one, and looks for it again a minute later. Without 
 writes, or the step of a `reduce`, compares two lists or maps that hold a null and differ as JSON as false, where Cypher
 may give null (`[null] = [1]`), and a read declares the function itself. Without the era functions, a statement gives
 the same rows, renumbering a year inline, but Oracle takes longer to plan one of temporal arithmetic: seconds, and over
-a minute for a moment two `CALL`s deep.
+a minute for a moment two `CALL`s deep. A statement of the query DSL that would call one the session may not call is
+refused, saying which (see the notes below).
 
 **A graph an earlier Drivine wrote.** Oracle, Postgres and SQLite hold each value in store layout 2, as the shared
 compiler writes it, and as drivine4j and drivine-python write it: a `Date` a save writes, and a temporal value a Cypher

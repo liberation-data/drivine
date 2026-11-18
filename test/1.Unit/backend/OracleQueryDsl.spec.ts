@@ -240,6 +240,23 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(new QuerySpecification('SELECT 1 FROM dual')._storedFunctions).toBeUndefined();
     });
 
+    it("says the stored functions a search's, a cascade's and a grouped read's filter calls", async () => {
+        const calls = { graph: 'drivine', nullsEqual: true, era: false, temporalArithmetic: false };
+        const where = backend.renderWhere((q: any) => q.meta.eq({ a: null }), scored).where;
+        const rooted = backend.renderWhere((q: any) => q.location.name.eq({ a: null }), hierarchy).where;
+        for (const statement of [
+            backend.nearest(scored, { label: 'Scored', property: 'e', similarity: 'COSINE', k: 3, where }),
+            backend.matching(scored, { label: 'Scored', properties: ['name'], text: 'ada', limit: 3, where }),
+            backend.delete(hierarchy, rooted, CascadeType.DELETE_ALL),
+            backend.cascadeDepthChecks(hierarchy, rooted)[0].statement,
+            await grouped((q: any) => ({ where: q.meta.eq({ a: null }), keys: { name: key(q.name) } }))
+        ]) {
+            expect(statement.calls).toEqual(calls);
+            expect(statement.text).not.toContain('drivine:');
+            expect(statement.spec()._storedFunctions).toEqual(calls);
+        }
+    });
+
     it("says a statement calls the graph's temporal arithmetic, where an order by arithmetic of a property does", () => {
         // A property's value may be a date, so the module works out the arithmetic by the graph's function.
         const query = backend.renderQuery((q: any) => ({ orderBy: times(q.$score, 2).desc() }), scored);
