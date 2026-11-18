@@ -13,6 +13,7 @@ import {
     ModelRegistry,
     NEO4J_GRAMMAR,
     NodeFragment,
+    NodeStamp,
     NodeId,
     nodeRef,
     OracleBackend,
@@ -564,5 +565,32 @@ describe('a lookup by id on SQLite, planned', () => {
         expect(await plan(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(index('n'));
         const related = backend.related({ model, id }, 'READS', Direction.OUTGOING, registry.fragment(Coded));
         expect(await plan(related.text, related.bindings)).toMatch(index('a'));
+    });
+});
+
+@NodeFragment({ labels: ['StampedDay'] })
+class StampedDay {
+    @NodeId() on: Date;
+    @NodeStamp() stamp?: string;
+}
+
+describe('a batch handing back stamps', () => {
+    // Oracle's fragment batch reads each node's id back from its tag, as the tag's text, where the object holds a Date: a
+    // Map finds a Date by the object, so the two are matched by that text.
+    it("hands each stamped node its stamp by its Date id's text, as the store reads it back", () => {
+        const model = new ModelRegistry().fragment(StampedDay);
+        const day = (): StampedDay => Object.assign(new StampedDay(), { on: new Date('2024-01-03T00:00:00.000Z') });
+        const days = [day(), day()];
+        const text = JSON.parse(writeLayout(days[0].on, 'sqlite')).v;
+        const stamp = `${'a'.repeat(16)}:${'b'.repeat(16)}`;
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new OracleBackend(new OracleGraph()),
+            new ModelRegistry()
+        );
+        (gom as any).handBackFragments([{ model, objects: days }], {
+            groups: [{ before: [], after: [{ id: text, stamp }] }]
+        });
+        expect(days.map((it) => it.stamp)).toEqual([stamp, stamp]);
     });
 });

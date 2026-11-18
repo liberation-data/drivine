@@ -50,7 +50,7 @@ import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
 import { columnValue } from '@/backend/postgres/PostgresStatement';
-import { lookupId, NO_NODE } from '@/backend/sql/NodeIds';
+import { lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
 import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
 /**
@@ -1068,10 +1068,11 @@ export class StatelessGraphObjectManager {
             if (!group.model.stampField) {
                 return;
             }
-            const found = new Map(result.groups[i].before.map((it) => [it.id, it.stamp]));
-            const now = new Map(result.groups[i].after.map((it) => [it.id, it.stamp]));
+            // Each id as the batch reads it back, a date's as its tag's text, so a Date id matches its node's.
+            const found = new Map(result.groups[i].before.map((it) => [readBackKey(it.id), it.stamp]));
+            const now = new Map(result.groups[i].after.map((it) => [readBackKey(it.id), it.stamp]));
             for (const object of group.objects) {
-                const id = object[group.model.nodeIdField!];
+                const id = readBackKey(object[group.model.nodeIdField!]);
                 object[group.model.stampField] = Stamps.handedBack(
                     object[group.model.stampField],
                     found.get(id) ?? '',
