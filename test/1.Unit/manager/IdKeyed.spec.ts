@@ -1,10 +1,12 @@
 import {
     CascadeType,
+    CypherBackend,
     Direction,
     GraphBackend,
     GraphRelationship,
     GraphView,
     ModelRegistry,
+    NEO4J_GRAMMAR,
     NodeFragment,
     NodeId,
     nodeRef,
@@ -22,8 +24,12 @@ import {
 } from '@liberation-data/drivine';
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
-import { openSqlite } from '@/connection/sqlite/SqliteDriver';
+import { openSqlite, SqliteDatabase } from '@/connection/sqlite/SqliteDriver';
+import { SqliteFunctions } from '@/connection/sqlite/SqliteFunctions';
 import { idSql } from '@/cypher/SharedCypherCompiler';
+import { writeLayout } from '@/cypher/ValueLayout';
+import { DrivineLogger } from '@/logger/DrivineLogger';
+import { ClassType } from '@/query/QuerySpecification';
 
 /** The comparison an Oracle lookup by `$id` makes of Gauge's id, as the shared module writes it. */
 const ORACLE_HAS_ID = idSql('oracle', 'hasId', 'n', 'id', 'JSON($id EXTENDED)');
@@ -207,5 +213,277 @@ describe('an id on Oracle', () => {
         await gom.load(Gauge, 7);
         await gom.load(Gauge, null);
         expect(bound.map((it) => it.id)).toEqual(['{"$numberDouble":"1.0E-7"}', '7']);
+    });
+});
+
+@NodeFragment({ labels: ['Dial', 'Meter'] })
+class Dial {
+    @NodeId() id: number;
+    name?: string;
+}
+
+@NodeFragment({ labels: ['Coded'] })
+class Coded {
+    @NodeId() code: string;
+}
+
+@NodeFragment({ labels: ['Dated'] })
+class Dated {
+    @NodeId() on: Date;
+}
+
+/** A `$`-named @NodeId, which the store layout holds under `$$code`. */
+@NodeFragment({ labels: ['Priced'] })
+class Priced {
+    @NodeId() $code: string;
+}
+
+@GraphView()
+class DialView {
+    @Root() dial: Dial;
+    @GraphRelationship({ type: 'READS', target: () => Coded }) codes: Coded[] = [];
+}
+
+/** A SQL store a lookup by id is written for: its backend, the SQL its id is read as, and its test of Dial's labels. */
+interface LookupStore {
+    name: string;
+    store: 'postgres' | 'sqlite' | 'oracle';
+    backend: () => GraphBackend;
+    json: (parameter: string) => string;
+    labels: string;
+}
+
+/**
+ * Each store's lookup of a node by its id: the shared module's hasId over the id as the node holds it (idSql), beside a
+ * test of every label in the form drivine4j writes beside it, and the id bound as its JSON in the store's layout.
+ */
+describe.each([
+    {
+        name: 'Postgres',
+        store: 'postgres' as const,
+        backend: (): GraphBackend => new PostgresBackend(new PostgresGraph()),
+        json: (parameter: string): string => parameter,
+        labels: `n.labels @> '["Dial"]' AND n.labels @> '["Meter"]'`
+    },
+    {
+        name: 'SQLite',
+        store: 'sqlite' as const,
+        backend: (): GraphBackend => new SqliteBackend(new SqliteGraph()),
+        json: (parameter: string): string => parameter,
+        labels: `instr(n.labels, '"Dial"') > 0 AND instr(n.labels, '"Meter"') > 0`
+    },
+    {
+        name: 'Oracle',
+        store: 'oracle' as const,
+        backend: (): GraphBackend => new OracleBackend(new OracleGraph()),
+        json: (parameter: string): string => `JSON(${parameter} EXTENDED)`,
+        labels:
+            `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"Dial","') > 0 AND ` +
+            `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"Meter","') > 0`
+    }
+])('a lookup by id on $name', ({ store, backend, json, labels }: LookupStore) => {
+    const registry = new ModelRegistry();
+    const dial = registry.fragment(Dial);
+    const hasId = idSql(store, 'hasId', 'n', 'id', json('$id'));
+
+    let bound: { text: string; parameters: Record<string, any> }[];
+    let gom: StatelessGraphObjectManager;
+
+    beforeEach(() => {
+        bound = [];
+        const record = (spec: QuerySpecification<any>): void => {
+            bound.push({ text: spec.statement.text, parameters: spec.parameters as any });
+        };
+        const pm = {
+            database: 'id-keyed',
+            query: async (spec: QuerySpecification<any>) => {
+                record(spec);
+                return Promise.resolve([]);
+            },
+            execute: async () => Promise.resolve(),
+            getOne: async (spec: QuerySpecification<any>) => {
+                record(spec);
+                return Promise.resolve(0);
+            }
+        } as unknown as PersistenceManager;
+        gom = new StatelessGraphObjectManager(pm, backend(), new ModelRegistry());
+    });
+
+    it("compares the id as the module writes it, beside a test of each label by the labels' text where it must be", () => {
+        const view = registry.view(DialView);
+        const statements = [
+            backend().loadFragment(dial),
+            backend().loadView(view),
+            backend().delete({ kind: 'NODE_FRAGMENT', model: dial }),
+            backend().delete({ kind: 'GRAPH_VIEW', model: view }, undefined, CascadeType.DELETE_ALL),
+            backend().heldProperties(dial),
+            backend().foundStamp(dial)
+        ];
+        for (const statement of statements) {
+            // A view's requirements are joined to the id's test, which is in parentheses of its own there.
+            expect(statement.text.split(`${labels} AND ((${hasId}`).join(`${labels} AND (${hasId}`)).toContain(
+                `${labels} AND (${hasId}`
+            );
+        }
+    });
+
+    it('finds the node loadRelated is from by its id, beside each of its labels', () => {
+        const related = backend().related(
+            { model: dial, id: 7 },
+            'READS',
+            Direction.OUTGOING,
+            registry.fragment(Coded)
+        );
+        expect(related.text).toContain(
+            `${idSql(store, 'hasId', 'a', 'id', json('$x_from'))} AND ${labels.replace(/\bn\.labels/g, 'a.labels')}`
+        );
+        expect((related.spec().parameters as any).x_from).toEqual('7');
+    });
+
+    it('binds a number, a date and a text id as the JSON the node holds each as', async () => {
+        const day = new Date('2024-01-02T03:04:05.000Z');
+        await gom.load(Dial, 7);
+        await gom.load(Dated, day);
+        await gom.load(Coded, 'abc');
+        expect(bound.map((it) => it.parameters.id)).toEqual(['7', writeLayout(day, store), '"abc"']);
+        expect(JSON.parse(bound[1].parameters.id)).toMatchObject({ $t: 'datetime', v: '2024-01-02T03:04:05Z' });
+    });
+
+    it('reads "6" as the number a number id is, and keeps it the text a text id is', async () => {
+        await gom.load(Dial, '6');
+        await gom.load(Coded, '6');
+        await gom.edges.loadRelated(nodeRef(Dial, '6'), 'READS', undefined, Coded);
+        expect(bound.map((it) => it.parameters.id ?? it.parameters.x_from)).toEqual(['6', '"6"', '6']);
+    });
+
+    it('reads an ISO text as the date a Date id is', async () => {
+        await gom.load(Dated, '2024-01-02T03:04:05.000Z');
+        expect(bound.map((it) => it.parameters.id)).toEqual([writeLayout(new Date('2024-01-02T03:04:05.000Z'), store)]);
+    });
+
+    it('runs no statement for text that is no value of the id, logging it at DEBUG alone', async () => {
+        const debug = jest.spyOn(DrivineLogger.prototype, 'debug');
+        const warn = jest.spyOn(DrivineLogger.prototype, 'warn');
+        const error = jest.spyOn(DrivineLogger.prototype, 'error');
+        try {
+            const nowhere = nodeRef(Dial, 'abc');
+            const coded = nodeRef(Coded, 'x');
+            expect(await gom.load(Dial, 'abc')).toBeUndefined();
+            expect(await gom.load(DialView, 'abc')).toBeUndefined();
+            expect(await gom.delete(Dial, 'abc')).toEqual(0);
+            expect(await gom.patch(Dial, 'abc', { set: { name: 'x' } })).toEqual({
+                found: false,
+                applied: false,
+                changed: false
+            });
+            expect(await gom.update(Dial, 'abc', (it) => it)).toBeUndefined();
+            expect(await gom.edges.loadRelated(nowhere, 'READS', undefined, Coded)).toEqual([]);
+            expect(await gom.edges.relate(nowhere, coded, 'READS')).toBe(false);
+            expect(await gom.edges.relate(coded, nowhere, 'READS')).toBe(false);
+            expect(await gom.edges.unrelate(nowhere, coded, 'READS')).toEqual(0);
+            expect(await gom.edges.unrelateAll(nowhere, 'READS')).toEqual(0);
+            expect(await gom.load(Dated, 'not a day')).toBeUndefined();
+            expect(bound).toEqual([]);
+            expect(debug.mock.calls.map(([message]) => message)).toContainEqual(
+                "No Dial is looked for by the id 'abc': it is no value of id's type, so no node has it."
+            );
+            expect(warn).not.toHaveBeenCalled();
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            debug.mockRestore();
+            warn.mockRestore();
+            error.mockRestore();
+        }
+    });
+
+    it('runs no statement for a patch, a load or a delete by a null id, which finds no node (#773)', async () => {
+        expect(await gom.patch(Coded, null, { set: {} })).toEqual({ found: false, applied: false, changed: false });
+        expect(await gom.load(Coded, null)).toBeUndefined();
+        expect(await gom.delete(Coded, undefined)).toEqual(0);
+        expect(bound).toEqual([]);
+    });
+
+    it('finds a node of a $-named id by the key the layout holds it under', () => {
+        const priced = registry.fragment(Priced);
+        expect(backend().loadFragment(priced).text).toContain(idSql(store, 'hasId', 'n', '$$code', json('$id')));
+    });
+});
+
+describe('a lookup by id on a graph engine', () => {
+    it('binds text as it is given: the engine compares it', async () => {
+        const bound: any[] = [];
+        const pm = {
+            database: 'id-keyed',
+            query: async (spec: QuerySpecification<any>) => {
+                bound.push((spec.parameters as any).id);
+                return Promise.resolve([]);
+            }
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+        await gom.load(Dial, '6');
+        await gom.load(Dial, 'abc');
+        expect(bound).toEqual(['6', 'abc']);
+    });
+});
+
+/**
+ * The columns of layout 2's index over the id `key` on SQLite, the id's class and key, as the module's `SqliteDdl` writes
+ * them (`indexColumns`): the two sides of its hasId that read the node's `props`. This library's schema grammar still
+ * makes layout 1's index, over the property's text.
+ */
+function layout2Columns(key: string): string[] {
+    const sql = idSql('sqlite', 'hasId', '', key, 'J');
+    const [kind, rest] = sql.split(` = COALESCE(J ->> '$."$t"'`);
+    const after = rest.slice(rest.indexOf(' AND ') + ' AND '.length);
+    return [kind, after.split(` = COALESCE(J ->> '$.s'`)[0]];
+}
+
+/**
+ * A lookup by id on SQLite reads a uniqueness constraint's index over the id made as layout 2 makes it, by both its
+ * columns, the id's class and key: SQLite's planner, in process, says which index it uses.
+ */
+describe('a lookup by id on SQLite, planned', () => {
+    let db: SqliteDatabase;
+    const graph = new SqliteGraph();
+    const backend = new SqliteBackend(graph);
+    const registry = new ModelRegistry();
+
+    beforeAll(() => {
+        db = openSqlite(':memory:');
+        SqliteFunctions.register(db);
+        graph.ddl.forEach((it) => db.exec(it));
+        for (const [label, key] of [
+            ['Dial', 'id'],
+            ['Dated', 'on']
+        ]) {
+            const columns = layout2Columns(key).join(', ');
+            db.exec(
+                `CREATE UNIQUE INDEX drivine_uq2_${label} ON drivine_node (${columns}) WHERE instr(labels, '"${label}"') > 0`
+            );
+        }
+    });
+
+    afterAll(() => db.close());
+
+    const plan = (text: string, bindings: Record<string, any>): string =>
+        db
+            .prepare(`EXPLAIN QUERY PLAN ${text}`)
+            .all(bindings)
+            .map((it: any) => it.detail)
+            .join('\n');
+
+    it.each([
+        ['a number', Dial, 7],
+        ['a date', Dated, new Date('2024-01-02T00:00:00.000Z')]
+    ])('reads the index for %s id, by a load, a delete and loadRelated', (_, type, id) => {
+        const model = registry.fragment(type as ClassType);
+        const index = /SEARCH n USING (COVERING )?INDEX drivine_uq2_\w+ \(<expr>=\? AND <expr>=\?\)/;
+        const bound = { id: writeLayout(id, 'sqlite') };
+        expect(plan(backend.loadFragment(model).text, bound)).toMatch(index);
+        expect(plan(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(index);
+        const related = backend.related({ model, id }, 'READS', Direction.OUTGOING, registry.fragment(Coded));
+        expect(plan(related.text, related.bindings)).toMatch(
+            /SEARCH a USING (COVERING )?INDEX drivine_uq2_\w+ \(<expr>=\? AND <expr>=\?\)/
+        );
     });
 });
