@@ -317,7 +317,19 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
         // A second save finds the node under the key the layout holds it as, and makes no second one.
         await gom.save(make(LookupPriced, { $code: 'p1', name: 'saved again' }));
         expect((await gom.loadAll(LookupPriced)).map((it) => it.name)).toEqual(['saved again']);
+        // So does a saveAll, which writes a batch, and a relate, which finds both ends by their ids.
+        await gom.saveAll([make(LookupPriced, { $code: 'p1', name: 'batched' })]);
+        expect(await names(LookupPriced)).toEqual(['batched']);
+        expect(await gom.edges.relate(nodeRef(LookupPriced, 'p1'), target, 'POINTS_TO')).toBe(true);
+        const related = await gom.edges.loadRelated(
+            nodeRef(LookupPriced, 'p1'),
+            'POINTS_TO',
+            Direction.OUTGOING,
+            LookupTarget
+        );
+        expect(related.map((it) => it.id)).toEqual(['x']);
         expect(await gom.patch(LookupPriced, 'p1', { set: { name: 'repriced' } })).toMatchObject({ found: true });
+        expect((await gom.load(LookupPriced, 'p1'))?.name).toEqual('repriced');
         expect(await gom.delete(LookupPriced, 'p1')).toEqual(1);
         expect(await gom.load(LookupPriced, 'p1')).toBeUndefined();
     });
