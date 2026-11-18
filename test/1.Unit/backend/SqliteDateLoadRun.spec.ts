@@ -38,6 +38,7 @@ class Event {
     @GraphProperty('due_at') due?: Date;
     undecorated?: Date;
     undecoratedDays?: Date[];
+    @Marked() mixed?: Set<string>;
     @NodeStamp() stamp?: string;
 }
 
@@ -422,6 +423,22 @@ describe('A property declared a Date, loaded on SQLite', () => {
             const props = (await stored()).e9;
             expect(props).toContain('"undecorated":{"$t":"datetime","v":"2026-01-09T00:00:00Z"');
             expect(props).toContain('"undecoratedDays":["2026-01-09T00:00:00Z"]');
+        });
+
+        it('writes a set given in another order afresh, its items where the set has them', async () => {
+            await pm.execute(
+                new QuerySpecification({
+                    text: "MATCH (n:DateLoadRun:Event {id: 'e1'}) SET n.mixed = ['a', date('2026-01-01')]",
+                    language: 'CYPHER'
+                })
+            );
+            const loaded = (await gom.load(Event, 'e1'))!;
+            expect(loaded.mixed).toEqual(new Set(['a', '2026-01-01']));
+            // The same items, so a set equal to the one loaded, but not held in the order the store holds them.
+            loaded.mixed = new Set(['2026-01-01', 'a']);
+            await gom.save(loaded);
+            expect((await gom.load(Event, 'e1'))!.mixed).toEqual(new Set(['2026-01-01', 'a']));
+            expect((await stored()).e1).toContain('"mixed":["2026-01-01","a"]');
         });
 
         it('recognises a copy given what it was loaded as, and not a copy saved without it', async () => {

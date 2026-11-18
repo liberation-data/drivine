@@ -801,12 +801,13 @@ export function propsOf(
 
 /**
  * `stored`, a field's value as a save writes it, or what the store held for it as `loaded` says, where `value` is the
- * value the load gave it still (see propsOf).
+ * value the load gave it still (see propsOf). A set is compared in its order too: the stored tags are put back by their
+ * place in the list, and a set of the same items in another order would put a tag in place of another item.
  */
 function asLoadedOr(stored: any, value: any, loaded: { value: any; held: any } | undefined): any {
-    return loaded && value != null && ObjectUtils.deepEqual(value, loaded.value)
-        ? new HeldAsLoaded(stored, loaded.held)
-        : stored;
+    const [now, then] =
+        value instanceof Set && loaded?.value instanceof Set ? [[...value], [...loaded.value]] : [value, loaded?.value];
+    return loaded && value != null && ObjectUtils.deepEqual(now, then) ? new HeldAsLoaded(stored, loaded.held) : stored;
 }
 
 /**

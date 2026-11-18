@@ -106,10 +106,13 @@ loads as its text, is saved back as the date, not as a string, and a datetime ke
 `save` with `from`, `saveAll` and `update`, of a fragment and of a view, its root, its related nodes, its nested views
 and its relationship fragments, a list of dates among them. A property is unchanged where its value deep-equals what
 the load gave, a `Date` by its time; one changed, in place or given anew, is written as any value is, and every
-property is still written. Two cases aren't recognised:
+property is still written. These cases aren't recognised, and their undecorated dates are saved as their text:
 
-- An object copied out of what a load returned, by a spread or `structuredClone`, is a new object to the save, and its
-  undecorated dates are saved as their text. Save the loaded object, or give it as `from`.
+- An object copied out of what a load returned, by a spread or `structuredClone`, is a new object to the save. Save the
+  loaded object, or give it as `from`. `from` stands for a view's root only: a related node of a view's copy must be
+  the one the load gave, not a copy of it.
+- An entry of a `@PropertyBag` is written as the load gave it, so a date in a bag is saved as its text.
+- A set is unchanged only in the order the load gave its items: the same items in another order are written afresh.
 - A new `Date` in an undecorated field is saved as a date but loads as its text, so it can't round-trip. Declare a
   field that holds a date with a decorator, or initialize it with a `Date`.
 
