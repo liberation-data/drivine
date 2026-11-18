@@ -218,6 +218,23 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(backend.renderQuery((q: any) => ({ where: q.name.gte('A') }), scored, indexed).labelsTested).toEqual([]);
     });
 
+    it('compares a text past 4,000 bytes as a CLOB, not through the index, which holds none, and tests the label', () => {
+        const indexed = [{ label: 'Scored', properties: ['name'] }];
+        // 4,000 bytes is read through the index; one byte more, or 2,001 two-byte characters, is not.
+        const at = backend.renderQuery((q: any) => ({ where: q.name.eq('a'.repeat(4000)) }), scored, indexed);
+        expect(at.labelsTested).toEqual(['Scored']);
+        expect(Object.keys(at.bindings)).toEqual(['_cyk__q0']);
+        for (const long of ['a'.repeat(4001), 'é'.repeat(2001)]) {
+            const query = backend.renderQuery((q: any) => ({ where: q.name.eq(long) }), scored, indexed);
+            expect(query.where).not.toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "Scored")') THEN`);
+            expect(query.where).toContain(`DBMS_LOB.COMPARE(TO_CLOB(JSON_VALUE(n_.props, '$.name' RETURNING CLOB))`);
+            expect(query.labelsTested).toEqual([]);
+            expect(query.bindings).toEqual({ _cy__q0: JSON.stringify(long) });
+            const statement = backend.loadAllFragments(scored.model as any, query.where, {}, query.labelsTested);
+            expect(statement.text).toContain(`WHERE JSON_EXISTS(n_.labels, '$?(@ == "Scored")') AND (`);
+        }
+    });
+
     it("writes an indexed equality over the expressions of layout 2's labelled and unique indexes, as the plan makes them", async () => {
         const ran: string[] = [];
         const recorder = {
