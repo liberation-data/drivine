@@ -50,8 +50,8 @@ class User {
 }
 
 /**
- * A dated item, saved by the object manager on each store: `due` is declared a Date where TypeScript records it, and
- * `undeclared` where it doesn't.
+ * A dated item, made by Cypher on each store: `due` is declared a Date where TypeScript records it, and `undeclared`
+ * where it doesn't.
  */
 @NodeFragment({ labels: ['GroupTest', 'DatedItem'] })
 class DatedItem {
@@ -225,14 +225,30 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
 
     it('should give a least and a greatest of a property declared a Date as a Date, the instant a load gives (#785)', async () => {
         const dates = [
-            new Date('2026-03-01T00:00:00.250Z'),
+            new Date('2026-03-01T00:00:01.000Z'),
             new Date('2026-01-01T00:00:00.000Z'),
             new Date('2026-02-01T00:00:00.000Z')
         ];
-        await gom.saveAll(
-            [...dates.map((due, i) => ({ id: `d${i}`, due, undeclared: due })), { id: 'd3' }].map((it) =>
-                Object.assign(new DatedItem(), { shelf: 'one', ...it })
-            )
+        // Made by Cypher's datetime(), as the Neo4j driver sends a JavaScript Date as an empty map, which a save can't
+        // write on a graph engine; each SQL store compiles the same statement to its tag. Whole seconds with no fraction, as
+        // Memgraph's datetime() reads no fraction before `Z`.
+        for (const [i, due] of dates.entries()) {
+            await pm.execute(
+                new QuerySpecification({
+                    text:
+                        `CREATE (:GroupTest:DatedItem {id: 'd${i}', shelf: 'one', due_at: datetime('${due
+                            .toISOString()
+                            .replace('.000Z', 'Z')}'), ` +
+                        `undeclared: datetime('${due.toISOString().replace('.000Z', 'Z')}')})`,
+                    language: 'CYPHER'
+                })
+            );
+        }
+        await pm.execute(
+            new QuerySpecification({
+                text: "CREATE (:GroupTest:DatedItem {id: 'd3', shelf: 'one'})",
+                language: 'CYPHER'
+            })
         );
         const [group] = await gom.groups.load(DatedItem, (q: any) => ({
             keys: { shelf: key(q.shelf) },
@@ -245,7 +261,7 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
         }));
         expect(group.soonest).toBeInstanceOf(Date);
         expect(group.soonest).toEqual(new Date('2026-01-01T00:00:00.000Z'));
-        expect(group.last).toEqual(new Date('2026-03-01T00:00:00.250Z'));
+        expect(group.last).toEqual(new Date('2026-03-01T00:00:01.000Z'));
         expect(group.none).toBeUndefined();
         // A load gives a Date on a graph engine and the text the save wrote on a SQL store, of the same instant.
         expect(group.soonest).toEqual(new Date((await gom.load(DatedItem, 'd1'))!.due!));
