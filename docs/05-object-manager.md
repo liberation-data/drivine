@@ -457,7 +457,8 @@ compared and ordered by the tag the store holds it as (see
 orders it. A property whose name begins with `$` is read as the store holds it too. A grouped read orders its groups by
 a property key, or a path key by its node's id, as Cypher orders it, a date by its moment, and a text before a boolean
 before a number. Its `min` and `max` are the value of a node of the group, in Cypher's order, of any kind: a text, or
-a date given back as its text, as well as a number. A raw `where` is still SQL, and compares a date as the SQL you
+a date, as well as a number; a date is a `Date` where the property is declared one (see
+[Grouped Reads](#grouped-reads-groups)). A raw `where` is still SQL, and compares a date as the SQL you
 write compares it; outside the DSL, a [Cypher statement](04-cypher-on-a-relational-database.md) compares dates as
 Neo4j does on every store:
 
@@ -758,6 +759,32 @@ What every engine agrees on:
 
 `min` and `max` of a text keep a value stored as `""`, as Cypher does, on Oracle too: the `min` of `""` and `"a"` is
 `""`.
+
+`min` and `max` of a property declared a `Date` are a `Date` on every store, the instant a load gives, as drivine4j
+gives a grouped value as the type its handle declares
+([#785](https://github.com/liberation-data/drivine/issues/785)). Drivine knows a property is declared a `Date` as it
+knows a field holds a [Set](#1-nodefragment-a-node): where TypeScript records its type, which it does for a decorated
+field, whatever the decorator, or where the class initializes the field with a `Date`. A field neither decorated nor
+initialized leaves no type at run time, and TypeScript records a union, such as `Date | null`, as `Object`: a `min` or
+`max` of such a field is given as the store gives it, a `Date` on Neo4j, the text FalkorDB holds, and Cypher's text of
+the date (`'2026-01-01T00:00:00Z'`) on Oracle, Postgres and SQLite. A key is given as the store gives it, as are
+`count`, `sum` and `avg`.
+
+```typescript
+@NodeFragment({ labels: ['Feedback'] })
+export class Feedback {
+    @NodeId() id: string;
+    page: string;
+    @GraphProperty('created_at') createdAt: Date;  // decorated: its min and max are Dates
+    updatedAt: Date;                                // neither decorated nor initialized: given as the store gives it
+}
+
+const [first] = await gom.groups.load(Feedback, (q) => ({
+    keys: { page: key(q.page) },
+    aggregates: { earliest: min(q.createdAt), latest: max(q.createdAt) }
+}));
+// first.earliest is a Date on every store
+```
 
 On Oracle and Postgres, a `sum` or an `avg` of decimals is worked out in exact decimal, so it is more accurate:
 0.1 + 0.2 is 0.3 there, where doubles give 0.30000000000000004. It differs from a graph engine's only around its 16th

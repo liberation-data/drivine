@@ -6,6 +6,7 @@ import {
     count,
     DatabaseRegistry,
     DatabaseType,
+    GraphProperty,
     key,
     max,
     min,
@@ -26,6 +27,8 @@ class Item {
     value?: unknown;
     name?: string;
     at?: Date;
+    /** Declared a Date where TypeScript records it, as a decorated field: grouped, its least and greatest are Dates. */
+    @GraphProperty('due_at') dueAt?: Date;
     shelf?: string;
 }
 
@@ -128,8 +131,8 @@ describe('a grouped read run on SQLite', () => {
             keys: { shelf: key('shelf') },
             aggregates: { first: min('name'), last: max('name'), earliest: min('at'), latest: max('at') }
         });
-        // A date is given as its text, Cypher's, as the temporal filters' grouped read reads one: not a Date, and not
-        // the text the save wrote, `.000Z`.
+        // A date of a field TypeScript records no type of is given as its text, Cypher's: not a Date, and not the text
+        // the save wrote, `.000Z`. One declared a Date is a Date: see the next test.
         expect(group).toEqual({
             shelf: 'one',
             first: 'apple',
@@ -137,6 +140,30 @@ describe('a grouped read run on SQLite', () => {
             earliest: '2026-01-01T00:00:00Z',
             latest: '2026-03-01T00:00:00Z'
         });
+    });
+
+    it('gives a least and a greatest of a property declared a Date as a Date, the instant a load gives (#785)', async () => {
+        await gom.saveAll(
+            [
+                { id: 'a', dueAt: new Date('2026-03-01T00:00:00.250Z') },
+                { id: 'b', dueAt: new Date('2026-01-01T00:00:00.000Z') },
+                { id: 'c', dueAt: new Date('2026-02-01T00:00:00.000Z') },
+                { id: 'd' }
+            ].map((it) => Object.assign(new Item(), { shelf: 'one', ...it }))
+        );
+        const [group] = await gom.groups.load(Item, (q: any) => ({
+            keys: { shelf: key(q.shelf) },
+            aggregates: { soonest: min(q.dueAt), last: max('due_at'), none: min(q.dueAt, q.id.eq('d')) }
+        }));
+        expect(group).toEqual({
+            shelf: 'one',
+            soonest: new Date('2026-01-01T00:00:00.000Z'),
+            last: new Date('2026-03-01T00:00:00.250Z'),
+            none: undefined
+        });
+        // A load on SQLite gives the text the save wrote, of the same instant.
+        expect(group.soonest).toEqual(new Date((await gom.load(Item, 'b'))!.dueAt!));
+        expect(group.last).toEqual(new Date((await gom.load(Item, 'a'))!.dueAt!));
     });
 
     /** The groups of each item's shelf, ordered by it `direction`, as the shelves' ids. */

@@ -7,6 +7,7 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
+import { dateOf, NO_NODE } from '@/backend/sql/NodeIds';
 
 /**
  * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
@@ -282,6 +283,31 @@ function wholeNumbersAsDeclared(type: Function, mapping: FieldMapping, fields: R
  */
 function declaredBigInt(type: Function, mapping: FieldMapping, field: string): boolean {
     return mapping.bigInts.has(field) || Reflect.getMetadata('design:type', type.prototype, field) === BigInt;
+}
+
+/**
+ * Internal: whether the field is declared a `Date`: as the model records it, or as TypeScript records it for a field only another
+ * library's decorator marks, which the model doesn't know of (as {@link declaredSet}).
+ */
+export function declaredDate(type: Function, mapping: FieldMapping, field: string): boolean {
+    return mapping.dates.has(field) || Reflect.getMetadata('design:type', type.prototype, field) === Date;
+}
+
+/**
+ * Internal: a value of a property declared a `Date` as a `Date`: ISO 8601 text, as a SQL store gives one (the module's
+ * canonical text, `2026-01-01T00:00:00Z`, at an offset, with nine digits of the second, or a year before 1 or past 9999,
+ * `-0044` and `+12345`, as Java writes them), as the instant it names, read as an id's text is ({@link dateOf}): a time
+ * with no offset at UTC, and to the millisecond, as a `Date` holds it. A `Date` a graph engine's driver gave is as it
+ * is, and so is anything else: a text that isn't ISO 8601, which JavaScript's parser would guess a date of (`'5'`), and
+ * a day the month hasn't (`2026-02-30`).
+ */
+export function asDate(value: any): any {
+    if (typeof value !== 'string') {
+        return value;
+    }
+    // dateOf reads a signed year of five or six digits, and a fraction no finer than a millisecond.
+    const date = dateOf(value.replace(/^([+-])(\d{4})-/, '$100$2-').replace(/(\.\d{3})\d+/, '$1'));
+    return date === NO_NODE ? value : date;
 }
 
 /**

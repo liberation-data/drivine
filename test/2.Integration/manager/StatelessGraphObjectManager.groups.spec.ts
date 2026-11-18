@@ -6,6 +6,7 @@ import {
     DatabaseType,
     Direction,
     DrivineError,
+    GraphProperty,
     hop,
     key,
     max,
@@ -46,6 +47,17 @@ class Message {
 class User {
     @NodeId() id: string;
     username?: string;
+}
+
+/**
+ * A dated item: `due` is declared a Date where TypeScript records it, and `undeclared` where it doesn't.
+ */
+@NodeFragment({ labels: ['GroupTest', 'DatedItem'] })
+class DatedItem {
+    @NodeId() id: string;
+    shelf?: string;
+    @GraphProperty('due_at') due?: Date;
+    undeclared?: Date;
 }
 
 /** The seeded users, read by a class with no @NodeId: a path key can't order its groups by them (#786). */
@@ -208,6 +220,53 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
             { page: '/agents', total: 3, mean: 1.5, low: 1, high: 2, helpfulTotal: 0, helpfulMean: undefined },
             { page: '/install', total: 9, mean: 4.5, low: 4, high: 5, helpfulTotal: 0, helpfulMean: undefined }
         ]);
+    });
+
+    it('should give a least and a greatest of a property declared a Date as a Date, the instant a load gives (#785)', async () => {
+        const dates = [
+            new Date('2026-03-01T00:00:01.000Z'),
+            new Date('2026-01-01T00:00:00.000Z'),
+            new Date('2026-02-01T00:00:00.000Z')
+        ];
+        if ([DatabaseType.NEO4J, DatabaseType.MEMGRAPH].includes(engine.type)) {
+            // Made by Cypher's datetime() on Neo4j and Memgraph, whose drivers send a JavaScript Date as an empty map, which
+            // a save can't write. Whole seconds with no fraction, as Memgraph's datetime() reads no fraction before `Z`.
+            for (const [i, due] of dates.entries()) {
+                const at = `datetime('${due.toISOString().replace('.000Z', 'Z')}')`;
+                await pm.execute(
+                    new QuerySpecification({
+                        text: `CREATE (:GroupTest:DatedItem {id: 'd${i}', shelf: 'one', due_at: ${at}, undeclared: ${at}})`,
+                        language: 'CYPHER'
+                    })
+                );
+            }
+            await gom.save(Object.assign(new DatedItem(), { id: 'd3', shelf: 'one' }));
+        } else {
+            await gom.saveAll(
+                [...dates.map((due, i) => ({ id: `d${i}`, due, undeclared: due })), { id: 'd3' }].map((it) =>
+                    Object.assign(new DatedItem(), { shelf: 'one', ...it })
+                )
+            );
+        }
+        const [group] = await gom.groups.load(DatedItem, (q: any) => ({
+            keys: { shelf: key(q.shelf) },
+            aggregates: {
+                soonest: min(q.due),
+                last: max('due_at'),
+                none: min(q.due, q.id.eq('d3')),
+                undeclared: min(q.undeclared)
+            }
+        }));
+        expect(group.soonest).toBeInstanceOf(Date);
+        expect(group.soonest).toEqual(new Date('2026-01-01T00:00:00.000Z'));
+        expect(group.last).toEqual(new Date('2026-03-01T00:00:01.000Z'));
+        expect(group.none).toBeUndefined();
+        // A load gives a Date on a graph engine and the text the save wrote on a SQL store, of the same instant.
+        expect(group.soonest).toEqual(new Date((await gom.load(DatedItem, 'd1'))!.due!));
+        expect(group.last).toEqual(new Date((await gom.load(DatedItem, 'd0'))!.due!));
+        // A property TypeScript records no type of is given as the store gives it: a Date on a graph engine whose
+        // driver reads one, the module's text on a SQL store.
+        expect(new Date(group.undeclared as any)).toEqual(new Date('2026-01-01T00:00:00.000Z'));
     });
 
     it('should group by a node reached through a path, counting each source once per group', async () => {

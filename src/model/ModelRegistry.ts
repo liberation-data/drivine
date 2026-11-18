@@ -542,7 +542,8 @@ export class ModelRegistry {
                 ])
             ),
             sets: this.sets(type, properties),
-            bigInts: this.bigInts(type, properties)
+            bigInts: this.bigInts(type, properties),
+            dates: this.dates(type, properties)
         };
     }
 
@@ -569,6 +570,19 @@ export class ModelRegistry {
         return new Set([
             ...[...properties].filter(([, it]) => it.bigInt || it.designType === BigInt).map(([field]) => field),
             ...Object.keys(initialized).filter((field) => typeof initialized[field] === 'bigint')
+        ]);
+    }
+
+    /**
+     * The fields declared a `Date`: those TypeScript records as `Date`, and those the class initializes with one.
+     * TypeScript records the type of a decorated field only, and a union such as `Date | null` as Object, so a field
+     * neither decorated nor initialized, or declared with a union, can't be told from a text.
+     */
+    private dates(type: Function, properties: Map<string, PropertyMetadata>): Set<string> {
+        const initialized = initializedFields(type);
+        return new Set([
+            ...[...properties].filter(([, it]) => it.designType === Date).map(([field]) => field),
+            ...Object.keys(initialized).filter((field) => initialized[field] instanceof Date)
         ]);
     }
 
