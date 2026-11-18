@@ -606,6 +606,26 @@ describe('a lookup by id on SQLite, planned', () => {
         const related = backend.related({ model, id }, 'READS', Direction.OUTGOING, registry.fragment(Coded));
         expect(await plan(related.text, related.bindings)).toMatch(index('a'));
     });
+
+    it("reads the index by the row each by-id statement's FROM declares: a view's load and deletes, a write's reads", async () => {
+        const model = registry.fragment(Dial);
+        const view = registry.view(DialView);
+        const index = (alias: string): RegExp =>
+            new RegExp(`SEARCH ${alias} USING (COVERING )?INDEX drivine_ix2_Dialid_\\w+ \\(<expr>=\\? AND <expr>=\\?\\)`);
+        const bound = { id: writeLayout(7, 'sqlite') };
+        const target = { kind: 'GRAPH_VIEW' as const, model: view };
+        for (const statement of [
+            backend.loadView(view),
+            backend.delete(target),
+            backend.delete(target, undefined, CascadeType.DELETE_ALL),
+            backend.delete(target, undefined, CascadeType.DELETE_ORPHAN)
+        ]) {
+            expect(await plan(statement.text, bound)).toMatch(index(DSL_ROW));
+        }
+        // A write's reads of the node it saves read it as `n`, as the write itself does.
+        expect(await plan(backend.heldProperties(model).text, bound)).toMatch(index('n'));
+        expect(await plan(backend.foundStamp(model).text, bound)).toMatch(index('n'));
+    });
 });
 
 @NodeFragment({ labels: ['StampedDay'] })
