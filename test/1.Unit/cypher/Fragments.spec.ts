@@ -39,6 +39,22 @@ describe('fragment', () => {
             expect(descending.terms.join()).toContain('DESC');
         });
 
+        it("compiles a condition over a relationship's row, and refuses one whose alias doesn't end with _", () => {
+            const compiled = fragment(
+                store,
+                graph,
+                { condition: 'r.weight > $w' },
+                { r: { relationship: 'knows_' } },
+                { w: 2 }
+            );
+            expect(compiled.terms).toHaveLength(1);
+            expect(compiled.terms[0]).toContain('knows_.props');
+            expect(compiled.parameters).toEqual({ _cy_w: '2' });
+            expect(() =>
+                fragment(store, graph, { condition: 'r.weight > 1' }, { r: { relationship: 'knows' } })
+            ).toThrow(/A fragment's variable r is a row whose name ends with _/);
+        });
+
         it('binds a Date as the datetime it is, and a driver date as a date, as a statement binds them', () => {
             const at = fragment(store, graph, { condition: 'n.seen < $t' }, PEOPLE, {
                 t: new Date('2020-01-01T00:00:00.000Z')
