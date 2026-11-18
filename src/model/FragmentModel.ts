@@ -30,6 +30,11 @@ export interface FragmentModel extends FieldMapping {
     nodeIdField?: string;
     /** The name the node id is stored under: the field, unless it has a @GraphProperty. */
     nodeIdProperty?: string;
+    /**
+     * The `@NodeId` field's declared type, as TypeScript records it (`design:type`), where it records one: an id given as
+     * text is read as it on a SQL store (see NodeIds).
+     */
+    nodeIdType?: Function;
     /** The field holding the node's labels beyond the fragment's own, if any. */
     nodeLabels?: NodeLabelsModel;
     /** The full-text indexes the fragment declares with @FullTextIndex, each by its graph properties. */

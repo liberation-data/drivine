@@ -4,7 +4,7 @@ import { MatchedNode } from '@/backend/EdgeStatements';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { CascadeDepthCheck, GraphBackend, MatchingSearch, NearestSearch, Page } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import { PostgresSaveBuilder, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
+import { PostgresSaveBuilder } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresStatement } from '@/backend/postgres/PostgresStatement';
 import { PostgresWrites } from '@/backend/postgres/PostgresWrites';
 import { SaveStatement } from '@/backend/SaveStatement';
@@ -12,6 +12,8 @@ import { CascadeBeyond } from '@/backend/CascadeTargets';
 import { beyondCount, keptTargets } from '@/backend/sql/SqlCascades';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
 import { sqlText } from '@/backend/sql/SqlGraph';
+import { hasId } from '@/backend/sql/NodeIds';
+import { writeLayout } from '@/cypher/ValueLayout';
 import { SqliteGroups } from '@/backend/sqlite/SqliteGroups';
 import { hasLabels, JSON_ROWS, nodeDocument, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
 import { SqliteQueryRenderer } from '@/backend/sqlite/SqliteQueryRenderer';
@@ -257,15 +259,18 @@ export class SqliteBackend implements GraphBackend {
                 ? '((e.src = a.nid AND x.nid = e.dst) OR (e.dst = a.nid AND x.nid = e.src))'
                 : 'e.src = a.nid AND x.nid = e.dst';
         const labels = [...new Set([...from.model.labels, ...(from.labels ?? [])])];
+        // The node it is from found by its id's JSON, as the index over the id is made (see NodeIds), bound by name: the
+        // comparison reads it more than once.
         return json(
             `SELECT ${nodeDocument('n')} AS "result" FROM ${this.graph.nodes} n WHERE n.nid IN (` +
                 `SELECT x.nid FROM ${this.graph.nodes} a JOIN ${this.graph.edges} e ON e.type = CAST($x_type AS TEXT) ` +
-                `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasLabels('a', labels)} AND ` +
-                `${textOf('a', from.model.nodeIdProperty)} = CAST($x_from AS TEXT) AND ${hasLabels(
-                    'x',
-                    target.labels
-                )})`,
-            { x_type: type, x_from: storedKey(from.id, 'sqlite') }
+                `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasId(
+                    'sqlite',
+                    'a',
+                    from.model.nodeIdProperty,
+                    '$x_from'
+                )} AND ${hasLabels('a', labels)} AND ${hasLabels('x', target.labels)})`,
+            { x_type: type, x_from: idJson(from.id) }
         );
     }
 
@@ -367,20 +372,21 @@ export class SqliteBackend implements GraphBackend {
         );
     }
 
-    /** `statement`, which finds a node by `$id`, binding the id as the text the store reads it back as (see storedKey). */
+    /** `statement`, which finds a node by `$id`, binding the id as the JSON text the node holds it as (see idJson). */
     private byId(statement: GraphStatement): GraphStatement {
-        return PostgresStatement.of(statement).keyingId((id) => storedKey(id, 'sqlite'));
+        return PostgresStatement.of(statement).keyingId(idJson);
     }
 
     /**
-     * The node whose id is `$id`, read as text, as a uniqueness constraint over the id holds it and as drivine4j finds a
-     * node: a number is the text the store holds it as, as `byId` binds it.
+     * The node whose id is `$id`, the JSON text the node holds it as, as `byId` binds it: the property's class and key
+     * compared with the id's, as the shared module writes the comparison, which the index over the id answers (see
+     * NodeIds). It reads `$id` more than once, which is bound by name.
      */
     private idPredicate(model: FragmentModel): string {
         if (!model.nodeIdProperty) {
             throw new DrivineError(`${model.type.name} has no @NodeId property, so it can't be found by id.`);
         }
-        return `${textOf(ROW_ALIAS, model.nodeIdProperty)} = CAST($id AS TEXT)`;
+        return hasId('sqlite', ROW_ALIAS, model.nodeIdProperty, '$id');
     }
 
     /** SQLite pages with `LIMIT … OFFSET …`, and an offset needs a limit before it: -1 for none. */
@@ -399,4 +405,9 @@ function json(statement: string | GraphStatement, bindings?: Record<string, any>
     return typeof statement === 'string'
         ? new PostgresStatement(`${JSON_ROWS}\n${statement}`, bindings)
         : new PostgresStatement(`${JSON_ROWS}\n${statement.text}`, statement.bindings);
+}
+
+/** An id as the JSON text a node on SQLite holds it as, as a save writes it (see writeLayout): what finds the node. */
+function idJson(id: unknown): string {
+    return writeLayout(id, 'sqlite');
 }

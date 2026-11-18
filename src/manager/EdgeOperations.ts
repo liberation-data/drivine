@@ -7,6 +7,7 @@ import { ModelRegistry } from '@/model/ModelRegistry';
 import { NodeRef, RelateMode } from '@/manager/NodeRef';
 import { GraphObjectMapper } from '@/mapper/GraphObjectMapper';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
+import { lookupId, NO_NODE } from '@/backend/sql/NodeIds';
 
 /**
  * Relationships on their own, between stored nodes matched by id: neither node is loaded or created, and neither's
@@ -34,7 +35,11 @@ export class EdgeOperations {
         target: ClassRef<T>
     ): Promise<T[]> {
         const model = this.registry.fragment(target as ClassType);
-        const rows = await this.query(this.backend.related(this.node(from), type, direction, model));
+        const node = this.node(from);
+        if (node === undefined) {
+            return [];
+        }
+        const rows = await this.query(this.backend.related(node, type, direction, model));
         return rows.map((row) => this.mapper.fragment<T>(model, row));
     }
 
@@ -54,21 +59,33 @@ export class EdgeOperations {
         const stored = Object.fromEntries(
             Object.entries(properties).map(([key, value]) => [key, storedValue(value, false)])
         );
-        const related = await this.run<number>(this.backend.relate(this.node(from), this.node(to), type, stored, mode));
+        const [start, end] = [this.node(from), this.node(to)];
+        if (start === undefined || end === undefined) {
+            return false;
+        }
+        const related = await this.run<number>(this.backend.relate(start, end, type, stored, mode));
         return related > 0;
     }
 
     /** Removes every relationship of the type from `from` to `to`, and returns how many there were. */
     async unrelate(from: NodeRef, to: NodeRef, type: string): Promise<number> {
-        return this.run<number>(this.backend.unrelate(this.node(from), this.node(to), type));
+        const [start, end] = [this.node(from), this.node(to)];
+        return start === undefined || end === undefined ? 0 : this.run<number>(this.backend.unrelate(start, end, type));
     }
 
     /** Removes every relationship of the type `from` has in the direction (OUTGOING by default), and returns how many. */
     async unrelateAll(from: NodeRef, type: string, direction: Direction = Direction.OUTGOING): Promise<number> {
-        return this.run<number>(this.backend.unrelateAll(this.node(from), type, direction));
+        const start = this.node(from);
+        return start === undefined ? 0 : this.run<number>(this.backend.unrelateAll(start, type, direction));
     }
 
-    private node(ref: NodeRef): MatchedNode {
-        return { model: this.registry.fragment(ref.type), id: ref.id, labels: ref.labels };
+    /**
+     * The node `ref` names, its id read as the `@NodeId` field's type on a SQL store; undefined where no node can have the
+     * id, for which no statement is run (see NodeIds).
+     */
+    private node(ref: NodeRef): MatchedNode | undefined {
+        const model = this.registry.fragment(ref.type);
+        const id = lookupId(this.backend, model, ref.id);
+        return id === NO_NODE ? undefined : { model, id, labels: ref.labels };
     }
 }

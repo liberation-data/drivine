@@ -162,6 +162,16 @@ export function hasLabels(alias: string, labels: string[]): string {
 }
 
 /**
+ * A predicate that holds when the node row `alias` carries every one of the labels, each told by the labels' text
+ * ({@link holdsLabel}), so the index over labels answers none of them: the form for a node that is found some other way,
+ * by its id. Given the choice, Oracle reads every node of a label and tests each for the id, where the index over the id
+ * gives the one node. drivine4j's `OracleSql.hasLabels(scanned = false)` writes the same, its `carriesLabel` for each.
+ */
+export function carriesLabels(alias: string, labels: string[]): string {
+    return labels.map((it) => holdsLabel(`${alias}.labels`, it)).join(' AND ');
+}
+
+/**
  * A predicate that holds when the JSON array of labels `labels` holds `label`, told by its text. `JSON_SERIALIZE`
  * writes the array compactly, `["A","B"]`; with its brackets made commas and `,"` put after it, `,"A","B","`, each
  * label is `,"label","`, and the label is looked for as that. The trims take one bracket at each end, since a label's

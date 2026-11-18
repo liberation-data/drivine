@@ -50,6 +50,8 @@ import { SearchIndex } from '@/cypher/SharedCypherCompiler';
 import { ClassRef, ClassType, QuerySpecification } from '@/query/QuerySpecification';
 import { cypherStatement } from '@/query/Statement';
 import { columnValue } from '@/backend/postgres/PostgresStatement';
+import { exactKey, HandedBack, lookupId, NO_NODE, readBackKey } from '@/backend/sql/NodeIds';
+import { rootOf } from '@/backend/sql/SqlSaves';
 import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
 /**
@@ -541,11 +543,16 @@ export class StatelessGraphObjectManager {
      */
     async update<T extends object>(
         type: ClassRef<T>,
-        id: unknown,
+        given: unknown,
         change: (loaded: T) => T | void | Promise<T | void>,
         attempts: number = UPDATE_ATTEMPTS
     ): Promise<T | undefined> {
         const target = this.modelOf(type);
+        const root = rootOf(target);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            return undefined;
+        }
         for (let attempt = 1; ; attempt++) {
             const found = await this.loadRow(type, id);
             if (found === undefined) {
@@ -560,7 +567,13 @@ export class StatelessGraphObjectManager {
             try {
                 return await this.write(changed, options, false);
             } catch (failure) {
-                if (!(failure instanceof StaleObjectException) || failure.id !== id || attempt >= attempts) {
+                // By value (see readBackKey): the save's id is the loaded object's, another Date than a Date id given,
+                // or on a SQL store the tag's text.
+                if (
+                    !(failure instanceof StaleObjectException) ||
+                    readBackKey(failure.id, root) !== readBackKey(id, root) ||
+                    attempt >= attempts
+                ) {
                     throw failure;
                 }
                 if (failure.deleted) {
@@ -575,13 +588,8 @@ export class StatelessGraphObjectManager {
      * It never makes a node, is not checked against a stamp, and hands none back: a node it changed has a new stamp,
      * so an object loaded before is refused when saved. On a view, the fields are its root's.
      */
-    async patch<T>(type: ClassRef<T>, id: unknown, options: PatchOptions<T>): Promise<PatchResult> {
+    async patch<T>(type: ClassRef<T>, given: unknown, options: PatchOptions<T>): Promise<PatchResult> {
         const target = this.modelOf(type);
-        const filter = this.condition(
-            target,
-            await this.lookups(options.where, target, loweredWhere),
-            options.bindings
-        );
         const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
         const set: Record<string, any> = {};
         const named = [...Object.keys(options.set ?? {}), ...(options.clear ?? [])];
@@ -592,6 +600,17 @@ export class StatelessGraphObjectManager {
                 root.jsonPacked.has(field)
             );
         }
+        // After the fields are checked, so a patch no store takes is refused whatever its id finds.
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            // A null id, or text that is no value of the id's type, finds no node (#773): nothing is run.
+            return { found: false, applied: false, changed: false };
+        }
+        const filter = this.condition(
+            target,
+            await this.lookups(options.where, target, loweredWhere),
+            options.bindings
+        );
         const statement = this.backend.patchOne(root, filter.where);
         const split = splitVectors(root, set);
         return this.whenUncontended(async () =>
@@ -646,13 +665,14 @@ export class StatelessGraphObjectManager {
             );
             return { id, ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR)) };
         });
+        // Each id by its value (see exactKey): a Date is one id by its time.
         const ids = rows.map((it) => it.id);
-        if (new Set(ids).size !== ids.length) {
+        if (new Set(ids.map(exactKey)).size !== ids.length) {
             throw new DrivineError('patchAll takes each id once.');
         }
         // In order of id, so that two calls over the same nodes take their locks in the same order.
         const sorted = [...rows].sort((a, b) => inOrder(String(a.id), String(b.id)));
-        const results = new Map<any, PatchResult>();
+        const results = new HandedBack<PatchResult>(root);
         // Each statement bound before the first runs: one a SQL store refuses (a NaN) is refused with none written.
         const statements: QuerySpecification<PatchResult & { id: any }>[] = [];
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
@@ -745,10 +765,14 @@ export class StatelessGraphObjectManager {
      */
     async delete<T>(
         type: ClassRef<T>,
-        id: unknown,
+        given: unknown,
         options: { where?: string | WhereFn<T>; bindings?: Record<string, any>; cascade?: CascadeType } = {}
     ): Promise<number> {
         const target = this.modelOf(type);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            return 0;
+        }
         const filter = this.condition(target, options.where, options.bindings);
         const statement = this.backend.delete(target, filter.where, options.cascade);
         const bindings = { ...filter.bindings, id };
@@ -798,10 +822,14 @@ export class StatelessGraphObjectManager {
     /** The object with the id, and the row it was mapped from; undefined when there is none. */
     private async loadRow<T>(
         type: ClassRef<T>,
-        id: unknown,
+        given: unknown,
         depth?: LoadOptions['depth']
     ): Promise<{ object: T; row: any } | undefined> {
         const target = this.modelOf(type);
+        const id = this.lookupId(target, given);
+        if (id === NO_NODE) {
+            return undefined;
+        }
         const statement =
             target.kind === 'GRAPH_VIEW'
                 ? this.backend.loadView(target.model, depth)
@@ -818,6 +846,14 @@ export class StatelessGraphObjectManager {
                 ? this.mapper.view<T>(target.model, rows[0])
                 : this.mapper.fragment<T>(target.model, rows[0]);
         return { object, row: rows[0] };
+    }
+
+    /**
+     * The id a lookup of the target's root by `given` binds: on a SQL store read as the `@NodeId` field's type, and
+     * NO_NODE where no node can have it, for which no statement is run (see NodeIds).
+     */
+    private lookupId(target: TargetModel, given: unknown): unknown {
+        return lookupId(this.backend, target.kind === 'GRAPH_VIEW' ? target.model.root : target.model, given);
     }
 
     /**
@@ -891,7 +927,8 @@ export class StatelessGraphObjectManager {
             throw new DrivineError(`The ${name} given as from has no root fragment.`);
         }
         const [loadedId, id] = [loadedRoot[model.nodeIdField!], root[model.nodeIdField!]];
-        if (String(loadedId) !== String(id)) {
+        // By value (see readBackKey): a SQL store loads a Date id as its tag's text, and a Date's String has no milliseconds.
+        if (String(readBackKey(loadedId, model)) !== String(readBackKey(id, model))) {
             throw new DrivineError(
                 `from is the ${name} '${String(loadedId)}', and the object saved '${String(id)}'. Give the object as ` +
                     `it was loaded.`
@@ -928,7 +965,9 @@ export class StatelessGraphObjectManager {
             target.kind === 'GRAPH_VIEW'
                 ? [before[target.model.rootField], changed[target.model.rootField]]
                 : [before, changed];
-        if (rootAfter?.[root.nodeIdField!] !== rootBefore[root.nodeIdField!]) {
+        // By value (see readBackKey): the copy taken before the change holds a Date id as another Date, and a SQL store
+        // loads one as its tag's text.
+        if (readBackKey(rootAfter?.[root.nodeIdField!], root) !== readBackKey(rootBefore[root.nodeIdField!], root)) {
             throw new DrivineError(
                 `An update of ${root.type.name} '${rootBefore[root.nodeIdField!]}' can't give it another id.`
             );
@@ -1041,8 +1080,16 @@ export class StatelessGraphObjectManager {
             if (!group.model.stampField) {
                 return;
             }
-            const found = new Map(result.groups[i].before.map((it) => [it.id, it.stamp]));
-            const now = new Map(result.groups[i].after.map((it) => [it.id, it.stamp]));
+            // Each id as it was given, or as the batch reads it back (see HandedBack), so a Date or bigint id matches
+            // its node's.
+            const found = new HandedBack(
+                group.model,
+                result.groups[i].before.map((it) => [it.id, it.stamp])
+            );
+            const now = new HandedBack(
+                group.model,
+                result.groups[i].after.map((it) => [it.id, it.stamp])
+            );
             for (const object of group.objects) {
                 const id = object[group.model.nodeIdField!];
                 object[group.model.stampField] = Stamps.handedBack(
@@ -1281,8 +1328,16 @@ export class StatelessGraphObjectManager {
     private handBackRelated(object: any, statement: SaveStatement, result: SaveResult): void {
         statement.stampedModels.forEach((model, index) => {
             const { before, after }: SaveResult['related'][number] = result.related[index];
-            const found = new Map(before.map((it) => [it.id, it.stamp]));
-            const now = new Map(after.map((it) => [it.id, it.stamp]));
+            // Each id as it was given, or as the save reads it back (see HandedBack), so a Date or bigint id matches
+            // its node's.
+            const found = new HandedBack(
+                model,
+                before.map((it) => [it.id, it.stamp])
+            );
+            const now = new HandedBack(
+                model,
+                after.map((it) => [it.id, it.stamp])
+            );
             for (const node of this.nodesOf(object, model)) {
                 const id = node[model.nodeIdField!];
                 if (now.has(id)) {
@@ -1346,6 +1401,7 @@ function relatedIds(rel: RelationshipModel, value: any): any[] {
     return [value ?? []].flat().map((item: any) => {
         const node = related.kind === 'RELATIONSHIP_FRAGMENT' ? item?.[related.model.targetField] : item;
         const fragment = into.kind === 'GRAPH_VIEW' ? node?.[into.model.rootField] : node;
-        return fragment?.[root.nodeIdField!];
+        // By value (see readBackKey): a loaded Date id is another Date, or on a SQL store its tag's text.
+        return readBackKey(fragment?.[root.nodeIdField!], root);
     });
 }

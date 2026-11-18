@@ -4,10 +4,11 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
-import { writeLayout, writeProps } from '@/cypher/ValueLayout';
+import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { LayoutBoundStatement } from '@/backend/oracle/LayoutBoundStatement';
 import { RowOrderedStatement } from '@/backend/oracle/RowOrderedStatement';
-import { hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
+import { carriesLabels, hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
+import { hasId } from '@/backend/sql/NodeIds';
 import { prelude } from '@/backend/oracle/OracleSaveBuilder';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
@@ -114,7 +115,7 @@ export class OracleWrites {
         const body: string[] = [];
         const reads = (when: 'before' | 'after'): void =>
             groups.forEach((group, i) => {
-                const k = jsonKey(group.model.nodeIdProperty!);
+                const k = jsonKey(heldKey(group.model.nodeIdProperty!));
                 const variable = `v_${when}${i}`;
                 if (when === 'before') {
                     declarations.push(`${variable} CLOB;`, `v_after${i} CLOB;`);
@@ -256,14 +257,17 @@ export class OracleWrites {
                 ? '((e.src = a.nid AND x.nid = e.dst) OR (e.dst = a.nid AND x.nid = e.src))'
                 : 'e.src = a.nid AND x.nid = e.dst';
         const labels = [...new Set([...from.model.labels, ...(from.labels ?? [])])];
+        // The node it is from found by its id, as the index over the id is made, its labels told by their text so Oracle
+        // reads that index for it (see OracleBackend.foundById); the id is read more than once, so bound by name.
         return new GraphStatement(
             `SELECT ${nodeDocument('n')} AS "result" FROM ${this.graph.nodes} n WHERE n.nid IN (` +
                 `SELECT x.nid FROM ${this.graph.nodes} a JOIN ${this.graph.edges} e ON e.type = $x_type ` +
-                `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasLabels('a', labels)} AND ` +
-                `JSON_EXISTS(a.props, '$?(@${jsonKey(
-                    idProperty(from.model)
-                )} == $v)' PASSING JSON($x_from EXTENDED) AS "v") AND ` +
-                `${hasLabels('x', target.labels)})`,
+                `JOIN ${this.graph.nodes} x ON ${join} WHERE ${hasId(
+                    'oracle',
+                    'a',
+                    idProperty(from.model),
+                    'JSON($x_from EXTENDED)'
+                )} AND ${carriesLabels('a', labels)} AND ${hasLabels('x', target.labels)})`,
             { x_type: type, x_from: oracleId(from.id) }
         );
     }
@@ -278,7 +282,7 @@ export class OracleWrites {
 
     private matchOf(node: MatchedNode, name: string = 'x_frommatch'): string {
         const labels = [...new Set([...node.model.labels, ...(node.labels ?? [])])];
-        const k = jsonKey(idProperty(node.model));
+        const k = jsonKey(heldKey(idProperty(node.model)));
         this.pending[name] = `${hasLabels(
             'n',
             labels
@@ -297,7 +301,7 @@ export class OracleWrites {
     }
 
     private matchText(model: FragmentModel): string {
-        const k = jsonKey(idProperty(model));
+        const k = jsonKey(heldKey(idProperty(model)));
         return `${hasLabels(
             'n',
             model.labels

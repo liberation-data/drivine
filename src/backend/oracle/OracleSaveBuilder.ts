@@ -1,7 +1,7 @@
 import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
-import { writeLayout, writeProps } from '@/cypher/ValueLayout';
+import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { hasLabels, jsonKey, OracleGraph, sqlText } from '@/backend/oracle/OracleGraph';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -215,7 +215,7 @@ export class OracleSaveBuilder {
                 .flatMap((it) =>
                     items(it, object[it.field]).map((item) => idOf(rootOf(targetOf(it)), fragmentOf(it, item)))
                 );
-            const k = jsonKey(into.nodeIdProperty!);
+            const k = jsonKey(heldKey(into.nodeIdProperty!));
             const notIn = (list: string): string =>
                 `NOT EXISTS (SELECT 1 FROM JSON_TABLE(JSON(${list} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) t ` +
                 `WHERE JSON_EXISTS(x.props, '$?(@${k} == $v)' PASSING t.v AS "v"))`;
@@ -247,7 +247,7 @@ export class OracleSaveBuilder {
     /** Reads `{id, stamp}` of each stamped related node, before or after the writes, into a variable each. */
     private readStamps(when: 'before' | 'after'): string[] {
         return this.stamped.map((it, i) => {
-            const k = jsonKey(it.model.nodeIdProperty!);
+            const k = jsonKey(heldKey(it.model.nodeIdProperty!));
             const variable = `v_${when}${i}`;
             if (!this.declarations.includes(`${variable} CLOB;`)) {
                 this.declarations.push(`${variable} CLOB;`);
@@ -309,7 +309,7 @@ END;`;
     }
 
     private nodeParams(write: NodeWrite): Record<string, string> {
-        const k = jsonKey(write.model.nodeIdProperty!);
+        const k = jsonKey(heldKey(write.model.nodeIdProperty!));
         const match = `${hasLabels(
             'n',
             write.model.labels

@@ -1,4 +1,5 @@
-import { hasLabels, SqliteGraph, textOf } from '@/backend/sqlite/SqliteGraph';
+import { hasLabels, SqliteGraph } from '@/backend/sqlite/SqliteGraph';
+import { idSql } from '@/cypher/SharedCypherCompiler';
 import { byCodePoints, ExactJson } from '@/backend/sqlite/ExactJson';
 import { WriteReturns } from '@/backend/sql/WritePlan';
 import { LowerCopies } from '@/model/LowerCopies';
@@ -240,7 +241,7 @@ export class SqlitePlanWriter {
     private saved(step: Record<string, any>): Saved {
         const shape = this.shapes[step.s];
         for (let tries = 0; ; tries++) {
-            const row = this.find(shape, String(step.k));
+            const row = this.find(shape, step.id);
             const start = this.startOf(step, row);
             setAndUnset(start.props, step);
             const relabelled = this.relabelled(step, start, row === undefined);
@@ -364,7 +365,7 @@ export class SqlitePlanWriter {
 
     /** Finds a node that must be there. */
     private ref(step: Record<string, any>): void {
-        const row = this.find(this.shapes[step.s], String(step.k));
+        const row = this.find(this.shapes[step.s], step.id);
         if (row === undefined) {
             throw new Stopped(0);
         }
@@ -440,7 +441,8 @@ export class SqlitePlanWriter {
         const held = new Set(strings(step.held));
         const keep = flag(step, 'keep', false);
         const remove = flag(step, 'delete', false);
-        const key = textOf('t', shape.key);
+        // Each target's id as the text the plan keys it by in `ids` and `held`: a temporal value's tag as its text.
+        const key = idSql('sqlite', 'keyText', 't', shape.key);
         const labels = shape.labels.length ? ` AND ${hasLabels('t', shape.labels)}` : '';
         // A relationship from the node to itself is read as leaving it, and so once when both directions are read.
         const reached = this.statements
@@ -558,7 +560,7 @@ export class SqlitePlanWriter {
      * hands back; one that does not meet the query is left as it is, and said to.
      */
     private patch(step: Record<string, any>): void {
-        const row = this.find(this.shapes[step.s], String(step.k));
+        const row = this.find(this.shapes[step.s], step.id);
         if (row === undefined) {
             return;
         }
@@ -597,15 +599,28 @@ export class SqlitePlanWriter {
 
     // ----- Reading -----
 
-    /** The node of `shape` whose id is stored as `id`, the first made where there are several. */
-    private find(shape: Shape, id: string): Row | undefined {
+    /**
+     * The node of `shape` whose id is `id`, the JSON the node holds it as (a step's `id`), the first made where there are
+     * several; undefined where there is none, or where the step gives no id. The id's class and key are compared with the
+     * property's, as the shared module writes the comparison (`hasId`), as a range index or a uniqueness constraint is
+     * made over them, so the index answers the lookup, and a temporal id's tag is equal only to the same value's: found by
+     * the text of the key, a date saved twice was two nodes (liberation-data/drivine-python#519).
+     */
+    private find(shape: Shape, id: unknown): Row | undefined {
+        if (id == null) {
+            return undefined;
+        }
         const labels = shape.labels.length ? ` AND ${hasLabels('n', shape.labels)}` : '';
         const [found] = this.statements.rows(
-            `SELECT n.nid, n.labels, n.props, n.stamp FROM ${this.nodesTable} n WHERE ${textOf(
+            // The one value, numbered, so each place the comparison reads it is bound to it.
+            `SELECT n.nid, n.labels, n.props, n.stamp FROM ${this.nodesTable} n WHERE ${idSql(
+                'sqlite',
+                'hasId',
                 'n',
-                shape.key
-            )} = ?${labels} ORDER BY n.nid LIMIT 1`,
-            id
+                shape.key,
+                '?1'
+            )}${labels} ORDER BY n.nid LIMIT 1`,
+            ExactJson.stringify(id)
         );
         if (!found) {
             return undefined;
