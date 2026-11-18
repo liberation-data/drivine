@@ -28,12 +28,9 @@ class Ranked {
  * A query DSL filter, order and grouped read of a property whose name begins with `$`, which store layout 2 holds as
  * `$$score` (drivine-cypher-spec#161). The DSL's own SQL named it as it is, `$score`, so it found no node, ordered by
  * nothing and grouped every node under no value, silently. The shared module's fragments read it as the layout holds it:
- * on SQLite since drivine-cypher-spec#235 step 2, and on Postgres since step 3.
+ * on SQLite since drivine-cypher-spec#235 step 2, on Postgres since step 3 and on Oracle since step 4.
  */
 describe.each(sqlStores())('A property whose name begins with $ in the query DSL on $type', (store) => {
-    // Held where the DSL's SQL is still the library's own, which names the property as it is: Oracle until
-    // drivine-cypher-spec#235 step 4. Make it it() again when that step lands.
-    const held = store.type === DatabaseType.ORACLE ? it.failing : it;
     let pm: PersistenceManager;
     let gom: StatelessGraphObjectManager;
 
@@ -62,13 +59,13 @@ describe.each(sqlStores())('A property whose name begins with $ in the query DSL
         expect((await gom.load(Ranked, 'r2'))?.$score).toEqual(2);
     });
 
-    held('filters by it', async () => {
+    it('filters by it', async () => {
         const found = await gom.loadAll(Ranked, (q: any) => ({ where: q.$score.gt(1) }));
         expect(found.map((it) => it.id).sort()).toEqual(['r2', 'r3']);
         expect(await gom.count(Ranked, (q: any) => ({ where: q.$score.eq(3) }))).toEqual(1);
     });
 
-    held('orders and seeks by it', async () => {
+    it('orders and seeks by it', async () => {
         expect((await gom.loadAll(Ranked, (q: any) => ({ orderBy: q.$score.desc() }))).map((it) => it.id)).toEqual([
             'r3',
             'r2',
@@ -81,7 +78,7 @@ describe.each(sqlStores())('A property whose name begins with $ in the query DSL
         ).toEqual(['r2', 'r3']);
     });
 
-    held('groups and adds by it', async () => {
+    it('groups and adds by it', async () => {
         const groups = await gom.groups.load(Ranked, (q: any) => ({
             keys: { score: key(q.$score) },
             aggregates: { nodes: count(), total: sum(q.$score) },
