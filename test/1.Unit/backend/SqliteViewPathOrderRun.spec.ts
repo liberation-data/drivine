@@ -152,6 +152,16 @@ describe("A view's path ordered by a hop's property, run on SQLite", () => {
         });
     });
 
+    it("orders a map, a list, a date and a text hop property in Cypher's order of kinds", async () => {
+        await create(['a', datetime('2024-01-01T00:00:00Z', '10000020240101000000000000000064800'), [1], { k: 1 }]);
+        expect(await loaded()).toEqual({
+            lowestFirst: ['d3', 'd2', 'd1', 'd0'],
+            highestFirst: ['d0', 'd1', 'd2', 'd3'],
+            lowest: 'd3',
+            highest: 'd0'
+        });
+    });
+
     it('orders an empty text as a text, the lowest, and targets of equal values by their node', async () => {
         await create(['', 'a', undefined, '']);
         expect(await loaded()).toEqual({
