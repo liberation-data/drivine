@@ -78,6 +78,29 @@ describe.each(allStores().filter((it) => it.type !== DatabaseType.FALKORDB))(
             await clearLabels(pm, store, 'OrderedPathKind');
         });
 
+        // What the engine's own ORDER BY does with values of several kinds, apart from any view: Neo4j orders a temporal
+        // value, a text, a boolean, a number, no value last. Whether Memgraph orders them so, orders them otherwise or
+        // refuses decides whether its view path needs a rank of the value's kind (CypherGrammar.kindRank, #799).
+        const engine = [DatabaseType.NEO4J, DatabaseType.MEMGRAPH].includes(store.type) ? it : it.skip;
+        const ordered = async (values: string, way: 'ASC' | 'DESC'): Promise<string[]> =>
+            (
+                await pm.query<string[]>(
+                    new QuerySpecification({
+                        text: `UNWIND ${values} AS v WITH v ORDER BY v IS NULL, v ${way} RETURN [x IN collect(v) | toString(x)]`,
+                        language: 'CYPHER'
+                    })
+                )
+            )[0];
+
+        engine("orders values of several kinds by ORDER BY as Neo4j does, its own engine's", async () => {
+            const kinds = "['b', true, 10, 9, null, false, 'a']";
+            expect(await ordered(kinds, 'ASC')).toEqual(['a', 'b', 'false', 'true', '9', '10']);
+            expect(await ordered(kinds, 'DESC')).toEqual(['10', '9', 'true', 'false', 'b', 'a']);
+            const dated = await ordered("['b', datetime('2024-01-01T00:00:00Z'), 9]", 'ASC');
+            expect(dated[0]).toMatch(/^2024-01-01/);
+            expect(dated.slice(1)).toEqual(['b', '9']);
+        });
+
         afterAll(async () => {
             await clearLabels(pm, store, 'OrderedPathKind');
             await closeGraphEngines();
