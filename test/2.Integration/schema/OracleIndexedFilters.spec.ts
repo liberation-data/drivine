@@ -49,6 +49,7 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
     let gom: StatelessGraphObjectManager;
     const byRepo = rangeIndex('OraIssue', 'repoKey');
     const uniqueCode = uniquenessConstraint('OraIssue', 'code');
+    const byCode = rangeIndex('OraIssue', 'code');
     const target = (): TargetModel => ({ kind: 'NODE_FRAGMENT', model: gom.registry.fragment(Issue) });
 
     /** The ids a load with the query finds, in order. */
@@ -82,6 +83,7 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
         pm = oraclePersistenceManager();
         gom = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
         await gom.indexes.drop(byRepo);
+        await gom.indexes.drop(byCode);
         await gom.constraints.drop(uniqueCode);
         await new OracleSeed(pm, 'OraIssue').clear();
         await new OracleSeed(pm, 'OraComment').clear();
@@ -109,6 +111,7 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
 
     afterAll(async () => {
         await gom.indexes.drop(byRepo);
+        await gom.indexes.drop(byCode);
         await gom.constraints.drop(uniqueCode);
         await new OracleSeed(pm, 'OraIssue').clear();
         await new OracleSeed(pm, 'OraComment').clear();
@@ -135,16 +138,27 @@ describeOnOracle('filters read through labelled indexes on Oracle', () => {
     });
 
     // The DSL's equality is the module's fragment (drivine-cypher-spec#235), over the expression layout 2's labelled index
-    // is made over by the module's schema plan, as drivine4j makes it (#696).
+    // is made over by the module's schema plan, as drivine4j makes it (#696). Of a property each node holds a value of its
+    // own of, where the index wins on cost: for one of a few values, such as the repo key, a 50th of the label each, one
+    // node a block, Oracle rightly reads the table instead, and the plan is then a matter of cost (#803).
     it('should read the index, and not the label, for a comparison every root meets', async () => {
-        await gom.indexes.ensure(byRepo);
-        const labelled = new OracleGraph().objectName('lx2', ['OraIssue', 'repoKey']).toUpperCase();
-        const indexed = await planOf((q) => ({ where: [q.repoKey.eq('r7'), q.state.eq('closed')] }));
-        expect(indexed).toContain(labelled);
-        expect(indexed).not.toContain('DRIVINE_NODE_LABELS');
-        // Inside an or, the label is read as before.
-        const either = await planOf((q) => ({ where: anyOf(q.repoKey.eq('r1'), q.repoKey.eq('r2')) }));
-        expect(either).not.toContain(labelled);
+        await gom.indexes.ensure(byCode);
+        try {
+            const labelled = new OracleGraph().objectName('lx2', ['OraIssue', 'code']).toUpperCase();
+            // Beside another condition, so its statement isn't the uniqueness constraint's test's: the driver's statement
+            // cache keeps the EXPLAIN PLAN it ran prepared, and running it again once the indexes changed is refused
+            // (ORA-00900).
+            const closed: QueryFn<Issue> = (q) => ({ where: [q.code.eq('c42'), q.state.eq('closed')] });
+            const indexed = await planOf(closed);
+            expect(indexed).toContain(labelled);
+            expect(indexed).not.toContain('DRIVINE_NODE_LABELS');
+            expect(await ids(closed)).toEqual(['i42']);
+            // Inside an or, the label is read as before.
+            const either = await planOf((q) => ({ where: anyOf(q.code.eq('c1'), q.code.eq('c2')) }));
+            expect(either).not.toContain(labelled);
+        } finally {
+            await gom.indexes.drop(byCode);
+        }
     });
 
     it('should read a uniqueness constraint over the property as it reads a range index', async () => {
