@@ -285,6 +285,32 @@ function declaredBigInt(type: Function, mapping: FieldMapping, field: string): b
 }
 
 /**
+ * Whether the field is declared a `Date`: as the model records it, or as TypeScript records it for a field only another
+ * library's decorator marks, which the model doesn't know of (as {@link declaredSet}).
+ */
+export function declaredDate(type: Function, mapping: FieldMapping, field: string): boolean {
+    return mapping.dates.has(field) || Reflect.getMetadata('design:type', type.prototype, field) === Date;
+}
+
+/** The start of an ISO 8601 date or datetime: a year, a month and a day, then a time or nothing. */
+const ISO_DATE = /^[+-]?\d{4,6}-\d{2}-\d{2}(T|$)/;
+
+/**
+ * Internal: a value of a property declared a `Date` as a `Date`: one a SQL store gives as its text (the module's
+ * canonical text, `2026-01-01T00:00:00Z`, or a FalkorDB datetime's), as the instant it names, to the millisecond, as a
+ * `Date` holds it. A `Date` a graph engine's driver gave is as it is, and so is anything else: a text that isn't ISO
+ * 8601, which JavaScript's parser would guess a date of (`'5'`), and one that names no instant a `Date` can be given as
+ * text (`-0044-03-15T00:00:00Z`).
+ */
+export function asDate(value: any): any {
+    if (typeof value !== 'string' || !ISO_DATE.test(value)) {
+        return value;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date;
+}
+
+/**
  * Internal: `value`'s whole numbers as bigints where `bigInt`, else as numbers, past 2^53 the nearest: a value the model
  * declares no field for, as a group's key or aggregate, as numbers, as before #741.
  */
