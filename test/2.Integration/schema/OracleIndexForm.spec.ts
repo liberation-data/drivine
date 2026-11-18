@@ -197,6 +197,21 @@ describeOnOracle("An earlier version's Oracle index over a property, made again 
         );
         expect((await gom.indexes.ensure(rangeIndex(LABEL, 'repoKey'))).status).toEqual('CREATED');
         expect((await gom.constraints.ensure(uniquenessConstraint(LABEL, 'code'))).status).toEqual('CREATED');
+        // Enough nodes of the label, and of another, that Oracle reads one key's few through an index rather than the
+        // table in full, as OracleIndexedFilters seeds them: a plan over a near-empty table proves nothing.
+        await pm.execute(
+            new QuerySpecification(
+                `INSERT INTO ${GRAPH}_node (labels, props) SELECT JSON('["${LABEL}"]'), JSON_OBJECT('id' VALUE 'f' || ` +
+                    `LEVEL, 'repoKey' VALUE 'r' || MOD(LEVEL, 50), 'code' VALUE 'c' || LEVEL RETURNING JSON) FROM dual ` +
+                    `CONNECT BY LEVEL <= 5000`
+            )
+        );
+        await pm.execute(
+            new QuerySpecification(
+                `INSERT INTO ${GRAPH}_node (labels, props) SELECT JSON('["OraFormOther"]'), JSON_OBJECT('id' VALUE ` +
+                    `'o' || LEVEL, 'repoKey' VALUE 'r' || MOD(LEVEL, 50) RETURNING JSON) FROM dual CONNECT BY LEVEL <= 5000`
+            )
+        );
         await pm.execute(
             new QuerySpecification(`BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, UPPER('${GRAPH}_NODE')); END;`)
         );
