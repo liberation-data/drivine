@@ -33,7 +33,8 @@ export class CypherShorthand {
     /**
      * @param alias what the predicate calls the root
      * @param row what the statement calls the root's row
-     * @param property how the store reads the property of a row, given the row and the property's name
+     * @param property how the store reads the property of a row, given the row and the key the property is held under
+     * (see heldKey), so it escapes none itself
      */
     constructor(
         private readonly alias: string,

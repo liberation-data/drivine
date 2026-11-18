@@ -36,7 +36,8 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
   b`), where 5.0 used the database's collation (see [Postgres](07-supported-engines.md#postgres)).
 - A property or map key whose name begins with `$` is held under one more `$` (`$$k` for `$k`), and reads back as it
   was. On SQLite and Postgres the query DSL filters, orders and groups by one as it is held; on Oracle it doesn't
-  yet, and finds nothing by one.
+  yet, and finds nothing by one. A raw `where` that names one as Cypher writes it, ``n.`$k` ``, reads it as it is held
+  on every SQL store; SQL of your own over `n.props` names it `$$k`.
 - Each value is held as a `CREATE` given it holds it, written by the shared compiler's module for the store
   ([drivine-cypher-spec#329](https://github.com/liberation-data/drivine-cypher-spec/issues/329)). On Oracle every float
   is a binary double, where 5.0 held it as a `NUMBER`, so a whole float saved read back by Cypher as a whole number. On

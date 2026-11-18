@@ -4,6 +4,7 @@ import { OracleBackend } from '@/backend/oracle/OracleBackend';
 import { textOf as oracle } from '@/backend/oracle/OracleGraph';
 import { PostgresBackend } from '@/backend/postgres/PostgresBackend';
 import { CypherShorthand } from '@/backend/sql/CypherShorthand';
+import { SqliteBackend } from '@/backend/sqlite/SqliteBackend';
 
 // drivine4j's CypherShorthandTest, ported: a predicate written by hand, with the root's properties written as Cypher
 // writes them, read on Oracle, as drivine4j reads it.
@@ -23,6 +24,13 @@ describe('CypherShorthand', () => {
         expect(rewrite('n.`$score` > 1')).toEqual('JSON_VALUE(n_.props, \'$."$$score"\') > 1');
         expect(rewrite('n.`$open` = true')).toEqual('JSON_VALUE(n_.props, \'$."$$open"\') = \'true\'');
         expect(rewrite("n.`a$b` = 'x'")).toEqual('JSON_VALUE(n_.props, \'$."a$b"\') = \'x\'');
+        // Each SQL store's raw where reads it so.
+        expect(new OracleBackend().written('n.`$score` > 1')).toEqual('JSON_VALUE(n.props, \'$."$$score"\') > 1');
+        expect(new PostgresBackend().written('n.`$score` > 1')).toEqual("(n_.props ->> '$$score') > 1");
+        expect(new SqliteBackend().written('n.`$score` > 1')).toEqual(
+            "(CASE json_type(n_.props, '$.\"$$score\"') WHEN 'text' THEN n_.props ->> '$.\"$$score\"' " +
+                "WHEN 'null' THEN NULL ELSE n_.props -> '$.\"$$score\"' END) > 1"
+        );
     });
 
     it("should read the row's own columns as the columns", () => {
