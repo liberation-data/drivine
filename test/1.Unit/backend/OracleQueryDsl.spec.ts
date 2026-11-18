@@ -116,7 +116,7 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         const where = backend.renderWhere((q: any) => q.name.eq('Ada'), scored).where;
         const nearest = backend.nearest(scored, { label: 'Scored', property: 'e', similarity: 'COSINE', k: 3, where });
         expect(nearest.text.startsWith(`SELECT ${HINT} JSON_OBJECT('value'`)).toBe(true);
-        expect(nearest.text).toContain('JOIN drivine_node n_ ON n_.nid = s.nid');
+        expect(nearest.text).toContain('JOIN drivine_node n_ ON (n_.nid = s.nid + 0 AND s.nid = n_.nid + 0)');
     });
 
     it("writes the hint after a delete's DELETE, and in a block on the statement the filter is in", () => {
