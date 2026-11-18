@@ -232,7 +232,8 @@ function escapedLabel(label: string): string {
  * No index this version makes holds it. Since layout 2 the shared module's schema plan makes them, with drivine4j's
  * statements, over the property's class and key (the module's `OracleSql.labelledIndex` and `uniqueIndex`), and the
  * layout verdict drops 5.0's on an empty graph (#696). The query DSL still writes this for a filter on an indexed
- * property, as the label's test and the property, until its filters are the module's fragments (#771).
+ * property, as the label's test and the property, so such a filter reads none of layout 2's indexes, until its filters
+ * are the module's fragments (drivine-cypher-spec#235, step 4).
  */
 export function labelledValue(alias: string, label: string, property: string): string {
     return (

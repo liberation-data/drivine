@@ -7,7 +7,7 @@ import { storeStatements } from '@/backend/StoreStatements';
 /** The start of the test of a later label, up to its needle. */
 const HELD = `INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"',`;
 
-/** The names drivine4j gives objects on Oracle (see its `source`). */
+/** What drivine4j wrote of a store's schema on Oracle, and the names it gives objects (see its `source`). */
 const DRIVINE4J = JSON.parse(fs.readFileSync(path.join(__dirname, '../golden/drivine4j-oracle-schema.json'), 'utf8'));
 
 describe('OracleGraph', () => {
