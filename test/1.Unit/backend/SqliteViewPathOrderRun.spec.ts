@@ -173,7 +173,8 @@ describe("A view's path ordered by a hop's property, run on SQLite", () => {
     });
 
     it('keeps for a node reached by several hop nodes the first of them, a date and a number apart', async () => {
-        // d0 is reached through a date and a number: lowest first it keeps the date, highest first the number.
+        // d0 is reached through a date, a number and a movie without a value: lowest first it keeps the date, highest
+        // first the number, and never the movie without one.
         await create([
             datetime('2024-01-01T00:00:00.5Z', '10000020240101000000500000000064800'),
             'x',
@@ -183,7 +184,8 @@ describe("A view's path ordered by a hop's property, run on SQLite", () => {
             new QuerySpecification({
                 text:
                     "MATCH (a:PathOrderRun:Actor {id: 'a'}), (d:PathOrderRun:Director {id: 'd0'}) " +
-                    "CREATE (a)-[:ACTED_IN]->(:PathOrderRun:Movie {id: 'm9', value: 7})-[:DIRECTED_BY]->(d)",
+                    "CREATE (a)-[:ACTED_IN]->(:PathOrderRun:Movie {id: 'm9', value: 7})-[:DIRECTED_BY]->(d), " +
+                    "(a)-[:ACTED_IN]->(:PathOrderRun:Movie {id: 'm10'})-[:DIRECTED_BY]->(d)",
                 language: 'CYPHER'
             })
         );
