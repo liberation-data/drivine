@@ -146,7 +146,7 @@ export class OracleConnection implements Connection {
                 ? [`${calls.graph}_nulls_equal`]
                 : []),
             ...(calls.era && !(await OracleStoredFunctions.era(this.connection, this.database, calls.graph))
-                ? [`${calls.graph}_era`]
+                ? [`${calls.graph}_era`, `${calls.graph}_era_date`, `${calls.graph}_temporal_key`]
                 : []),
             ...(calls.temporalArithmetic &&
             !(await OracleStoredFunctions.temporalArithmetic(this.connection, this.database, calls.graph))
@@ -155,9 +155,9 @@ export class OracleConnection implements Connection {
         ];
         if (missing.length) {
             throw new DrivineError(
-                `The query DSL's statement calls ${missing.join(' and ')}, a function the Oracle graph '${
-                    calls.graph
-                }' ` +
+                `The query DSL's statement calls ${listed(missing)}, ${
+                    missing.length > 1 ? 'functions' : 'a function'
+                } the Oracle graph '${calls.graph}' ` +
                     `keeps, which this session may not call. Ensure the graph as a user who may make a function ` +
                     `(CREATE PROCEDURE, which the RESOURCE role grants), or compare the value in a Cypher statement.`,
                 undefined,
@@ -283,4 +283,9 @@ function implicitRows(rows: any[] | undefined, exact: boolean): any[] {
         }
         return out;
     });
+}
+
+/** The names, the last joined by `and`, the others by commas, as OracleStoredFunctions names the era functions. */
+function listed(names: string[]): string {
+    return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
 }

@@ -211,6 +211,41 @@ describe('OracleConnection', () => {
             expect(it.execute).toHaveBeenCalledTimes(1);
         });
 
+        it("should be refused, naming each of the graph's era functions, where it calls them and the session may not", async () => {
+            const g = graph();
+            const it = session('found', 904);
+            const spec = new QuerySpecification('SELECT 1 FROM dual').callsStoredFunctions({
+                graph: g,
+                nullsEqual: false,
+                era: true,
+                temporalArithmetic: false
+            });
+            await expect(
+                new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(spec)
+            ).rejects.toThrow(
+                `calls ${g}_era, ${g}_era_date and ${g}_temporal_key, functions the Oracle graph '${g}' keeps, ` +
+                    'which this session may not call'
+            );
+            expect(it.execute).toHaveBeenCalledTimes(1);
+            expect(it.execute.mock.calls[0][0]).toContain(`${g}_era('0000-01-01')`);
+        });
+
+        it('should run one that calls the era functions where the session may call them', async () => {
+            const g = graph();
+            const it = session(904, 'found');
+            const spec = new QuerySpecification('SELECT 1 FROM dual').callsStoredFunctions({
+                graph: g,
+                nullsEqual: false,
+                era: true,
+                temporalArithmetic: false
+            });
+            await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', g, 'db|me').query(spec);
+            expect(it.execute.mock.calls.map(([sql]) => sql as string)).toEqual([
+                expect.stringContaining(`${g}_era('0000-01-01')`),
+                'SELECT 1 FROM dual'
+            ]);
+        });
+
         it('should ask nothing of one that calls none', async () => {
             const it = session(904);
             await new OracleConnection(it as any, new OracleResultMapper(), 'oracle.1', graph(), 'db|me').query(
