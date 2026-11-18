@@ -2,7 +2,7 @@ import { Direction } from '@/annotation/Metadata';
 import { labelExpression, quoteName } from '@/backend/Cypher';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 import { GroupAggregate, GroupKey, GroupQuery } from '@/manager/Groups';
 import { NODE_ALIAS } from '@/backend/CypherBackend';
 import { scopeOf } from '@/dsl/ModelScope';
@@ -67,7 +67,7 @@ export class GroupStatement {
     static build(
         source: FragmentModel,
         query: GroupQuery<any, any>,
-        pathTargets: Map<string, FragmentModel>
+        pathTargets: Map<string, IdentifiedFragment>
     ): GraphStatement {
         const keys: [string, GroupKey][] = Object.entries(query.keys);
         const aggregates: [string, GroupAggregate][] = Object.entries(query.aggregates ?? {});
@@ -121,7 +121,7 @@ export class GroupStatement {
             const index = Number(column.slice(1));
             const key = column.startsWith('k') ? keys[index][1] : undefined;
             return key?.kind === 'path'
-                ? `${column}.${quoteName(pathTargets.get(keys[index][0])!.nodeIdProperty!)}`
+                ? `${column}.${quoteName(pathTargets.get(keys[index][0])!.nodeIdProperty)}`
                 : column;
         };
         const ordered = (query.orderBy ?? []).map(([name, direction]: [string, string]) => {

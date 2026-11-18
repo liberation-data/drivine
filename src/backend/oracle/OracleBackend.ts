@@ -32,7 +32,7 @@ import { recordedAs } from '@/backend/oracle/OracleSchemaGrammar';
 import { catalogProperties } from '@/backend/sql/SqlCatalog';
 import { fullTextIndexLookup } from '@/cypher/SharedCypherCompiler';
 import { DrivineError } from '@/DrivineError';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
@@ -347,7 +347,11 @@ END;`)
         return new OracleWrites(this.graph).fragmentBatch(groups, options);
     }
 
-    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+    groups(
+        model: FragmentModel,
+        query: GroupQuery<any, any>,
+        pathTargets: Map<string, IdentifiedFragment>
+    ): GraphStatement {
         return new OracleGroups(this.graph).build(model, query, pathTargets);
     }
 

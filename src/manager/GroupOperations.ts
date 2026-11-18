@@ -1,7 +1,7 @@
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
 import { GraphObjectMapper, wholeNumbers } from '@/mapper/GraphObjectMapper';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment, isIdentified } from '@/model/FragmentModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
 import { GroupAggregate, GroupKey, GroupQuery, GroupRow, count, key } from '@/manager/Groups';
@@ -43,20 +43,12 @@ export class GroupOperations {
     ): Promise<GroupRow<K, A>[]> {
         const model = this.registry.fragment(source as ClassType);
         const asked = typeof spec === 'function' ? spec(rootRefs<T>(scopeOf(fragmentOf(model)))) : spec;
+        const targets = this.pathTargets(asked.keys as Record<string, GroupKey>);
         const where =
             asked.where === undefined || typeof asked.where === 'string'
                 ? asked.where
                 : await this.lookups(model, asked.where);
         const query = this.written({ ...asked, where });
-        const targets = new Map<string, FragmentModel>();
-        for (const [name, groupKey] of Object.entries(query.keys as Record<string, GroupKey>)) {
-            if (groupKey.kind === 'path') {
-                if (!groupKey.hops.length) {
-                    throw new DrivineError(`The path key ${name} needs at least one hop.`);
-                }
-                targets.set(name, this.registry.fragment(groupKey.target as ClassType));
-            }
-        }
         const rows = await this.query(this.backend.groups(model, query, targets));
         const keyNames = Object.keys(query.keys);
         const aggregateNames = Object.keys(query.aggregates ?? {});
@@ -87,6 +79,27 @@ export class GroupOperations {
             aggregates: { count: count() }
         });
         return new Map(rows.map((it) => [it.value, it.count ?? 0]));
+    }
+
+    /**
+     * The fragment each path key ends at, by the key's name, checked before anything is written so every store refuses
+     * the same keys: a path key's groups are ordered by its node's id, so its fragment must have a `@NodeId`.
+     */
+    private pathTargets(keys: Record<string, GroupKey>): Map<string, IdentifiedFragment> {
+        const targets = new Map<string, IdentifiedFragment>();
+        for (const [name, groupKey] of Object.entries(keys)) {
+            if (groupKey.kind === 'path') {
+                if (!groupKey.hops.length) {
+                    throw new DrivineError(`The path key ${name} needs at least one hop.`);
+                }
+                const target = this.registry.fragment(groupKey.target as ClassType);
+                if (!isIdentified(target)) {
+                    throw new DrivineError(`${target.type.name} has no @NodeId field, which a path key is ordered by.`);
+                }
+                targets.set(name, target);
+            }
+        }
+        return targets;
     }
 
     /** The query with each predicate the caller wrote, its `where` and its aggregates' filters, as the store reads it. */
