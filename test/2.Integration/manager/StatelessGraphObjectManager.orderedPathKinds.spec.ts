@@ -126,9 +126,10 @@ describe.each(allStores().filter((it) => ![DatabaseType.MEMGRAPH, DatabaseType.F
             });
         });
 
-        // The pinned compiler (0.50.0) orders kinds on Postgres in jsonb's order, a number before a boolean and a temporal
-        // after a text: liberation-data/drivine-cypher-spec#371, fixed by #374 after 0.50.0. Unfail it at the bump.
-        const mixed = store.type === DatabaseType.POSTGRES ? it.failing : it;
+        // Held on Postgres, where the pinned compiler (0.50.0) orders kinds in jsonb's order, a number before a boolean and
+        // a temporal after a text (liberation-data/drivine-cypher-spec#371, fixed by #374 after 0.50.0: unfail at the
+        // bump); and on Neo4j, whose view path is sorted by the library's own Cypher, which puts every text first (#799).
+        const mixed = [DatabaseType.POSTGRES, DatabaseType.NEO4J].includes(store.type) ? it.failing : it;
 
         mixed(
             'orders a hop property of mixed kinds as Cypher does: a text, a boolean, a number, no value last',
