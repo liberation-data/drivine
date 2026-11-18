@@ -1,6 +1,11 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
     CascadeType,
     CypherBackend,
+    DatabaseRegistry,
+    DatabaseType,
     Direction,
     GraphBackend,
     GraphRelationship,
@@ -24,12 +29,15 @@ import {
 } from '@liberation-data/drivine';
 import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
-import { openSqlite, SqliteDatabase } from '@/connection/sqlite/SqliteDriver';
-import { SqliteFunctions } from '@/connection/sqlite/SqliteFunctions';
+import { openSqlite } from '@/connection/sqlite/SqliteDriver';
 import { idSql } from '@/cypher/SharedCypherCompiler';
 import { writeLayout } from '@/cypher/ValueLayout';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 import { ClassType } from '@/query/QuerySpecification';
+import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
+import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
+import { rangeIndex } from '@/schema/SchemaSpecs';
+import { TransactionContextHolder } from '@/transaction/TransactonContextHolder';
 
 /** The comparison an Oracle lookup by `$id` makes of Gauge's id, as the shared module writes it. */
 const ORACLE_HAS_ID = idSql('oracle', 'hasId', 'n', 'id', 'JSON($id EXTENDED)');
@@ -238,6 +246,16 @@ class Priced {
     @NodeId() $code: string;
 }
 
+@NodeFragment({ labels: ['Counted'] })
+class Counted {
+    @NodeId() id: bigint;
+}
+
+@NodeFragment({ labels: ['Flagged'] })
+class Flagged {
+    @NodeId() on: boolean;
+}
+
 @GraphView()
 class DialView {
     @Root() dial: Dial;
@@ -361,6 +379,24 @@ describe.each([
         expect(bound.map((it) => it.parameters.id)).toEqual([writeLayout(new Date('2024-01-02T03:04:05.000Z'), store)]);
     });
 
+    it("reads a bigint id's text as its digits, and a boolean id's as the boolean, running nothing for other text", async () => {
+        const big = BigInt('1152921504606846976');
+        await gom.load(Counted, '1152921504606846976');
+        await gom.load(Counted, big);
+        await gom.load(Flagged, 'true');
+        await gom.load(Flagged, 'false');
+        for (const nothing of ['1.5', '1e3', ' 7', '']) {
+            expect(await gom.load(Counted, nothing)).toBeUndefined();
+        }
+        expect(await gom.load(Flagged, 'yes')).toBeUndefined();
+        expect(bound.map((it) => it.parameters.id)).toEqual([
+            writeLayout(big, store),
+            writeLayout(big, store),
+            'true',
+            'false'
+        ]);
+    });
+
     it('runs no statement for text that is no value of the id, logging it at DEBUG alone', async () => {
         const debug = jest.spyOn(DrivineLogger.prototype, 'debug');
         const warn = jest.spyOn(DrivineLogger.prototype, 'warn');
@@ -409,6 +445,14 @@ describe.each([
     });
 });
 
+describe('idSql', () => {
+    it("throws the module's refusal, by the helper and the store, for a request it writes no SQL for", () => {
+        expect(() => idSql('sqlite', 'hasId', 'n', 'id')).toThrow(
+            "The shared module wrote no hasId for sqlite: idSql's hasId gives json as text."
+        );
+    });
+});
+
 describe('a lookup by id on a graph engine', () => {
     it('binds text as it is given: the engine compares it', async () => {
         const bound: any[] = [];
@@ -427,63 +471,55 @@ describe('a lookup by id on a graph engine', () => {
 });
 
 /**
- * The columns of layout 2's index over the id `key` on SQLite, the id's class and key, as the module's `SqliteDdl` writes
- * them (`indexColumns`): the two sides of its hasId that read the node's `props`. This library's schema grammar still
- * makes layout 1's index, over the property's text.
- */
-function layout2Columns(key: string): string[] {
-    const sql = idSql('sqlite', 'hasId', '', key, 'J');
-    const [kind, rest] = sql.split(` = COALESCE(J ->> '$."$t"'`);
-    const after = rest.slice(rest.indexOf(' AND ') + ' AND '.length);
-    return [kind, after.split(` = COALESCE(J ->> '$.s'`)[0]];
-}
-
-/**
- * A lookup by id on SQLite reads a uniqueness constraint's index over the id made as layout 2 makes it, by both its
- * columns, the id's class and key: SQLite's planner, in process, says which index it uses.
+ * A lookup by id on SQLite reads the index the library itself makes over the id, as layout 2 makes it, by both its
+ * columns, the id's class and key: a range index (`gom.indexes`) on one label and a uniqueness constraint's index
+ * (`gom.constraints`) on the other, each made by the shared module's schema plan. SQLite's planner, in process, says
+ * which index it uses.
  */
 describe('a lookup by id on SQLite, planned', () => {
-    let db: SqliteDatabase;
-    const graph = new SqliteGraph();
-    const backend = new SqliteBackend(graph);
+    let folder: string;
+    let pm: PersistenceManager;
+    const backend = new SqliteBackend(new SqliteGraph());
     const registry = new ModelRegistry();
 
-    beforeAll(() => {
-        db = openSqlite(':memory:');
-        SqliteFunctions.register(db);
-        graph.ddl.forEach((it) => db.exec(it));
-        for (const [label, key] of [
-            ['Dial', 'id'],
-            ['Dated', 'on']
-        ]) {
-            const columns = layout2Columns(key).join(', ');
-            db.exec(
-                `CREATE UNIQUE INDEX drivine_uq2_${label} ON drivine_node (${columns}) WHERE instr(labels, '"${label}"') > 0`
-            );
-        }
+    beforeAll(async () => {
+        folder = fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-id-planned-'));
+        DatabaseRegistry.getInstance()
+            .builder()
+            .withProperties({ databaseType: DatabaseType.SQLITE, host: '', databaseName: path.join(folder, 'ids.db') })
+            .register('id-planned');
+        const factory = new PersistenceManagerFactory(
+            DatabaseRegistry.getInstance(),
+            TransactionContextHolder.getInstance()
+        );
+        pm = factory.get('id-planned', 'NON_TRANSACTIONAL');
+        const gom = new GraphObjectManagerFactory(factory).get('id-planned');
+        await gom.indexes.ensure(rangeIndex('Dial', 'id'));
+        await gom.constraints.ensure({ kind: 'UNIQUE', label: 'Dated', properties: ['on'] });
     });
 
-    afterAll(() => db.close());
+    afterAll(async () => {
+        await Promise.all(DatabaseRegistry.getInstance().providers.map(async (it) => it.end()));
+        DatabaseRegistry.tearDown();
+        fs.rmSync(folder, { recursive: true, force: true });
+    });
 
-    const plan = (text: string, bindings: Record<string, any>): string =>
-        db
-            .prepare(`EXPLAIN QUERY PLAN ${text}`)
-            .all(bindings)
-            .map((it: any) => it.detail)
+    const plan = async (text: string, bindings: Record<string, any>): Promise<string> =>
+        (await pm.query<any>(new QuerySpecification(`EXPLAIN QUERY PLAN ${text}`).bind(bindings)))
+            .map((it) => it.detail)
             .join('\n');
 
     it.each([
-        ['a number', Dial, 7],
-        ['a date', Dated, new Date('2024-01-02T00:00:00.000Z')]
-    ])('reads the index for %s id, by a load, a delete and loadRelated', (_, type, id) => {
+        ['a number', Dial, 7, 'ix2_Dialid'],
+        ['a date', Dated, new Date('2024-01-02T00:00:00.000Z'), 'uq2_Datedon']
+    ])('reads the index for %s id, by a load, a delete and loadRelated', async (_, type, id, made) => {
         const model = registry.fragment(type as ClassType);
-        const index = /SEARCH n USING (COVERING )?INDEX drivine_uq2_\w+ \(<expr>=\? AND <expr>=\?\)/;
+        const index = (alias: string): RegExp =>
+            new RegExp(`SEARCH ${alias} USING (COVERING )?INDEX drivine_${made}_\\w+ \\(<expr>=\\? AND <expr>=\\?\\)`);
         const bound = { id: writeLayout(id, 'sqlite') };
-        expect(plan(backend.loadFragment(model).text, bound)).toMatch(index);
-        expect(plan(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(index);
+        expect(await plan(backend.loadFragment(model).text, bound)).toMatch(index('n'));
+        expect(await plan(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(index('n'));
         const related = backend.related({ model, id }, 'READS', Direction.OUTGOING, registry.fragment(Coded));
-        expect(plan(related.text, related.bindings)).toMatch(
-            /SEARCH a USING (COVERING )?INDEX drivine_uq2_\w+ \(<expr>=\? AND <expr>=\?\)/
-        );
+        expect(await plan(related.text, related.bindings)).toMatch(index('a'));
     });
 });

@@ -34,9 +34,8 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
   Postgres a whole float (`cypherFloat(2)`) is held with its fraction. A whole number past 2^53, such as 2^60, is held
   with its digits (`1152921504606846976`), as a statement binds it, where 5.0 held JavaScript's shortest text of it
   (`1152921504606847000`).
-- A node whose `@NodeId` is a float is found by a load, a delete, `edges.relate` and `loadRelated` by the text the store
-  holds it as, as a save finds it: on Postgres and SQLite, 5.0 found none whose id JavaScript writes with an exponent
-  (`1e-7`).
+- A node whose `@NodeId` is a float is found by a load, a delete, `edges.relate` and `loadRelated` as the store holds
+  it, as a save finds it: on Postgres and SQLite, 5.0 found none whose id JavaScript writes with an exponent (`1e-7`).
 - Bytes (a `Uint8Array`, an `Int8Array`, a `Buffer`) are held as the list of their signed values (`[1, 2, -1]` for 1,
   2, 255), a `Float32Array` or a `Float64Array`, such as an embedding, as the list of its numbers, each a float, and
   another typed array as the list of its numbers, where 5.0 wrote a map of indexes.
@@ -47,6 +46,17 @@ On Oracle, Postgres and SQLite, wherever a save, `patch`, `patchAll` or `edges.r
 
 On SQLite a range index or a uniqueness constraint is over a value's kind and key, so a value is equal only to one of
 its kind: a uniqueness constraint no longer takes `1` and `'1'` for the same key.
+
+### An id given as text is read as the id's type
+
+On Oracle, Postgres and SQLite, `load`, `update`, `patch`, `delete` and `edges` read an id given as text as the
+`@NodeId` field's type, as drivine4j does, and compare it as the store's index over the id is made, so the index
+answers the lookup. `'6'` finds the node whose number id is 6, where 5.0 compared the property's text and found it, or
+a node of the same labels whose id is the text `'6'`; on a `string` id `'6'` finds only the text. Text that is no
+value of the type (`'abc'` for a number id) finds no node and runs nothing, and so does a null id: 5.0's `patch` by a
+null id could change the node whose id is the text `'null'`
+([#773](https://github.com/liberation-data/drivine/issues/773)). See
+[Object Manager](05-object-manager.md#loading-data).
 
 ### `withBuild` is gone
 

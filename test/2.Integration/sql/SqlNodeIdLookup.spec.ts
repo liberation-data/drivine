@@ -18,7 +18,6 @@ import {
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
-import { idSql } from '@/cypher/SharedCypherCompiler';
 import { writeLayout } from '@/cypher/ValueLayout';
 import { ClassType } from '@/query/QuerySpecification';
 import { SqlSeed, sqlPersistenceManager, sqlStores } from '../support/SqlStores';
@@ -323,24 +322,17 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
     // ----- Each lookup reads the index -----
 
     /**
-     * A load, a delete by id and loadRelated read an index made over the id as layout 2 makes it, by the columns the
-     * module's DDL writes (IndexKey.column, which its hasId compares): this library's schema grammar still makes layout
-     * 1's index, over the property's text, so the index is made here by hand. On Postgres and SQLite, whose planners are
-     * read here; Oracle's lookups are planned in drivine4j's suite.
+     * A load, a delete by id and loadRelated read the index the library makes over the id, a uniqueness constraint's
+     * ensured through `gom.constraints`, which the shared module's schema plan makes as layout 2 makes it: over the
+     * property's JSON on Postgres, and its class and key on SQLite, which the module's hasId compares. On Postgres and
+     * SQLite, whose planners are read here; Oracle's lookups are planned in drivine4j's suite.
      */
     const planned = store.type === DatabaseType.ORACLE ? it.skip : it;
     planned('should read the index over the id for a load, a delete and loadRelated', async () => {
-        const index = `drivine_uq2_lookupnumber_${store.name.toLowerCase()}`;
+        const constraint = { kind: 'UNIQUE' as const, label: 'LookupNumber', properties: ['id'] };
         const sqlite = store.type === DatabaseType.SQLITE;
-        const columns = sqlite ? sqliteColumns('id') : [postgresColumn('id')];
-        const label = sqlite ? `instr(labels, '"LookupNumber"') > 0` : `labels @> '["LookupNumber"]'`;
         await gom.saveAll(Array.from({ length: 3000 }, (_, i) => make(LookupNumber, { id: 1000 + i, name: 'filler' })));
-        await pm.execute(new QuerySpecification(`DROP INDEX IF EXISTS ${index}`));
-        await pm.execute(
-            new QuerySpecification(
-                `CREATE UNIQUE INDEX ${index} ON drivine_node (${columns.join(', ')}) WHERE ${label}`
-            )
-        );
+        await gom.constraints.ensure(constraint);
         try {
             await pm.execute(new QuerySpecification(sqlite ? 'ANALYZE' : 'ANALYZE drivine_node'));
             const registry = new ModelRegistry();
@@ -351,9 +343,10 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
                 );
                 return rows.map((it) => (sqlite ? it.detail : Object.values(it)[0])).join('\n');
             };
+            const index = 'drivine_uq2_lookupnumberid_\\w+';
             const reads = sqlite
-                ? new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(<expr>=\\? AND <expr>=\\?\\)`)
-                : new RegExp(`Index (Only )?Scan using ${index} on drivine_node`);
+                ? new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(<expr>=\\? AND <expr>=\\?\\)`, 'i')
+                : new RegExp(`Index (Only )?Scan using ${index} on drivine_node`, 'i');
             const bound = { id: writeLayout(1500, 'postgres') };
             expect(await explain(backend.loadFragment(model).text, bound)).toMatch(reads);
             expect(await explain(backend.delete({ kind: 'NODE_FRAGMENT', model }).text, bound)).toMatch(reads);
@@ -365,20 +358,7 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
             );
             expect(await explain(related.text, related.bindings)).toMatch(reads);
         } finally {
-            await pm.execute(new QuerySpecification(`DROP INDEX IF EXISTS ${index}`));
+            await gom.constraints.drop(constraint);
         }
     });
 });
-
-/** Layout 2's index column over `key` on Postgres, the property's JSON: the side of the module's hasId that reads it. */
-function postgresColumn(key: string): string {
-    return `(${idSql('postgres', 'hasId', '', key, 'J').split(' = CAST(J AS jsonb)')[0]})`;
-}
-
-/** Layout 2's index columns over `key` on SQLite, the id's class and key: the sides of the module's hasId that read them. */
-function sqliteColumns(key: string): string[] {
-    const sql = idSql('sqlite', 'hasId', '', key, 'J');
-    const [kind, rest] = sql.split(` = COALESCE(J ->> '$."$t"'`);
-    const after = rest.slice(rest.indexOf(' AND ') + ' AND '.length);
-    return [kind, after.split(` = COALESCE(J ->> '$.s'`)[0]];
-}
