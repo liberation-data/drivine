@@ -1,5 +1,5 @@
 import { Direction } from '@/annotation/Metadata';
-import { boundIdRows, foundByIds, idMatch, oracleId } from '@/backend/oracle/IdKeyedStatement';
+import { boundIdRows, foundByIds, idMatch, NO_JSON_TABLE_TRANSFORM, oracleId } from '@/backend/oracle/IdKeyedStatement';
 import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
@@ -126,9 +126,10 @@ export class OracleWrites {
                         'oracle'
                     )
                 );
+                // Hinted as the lookup is: it reads the node's props beside the lookup's, once Oracle unnests the lookup.
                 body.push(
-                    `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
-                        `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
+                    `SELECT ${NO_JSON_TABLE_TRANSFORM} NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), ` +
+                        `'stamp' VALUE NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
                         `WHERE ${foundByIds(
                             this.graph.nodes,
                             'n',

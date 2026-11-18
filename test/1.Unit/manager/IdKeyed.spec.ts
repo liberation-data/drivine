@@ -892,6 +892,7 @@ describe("an Oracle write block's id", () => {
     const backend = new OracleBackend(new OracleGraph());
     const registry = new ModelRegistry();
     const occurrences = (text: string, needle: string): number => text.split(needle).length - 1;
+    const HINT = '/*+ NO_JSON_TABLE_TRANSFORM */';
     /** Each id list's rows, bound as `list`. */
     const rows = (list: string): string => `JSON_TABLE(JSON(${list} EXTENDED), '$[*]' COLUMNS (v JSON PATH '$')) i`;
 
@@ -956,6 +957,8 @@ describe("an Oracle write block's id", () => {
             '$x_1'
         )} CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`;
         expect(statement.text).toContain(reads);
+        // The read itself reads each node's props beside the lookup's, so it is planned without the transformation too.
+        expect(occurrences(statement.text, `SELECT ${HINT} NVL(JSON_ARRAYAGG(`)).toBe(2);
         expect(occurrences(statement.text, `CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`)).toBe(2);
         expect(parameters.x_1).toEqual(writeLayout([days[0].on, days[1].on], 'oracle'));
         expect(statement.text).not.toContain('PASSING t.v');
@@ -992,6 +995,7 @@ describe("an Oracle write block's id", () => {
         // The stamps of the related days, read before and after, each id a row found through the index.
         const reads = `n.nid IN (SELECT /*+ NO_JSON_TABLE_TRANSFORM */ f.nid + 0 FROM ${rows('$x_')}`;
         expect(occurrences(statement.text.replace(/\$x_\d+/g, '$x_'), reads)).toBe(2);
+        expect(occurrences(statement.text, `SELECT ${HINT} NVL(JSON_ARRAYAGG(`)).toBe(2);
         expect(occurrences(statement.text, `CROSS JOIN drivine_node f WHERE ${writeHasId('on')}`)).toBe(2);
         expect(statement.text).not.toContain('PASSING t.v');
         // Each lookup hands its node back as `f.nid + 0`: Oracle eliminates a join of the node table to a view of it on a

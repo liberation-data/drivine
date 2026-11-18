@@ -259,9 +259,10 @@ export class OracleSaveBuilder {
             if (!this.declarations.includes(`${variable} CLOB;`)) {
                 this.declarations.push(`${variable} CLOB;`);
             }
+            // Hinted as the lookup is: it reads the node's props beside the lookup's, once Oracle unnests the lookup.
             return (
-                `SELECT NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), 'stamp' VALUE ` +
-                `NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
+                `SELECT ${NO_JSON_TABLE_TRANSFORM} NVL(JSON_ARRAYAGG(JSON_OBJECT('id' VALUE JSON_QUERY(n.props, '$${k}'), ` +
+                `'stamp' VALUE NVL(n.stamp, '${Stamps.NEVER_STAMPED}')) RETURNING CLOB), '[]') INTO ${variable} FROM ${this.graph.nodes} n ` +
                 `WHERE ${foundByIds(
                     this.graph.nodes,
                     'n',
