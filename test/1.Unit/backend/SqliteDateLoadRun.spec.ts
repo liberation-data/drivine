@@ -35,6 +35,7 @@ class Event {
     @Marked() at?: Date;
     @GraphProperty('due_at') due?: Date;
     undecorated?: Date;
+    undecoratedDays?: Date[];
     @NodeStamp() stamp?: string;
 }
 
@@ -52,6 +53,7 @@ class Day {
 @RelationshipFragment()
 class Attendance {
     @Marked() since?: Date;
+    undecoratedSince?: Date;
     @TargetNode() event: Event;
 }
 
@@ -74,7 +76,14 @@ const moment = (day: number): Date => new Date(`2026-01-0${day}T00:00:00.000Z`);
 const SINCE = new Date('2025-12-01T00:00:00.000Z');
 
 const event = (id: string, day: number): Event =>
-    Object.assign(new Event(), { id, name: id, at: moment(day), due: moment(day + 1), undecorated: moment(day) });
+    Object.assign(new Event(), {
+        id,
+        name: id,
+        at: moment(day),
+        due: moment(day + 1),
+        undecorated: moment(day),
+        undecoratedDays: [moment(day)]
+    });
 
 /**
  * A property declared a Date, loaded on SQLite, which Node bundles, so no container: a Date on every load path, as
@@ -107,7 +116,9 @@ describe('A property declared a Date, loaded on SQLite', () => {
                     next: event('e2', 2),
                     followers: [event('e3', 3)]
                 }),
-                attended: [Object.assign(new Attendance(), { since: SINCE, event: event('e4', 4) })]
+                attended: [
+                    Object.assign(new Attendance(), { since: SINCE, undecoratedSince: SINCE, event: event('e4', 4) })
+                ]
             })
         );
     });
@@ -210,6 +221,100 @@ describe('A property declared a Date, loaded on SQLite', () => {
             }));
             expect(found.map((it) => it.id)).toEqual([id]);
         }
+    });
+
+    /**
+     * Whether each undecorated Date the fixture saved is still held as a date (#811): the where on the root's
+     * `undecorated` finds each event by its instant, an order by it puts them in time order, an item of
+     * `undecoratedDays` is found by its instant, and so is the relationship fragment's `undecoratedSince`. A date
+     * written back as its text is none of these: a compare of a text with a date is false, and a text orders after
+     * every date.
+     */
+    const expectUndecoratedKept = async (): Promise<void> => {
+        for (const day of [1, 2, 3, 4]) {
+            const found = await gom.loadAll(Event, (q) => ({ where: q.property('undecorated').eq(moment(day)) }));
+            expect(found.map((it) => it.id)).toEqual([`e${day}`]);
+            const listed = await pm.query<string>(
+                new QuerySpecification<string>({
+                    text: 'MATCH (n:DateLoadRun:Event) WHERE $day IN n.undecoratedDays RETURN n.id',
+                    language: 'CYPHER'
+                }).bind({ day: moment(day) })
+            );
+            expect(listed).toEqual([`e${day}`]);
+        }
+        const ordered = await gom.loadAll(Event, (q) => ({ orderBy: q.property('undecorated').asc() }));
+        expect(ordered.map((it) => it.id)).toEqual(['e1', 'e2', 'e3', 'e4']);
+        const since = await pm.query<number>(
+            new QuerySpecification<number>({
+                text: 'MATCH (:DateLoadRun)-[r:ATTENDS]->(:DateLoadRun) WHERE r.undecoratedSince = $since RETURN count(r)',
+                language: 'CYPHER'
+            }).bind({ since: SINCE })
+        );
+        expect(since).toEqual([1]);
+    };
+
+    // it.failing marks what #811 still has to fix: a write that gives the loaded text back writes it over the tag.
+    // Only an update of a node, which writes only the fields its change altered, keeps the tag today.
+    describe('keeps an undecorated Date as a date when a loaded node is written back (#811)', () => {
+        it('holds every undecorated Date as a date once saved', async () => {
+            await expectUndecoratedKept();
+        });
+
+        it('in an update of the node, which writes only what the change altered', async () => {
+            for (const id of ['e1', 'e2', 'e3', 'e4']) {
+                await gom.update(Event, id, (it) => {
+                    it.name = 'updated';
+                });
+            }
+            await expectUndecoratedKept();
+        });
+
+        it.failing(
+            "in an update of a view: the root's change, and its related nodes and relationship fragments written whole",
+            async () => {
+                await gom.update(Diary, 'p', (it) => {
+                    it.plan!.event.name = 'updated';
+                });
+                await expectUndecoratedKept();
+            }
+        );
+
+        it.failing('in a save of a changed copy given what it was loaded as', async () => {
+            for (const id of ['e1', 'e2', 'e3', 'e4']) {
+                const loaded = (await gom.load(Event, id))!;
+                await gom.save(Object.assign(new Event(), loaded, { name: 'copied' }), { from: loaded });
+            }
+            await expectUndecoratedKept();
+        });
+
+        it.failing(
+            'in a save of a changed copy of a view given what it was loaded as: its to-one and to-many written whole',
+            async () => {
+                // A view saved with from needs a stamped root: the event's, with e2 its to-one and e3 its to-many.
+                const loaded = (await gom.load(EventView, 'e1'))!;
+                const root = Object.assign(new Event(), loaded.event, { name: 'copied' });
+                await gom.save(Object.assign(new EventView(), loaded, { event: root }), { from: loaded });
+                await expectUndecoratedKept();
+            }
+        );
+
+        it.failing('in a plain save of the node as loaded, a field changed', async () => {
+            for (const id of ['e1', 'e2', 'e3', 'e4']) {
+                const loaded = (await gom.load(Event, id))!;
+                await gom.save(Object.assign(loaded, { name: 'resaved' }));
+            }
+            await expectUndecoratedKept();
+        });
+
+        it.failing(
+            'in a plain save of a view as loaded: its root, a to-one, a to-many, a nested view, a relationship fragment',
+            async () => {
+                const loaded = (await gom.load(Diary, 'p'))!;
+                loaded.plan!.event.name = 'resaved';
+                await gom.save(loaded);
+                await expectUndecoratedKept();
+            }
+        );
     });
 
     it('gives a Date id as a Date, which finds the node again', async () => {
