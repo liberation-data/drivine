@@ -5,7 +5,7 @@ import { COMPARISONS, HeldAggregate, SqlGroups } from '@/backend/sql/SqlGroups';
 import { FragmentVariable, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { SqlFragments } from '@/cypher/SqlFragments';
 import { GroupAggregate, GroupQuery } from '@/manager/Groups';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 
 /**
  * A grouped read whose values are the shared module's (drivine-cypher-spec#235, its fragments; drivine4j's
@@ -34,7 +34,11 @@ export abstract class FragmentGroups extends SqlGroups {
     /** The store whose module's fragments the statement's values are. */
     protected abstract readonly store: SharedStore;
 
-    build(source: FragmentModel, given: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+    build(
+        source: FragmentModel,
+        given: GroupQuery<any, any>,
+        pathTargets: Map<string, IdentifiedFragment>
+    ): GraphStatement {
         this.fragments = new SqlFragments(this.store, { name: this.graph.name });
         this.labels = [...source.labels];
         const statement = super.build(source, given, pathTargets);
@@ -109,11 +113,11 @@ export abstract class FragmentGroups extends SqlGroups {
      * A path key is ordered as Cypher orders its node's id, whatever its kind, a date included: read on the node, joined
      * back, as drivine4j reads it.
      */
-    protected heldPath(target: FragmentModel): (holder: string, direction: 'ASC' | 'DESC') => string[] {
+    protected heldPath(target: IdentifiedFragment): (holder: string, direction: 'ASC' | 'DESC') => string[] {
         return (holder, direction) =>
             this.fragments.ordered(
                 { n: { node: holder, labels: [...target.labels] } },
-                cypherOf(target.nodeIdProperty!),
+                cypherOf(target.nodeIdProperty),
                 direction === 'DESC'
             );
     }

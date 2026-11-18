@@ -28,7 +28,7 @@ import { CascadeType } from '@/manager/CascadeType';
 import { GroupQuery } from '@/manager/Groups';
 import { RelateMode } from '@/manager/NodeRef';
 import { SaveOptions } from '@/manager/SaveOptions';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { TargetModel } from '@/model/RelationshipModel';
@@ -260,7 +260,11 @@ export class SqliteBackend implements GraphBackend {
         return new PostgresWrites(this.graph).fragmentBatch(groups, options);
     }
 
-    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+    groups(
+        model: FragmentModel,
+        query: GroupQuery<any, any>,
+        pathTargets: Map<string, IdentifiedFragment>
+    ): GraphStatement {
         return json(new SqliteGroups(this.graph).build(model, query, pathTargets));
     }
 

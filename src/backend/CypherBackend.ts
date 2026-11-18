@@ -10,7 +10,7 @@ import {
 import { GraphStatement } from '@/backend/GraphStatement';
 import { CypherGrammar } from '@/backend/CypherGrammar';
 import { labelExpression, quoteName } from '@/backend/Cypher';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { fragment, ViewProjector } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -296,7 +296,11 @@ export class CypherBackend implements GraphBackend {
         return FragmentBatchStatement.build(groups, options, this.grammar);
     }
 
-    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+    groups(
+        model: FragmentModel,
+        query: GroupQuery<any, any>,
+        pathTargets: Map<string, IdentifiedFragment>
+    ): GraphStatement {
         return GroupStatement.build(
             model,
             GroupStatement.resolved(model, query, new QueryRenderer(this.grammar)),

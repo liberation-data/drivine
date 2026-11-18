@@ -55,3 +55,11 @@ export interface FragmentModel extends FieldMapping {
      */
     lowerCopied: string[];
 }
+
+/** A fragment with a `@NodeId`: what a grouped read's path key ends at, as its groups are ordered by the node's id. */
+export type IdentifiedFragment = FragmentModel & { nodeIdProperty: string };
+
+/** Whether `model` has a `@NodeId`. */
+export function isIdentified(model: FragmentModel): model is IdentifiedFragment {
+    return !!model.nodeIdProperty;
+}

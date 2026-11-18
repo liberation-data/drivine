@@ -1,5 +1,5 @@
 import type { ModuleStore } from '@/backend/StoreStatements';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 import { GraphViewModel } from '@/model/GraphViewModel';
 import { TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
@@ -127,7 +127,11 @@ export interface GraphBackend {
     fragmentBatch(groups: FragmentGroup[], options: SaveOptions<any>): GraphStatement;
 
     /** A grouped read. The query may hold references and conditions, which the backend writes. */
-    groups(model: FragmentModel, query: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement;
+    groups(
+        model: FragmentModel,
+        query: GroupQuery<any, any>,
+        pathTargets: Map<string, IdentifiedFragment>
+    ): GraphStatement;
 
     /** The nodes joined to a node by a relationship type in a direction, each once. */
     related(from: MatchedNode, type: string, direction: Direction, target: FragmentModel): GraphStatement;

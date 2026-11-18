@@ -18,6 +18,7 @@ import {
     avg,
     count,
     hop,
+    IdentifiedFragment,
     key,
     max,
     pathKey,
@@ -348,7 +349,7 @@ function searches(registry: ModelRegistry, backend: GraphBackend, where: string)
 
 function groups(registry: ModelRegistry, backend: GraphBackend): Record<string, GraphStatement> {
     const movie = registry.fragment(Movie);
-    const directors = new Map([['director', registry.fragment(Director)]]);
+    const directors = new Map([['director', registry.fragment(Director) as IdentifiedFragment]]);
     return {
         'groups.byProperty': backend.groups(
             movie,

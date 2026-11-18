@@ -5,7 +5,7 @@ import { SqlGraph } from '@/backend/sql/SqlGraph';
 import { ConditionWriter } from '@/backend/GroupStatement';
 import { SqlViews } from '@/backend/sql/SqlViews';
 import { DrivineError } from '@/DrivineError';
-import { FragmentModel } from '@/model/FragmentModel';
+import { FragmentModel, IdentifiedFragment } from '@/model/FragmentModel';
 import { GroupAggregate, GroupKey, GroupQuery } from '@/manager/Groups';
 
 export const COMPARISONS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
@@ -51,7 +51,11 @@ export abstract class SqlGroups {
 
     constructor(protected readonly graph: SqlGraph) {}
 
-    build(source: FragmentModel, given: GroupQuery<any, any>, pathTargets: Map<string, FragmentModel>): GraphStatement {
+    build(
+        source: FragmentModel,
+        given: GroupQuery<any, any>,
+        pathTargets: Map<string, IdentifiedFragment>
+    ): GraphStatement {
         this.windows = [];
         const views = this.views();
         const query = GroupStatement.resolved(source, given, this.renderer(views));
@@ -156,9 +160,7 @@ export abstract class SqlGroups {
                 return this.keyOrder(`g.k${i}`);
             }
             const target = pathTargets.get(keys[i][0])!;
-            return [
-                `(SELECT ${this.idValue(target.nodeIdProperty!)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`
-            ];
+            return [`(SELECT ${this.idValue(target.nodeIdProperty)} FROM ${this.graph.nodes} p WHERE p.nid = g.k${i})`];
         };
         const columnOrder = (column: string, direction: 'ASC' | 'DESC'): string => {
             const index = Number(column.slice(1));
@@ -298,7 +300,9 @@ export abstract class SqlGroups {
      * drivine4j's SQLite orders one: by the terms this gives for the node's id there. Undefined where the store orders
      * the key by its node's id value ({@link idValue}).
      */
-    protected heldPath(_target: FragmentModel): ((holder: string, direction: 'ASC' | 'DESC') => string[]) | undefined {
+    protected heldPath(
+        _target: IdentifiedFragment
+    ): ((holder: string, direction: 'ASC' | 'DESC') => string[]) | undefined {
         return undefined;
     }
 

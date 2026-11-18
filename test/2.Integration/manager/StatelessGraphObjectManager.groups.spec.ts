@@ -5,6 +5,7 @@ import {
     backendFor,
     DatabaseType,
     Direction,
+    DrivineError,
     hop,
     key,
     max,
@@ -44,6 +45,12 @@ class Message {
 @NodeFragment({ labels: ['GroupTest', 'User'] })
 class User {
     @NodeId() id: string;
+    username?: string;
+}
+
+/** The seeded users, read by a class with no @NodeId: a path key can't order its groups by them (#786). */
+@NodeFragment({ labels: ['GroupTest', 'User'] })
+class Owner {
     username?: string;
 }
 
@@ -215,6 +222,15 @@ describe.each([...graphEngines(), ...sqlStores()])('groups on $type', (engine) =
         ]);
         expect(ranking[0].user).toBeInstanceOf(User);
         expect(ranking[0].user.username).toEqual('Ada');
+    });
+
+    it('should refuse a path key whose node has no @NodeId, by name, as drivine4j does', async () => {
+        const read = gom.groups.load(Message, {
+            keys: { owner: pathKey(Owner, [hop('HAS_MESSAGE', Direction.INCOMING, 'ChatSession'), hop('OWNED_BY')]) },
+            aggregates: { messages: count() }
+        });
+        await expect(read).rejects.toThrow(DrivineError);
+        await expect(read).rejects.toThrow('Owner has no @NodeId field, which a path key is ordered by.');
     });
 
     it('should order, break ties by the keys, and page', async () => {
