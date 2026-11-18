@@ -4,7 +4,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
 import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
-import { writeLayout, writeProps } from '@/cypher/ValueLayout';
+import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { LayoutBoundStatement } from '@/backend/oracle/LayoutBoundStatement';
 import { RowOrderedStatement } from '@/backend/oracle/RowOrderedStatement';
 import { carriesLabels, hasLabels, jsonKey, nodeDocument, OracleGraph } from '@/backend/oracle/OracleGraph';
@@ -115,7 +115,7 @@ export class OracleWrites {
         const body: string[] = [];
         const reads = (when: 'before' | 'after'): void =>
             groups.forEach((group, i) => {
-                const k = jsonKey(group.model.nodeIdProperty!);
+                const k = jsonKey(heldKey(group.model.nodeIdProperty!));
                 const variable = `v_${when}${i}`;
                 if (when === 'before') {
                     declarations.push(`${variable} CLOB;`, `v_after${i} CLOB;`);
@@ -282,7 +282,7 @@ export class OracleWrites {
 
     private matchOf(node: MatchedNode, name: string = 'x_frommatch'): string {
         const labels = [...new Set([...node.model.labels, ...(node.labels ?? [])])];
-        const k = jsonKey(idProperty(node.model));
+        const k = jsonKey(heldKey(idProperty(node.model)));
         this.pending[name] = `${hasLabels(
             'n',
             labels
@@ -301,7 +301,7 @@ export class OracleWrites {
     }
 
     private matchText(model: FragmentModel): string {
-        const k = jsonKey(idProperty(model));
+        const k = jsonKey(heldKey(idProperty(model)));
         return `${hasLabels(
             'n',
             model.labels

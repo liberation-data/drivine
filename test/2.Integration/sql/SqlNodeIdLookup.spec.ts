@@ -314,6 +314,9 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
     it('should find a node of a $-named id by its id', async () => {
         await gom.save(make(LookupPriced, { $code: 'p1', name: 'priced' }));
         expect((await gom.load(LookupPriced, 'p1'))?.name).toEqual('priced');
+        // A second save finds the node under the key the layout holds it as, and makes no second one.
+        await gom.save(make(LookupPriced, { $code: 'p1', name: 'saved again' }));
+        expect((await gom.loadAll(LookupPriced)).map((it) => it.name)).toEqual(['saved again']);
         expect(await gom.patch(LookupPriced, 'p1', { set: { name: 'repriced' } })).toMatchObject({ found: true });
         expect(await gom.delete(LookupPriced, 'p1')).toEqual(1);
         expect(await gom.load(LookupPriced, 'p1')).toBeUndefined();
