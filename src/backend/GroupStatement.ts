@@ -36,8 +36,7 @@ export class GroupStatement {
         renderer: ConditionWriter
     ): GroupQuery<any, any> {
         const scope = scopeOf({ kind: 'NODE_FRAGMENT', model });
-        const name = (property: unknown, what: string): string =>
-            typeof property === 'string' ? property : rootProperty(pathOf(property), scope, what);
+        const name = (property: unknown, what: string): string => storedName(property, scope, what);
         const cypher = (where: string | Where | undefined): string | undefined =>
             where === undefined || typeof where === 'string'
                 ? where
@@ -185,6 +184,11 @@ function integer(value: number, what: string): number {
         throw new DrivineError(`${what} must be a whole number of at least 0.`);
     }
     return value;
+}
+
+/** The stored name of a group key's or an aggregate's property: given as it, or as a reference to a root property. */
+export function storedName(property: unknown, scope: Scope, what: string): string {
+    return typeof property === 'string' ? property : rootProperty(pathOf(property), scope, what);
 }
 
 function pathOf(ref: unknown): readonly string[] {

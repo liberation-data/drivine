@@ -1,6 +1,6 @@
 import { GraphStatement } from '@/backend/GraphStatement';
 import { DrivineError } from '@/DrivineError';
-import { GraphObjectMapper, wholeNumbers } from '@/mapper/GraphObjectMapper';
+import { asDate, declaredDate, GraphObjectMapper, wholeNumbers } from '@/mapper/GraphObjectMapper';
 import { FragmentModel, IdentifiedFragment, isIdentified } from '@/model/FragmentModel';
 import { ModelRegistry } from '@/model/ModelRegistry';
 import { ClassRef, ClassType } from '@/query/QuerySpecification';
@@ -9,6 +9,7 @@ import { scopeOf } from '@/dsl/ModelScope';
 import { rootRefs } from '@/dsl/QueryRefs';
 import { RootRefs, Where } from '@/dsl/Refs';
 import { GraphBackend } from '@/backend/GraphBackend';
+import { storedName } from '@/backend/GroupStatement';
 
 function fragmentOf(model: FragmentModel): { kind: 'NODE_FRAGMENT'; model: FragmentModel } {
     return { kind: 'NODE_FRAGMENT', model };
@@ -52,6 +53,7 @@ export class GroupOperations {
         const rows = await this.query(this.backend.groups(model, query, targets));
         const keyNames = Object.keys(query.keys);
         const aggregateNames = Object.keys(query.aggregates ?? {});
+        const dated = this.datedAggregates(model, query.aggregates ?? {});
         return rows.map((row) => {
             const result: any = {};
             keyNames.forEach((name, i) => {
@@ -60,7 +62,10 @@ export class GroupOperations {
                     ? this.mapper.fragment(target, row[`k${i}`])
                     : wholeNumbers(row[`k${i}`] ?? undefined, false);
             });
-            aggregateNames.forEach((name, i) => (result[name] = wholeNumbers(row[`a${i}`] ?? undefined, false)));
+            aggregateNames.forEach((name, i) => {
+                const value = wholeNumbers(row[`a${i}`] ?? undefined, false);
+                result[name] = dated.has(name) ? asDate(value) : value;
+            });
             return result;
         });
     }
@@ -79,6 +84,26 @@ export class GroupOperations {
             aggregates: { count: count() }
         });
         return new Map(rows.map((it) => [it.value, it.count ?? 0]));
+    }
+
+    /**
+     * The names of the `min` and `max` aggregates of a property the source declares a `Date`, which are given as a
+     * `Date` on every store, as drivine4j gives a grouped value as its handle's type (#785): a SQL store gives the
+     * value's text, and a graph engine's driver a `Date`. A property the source declares no type of is given as the
+     * store gives it.
+     */
+    private datedAggregates(model: FragmentModel, aggregates: Record<string, GroupAggregate>): Set<string> {
+        const scope = scopeOf(fragmentOf(model));
+        const fields = new Map([...model.graphProperties].map(([field, stored]) => [stored, field]));
+        return new Set(
+            Object.entries(aggregates)
+                .filter(([, it]) => (it.function === 'MIN' || it.function === 'MAX') && it.property !== undefined)
+                .filter(([, it]) => {
+                    const stored = storedName(it.property, scope, 'An aggregate');
+                    return declaredDate(model.type, model, fields.get(stored) ?? stored);
+                })
+                .map(([name]) => name)
+        );
     }
 
     /**
