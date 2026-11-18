@@ -8,6 +8,8 @@ import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { dateOf, NO_NODE } from '@/backend/sql/NodeIds';
+import { tagsHeldBy } from '@/cypher/ValueLayout';
+import { ObjectUtils } from '@/utils/ObjectUtils';
 
 /**
  * Keys a row's properties are never copied under: a property bag's entry or a field named `__proto__` would otherwise
@@ -50,6 +52,23 @@ const packedAsHeld = new WeakMap<object, Record<string, any>>();
  */
 export function packedTextOf(fragment: object): Record<string, any> | undefined {
     return packedAsHeld.get(fragment);
+}
+
+/**
+ * The fields of an object a load made whose property a SQL store held a temporal tag in (#811), each with its value as
+ * the load gave it, copied, and what the store held, as plain JSON (see ValueLayout's tagsHeldBy). The load gives a tag
+ * as its text where no field declares a `Date`, so a save of the text would write a string over the date; a save writes
+ * a field still as loaded as the store held it instead (see SaveStatementBuilder's propsOf). Kept for fragments and
+ * relationship fragments a load made from a SQL store's row, and only as long as the object is.
+ */
+const tagsAsLoaded = new WeakMap<object, Map<string, { value: any; held: any }>>();
+
+/**
+ * Internal: of each field of `object` whose property held a temporal tag when a load made it, the value the load gave
+ * it and what the store held (see tagsAsLoaded); undefined for an object no load from a SQL store made.
+ */
+export function heldTagsOf(object: object): Map<string, { value: any; held: any }> | undefined {
+    return tagsAsLoaded.get(object);
 }
 
 /**
@@ -224,7 +243,42 @@ export class GraphObjectMapper {
         const instance = plainToInstance(type as any, fields) as any;
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         loadCollections(type, mapping, instance, Object.keys(fields));
+        recordTagsAsLoaded(instance, source, props, fields, byGraphName, mapping);
         return instance;
+    }
+}
+
+/**
+ * Records, of each field of `instance` loaded from a property of `source` in which the store held a temporal tag, the
+ * value the field was given, copied, so a change in place is a change, and what the store held (see tagsAsLoaded). A
+ * property a bag took is left out: a save writes a bag's entries as they are.
+ */
+function recordTagsAsLoaded(
+    instance: any,
+    source: Record<string, any> | undefined,
+    props: Record<string, any>,
+    fields: Record<string, any>,
+    byGraphName: Map<string, string>,
+    mapping: FieldMapping
+): void {
+    const held = source != null && typeof source === 'object' ? tagsHeldBy(source) : undefined;
+    if (!held) {
+        return;
+    }
+    const kept = new Map<string, { value: any; held: any }>();
+    for (const [name, stored] of held) {
+        const field = byGraphName.get(name) ?? (mapping.graphProperties.has(name) ? undefined : name);
+        if (
+            field === undefined ||
+            !Object.prototype.hasOwnProperty.call(props, name) ||
+            !Object.prototype.hasOwnProperty.call(fields, field)
+        ) {
+            continue;
+        }
+        kept.set(field, { value: ObjectUtils.deepCopy(instance[field]), held: stored });
+    }
+    if (kept.size) {
+        tagsAsLoaded.set(instance, kept);
     }
 }
 
