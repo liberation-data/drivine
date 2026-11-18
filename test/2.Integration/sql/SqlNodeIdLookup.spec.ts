@@ -15,6 +15,7 @@ import {
     PersistenceManager,
     QuerySpecification,
     RelateMode,
+    RemovedTargets,
     Root,
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
@@ -62,6 +63,15 @@ class LookupTarget {
 class LookupPriced {
     @NodeId() $code: string;
     name?: string;
+    @NodeStamp() stamp?: string;
+}
+
+/** A float @NodeId, which Oracle holds as a binary double, and a write block finds as one (#754). */
+@NodeFragment({ labels: ['SqlLookup', 'LookupFloat'] })
+class LookupFloat {
+    @NodeId() id: number;
+    name?: string;
+    @NodeStamp() stamp?: string;
 }
 
 /** The target joined to days, which a save that replaces the list unlinks by their ids. */
@@ -217,6 +227,70 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
         await refsAndPatches(LookupText, make(LookupText, { id: 't21', name: 'a' }), 't21', 't22');
     });
 
+    // Oracle holds a float as a binary double: each write block finds it by the id bound as one, read EXTENDED (#754).
+    it('should relate and patch a node of a float id', async () => {
+        await refsAndPatches(LookupFloat, make(LookupFloat, { id: 2.5, name: 'a' }), '2.5', '3.5');
+    });
+
+    it('should relate, unrelate, patchAll and unrelateAll a node of a $-named id', async () => {
+        await gom.save(make(LookupPriced, { $code: 'p2', name: 'a' }));
+        const priced = nodeRef(LookupPriced, 'p2');
+        expect(await gom.edges.relate(priced, target, 'REFERS_TO', {}, RelateMode.CREATE)).toBe(true);
+        expect(await gom.edges.relate(target, priced, 'REFERS_TO')).toBe(true);
+        expect(await gom.edges.unrelate(priced, target, 'REFERS_TO')).toEqual(1);
+        expect(
+            await gom.patchAll([make(LookupPriced, { $code: 'p2', name: 'patched all' })], { only: ['name'] })
+        ).toEqual([{ found: true, applied: true, changed: true }]);
+        expect((await gom.load(LookupPriced, 'p2'))?.name).toEqual('patched all');
+        expect(await gom.edges.unrelateAll(priced, 'REFERS_TO', Direction.INCOMING)).toEqual(1);
+        expect(await gom.edges.loadRelated(target, 'REFERS_TO', Direction.OUTGOING, LookupPriced)).toEqual([]);
+    });
+
+    /**
+     * A saveAll writes a batch: each node found by its id, a float, a Date and a `$`-named one, so a second saveAll makes
+     * no second node, and each node's stamp read back for it by its id, before and after the writes: a node the batch made
+     * is handed its whole stamp, and one that was there, whose relationships the object didn't come from, its data token.
+     */
+    it('should find each node of a saveAll by a float, a Date and a $-named id, and hand back its stamp', async () => {
+        const batch = (suffix: string): any[] => [
+            make(LookupFloat, { id: 0.1, name: `float${suffix}` }),
+            make(LookupDate, { id: day('2024-07-08'), name: `date${suffix}` }),
+            make(LookupPriced, { $code: 'p3', name: `priced${suffix}` })
+        ];
+        const loaded = async (): Promise<(string | undefined)[]> => [
+            (await gom.load(LookupFloat, 0.1))?.stamp,
+            (await gom.load(LookupDate, '2024-07-08'))?.stamp,
+            (await gom.load(LookupPriced, 'p3'))?.stamp
+        ];
+        const made = batch('');
+        await gom.saveAll(made);
+        const first = await loaded();
+        expect(first.every((it) => it?.includes(':'))).toBe(true);
+        expect(made.map((it) => it.stamp)).toEqual(first);
+
+        const again = batch(' again');
+        await gom.saveAll(again);
+        expect(await names(LookupFloat)).toEqual(['float again']);
+        expect(await names(LookupDate)).toEqual(['date again']);
+        expect(await names(LookupPriced)).toEqual(['priced again']);
+        expect(again.map((it) => it.stamp)).toEqual((await loaded()).map((it) => `${it!.split(':')[0]}:`));
+    });
+
+    it("should hand a view's related nodes of a Date id their stamps", async () => {
+        const days = make(LookupTarget, { id: 'stamped days', name: 'a target of stamped days' });
+        const first = make(LookupDate, { id: day('2025-03-01'), name: 'first day' });
+        const second = make(LookupDate, { id: day('2025-03-02'), name: 'second day' });
+        await gom.save(make(LookupTargetDays, { target: days, days: [first, second] }));
+        for (const [it, iso] of [
+            [first, '2025-03-01'],
+            [second, '2025-03-02']
+        ] as const) {
+            const stamp = (await gom.load(LookupDate, iso))!.stamp;
+            expect(stamp).toBeDefined();
+            expect(it.stamp).toEqual(stamp);
+        }
+    });
+
     /**
      * A save that replaces a list keeps the targets the object still holds, told by their ids as the plan keys them, and
      * unlinks the rest: a target of a Date id is read back by its tag's text `v`, which the plan's `ids` hold. Read as
@@ -240,6 +314,30 @@ describe.each(sqlStores())('a lookup by id on $name', (store) => {
         expect((await gom.load(LookupTargetDays, 'days'))!.days.map((it) => it.name)).toEqual(['second day']);
         expect((await gom.load(LookupDate, '2025-01-02'))!.stamp).toEqual(held);
         expect((await gom.load(LookupDate, '2025-01-01'))?.name).toEqual('first day');
+    });
+
+    /**
+     * Replaced with DELETE_UNREFERENCED, the dropped target of a Date id, which nothing else refers to, is deleted, and
+     * the one still held is kept, unlinked from nothing, its stamp as it was: each told from the ids kept by their tags.
+     */
+    it('should delete the dropped target of a Date id nothing refers to, and keep the one still held', async () => {
+        const days = make(LookupTarget, { id: 'unreferenced days', name: 'a target of days' });
+        const first = make(LookupDate, { id: day('2025-02-01'), name: 'dropped day' });
+        const second = make(LookupDate, { id: day('2025-02-02'), name: 'held day' });
+        await gom.save(make(LookupTargetDays, { target: days, days: [first, second] }));
+        const held = (await gom.load(LookupDate, '2025-02-02'))!.stamp;
+
+        const kept = make(LookupDate, { id: day('2025-02-02'), name: 'held day' });
+        await gom.save(make(LookupTargetDays, { target: days, days: [kept] }), {
+            replace: ['days'],
+            removedTargets: RemovedTargets.DELETE_UNREFERENCED
+        });
+
+        expect((await gom.load(LookupTargetDays, 'unreferenced days'))!.days.map((it) => it.name)).toEqual([
+            'held day'
+        ]);
+        expect(await gom.load(LookupDate, '2025-02-01')).toBeUndefined();
+        expect((await gom.load(LookupDate, '2025-02-02'))!.stamp).toEqual(held);
     });
 
     /**
