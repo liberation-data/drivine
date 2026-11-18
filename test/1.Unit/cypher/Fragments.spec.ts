@@ -122,6 +122,18 @@ describe('fragment', () => {
         expect(fragments.callsStoredNullsEqual).toBe(true);
         expect(fragments.callsStoredEra).toBe(false);
     });
+
+    it("gathers whether an order calls Oracle's stored era, and names a value's and an order's parameters apart", () => {
+        const fragments = new SqlFragments('oracle', { name: 'g' });
+        expect(fragments.order(PEOPLE, 'n.seen.epochMillis / 1000.0').join()).toContain('g_era(');
+        expect(fragments.callsStoredEra).toBe(true);
+        const value = fragments.value(PEOPLE, 'n.age + $p', { p: 1 });
+        const order = fragments.order(PEOPLE, 'n.age + $p', true, { p: 2 });
+        expect(value).toContain('$_cy_f2_p');
+        expect(order.join()).toContain('$_cy_f3_p');
+        expect(fragments.parameters).toEqual({ _cy_f2_p: '1', _cy_f3_p: '2' });
+        expect(fragments.callsStoredEra).toBe(true);
+    });
 });
 
 /**
