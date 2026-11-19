@@ -401,7 +401,7 @@ storeStamp:
         WHERE schemaname = current_schema() AND tablename = 'drivine_node'
         UNION ALL
         SELECT jsonb_build_object('name', tablename, 'type', 'TABLE') FROM pg_tables
-        WHERE schemaname = current_schema() AND tablename = 'drivine_lock2'
+        WHERE schemaname = current_schema() AND tablename IN ('drivine_lock2', 'drivine_migrate2')
         ORDER BY 1
       layout: 2
       constraint:
@@ -521,7 +521,7 @@ storeStamp:
       layoutObjects: |-
         /* drivine:json */
         SELECT json_object('name', name, 'type', upper(type)) FROM sqlite_master
-        WHERE (type = 'index' AND tbl_name = 'drivine_node') OR (type = 'table' AND name = 'drivine_lock2')
+        WHERE (type = 'index' AND tbl_name = 'drivine_node') OR (type = 'table' AND name IN ('drivine_lock2', 'drivine_migrate2'))
         ORDER BY name
       layout: 2
       constraint:
@@ -645,17 +645,17 @@ storeLayout:
       store: "postgres"
       stamps: [{layout: null}]
       foreignNodes: true
-      verdict: {refuse: "The graph 'drivine' on Postgres was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on Postgres was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.", from: 1}
     - name: "An older layout, holding values"
       store: "oracle"
       stamps: [{layout: 1}]
       foreignNodes: true
-      verdict: {refuse: "The graph 'drivine' on Oracle was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on Oracle was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.", from: 1}
     - name: "No stamp, holding values"
       store: "sqlite"
       stamps: []
       foreignNodes: true
-      verdict: {refuse: "The graph 'drivine' on SQLite was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on SQLite was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.", from: 1}
     - name: "A later layout"
       store: "postgres"
       stamps: [{layout: 3}]
@@ -675,7 +675,7 @@ storeLayout:
       store: "sqlite"
       stamps: [{layout: null}]
       foreignNodes: true
-      verdict: {refuse: "The graph 'drivine' on SQLite was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on SQLite was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.", from: 1}
     - name: "Read back after a re-stamp"
       store: "oracle"
       stamps: [{layout: 2}]
@@ -750,7 +750,7 @@ storeLayout:
       objects:
         - {name: "drivine_t_lock2", type: "TABLE"}
         - {name: "drivine_t_uq2_drivinestorekey_e211949b", type: "INDEX"}
-      verdict: {refuse: "The graph 'drivine' on Oracle was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on Oracle was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.", from: 1}
     - name: "Cleared and loaded again, on SQLite: this layout's lock table alone"
       store: "sqlite"
       stamps: []
@@ -777,7 +777,7 @@ storeLayout:
       objects:
         - {name: "drivine_node_labels", type: "INDEX"}
         - {name: "drivine_uq_drivinestorekey_e211949b", type: "INDEX"}
-      verdict: {refuse: "The graph 'drivine' on Postgres was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on Postgres was written in store layout 1, and this version of Drivine reads layout 2 only, which holds values otherwise. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.", from: 1}
     - name: "Cleared and loaded again, its lock table dropped by hand: this layout's generated names alone"
       store: "postgres"
       stamps: []
@@ -803,6 +803,26 @@ storeLayout:
         - {name: "drivine_ix3_personname_44ce5436", type: "INDEX"}
         - {name: "drivine_lock2", type: "TABLE"}
       verdict: {refuse: "The graph 'drivine' on SQLite was written in store layout 3 by a later version of Drivine, and this version reads layout 2 only: upgrade Drivine to use it."}
+    - name: "Part way through a migration to this layout"
+      # A migration's checkpoint table, which only a migration makes and drops when done (#256): the graph holds values of
+      # both layouts, and is refused until the migration is resumed and finished, whatever its stamp says.
+      store: "postgres"
+      stamps: [{layout: 1}]
+      foreignNodes: true
+      objects:
+        - {name: "drivine_ix_personname_1a2b3c4d", type: "INDEX"}
+        - {name: "drivine_lock2", type: "TABLE"}
+        - {name: "drivine_migrate2", type: "TABLE"}
+      verdict: {refuse: "The graph 'drivine' on Postgres is part way through a migration to store layout 2, which holds some of its values in its earlier layout: resume the migration, with the same declarations, to finish it; see the upgrade notes.", inProgress: true}
+    - name: "Part way through a migration, stamped this layout"
+      # Stamped layout 2 before its checkpoint is dropped: still refused, until the migration is resumed and drops it.
+      store: "sqlite"
+      stamps: [{layout: 2}]
+      foreignNodes: true
+      objects:
+        - {name: "drivine_lock2", type: "TABLE"}
+        - {name: "drivine_migrate2", type: "TABLE"}
+      verdict: {refuse: "The graph 'drivine' on SQLite is part way through a migration to store layout 2, which holds some of its values in its earlier layout: resume the migration, with the same declarations, to finish it; see the upgrade notes.", inProgress: true}
   # The order a library asks in, which no statement of the module's can hold it to: the verdict on a graph's first connection
   # comes before the store's ensuring or ddl and the stamp's prepare make anything, as this layout's lock table, which they
   # make, is the verdict's evidence that a graph without a stamp is of this layout. Each library's runner sets each case up

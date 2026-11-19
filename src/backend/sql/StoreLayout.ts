@@ -7,16 +7,22 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 
 /**
  * A graph whose store layout this version of Drivine does not read: written in an earlier layout and holding values,
- * written by a later Drivine, or stamped by two at once (liberation-data/drivine-cypher-spec#161). The shared module
- * decides (its `layout` request), and the message says which, and what to do: reload the graph with this version, or
- * upgrade. Thrown on every connection, as no statement may run over a store whose values are held otherwise.
+ * written by a later Drivine, stamped by two at once (liberation-data/drivine-cypher-spec#161), or part way through a
+ * migration to this layout, its checkpoint table standing (`inProgress`, drivine-cypher-spec#256). The shared module
+ * decides (its `layout` request), and the message says which, and what to do: reload the graph with this version,
+ * upgrade, or resume the migration. Thrown on every connection, as no statement may run over a store whose values are
+ * held otherwise.
  * drivine4j's `StoreLayoutException`.
  */
 export class StoreLayoutError extends DrivineError {
     constructor(
         /** The graph refused. */
         readonly graph: string,
-        message: string
+        message: string,
+        /** The earlier layout the graph was written in, where a migration moves it to this one (#765). */
+        readonly from?: number,
+        /** Whether the graph is part way through a migration to this layout, which resuming finishes. */
+        readonly inProgress: boolean = false
     ) {
         super(message);
         this.name = 'StoreLayoutError';
@@ -27,7 +33,14 @@ export class StoreLayoutError extends DrivineError {
 export type LayoutVerdict =
     | { verdict: 'current' }
     | { verdict: 'stamp'; drops: string[]; assign: boolean; parameters: Record<string, any> }
-    | { verdict: 'refuse'; message: string };
+    | {
+          verdict: 'refuse';
+          message: string;
+          /** The earlier layout a graph that holds values was written in, which a migration moves from. */
+          from?: number;
+          /** Whether a migration to this layout was begun and not finished (its checkpoint table stands). */
+          inProgress?: boolean;
+      };
 
 /** What the module judges a graph by: its stamps, whether it holds a node not Drivine's, and what an earlier layout left. */
 export interface LayoutEvidence {
@@ -95,7 +108,7 @@ export async function judgeLayout(
             return;
         }
         if (verdict.verdict === 'refuse') {
-            throw new StoreLayoutError(graph, verdict.message);
+            throw new StoreLayoutError(graph, verdict.message, verdict.from, verdict.inProgress ?? false);
         }
         if (asked === 2) {
             throw new StoreLayoutError(

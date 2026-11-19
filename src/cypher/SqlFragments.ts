@@ -66,7 +66,20 @@ export class SqlFragments {
      * own, which no other fragment of the statement binds by.
      */
     whole(variables: Record<string, FragmentVariable>, cypher: string, parameters: Record<string, any> = {}): string {
-        return single(this.kept(fragment(this.store, this.graph, { condition: cypher }, variables, parameters)));
+        return this.wholeImplying(variables, cypher, parameters).term;
+    }
+
+    /**
+     * As {@link whole}, with the labels the module says every row the condition keeps carries, by variable
+     * (`impliedLabels`, drivine-cypher-spec#373), which the statement needn't test again.
+     */
+    wholeImplying(
+        variables: Record<string, FragmentVariable>,
+        cypher: string,
+        parameters: Record<string, any> = {}
+    ): { term: string; impliedLabels: Record<string, string[]> } {
+        const compiled = this.kept(fragment(this.store, this.graph, { condition: cypher }, variables, parameters));
+        return { term: single(compiled), impliedLabels: compiled.impliedLabels };
     }
 
     /** The terms an `ORDER BY` sorts by `cypher` over `variables`, descending where `descending` is true. */

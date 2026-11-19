@@ -73,6 +73,11 @@ export interface StoreStatements {
     versions?: Record<string, string>;
     /** On Oracle, see {@link StoredFunctions}. */
     storedFunctions?: StoredFunctions;
+    /**
+     * On Oracle, the statements a library runs once on each connection as it opens it, before any other: text compared
+     * and sorted by its code points whatever the session's `NLS_COMP` and `NLS_SORT` (drivine-cypher-spec#372).
+     */
+    session?: string[];
     stamp: StampStatements;
     marker: MarkerStatements;
 }

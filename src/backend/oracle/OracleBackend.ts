@@ -8,14 +8,7 @@ import {
     Page
 } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import {
-    carriesLabels,
-    hasLabels,
-    moduleLabelTest,
-    nodeDocument,
-    OracleGraph,
-    textOf
-} from '@/backend/oracle/OracleGraph';
+import { carriesLabels, hasLabels, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
 import { called, hinted, noted } from '@/backend/oracle/OracleFragments';
 import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
 import { SqlFragments } from '@/cypher/SqlFragments';
@@ -39,10 +32,8 @@ import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { SaveStatement } from '@/backend/SaveStatement';
 import { ModelRegistry } from '@/model/ModelRegistry';
-import { pinnedProperties, RenderedQuery } from '@/dsl/QueryRenderer';
-import { allOfOne, Condition, Query, QueryFn, WhereFn } from '@/dsl/Refs';
-import { scopeOf } from '@/dsl/ModelScope';
-import { rootRefs } from '@/dsl/QueryRefs';
+import { RenderedQuery } from '@/dsl/QueryRenderer';
+import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { GroupQuery } from '@/manager/Groups';
 import { SchemaItem } from '@/schema/SchemaGrammar';
@@ -301,27 +292,19 @@ END;`)
      * The query, as the shared module's fragments write it (FragmentQueryRenderer), what they ask of its statement noted
      * on its filter and its order (see OracleFragments). An equality of a property the first property of a range index or
      * a uniqueness constraint of one of the root's labels is (`indexed`) is read through the index's expression, as the
-     * module writes it for the labels the root is given (drivine4j#65): a label that such an equality at the top of the
-     * filter tests is then not tested again by the statement (`labelsTested`, see `from`).
+     * module writes it for the labels the root is given (drivine4j#65): a label the module says the filter then implies
+     * (`impliedLabels`, drivine-cypher-spec#373) is not tested again by the statement (`labelsTested`, see `from`).
      */
     renderQuery<T>(fn: QueryFn<T>, target: TargetModel, indexed: SchemaItem[] = []): RenderedQuery {
         const fragments = new SqlFragments('oracle', {
             name: this.graph.name,
             indexedProperties: indexed.map((it) => [it.label, it.properties[0]] as const)
         });
-        // Made once: the labels implied are read from the very conditions the statement compiles.
-        const made = fn(rootRefs<T>(scopeOf(target)));
-        const query = FragmentQueryRenderer.render(fragments, () => made, target, ROW_ALIAS);
-        const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
+        const query = FragmentQueryRenderer.render(fragments, fn, target, ROW_ALIAS);
         return {
             ...query,
             where: noted(query.where, fragments),
-            orderBy: noted(query.orderBy, fragments),
-            labelsTested: labelsImplied(
-                query.where,
-                root.labels,
-                indexedEqualities(this.graph.name, made, target, indexed)
-            )
+            orderBy: noted(query.orderBy, fragments)
         };
     }
 
@@ -518,56 +501,4 @@ END;`);
             ...(page.limit !== undefined ? [`FETCH NEXT ${page.limit} ROWS ONLY`] : [])
         ];
     }
-}
-
-/**
- * The labels of `labels` the condition `where`, as the shared module's fragments write it, tests at its top: those of
- * whose properties an equality is read through a labelled index there (see moduleLabelTest), as drivine4j's
- * `OraclePredicates.predicate` finds them. None for no condition.
- *
- * Only a plain equality at the top of the DSL's filter of an indexed property of the label, read through the index
- * (`equalities`, see indexedEqualities), implies it. An ignore-case equality of a lowercased copy
- * (`EQ_LOWERED`, see LowerCopyLookups) is read through the same index, but past 4,000 bytes the module's term holds for
- * every node, the label's test inside it then not deciding it: the statement tests the label itself. Retires once the
- * module keeps the label's test inside that guard (liberation-data/drivine-cypher-spec#373).
- */
-function labelsImplied(where: string | undefined, labels: string[], equalities: string | undefined): string[] {
-    return where && equalities
-        ? labels.filter(
-              (label) =>
-                  where.includes(moduleLabelTest(ROW_ALIAS, label)) &&
-                  equalities.includes(moduleLabelTest(ROW_ALIAS, label))
-          )
-        : [];
-}
-
-/**
- * The plain equalities at the top of the query's filter of a property `indexed` for a label of the root, as the
- * shared module's fragments write them alone: none when there are none. The module reads some values through the
- * index (a label test in their term) and others not (a list, a map, `""`), as it alone knows.
- */
-function indexedEqualities(
-    graph: string,
-    query: Query,
-    target: TargetModel,
-    indexed: SchemaItem[]
-): string | undefined {
-    const root = target.kind === 'GRAPH_VIEW' ? target.model.root : target.model;
-    const properties = indexed.filter((it) => root.labels.includes(it.label)).map((it) => it.properties[0]);
-    const scope = scopeOf(target);
-    const equalities = (condition: Condition): Condition[] =>
-        condition.kind === 'AND'
-            ? condition.conditions.flatMap(equalities)
-            : pinnedProperties(condition, scope).some((it) => properties.includes(it))
-            ? [condition]
-            : [];
-    const pinned = query.where !== undefined && properties.length ? equalities(allOfOne(query.where)) : [];
-    if (!pinned.length) {
-        return undefined;
-    }
-    const fragments = new SqlFragments('oracle', {
-        name: graph,
-        indexedProperties: indexed.map((it) => [it.label, it.properties[0]] as const)
-    });
-    return FragmentQueryRenderer.renderWhere(fragments, () => pinned, target, ROW_ALIAS).where;
 }

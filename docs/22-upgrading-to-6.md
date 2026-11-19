@@ -164,6 +164,17 @@ A pattern the matcher can't match exactly as Java does is refused by name now, f
 it: a lookbehind (`(?<=a)b`) and a back reference (`(a)\1`, `\k<name>`) among them (`a lookbehind is not supported on
 this platform; rewrite the pattern without it.`). See [SQLite](07-supported-engines.md#sqlite) for the whole list.
 
+### A map is no property in compiled Cypher
+
+On Oracle, Postgres and SQLite, compiled Cypher stores as a property only what Neo4j stores: a number, a text, a truth
+value, a temporal value, or a list of one kind of them. A map, or a list of maps or of lists, written as a property in
+`CREATE`, `MERGE` or `SET` is refused by name before the statement runs (`A property is a number, a text, a truth value,
+a temporal value or a list of them, not a map, as in Neo4j.`). Such a value given as a parameter or an unwound row, or
+a list of more than one kind, fails the statement as its row is written, and nothing is stored. 5.0 stored each as a
+document ([drivine4j#820](https://github.com/liberation-data/drivine4j/issues/820)). Store such a value as its JSON
+text, as a `@JsonPacked` field is stored. See
+[Cypher on Oracle and Postgres](07-supported-engines.md#cypher-on-oracle-and-postgres).
+
 ### `withBuild` is gone
 
 `IndexManager.withBuild` and `ConstraintManager.withBuild` are removed, with `IndexBuildOptions`. `gom.indexes` and

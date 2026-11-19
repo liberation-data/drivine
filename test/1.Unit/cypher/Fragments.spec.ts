@@ -207,6 +207,8 @@ describe('fragments.yaml', () => {
         it.each(spec.cases.map((it) => [it.name, it] as const))('%s', (_, it) => {
             const compiled = fragment(store, graph, partOf(it), spec.variables, parametersOf(it.parameters));
             expect(compiled.terms).toEqual(it.sql[store]);
+            // The labels it implies, none on a store the case doesn't name (drivine-cypher-spec#373).
+            expect(compiled.impliedLabels).toEqual(it.impliedLabels?.[store] ?? {});
         });
 
         it("gives each of the table's forms the terms its digests pin", () => {

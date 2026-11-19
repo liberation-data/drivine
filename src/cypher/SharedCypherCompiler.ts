@@ -258,6 +258,12 @@ export interface SqlFragment {
     nonFinite: boolean;
     hints: string[];
     storedFunctions: { nullsEqual: boolean; era: boolean; temporalArithmetic: boolean };
+    /**
+     * The labels every row a condition keeps carries, by variable, as the module says (drivine-cypher-spec#373): on
+     * Oracle, those of each equality it reads through a label's index that is one of the condition's own conjuncts. A
+     * statement needn't test them again. Empty for a value and an order, and on Postgres and SQLite.
+     */
+    impliedLabels: Record<string, string[]>;
 }
 
 /**
@@ -296,7 +302,8 @@ export function fragment(
             nullsEqual: answer.storedFunctions?.nullsEqual ?? false,
             era: answer.storedFunctions?.era ?? false,
             temporalArithmetic: answer.storedFunctions?.temporalArithmetic ?? false
-        }
+        },
+        impliedLabels: answer.impliedLabels ?? {}
     };
 }
 
@@ -306,6 +313,7 @@ interface FragmentAnswer {
     nonFinite?: boolean;
     hints?: string[];
     storedFunctions?: { nullsEqual?: boolean; era?: boolean; temporalArithmetic?: boolean };
+    impliedLabels?: Record<string, string[]>;
 }
 
 interface SearchAnswer {
@@ -515,7 +523,8 @@ function temporalKind(value: object): string | undefined {
  */
 function temporalText(value: object): string {
     const text = zonedAtOffset(value);
-    // The module reads an offset to the minute, and bound a tag of one with seconds as a text (drivine-cypher-spec#357).
+    // The store holds an offset to the minute: refused here, by the value's own text, before the module refuses its tag
+    // ("A value given as a DATE_TIME isn't one", since compiler 0.51.0; it bound one as a text before, drivine-cypher-spec#357).
     if (/[+-]\d\d:\d\d:\d\d$/.test(text)) {
         throw new DrivineError(
             `A temporal parameter at an offset with seconds (${text}) can't be bound on a SQL store, which holds an offset to the minute.`

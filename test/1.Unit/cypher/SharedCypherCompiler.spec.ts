@@ -144,8 +144,8 @@ describe('parametersJson', () => {
             toPlainDateTime: () => '1971-01-01T00:00:00',
             offset: '-00:44:30'
         });
-        // Not rounded to -00:45, a moment 30 s off, and refused by name, as the store holds an offset to the minute and
-        // the module bound a tag of one with seconds as a text (drivine-cypher-spec#357).
+        // Not rounded to -00:45, a moment 30 s off, and refused by name, as the store holds an offset to the minute (the
+        // module refuses its tag too since 0.51.0, where it bound it as a text before: drivine-cypher-spec#357).
         expect(() => parametersJson({ t: monrovia })).toThrow(
             new DrivineError(
                 "A temporal parameter at an offset with seconds (1971-01-01T00:00:00-00:44:30) can't be bound on a SQL store, which holds an offset to the minute."

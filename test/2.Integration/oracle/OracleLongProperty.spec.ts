@@ -155,15 +155,17 @@ describeOnOracle('a property past 32 KB read on two nodes on Oracle', () => {
         expect(await cypher('MATCH (n:CyWrite) RETURN count(n)')).toEqual([3]);
     });
 
-    it('writes a map an unwound item holds, with a key as extended JSON names one, as the map it is', async () => {
-        // Only a text a write takes from its row is read through the row's text (liberation-data/drivine#356): a map is
-        // read as JSON, as before, and not from extended JSON, which would read {"$numberLong": "5"} as the number 5.
+    it('refuses a map an unwound item holds as a property, as Neo4j does', async () => {
+        // Since the compiler's 0.51.0 a map is no property, as in Neo4j (drivine-cypher-spec#375): a write of one, here a map
+        // with a key as extended JSON names one, is refused by name, and nothing is made.
         await cypher('MATCH (n:CyWrite) DETACH DELETE n');
         const items = [
             { id: 1, m: { $numberLong: '5' } },
             { id: 2, m: { $numberDouble: '2.0' } }
         ];
-        await cypher('UNWIND $items AS t CREATE (:CyWrite {id: t.id, m: t.m})', { items });
-        expect(await cypher('MATCH (n:CyWrite) RETURN properties(n) ORDER BY n.id')).toEqual(items);
+        await expect(cypher('UNWIND $items AS t CREATE (:CyWrite {id: t.id, m: t.m})', { items })).rejects.toThrow(
+            'A property is a number, a text, a truth value, a temporal value or a list of them, not a map, as in Neo4j.'
+        );
+        expect(await cypher('MATCH (n:CyWrite) RETURN count(n)')).toEqual([0]);
     });
 });

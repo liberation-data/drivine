@@ -208,6 +208,10 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(query.labelsTested).toEqual(['Scored']);
         const statement = backend.loadAllFragments(scored.model as any, query.where, {}, query.labelsTested);
         expect(statement.text).not.toContain(`JSON_EXISTS(n_.labels, '$?(@ == "Scored")')`);
+        // A view's root is the row the module reads the index over, so its label is the one implied.
+        expect(
+            backend.renderQuery((q: any) => ({ where: q.scored.name.eq('Ada') }), view, indexed).labelsTested
+        ).toEqual(['Scored']);
         // Inside an or the module reads no index, and the label is tested as before.
         const either = backend.renderQuery(
             (q: any) => ({ where: anyOf(q.name.eq('Ada'), q.name.eq('Bo')) }),
@@ -219,7 +223,7 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(backend.renderQuery((q: any) => ({ where: q.name.gte('A') }), scored, indexed).labelsTested).toEqual([]);
     });
 
-    it('tests the label of an ignore-case equality read through the index over a lowercased copy (drivine-cypher-spec#373)', () => {
+    it("leaves out the label an ignore-case equality read through the index over a lowercased copy implies, as the module's impliedLabels say (drivine-cypher-spec#373)", () => {
         const account: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(Account) };
         const indexed = [{ label: 'Account', properties: ['__drivine.lower.email'] }];
         const lowered = backend.renderQuery(
@@ -227,34 +231,30 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
             account,
             indexed
         );
-        // The module reads the copy through the labelled index, but past 4,000 bytes its term holds for any node: the
-        // statement tests the label itself.
+        // The module reads the copy through the labelled index, and since #373 each branch of its term, the one past
+        // 4,000 bytes too, holds only for a node of the label: the statement tests the label no more.
         expect(lowered.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "Account")') THEN`);
-        expect(lowered.labelsTested).toEqual([]);
+        expect(lowered.labelsTested).toEqual(['Account']);
         const statement = backend.loadAllFragments(account.model as any, lowered.where, {}, lowered.labelsTested);
-        expect(statement.text).toContain(`WHERE JSON_EXISTS(n_.labels, '$?(@ == "Account")') AND (`);
-        // An equality of the copy's own value, not lowered, still tests the label through the index.
+        expect(statement.text).not.toContain(`JSON_EXISTS(n_.labels, '$?(@ == "Account")')`);
+        // An equality of the copy's own value, not lowered, implies the label too.
         const plain = backend.renderQuery(
             (q: any) => ({ where: q.property('__drivine.lower.email').eq('ada@x.com') }),
             account,
             indexed
         );
         expect(plain.labelsTested).toEqual(['Account']);
-        // As does a plain indexed equality beside the lowered one.
-        const both = backend.renderQuery(
-            loweredQuery(
-                (q: any) => ({ where: [q.email.eqIgnoreCase('Ada@X.com'), q.name.eq('Ada')] }),
-                account,
-                new Set(['email'])
-            ),
-            account,
-            [...indexed, { label: 'Account', properties: ['name'] }]
-        );
-        expect(both.labelsTested).toEqual(['Account']);
-        // But not an equality of an indexed property the module reads through no index, a list's or "": its term holds
-        // no label test, and the lowered one's doesn't decide it.
+        // An equality of an indexed property the module reads through no index, a list's or "", implies none alone...
         for (const value of [['Ada'], '']) {
-            const unread = backend.renderQuery(
+            const unread = backend.renderQuery((q: any) => ({ where: q.name.eq(value) }), account, [
+                ...indexed,
+                { label: 'Account', properties: ['name'] }
+            ]);
+            expect(unread.labelsTested).toEqual([]);
+            const tested = backend.loadAllFragments(account.model as any, unread.where, {}, unread.labelsTested);
+            expect(tested.text).toContain(`WHERE JSON_EXISTS(n_.labels, '$?(@ == "Account")') AND (`);
+            // ...and beside the lowered one, the lowered one implies it.
+            const beside = backend.renderQuery(
                 loweredQuery(
                     (q: any) => ({ where: [q.email.eqIgnoreCase('Ada@X.com'), q.name.eq(value)] }),
                     account,
@@ -263,25 +263,19 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
                 account,
                 [...indexed, { label: 'Account', properties: ['name'] }]
             );
-            expect(unread.where).toContain(`CASE WHEN JSON_EXISTS(n_.labels, '$[*]?(@ == "Account")') THEN`);
-            expect(unread.labelsTested).toEqual([]);
+            expect(beside.labelsTested).toEqual(['Account']);
         }
-        // The query is made once, so the label is implied by the very equality the statement compiles: not by one a
-        // second call makes, read through the index where the first was too long to be.
-        let calls = 0;
-        const changing = backend.renderQuery(
+        // Inside an or no equality is read through the index, so none implies the label.
+        const either = backend.renderQuery(
             loweredQuery(
-                (q: any) => ({
-                    where: [q.email.eqIgnoreCase('Ada@X.com'), q.name.eq(calls++ ? 'Ada' : 'a'.repeat(4001))]
-                }),
+                (q: any) => ({ where: anyOf(q.email.eqIgnoreCase('Ada@X.com'), q.email.eqIgnoreCase('Bo@X.com')) }),
                 account,
                 new Set(['email'])
             ),
             account,
-            [...indexed, { label: 'Account', properties: ['name'] }]
+            indexed
         );
-        expect(calls).toBe(1);
-        expect(changing.labelsTested).toEqual([]);
+        expect(either.labelsTested).toEqual([]);
     });
 
     it('compares a text past 4,000 bytes as a CLOB, not through the index, which holds none, and tests the label', () => {
@@ -313,11 +307,12 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         await new ConstraintManager(planningOn('oracle', recorder)).ensure(uniquenessConstraint('Scored', 'name'));
         /** The expressions the index of the kind (lx2, uq2) is made over, over the DSL's row. */
         const columns = (kind: string): string[] => {
-            const made = ran
-                .join('\n')
-                .match(
-                    new RegExp(`INDEX IF NOT EXISTS drivine_${kind}_Scoredname_\\w+ ON drivine_node n \\((.*)\\)';`)
-                );
+            const made = ran.join('\n').match(
+                // A range index's indexes are built ONLINE (drivine-cypher-spec#381); a unique one's is not.
+                new RegExp(
+                    `INDEX IF NOT EXISTS drivine_${kind}_Scoredname_\\w+ ON drivine_node n \\((.*)\\)(?: ONLINE)?';`
+                )
+            );
             expect(made).not.toBeNull();
             const ddl = made![1].replace(/''/g, "'").replace(/\bn\./g, 'n_.');
             const split: string[] = [];

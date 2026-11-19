@@ -197,7 +197,32 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "There is no procedure with the name `vector_search.show_index_info` registered"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
@@ -642,6 +667,9 @@ cases:
                 actions:
                   - {query: {marker: "read.items", scope: "schema"}, rows: []}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {drop: "Range index"}}
@@ -2399,7 +2427,33 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
@@ -2414,14 +2468,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["neo4j"]
             rounds:
               - now: 1000000
@@ -2438,14 +2492,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
   - case: "12b"
     name: "Drift under WARN"
     description: "A vector index of another size: drift, which is logged, and the marker written."
@@ -2456,7 +2510,35 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["WARN", "SchemaManager", "  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
@@ -2477,10 +2559,10 @@ cases:
                 - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["WARN", "SchemaManager", "  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
           - stores: ["neo4j"]
             rounds:
               - now: 1000000
@@ -2501,10 +2583,10 @@ cases:
                 - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["WARN", "SchemaManager", "  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
   - case: "12c"
     name: "Drift with recreateOnDrift"
     description: "A vector index of another size: drift, which recreates the item."
@@ -2515,7 +2597,48 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", recreated: {previous: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, current: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} VECTOR_INDEX on Chunk[embedding]"]
+                - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
+                - ["WARN", "IndexManager", "Recreated {engine} VECTOR_INDEX on Chunk[embedding] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
@@ -2547,7 +2670,7 @@ cases:
                 - {owner: null, results: [{spec: "Vector index by cosine", recreated: {previous: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, current: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["INFO", "IndexManager", "Dropped {engine} VECTOR_INDEX on Chunk[embedding]"]
                 - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
                 - ["WARN", "IndexManager", "Recreated {engine} VECTOR_INDEX on Chunk[embedding] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
@@ -2582,7 +2705,7 @@ cases:
                 - {owner: null, results: [{spec: "Vector index by cosine", recreated: {previous: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, current: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["INFO", "IndexManager", "Dropped {engine} VECTOR_INDEX on Chunk[embedding]"]
                 - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
                 - ["WARN", "IndexManager", "Recreated {engine} VECTOR_INDEX on Chunk[embedding] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
@@ -2705,6 +2828,25 @@ cases:
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+      # Its record gone (a drop of the range index drops the index over every node's property with it), a uniqueness
+      # constraint over the property doesn't serve the range index on Oracle: its index stands for the labelled index
+      # alone, so an ensure makes the range index again, and the constraints aren't read (liberation-data/drivine-cypher-spec#325).
+      - operation: {item: {call: "ENSURE", spec: "Range index"}}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
   - case: "16"
     name: "FalkorDB's coverage"
     description: "FalkorDB keeps one range index a label: one over more properties than declared is the one declared."
@@ -3931,6 +4073,9 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}, {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
               - now: 1000000
                 actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {execute: {drop: "Range index over two properties"}}
             done: 1000000
             report:
@@ -3979,6 +4124,9 @@ cases:
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {drop: "Range index"}}
@@ -4108,6 +4256,9 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
               - now: 1000000
                 actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {execute: {drop: "Range index over two properties"}}
                   - {query: {marker: "read.version", scope: "schema"}, rows: []}
               - now: 1000000
@@ -4171,6 +4322,9 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
@@ -4241,7 +4395,7 @@ cases:
               failure: "Schema application on database 'default' failed for 1 owner(s):\ncanceling statement due to statement timeout"
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'a' on 'default': 3 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
                 - ["ERROR", "SchemaManager", "Schema application for owner 'a' on 'default' failed: canceling statement due to statement timeout"]
                 - ["INFO", "SchemaManager", "Applying schema for owner 'b' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
@@ -4356,7 +4510,40 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {execute: {create: "Range index that ignores case"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {execute: {create: "Uniqueness constraint that ignores case"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index that ignores case", created: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}, {spec: "Uniqueness constraint that ignores case", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[__drivine.lower.email]"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
@@ -4441,14 +4628,38 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
   - case: "29b"
     name: "Ignore-case lower copies, after a listing that fails once"
-    description: "The first read of the listing fails, so the copies are filled in again; the index is read again, there, and matches."
+    description: "The first read of the listing fails, so the copies are filled in again (on Postgres and SQLite once the constraints show none serves the index); the index is read again, there, and matches."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Range index that ignores case"]}
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "connection reset"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index that ignores case", alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
@@ -4711,14 +4922,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix2_personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix2_personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix2_personname_44ce5436, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_personemail_5482a751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["oracle"]
             rounds:
               - now: 1000000
@@ -4730,14 +4941,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "DRIVINE_IX2_NAME_337A8B"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "DRIVINE_UQ2_PERSONEMAIL_5482A751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "DRIVINE_IX2_NAME_337A8B"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "DRIVINE_UQ2_PERSONEMAIL_5482A751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "IndexManager", "Index drift on Person[name]: DRIVINE_IX2_NAME_337A8B, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: DRIVINE_UQ2_PERSONEMAIL_5482A751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["sqlite"]
             rounds:
               - now: 1000000
@@ -4749,14 +4960,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix2_Personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix2_Personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix2_Personname_44ce5436, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_Personemail_5482a751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
   - case: "30e"
     name: "Another item under the names Drivine gives, under WARN"
     description: "drivine4j#770: an index over another property under the range index's name, and a plain index under the uniqueness constraint's name, neither recorded. Each is drift and neither is made: each is logged, and the marker written."
@@ -4787,8 +4998,8 @@ cases:
                 - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix2_personname_44ce5436, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_personemail_5482a751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
-                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
           - stores: ["oracle"]
             rounds:
               - now: 1000000
@@ -4809,8 +5020,8 @@ cases:
                 - ["WARN", "IndexManager", "Index drift on Person[name]: DRIVINE_IX2_NAME_337A8B, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: DRIVINE_UQ2_PERSONEMAIL_5482A751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
-                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX2_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ2_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
           - stores: ["sqlite"]
             rounds:
               - now: 1000000
@@ -4831,8 +5042,8 @@ cases:
                 - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix2_Personname_44ce5436, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_Personemail_5482a751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
-                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix2_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
   - case: "30f"
     name: "A plain index under a uniqueness constraint's name, with recreateOnDrift"
     description: "drivine4j#770: a plain index under the constraint's name is drift; with recreateOnDrift the constraint's unique index is built beside it first, then swapped in for it (#135 §4), the drop said at INFO."
@@ -5041,13 +5252,13 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_personemail_5482a751, an object Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is a table, not an index, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["sqlite"]
             rounds:
               - now: 1000000
@@ -5058,13 +5269,13 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_Personemail_5482a751, an object Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is a table, not an index, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["oracle"]
             rounds:
               - now: 1000000
@@ -5099,13 +5310,13 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_personemail_5482a751, an object Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is a table, not an index, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["sqlite"]
             rounds:
               - now: 1000000
@@ -5116,13 +5327,13 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq2_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq2_Personemail_5482a751, an object Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is a table, not an index, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["oracle"]
             rounds:
               - now: 1000000
@@ -5281,14 +5492,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Vector index by cosine", "drift": {"existing": {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "drivine_v2_chunkembedding_7e60bd64"}, "requested": "Vector index by cosine"}}, {"spec": "Full-text index", "drift": {"existing": {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "drivine_t2_doctitlebody_f4762232"}, "requested": "Full-text index"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=drivine_v2_chunkembedding_7e60bd64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=drivine_t2_doctitlebody_f4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=drivine_v2_chunkembedding_7e60bd64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=drivine_t2_doctitlebody_f4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Vector index by cosine", "drift": {"existing": {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "drivine_v2_chunkembedding_7e60bd64"}, "requested": "Vector index by cosine"}}, {"spec": "Full-text index", "drift": {"existing": {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "drivine_t2_doctitlebody_f4762232"}, "requested": "Full-text index"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=drivine_v2_chunkembedding_7e60bd64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=drivine_t2_doctitlebody_f4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=drivine_v2_chunkembedding_7e60bd64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=drivine_t2_doctitlebody_f4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: drivine_v2_chunkembedding_7e60bd64, an index Drivine didn't make, stands under its name for the VECTOR_INDEX: it is an index with vector_l2_ops, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["WARN", "IndexManager", "Index drift on Doc[title, body]: drivine_t2_doctitlebody_f4762232, an index Drivine didn't make, stands under its name for the FULLTEXT_INDEX: it is an index over [title], so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=drivine_v2_chunkembedding_7e60bd64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=drivine_t2_doctitlebody_f4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=drivine_v2_chunkembedding_7e60bd64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=drivine_t2_doctitlebody_f4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["oracle"]
             rounds:
               - now: 1000000
@@ -5300,14 +5511,14 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Vector index by cosine", "drift": {"existing": {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "DRIVINE_V2_CHUNKEMBEDDING_7E60BD64"}, "requested": "Vector index by cosine"}}, {"spec": "Full-text index", "drift": {"existing": {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "DRIVINE_T2_DOCTITLEBODY_F4762232"}, "requested": "Full-text index"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=DRIVINE_T2_DOCTITLEBODY_F4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=DRIVINE_T2_DOCTITLEBODY_F4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Vector index by cosine", "drift": {"existing": {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "DRIVINE_V2_CHUNKEMBEDDING_7E60BD64"}, "requested": "Vector index by cosine"}}, {"spec": "Full-text index", "drift": {"existing": {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "DRIVINE_T2_DOCTITLEBODY_F4762232"}, "requested": "Full-text index"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=DRIVINE_T2_DOCTITLEBODY_F4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=DRIVINE_T2_DOCTITLEBODY_F4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, an object Drivine didn't make, stands under its name for the VECTOR_INDEX: it is a table without the VECTOR column EMBEDDING, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
                 - ["WARN", "IndexManager", "Index drift on Doc[title, body]: DRIVINE_T2_DOCTITLEBODY_F4762232, an object Drivine didn't make, stands under its name for the FULLTEXT_INDEX: it is a table without the JSON column DOC, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=DRIVINE_T2_DOCTITLEBODY_F4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=DRIVINE_V2_CHUNKEMBEDDING_7E60BD64, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\n  - DRIFT: FULLTEXT_INDEX on Doc[title, body] exists with a different shape: SchemaItemInfo(kind=FULLTEXT_INDEX, label=Doc, properties=[title, body], name=DRIVINE_T2_DOCTITLEBODY_F4762232, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
   - case: "30l"
     name: "Another index under a range index's name, over its record of form 0, with recreateOnDrift"
     description: "The range index's record says form 0, and an index Drivine didn't make stands under its name. With recreateOnDrift the index is dropped by its name, the record, found before it was, is forgotten, and the item made again with a record of form 2."
@@ -7672,13 +7883,13 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=Person_email_unique, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
-              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=Person_email_unique, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=Person_email_unique, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=Person_email_unique, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: DRIVINE_UQ2_PERSONEMAIL_5482A751, an index Drivine didn't make, stands under its name for the UNIQUENESS_CONSTRAINT: it is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
-                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=Person_email_unique, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=Person_email_unique, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
           - stores: ["sqlite"]
             rounds:
               - now: 1000000
@@ -7985,11 +8196,27 @@ cases:
                 - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
       - operation: {item: {call: "DROP", spec: "Range index"}}
         runs:
-          - stores: ["sqlite", "postgres", "neo4j"]
+          - stores: ["sqlite", "postgres"]
             rounds:
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index"}}
+            done: 1000000
+            report:
+              item: {result: null, dropped: true}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {drop: "Range index"}}
@@ -8022,6 +8249,165 @@ cases:
             report:
               item: {result: null, dropped: false}
               log: []
+      # A uniqueness constraint's own index, which Neo4j lists as a range index under the constraint's name: told from the
+      # constraints and left to the constraint by a drop and a recreate, which Neo4j refuses of it ("Index belongs to
+      # constraint"), and found by an ensure (liberation-data/drivine-cypher-spec#325).
+      - operation: {item: {call: "DROP", spec: "Range index"}}
+        runs:
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+            done: 1000000
+            report:
+              item: {result: null, dropped: false}
+              log:
+                - ["INFO", "IndexManager", "Range index on Person[name] is the index of constraint Person_name_unique, so it is not dropped: drop the constraint to drop it"]
+          - stores: ["sqlite", "postgres", "memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+            done: 1000000
+            report:
+              item: {result: null, dropped: false}
+              log: []
+      - operation: {item: {call: "RECREATE", spec: "Range index"}}
+        runs:
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+            done: 1000000
+            report:
+              item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Range index on Person[name] is the index of constraint Person_name_unique, so it is not recreated: drop the constraint to drop it"]
+          - stores: ["sqlite", "postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              item: {result: {recreated: {previous: null, current: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}}, dropped: null}
+              log:
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+          - stores: ["memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"]}]}
+            done: 1000000
+            report:
+              item: {result: {recreated: {previous: null, current: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}}}, dropped: null}
+              log:
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+      - operation: {item: {call: "ENSURE", spec: "Range index"}}
+        runs:
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {awaitIndex: {name: "Person_name_unique", timeout: 60}}
+            done: 1000000
+            report:
+              item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}}, dropped: null}
+              log: []
+          # Postgres and SQLite list a uniqueness constraint's unique index as the constraint's alone: it serves a range index
+          # over its label and property, and none is made beside it.
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+            done: 1000000
+            report:
+              item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Range index on Person[name] is served by Person_name_unique's index: nothing made beside it"]
+          - stores: ["memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"]}]}
+            done: 1000000
+            report:
+              item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}}, dropped: null}
+              log: []
+      # A uniqueness constraint over another property, or of another label, serves no range index: one is made.
+      - operation: {item: {call: "ENSURE", spec: "Range index"}}
+        runs:
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Company", properties: ["name"], name: "Company_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {awaitIndex: {name: "Person_name_range", timeout: 60}}
+            done: 1000000
+            report:
+              item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+          - stores: ["memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"]}]}
+            done: 1000000
+            report:
+              item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
       - operation: {item: {call: "DROP", spec: "Uniqueness constraint"}}
         runs:
           - stores: ["sqlite", "postgres"]

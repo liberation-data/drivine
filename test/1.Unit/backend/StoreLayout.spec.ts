@@ -14,7 +14,10 @@ interface LayoutCase {
     stamps: { layout: number | string | null }[];
     foreignNodes: boolean;
     objects?: { name: string; type: string }[];
-    verdict: 'current' | { refuse: string } | { stamp: { drops: string[]; assign?: boolean } };
+    verdict:
+        | 'current'
+        | { refuse: string; from?: number; inProgress?: boolean }
+        | { stamp: { drops: string[]; assign?: boolean } };
 }
 
 const CASES: LayoutCase[] = MARKER.storeLayout.cases;
@@ -35,7 +38,13 @@ describe("The spec's marker.yaml storeLayout cases", () => {
         if (it.verdict === 'current') {
             expect(verdict).toEqual({ verdict: 'current' });
         } else if ('refuse' in it.verdict) {
-            expect(verdict).toEqual({ verdict: 'refuse', message: it.verdict.refuse });
+            // An earlier layout's graph that holds values says which (`from`), and one part way through a migration so.
+            expect(verdict).toEqual({
+                verdict: 'refuse',
+                message: it.verdict.refuse,
+                ...(it.verdict.from !== undefined ? { from: it.verdict.from } : {}),
+                ...(it.verdict.inProgress !== undefined ? { inProgress: it.verdict.inProgress } : {})
+            });
         } else {
             expect(verdict).toMatchObject({
                 verdict: 'stamp',
@@ -90,6 +99,29 @@ describe('judgeLayout', () => {
         await expect(refusal).rejects.toThrow(/was written in store layout 1/);
         // An application catches it by its class, as the package exports it.
         expect(drivine.StoreLayoutError).toBe(StoreLayoutError);
+        expect(it.ran).not.toContain(stamp.restampLayout);
+        // It says the layout it was written in, which a migration moves from, and that none is under way.
+        await expect(refusal).rejects.toMatchObject({ graph, from: 1, inProgress: false });
+    });
+
+    it('refuses a graph part way through a migration, saying so, whatever its stamp says', async () => {
+        const it = store((statement) =>
+            statement === MADE
+                ? [{ made: 1 }]
+                : statement === stamp.readStamps
+                ? [{ stamp: '{"id":"a","assignedAt":"t","layout":2}' }]
+                : statement === stamp.foreignNodes
+                ? [{ one: 1 }]
+                : statement === stamp.layoutObjects
+                ? [
+                      { object: `{"name":"${graph}_lock2","type":"TABLE"}` },
+                      { object: `{"name":"${graph}_migrate2","type":"TABLE"}` }
+                  ]
+                : []
+        );
+        const refusal = judgeLayout('sqlite', graph, MADE, it.run);
+        await expect(refusal).rejects.toThrow(/part way through a migration to store layout 2/);
+        await expect(refusal).rejects.toMatchObject({ graph, inProgress: true });
         expect(it.ran).not.toContain(stamp.restampLayout);
     });
 

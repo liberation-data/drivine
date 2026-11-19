@@ -225,7 +225,8 @@ describe('SchemaPlan', () => {
         } finally {
             warn.mockRestore();
         }
-        expect(ran.some((it) => /DROP|CREATE/i.test(it))).toBe(false);
+        // The listing names pg_stat_progress_create_index, as it finds an online build under way (drivine-cypher-spec#381).
+        expect(ran.filter((it) => !it.includes('SELECT listed')).some((it) => /DROP|CREATE/i.test(it))).toBe(false);
     });
 
     it('reads the data once the engine refuses a constraint, a sample size of 0 giving a VIOLATION with none', async () => {
@@ -259,6 +260,48 @@ describe('SchemaPlan', () => {
         expect(created).toBeGreaterThanOrEqual(0);
         expect(ran.findIndex((it) => it.includes("'count', COUNT(*)"))).toBeGreaterThan(created);
     });
+
+    // An ensure builds a range index online (drivine-cypher-spec#381); where the store refuses that, by the driver's error
+    // as this host gives it to the module, the build is run again as one that blocks writes, said once at WARN.
+    it.each([
+        [
+            'oracle',
+            / ONLINE'/,
+            Object.assign(new Error('ORA-00439: feature not enabled: Online Index Build'), { errorNum: 439 })
+        ],
+        [
+            'postgres',
+            /CREATE INDEX CONCURRENTLY/,
+            Object.assign(new Error('CREATE INDEX CONCURRENTLY cannot run inside a transaction block'), {
+                code: '25001',
+                severity: 'ERROR'
+            })
+        ]
+    ] as const)(
+        'builds a range index on %s by a statement that blocks writes where the store refuses an online build',
+        async (store, online, refusal) => {
+            const ran: string[] = [];
+            const executor = {
+                run: async (statement: string | NativeOperation): Promise<any[]> => {
+                    const text = String(statement);
+                    ran.push(text);
+                    return online.test(text) ? Promise.reject(refusal) : Promise.resolve([]);
+                }
+            };
+            const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
+            try {
+                const item = await planItem(planningOn(store, executor), 'ENSURE', rangeIndex('Person', 'name'));
+                expect(Object.keys(item.result ?? {})).toEqual(['created']);
+                expect(warn).toHaveBeenCalledWith(expect.stringContaining("can't build an index online here"));
+            } finally {
+                warn.mockRestore();
+            }
+            const tried = ran.findIndex((it) => online.test(it));
+            expect(tried).toBeGreaterThanOrEqual(0);
+            // The same index built again after it, not online.
+            expect(ran.slice(tried + 1).some((it) => /CREATE INDEX/.test(it) && !online.test(it))).toBe(true);
+        }
+    );
 
     it("runs FalkorDB's GRAPH.CONSTRAINT as its driver's command", async () => {
         const ran: (string | NativeOperation)[] = [];

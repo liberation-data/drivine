@@ -1,5 +1,6 @@
 import { DatabaseType } from '@/connection/DatabaseType';
 import { OracleConnectionProvider, oracleRefusal } from '@/connection/oracle/OracleConnectionProvider';
+import { storeStatements } from '@/backend/StoreStatements';
 import { OracleGraph } from '@/backend/oracle/OracleGraph';
 import { OracleStoredFunctions } from '@/backend/oracle/OracleStoredFunctions';
 import { QuerySpecification } from '@/query/QuerySpecification';
@@ -8,8 +9,10 @@ import { DrivineLogger } from '@/logger';
 const oracledb = require('oracledb');
 
 /**
- * Each session the pool opens is set to make no adaptive plan (liberation-data/drivine#331), and a session that can't
- * be set is handed back to the pool as an error, which drops it, rather than given out unset.
+ * Each session the pool opens is set as the shared module's `session` says, text compared by its code points whatever
+ * NLS_COMP and NLS_SORT (drivine-cypher-spec#372), then to make no adaptive plan (liberation-data/drivine#331), before
+ * any other statement; and a session that can't be set is handed back to the pool as an error, which drops it, rather
+ * than given out unset.
  */
 describe('OracleConnectionProvider', () => {
     let sessionCallback: (connection: unknown, tag: string, done: (error?: Error) => void) => void;
@@ -28,16 +31,49 @@ describe('OracleConnectionProvider', () => {
     const settle = async (execute: (sql: string) => Promise<unknown>): Promise<Error | undefined> =>
         new Promise((resolve) => sessionCallback({ execute }, '', resolve));
 
-    it('should set a new session to make no adaptive plan', async () => {
+    it("should run the module's session statements on a new session, then set it to make no adaptive plan", async () => {
         const statements: string[] = [];
         const error = await settle(async (sql) => Promise.resolve(statements.push(sql)));
         expect(error).toBeUndefined();
-        expect(statements).toEqual(['ALTER SESSION SET OPTIMIZER_ADAPTIVE_PLANS = FALSE']);
+        const session = storeStatements('oracle', 'drivine').session!;
+        expect(session).toEqual(['ALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY']);
+        expect(statements).toEqual([...session, 'ALTER SESSION SET OPTIMIZER_ADAPTIVE_PLANS = FALSE']);
     });
 
-    it('should hand back the error of a session that cannot be set, so the pool drops it', async () => {
-        const failure = new Error('ORA-02248: invalid option for ALTER SESSION');
-        expect(await settle(async () => Promise.reject(failure))).toBe(failure);
+    it('should run each statement once the one before it has run', async () => {
+        const started: string[] = [];
+        let finish: () => void = () => undefined;
+        const done = new Promise<Error | undefined>((resolve) =>
+            sessionCallback(
+                {
+                    execute: async (sql: string) => {
+                        started.push(sql);
+                        return new Promise<void>((ran) => (finish = ran));
+                    }
+                },
+                '',
+                resolve
+            )
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(started).toHaveLength(1);
+        finish();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(started).toHaveLength(2);
+        finish();
+        expect(await done).toBeUndefined();
+    });
+
+    it('should hand back the error of a session that cannot be set, so the pool drops it, and run nothing after it', async () => {
+        const failure = new Error('ORA-12705: Cannot access NLS data files or invalid environment specified');
+        const statements: string[] = [];
+        expect(
+            await settle(async (sql) => {
+                statements.push(sql);
+                return Promise.reject(failure);
+            })
+        ).toBe(failure);
+        expect(statements).toEqual(storeStatements('oracle', 'drivine').session);
     });
 });
 

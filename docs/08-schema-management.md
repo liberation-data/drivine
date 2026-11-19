@@ -38,6 +38,13 @@ and there is nothing to wait for. `gom.indexes` waits 60 seconds, as drivine4j's
 returns once its index is built, so a constraint is not waited on; FalkorDB's is (see below), and so is the range index
 it needs first.
 
+On Postgres and Oracle, `ensure` builds an index so that writes to the graph go on while it is built: on Postgres a
+range, vector or full-text index is made `CREATE INDEX CONCURRENTLY`, and on Oracle a range index is built `ONLINE`. A
+uniqueness constraint's index blocks writes while it is built, as before. Where the store can't build online (Oracle
+without Enterprise Edition, `ORA-00439`), the index is built by a statement that blocks writes, said once at `WARN`. A
+Postgres build cut short leaves its index invalid; the next `ensure` drops it and builds it again
+([drivine-cypher-spec#381](https://github.com/liberation-data/drivine-cypher-spec/issues/381)).
+
 `ensure` returns a result whose `status` is:
 
 | Status | Meaning |

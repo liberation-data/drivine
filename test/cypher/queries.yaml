@@ -744,27 +744,33 @@ cases:
   - name: "Values of several kinds in Cypher's order of kinds"
     description: "ORDER BY sorts a map, then a list, a text, a truth value, a number, and null last ascending (first descending), and values of one kind among themselves; min() and max() take that order too."
     steps:
-      - note: "Postgres sorts a number before a truth value, and a map and a list last (drivine4j#307)."
-        cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t RETURN t ORDER BY t"
-        except: [postgres]
+      - cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t RETURN t ORDER BY t"
         rows: [{a: 1}, [1, 2], [2], "A", "b", false, true, -1, 1, 2.5, null]
       - cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t RETURN t ORDER BY t DESC"
-        except: [postgres]
         rows: [null, 2.5, 1, -1, true, false, "b", "A", [2], [1, 2], {a: 1}]
       - note: "Carried out of a WITH that pages them."
         cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t WITH t ORDER BY t SKIP 3 LIMIT 4 RETURN t"
-        except: [postgres]
         rows: ["A", "b", false, true]
       - cypher: "UNWIND [2, 'b', true, 2, 'b'] AS t RETURN DISTINCT t ORDER BY t"
-        except: [postgres]
         rows: ["b", true, 2]
+      - note: "A grouping key."
+        only: [neo4j, sql]
+        cypher: "UNWIND [2, 'b', true, 2, 'b', false] AS t RETURN t, count(*) AS c ORDER BY t"
+        rows: [["b", 2], [false, 1], [true, 1], [2, 2]]
+      - note: "A temporal value after a map and a list, before a text."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[0, date('2024-03-15')], [1, {a: 1}], [2, [1]], [3, 'a']] AS p RETURN p[0] ORDER BY p[1]"
+        rows: [1, 2, 0, 3]
+      - note: "NaN a number, after a text and a truth value."
+        only: [neo4j, sql]
+        cypher: "UNWIND [$p, true, 'a', 1.0] AS t RETURN t ORDER BY t"
+        parameters: {p: {$float: "NaN"}}
+        rows: ["a", true, 1.0, {$float: "NaN"}]
       - note: "An item of a list, whose kind the statement leaves open, beside another term."
         cypher: "UNWIND [[2, 0], [1, 3], [2, false], [1, 'a']] AS p RETURN p ORDER BY p[0], p[1]"
-        except: [postgres]
         rows: [[1, "a"], [1, 3], [2, false], [2, 0]]
       - note: "A truth value before a number, though SQLite reads one as 1 or 0."
         cypher: "UNWIND [1, true, 0, false] AS t RETURN t ORDER BY t"
-        except: [postgres]
         rows: [false, true, 0, 1]
       - cypher: "UNWIND [true, 1, 'b', [1], {a: 1}] AS t RETURN min(t), max(t)"
         rows: [[{a: 1}, 1]]
@@ -3843,10 +3849,6 @@ cases:
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE EXISTS { (w1) ((a)-->(b))+ () }]) > 0 RETURN q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Carrie", "Keanu", "Laurence"]
-      - note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
-        cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE p.name IS NOT NULL]) > 0 RETURN q.name ORDER BY q.name"
-        only: [neo4j]
-        rows: []
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { (q)-->(m1) WHERE EXISTS { (m1) ((p)-->(b))+ () } } RETURN q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Keanu", "Laurence"]
@@ -4141,10 +4143,6 @@ cases:
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([w2 IN [w1] WHERE EXISTS { (w2) ((a)-->(b))+ () }]) > 0]) > 0 RETURN q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Carrie", "Keanu", "Laurence"]
-      - note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
-        cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([w2 IN [w1] WHERE p.name IS NOT NULL]) > 0]) > 0 RETURN q.name ORDER BY q.name"
-        only: [neo4j]
-        rows: []
 
   - name: "Nesting of a dropped variable: a WITH that drops p and groups, in its ORDER BY"
     description: "nesting.yaml's cells in a WITH that drops p and groups, in its ORDER BY that Neo4j gives rows for, and the SQL stores, but where a note says they refuse it (see refusals.yaml, \"Nesting of a dropped variable refused: a WITH that drops p and groups, in its ORDER BY\"; drivine4j#681)."
@@ -7385,11 +7383,18 @@ cases:
         cypher: "RETURN [toString($l), toString($k)]"
         parameters: {l: [1, "a", [2, [true, null]], 2.5], k: [1, 2]}
         rows: [["[1, a, [2, [true, null]], 2.5]", "[1, 2]"]]
-      - note: "Neo4j 2026.10.1 plans a member of a map given as a parameter as a value of any kind, and gives a list there as its text. A SQL store gives its JSON text, as it gives toString() of a value whose kind is left open."
-        only: [neo4j]
+      - note: "Neo4j 2026.10.1 plans a member of a map given as a parameter as a value of any kind, and gives a list there as its text. A SQL store writes a value whose kind is left open as a list, item by item, where it turns out one as the statement runs (liberation-data/drivine-cypher-spec#297)."
+        only: [neo4j, sql]
         cypher: "WITH $m AS m RETURN toString(m.l)"
         parameters: {m: {l: [1, 2]}}
         rows: ["[1, 2]"]
+      - note: "Neo4j 2026.10.1 gives a map read as the statement runs as its text (captured). A SQL store doesn't know its keys when compiling, and fails by name as the statement runs (liberation-data/drivine-cypher-spec#301), where it gave its JSON text."
+        only: [neo4j]
+        cypher: "WITH {a: {b: 1}} AS m RETURN toString(m.a)"
+        rows: ["{b: 1}"]
+      - only: [sql]
+        cypher: "WITH {a: {b: 1}} AS m RETURN toString(m.a)"
+        error: true
       - note: "Neo4j 2026.10.1 gives these, lists of items of more than one kind (liberation-data/drivine-cypher-spec#296): tail(), a slice and reverse() of one, and two lists joined by + whose items are of two kinds."
         cypher: "RETURN [toString([true, 1]), toString([[1], 1]), toString([{a: 1}, 1]), toString(tail([1, 'a', 2])), toString([1, 'a', 2][0..2]), toString(reverse([1, 'a'])), toString([1] + ['a'])]"
         rows: [["[true, 1]", "[[1], 1]", "[{a: 1}, 1]", "[a, 2]", "[1, a]", "[a, 1]", "[1, a]"]]
@@ -7404,14 +7409,14 @@ cases:
         cypher: "RETURN toString([x IN $l | x])"
         parameters: {l: [1, 2]}
         rows: ["[1, 2]"]
-      - note: "Neo4j 2026.10.1 gives these (liberation-data/drivine-cypher-spec#296). A SQL store refuses a list that holds a temporal value by name (see refusals.yaml), and gives coalesce() of lists as its JSON text, as it gives toString() of a value whose kind is left open."
+      - note: "Neo4j 2026.10.1 gives these (liberation-data/drivine-cypher-spec#296). A SQL store refuses a list that holds a temporal value by name (see refusals.yaml)."
         only: [neo4j]
         cypher: "RETURN [toString([date('2024-01-02'), 1]), toString(coalesce([1, 'a'], [2]))]"
         rows: [["[2024-01-02, 1]", "[1, a]"]]
-      - note: "Neo4j 2026.10.1 gives coalesce() with a null among its arguments as a list of any items (liberation-data/drivine-cypher-spec#296). A SQL store gives its JSON text, as it gives toString() of a value whose kind is left open (liberation-data/drivine-cypher-spec#297)."
-        only: [neo4j]
-        cypher: "RETURN toString(coalesce(null, [1, 2]))"
-        rows: ["[1, 2]"]
+      - note: "coalesce() of lists, one of whose items are of two kinds, and coalesce() with a null among its arguments, Neo4j 2026.10.1 gives as lists of any items (liberation-data/drivine-cypher-spec#296). A SQL store leaves coalesce()'s kind open, and writes it as a list, item by item, as the statement runs (liberation-data/drivine-cypher-spec#297)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toString(coalesce([1, 'a'], [2])), toString(coalesce(null, [1, 2]))]"
+        rows: [["[1, a]", "[1, 2]"]]
       - note: "Neo4j 2026.10.1 gives a CASE one of whose values is a list of any items as a list of any items (liberation-data/drivine-cypher-spec#296)."
         cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [1, 'a'] END)"
         rows: ["[1, 2]"]
@@ -7729,6 +7734,72 @@ cases:
         cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0), toString(-1.0 / 0)]"
         except: [memgraph, falkordb]
         rows: [["NaN", "Infinity", "-Infinity"]]
+
+  - name: "A truth value put together with a text or a list"
+    description: "+ puts a truth value together with a text, as its text, and with a list, as an item, as Neo4j 2026.10.2 gives each; with null it is null. The SQL stores gave null for a truth value beside a text (liberation-data/drivine-cypher-spec#341). Beside a number, a truth value or a map Neo4j refuses it as it plans the statement where it knows both kinds, as the SQL stores now do (refusals.yaml's \"Arithmetic of a value that isn't a number\"), and fails as it runs otherwise, as the SQL stores now do where a truth value is read beside a number the statement makes or gives (liberation-data/drivine-cypher-spec#345): they gave null. Read beside a value of a kind left open as well, a truth value still gives null on the SQL stores. The graph engines other than Neo4j are not pinned here."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN 'a' + true"
+        rows: ["atrue"]
+      - only: [neo4j, sql]
+        cypher: "RETURN true + 'a'"
+        rows: ["truea"]
+      - only: [neo4j, sql]
+        cypher: "RETURN [1] + true"
+        rows: [[1, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN true + [1]"
+        rows: [[true, 1]]
+      - only: [neo4j, sql]
+        cypher: "RETURN true + null"
+        rows: [null]
+      - note: "A truth value given as a parameter, put together with a text either side."
+        only: [neo4j, sql]
+        cypher: "RETURN ['a' + $b, $b + 'a', $b + [1]]"
+        parameters: {b: false}
+        rows: [["afalse", "falsea", [false, 1]]]
+      - note: "Read as the statement runs, an item of a list given, put together with a text."
+        only: [neo4j, sql]
+        cypher: "UNWIND $l AS b RETURN 'a' + b"
+        parameters: {l: [true]}
+        rows: ["atrue"]
+      - note: "Read beside a number, a truth value fails the statement, on Neo4j as it plans it or as it runs, and on the SQL stores as it runs, where they gave null (liberation-data/drivine-cypher-spec#345). They test the side read alone: #341's test of each side's kind in every + made a sum of sums too long."
+        only: [neo4j, sql]
+        cypher: "UNWIND $l AS b RETURN b + 1"
+        parameters: {l: [true]}
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH collect(true) AS l RETURN l[0] - 1"
+        error: true
+      - note: "Of items of two kinds, Neo4j fails as it runs: Cannot add `Boolean` and `Long`."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, true] AS b RETURN b + 1"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [null] AS b RETURN b + 1"
+        rows: [null]
+      - note: "Not captured from Neo4j: the other side first, the other operators, and a parameter's key."
+        only: [sql]
+        cypher: "UNWIND $l AS b RETURN 1.5 + b"
+        parameters: {l: [true]}
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS b RETURN b * 2"
+        parameters: {l: [false]}
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS b RETURN 2 / b"
+        parameters: {l: [true]}
+        error: true
+      - only: [sql]
+        cypher: "RETURN $m.b + 1"
+        parameters: {m: {b: true}}
+        error: true
+      - note: "A number or null read beside a number is added as before."
+        only: [sql]
+        cypher: "UNWIND $l AS b RETURN b + 1"
+        parameters: {l: [1, 1.5, null]}
+        rows: [2, 2.5, null]
 
   - name: "Sorted by a list"
     description: "A sort by a list compares two lists item by item, the shorter first where one begins the other, items of different kinds as Cypher orders kinds and null last, as by what collect gathered."

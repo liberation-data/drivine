@@ -108,8 +108,9 @@ describeOnOracle('the query DSL on Oracle, as the module writes it', () => {
         ]);
     });
 
-    // drivine-cypher-spec#373: past 4,000 bytes the module's term over the copy holds for any node, so the statement
-    // tests the label itself, and a node of another label with the same copy is not found.
+    // drivine-cypher-spec#373: each branch of the module's term over the copy, the one past 4,000 bytes too, holds only
+    // for a node of the label, which it says the condition implies, so the statement tests the label no more, and a node
+    // of another label with the same copy is still not found.
     it('finds by eqIgnoreCase through the index over the copy past 4,000 bytes the nodes of its own label alone', async () => {
         const index = rangeIndex('OraDslCiA', 'email', { ignoreCase: true });
         await gom.indexes.ensure(index);

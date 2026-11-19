@@ -33,23 +33,28 @@ export class FragmentQueryRenderer implements ConditionWriter {
 
     /**
      * The query `fn` makes of the model's references, over the root's row `row`, as the statement's `fragments` compile
-     * it, which hold what it binds, and on Oracle the hints and the stored functions it asks for.
+     * it, which hold what it binds, and on Oracle the hints and the stored functions it asks for. Its `labelsTested` are
+     * the root's labels the module says its filter implies (`impliedLabels`, drivine-cypher-spec#373), which the
+     * statement then doesn't test again.
      */
     static render<T>(fragments: SqlFragments, fn: QueryFn<T>, model: TargetModel, row: string): RenderedQuery {
-        const variables = { [ROOT]: rootRow(row, model) };
+        const root = rootRow(row, model);
+        const variables = { [ROOT]: root };
         const parts = QueryRenderer.parts(fn, model, NEO4J_GRAMMAR, ROOT);
         const where = [parts.filter, parts.keyset]
             .filter((it) => it !== undefined)
-            .map((it) => fragments.whole(variables, it!.cypher, it!.bindings));
+            .map((it) => fragments.wholeImplying(variables, it!.cypher, it!.bindings));
         const orders = parts.orders.flatMap((it) =>
             fragments.ordered(variables, it.cypher, it.term.direction === 'DESC', it.term.nulls, it.bindings)
         );
+        // The conditions are joined by AND, so a label any of them implies, every row the query keeps carries.
+        const implied = new Set(where.flatMap((it) => it.impliedLabels[ROOT] ?? []));
         return {
             ...parts.rendered,
-            where: where.join(' AND ') || undefined,
+            where: where.map((it) => it.term).join(' AND ') || undefined,
             orderBy: orders.length ? orders.join(', ') : undefined,
             bindings: fragments.parameters,
-            labelsTested: []
+            labelsTested: root.labels.filter((it) => implied.has(it))
         };
     }
 

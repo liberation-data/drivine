@@ -225,15 +225,6 @@ function escapedLabel(label: string): string {
 }
 
 /**
- * The test the shared module writes of whether the node row `alias` carries `label`, where it reads an equality of the
- * node's property through the labelled index of the label (`CASE WHEN <test> THEN …`): a condition that holds it at its
- * top implies the label, so a statement needn't test the label again (see OracleBackend's `labelsImplied`).
- */
-export function moduleLabelTest(alias: string, label: string): string {
-    return `CASE WHEN JSON_EXISTS(${alias}.labels, '$[*]?(@ == "${escapedLabel(label)}")') THEN`;
-}
-
-/**
  * The node keys `a` and `b` equal, compared with `+ 0` on one side and again the other way round, as the module's
  * compiler joins a node back to the node table: compared column to column, Oracle (23.26) may eliminate the join and
  * read the other row by the key it dropped, or end the server process where a filter reads an indexed property of it
