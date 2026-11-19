@@ -1228,6 +1228,21 @@ cases:
       - only: [sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.g + duration('PT1S')"
         error: true
+      - note: "Stored, and converted to each kind: a fraction past the microsecond kept beside an offset or none, and a fraction of six digits, three or none as the converted text writes it (#302, #338)."
+        only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'ns3', a: datetime('2024-01-01T10:30:00.123456789+10:00'), b: localdatetime('2024-01-01T10:30:00.000000001'), c: time('10:30:00.123456789-05:30'), d: localdatetime('2024-01-01T10:30:00'), e: datetime('2024-01-01T10:30:00.123456-05:30'), f: localtime('10:30:00.123'), g: datetime('2024-01-01T10:30:00Z')})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.a)), toString(localdatetime(n.a)), toString(time(n.a)), toString(localtime(n.a)), toString(date(n.a))]"
+        rows: [["2024-01-01T10:30:00.123456789+10:00", "2024-01-01T10:30:00.123456789", "10:30:00.123456789+10:00", "10:30:00.123456789", "2024-01-01"]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.b)), toString(localdatetime(n.b)), toString(time(n.b)), toString(localtime(n.b)), toString(time(n.c)), toString(localtime(n.c))]"
+        rows: [["2024-01-01T10:30:00.000000001Z", "2024-01-01T10:30:00.000000001", "10:30:00.000000001Z", "10:30:00.000000001", "10:30:00.123456789-05:30", "10:30:00.123456789"]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.d)), toString(time(n.d)), toString(localtime(n.d)), toString(datetime(n.g)), toString(localdatetime(n.g)), toString(time(n.g)), toString(localtime(n.g))]"
+        rows: [["2024-01-01T10:30:00Z", "10:30:00Z", "10:30:00", "2024-01-01T10:30:00Z", "2024-01-01T10:30:00", "10:30:00Z", "10:30:00"]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.e)), toString(localdatetime(n.e)), toString(time(n.e)), toString(localtime(n.e)), toString(time(n.f)), toString(localtime(n.f))]"
+        rows: [["2024-01-01T10:30:00.123456-05:30", "2024-01-01T10:30:00.123456", "10:30:00.123456-05:30", "10:30:00.123456", "10:30:00.123Z", "10:30:00.123"]]
 
   - name: "A sum or an average of durations, or of other kinds"
     description: "Neo4j's sum() and avg() take integers, floats and durations, and pass nulls by: a duration's they work out, and any other kind fails. The SQL stores' sum adds numbers alone, so it gave 0, and the average null, for any other item (#281). Now each fails by name there: a duration as not yet worked out (#282), any other kind as Neo4j fails it. Where the statement makes the items, it fails as it compiles; where it reads one from the store or is given it, as it runs."
@@ -1873,15 +1888,15 @@ cases:
         rows: ["i", "b", "s", "du", "lt", "t", "d", "d0", "ldt", "dt2", "dt1", "l", "m"]
 
   - name: "A property stored as temporal values and values of other kinds, in Cypher's order of kinds"
-    description: "A temporal value's tag sorts among the other kinds as Cypher orders them: after a list, the moments, the local moments, the dates, the times, the local times and the durations, then the texts, the truth values and the numbers, and a missing property last; min() and max() take that order too, a tag by its sort key in its kind (#161). Postgres sorts the kinds as jsonb does (drivine4j#307), but the temporal kinds among themselves as Cypher does."
+    description: "A temporal value's tag sorts among the other kinds as Cypher orders them: after a list, the moments, the local moments, the dates, the times, the local times and the durations, then the texts, the truth values and the numbers, and a missing property last; min() and max() take that order too, a tag by its sort key in its kind (#161). Postgres sorted the kinds as jsonb does, a number before a truth value and a list after both (drivine4j#307)."
     steps:
       - cypher: "CREATE (:CyTemporal {id: 'l', v: [1]}), (:CyTemporal {id: 'dt1', v: datetime('2024-03-15T10:00:00+02:00')}), (:CyTemporal {id: 'dt2', v: datetime('2024-03-15T09:00:00Z')}), (:CyTemporal {id: 'd', v: date('2024-03-15')}), (:CyTemporal {id: 'lt', v: localtime('10:00:00')}), (:CyTemporal {id: 'du', v: duration('P1D')}), (:CyTemporal {id: 'sA', v: 'A'}), (:CyTemporal {id: 'sb', v: 'b'}), (:CyTemporal {id: 'tr', v: true}), (:CyTemporal {id: 'f', v: 1.5}), (:CyTemporal {id: 'i', v: 2}), (:CyTemporal {id: 'none'})"
         only: [neo4j, sql]
       - cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.v"
-        only: [neo4j, oracle, sqlite]
+        only: [neo4j, sql]
         rows: ["l", "dt1", "dt2", "d", "lt", "du", "sA", "sb", "tr", "f", "i", "none"]
       - cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.v DESC"
-        only: [neo4j, oracle, sqlite]
+        only: [neo4j, sql]
         rows: ["none", "i", "f", "tr", "sb", "sA", "du", "lt", "d", "dt2", "dt1", "l"]
       - note: "Temporal values of several kinds alone sort by kind, then within it, on Postgres too, which sorts a tag by its kind's rank and its key: as its own jsonb object it was sorted by time alone, whatever its kind."
         cypher: "MATCH (n:CyTemporal) WHERE n.id IN ['dt1', 'dt2', 'd', 'lt', 'du'] RETURN n.id ORDER BY n.v"
@@ -1953,3 +1968,70 @@ cases:
         cypher: "UNWIND $l AS m RETURN duration(m)"
         parameters: {l: [{days: 1}]}
         error: true
+
+  - name: "A temporal value of a list, a number or a truth value"
+    description: "Neo4j fails a temporal function of a list, a number or a truth value as the statement runs, as no text and no map of its fields. The SQL stores gave null (drivine-cypher-spec#331); they refuse one the compiler knows by name (refusals.yaml, \"A temporal value of a list, a number or a truth value\"), and any other fails it by name as it runs, or gives null where it is null. Captured from Neo4j 2026.10.2."
+    steps:
+      - only: [neo4j]
+        cypher: "WITH collect([1]) AS l RETURN toString(localtime(l[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(localtime([1]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date([2024, 3, 15]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date($l))"
+        parameters: {l: [2024]}
+        error: true
+      - only: [neo4j]
+        cypher: "UNWIND [[1], [2]] AS l RETURN toString(localtime(l))"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH [[1]] AS ls RETURN toString(duration(ls[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(datetime([]))"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH collect(true) AS l RETURN toString(date(l[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH collect(5) AS l RETURN toString(date(l[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date(5))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date(true))"
+        error: true
+      - note: "One only read as the statement runs, an item of a list, fails the statement on the SQL stores, where it gave null."
+        only: [sql]
+        cypher: "WITH collect([1]) AS l RETURN localtime(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "WITH [[1]] AS ls RETURN duration(ls[0])"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND [[1], [2]] AS l RETURN localtime(l)"
+        error: true
+      - only: [sql]
+        cypher: "WITH collect(true) AS l RETURN date(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "WITH collect(5) AS l RETURN date(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS m RETURN datetime(m)"
+        parameters: {l: [2.5]}
+        error: true
+      - note: "A function's null is null, as of a function that gives a number where it gives one."
+        only: [sql]
+        cypher: "RETURN date(toFloat($x))"
+        parameters: {x: null}
+        rows: [null]
+      - note: "So is a variable's of a kind the statement knows, which may be null, as Neo4j's date(null) is."
+        only: [sql]
+        cypher: "WITH CASE WHEN false THEN 1 END AS n RETURN date(n)"
+        rows: [null]
