@@ -1,6 +1,6 @@
 import type { GraphBackend } from '@/backend/GraphBackend';
 import { idSql, SharedStore } from '@/cypher/SharedCypherCompiler';
-import { heldKey } from '@/cypher/ValueLayout';
+import { HeldAsLoaded, heldKey } from '@/cypher/ValueLayout';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 import { FragmentModel } from '@/model/FragmentModel';
 
@@ -142,9 +142,10 @@ export function temporalText(layout: string): string | undefined {
  * `model`, text read as the id's type first ({@link typedId}), as Oracle reads a date back as its tag's text `v` and
  * FalkorDB as the text with nine digits of the second it holds it as. Any other id is as it is. A `Map` finds a `Date` by
  * the object, never by its value, and a `bigint` never by a number, so the object's id and the id read back are matched
- * as this reads both.
+ * as this reads both. An id a save binds as held as loaded is its value (see asGiven).
  */
-export function readBackKey(id: unknown, model?: FragmentModel): unknown {
+export function readBackKey(given: unknown, model?: FragmentModel): unknown {
+    const id = asGiven(given);
     const typed = model && typeof id === 'string' ? typedId(model, id) : id;
     const it = typed === NO_NODE ? id : typed;
     if (it instanceof Date) {
@@ -154,11 +155,21 @@ export function readBackKey(id: unknown, model?: FragmentModel): unknown {
 }
 
 /**
+ * An id as the object holds it: one a save binds as the tag it was loaded from (see SaveStatementBuilder's boundIdOf)
+ * as its value, so what a statement hands back for it is matched by the id the object holds.
+ */
+function asGiven(id: unknown): unknown {
+    return id instanceof HeldAsLoaded ? id.value : id;
+}
+
+/**
  * `id` as itself, by value: a `Date` by its time, and any other value by its type and value, so that two ids that
  * {@link readBackKey} reads alike (a `Date` and its text, where the id's field takes both) stay apart, as a store that
- * hands each id back as it was given (Postgres, SQLite, Neo4j, Memgraph) holds them apart.
+ * hands each id back as it was given (Postgres, SQLite, Neo4j, Memgraph) holds them apart. An id a save binds as held
+ * as loaded is its value (see asGiven).
  */
-export function exactKey(id: unknown): unknown {
+export function exactKey(given: unknown): unknown {
+    const id = asGiven(given);
     if (id instanceof Date) {
         return `date:${id.getTime()}`;
     }

@@ -1,7 +1,15 @@
 import { PostgresSaveStatement } from '@/backend/postgres/PostgresSaveStatement';
 import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
 import { SaveStatement } from '@/backend/SaveStatement';
-import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
+import {
+    bagEntries,
+    boundIdOf,
+    fragmentOf,
+    idOf,
+    loadRecordOf,
+    objectProps,
+    propsOf
+} from '@/backend/SaveStatementBuilder';
 import { NodeWrites, RootStep, WritePlan } from '@/backend/sql/WritePlan';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
@@ -90,7 +98,9 @@ export class PostgresSaveBuilder {
             object,
             props,
             model.nodeLabels && keep(model.nodeLabels.field) ? clear : undefined,
-            held
+            held,
+            model,
+            loadRecordOf(object, this.options)
         );
         const expected: string | undefined = model.stampField ? object[model.stampField] ?? undefined : undefined;
         if (createOnly && expected != null) {
@@ -174,7 +184,7 @@ export class PostgresSaveBuilder {
             const keep = view.relationships
                 .filter((it) => it.type === rel.type && it.direction === rel.direction)
                 .flatMap((it) =>
-                    items(it, object[it.field]).map((item) => idOf(rootOf(targetOf(it)), fragmentOf(it, item)))
+                    items(it, object[it.field]).map((item) => boundIdOf(rootOf(targetOf(it)), fragmentOf(it, item)))
                 );
             this.plan.unlink(
                 0,
@@ -206,8 +216,8 @@ export class PostgresSaveBuilder {
         return this.plan.node(
             this.plan.shape(write.model.labels, key),
             key,
-            write.id,
-            storedKey(write.id, this.graph.store),
+            write.bound,
+            storedKey(write.bound, this.graph.store),
             [...new Set(write.labels)],
             writes,
             index,
@@ -246,7 +256,8 @@ export class PostgresSaveBuilder {
 /**
  * An id as the text a write plan keys its node by, within the plan (a step's `k`, an unlink's `ids` and `held`), which is
  * how the store's write reads a stored target's id back (the module's `keyText`): text as it is; a temporal value as its
- * tag's text `v`, as the module writes it (drivine4j's `NodeIds.temporalText`); and anything else as the JSON text
+ * tag's text `v`, as the module writes it (drivine4j's `NodeIds.temporalText`), and so an id held as loaded (see
+ * boundIdOf) as the text of the tag it was loaded from; and anything else as the JSON text
  * `store`'s layout holds it as (see writeLayout), as a save writes it, so a float id is keyed by the text it is held as
  * (`1.0E-7` on SQLite, where JSON text writes `1e-7`). On Postgres a number is the text `jsonb` gives back for it,
  * `numeric`'s, with no exponent (`0.00000010` for `1.0E-7`): `jsonb` holds a number as a `numeric`, not as the text it was

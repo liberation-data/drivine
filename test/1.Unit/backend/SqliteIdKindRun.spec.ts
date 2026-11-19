@@ -329,7 +329,7 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
 
         // Not refused, as the user didn't type the id, and left open as the Date over a date below: the save writes the
         // text, which its lookup misses, so it makes a second node. Fails while that holds.
-        it.failing('saves an id declared any back onto the same node', async () => {
+        it('saves an id declared any back onto the same node', async () => {
             const [any] = await gom.loadAll(LookupDateAsAny);
             await gom.save(Object.assign(any, { name: 'resaved' }));
             expect(await keyedCount()).toEqual(1);
@@ -382,7 +382,7 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
 
         // As the date below: a Date binds as a datetime at UTC to the millisecond, which a lookup of a node whose id is
         // held otherwise misses, so the save makes a second node (#815). Fails while that holds.
-        it.failing.each([
+        it.each([
             "datetime('2026-01-05T10:11:12+02:00')",
             "datetime('2026-01-05T10:11:12.123456789Z')",
             "localdatetime('2026-01-05T10:11:12')"
@@ -402,7 +402,7 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
         // Not #813's refusal, and left open: a Date binds as a datetime, which a lookup of a node whose id is held as a
         // date misses, so the save makes a second node. Fails while that holds; passes once a save of an unchanged id
         // looks the node up by the tag it was loaded from.
-        it.failing('held as a date: saves back onto the same node', async () => {
+        it('held as a date: saves back onto the same node', async () => {
             await reset("date('2026-01-05')");
             const [loaded] = await gom.loadAll(LookupDateAsDate);
             await gom.save(Object.assign(loaded, { name: 'resaved' }));

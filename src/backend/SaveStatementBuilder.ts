@@ -729,6 +729,40 @@ export function idOf(model: FragmentModel, object: any): any {
 }
 
 /**
+ * What a SQL store's load recorded of the fields of `object` whose property held a temporal tag (see GraphObjectMapper's
+ * heldTagsOf): the object's own load, or, for a changed copy, the load of the root the options hold as loaded (`from`,
+ * or `update`'s). Undefined for an object no such load made.
+ */
+export function loadRecordOf(
+    object: any,
+    options: SaveOptions<any> = {}
+): Map<string, { value: any; held: any }> | undefined {
+    return (
+        (object != null ? heldTagsOf(object) : undefined) ??
+        (options.loaded != null ? heldTagsOf(options.loaded) : undefined)
+    );
+}
+
+/**
+ * The id a SQL store's save binds for `object`, wherever it binds it: to find the node, as the key it writes, among the
+ * properties it writes (Oracle), to read the node's stamp, and as the end of a relationship (#815). While the id is
+ * unchanged since the load `loaded` records, by deep equality, it is a {@link HeldAsLoaded} of the temporal tag the store
+ * held it as, so an id declared `any` (loaded as the tag's text) or a `Date` over a tag a `Date` can't hold exactly (a
+ * `date`, a `localdatetime`, an offset, a fraction finer than a millisecond) finds the node it was loaded from, and is
+ * written back as it was held. It is both or neither: a lookup by the tag with a write of the text, or the other way
+ * round, would change the stored id's kind or miss. An id changed since the load, or of an object no load made, is the
+ * id as given, as a node made with it holds it. Only a SQL store's save asks: a graph engine's load records no tag.
+ */
+export function boundIdOf(
+    model: FragmentModel,
+    object: any,
+    loaded: Map<string, { value: any; held: any }> | undefined = loadRecordOf(object)
+): any {
+    const id = idOf(model, object);
+    return asLoadedOr(id, id, model.nodeIdField ? loaded?.get(model.nodeIdField) : undefined);
+}
+
+/**
  * The properties a save writes of an object (of a view, its root), as the options' null policy, `only` and `except` say.
  *
  * @param asLoaded whether a property unchanged since a SQL store's load, which held a temporal tag in it, is written as
@@ -749,9 +783,7 @@ export function objectProps(
     if (reserved.length) {
         throw new DrivineError(`only names ${reserved.join(' and ')}, which a save does not write from the object.`);
     }
-    const held = asLoaded
-        ? heldTagsOf(object) ?? (options.loaded != null ? heldTagsOf(options.loaded) : undefined)
-        : undefined;
+    const held = asLoaded ? loadRecordOf(object, options) : undefined;
     const props = propsOf(model, object, stampExcluded(model), nullPolicy === NullPolicy.CLEAR, held);
     const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
     const byGraphName = new Map([...model.graphProperties].map(([field, name]) => [name, field]));
@@ -766,9 +798,11 @@ export function objectProps(
  * heldTagsOf), or `true` for the object's own load: a field whose value is unchanged since then, by deep equality, is
  * written as the store held it, a {@link HeldAsLoaded}, so a date an undecorated field loaded as its text stays a date,
  * and a datetime keeps its nanoseconds and its offset (#811). Every property is still written. Only a SQL store's save
- * gives it: a graph engine's load gives typed values, and its driver would write the marker as a map. The id is written
- * as given, as the save finds the node by it: Oracle's save writes it among the properties, Postgres's and SQLite's as
- * the key, and a tag kept there would give a node made for a text id the id of the node the text was loaded from.
+ * gives it: a graph engine's load gives typed values, and its driver would write the marker as a map. The id is kept as
+ * loaded alike, as {@link boundIdOf} keeps it wherever the save binds it (#815): Oracle's save writes it among the
+ * properties, Postgres's and SQLite's as the key, and both find the node by it, so the id is the held tag in every role
+ * or in none. An object no load made, holding the text another node's tag reads as, has no record, and is written with
+ * its text, so it never takes that node's id.
  */
 export function propsOf(
     model: {
@@ -795,7 +829,7 @@ export function propsOf(
             props[model.graphProperties.get(field) ?? field] = asLoadedOr(
                 storedValue(value, packed),
                 value,
-                heldFor(field, packed || field === model.nodeIdField, held)
+                heldFor(field, packed, held)
             );
         }
     }

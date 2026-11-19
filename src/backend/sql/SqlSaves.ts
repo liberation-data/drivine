@@ -1,5 +1,5 @@
 import { ClassKind } from '@/annotation/Metadata';
-import { idOf } from '@/backend/SaveStatementBuilder';
+import { boundIdOf, idOf } from '@/backend/SaveStatementBuilder';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
@@ -36,30 +36,42 @@ export function items(rel: RelationshipModel, value: any): any[] {
     return rel.isCollection ? value : [value];
 }
 
-/** The ids of every node the object holds, at any depth. */
+/**
+ * The ids of every node the object holds, at any depth, each as the save binds it (see boundIdOf): an id unchanged since
+ * its node's load as the tag the store held it as.
+ */
 export function heldIds(view: GraphViewModel, object: any, seen: Set<any> = new Set<any>()): any[] {
     if (object == null || seen.has(object)) {
         return [];
     }
     seen.add(object);
-    const ids = [object[view.rootField]?.[view.root.nodeIdField!]];
+    const ids = [boundOrNone(view.root, object[view.rootField])];
     for (const rel of view.relationships) {
         const into = targetOf(rel);
         for (const item of items(rel, object[rel.field])) {
             const node = nodeOf(rel, item);
-            ids.push(
-                ...(into.kind === 'GRAPH_VIEW' ? heldIds(into.model, node, seen) : [node?.[into.model.nodeIdField!]])
-            );
+            ids.push(...(into.kind === 'GRAPH_VIEW' ? heldIds(into.model, node, seen) : [boundOrNone(into.model, node)]));
         }
     }
     return ids.filter((it) => it != null);
+}
+
+/** The id of `node` as the save binds it (see boundIdOf); undefined for no node, or one with no id. */
+function boundOrNone(model: FragmentModel, node: any): any {
+    return node?.[model.nodeIdField!] == null ? undefined : boundIdOf(model, node);
 }
 
 /** What writing one node takes: how to find it, and the labels and properties to give it. */
 export interface NodeWrite {
     /** The model whose labels and id property the node is found by. */
     model: FragmentModel;
+    /** The id as the object holds it, which what the save hands back is matched by. */
     id: any;
+    /**
+     * The id as the save binds it, to find the node and as the key a node made is given: unchanged since the load, the
+     * tag the store held it as (see boundIdOf).
+     */
+    bound: any;
     /** The labels it is made with, when it is not there. */
     labels: string[];
     add: string[];
@@ -75,7 +87,8 @@ export interface NodeWrite {
 /**
  * The write of a node: found by the labels of `found` (by default its own class's) and its id. With `labelsClear`
  * defined, the node is given the labels its @NodeLabels field holds, and with it true loses those it owns and no longer
- * holds: those `held` records, for an open field.
+ * holds: those `held` records, for an open field. `loaded` is what a load recorded of the object's tags, which its id is
+ * bound by (see boundIdOf): by default the object's own load.
  */
 export function nodeWrite(
     model: FragmentModel,
@@ -83,11 +96,13 @@ export function nodeWrite(
     props: Record<string, any>,
     labelsClear: boolean | undefined,
     held: Record<string, any>,
-    found: FragmentModel = model
+    found: FragmentModel = model,
+    loaded?: Map<string, { value: any; held: any }>
 ): NodeWrite {
     const write: NodeWrite = {
         model: found,
         id: idOf(model, object),
+        bound: boundIdOf(model, object, loaded),
         labels: [...model.labels],
         add: model === found ? [] : model.labels.filter((it) => !found.labels.includes(it)),
         remove: [],

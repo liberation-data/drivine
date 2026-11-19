@@ -5,7 +5,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { absent, present, storedKey, withoutKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
-import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
+import { boundIdOf, idOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { WritePlan } from '@/backend/sql/WritePlan';
@@ -114,11 +114,13 @@ export class PostgresWrites {
                 const props = withoutKey(objectProps(group.model, object, options, true), key);
                 const index = String(handed.size);
                 handed.set(index, { group: g, id });
+                // Found and keyed by the id as the save binds it, the tag it was loaded from while unchanged (#815).
+                const bound = boundIdOf(group.model, object);
                 plan.node(
                     shape,
                     key,
-                    id,
-                    storedKey(id, this.graph.store),
+                    bound,
+                    storedKey(bound, this.graph.store),
                     [...new Set(group.model.labels)],
                     { set: present(props), unset: absent(props), lower: group.model.lowerCopied },
                     index
