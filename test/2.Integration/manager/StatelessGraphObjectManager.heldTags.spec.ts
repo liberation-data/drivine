@@ -78,8 +78,12 @@ async function storedText(pm: PersistenceManager, store: SqlStore): Promise<Reco
                   `SELECT e.props AS "props" FROM drivine_edge e WHERE e.type = 'HELD_ATTENDS'`
               ];
     const rows = await pm.query<{ id: string; props: string }>(new QuerySpecification(nodes));
-    const [edge] = await pm.query<{ props: string }>(new QuerySpecification(edges));
-    return Object.fromEntries([...rows.map((it) => [it.id, it.props]), ['edge', edge.props]]);
+    // A row of one column is given as its value on Oracle, and as the row elsewhere.
+    const [edge] = await pm.query<{ props: string } | string>(new QuerySpecification(edges));
+    return Object.fromEntries([
+        ...rows.map((it) => [it.id, it.props]),
+        ['edge', typeof edge === 'string' ? edge : edge.props]
+    ]);
 }
 
 /** Of each property `TEMPORALS` names in the stored JSON `text`, its JSON text, as the store holds it. */
