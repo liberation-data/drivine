@@ -3,7 +3,16 @@ import { CypherFloat } from '@/cypher/CypherFloat';
 import { jsonText } from '@/utils/JsonText';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { int } from 'neo4j-driver';
-import { heldKey, readLayout, readLayoutAfter, readLayoutOf, writeLayout, writeProps } from '@/cypher/ValueLayout';
+import {
+    heldKey,
+    HeldAsLoaded,
+    readLayout,
+    readLayoutAfter,
+    readLayoutOf,
+    tagsHeldBy,
+    writeLayout,
+    writeProps
+} from '@/cypher/ValueLayout';
 
 /**
  * A column read in the store layout (readLayout): the module is asked of every text that holds `"$` or `$`, and
@@ -263,5 +272,76 @@ describe('writeLayout', () => {
             '{"m":{"$$numberDouble":"NaN","n":{"$numberDouble":"2.0"}}}'
         );
         expect(writeLayout({ m: { $numberDouble: 'NaN' } }, 'postgres')).toEqual('{"m":{"$$numberDouble":"NaN"}}');
+    });
+});
+
+/**
+ * A temporal tag a read gives as its text, recorded with what the store held (#811), and a value unchanged since its
+ * load written back as the store held it: so a date an undecorated field loaded as its text is saved as the date, with
+ * the nanoseconds, the offset and the sort key the store held, byte for byte.
+ */
+describe('tags held as loaded', () => {
+    /** One tag of each kind as a CREATE writes it on SQLite: its keys in the order the store keeps them. */
+    const TAGS = {
+        at: '{"$t":"datetime","s":"10000020251231220000123456789072000","v":"2026-01-01T00:00:00.123456789+02:00"}',
+        day: '{"$t":"date","s":"10000020260101","v":"2026-01-01"}',
+        local: '{"$t":"localdatetime","s":"10000020260101101112500000000","v":"2026-01-01T10:11:12.500"}',
+        lasted: '{"$t":"duration","v":"P1Y2M3DT4H5M6.789S"}'
+    };
+    const props = `{"name":"e1",${Object.entries(TAGS)
+        .map(([key, tag]) => `"${key}":${tag}`)
+        .join(',')},"days":[${TAGS.day},${TAGS.at}],"$$k":{"since":${TAGS.day}},"score":2.5}`;
+    const row = `{"props":${props},"labels":["Event"]}`;
+
+    it('records each key of each map a read gives that held a tag, as the store held it, at any depth', () => {
+        const read = readLayout(row);
+        expect(read.props.at).toEqual('2026-01-01T00:00:00.123456789+02:00');
+        const held = tagsHeldBy(read.props)!;
+        expect([...held.keys()]).toEqual(['at', 'day', 'local', 'lasted', 'days', '$k']);
+        expect(jsonText(held.get('at'))).toEqual(TAGS.at);
+        expect(jsonText(held.get('days'))).toEqual(`[${TAGS.day},${TAGS.at}]`);
+        // A key escaped in the store is the key read; a map in a property records its own keys too.
+        expect(jsonText(tagsHeldBy(read.props.$k)!.get('since'))).toEqual(TAGS.day);
+        expect([...tagsHeldBy(read)!.keys()]).toEqual(['props']);
+    });
+
+    it('records alike what readLayoutAfter and readLayoutOf read, and nothing of a read with no tag in it', () => {
+        expect(jsonText(tagsHeldBy(readLayoutAfter(props, (it) => it))!.get('lasted'))).toEqual(TAGS.lasted);
+        expect(jsonText(tagsHeldBy(readLayoutOf(JSON.parse(props)))!.get('local'))).toEqual(TAGS.local);
+        expect(tagsHeldBy(readLayout('{"name":"e1","n":1}'))).toBeUndefined();
+        expect(tagsHeldBy(readLayout('{"$$k":"$5"}'))).toBeUndefined();
+    });
+
+    it('writes each tag a value unchanged since its load held byte for byte, on every store, the rest as any value', () => {
+        const read = readLayout(props);
+        const held = tagsHeldBy(read)!;
+        const kept = Object.fromEntries(
+            Object.entries(read).map(([key, value]) => [
+                key,
+                held.has(key) ? new HeldAsLoaded(value, held.get(key)) : value
+            ])
+        );
+        for (const store of ['sqlite', 'postgres'] as const) {
+            expect(writeProps(kept, store)).toEqual(props);
+        }
+        // Oracle writes its floats as extended JSON's doubles, and the tags as they were.
+        expect(writeProps(kept, 'oracle')).toEqual(props.replace('"score":2.5', '"score":{"$numberDouble":"2.5"}'));
+    });
+
+    it('writes a tag as it was beside a value the module asks for, and a value of no tag as any value is', () => {
+        const at = JSON.parse(TAGS.at);
+        expect(writeLayout({ a: new HeldAsLoaded('text', at), b: new Date(0) }, 'sqlite')).toEqual(
+            `{"a":${TAGS.at},"b":${writeLayout(new Date(0), 'sqlite')}}`
+        );
+        // A list whose shape is not the one held is written as any value is.
+        expect(writeLayout({ a: new HeldAsLoaded(['x', 'y'], [at]) }, 'sqlite')).toEqual('{"a":["x","y"]}');
+        // Anything else that writes it, JSON text among them, writes its value.
+        expect(jsonText({ a: new HeldAsLoaded('2026-01-01', at) })).toEqual('{"a":"2026-01-01"}');
+    });
+
+    it('writes a value given afresh as it always has: a Date its tag, a text a text', () => {
+        expect(writeProps({ at: new Date('2026-01-01T00:00:00.123Z'), name: '2026-01-01' }, 'sqlite')).toEqual(
+            '{"at":{"$t":"datetime","v":"2026-01-01T00:00:00.123Z","s":"10000020260101000000123000000064800"},"name":"2026-01-01"}'
+        );
     });
 });

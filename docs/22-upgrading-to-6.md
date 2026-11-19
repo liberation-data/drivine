@@ -118,6 +118,13 @@ it, and so does a list of dates (`Date[]`). Code that read such a field with `ne
 that compared it with a text, or called a string method on it, now has a `Date`. See
 [Object Manager](05-object-manager.md#1-nodefragment-a-node).
 
+A save of an object loaded from Oracle, Postgres or SQLite writes each property it leaves unchanged as the store held it
+([#811](https://github.com/liberation-data/drivine/issues/811)), so an undecorated `Date`, which loads as its text, stays
+a date. Before, every save path but an `update` of a fragment wrote that text over the date, and a `where` or an order
+on the field was silently wrong from then on. An object copied out of a load (a spread, `structuredClone`) isn't
+recognised, nor is a date in a property bag, and a new `Date` in an undecorated field can't load back as one: declare
+such a field with a decorator. See [Object Manager](05-object-manager.md#1-nodefragment-a-node) for each case.
+
 ### An id given as text is read as the id's type
 
 On Oracle, Postgres and SQLite, `load`, `update`, `patch`, `delete` and `edges` read an id given as text as the

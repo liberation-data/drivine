@@ -99,6 +99,23 @@ openedAt = new Date(0);               // initialized: loads as a Date
 seenAt: Date;                         // neither: a Date on Neo4j and Memgraph, its text on the other stores
 ```
 
+On Oracle, Postgres and SQLite, a save writes each property it leaves as a load gave it exactly as the store held it,
+byte for byte ([#811](https://github.com/liberation-data/drivine/issues/811)). So an undecorated `Date` field, which
+loads as its text, is saved back as the date, not as a string, and a datetime keeps the nanoseconds and the offset a
+`Date` can't hold, a field declared a `Date` included. This holds for every save of an object a load made: `save`,
+`save` with `from`, `saveAll`, `update` and `patchAll`, of a fragment and of a view, its root, its related nodes, its
+nested views and its relationship fragments, a list of dates among them. A property is unchanged where its value
+deep-equals what the load gave, a `Date` by its time; one changed, in place or given anew, is written as any value is,
+and every property is still written. These cases aren't recognised, and their undecorated dates are saved as their text:
+
+- An object copied out of what a load returned, by a spread or `structuredClone`, is a new object to the save. Save the
+  loaded object, or give it as `from`. `from` stands for a view's root only: a related node of a view's copy must be
+  the one the load gave, not a copy of it.
+- An entry of a `@PropertyBag` is written as the load gave it, so a date in a bag is saved as its text.
+- A set is unchanged only in the order the load gave its items: the same items in another order are written afresh.
+- A new `Date` in an undecorated field is saved as a date but loads as its text, so it can't round-trip. Declare a
+  field that holds a date with a decorator, or initialize it with a `Date`.
+
 `save`, `patch`, `patchAll` and `edges.relate` all write a set as the list of its items, and a `@JsonPacked` one as the
 JSON text of that list, which is also what a `where` compares a packed set field with. In 3.2, `patch` wrote a packed
 set as `{}`, and on Postgres and Oracle so did `patch` and `relate` any set, losing its items; a `where` comparing a

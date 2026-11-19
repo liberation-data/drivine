@@ -111,7 +111,7 @@ export class PostgresWrites {
             const shape = plan.shape(group.model.labels, key);
             group.objects.forEach((object) => {
                 const id = idOf(group.model, object);
-                const props = withoutKey(objectProps(group.model, object, options), key);
+                const props = withoutKey(objectProps(group.model, object, options, true), key);
                 const index = String(handed.size);
                 handed.set(index, { group: g, id });
                 plan.node(

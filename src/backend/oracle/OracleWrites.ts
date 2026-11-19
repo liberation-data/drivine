@@ -151,7 +151,7 @@ export class OracleWrites {
         reads('before');
         groups.forEach((group) => {
             for (const object of group.objects) {
-                const props = objectProps(group.model, object, options);
+                const props = objectProps(group.model, object, options, true);
                 body.push(
                     `v_root := write_node(${bind(this.matchText(group.model))}, ${bind(
                         writeLayout(idOf(group.model, object), 'oracle')

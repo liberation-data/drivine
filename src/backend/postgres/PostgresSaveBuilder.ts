@@ -83,7 +83,7 @@ export class PostgresSaveBuilder {
         const keep = (field: string): boolean => (only ? only.includes(field) : !except?.includes(field));
         const clear = this.options.nullPolicy === NullPolicy.CLEAR;
         const held = this.options.heldProperties ?? {};
-        const props: Record<string, any> = { ...objectProps(model, object, this.options) };
+        const props: Record<string, any> = { ...objectProps(model, object, this.options, true) };
         bagEntries(model, object, Object.keys(held), clear, keep).forEach((value, key) => (props[key] = value));
         const write = nodeWrite(
             model,
@@ -127,13 +127,15 @@ export class PostgresSaveBuilder {
                 const nodeObject = into.kind === 'GRAPH_VIEW' ? node[into.model.rootField] : node;
                 const root = rootOf(into);
                 const concrete = concreteModel(this.registry, root, nodeObject);
-                const props: Record<string, any> = { ...propsOf(concrete, nodeObject, stampExcluded(concrete)) };
+                const props: Record<string, any> = {
+                    ...propsOf(concrete, nodeObject, stampExcluded(concrete), false, true)
+                };
                 bagEntries(concrete, nodeObject).forEach((value, key) => (props[key] = value));
                 const write = nodeWrite(concrete, nodeObject, props, concrete.nodeLabels ? false : undefined, {}, root);
                 const to = this.node(write, this.handedBack(root, write.id));
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
-                        ? propsOf(rel.related.model, item, [rel.related.model.targetField])
+                        ? propsOf(rel.related.model, item, [rel.related.model.targetField], false, true)
                         : {};
                 this.plan.link(from, to, rel.type, rel.direction, present(relProps), absent(relProps));
                 if (into.kind === 'GRAPH_VIEW') {
