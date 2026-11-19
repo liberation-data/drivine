@@ -279,21 +279,36 @@ describe('OracleConnectionProvider, over a store it may not make', () => {
         expect(second.blocks()).toEqual(1);
     });
 
-    it('should hand a connection back to the pool where its session id could not be read', async () => {
+    it('should hand a connection back to the pool where its session id could not be read, and give the next one out', async () => {
+        const graph = `no_session_${Date.now()}`;
         const failure = new Error('NJS-500: connection to Oracle Database was closed or broken');
-        const close = jest.fn(async () => Promise.resolve());
-        const execute = jest.fn(async (sql: string) =>
-            sql.includes("SYS_CONTEXT('USERENV', 'SID')") ? Promise.reject(failure) : Promise.resolve({ rows: [] })
-        );
+        // The hand-back's own failure is not the one thrown.
+        const close = jest.fn(async () => Promise.reject(new Error('NJS-003: invalid or closed connection')));
+        let blocks = 0;
+        let sessions = 0;
+        const execute = jest.fn(async (sql: string) => {
+            if (sql === new OracleGraph(graph).ensuring) {
+                blocks++;
+            }
+            if (sql.includes("SYS_CONTEXT('USERENV', 'SID')")) {
+                return sessions++ === 0 ? Promise.reject(failure) : Promise.resolve({ rows: [{ SID: '7' }] });
+            }
+            return Promise.resolve({ rows: [] });
+        });
         jest.spyOn(oracledb, 'createPool').mockResolvedValue({
             getConnection: async () => Promise.resolve({ execute, close })
         });
         const provider = new OracleConnectionProvider('ORACLE', DatabaseType.ORACLE, {
             connectString: 'host:1521/svc',
-            graph: `no_session_${Date.now()}`
+            graph
         });
         await expect(provider.connect()).rejects.toBe(failure);
         expect(close).toHaveBeenCalledTimes(1);
+
+        const next = await provider.connect();
+        expect(next.sessionId()).toEqual('oracle.7');
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(blocks).toEqual(1);
     });
 
     it('should throw a busy lock, hand the connection back, and run the block again on the next connection', async () => {
