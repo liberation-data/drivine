@@ -7,7 +7,7 @@ import { GraphViewModel } from '@/model/GraphViewModel';
 import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
-import { dateOf, NO_NODE } from '@/backend/sql/NodeIds';
+import { dateOf, NO_NODE, recordIdAsLoaded } from '@/backend/sql/NodeIds';
 import { isTag, tagsHeldBy } from '@/cypher/ValueLayout';
 import { DrivineError } from '@/DrivineError';
 import { ObjectUtils } from '@/utils/ObjectUtils';
@@ -70,6 +70,18 @@ const tagsAsLoaded = new WeakMap<object, Map<string, { value: any; held: any }>>
  */
 export function heldTagsOf(object: object): Map<string, { value: any; held: any }> | undefined {
     return tagsAsLoaded.get(object);
+}
+
+/**
+ * Internal: gives `copy`, a copy of `object` taken as a load gave it, what that load recorded of `object` (see
+ * heldTagsOf), so a save that looks to the copy as the object loaded finds the tags, and the id's (#815). The record
+ * holds the values as loaded, copied, so it is the copy's as it is the object's.
+ */
+export function keepLoadRecord(copy: object, object: object): void {
+    const record = tagsAsLoaded.get(object);
+    if (record) {
+        tagsAsLoaded.set(copy, record);
+    }
 }
 
 /**
@@ -245,7 +257,7 @@ export class GraphObjectMapper {
         const instance = plainToInstance(type as any, fields) as any;
         fragment?.propertyBags.forEach((bag) => (instance[bag.field] = instance[bag.field] ?? {}));
         loadCollections(type, mapping, instance, Object.keys(fields));
-        recordTagsAsLoaded(instance, source, props, fields, byGraphName, mapping);
+        recordTagsAsLoaded(instance, source, props, fields, byGraphName, mapping, fragment?.nodeIdField);
         return instance;
     }
 }
@@ -294,7 +306,8 @@ function refuseIdOfAnotherKind(type: Function, fragment: FragmentModel | undefin
 /**
  * Records, of each field of `instance` loaded from a property of `source` in which the store held a temporal tag, the
  * value the field was given, copied, so a change in place is a change, and what the store held (see tagsAsLoaded). A
- * property a bag took is left out: a save writes a bag's entries as they are.
+ * property a bag took is left out: a save writes a bag's entries as they are. The `@NodeId` field `idField`, loaded as
+ * a `Date`, has its value recorded too, so a lookup given that `Date` finds the node by the tag (see recordIdAsLoaded).
  */
 function recordTagsAsLoaded(
     instance: any,
@@ -302,7 +315,8 @@ function recordTagsAsLoaded(
     props: Record<string, any>,
     fields: Record<string, any>,
     byGraphName: Map<string, string>,
-    mapping: FieldMapping
+    mapping: FieldMapping,
+    idField?: string
 ): void {
     const held = source != null && typeof source === 'object' ? tagsHeldBy(source) : undefined;
     if (!held) {
@@ -318,7 +332,11 @@ function recordTagsAsLoaded(
         ) {
             continue;
         }
-        kept.set(field, { value: ObjectUtils.deepCopy(instance[field]), held: stored });
+        const loaded = { value: ObjectUtils.deepCopy(instance[field]), held: stored };
+        kept.set(field, loaded);
+        if (field === idField) {
+            recordIdAsLoaded(instance[field], loaded);
+        }
     }
     if (kept.size) {
         tagsAsLoaded.set(instance, kept);

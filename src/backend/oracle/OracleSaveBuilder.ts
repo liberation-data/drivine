@@ -56,6 +56,8 @@ export class OracleSaveBuilder {
     private readonly stamped: { model: FragmentModel; ids: any[] }[] = [];
     private count = 0;
     private options: SaveOptions<any> = {};
+    /** The root's id as the block binds it (see boundIdOf). */
+    private rootIdBound: unknown;
     /** Whether the block writes lowercased copies, and so declares `lower_node`. */
     private lowers = false;
 
@@ -117,6 +119,7 @@ export class OracleSaveBuilder {
             model,
             loadRecordOf(object, this.options)
         );
+        this.rootIdBound = write.bound;
         const expected = model.stampField ? object[model.stampField] : undefined;
         const p = this.nodeParams(write);
         if (createOnly && expected != null) {
@@ -319,7 +322,8 @@ END;`;
             root,
             rootObject,
             expected,
-            this.stamped.map((it) => it.model)
+            this.stamped.map((it) => it.model),
+            this.rootIdBound
         );
     }
 

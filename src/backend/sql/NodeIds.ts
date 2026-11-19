@@ -2,6 +2,7 @@ import type { GraphBackend } from '@/backend/GraphBackend';
 import { idSql, SharedStore } from '@/cypher/SharedCypherCompiler';
 import { HeldAsLoaded, heldKey } from '@/cypher/ValueLayout';
 import { DrivineLogger } from '@/logger/DrivineLogger';
+import { ObjectUtils } from '@/utils/ObjectUtils';
 import { FragmentModel } from '@/model/FragmentModel';
 
 /**
@@ -96,13 +97,46 @@ export function isSqlBackend(backend: GraphBackend): boolean {
 const logger: DrivineLogger = new DrivineLogger('NodeIds');
 
 /**
+ * Each `Date` a SQL store's load gave as a node's id, with the value it was given, copied, and the temporal tag the store
+ * held (see GraphObjectMapper's recordTagsAsLoaded). Kept only as long as the `Date` is.
+ */
+const idsAsLoaded = new WeakMap<object, { value: any; held: any }>();
+
+/**
+ * Internal: records that a SQL store's load gave `id` as a node's id, from the tag `loaded.held`, so a lookup given that
+ * value finds the node by the tag (see lookupId). Only an id that is an object, a `Date`, can be told apart from another
+ * of its value: text an id declared `any` loaded as is any text.
+ */
+export function recordIdAsLoaded(id: unknown, loaded: { value: any; held: any }): void {
+    if (id !== null && typeof id === 'object') {
+        idsAsLoaded.set(id, loaded);
+    }
+}
+
+/**
+ * `given`, a `Date` a SQL store's load gave as an id and unchanged since, as the tag the store held it as, which a lookup
+ * binds (#815): a `date`, a `localdatetime`, an offset or a fraction finer than a millisecond, which a `Date` written
+ * afresh would miss. Undefined for any other value.
+ */
+function heldAsLoaded(given: unknown): HeldAsLoaded | undefined {
+    const loaded = given !== null && typeof given === 'object' ? idsAsLoaded.get(given) : undefined;
+    return loaded && ObjectUtils.deepEqual(given, loaded.value) ? new HeldAsLoaded(given, loaded.held) : undefined;
+}
+
+/**
  * The id a lookup of a node of `model` by `given` binds on `backend`: on a SQL store `given` read as the id's type
  * ({@link typedId}), and {@link NO_NODE} where it finds no node, which the caller runs no statement for, logging why at
- * DEBUG; on a graph engine `given` as it is, as the engine compares it.
+ * DEBUG; on a graph engine `given` as it is, as the engine compares it. A `Date` a SQL store's load gave as an id, and
+ * unchanged since, is the tag the store held it as (#815), so `update`, `patch`, `delete`, a load and a relationship's end
+ * given a loaded object's id find its node.
  */
 export function lookupId(backend: GraphBackend, model: FragmentModel, given: unknown): unknown {
     if (!isSqlBackend(backend)) {
         return given;
+    }
+    const held = heldAsLoaded(given);
+    if (held) {
+        return held;
     }
     const id = typedId(model, given);
     if (id === NO_NODE && given != null) {

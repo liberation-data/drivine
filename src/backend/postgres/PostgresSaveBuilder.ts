@@ -47,6 +47,8 @@ export class PostgresSaveBuilder {
     /** For each index a related node's step was given, its stamped model's place among `stamped`, and its id. */
     private readonly handed = new Map<string, { group: number; id: any }>();
     private options: SaveOptions<any> = {};
+    /** The root's id as the plan binds it (see boundIdOf). */
+    private rootIdBound: unknown;
 
     constructor(
         private readonly graph: WriteFunction,
@@ -102,6 +104,7 @@ export class PostgresSaveBuilder {
             model,
             loadRecordOf(object, this.options)
         );
+        this.rootIdBound = write.bound;
         const expected: string | undefined = model.stampField ? object[model.stampField] ?? undefined : undefined;
         if (createOnly && expected != null) {
             throw new DrivineError(
@@ -248,7 +251,8 @@ export class PostgresSaveBuilder {
             rootObject,
             expected,
             this.stamped,
-            this.handed
+            this.handed,
+            this.rootIdBound
         );
     }
 }

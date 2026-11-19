@@ -127,6 +127,11 @@ export class HeldAsLoaded {
     toJSON(): any {
         return this.value;
     }
+
+    /** Its value's text, as a message names the id it is. */
+    toString(): string {
+        return String(this.value);
+    }
 }
 
 /**
