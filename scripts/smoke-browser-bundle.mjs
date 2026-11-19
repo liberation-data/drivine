@@ -83,6 +83,13 @@ if (JSON.stringify(host) !== JSON.stringify([[true, true, '2024-03-01']])) {
     console.error(`The browser bundle read back ${JSON.stringify(host)}, not [[true,true,"2024-03-01"]].`);
     process.exit(1);
 }
+// =~ reads its pattern as Java does, by the module's matcher, not the page's RegExp: \w is Unicode's, and && in a class
+// intersects (#560, #568).
+const java = await manager.query(cypher("RETURN 'café' =~ '\\\\w+' AS word, 'c' =~ '[a-z&&b]' AS intersected"));
+if (JSON.stringify(java) !== JSON.stringify([[true, false]])) {
+    console.error(`The browser bundle read back ${JSON.stringify(java)}, not [[true,false]].`);
+    process.exit(1);
+}
 // A failed statement closes its connection, the only one open, and the provider ends: the graph outlives them, as a
 // file does.
 const failed = await manager.query(cypher('THIS IS NOT CYPHER')).then(
