@@ -459,23 +459,18 @@ describe('A property declared a Date, loaded on SQLite', () => {
             }
         });
 
-        it('writes an id as given, never the tag a text id was loaded from: the save finds the node by it', async () => {
+        it('refuses a text id the store holds as a date, so no save of it can make a second node (#813)', async () => {
             await pm.execute(
                 new QuerySpecification({
                     text: "CREATE (:DateLoadRun:TextKeyed {id: date('2026-01-05'), name: 'x'})",
                     language: 'CYPHER'
                 })
             );
-            const [loaded] = await gom.loadAll(TextKeyed);
-            expect(loaded.id).toEqual('2026-01-05');
-            const registry = new ModelRegistry();
-            const target: TargetModel = { kind: 'NODE_FRAGMENT', model: registry.fragment(TextKeyed) };
-            // Oracle's save writes the id among the properties, and finds the node by the id as given.
-            const oracle = backendFor(DatabaseType.ORACLE).save(target, loaded, {}, false, registry);
-            const written = Object.values(oracle.bindings).filter(
-                (it) => typeof it === 'string' && it.includes('"id"')
+            // Before #813 the load gave the text '2026-01-05', which a save's lookup missed: see SqliteIdKindRun.
+            await expect(gom.loadAll(TextKeyed)).rejects.toThrow(
+                "TextKeyed's @NodeId id is declared a string, but the node whose id is '2026-01-05' holds it as a " +
+                    'date: declare id as a date to load it.'
             );
-            expect(written).toContain('{"id":"2026-01-05","name":"x"}');
         });
 
         it('recognises a copy given what it was loaded as, and not a copy saved without it', async () => {
