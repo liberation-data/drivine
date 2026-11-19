@@ -236,8 +236,8 @@ export class SqliteBackend implements GraphBackend {
     }
 
     /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
-    written(predicate: string): string {
-        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate);
+    written(predicate: string, bindings: Record<string, any> = {}): string {
+        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate, bindings);
     }
 
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> } {

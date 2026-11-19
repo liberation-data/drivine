@@ -326,8 +326,8 @@ END;`)
     }
 
     /** A raw `where`, over `n`, read over the row a read calls its root, `n_` (see CypherShorthand). */
-    written(predicate: string): string {
-        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate);
+    written(predicate: string, bindings: Record<string, any> = {}): string {
+        return new CypherShorthand(NODE_ROW, ROW_ALIAS, textOf).rewrite(predicate, bindings);
     }
 
     /** The condition, as the shared module's fragments write it, what they ask of its statement noted on it. */

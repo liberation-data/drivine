@@ -200,20 +200,25 @@ export class PostgresWrites {
     private meeting(where: string, bound: Record<string, any>): string {
         const names = Object.keys(bound).sort((a, b) => b.length - a.length);
         const written = where.replace(/'(?:[^']|'')*'|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name?: string) =>
-            name !== undefined && names.includes(name) ? literal(bound[name]) : match
+            name !== undefined && names.includes(name) ? literal(bound[name], this.graph.store) : match
         );
         return `SELECT COUNT(*) FROM ${this.graph.nodes} ${DSL_ROW} WHERE ${DSL_ROW}.nid = $1 AND (${written})`;
     }
 }
 
 /**
- * A value written into a statement as a literal, as a driver would bind it: a number as itself, anything else as text,
- * which Postgres reads as the type the statement wants there, as it reads a value bound without a type. A number is
- * written in parentheses, so a negative one after a minus is not read as the start of a comment.
+ * A value written into a statement as a literal, as `store`'s driver would bind it: a number as itself, a boolean as
+ * 1 or 0 on SQLite and as its text on Postgres, anything else as text, which Postgres reads as the type the statement
+ * wants there, as it reads a value bound without a type. A number is written in parentheses, so a negative one after a
+ * minus is not read as the start of a comment.
  */
-function literal(value: unknown): string {
+function literal(value: unknown, store: WriteFunction['store']): string {
     if (value === null || value === undefined) {
         return 'NULL';
+    }
+    if (typeof value === 'boolean') {
+        // As the store's driver binds it, so SQL over `n.props` reads it in a patch as in a load: SQLite's binds 1 or 0.
+        return store === 'sqlite' ? (value ? '1' : '0') : `'${value}'`;
     }
     if (typeof value === 'number' || typeof value === 'bigint') {
         return `(${String(value)})`;

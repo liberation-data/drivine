@@ -132,7 +132,7 @@ export class GroupOperations {
     /** The query with each predicate the caller wrote, its `where` and its aggregates' filters, as the store reads it. */
     private written<Q extends GroupQuery<any, any>>(query: Q): Q {
         const written = <W>(where: string | W | undefined): string | W | undefined =>
-            typeof where === 'string' && where ? this.backend.written(where) : where;
+            typeof where === 'string' && where ? this.backend.written(where, query.bindings) : where;
         const aggregates = Object.fromEntries(
             Object.entries((query.aggregates ?? {}) as Record<string, GroupAggregate>).map(([name, aggregate]) => [
                 name,

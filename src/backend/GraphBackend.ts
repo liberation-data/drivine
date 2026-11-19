@@ -110,9 +110,10 @@ export interface GraphBackend {
 
     /**
      * A predicate the caller wrote, as the store reads it. A SQL store reads each property of the root written as
-     * Cypher writes it, `n.name`, as that property (see CypherShorthand); a graph engine reads it as it is.
+     * Cypher writes it, `n.name`, as that property (see CypherShorthand); a graph engine reads it as it is. `bindings`
+     * are the statement's values, which decide how a property compared with a parameter bound to a boolean is read.
      */
-    written(predicate: string): string;
+    written(predicate: string, bindings?: Record<string, any>): string;
 
     /** A condition over a class's references, written for the store, with its values. */
     renderWhere<T>(fn: WhereFn<T>, target: TargetModel): { where: string; bindings: Record<string, any> };

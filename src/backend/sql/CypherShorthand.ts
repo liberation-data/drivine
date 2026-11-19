@@ -9,6 +9,12 @@ const SHORTHAND = /([A-Za-z_][A-Za-z0-9_]*)\.(?:`([^`]+)`|([A-Za-z_][A-Za-z0-9_]
  */
 const BOOLEAN_COMPARED = /([ \t\n\v\f\r]*(?:=|<>|!=)[ \t\n\v\f\r]*)(true|false)(?![A-Za-z0-9_])/iy;
 
+/**
+ * An equality or inequality with a parameter, `$name`, that follows a property: the operator with its space, and the
+ * name.
+ */
+const BOUND_COMPARED = /([ \t\n\v\f\r]*(?:=|<>|!=)[ \t\n\v\f\r]*)\$([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_])/y;
+
 /** A character that continues a name, so a name after it is not the start of one. */
 const CONTINUES_NAME = /[\p{L}\p{Nd}_.]/u;
 
@@ -26,8 +32,10 @@ function matchAt(pattern: RegExp, text: string, at: number): RegExpExecArray | u
  * ``issue.`metadata.source` ``, to read that property. So the plain comparisons a Cypher predicate makes are the same
  * text on a SQL store; anything more is SQL, over the root's columns `issue.props`, `issue.labels` and `issue.stamp`.
  * Text inside a string literal is left as it is. A property compared with `true` or `false` (`issue.locked = true`) is
- * compared with the text a store reads a JSON boolean as, since SQL compares no text with a boolean. drivine4j's
- * `CypherShorthand`, rule for rule.
+ * compared with the text a store reads a JSON boolean as, since SQL compares no text with a boolean, and so is one
+ * compared with a parameter bound to a boolean (`issue.locked = $locked`): a driver binds it as no such text (SQLite's
+ * as 1), and the comparison would hold for no node (#802, drivine-python#542). drivine-python's `CypherShorthand`, rule
+ * for rule.
  */
 export class CypherShorthand {
     /**
@@ -42,8 +50,12 @@ export class CypherShorthand {
         private readonly property: (row: string, key: string) => string
     ) {}
 
-    /** `predicate` with each `alias.name` of the root read as that property, or as that column of the row. */
-    rewrite(predicate: string): string {
+    /**
+     * `predicate` with each `alias.name` of the root read as that property, or as that column of the row. `bindings` are
+     * what the statement binds: a property compared with one of them that is a boolean is compared with the boolean's
+     * text.
+     */
+    rewrite(predicate: string, bindings: Record<string, any> = {}): string {
         let out = '';
         let at = 0;
         while (at < predicate.length) {
@@ -53,7 +65,7 @@ export class CypherShorthand {
                 at = stop;
                 continue;
             }
-            const read = this.rootAt(predicate, at);
+            const read = this.rootAt(predicate, at, bindings);
             if (read) {
                 out += read.text;
                 at = read.end;
@@ -68,7 +80,11 @@ export class CypherShorthand {
      * The `alias.name` of the root that starts at `at`, as the store reads it, and the index after it: undefined where
      * none does, as where a name goes on from before `at`, the alias is another's, or the name is a function's.
      */
-    private rootAt(predicate: string, at: number): { text: string; end: number } | undefined {
+    private rootAt(
+        predicate: string,
+        at: number,
+        bindings: Record<string, any>
+    ): { text: string; end: number } | undefined {
         const match =
             at === 0 || !CONTINUES_NAME.test(predicate[at - 1]) ? matchAt(SHORTHAND, predicate, at) : undefined;
         const end = match ? at + match[0].length : at;
@@ -85,12 +101,28 @@ export class CypherShorthand {
         const property = this.property(this.row, heldKey(key));
         // A property compared with a boolean is compared with the boolean's text, which is what a property is read as.
         const compared = matchAt(BOOLEAN_COMPARED, predicate, end);
-        return compared
-            ? {
-                  text: `${property}${compared[1]}'${compared[2].toLowerCase()}'`,
-                  end: end + compared[0].length
-              }
-            : { text: property, end };
+        if (compared) {
+            return { text: `${property}${compared[1]}'${compared[2].toLowerCase()}'`, end: end + compared[0].length };
+        }
+        return this.boundAt(predicate, end, property, bindings) ?? { text: property, end };
+    }
+
+    /**
+     * The property read as `property`, compared at `end` with a parameter bound to a boolean, as compared with the
+     * boolean's text, and the index after the parameter, which is then no longer read; undefined where it is compared
+     * with no such parameter.
+     */
+    private boundAt(
+        predicate: string,
+        end: number,
+        property: string,
+        bindings: Record<string, any>
+    ): { text: string; end: number } | undefined {
+        const bound = matchAt(BOUND_COMPARED, predicate, end);
+        const value = bound ? bindings[bound[2]] : undefined;
+        return bound && typeof value === 'boolean'
+            ? { text: `${property}${bound[1]}'${value}'`, end: end + bound[0].length }
+            : undefined;
     }
 
     /** The index after the string literal that opens at `start`; a doubled quote is part of it. */
