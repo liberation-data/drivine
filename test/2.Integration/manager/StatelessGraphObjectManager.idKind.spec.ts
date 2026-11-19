@@ -67,6 +67,7 @@ class LookupDateAsBoolean {
 class LookupDateAsAny {
     @NodeId() id: any;
     name?: string;
+    @NodeStamp() stamp?: string;
 }
 
 /** An id declared a union: TypeScript records `Object` too. */
@@ -79,6 +80,7 @@ class LookupDateAsUnion {
 class LookupDateAsDate {
     @NodeId() id: Date;
     name?: string;
+    @NodeStamp() stamp?: string;
 }
 
 @NodeFragment({ labels: ['IdKindTest', 'Owner'] })
@@ -105,6 +107,18 @@ class Owned {
 }
 
 @GraphView()
+class OwnedAny {
+    @Root() owner: Owner;
+    @GraphRelationship({ type: 'OWNS', target: () => LookupDateAsAny }) keyed: LookupDateAsAny[];
+}
+
+@GraphView()
+class OwnedDate {
+    @Root() owner: Owner;
+    @GraphRelationship({ type: 'OWNS', target: () => LookupDateAsDate }) keyed: LookupDateAsDate[];
+}
+
+@GraphView()
 class OwnedNested {
     @Root() owner: Owner;
     @GraphRelationship({ type: 'OWNS', target: () => KeyedView }) views: KeyedView[];
@@ -127,6 +141,14 @@ const KINDS = [
     { kind: 'date', cypher: "date('2026-01-05')", text: '2026-01-05' },
     { kind: 'datetime', cypher: "datetime('2026-01-05T10:11:12Z')", text: '2026-01-05T10:11:12Z' },
     { kind: 'duration', cypher: "duration('P1DT2H')", text: 'P1DT2H' }
+];
+
+/** Tags a `Date` can't hold exactly, each as Cypher writes it, and its kind. */
+const INEXACT = [
+    { kind: 'date', cypher: "date('2026-01-05')" },
+    { kind: 'localdatetime', cypher: "localdatetime('2026-01-05T10:11:12')" },
+    { kind: 'datetime', cypher: "datetime('2026-01-05T10:11:12+02:00')" },
+    { kind: 'datetime', cypher: "datetime('2026-01-05T10:11:12.123456789Z')" }
 ];
 
 const refusal = (type: string, declared: string, text: string, kind: string): string =>
@@ -274,6 +296,47 @@ describe.each(sqlStores())('a @NodeId held as a temporal, declared a non-tempora
             expect(await gom.count(LookupDateAsAny)).toEqual(2);
         });
 
+        /**
+         * The node's id is still held as the tag: a class that declares it a string is refused, naming its kind and
+         * text, as it was before the save (#815).
+         */
+        const stillHeld = async (): Promise<void> => {
+            await expect(gom.loadAll(LookupDateAsText)).rejects.toThrow(asText);
+            expect(await gom.count(LookupDateAsAny)).toEqual(1);
+        };
+
+        it('saves an id declared any back onto its node, by save, from, a view and patchAll (#815)', async () => {
+            const [any] = await gom.loadAll(LookupDateAsAny);
+            await gom.save(Object.assign(any, { name: 'resaved' }));
+            await stillHeld();
+            const [again] = await gom.loadAll(LookupDateAsAny);
+            await gom.save(Object.assign(new LookupDateAsAny(), again, { name: 'copied' }), { from: again });
+            await stillHeld();
+            const view = (await gom.load(OwnedAny, 'o'))!;
+            view.keyed[0].name = 'related';
+            await gom.save(view, { replace: ['keyed'] });
+            await gom.update(OwnedAny, 'o', (it) => {
+                it.keyed[0].name = 'updated';
+            });
+            await stillHeld();
+            expect((await gom.load(OwnedAny, 'o'))!.keyed.map((it) => it.name)).toEqual(['updated']);
+            const loaded = await gom.loadAll(LookupDateAsAny);
+            loaded[0].name = 'patched';
+            expect(await gom.patchAll(loaded, { only: ['name'] })).toEqual([
+                { found: true, applied: true, changed: true }
+            ]);
+            await stillHeld();
+            expect((await gom.loadAll(LookupDateAsAny)).map((it) => it.name)).toEqual(['patched']);
+        });
+
+        it('writes an id declared any as given once it is changed, or given an object no load made', async () => {
+            await gom.save(Object.assign(new LookupDateAsAny(), { id: text, name: 'fresh' }));
+            expect(await gom.count(LookupDateAsAny)).toEqual(2);
+            const loaded = (await gom.loadAll(LookupDateAsAny)).find((it) => it.name === 'x')!;
+            await gom.save(Object.assign(loaded, { id: 'moved', stamp: undefined }));
+            expect(await gom.count(LookupDateAsAny)).toEqual(3);
+        });
+
         it('loads an id declared any, or a union, as the text the read gives, as before', async () => {
             const [any] = await gom.loadAll(LookupDateAsAny);
             expect(any.id).toEqual(text);
@@ -294,5 +357,64 @@ describe.each(sqlStores())('a @NodeId held as a temporal, declared a non-tempora
         await reset("date('2026-01-05')");
         const [loaded] = await gom.loadAll(LookupDateAsDate);
         expect(loaded.id).toEqual(new Date('2026-01-05T00:00:00Z'));
+    });
+
+    /** Tags a `Date` can't hold exactly: while the id is unchanged since the load, each binds the tag (#815). */
+    describe.each(INEXACT)('an id declared a Date held as $cypher', ({ kind, cypher }: (typeof INEXACT)[number]) => {
+        beforeEach(async () => reset(cypher));
+
+        // Still held as the tag, of its kind: a class that declares the id a string is refused. Its text, as each
+        // store reads it back, is the read's (a fraction finer than a millisecond may be written otherwise).
+        const stillHeld = async (): Promise<void> => {
+            await expect(gom.loadAll(LookupDateAsText)).rejects.toThrow(`holds it as a ${kind}: `);
+            expect(await gom.count(LookupDateAsAny)).toEqual(1);
+        };
+
+        it('saves back onto its node, by save, from and a view', async () => {
+            const [loaded] = await gom.loadAll(LookupDateAsDate);
+            await gom.save(Object.assign(loaded, { name: 'resaved' }));
+            await stillHeld();
+            const [again] = await gom.loadAll(LookupDateAsDate);
+            await gom.save(Object.assign(new LookupDateAsDate(), again, { name: 'copied' }), { from: again });
+            await stillHeld();
+            const view = (await gom.load(OwnedDate, 'o'))!;
+            view.keyed[0].name = 'related';
+            await gom.save(view, { replace: ['keyed'] });
+            await stillHeld();
+            expect((await gom.load(OwnedDate, 'o'))!.keyed.map((it) => it.name)).toEqual(['related']);
+        });
+
+        it('updates, patches, relates and deletes by the loaded id', async () => {
+            const [loaded] = await gom.loadAll(LookupDateAsDate);
+            expect(
+                (
+                    await gom.update(LookupDateAsDate, loaded.id, (it) => {
+                        it.name = 'updated';
+                    })
+                )?.name
+            ).toEqual('updated');
+            expect((await gom.patch(LookupDateAsDate, loaded.id, { set: { name: 'patched' } })).found).toBe(true);
+            expect(await gom.edges.relate(nodeRef(Owner, 'o'), nodeRef(LookupDateAsDate, loaded.id), 'LIKES')).toBe(
+                true
+            );
+            await stillHeld();
+            expect(await gom.delete(LookupDateAsDate, loaded.id)).toEqual(1);
+            expect(await gom.count(LookupDateAsAny)).toEqual(0);
+        });
+    });
+
+    /** Only a load's record tells a node whose id is a date from one whose id is the date's text (#815). */
+    it('saves each of a date id and its text, loaded, onto its own node', async () => {
+        await reset("date('2026-01-05')");
+        await gom.save(Object.assign(new LookupDateAsAny(), { id: '2026-01-05', name: 'text' }));
+        const loaded = await gom.loadAll(LookupDateAsAny);
+        expect(loaded.map((it) => it.id)).toEqual(['2026-01-05', '2026-01-05']);
+        for (const it of loaded) {
+            await gom.save(Object.assign(it, { name: `${it.name}, saved` }));
+        }
+        expect(await gom.count(LookupDateAsAny)).toEqual(2);
+        const texts = await gom.loadAll(LookupDateAsText, (q) => ({ where: q.name.eq('text, saved') }));
+        expect(texts.map((it) => it.id)).toEqual(['2026-01-05']);
+        expect((await gom.loadAll(LookupDateAsAny)).map((it) => it.name).sort()).toEqual(['text, saved', 'x, saved']);
     });
 });
