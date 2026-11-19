@@ -9,6 +9,7 @@ import { DEFAULT_GRAPH, OracleGraph } from '@/backend/oracle/OracleGraph';
 import { FirstConnection } from '@/connection/FirstConnection';
 import { DrivineLogger } from '@/logger';
 import { INSPECT, maskedProperties, printable } from '@/connection/Masking';
+import { storeStatements } from '@/backend/StoreStatements';
 
 /** The oldest Oracle Drivine runs Cypher on, 23.9: see {@link oracleRefusal}. */
 const ORACLE_MAJOR = 23;
@@ -156,25 +157,43 @@ export class OracleConnectionProvider implements ConnectionProvider {
             poolMin: 0,
             poolMax: this.connectionProperties.poolMax ?? 10,
             connectTimeout: this.connectionProperties.connectTimeout,
-            sessionCallback: withoutAdaptivePlans
+            sessionCallback: oracleSessionSetUp(this.graphName)
         });
         return this.pool;
     }
 }
 
+/** Oracle makes no adaptive plan in a session of Drivine's: see {@link oracleSessionSetUp}. */
+const NO_ADAPTIVE_PLANS = 'ALTER SESSION SET OPTIMIZER_ADAPTIVE_PLANS = FALSE';
+
 /**
- * Sets up each session the pool opens: Oracle makes no adaptive plan in it. An adaptive plan picks its joins as it
- * runs, and once the graph's tables had grown and shrunk without statistics, one gave no rows for a join that filters
- * a node by a label and a property, where the same plan, fixed, gave them (liberation-data/drivine#331). A walk's step
- * already asks for no adaptive plan (liberation-data/drivine4j#182); this covers every statement.
+ * Sets up each session the pool opens for the graph `graph`, before any other statement runs on it, in order:
+ *
+ * - the session the shared module says its compiled statements need (`storeStatements`' `session`): text compared and
+ *   sorted by its code points, as Cypher compares it, whatever `NLS_COMP` and `NLS_SORT` a database or a logon trigger
+ *   gives the session. Under `NLS_COMP=LINGUISTIC NLS_SORT=BINARY_CI`, `'B' < 'a'` was false and `'a' = 'A'` true, with
+ *   no error (drivine-cypher-spec#372).
+ * - no adaptive plan. An adaptive plan picks its joins as it runs, and once the graph's tables had grown and shrunk
+ *   without statistics, one gave no rows for a join that filters a node by a label and a property, where the same plan,
+ *   fixed, gave them (liberation-data/drivine#331). A walk's step already asks for no adaptive plan
+ *   (liberation-data/drivine4j#182); this covers every statement.
+ *
+ * node-oracledb calls it for each new session of the pool. A session a statement fails on is handed back as an error,
+ * which drops it, rather than given out unset.
  */
-function withoutAdaptivePlans(
-    connection: oracledb.Connection,
-    _requestedTag: string,
-    done: (error?: Error) => void
-): void {
-    connection.execute('ALTER SESSION SET OPTIMIZER_ADAPTIVE_PLANS = FALSE').then(
-        () => done(),
-        (e) => done(e)
-    );
+export function oracleSessionSetUp(
+    graph: string
+): (connection: oracledb.Connection, requestedTag: string, done: (error?: Error) => void) => void {
+    const statements = [...(storeStatements('oracle', graph).session ?? []), NO_ADAPTIVE_PLANS];
+    return (connection, _requestedTag, done) => {
+        statements
+            .reduce(
+                async (ran: Promise<unknown>, statement) => ran.then(async () => connection.execute(statement)),
+                Promise.resolve()
+            )
+            .then(
+                () => done(),
+                (e) => done(e)
+            );
+    };
 }
