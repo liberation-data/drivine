@@ -115,6 +115,8 @@ describe('SqliteHostFunctions', () => {
             ['[a&&&b]', '&', 1], // drivine-python#379
             ['[a\\Q\\E-c]', 'b', 1],
             ['(?i)ß', 'ẞ', 0],
+            ['^a\\Z', 'a\n', 1], // \Z and \p{…} are Java's
+            ['^\\p{L}$', 'é', 1],
             // The one departure, on purpose, as drivine4j's and drivine-python's: a POSIX class is read as Java names it,
             // \p{Alpha}, where Java reads [[:alpha:]] as a class of the characters :, a, l, p and h (and gives 0, then 1).
             ['[[:alpha:]]+', 'é', 1],
