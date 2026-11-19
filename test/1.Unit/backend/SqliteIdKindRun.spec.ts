@@ -20,9 +20,11 @@ import {
     NodeId,
     nodeRef,
     NodeStamp,
+    NullPolicy,
     pathKey,
     PersistenceManager,
     PersistenceManagerFactory,
+    PropertyBag,
     QuerySpecification,
     RelationshipFragment,
     Root,
@@ -80,6 +82,13 @@ class LookupDateAsDate {
     @NodeId() id: Date;
     name?: string;
     @NodeStamp() stamp?: string;
+}
+
+/** A Date id beside a property bag, whose save under NullPolicy.CLEAR reads the keys the node holds first. */
+@NodeFragment({ labels: ['IdKindRun', 'Keyed'] })
+class BaggedDate {
+    @NodeId() id: Date;
+    @PropertyBag() meta: Record<string, any> = {};
 }
 
 /** An id stored under another name: refused by its field's name. */
@@ -548,6 +557,21 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
                 expect(failure).toBeInstanceOf(StaleObjectException);
                 expect(failure.deleted).toBe(false);
                 expect(await keyedCount()).toEqual(1);
+            });
+
+            it("removes a bag's dropped entry, reading the keys the node holds by the tag", async () => {
+                await pm.execute(
+                    new QuerySpecification({
+                        text: 'MATCH (n:IdKindRun:Keyed) SET n.`meta.a` = 1, n.`meta.b` = 2',
+                        language: 'CYPHER'
+                    })
+                );
+                const [loaded] = await gom.loadAll(BaggedDate);
+                expect(loaded.meta).toEqual({ a: 1, b: 2 });
+                delete loaded.meta.b;
+                await gom.save(loaded, { nullPolicy: NullPolicy.CLEAR });
+                expect(await keyedCount()).toEqual(1);
+                expect((await gom.loadAll(BaggedDate))[0].meta).toEqual({ a: 1 });
             });
 
             it('saves the related node of a view onto the same node', async () => {
