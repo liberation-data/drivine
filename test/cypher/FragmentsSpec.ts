@@ -34,6 +34,8 @@ export interface FragmentCase {
     parameters?: Record<string, any>;
     rows?: string[];
     sql: Record<SharedStore, string[]>;
+    /** The labels the answer says each row the condition keeps carries, by variable, on each store where there are any. */
+    impliedLabels?: Partial<Record<SharedStore, Record<string, string[]>>>;
 }
 
 type Digests = Record<SharedStore, string[]>;

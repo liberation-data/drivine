@@ -258,6 +258,12 @@ export interface SqlFragment {
     nonFinite: boolean;
     hints: string[];
     storedFunctions: { nullsEqual: boolean; era: boolean; temporalArithmetic: boolean };
+    /**
+     * The labels every row a condition keeps carries, by variable, as the module says (drivine-cypher-spec#373): on
+     * Oracle, those of each equality it reads through a label's index that is one of the condition's own conjuncts. A
+     * statement needn't test them again. Empty for a value and an order, and on Postgres and SQLite.
+     */
+    impliedLabels: Record<string, string[]>;
 }
 
 /**
@@ -296,7 +302,8 @@ export function fragment(
             nullsEqual: answer.storedFunctions?.nullsEqual ?? false,
             era: answer.storedFunctions?.era ?? false,
             temporalArithmetic: answer.storedFunctions?.temporalArithmetic ?? false
-        }
+        },
+        impliedLabels: answer.impliedLabels ?? {}
     };
 }
 
@@ -306,6 +313,7 @@ interface FragmentAnswer {
     nonFinite?: boolean;
     hints?: string[];
     storedFunctions?: { nullsEqual?: boolean; era?: boolean; temporalArithmetic?: boolean };
+    impliedLabels?: Record<string, string[]>;
 }
 
 interface SearchAnswer {

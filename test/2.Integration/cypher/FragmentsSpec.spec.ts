@@ -73,16 +73,22 @@ describe.each(stores())('fragments.yaml on $name', (store) => {
             let got: string[];
             try {
                 const compiled = fragment(shared, graph, part, spec.variables, parameters);
-                const hints = [...new Set([...labelled.hints, ...compiled.hints])];
+                // Where the answer says every row it keeps is a Person, the label's test is left out, as a library's
+                // query leaves it out: setup's Robot then shows a condition that implies a label it doesn't test
+                // (drivine-cypher-spec#373).
+                const implied = 'condition' in part && (compiled.impliedLabels.n?.includes('Person') ?? false);
+                const tested = implied ? undefined : labelled;
+                const hints = [...new Set([...(tested?.hints ?? []), ...compiled.hints])];
+                const kept = [
+                    ...(tested ? [tested.terms[0]] : []),
+                    ...('condition' in part ? [`(${compiled.terms[0]})`] : [])
+                ];
+                const order = 'condition' in part ? [id] : [...compiled.terms, id];
                 sql =
                     `SELECT ${hints.length > 0 ? `/*+ ${hints.join(' ')} */ ` : ''}${id} AS "id" ` +
-                    `FROM ${GRAPH}_node ${row} WHERE ${labelled.terms[0]}`;
-                sql +=
-                    'condition' in part
-                        ? ` AND (${compiled.terms[0]}) ORDER BY ${id}`
-                        : ` ORDER BY ${[...compiled.terms, id].join(', ')}`;
+                    `FROM ${GRAPH}_node ${row} WHERE ${kept.join(' AND ')} ORDER BY ${order.join(', ')}`;
                 const rows = await pm.query<any>(
-                    new QuerySpecification(sql).bind({ ...labelled.parameters, ...compiled.parameters })
+                    new QuerySpecification(sql).bind({ ...(tested?.parameters ?? {}), ...compiled.parameters })
                 );
                 got = rows.map((it) =>
                     String(it !== null && typeof it === 'object' ? it.id ?? Object.values(it)[0] : it)
@@ -121,6 +127,6 @@ describe.each(stores())('fragments.yaml on $name', (store) => {
             `0 of ${checked} differ from Neo4j:\n`
         );
         // fragments.yaml's cases with rows, and its table.
-        expect([withRows.length, checked]).toEqual([25, 25 + conditions.length * positions.length + orders.length * 2]);
+        expect([withRows.length, checked]).toEqual([26, 26 + conditions.length * positions.length + orders.length * 2]);
     });
 });
