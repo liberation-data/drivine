@@ -325,13 +325,30 @@ id's kind as well, so a save of what was loaded would make a second node. Each r
 `loadAll`, `loadNearest`, `loadMatching`, `edges.loadRelated`, `update`, a grouped read's path key, and a view's root,
 related nodes, nested views, relationship fragments and path ends) refuses it by name, before anything is written
 ([#813](https://github.com/liberation-data/drivine/issues/813)): `Holiday's @NodeId id is declared a string, but the
-node whose id is '2026-01-05' holds it as a date: declare id as a date to load it.` Declare the id a `Date` for a
-`datetime` at UTC to the millisecond (what a `Date` is saved as), which loads, finds and saves the node as one. An id
-held as a `date`, a `localdatetime`, or a `datetime` at another offset or finer than a millisecond (as a drivine4j
-`Instant` may be) loads as a `Date` too, but a save writes the `Date` as a `datetime` at UTC to the millisecond, which a
-lookup doesn't find the node by: a save of such a node makes a second one, so write it with Cypher. An id declared
-`any`, `unknown` or a union, which TypeScript records no scalar type for, is not refused, and loads as the text the
-store gives: a save of it makes a second node too.
+node whose id is '2026-01-05' holds it as a date: declare id as a date to load it.`
+
+Declare such an id a `Date`, or `any`. An id declared `any`, `unknown` or a union, which TypeScript records no scalar
+type for, is not refused, and loads as the text the store gives. An id declared a `Date` loads as a `Date`, whether it
+is held as a `datetime`, a `date`, a `localdatetime`, or a `datetime` at another offset or finer than a millisecond (as
+a drivine4j `Instant` may be). Either way the save finds the node and writes its id back as the store held it, byte for
+byte, while the id is unchanged since the load: it binds the stored value the id was loaded from wherever it binds the
+id, as it does an unchanged property ([#815](https://github.com/liberation-data/drivine/issues/815)). So an `any` id and
+a `Date` id round-trip onto their node, by `save`, `save` with `from`, `saveAll`, `update` and `patchAll`, as a view's
+root or related node, and a stale save is told apart from a deleted node. A `Date` a load gave as the id finds the node
+when it is given to `load`, `update`, `patch`, `delete` or `edges` too.
+
+What the load gave is all the save knows. An id changed since the load, or of an object no load made, is written as
+given, so it never takes another node's stored id: a node whose id is held as a date and one whose id is the date's
+text stay two nodes, each saved onto its own. And a new id, or an `any` id given as text, is written and looked up as
+TypeScript gives it:
+
+- A new id set through a JS `Date` is written as a `datetime` at UTC to the millisecond: a `date`, a `localdatetime` or
+  an offset id can't be made from TypeScript. Write one with Cypher.
+- Text given as an `any` id, to `load`, `update`, `patch`, `delete` or `edges`, is looked up as text, so it misses a
+  node whose id is held as a date. Load the node another way (`loadAll` with a `where`, a view), and save what loaded.
+- drivine-python refuses a union that would load the id as text, as it refuses a `str` id. TypeScript records a union
+  as `Object`, as it records `any`, so Drivine for TypeScript can't tell one from the other, and refuses neither: the
+  same intent, limited by the type information TypeScript keeps.
 
 #### Count
 
