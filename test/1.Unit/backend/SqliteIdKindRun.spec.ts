@@ -549,6 +549,14 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
                 expect(await keyedCount()).toEqual(0);
             });
 
+            it("patches by the loaded id under a where naming $id, which names the id's value", async () => {
+                const [loaded] = await gom.loadAll(LookupDateAsDate);
+                await gom.save(Object.assign(loaded, { name: loaded.id.toISOString() }));
+                expect(
+                    await gom.patch(LookupDateAsDate, loaded.id, { set: { name: 'w' }, where: 'n.name = $id' })
+                ).toEqual({ found: true, applied: true, changed: true });
+            });
+
             it("reads a stale save's stamp from the node, which it finds by the tag", async () => {
                 const [first] = await gom.loadAll(LookupDateAsDate);
                 const [second] = await gom.loadAll(LookupDateAsDate);
