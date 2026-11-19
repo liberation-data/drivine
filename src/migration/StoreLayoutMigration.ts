@@ -6,8 +6,12 @@ import { QuerySpecification } from '@/query/QuerySpecification';
 import { randomUuid } from '@/utils/Random';
 import { classChain, propertyMetadata, ownClassMetadata } from '@/annotation/Metadata';
 
-/** What a property is declared to hold, which store layout 1 can't tell (the shared module's `LayoutMigration.Kind`). */
-export type DeclaredKind =
+/**
+ * What a property is declared to hold, which store layout 1 can't tell: which texts are dates or moments, which whole
+ * numbers are floats, and which lists of numbers are bytes (the shared module's kinds, by their words, as drivine4j's
+ * `Kind` and drivine-python's give them).
+ */
+export type Kind =
     | 'date'
     | 'localtime'
     | 'time'
@@ -18,10 +22,10 @@ export type DeclaredKind =
     | 'bytes';
 
 /** That the property `property` of the nodes labelled `label`, or the relationships of that type, holds `kind`, or lists of it. */
-export interface MigrationDeclaration {
+export interface Declaration {
     label: string;
     property: string;
-    kind: DeclaredKind;
+    kind: Kind;
 }
 
 /** What a migration is asked besides its declarations. */
@@ -39,18 +43,33 @@ export interface MigrationOptions {
     unproven: true;
 }
 
-/** The report a migration, or its dry run, ends with: the shared module's `MigrationReport`, as its JSON entry writes it. */
+/**
+ * How a migration ended, as drivine4j's `MigrationReport.Status` and drivine-python's name it:
+ *
+ * - `migrated`: the graph is in layout 2.
+ * - `current` or `empty`: nothing to do.
+ * - `dryRun`: a dry run's report; nothing was written.
+ * - `inProgress`: a dry run of a graph part way through a migration, which only resuming it goes on with.
+ * - `invalid`: values are no value of their declared kind. Declare them otherwise, or pass `keepInvalid`.
+ * - `collisions`: a uniqueness constraint's keys collide in layout 2. Correct them with plain SQL and run it again.
+ * - `refused`: a graph of another layout, or one changed since its migration began, or a migration resumed, before every
+ *   row is written, with other declarations or another `keepInvalid`.
+ * - `failed`: a statement failed, and the message is the store's; run it again to resume.
+ */
+export type MigrationStatus =
+    | 'current'
+    | 'empty'
+    | 'refused'
+    | 'inProgress'
+    | 'invalid'
+    | 'dryRun'
+    | 'collisions'
+    | 'migrated'
+    | 'failed';
+
+/** The report a migration, or its dry run, ends with: the shared module's, as its JSON entry writes it. */
 export interface MigrationReport {
-    status:
-        | 'current'
-        | 'empty'
-        | 'refused'
-        | 'inProgress'
-        | 'invalid'
-        | 'dryRun'
-        | 'collisions'
-        | 'migrated'
-        | 'failed';
+    status: MigrationStatus;
     message: string;
     tables: Record<string, { rows: number; changed: number }>;
     properties: {
@@ -60,7 +79,7 @@ export interface MigrationReport {
         invalid: { table: string; id: number; kind: string; value: string; message: string }[];
     }[];
     observed: { label: string; property: string; classes: Record<string, number> }[];
-    candidates: { label: string; property: string; kind: DeclaredKind; values: number }[];
+    candidates: { label: string; property: string; kind: Kind; values: number }[];
     kept: {
         table: string;
         id: number;
@@ -105,7 +124,9 @@ type Outcome = { type: 'rows'; rows: any[] } | { type: 'ran' } | { type: 'failed
  * A migration makes no index or constraint: the application's schema plan makes its declared ones at its next start.
  *
  * Statements run on a connection of their own that neither makes the graph's tables nor judges its layout, as `connect`
- * would, and refuse the graph; the lock on another, in a transaction left open until the migration ends.
+ * would, and refuse the graph; the lock on another, in a transaction left open until the migration ends. Each is the
+ * provider's own, taken from its pool, never one of an application's transaction (a `TransactionContextHolder`'s), so a
+ * round's writes commit as the migration commits them, whatever the caller is running in.
  */
 export class StoreLayoutMigration {
     private readonly store: 'postgres' | 'oracle' | 'sqlite';
@@ -121,7 +142,7 @@ export class StoreLayoutMigration {
     }
 
     /** Migrates the graph by `declarations`, or with `dryRun` reports what a migration would do: see the class. */
-    async migrate(declarations: MigrationDeclaration[], options: MigrationOptions): Promise<MigrationReport> {
+    async migrate(declarations: Declaration[], options: MigrationOptions): Promise<MigrationReport> {
         if (options?.unproven !== true) {
             throw new DrivineError(
                 'The store layout migration is not yet proven on every store (liberation-data/drivine#765): back the graph up first, and pass { unproven: true } to run it.'
@@ -267,13 +288,6 @@ function document(row: any): any {
     return row;
 }
 
-/**
- * The declarations the node fragment `type` says, under each of its labels, its own and those it inherits, as a node of it
- * carries them: each field TypeScript records as a `Date`
- * (`datetime`, as a JavaScript Date is a moment) or as bytes (`Uint8Array`, `Buffer`), as `design:type` gives them for a
- * decorated field. A date with no time, a float, or a list of either, which TypeScript records no type of, is to be
- * declared by hand.
- */
 /** The labels a node of `type` carries: its own and those it inherits, none where it has none. */
 function inheritedLabels(type: Function): string[] {
     const labels = new Set<string>();
@@ -283,17 +297,23 @@ function inheritedLabels(type: Function): string[] {
     return [...labels];
 }
 
-export function declarationsOf(type: Function, relationshipType?: string): MigrationDeclaration[] {
+/**
+ * The declarations the node fragment `type` says, under each of its labels, its own and those it inherits, as a node of it
+ * carries them, or with `relationshipType` the relationship fragment's, under that type: each field TypeScript records
+ * as a `Date` (`datetime`, as a JavaScript Date is a moment, which layout 1 saved as its ISO text), as `design:type`
+ * gives it for a decorated field, by the name it is stored under.
+ *
+ * A field layout 1 saved in a form other than its kind's is given no declaration, as the migration would read its values
+ * as no value of the kind and refuse the graph: it is kept as it is. So bytes (`Uint8Array`, `Buffer`) are not declared,
+ * as layout 1 saved one as `JSON.stringify` writes it, an object of its indexes or `{type: 'Buffer', data}`, not the
+ * list of numbers or base64 text the migration reads bytes from. A date with no time, a float, or a list of either,
+ * which TypeScript records no type of, is to be declared by hand.
+ */
+export function declarationsOf(type: Function, relationshipType?: string): Declaration[] {
     const labels: string[] = relationshipType ? [relationshipType] : inheritedLabels(type);
-    const declared: MigrationDeclaration[] = [];
+    const declared: Declaration[] = [];
     propertyMetadata(type).forEach((metadata, field) => {
-        const kind: DeclaredKind | undefined =
-            metadata.designType === Date
-                ? 'datetime'
-                : metadata.designType === Uint8Array ||
-                  (typeof Buffer !== 'undefined' && metadata.designType === Buffer)
-                ? 'bytes'
-                : undefined;
+        const kind: Kind | undefined = metadata.designType === Date ? 'datetime' : undefined;
         if (kind) {
             const property = metadata.graphProperty ?? field;
             labels.forEach((label) => declared.push({ label, property, kind }));

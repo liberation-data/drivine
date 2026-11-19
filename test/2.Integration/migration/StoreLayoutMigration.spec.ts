@@ -12,7 +12,7 @@ import {
 } from '@liberation-data/drivine';
 import { StoreLayoutError } from '@/backend/sql/StoreLayout';
 import { openSqlite } from '@/connection/sqlite/SqliteDriver';
-import { StoreLayoutMigration, MigrationDeclaration } from '@/migration/StoreLayoutMigration';
+import { Declaration, StoreLayoutMigration } from '@liberation-data/drivine';
 
 jest.setTimeout(60_000);
 
@@ -26,7 +26,7 @@ jest.setTimeout(60_000);
 describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
     const folder = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-migration-')));
     const file = path.join(folder, 'layout1.sqlite');
-    const declarations: MigrationDeclaration[] = [
+    const declarations: Declaration[] = [
         { label: 'Person', property: 'born', kind: 'date' },
         { label: 'KNOWS', property: 'since', kind: 'date' },
         { label: 'Event', property: 'at', kind: 'datetime' }
@@ -110,5 +110,44 @@ describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
             .filter((it) => it.startsWith('drivine_'))
             .map((it) => it.split('|')[0]);
         expect(objects.filter((it) => it.startsWith('drivine_uq_') || it === 'drivine_migrate2')).toEqual([]);
+    });
+});
+
+/**
+ * Bytes as Drivine for TypeScript 5.0.0 saved them, as `JSON.stringify` writes them: a Uint8Array as an object of its
+ * indexes, a Buffer as `{type: 'Buffer', data}`. The migration reads bytes from a list of numbers or a base64 text alone,
+ * so a declaration of them refuses the graph as `invalid`, writing nothing: why `declarationsOf` declares no bytes.
+ */
+describe('bytes a graph 5.0.0 wrote, declared to a store layout migration', () => {
+    const folder = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-migration-bytes-')));
+    const file = path.join(folder, 'layout1.sqlite');
+
+    beforeAll(() => {
+        fs.copyFileSync(path.join(__dirname, 'layout1-5.0.0.sqlite'), file);
+        const db = openSqlite(file);
+        try {
+            db.prepare(
+                `UPDATE drivine_node SET props = json_set(props, '$.raw', json('{"0":1,"1":2,"2":255}'), '$.buffer', json('{"type":"Buffer","data":[1,2,255]}')) WHERE json_extract(props, '$.name') = 'Ada'`
+            ).run();
+        } finally {
+            db.close();
+        }
+    });
+    afterAll(() => fs.rmSync(folder, { recursive: true, force: true }));
+
+    it('should refuse each as invalid, and write nothing', async () => {
+        const provider = new SqliteConnectionProvider('migration-bytes', DatabaseType.SQLITE, file, { graph: 'drivine' });
+        try {
+            for (const property of ['raw', 'buffer']) {
+                const report = await new StoreLayoutMigration(provider).migrate([{ label: 'Person', property, kind: 'bytes' }], {
+                    unproven: true
+                });
+                expect(report.status).toBe('invalid');
+                expect(report.properties.find((it) => it.property === property)?.invalid).toHaveLength(1);
+            }
+            await expect(provider.connect()).rejects.toBeInstanceOf(StoreLayoutError);
+        } finally {
+            await provider.end();
+        }
     });
 });
