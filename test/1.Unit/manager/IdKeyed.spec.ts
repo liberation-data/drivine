@@ -42,6 +42,7 @@ import { FALKORDB_GRAMMAR } from '@/backend/CypherGrammar';
 import { toFixedWidthIso } from '@/connection/falkordb/FalkorDbParameterCoercer';
 import { DrivineLogger } from '@/logger/DrivineLogger';
 import { asDate } from '@/mapper/GraphObjectMapper';
+import { recordIdAsLoaded } from '@/backend/sql/NodeIds';
 import { ClassType } from '@/query/QuerySpecification';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
@@ -869,6 +870,18 @@ describe('a Date id matched by its time', () => {
             });
             expect(day.stamp).toEqual(stamp);
         }
+    });
+
+    it('names a loaded Date id by its value where a lookup by its held tag finds two roots (#815)', async () => {
+        const id = new Date('2026-01-05T00:00:00.000Z');
+        recordIdAsLoaded(id, { value: new Date(id), held: { t: 'date', v: '2026-01-05' } });
+        const pm = {
+            database: 'id-keyed',
+            execute: async () => Promise.resolve(),
+            query: async () => Promise.resolve([{}, {}])
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new SqliteBackend(new SqliteGraph()), new ModelRegistry());
+        await expect(gom.load(StampedDay, id)).rejects.toThrow(`2 StampedDay roots have the id ${String(id)}.`);
     });
 
     it('is one node of a save that holds it twice, as two objects, each with a Date of its own', () => {

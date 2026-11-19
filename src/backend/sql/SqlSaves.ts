@@ -1,5 +1,5 @@
 import { ClassKind } from '@/annotation/Metadata';
-import { boundIdOf, idOf } from '@/backend/SaveStatementBuilder';
+import { boundIdOf } from '@/backend/SaveStatementBuilder';
 import { target as targetOf } from '@/backend/ViewProjector';
 import { DrivineError } from '@/DrivineError';
 import { FragmentModel } from '@/model/FragmentModel';
@@ -67,8 +67,6 @@ function boundOrNone(model: FragmentModel, node: any): any {
 export interface NodeWrite {
     /** The model whose labels and id property the node is found by. */
     model: FragmentModel;
-    /** The id as the object holds it, which what the save hands back is matched by. */
-    id: any;
     /**
      * The id as the save binds it, to find the node and as the key a node made is given: unchanged since the load, the
      * tag the store held it as (see boundIdOf).
@@ -103,7 +101,6 @@ export function nodeWrite(
 ): NodeWrite {
     const write: NodeWrite = {
         model: found,
-        id: idOf(model, object),
         bound: boundIdOf(model, object, loaded),
         labels: [...model.labels],
         add: model === found ? [] : model.labels.filter((it) => !found.labels.includes(it)),
