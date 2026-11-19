@@ -114,17 +114,30 @@ describe('SqliteHostFunctions', () => {
             ['^.$', '\u0085', 0], // a dot matches no U+0085
             ['[a&&&b]', '&', 1], // drivine-python#379
             ['[a\\Q\\E-c]', 'b', 1],
-            ['(?i)ß', 'ẞ', 0]
+            ['(?i)ß', 'ẞ', 0],
+            // The one departure, on purpose, as drivine4j's and drivine-python's: a POSIX class is read as Java names it,
+            // \p{Alpha}, where Java reads [[:alpha:]] as a class of the characters :, a, l, p and h (and gives 0, then 1).
+            ['[[:alpha:]]+', 'é', 1],
+            ['[[:alpha:]]', ':', 0]
         ])('matches %j in %j as Java does', (pattern, text, expected) => {
             expect(row('SELECT ? REGEXP ?', text, pattern)).toEqual([BigInt(expected)]);
         });
 
         it.each([
             ['a++b', 'a possessive quantifier is not supported on this platform; rewrite the pattern without it.'],
+            ['(?<=a)b', 'a lookbehind is not supported on this platform; rewrite the pattern without it.'],
+            [
+                'x'.repeat(2_000_001),
+                'a pattern written as more than 2000000 characters is not supported on this platform; rewrite the pattern without it.'
+            ],
             ['[&&]', 'Bad class syntax'],
             ['\\p{IsAll}', 'Unknown character property name {IsAll}']
-        ])('refuses %j, naming what it refuses', (pattern, message) => {
-            expect(() => row('SELECT ? REGEXP ?', 'a', pattern)).toThrow(message);
+        ])('refuses %#, naming what it refuses, with no prefix', (pattern, message) => {
+            expect(() => row('SELECT ? REGEXP ?', 'a', pattern)).toThrow(new Error(message));
+        });
+
+        it('takes a pattern of 2,000,000 characters', () => {
+            expect(row('SELECT ? REGEXP ?', 'a', 'x'.repeat(2_000_000))).toEqual([BigInt(0)]);
         });
     });
 

@@ -52,11 +52,11 @@ describe('=~ and matches, run on SQLite', () => {
     it("should match café with \\w+ in compiled Cypher's =~", async () => {
         const matched = await pm.query<boolean[]>(
             new QuerySpecification<boolean[]>({
-                text: "RETURN ['café' =~ '\\\\w+', 'c' =~ '[a-z&&b]']",
+                text: "RETURN ['café' =~ '\\\\w+', 'c' =~ '[a-z&&b]', 'café!' =~ '\\\\w+']",
                 language: 'CYPHER'
             })
         );
-        expect(matched).toEqual([[true, false]]);
+        expect(matched).toEqual([[true, false, false]]);
     });
 
     it('should match café with \\w+ in the query DSL', async () => {

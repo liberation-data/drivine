@@ -398,8 +398,12 @@ Notes:
   is an intersection, and `\Q…\E`, `\Z`, `\p{…}` and inline flags such as `(?i)` are Java's
   ([#560](https://github.com/liberation-data/drivine/issues/560),
   [#568](https://github.com/liberation-data/drivine/issues/568),
-  [#632](https://github.com/liberation-data/drivine/issues/632)). A pattern Java can't compile is refused with Java's
-  message. What the matcher can't match exactly as Java does, it refuses by name (`a lookbehind is not supported on
+  [#632](https://github.com/liberation-data/drivine/issues/632)). One departure is on purpose, as on drivine4j and
+  drivine-python: a POSIX class, `[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[:lower:]` or
+  `[:punct:]`, is read as Java names it, `\p{Alnum}` and so on, Unicode's, so `[[:alpha:]]` matches `é`, where Java
+  reads it as a class of the characters `:`, `a`, `l`, `p` and `h`; a full-text search's patterns, written for Postgres,
+  read alike. A pattern Java can't compile is refused with Java's description of the fault (`Bad class syntax`), without
+  its index. What the matcher can't match exactly as Java does, it refuses by name (`a lookbehind is not supported on
   this platform; rewrite the pattern without it.`), as the
   [compiler's README](https://github.com/liberation-data/drivine-cypher-spec/blob/main/compiler/README.md#regular-expressions)
   lists them:

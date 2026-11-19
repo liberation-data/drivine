@@ -153,7 +153,7 @@ null id could change the node whose id is the text `'null'`
 
 On SQLite, compiled Cypher's `=~` and the query DSL's `matches` read a pattern as Java reads it, with
 `UNICODE_CHARACTER_CLASS`, through the shared compiler's matcher, in Node and in the browser bundle alike, as drivine4j
-does. 5.0 and 4.x read it with JavaScript's `RegExp`, rewritten from Java's: `\w`, `\d` and `\b` were ASCII's, `\s`
+does. 5.0 and earlier read it with JavaScript's `RegExp`, rewritten from Java's: `\w`, `\d` and `\b` were ASCII's, `\s`
 was JavaScript's white space, and a class's `&&` was two ampersands, not an intersection
 ([#560](https://github.com/liberation-data/drivine/issues/560),
 [#568](https://github.com/liberation-data/drivine/issues/568),
