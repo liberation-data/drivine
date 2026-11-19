@@ -279,6 +279,23 @@ describe('OracleConnectionProvider, over a store it may not make', () => {
         expect(second.blocks()).toEqual(1);
     });
 
+    it('should hand a connection back to the pool where its session id could not be read', async () => {
+        const failure = new Error('NJS-500: connection to Oracle Database was closed or broken');
+        const close = jest.fn(async () => Promise.resolve());
+        const execute = jest.fn(async (sql: string) =>
+            sql.includes("SYS_CONTEXT('USERENV', 'SID')") ? Promise.reject(failure) : Promise.resolve({ rows: [] })
+        );
+        jest.spyOn(oracledb, 'createPool').mockResolvedValue({
+            getConnection: async () => Promise.resolve({ execute, close })
+        });
+        const provider = new OracleConnectionProvider('ORACLE', DatabaseType.ORACLE, {
+            connectString: 'host:1521/svc',
+            graph: `no_session_${Date.now()}`
+        });
+        await expect(provider.connect()).rejects.toBe(failure);
+        expect(close).toHaveBeenCalledTimes(1);
+    });
+
     it('should throw a busy lock, hand the connection back, and run the block again on the next connection', async () => {
         const { provider, blocks, close }: ReturnType<typeof providerFailing> = providerFailing(
             'ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'
