@@ -128,9 +128,14 @@ such a field with a decorator. See [Object Manager](05-object-manager.md#1-nodef
 A node whose `@NodeId` Oracle, Postgres or SQLite holds as a temporal value (Cypher's `date(...)`, a drivine4j `Instant`
 id) is refused by name when its class declares the id a `string`, `number`, `bigint` or `boolean`
 ([#813](https://github.com/liberation-data/drivine/issues/813)). 5.0 loaded it with the id as its text, which a lookup
-by id missed, so a save made a second node with that text id, silently. Declare a `datetime` id a `Date`; one at
-another offset or finer than a millisecond, like a `date`, still can't be saved back. One declared `any` still loads as
-the text, and a save of it still makes a second node. See
+by id missed, so a save made a second node with that text id, silently. Declare the id a `Date`, or `any`: a save of
+either finds the node and writes the id back as the store held it, while the id is unchanged since the load
+([#815](https://github.com/liberation-data/drivine/issues/815)), so an `any` id (which loads as the text) and a `Date` id
+over a `date`, a `localdatetime`, an offset or a fraction finer than a millisecond round-trip onto their node, where 5.0
+made a second one. A new id set through a JS `Date` is still written as a `datetime` at UTC to the millisecond, so a
+date-only or offset id can't be made from TypeScript. drivine-python is to refuse a union that would load the id as
+text too ([drivine-python#560](https://github.com/liberation-data/drivine-python/issues/560)); TypeScript records a union
+as `Object`, as it does `any`, so it never refuses one. See
 [Object Manager](05-object-manager.md#loading-data).
 
 ### An id given as text is read as the id's type

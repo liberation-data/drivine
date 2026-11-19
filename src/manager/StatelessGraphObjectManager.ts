@@ -5,14 +5,21 @@ import { IndexAdvicePolicy, QueryIndexAdvisor } from '@/dsl/QueryIndexAdvisor';
 import { QueryFn, WhereFn } from '@/dsl/Refs';
 import { ClassKind } from '@/annotation/Metadata';
 import { DrivineError } from '@/DrivineError';
-import { FragmentRow, GraphObjectMapper, heldTagsOf, packedTextOf, ViewRow } from '@/mapper/GraphObjectMapper';
+import {
+    FragmentRow,
+    GraphObjectMapper,
+    heldTagsOf,
+    keepLoadRecord,
+    packedTextOf,
+    ViewRow
+} from '@/mapper/GraphObjectMapper';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { CascadeType } from '@/manager/CascadeType';
 import { SaveOptions } from '@/manager/SaveOptions';
 import { MatchingOptions, NearestOptions, Scored } from '@/manager/Scored';
 import { PatchOptions, PatchResult } from '@/manager/PatchResult';
 import { splitVectors } from '@/backend/VectorWrites';
-import { idOf, propsOf, storedValue } from '@/backend/SaveStatementBuilder';
+import { boundIdOf, idOf, loadRecordOf, propsOf, storedValue } from '@/backend/SaveStatementBuilder';
 import { NullPolicy } from '@/manager/NullPolicy';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 import { whenNotContended } from '@/manager/Contention';
@@ -564,6 +571,8 @@ export class StatelessGraphObjectManager {
             }
             const loaded = found.object;
             const before = ObjectUtils.deepCopy(loaded);
+            // The root as loaded keeps its load's record, which a change that returns a copy is saved by (#811, #815).
+            keepLoadRecord(rootObjectOf(target, before), rootObjectOf(target, loaded));
             const changed = ((await change(loaded)) ?? loaded) as T;
             // The root's properties as the load read them, which the save compares a packed field with.
             const loadedProperties = (target.kind === 'GRAPH_VIEW' ? found.row?.root?.props : found.row?.props) ?? {};
@@ -671,11 +680,13 @@ export class StatelessGraphObjectManager {
             const held = isSqlBackend(this.backend) ? heldTagsOf(fragment) : undefined;
             return {
                 id,
+                // The id as a save binds it: unchanged since the load, the tag the store held it as (#815).
+                bound: held ? boundIdOf(root, fragment, held) : id,
                 ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR, held))
             };
         });
-        // Each id by its value (see exactKey): a Date is one id by its time.
-        const ids = rows.map((it) => it.id);
+        // Each id by its value (see exactKey): a Date is one id by its time, and an id held as loaded by its tag.
+        const ids = rows.map((it) => it.bound);
         if (new Set(ids.map(exactKey)).size !== ids.length) {
             throw new DrivineError('patchAll takes each id once.');
         }
@@ -685,7 +696,10 @@ export class StatelessGraphObjectManager {
         // Each statement bound before the first runs: one a SQL store refuses (a NaN) is refused with none written.
         const statements: QuerySpecification<PatchResult & { id: any }>[] = [];
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
-            statements.push(this.backend.patchMany(root).spec({ rows: sorted.slice(start, start + PATCH_ROWS) }));
+            const rows = sorted
+                .slice(start, start + PATCH_ROWS)
+                .map(({ bound, ...row }: (typeof sorted)[number]) => ({ ...row, id: bound }));
+            statements.push(this.backend.patchMany(root).spec({ rows }));
         }
         for (const statement of statements) {
             const found = await this.whenUncontended(async () => this.persistenceManager.query(statement));
@@ -1101,7 +1115,7 @@ export class StatelessGraphObjectManager {
                 result.groups[i].after.map((it) => [it.id, it.stamp])
             );
             for (const object of group.objects) {
-                const id = object[group.model.nodeIdField!];
+                const id = this.handedId(group.model, object);
                 object[group.model.stampField] = Stamps.handedBack(
                     object[group.model.stampField],
                     found.get(id) ?? '',
@@ -1126,8 +1140,12 @@ export class StatelessGraphObjectManager {
         if (!reads || rootObject?.[root.nodeIdField!] == null) {
             return options;
         }
+        // Read by the id the save will find the node by: on a SQL store, the tag an unchanged id was loaded from (#815).
+        const id = isSqlBackend(this.backend)
+            ? boundIdOf(root, rootObject, loadRecordOf(rootObject, options))
+            : rootObject[root.nodeIdField!];
         const held = await this.persistenceManager.query<Record<string, any>>(
-            this.backend.heldProperties(root).spec({ id: rootObject[root.nodeIdField!] })
+            this.backend.heldProperties(root).spec({ id })
         );
         return { ...options, heldProperties: held[0] ?? {} };
     }
@@ -1349,7 +1367,7 @@ export class StatelessGraphObjectManager {
                 after.map((it) => [it.id, it.stamp])
             );
             for (const node of this.nodesOf(object, model)) {
-                const id = node[model.nodeIdField!];
+                const id = this.handedId(model, node);
                 if (now.has(id)) {
                     node[model.stampField!] = Stamps.handedBack(
                         node[model.stampField!],
@@ -1359,6 +1377,16 @@ export class StatelessGraphObjectManager {
                 }
             }
         });
+    }
+
+    /**
+     * The id a save handed `node`'s stamp back under: on a SQL store the id as the save bound it (see boundIdOf), so a
+     * node whose id is held as a date and one whose id is the date's text, both loaded as that text, are each handed
+     * their own (#815).
+     */
+    private handedId(model: FragmentModel, node: any): any {
+        const id = node[model.nodeIdField!];
+        return id != null && isSqlBackend(this.backend) ? boundIdOf(model, node) : id;
     }
 
     /** The instances of a fragment class the object holds, at any depth, the root included. */
@@ -1379,7 +1407,10 @@ export class StatelessGraphObjectManager {
 
     private async staleObject(statement: SaveStatement): Promise<StaleObjectException> {
         const id = statement.bindings.root.id;
-        const found = await this.persistenceManager.query<string>(this.backend.foundStamp(statement.root).spec({ id }));
+        // Read by the id the save found the node by: on a SQL store, the tag an unchanged id was loaded from (#815).
+        const found = await this.persistenceManager.query<string>(
+            this.backend.foundStamp(statement.root).spec({ id: statement.rootIdBound ?? id })
+        );
         return new StaleObjectException(
             statement.root.type,
             id,
@@ -1414,4 +1445,9 @@ function relatedIds(rel: RelationshipModel, value: any): any[] {
         // By value (see readBackKey): a loaded Date id is another Date, or the text a related object was given.
         return readBackKey(fragment?.[root.nodeIdField!], root);
     });
+}
+
+/** The root of an object of the target: a view's root, or the fragment itself. */
+function rootObjectOf(target: TargetModel, object: any): any {
+    return target.kind === 'GRAPH_VIEW' ? object?.[target.model.rootField] : object;
 }

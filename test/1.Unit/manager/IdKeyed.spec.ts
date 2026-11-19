@@ -41,6 +41,8 @@ import { writeLayout } from '@/cypher/ValueLayout';
 import { FALKORDB_GRAMMAR } from '@/backend/CypherGrammar';
 import { toFixedWidthIso } from '@/connection/falkordb/FalkorDbParameterCoercer';
 import { DrivineLogger } from '@/logger/DrivineLogger';
+import { asDate } from '@/mapper/GraphObjectMapper';
+import { recordIdAsLoaded } from '@/backend/sql/NodeIds';
 import { ClassType } from '@/query/QuerySpecification';
 import { GraphObjectManagerFactory } from '@/manager/GraphObjectManagerFactory';
 import { PersistenceManagerFactory } from '@/manager/PersistenceManagerFactory';
@@ -849,6 +851,37 @@ describe('a Date id matched by its time', () => {
             groups: [{ before: [], after: [{ id, stamp }] }]
         });
         expect(day.stamp).toEqual(stamp);
+    });
+
+    it("hands a stamped node of a Date id its stamp by the tag's text Oracle reads it back as, finer than a millisecond too (#815)", () => {
+        const model = new ModelRegistry().fragment(StampedDay);
+        const stamp = `${'a'.repeat(16)}:${'b'.repeat(16)}`;
+        const gom = new StatelessGraphObjectManager(
+            {} as any,
+            new OracleBackend(new OracleGraph()),
+            new ModelRegistry()
+        );
+        for (const id of ['2026-01-05T10:11:12.123456789Z', '2026-01-05T12:11:12.123456+02:00', '-0044-03-15']) {
+            // The Date a load gives for the tag, as a save of it finds the node by the tag (#815).
+            const day = Object.assign(new StampedDay(), { on: asDate(id) });
+            expect(day.on).toBeInstanceOf(Date);
+            (gom as any).handBackFragments([{ model, objects: [day] }], {
+                groups: [{ before: [], after: [{ id, stamp }] }]
+            });
+            expect(day.stamp).toEqual(stamp);
+        }
+    });
+
+    it('names a loaded Date id by its value where a lookup by its held tag finds two roots (#815)', async () => {
+        const id = new Date('2026-01-05T00:00:00.000Z');
+        recordIdAsLoaded(id, { value: new Date(id), held: { t: 'date', v: '2026-01-05' } });
+        const pm = {
+            database: 'id-keyed',
+            execute: async () => Promise.resolve(),
+            query: async () => Promise.resolve([{}, {}])
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new SqliteBackend(new SqliteGraph()), new ModelRegistry());
+        await expect(gom.load(StampedDay, id)).rejects.toThrow(`2 StampedDay roots have the id ${String(id)}.`);
     });
 
     it('is one node of a save that holds it twice, as two objects, each with a Date of its own', () => {

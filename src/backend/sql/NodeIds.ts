@@ -1,7 +1,8 @@
 import type { GraphBackend } from '@/backend/GraphBackend';
 import { idSql, SharedStore } from '@/cypher/SharedCypherCompiler';
-import { heldKey } from '@/cypher/ValueLayout';
+import { HeldAsLoaded, heldKey } from '@/cypher/ValueLayout';
 import { DrivineLogger } from '@/logger/DrivineLogger';
+import { ObjectUtils } from '@/utils/ObjectUtils';
 import { FragmentModel } from '@/model/FragmentModel';
 
 /**
@@ -80,6 +81,15 @@ export function dateOf(text: string): unknown {
     return Number.isNaN(date.getTime()) ? NO_NODE : date;
 }
 
+/**
+ * ISO text as the `Date` a load reads it as (GraphObjectMapper's asDate): as {@link dateOf} reads it, a signed year of
+ * four digits (`-0044`, as Java writes it) read too, and a fraction finer than a millisecond cut to one, as a `Date` holds
+ * it; NO_NODE for any other text.
+ */
+export function loadedDateOf(text: string): unknown {
+    return dateOf(text.replace(/^([+-])(\d{4})-/, '$100$2-').replace(/(\.\d{3})\d+/, '$1'));
+}
+
 /** Whether the month of the year has the day. */
 function isCalendarDay(year: number, month: number, day: number): boolean {
     const date = new Date(0);
@@ -96,13 +106,46 @@ export function isSqlBackend(backend: GraphBackend): boolean {
 const logger: DrivineLogger = new DrivineLogger('NodeIds');
 
 /**
+ * Each `Date` a SQL store's load gave as a node's id, with the value it was given, copied, and the temporal tag the store
+ * held (see GraphObjectMapper's recordTagsAsLoaded). Kept only as long as the `Date` is.
+ */
+const idsAsLoaded = new WeakMap<object, { value: any; held: any }>();
+
+/**
+ * Internal: records that a SQL store's load gave `id` as a node's id, from the tag `loaded.held`, so a lookup given that
+ * value finds the node by the tag (see lookupId). Only an id that is an object, a `Date`, can be told apart from another
+ * of its value: text an id declared `any` loaded as is any text.
+ */
+export function recordIdAsLoaded(id: unknown, loaded: { value: any; held: any }): void {
+    if (id !== null && typeof id === 'object') {
+        idsAsLoaded.set(id, loaded);
+    }
+}
+
+/**
+ * `given`, a `Date` a SQL store's load gave as an id and unchanged since, as the tag the store held it as, which a lookup
+ * binds (#815): a `date`, a `localdatetime`, an offset or a fraction finer than a millisecond, which a `Date` written
+ * afresh would miss. Undefined for any other value.
+ */
+function heldAsLoaded(given: unknown): HeldAsLoaded | undefined {
+    const loaded = given !== null && typeof given === 'object' ? idsAsLoaded.get(given) : undefined;
+    return loaded && ObjectUtils.deepEqual(given, loaded.value) ? new HeldAsLoaded(given, loaded.held) : undefined;
+}
+
+/**
  * The id a lookup of a node of `model` by `given` binds on `backend`: on a SQL store `given` read as the id's type
  * ({@link typedId}), and {@link NO_NODE} where it finds no node, which the caller runs no statement for, logging why at
- * DEBUG; on a graph engine `given` as it is, as the engine compares it.
+ * DEBUG; on a graph engine `given` as it is, as the engine compares it. A `Date` a SQL store's load gave as an id, and
+ * unchanged since, is the tag the store held it as (#815), so `update`, `patch`, `delete`, a load and a relationship's end
+ * given a loaded object's id find its node.
  */
 export function lookupId(backend: GraphBackend, model: FragmentModel, given: unknown): unknown {
     if (!isSqlBackend(backend)) {
         return given;
+    }
+    const held = heldAsLoaded(given);
+    if (held) {
+        return held;
     }
     const id = typedId(model, given);
     if (id === NO_NODE && given != null) {
@@ -142,10 +185,13 @@ export function temporalText(layout: string): string | undefined {
  * `model`, text read as the id's type first ({@link typedId}), as Oracle reads a date back as its tag's text `v` and
  * FalkorDB as the text with nine digits of the second it holds it as. Any other id is as it is. A `Map` finds a `Date` by
  * the object, never by its value, and a `bigint` never by a number, so the object's id and the id read back are matched
- * as this reads both.
+ * as this reads both. An id a save binds as held as loaded is its value (see asGiven).
  */
-export function readBackKey(id: unknown, model?: FragmentModel): unknown {
-    const typed = model && typeof id === 'string' ? typedId(model, id) : id;
+export function readBackKey(given: unknown, model?: FragmentModel): unknown {
+    const id = asGiven(given);
+    // A Date id's text as a load reads it (#815): Oracle reads back a tag finer than a millisecond as its text.
+    const typed =
+        model && typeof id === 'string' ? (model.nodeIdType === Date ? loadedDateOf(id) : typedId(model, id)) : id;
     const it = typed === NO_NODE ? id : typed;
     if (it instanceof Date) {
         return Number.isNaN(it.getTime()) ? String(it) : it.toISOString();
@@ -154,11 +200,24 @@ export function readBackKey(id: unknown, model?: FragmentModel): unknown {
 }
 
 /**
+ * An id as the object holds it: one a save binds as the tag it was loaded from (see SaveStatementBuilder's boundIdOf)
+ * as its value, so what a statement hands back for it is matched by the id the object holds.
+ */
+function asGiven(id: unknown): unknown {
+    return id instanceof HeldAsLoaded ? id.value : id;
+}
+
+/**
  * `id` as itself, by value: a `Date` by its time, and any other value by its type and value, so that two ids that
  * {@link readBackKey} reads alike (a `Date` and its text, where the id's field takes both) stay apart, as a store that
- * hands each id back as it was given (Postgres, SQLite, Neo4j, Memgraph) holds them apart.
+ * hands each id back as it was given (Postgres, SQLite, Neo4j, Memgraph) holds them apart. An id a save binds as held
+ * as loaded is the tag it binds, so a node whose id is held as a date and one whose id is the date's text, both loaded
+ * as that text, stay apart too (#815).
  */
 export function exactKey(id: unknown): unknown {
+    if (id instanceof HeldAsLoaded) {
+        return `held:${JSON.stringify(id.held)}`;
+    }
     if (id instanceof Date) {
         return `date:${id.getTime()}`;
     }

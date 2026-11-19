@@ -1,6 +1,14 @@
 import { Direction } from '@/annotation/Metadata';
 import { SaveStatement } from '@/backend/SaveStatement';
-import { bagEntries, fragmentOf, idOf, objectProps, propsOf } from '@/backend/SaveStatementBuilder';
+import {
+    bagEntries,
+    boundIdOf,
+    fragmentOf,
+    idOf,
+    loadRecordOf,
+    objectProps,
+    propsOf
+} from '@/backend/SaveStatementBuilder';
 import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
 import {
     boundIdRows,
@@ -48,6 +56,8 @@ export class OracleSaveBuilder {
     private readonly stamped: { model: FragmentModel; ids: any[] }[] = [];
     private count = 0;
     private options: SaveOptions<any> = {};
+    /** The root's id as the block binds it (see boundIdOf). */
+    private rootIdBound: unknown;
     /** Whether the block writes lowercased copies, and so declares `lower_node`. */
     private lowers = false;
 
@@ -105,8 +115,11 @@ export class OracleSaveBuilder {
             object,
             props,
             model.nodeLabels && keep(model.nodeLabels.field) ? clear : undefined,
-            held
+            held,
+            model,
+            loadRecordOf(object, this.options)
         );
+        this.rootIdBound = write.bound;
         const expected = model.stampField ? object[model.stampField] : undefined;
         const p = this.nodeParams(write);
         if (createOnly && expected != null) {
@@ -165,7 +178,7 @@ export class OracleSaveBuilder {
                 const nodeObject = into.kind === 'GRAPH_VIEW' ? node[into.model.rootField] : node;
                 const root = rootOf(into);
                 const concrete = concreteModel(this.registry, root, nodeObject);
-                this.stampedId(root, idOf(root, nodeObject));
+                this.stampedId(root, boundIdOf(root, nodeObject));
                 const props: Record<string, any> = {
                     ...propsOf(concrete, nodeObject, stampExcluded(concrete), false, true)
                 };
@@ -225,7 +238,7 @@ export class OracleSaveBuilder {
             const keep = view.relationships
                 .filter((it) => it.type === rel.type && it.direction === rel.direction)
                 .flatMap((it) =>
-                    items(it, object[it.field]).map((item) => idOf(rootOf(targetOf(it)), fragmentOf(it, item)))
+                    items(it, object[it.field]).map((item) => boundIdOf(rootOf(targetOf(it)), fragmentOf(it, item)))
                 );
             // Whether x, a target the root is joined to, holds none of the ids bound as `list`.
             const notIn = (list: string): string => `NOT ${holdsIdAmong('x', into.nodeIdProperty!, boundIdRows(list))}`;
@@ -309,7 +322,8 @@ END;`;
             root,
             rootObject,
             expected,
-            this.stamped.map((it) => it.model)
+            this.stamped.map((it) => it.model),
+            this.rootIdBound
         );
     }
 
@@ -328,7 +342,7 @@ END;`;
     private nodeParams(write: NodeWrite): Record<string, string> {
         return {
             match: this.bind(idMatch(this.graph.nodes, write.model.nodeIdProperty!, write.model.labels)),
-            id: this.bind(writeLayout(write.id, 'oracle')),
+            id: this.bind(writeLayout(write.bound, 'oracle')),
             labels: this.bind(JSON.stringify([...new Set(write.labels)])),
             props: this.bind(writeProps(write.props, 'oracle')),
             add: this.bind(JSON.stringify(write.add)),
@@ -338,6 +352,10 @@ END;`;
         };
     }
 
+    /**
+     * Notes that the stamp of the node of `model` whose id `id` binds as is read: `id` as the save binds it (see
+     * boundIdOf), so a tag held as loaded finds the node. Each once, by the text it is bound as.
+     */
     private stampedId(model: FragmentModel, id: any): void {
         if (!model.stampField) {
             return;
@@ -347,7 +365,8 @@ END;`;
             stamped = { model, ids: [] };
             this.stamped.push(stamped);
         }
-        if (!stamped.ids.includes(id)) {
+        const text = writeLayout(id, 'oracle');
+        if (!stamped.ids.some((it) => writeLayout(it, 'oracle') === text)) {
             stamped.ids.push(id);
         }
     }

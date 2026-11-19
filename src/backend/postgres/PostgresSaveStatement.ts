@@ -21,9 +21,10 @@ export class PostgresSaveStatement extends SaveStatement {
         rootObject: any,
         expectedStamp: string | undefined,
         stampedModels: FragmentModel[],
-        private readonly handed: Map<string, { group: number; id: any }>
+        private readonly handed: Map<string, { group: number; id: any }>,
+        rootIdBound?: unknown
     ) {
-        super(text, bindings, root, rootObject, expectedStamp, stampedModels);
+        super(text, bindings, root, rootObject, expectedStamp, stampedModels, rootIdBound);
     }
 
     spec<T>(more: Record<string, any> = {}): QuerySpecification<T> {

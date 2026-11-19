@@ -5,10 +5,11 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { absent, present, storedKey, withoutKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
-import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
+import { boundIdOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { WritePlan } from '@/backend/sql/WritePlan';
+import { HeldAsLoaded } from '@/cypher/ValueLayout';
 import { DrivineError } from '@/DrivineError';
 import { RelateMode } from '@/manager/NodeRef';
 import { SaveOptions } from '@/manager/SaveOptions';
@@ -110,15 +111,17 @@ export class PostgresWrites {
             const key = idProperty(group.model, "it can't be saved: a save merges on the id");
             const shape = plan.shape(group.model.labels, key);
             group.objects.forEach((object) => {
-                const id = idOf(group.model, object);
                 const props = withoutKey(objectProps(group.model, object, options, true), key);
                 const index = String(handed.size);
-                handed.set(index, { group: g, id });
+                // Found, keyed and handed back by the id as the save binds it, the tag it was loaded from while
+                // unchanged (#815).
+                const bound = boundIdOf(group.model, object);
+                handed.set(index, { group: g, id: bound });
                 plan.node(
                     shape,
                     key,
-                    id,
-                    storedKey(id, this.graph.store),
+                    bound,
+                    storedKey(bound, this.graph.store),
                     [...new Set(group.model.labels)],
                     { set: present(props), unset: absent(props), lower: group.model.lowerCopied },
                     index
@@ -212,7 +215,9 @@ export class PostgresWrites {
  * wants there, as it reads a value bound without a type. A number is written in parentheses, so a negative one after a
  * minus is not read as the start of a comment.
  */
-function literal(value: unknown, store: WriteFunction['store']): string {
+function literal(given: unknown, store: WriteFunction['store']): string {
+    // An id held as loaded (see boundIdOf) is named by its value, as a where compares it.
+    const value = given instanceof HeldAsLoaded ? given.value : given;
     if (value === null || value === undefined) {
         return 'NULL';
     }

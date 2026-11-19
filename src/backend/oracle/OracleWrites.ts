@@ -3,7 +3,7 @@ import { boundIdRows, foundByIds, idMatch, NO_JSON_TABLE_TRANSFORM, oracleId } f
 import { GraphStatement } from '@/backend/GraphStatement';
 import { FragmentGroup } from '@/backend/FragmentBatchStatement';
 import { MatchedNode } from '@/backend/EdgeStatements';
-import { idOf, objectProps } from '@/backend/SaveStatementBuilder';
+import { boundIdOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { heldKey, writeLayout, writeProps } from '@/cypher/ValueLayout';
 import { LayoutBoundStatement } from '@/backend/oracle/LayoutBoundStatement';
 import { RowOrderedStatement } from '@/backend/oracle/RowOrderedStatement';
@@ -131,7 +131,7 @@ export class OracleWrites {
                 }
                 const ids = bind(
                     writeLayout(
-                        group.objects.map((it) => idOf(group.model, it)),
+                        group.objects.map((it) => boundIdOf(group.model, it)),
                         'oracle'
                     )
                 );
@@ -154,7 +154,7 @@ export class OracleWrites {
                 const props = objectProps(group.model, object, options, true);
                 body.push(
                     `v_root := write_node(${bind(this.matchText(group.model))}, ${bind(
-                        writeLayout(idOf(group.model, object), 'oracle')
+                        writeLayout(boundIdOf(group.model, object), 'oracle')
                     )}, ` +
                         `${bind(JSON.stringify(group.model.labels))}, ${bind(
                             writeProps(props, 'oracle')
