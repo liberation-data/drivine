@@ -8,13 +8,7 @@ import {
     Page
 } from '@/backend/GraphBackend';
 import { GraphStatement } from '@/backend/GraphStatement';
-import {
-    carriesLabels,
-    hasLabels,
-    nodeDocument,
-    OracleGraph,
-    textOf
-} from '@/backend/oracle/OracleGraph';
+import { carriesLabels, hasLabels, nodeDocument, OracleGraph, textOf } from '@/backend/oracle/OracleGraph';
 import { called, hinted, noted } from '@/backend/oracle/OracleFragments';
 import { DSL_ROW, FragmentQueryRenderer } from '@/backend/sql/FragmentQueryRenderer';
 import { SqlFragments } from '@/cypher/SqlFragments';
@@ -508,4 +502,3 @@ END;`);
         ];
     }
 }
-

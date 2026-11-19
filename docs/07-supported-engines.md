@@ -98,7 +98,9 @@ Drivine's own, its stamp and its schema marker, has that layout's indexes droppe
 holds the application's nodes is refused,
 on that connection and every one after it, with a `StoreLayoutError` that names the graph and says what to do: export
 it with the Drivine version that wrote it, and import it with this one. Nothing is migrated. A graph a later Drivine
-stamped with a later layout is refused too.
+stamped with a later layout is refused too. The error's `graph` names the graph, `from` the earlier layout it was
+written in, where it holds values, and `inProgress` is true where a migration of it to this layout was begun and
+not finished.
 
 Notes:
 
@@ -151,6 +153,11 @@ Notes:
   Neo4j: `"of sou*"` is the phrase `of sou`. The index holds what has been committed, so a search doesn't see its own
   transaction's writes. Oracle Text is in the regular Free image, not the slim one; without it, or with no index made, a
   search counts the words in the text of every node of the label and scores them by BM25, as Postgres does.
+- Each session Drivine opens compares and sorts text by its code points (`NLS_COMP = BINARY NLS_SORT = BINARY`), as
+  Cypher does, whatever a database or a logon trigger sets: under `NLS_COMP = LINGUISTIC NLS_SORT = BINARY_CI`, a
+  compiled `'a' = 'A'` was true, with no error
+  ([drivine-cypher-spec#372](https://github.com/liberation-data/drivine-cypher-spec/issues/372)). A statement of yours
+  runs in such a session, so its text compares by code points too.
 - Each session Drivine opens makes no adaptive plan (`OPTIMIZER_ADAPTIVE_PLANS = FALSE`). On tables without
   statistics, Oracle's adaptive join plan gave no rows for a read of a graph just written, where the same plan, fixed,
   gave them all ([#331](https://github.com/liberation-data/drivine/issues/331)). A statement of yours that relies on
@@ -637,7 +644,10 @@ const names = await pm.query<string>(
   `RETURN 123 AND true` fails with `AND takes a truth value, not an integer, as in Neo4j.`, and so do
   `WITH 123 AS x RETURN x.num` and `RETURN 1 IN 'foo'`. A step of 0 in `range()`, written or given, a parameter given
   as the index of a list or a map written that isn't indexed by its kind, and a map, or a list of maps or of lists,
-  written in `SET`, are refused too, though Neo4j fails on them only when a row reaches them. A value whose kind is
+  written as a property in `SET`, `CREATE` or `MERGE`, are refused too, though Neo4j fails on them only when a row
+  reaches them. Such a value given as a parameter, or a list of more than one kind, fails the statement as its row is
+  written, as on Neo4j, and nothing is stored
+  ([drivine4j#820](https://github.com/liberation-data/drivine4j/issues/820)). A value whose kind is
   known only when the row is read, such as a property or a parameter, is compiled: where it is of the wrong kind, the
   statement may give null where Neo4j fails. A variable used as two kinds is refused, as Neo4j refuses it:
   `MATCH (a)-[a]->()` fails with `a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j.`

@@ -208,6 +208,10 @@ describe("The query DSL on Oracle, as the module's fragments", () => {
         expect(query.labelsTested).toEqual(['Scored']);
         const statement = backend.loadAllFragments(scored.model as any, query.where, {}, query.labelsTested);
         expect(statement.text).not.toContain(`JSON_EXISTS(n_.labels, '$?(@ == "Scored")')`);
+        // A view's root is the row the module reads the index over, so its label is the one implied.
+        expect(
+            backend.renderQuery((q: any) => ({ where: q.scored.name.eq('Ada') }), view, indexed).labelsTested
+        ).toEqual(['Scored']);
         // Inside an or the module reads no index, and the label is tested as before.
         const either = backend.renderQuery(
             (q: any) => ({ where: anyOf(q.name.eq('Ada'), q.name.eq('Bo')) }),
