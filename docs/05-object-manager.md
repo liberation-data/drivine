@@ -318,6 +318,21 @@ so `'6'` doesn't find a node of the same labels whose id is the number 6. Text t
 `'abc'` for a number id, finds no node: nothing is run, and a DEBUG line says why. A null id finds none either, and runs
 nothing. Neo4j, Memgraph and FalkorDB compare the id as it is given.
 
+On Oracle, Postgres and SQLite an id may be held as a temporal value another writer stored, such as Cypher's
+`date('2026-01-05')` or a drivine4j `Instant` id. A class that declares such an id a `string`, `number`, `bigint` or
+`boolean` can't load the node: the read gives the id as its text, which a lookup by id doesn't find, as it compares the
+id's kind as well, so a save of what was loaded would make a second node. Each read that maps the node (`load`,
+`loadAll`, `loadNearest`, `loadMatching`, `edges.loadRelated`, `update`, a grouped read's path key, and a view's root,
+related nodes, nested views, relationship fragments and path ends) refuses it by name, before anything is written
+([#813](https://github.com/liberation-data/drivine/issues/813)): `Holiday's @NodeId id is declared a string, but the
+node whose id is '2026-01-05' holds it as a date: declare id as a date to load it.` Declare the id a `Date` for a
+`datetime` at UTC to the millisecond (what a `Date` is saved as), which loads, finds and saves the node as one. An id
+held as a `date`, a `localdatetime`, or a `datetime` at another offset or finer than a millisecond (as a drivine4j
+`Instant` may be) loads as a `Date` too, but a save writes the `Date` as a `datetime` at UTC to the millisecond, which a
+lookup doesn't find the node by: a save of such a node makes a second one, so write it with Cypher. An id declared
+`any`, `unknown` or a union, which TypeScript records no scalar type for, is not refused, and loads as the text the
+store gives: a save of it makes a second node too.
+
 #### Count
 
 `count` counts exactly what `loadAll` would return for the same type and filter:

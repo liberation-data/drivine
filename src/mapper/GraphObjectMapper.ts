@@ -8,7 +8,8 @@ import { RelationshipFragmentModel } from '@/model/RelationshipFragmentModel';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { parseExactIntegers } from '@/utils/ExactIntegers';
 import { dateOf, NO_NODE } from '@/backend/sql/NodeIds';
-import { tagsHeldBy } from '@/cypher/ValueLayout';
+import { isTag, tagsHeldBy } from '@/cypher/ValueLayout';
+import { DrivineError } from '@/DrivineError';
 import { ObjectUtils } from '@/utils/ObjectUtils';
 
 /**
@@ -221,6 +222,7 @@ export class GraphObjectMapper {
             source ?? {},
             fragment
         );
+        refuseIdOfAnotherKind(type, fragment, source);
         Object.assign(fields, bags);
         const byGraphName = new Map([...mapping.graphProperties].map(([field, name]) => [name, field]));
         for (const [name, value] of Object.entries(props)) {
@@ -246,6 +248,47 @@ export class GraphObjectMapper {
         recordTagsAsLoaded(instance, source, props, fields, byGraphName, mapping);
         return instance;
     }
+}
+
+/**
+ * The kind word of each type TypeScript records for a `@NodeId` field that a temporal tag can't load as: a concrete
+ * scalar. An id declared `any`, `unknown`, a union or an interface is recorded as `Object`, and one no decorator records
+ * isn't recorded at all: neither is refused, as the user didn't type it.
+ */
+const SCALAR_ID_KINDS = new Map<unknown, string>([
+    [String, 'string'],
+    [Number, 'number'],
+    [BigInt, 'bigint'],
+    [Boolean, 'boolean']
+]);
+
+/**
+ * Refuses a node whose `@NodeId` property a SQL store held as a temporal tag, where the class declares the id a
+ * non-temporal scalar (#813). The read gives the tag as its text, but a lookup by that text compares the id's kind as
+ * well, so it misses the node: a save of the loaded object would make a second node with the text id. An id declared a
+ * `Date` loads as one (#807), whose lookup binds a datetime's tag, and is not refused. Each read that maps a node comes
+ * here: a fragment, a view's root, related node and nested view, a relationship fragment's node and a path's node, by
+ * every load, search and update. The message is shared with drivine4j and drivine-python.
+ */
+function refuseIdOfAnotherKind(type: Function, fragment: FragmentModel | undefined, source: any): void {
+    const property = fragment?.nodeIdProperty;
+    const field = fragment?.nodeIdField;
+    if (!property || !field || source == null || typeof source !== 'object') {
+        return;
+    }
+    const held = tagsHeldBy(source)?.get(property);
+    if (!isTag(held) || declaredDate(type, fragment!, field)) {
+        return;
+    }
+    const declared = SCALAR_ID_KINDS.get(Reflect.getMetadata('design:type', type.prototype, field));
+    if (!declared) {
+        return;
+    }
+    const kind = held.$t;
+    throw new DrivineError(
+        `${type.name}'s @NodeId ${field} is declared a ${declared}, but the node whose id is '${source[property]}' ` +
+            `holds it as a ${kind}: declare ${field} as a ${kind} to load it.`
+    );
 }
 
 /**
