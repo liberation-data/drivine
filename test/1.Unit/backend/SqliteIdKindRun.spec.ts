@@ -693,6 +693,7 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
          * too, silently. Not #815's: a plan keyed so before it, by an object no load made. Pinned until the plan's keys
          * tell the kinds apart, in the shared module.
          */
+        // A write plan keys a date id and its text alike (drivine-cypher-spec#391).
         it.failing("trims a view's relationship to a node whose id is a date, kept the date's text alone", async () => {
             await gom.save(
                 Object.assign(new Owned(), {
