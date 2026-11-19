@@ -326,10 +326,12 @@ id's kind as well, so a save of what was loaded would make a second node. Each r
 related nodes, nested views, relationship fragments and path ends) refuses it by name, before anything is written
 ([#813](https://github.com/liberation-data/drivine/issues/813)): `Holiday's @NodeId id is declared a string, but the
 node whose id is '2026-01-05' holds it as a date: declare id as a date to load it.` Declare the id a `Date` for a
-`datetime` (the kind a `Date` is saved as), which loads, finds and saves the node as one. An id held as a `date` loads
-as a `Date` too, but a save writes a `Date` as a `datetime`, which a lookup doesn't find the date by: a save of such a
-node makes a second one, so write it with Cypher. An id declared `any`, `unknown` or a union, which TypeScript records
-no scalar type for, is not refused, and loads as the text the store gives: a save of it makes a second node too.
+`datetime` at UTC to the millisecond (what a `Date` is saved as), which loads, finds and saves the node as one. An id
+held as a `date`, a `localdatetime`, or a `datetime` at another offset or finer than a millisecond (as a drivine4j
+`Instant` may be) loads as a `Date` too, but a save writes the `Date` as a `datetime` at UTC to the millisecond, which a
+lookup doesn't find the node by: a save of such a node makes a second one, so write it with Cypher. An id declared
+`any`, `unknown` or a union, which TypeScript records no scalar type for, is not refused, and loads as the text the
+store gives: a save of it makes a second node too.
 
 #### Count
 

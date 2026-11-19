@@ -1,5 +1,6 @@
 import {
     backendFor,
+    count,
     DatabaseRegistry,
     DatabaseType,
     Direction,
@@ -15,6 +16,7 @@ import {
     NodeId,
     nodeRef,
     NodeStamp,
+    pathKey,
     PersistenceManager,
     PersistenceManagerFactory,
     PostgresGraph,
@@ -233,6 +235,15 @@ describe.each(sqlStores())('a @NodeId held as a temporal, declared a non-tempora
             [
                 'edges.loadRelated',
                 async () => gom.edges.loadRelated(nodeRef(Owner, 'o'), 'OWNS', Direction.OUTGOING, LookupDateAsText),
+                asText
+            ],
+            [
+                "a grouped read's path key",
+                async () =>
+                    gom.groups.load(Owner, {
+                        keys: { keyed: pathKey(LookupDateAsText, [{ type: 'OWNS' }]) },
+                        aggregates: { all: count() }
+                    }),
                 asText
             ],
             ["a view's root", async () => gom.loadAll(KeyedView), asText],

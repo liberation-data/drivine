@@ -380,6 +380,19 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             expect(await keyedCount()).toEqual(1);
         });
 
+        // As the date below: a Date binds as a datetime at UTC to the millisecond, which a lookup of a node whose id is
+        // held otherwise misses, so the save makes a second node (#815). Fails while that holds.
+        it.failing.each([
+            "datetime('2026-01-05T10:11:12+02:00')",
+            "datetime('2026-01-05T10:11:12.123456789Z')",
+            "localdatetime('2026-01-05T10:11:12')"
+        ])('held as %s: saves back onto the same node', async (cypher) => {
+            await reset(cypher);
+            const [loaded] = await gom.loadAll(LookupDateAsDate);
+            await gom.save(Object.assign(loaded, { name: 'resaved' }));
+            expect(await keyedCount()).toEqual(1);
+        });
+
         it('held as a date: loads as a Date, not refused', async () => {
             await reset("date('2026-01-05')");
             const [loaded] = await gom.loadAll(LookupDateAsDate);
