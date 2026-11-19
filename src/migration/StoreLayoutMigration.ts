@@ -4,7 +4,7 @@ import { stampParameters, storeStatements } from '@/backend/StoreStatements';
 import { Connection } from '@/connection/Connection';
 import { QuerySpecification } from '@/query/QuerySpecification';
 import { randomUuid } from '@/utils/Random';
-import { propertyMetadata, ownClassMetadata } from '@/annotation/Metadata';
+import { classChain, propertyMetadata, ownClassMetadata } from '@/annotation/Metadata';
 
 /** What a property is declared to hold, which store layout 1 can't tell (the shared module's `LayoutMigration.Kind`). */
 export type DeclaredKind =
@@ -268,13 +268,23 @@ function document(row: any): any {
 }
 
 /**
- * The declarations the node fragment `type` says, under each of its labels: each field TypeScript records as a `Date`
+ * The declarations the node fragment `type` says, under each of its labels, its own and those it inherits, as a node of it
+ * carries them: each field TypeScript records as a `Date`
  * (`datetime`, as a JavaScript Date is a moment) or as bytes (`Uint8Array`, `Buffer`), as `design:type` gives them for a
  * decorated field. A date with no time, a float, or a list of either, which TypeScript records no type of, is to be
  * declared by hand.
  */
+/** The labels a node of `type` carries: its own and those it inherits, none where it has none. */
+function inheritedLabels(type: Function): string[] {
+    const labels = new Set<string>();
+    for (const it of classChain(type)) {
+        ownClassMetadata(it)?.labels?.forEach((label) => labels.add(label));
+    }
+    return [...labels];
+}
+
 export function declarationsOf(type: Function, relationshipType?: string): MigrationDeclaration[] {
-    const labels: string[] = relationshipType ? [relationshipType] : ownClassMetadata(type)?.labels ?? [];
+    const labels: string[] = relationshipType ? [relationshipType] : inheritedLabels(type);
     const declared: MigrationDeclaration[] = [];
     propertyMetadata(type).forEach((metadata, field) => {
         const kind: DeclaredKind | undefined =
