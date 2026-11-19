@@ -225,7 +225,8 @@ describe('SchemaPlan', () => {
         } finally {
             warn.mockRestore();
         }
-        expect(ran.some((it) => /DROP|CREATE/i.test(it))).toBe(false);
+        // The listing names pg_stat_progress_create_index, as it finds an online build under way (drivine-cypher-spec#381).
+        expect(ran.filter((it) => !it.includes('SELECT listed')).some((it) => /DROP|CREATE/i.test(it))).toBe(false);
     });
 
     it('reads the data once the engine refuses a constraint, a sample size of 0 giving a VIOLATION with none', async () => {

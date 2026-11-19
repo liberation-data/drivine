@@ -62,7 +62,10 @@ function columns(statement: string, index: string): string[] {
     const ddl = statement.replace(/''/g, "'");
     const start = ddl.indexOf(`INDEX IF NOT EXISTS ${index} ON drivine_node n (`);
     expect(start).toBeGreaterThanOrEqual(0);
-    const body = ddl.slice(ddl.indexOf('(', start) + 1, ddl.indexOf(")';", start));
+    // A range index's indexes are built ONLINE, so writes go on while they are built (drivine-cypher-spec#381).
+    const open = ddl.indexOf('(', start) + 1;
+    const close = open + ddl.slice(open).search(/\)( ONLINE)?';/);
+    const body = ddl.slice(open, close);
     return body
         .split(/, (?=CASE WHEN JSON_EXISTS\(n\.labels)/)
         .map((it) => it.replace(/\bn\.(labels|props)\b/g, 'n_.$1'));
