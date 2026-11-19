@@ -125,6 +125,12 @@ on the field was silently wrong from then on. An object copied out of a load (a 
 recognised, nor is a date in a property bag, and a new `Date` in an undecorated field can't load back as one: declare
 such a field with a decorator. See [Object Manager](05-object-manager.md#1-nodefragment-a-node) for each case.
 
+A node whose `@NodeId` Oracle, Postgres or SQLite holds as a temporal value (Cypher's `date(...)`, a drivine4j `Instant`
+id) is refused by name when its class declares the id a `string`, `number`, `bigint` or `boolean`
+([#813](https://github.com/liberation-data/drivine/issues/813)). 5.0 loaded it with the id as its text, which a lookup
+by id missed, so a save made a second node with that text id, silently. Declare such an id a `Date`, or `any` to keep
+the text. See [Object Manager](05-object-manager.md#loading-data).
+
 ### An id given as text is read as the id's type
 
 On Oracle, Postgres and SQLite, `load`, `update`, `patch`, `delete` and `edges` read an id given as text as the
