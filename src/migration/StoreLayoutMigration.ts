@@ -303,8 +303,8 @@ function document(row: any): any {
  * as no value of the kind and refuse the graph: it is kept as it is. So a `@JsonPacked` field, saved as a JSON text, is
  * not declared, nor bytes (`Uint8Array`, `Buffer`), as layout 1 saved one as `JSON.stringify` writes it, an object of
  * its indexes or `{type: 'Buffer', data}`, not the list of numbers or base64 text the migration reads bytes from. A
- * `@GraphTransient` field, never saved, is not declared either. A date with no time, a float, or a list of either, which
- * TypeScript records no type of, is to be declared by hand.
+ * `@GraphTransient` field, never saved, is not declared either. A list of `Date`s, which TypeScript records as an
+ * `Array`, a date with no time, a float, or a list of either, which TypeScript records no type of, is to be declared by hand.
  */
 export function declarationsOf(type: Function, relationshipType?: string): Declaration[] {
     const registry = new ModelRegistry();

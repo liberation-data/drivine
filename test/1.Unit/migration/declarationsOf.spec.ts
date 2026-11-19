@@ -34,6 +34,7 @@ class Shaped {
     @NodeId() id: string;
     @JsonPacked() packed: Date;
     @GraphTransient() transient: Date;
+    @GraphProperty('times') times: Date[];
     opened = new Date(0);
 }
 
@@ -62,6 +63,7 @@ describe('declarationsOf', () => {
     });
 
     it('should declare each field the object manager knows is a Date, and none layout 1 saved as no datetime or never saved', () => {
+        // A list of Dates TypeScript records as an Array, so it is declared by hand.
         // @JsonPacked saved a Date as JSON text, '"2024-…Z"', which the migration reads as no datetime: see the store's test.
         expect(declarationsOf(Shaped)).toEqual([{ label: 'Shaped', property: 'opened', kind: 'datetime' }]);
     });

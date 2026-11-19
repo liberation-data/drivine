@@ -115,7 +115,8 @@ decorator decorates, or one the class initializes with a `Date`), under each of 
 `declarationsOf(Knows, 'KNOWS')` from a relationship fragment's. A field layout 1 saved in another form than its
 kind's is not declared, as the migration would read it as no value of its kind and refuse the graph, and is kept as it
 is: a `@JsonPacked` one, saved as a JSON text, and bytes (`Uint8Array`, `Buffer`), which 5.0 saved as `JSON.stringify`
-writes them. A date with no time, a float, or a list of either is declared by hand.
+writes them. A list of `Date`s, which TypeScript records as an `Array`, a date with no time, a float, or a list of
+either is declared by hand.
 
 ```typescript
 const migration = new StoreLayoutMigration(provider); // a PostgresConnectionProvider, say
