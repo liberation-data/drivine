@@ -155,25 +155,19 @@ describe.each(allStores().filter((it) => it.type !== DatabaseType.FALKORDB))(
             });
         });
 
-        // Held on Postgres, where the pinned compiler (0.50.0) orders kinds in jsonb's order, a number before a boolean and
-        // a temporal after a text (liberation-data/drivine-cypher-spec#371, fixed by #374 after 0.50.0: unfail at the
-        // bump).
-        const mixed = store.type === DatabaseType.POSTGRES ? it.failing : it;
+        // On Postgres too, since compiler 0.51.0, which orders kinds as Cypher does there, where it had jsonb's order, a
+        // number before a boolean and a temporal after a text (liberation-data/drivine-cypher-spec#371).
+        it('orders a hop property of mixed kinds as Cypher does: a text, a boolean, a number, no value last', async () => {
+            await create(["'b'", 'true', '10', '9', 'null', 'false', "'a'"]);
+            expect(await loaded()).toEqual({
+                lowestFirst: ['d6', 'd0', 'd5', 'd1', 'd3', 'd2', 'd4'],
+                highestFirst: ['d2', 'd3', 'd1', 'd5', 'd0', 'd6', 'd4'],
+                lowest: 'd6',
+                highest: 'd2'
+            });
+        });
 
-        mixed(
-            'orders a hop property of mixed kinds as Cypher does: a text, a boolean, a number, no value last',
-            async () => {
-                await create(["'b'", 'true', '10', '9', 'null', 'false', "'a'"]);
-                expect(await loaded()).toEqual({
-                    lowestFirst: ['d6', 'd0', 'd5', 'd1', 'd3', 'd2', 'd4'],
-                    highestFirst: ['d2', 'd3', 'd1', 'd5', 'd0', 'd6', 'd4'],
-                    lowest: 'd6',
-                    highest: 'd2'
-                });
-            }
-        );
-
-        const mixedAndDated = store.type === DatabaseType.MEMGRAPH ? it.skip : mixed;
+        const mixedAndDated = store.type === DatabaseType.MEMGRAPH ? it.skip : it;
 
         mixedAndDated(
             'keeps for a node reached by a date and a number the date lowest first, the number highest',
