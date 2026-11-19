@@ -339,7 +339,9 @@ when it is given to `load`, `update`, `patch`, `delete` or `edges` too.
 
 What the load gave is all the save knows. An id changed since the load, or of an object no load made, is written as
 given, so it never takes another node's stored id: a node whose id is held as a date and one whose id is the date's
-text stay two nodes, each saved onto its own. And a new id, or an `any` id given as text, is written and looked up as
+text stay two nodes, each saved onto its own. On Oracle, save such a pair one by one: Oracle reads both ids back as the
+date's text, so a `saveAll`, or a view's save, holding both hands both the same stamp, and one of them is then stale.
+And a new id, or an `any` id given as text, is written and looked up as
 TypeScript gives it:
 
 - A new id set through a JS `Date` is written as a `datetime` at UTC to the millisecond: a `date`, a `localdatetime` or

@@ -687,6 +687,67 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             expect(await keyedCount()).toEqual(2);
         });
 
+        /**
+         * A write plan keys a node within the plan by its id's text (PostgresSaveBuilder's storedKey, the module's
+         * keyText), which a date and the date's text share: a `replace` that keeps one keeps the other's relationship
+         * too, silently. Not #815's: a plan keyed so before it, by an object no load made. Pinned until the plan's keys
+         * tell the kinds apart, in the shared module.
+         */
+        it.failing("trims a view's relationship to a node whose id is a date, kept the date's text alone", async () => {
+            await gom.save(
+                Object.assign(new Owned(), {
+                    owner: Object.assign(new Owner(), { id: 'o', name: 'owner' }),
+                    keyed: [Object.assign(new LookupDateAsText(), { id: '2026-01-05', name: 'text' })]
+                }),
+                { replace: ['keyed'] }
+            );
+            expect(await ownsEdges()).toEqual(1);
+        });
+
+        it.failing("trims a view's relationship to the text's node, kept the date's node alone", async () => {
+            await pm.execute(
+                new QuerySpecification({
+                    text: "MATCH (o:IdKindRun:Owner {id: 'o'}), (k:IdKindRun:Keyed {name: 'text'}) CREATE (o)-[:OWNS]->(k)",
+                    language: 'CYPHER'
+                })
+            );
+            const view = (await gom.load(OwnedAny, 'o'))!;
+            view.keyed = view.keyed.filter((it) => it.name === 'x');
+            await gom.save(view, { replace: ['keyed'] });
+            expect(await ownsEdges()).toEqual(1);
+        });
+
+        /**
+         * Oracle reads each node's id back from the node, as the tag's text, to hand a saveAll's or a view's stamps
+         * back, so it can't tell the two apart: both are handed the stamp of whichever it read last, and the other is
+         * then stale. Saved one by one, each is handed its own (the root's stamp comes back by itself).
+         */
+        it("can't hand each its own stamp back from one Oracle saveAll, as Oracle reads both ids back as the text", async () => {
+            const loaded = await gom.loadAll(LookupDateAsAny);
+            const dated = loaded.find((it) => it.name === 'x')!;
+            const text = loaded.find((it) => it.name === 'text')!;
+            const oracle = new StatelessGraphObjectManager(pm, backendFor(DatabaseType.ORACLE), new ModelRegistry());
+            const model = new ModelRegistry().fragment(LookupDateAsAny);
+            const [d, t] = [`${'d'.repeat(16)}:`, `${'t'.repeat(16)}:`];
+            [dated.stamp, text.stamp] = [`${'a'.repeat(16)}:`, `${'b'.repeat(16)}:`];
+            (oracle as any).handBackFragments([{ model, objects: [dated, text] }], {
+                groups: [
+                    {
+                        before: [
+                            { id: '2026-01-05', stamp: dated.stamp },
+                            { id: '2026-01-05', stamp: text.stamp }
+                        ],
+                        after: [
+                            { id: '2026-01-05', stamp: d },
+                            { id: '2026-01-05', stamp: t }
+                        ]
+                    }
+                ]
+            });
+            expect(text.stamp).toEqual(t);
+            expect(dated.stamp).not.toEqual(d);
+        });
+
         it("saves an object no load made, given the text, onto the text's node", async () => {
             await gom.save(Object.assign(new LookupDateAsAny(), { id: '2026-01-05', name: 'fresh' }));
             expect(await names()).toEqual({ [TAG]: 'x', '"2026-01-05"': 'fresh' });
