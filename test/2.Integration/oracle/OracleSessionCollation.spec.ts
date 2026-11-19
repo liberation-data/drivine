@@ -24,6 +24,7 @@ describeOnOracle('a session of Drivine on Oracle, whatever its NLS_COMP and NLS_
     const cypher = async (text: string, parameters: Record<string, any> = {}): Promise<any[]> =>
         connection.query(new QuerySpecification({ text, language: 'CYPHER' }).bind(parameters));
 
+    // A row of several columns is their values in order: less, equal, unequal.
     const comparisons = async (): Promise<any[]> =>
         cypher('RETURN $upper < $lower AS less, $lower = $upperA AS equal, $lower <> $upperA AS unequal', {
             upper: 'B',
@@ -32,7 +33,8 @@ describeOnOracle('a session of Drivine on Oracle, whatever its NLS_COMP and NLS_
         });
 
     const ordered = async (): Promise<string[]> =>
-        (await cypher('UNWIND $items AS x RETURN x ORDER BY x', { items: ['b', 'a', 'B'] })).map((it) => it.x);
+        // A row of one column is its value, as the connection gives a row of Cypher on Oracle.
+        cypher('UNWIND $items AS x RETURN x ORDER BY x', { items: ['b', 'a', 'B'] });
 
     const nls = async (): Promise<Record<string, string>> =>
         Object.fromEntries(
@@ -73,7 +75,7 @@ describeOnOracle('a session of Drivine on Oracle, whatever its NLS_COMP and NLS_
 
     it('opens each session comparing text by its code points', async () => {
         expect(await nls()).toEqual({ NLS_COMP: 'BINARY', NLS_SORT: 'BINARY' });
-        expect(await comparisons()).toEqual([{ less: true, equal: false, unequal: true }]);
+        expect(await comparisons()).toEqual([[true, false, true]]);
         expect(await ordered()).toEqual(['B', 'a', 'b']);
     });
 
@@ -82,7 +84,7 @@ describeOnOracle('a session of Drivine on Oracle, whatever its NLS_COMP and NLS_
         try {
             expect(await nls()).toEqual({ NLS_COMP: 'LINGUISTIC', NLS_SORT: 'BINARY_CI' });
             // The case the module's session statements are there for: a compiled comparison takes the session's sort.
-            expect(await comparisons()).not.toEqual([{ less: true, equal: false, unequal: true }]);
+            expect(await comparisons()).not.toEqual([[true, false, true]]);
 
             await new Promise<void>((resolve, reject) =>
                 oracleSessionSetUp(GRAPH)((connection as OracleConnection).connection, '', (error) =>
@@ -91,7 +93,7 @@ describeOnOracle('a session of Drivine on Oracle, whatever its NLS_COMP and NLS_
             );
 
             expect(await nls()).toEqual({ NLS_COMP: 'BINARY', NLS_SORT: 'BINARY' });
-            expect(await comparisons()).toEqual([{ less: true, equal: false, unequal: true }]);
+            expect(await comparisons()).toEqual([[true, false, true]]);
             expect(await ordered()).toEqual(['B', 'a', 'b']);
         } finally {
             // The session goes back to the pool as the pool set it up, whatever failed above.
