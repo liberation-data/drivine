@@ -81,6 +81,15 @@ export function dateOf(text: string): unknown {
     return Number.isNaN(date.getTime()) ? NO_NODE : date;
 }
 
+/**
+ * ISO text as the `Date` a load reads it as (GraphObjectMapper's asDate): as {@link dateOf} reads it, a signed year of
+ * four digits (`-0044`, as Java writes it) read too, and a fraction finer than a millisecond cut to one, as a `Date` holds
+ * it; NO_NODE for any other text.
+ */
+export function loadedDateOf(text: string): unknown {
+    return dateOf(text.replace(/^([+-])(\d{4})-/, '$100$2-').replace(/(\.\d{3})\d+/, '$1'));
+}
+
 /** Whether the month of the year has the day. */
 function isCalendarDay(year: number, month: number, day: number): boolean {
     const date = new Date(0);
@@ -180,7 +189,9 @@ export function temporalText(layout: string): string | undefined {
  */
 export function readBackKey(given: unknown, model?: FragmentModel): unknown {
     const id = asGiven(given);
-    const typed = model && typeof id === 'string' ? typedId(model, id) : id;
+    // A Date id's text as a load reads it (#815): Oracle reads back a tag finer than a millisecond as its text.
+    const typed =
+        model && typeof id === 'string' ? (model.nodeIdType === Date ? loadedDateOf(id) : typedId(model, id)) : id;
     const it = typed === NO_NODE ? id : typed;
     if (it instanceof Date) {
         return Number.isNaN(it.getTime()) ? String(it) : it.toISOString();
@@ -200,10 +211,13 @@ function asGiven(id: unknown): unknown {
  * `id` as itself, by value: a `Date` by its time, and any other value by its type and value, so that two ids that
  * {@link readBackKey} reads alike (a `Date` and its text, where the id's field takes both) stay apart, as a store that
  * hands each id back as it was given (Postgres, SQLite, Neo4j, Memgraph) holds them apart. An id a save binds as held
- * as loaded is its value (see asGiven).
+ * as loaded is the tag it binds, so a node whose id is held as a date and one whose id is the date's text, both loaded
+ * as that text, stay apart too (#815).
  */
-export function exactKey(given: unknown): unknown {
-    const id = asGiven(given);
+export function exactKey(id: unknown): unknown {
+    if (id instanceof HeldAsLoaded) {
+        return `held:${JSON.stringify(id.held)}`;
+    }
     if (id instanceof Date) {
         return `date:${id.getTime()}`;
     }

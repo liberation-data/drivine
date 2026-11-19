@@ -650,6 +650,43 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             expect(await keyedCount()).toEqual(2);
         });
 
+        it('hands each its own stamp back from a saveAll, a view and a patchAll, so neither is then stale', async () => {
+            const loaded = await gom.loadAll(LookupDateAsAny);
+            const dated = loaded.find((it) => it.name === 'x')!;
+            const text = loaded.find((it) => it.name === 'text')!;
+            await gom.saveAll([
+                Object.assign(dated, { name: 'dated, batched' }),
+                Object.assign(text, { name: 'text, batched' })
+            ]);
+            await gom.save(Object.assign(dated, { name: 'dated, saved' }));
+            await gom.save(Object.assign(text, { name: 'text, saved' }));
+            expect(await names()).toEqual({ [TAG]: 'dated, saved', '"2026-01-05"': 'text, saved' });
+            await pm.execute(
+                new QuerySpecification({
+                    text: "MATCH (o:IdKindRun:Owner {id: 'o'}), (k:IdKindRun:Keyed {name: 'text, saved'}) CREATE (o)-[:OWNS]->(k)",
+                    language: 'CYPHER'
+                })
+            );
+            const view = (await gom.load(OwnedAny, 'o'))!;
+            expect(view.keyed).toHaveLength(2);
+            view.keyed.forEach((it) => (it.name = `${it.name}, in a view`));
+            await gom.save(view);
+            for (const it of view.keyed) {
+                await gom.save(Object.assign(it, { name: `${it.name} and saved` }));
+            }
+            expect(await names()).toEqual({
+                [TAG]: 'dated, saved, in a view and saved',
+                '"2026-01-05"': 'text, saved, in a view and saved'
+            });
+            const again = await gom.loadAll(LookupDateAsAny);
+            again.forEach((it) => (it.name = `${it.name}, patched`));
+            expect(await gom.patchAll(again, { only: ['name'] })).toEqual([
+                { found: true, applied: true, changed: true },
+                { found: true, applied: true, changed: true }
+            ]);
+            expect(await keyedCount()).toEqual(2);
+        });
+
         it("saves an object no load made, given the text, onto the text's node", async () => {
             await gom.save(Object.assign(new LookupDateAsAny(), { id: '2026-01-05', name: 'fresh' }));
             expect(await names()).toEqual({ [TAG]: 'x', '"2026-01-05"': 'fresh' });

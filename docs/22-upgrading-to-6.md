@@ -133,8 +133,9 @@ either finds the node and writes the id back as the store held it, while the id 
 ([#815](https://github.com/liberation-data/drivine/issues/815)), so an `any` id (which loads as the text) and a `Date` id
 over a `date`, a `localdatetime`, an offset or a fraction finer than a millisecond round-trip onto their node, where 5.0
 made a second one. A new id set through a JS `Date` is still written as a `datetime` at UTC to the millisecond, so a
-date-only or offset id can't be made from TypeScript. drivine-python also refuses a union that would load the id as
-text; TypeScript records a union as `Object`, as it does `any`, so it never refuses one. See
+date-only or offset id can't be made from TypeScript. drivine-python is to refuse a union that would load the id as
+text too ([drivine-python#560](https://github.com/liberation-data/drivine-python/issues/560)); TypeScript records a union
+as `Object`, as it does `any`, so it never refuses one. See
 [Object Manager](05-object-manager.md#loading-data).
 
 ### An id given as text is read as the id's type

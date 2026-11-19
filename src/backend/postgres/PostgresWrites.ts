@@ -5,7 +5,7 @@ import { GraphStatement } from '@/backend/GraphStatement';
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
 import { absent, present, storedKey, withoutKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { PostgresWriteStatement, WriteFunction } from '@/backend/postgres/PostgresWriteStatement';
-import { boundIdOf, idOf, objectProps } from '@/backend/SaveStatementBuilder';
+import { boundIdOf, objectProps } from '@/backend/SaveStatementBuilder';
 import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { sqlText } from '@/backend/sql/SqlGraph';
 import { WritePlan } from '@/backend/sql/WritePlan';
@@ -111,12 +111,12 @@ export class PostgresWrites {
             const key = idProperty(group.model, "it can't be saved: a save merges on the id");
             const shape = plan.shape(group.model.labels, key);
             group.objects.forEach((object) => {
-                const id = idOf(group.model, object);
                 const props = withoutKey(objectProps(group.model, object, options, true), key);
                 const index = String(handed.size);
-                handed.set(index, { group: g, id });
-                // Found and keyed by the id as the save binds it, the tag it was loaded from while unchanged (#815).
+                // Found, keyed and handed back by the id as the save binds it, the tag it was loaded from while
+                // unchanged (#815).
                 const bound = boundIdOf(group.model, object);
+                handed.set(index, { group: g, id: bound });
                 plan.node(
                     shape,
                     key,

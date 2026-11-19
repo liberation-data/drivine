@@ -346,9 +346,10 @@ TypeScript gives it:
   an offset id can't be made from TypeScript. Write one with Cypher.
 - Text given as an `any` id, to `load`, `update`, `patch`, `delete` or `edges`, is looked up as text, so it misses a
   node whose id is held as a date. Load the node another way (`loadAll` with a `where`, a view), and save what loaded.
-- drivine-python refuses a union that would load the id as text, as it refuses a `str` id. TypeScript records a union
-  as `Object`, as it records `any`, so Drivine for TypeScript can't tell one from the other, and refuses neither: the
-  same intent, limited by the type information TypeScript keeps.
+- drivine-python is to refuse a union that would load the id as text, as it refuses a `str` id
+  ([drivine-python#560](https://github.com/liberation-data/drivine-python/issues/560)). TypeScript records a union as
+  `Object`, as it records `any`, so Drivine for TypeScript can't tell one from the other, and refuses neither: the same
+  intent, limited by the type information TypeScript keeps.
 
 #### Count
 

@@ -685,8 +685,8 @@ export class StatelessGraphObjectManager {
                 ...splitVectors(root, propsOf(root, fields, [], options.nullPolicy === NullPolicy.CLEAR, held))
             };
         });
-        // Each id by its value (see exactKey): a Date is one id by its time.
-        const ids = rows.map((it) => it.id);
+        // Each id by its value (see exactKey): a Date is one id by its time, and an id held as loaded by its tag.
+        const ids = rows.map((it) => it.bound);
         if (new Set(ids.map(exactKey)).size !== ids.length) {
             throw new DrivineError('patchAll takes each id once.');
         }
@@ -1115,7 +1115,7 @@ export class StatelessGraphObjectManager {
                 result.groups[i].after.map((it) => [it.id, it.stamp])
             );
             for (const object of group.objects) {
-                const id = object[group.model.nodeIdField!];
+                const id = this.handedId(group.model, object);
                 object[group.model.stampField] = Stamps.handedBack(
                     object[group.model.stampField],
                     found.get(id) ?? '',
@@ -1367,7 +1367,7 @@ export class StatelessGraphObjectManager {
                 after.map((it) => [it.id, it.stamp])
             );
             for (const node of this.nodesOf(object, model)) {
-                const id = node[model.nodeIdField!];
+                const id = this.handedId(model, node);
                 if (now.has(id)) {
                     node[model.stampField!] = Stamps.handedBack(
                         node[model.stampField!],
@@ -1377,6 +1377,16 @@ export class StatelessGraphObjectManager {
                 }
             }
         });
+    }
+
+    /**
+     * The id a save handed `node`'s stamp back under: on a SQL store the id as the save bound it (see boundIdOf), so a
+     * node whose id is held as a date and one whose id is the date's text, both loaded as that text, are each handed
+     * their own (#815).
+     */
+    private handedId(model: FragmentModel, node: any): any {
+        const id = node[model.nodeIdField!];
+        return id != null && isSqlBackend(this.backend) ? boundIdOf(model, node) : id;
     }
 
     /** The instances of a fragment class the object holds, at any depth, the root included. */

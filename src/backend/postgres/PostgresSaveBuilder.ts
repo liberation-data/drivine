@@ -44,7 +44,7 @@ import { temporalText } from '@/backend/sql/NodeIds';
 export class PostgresSaveBuilder {
     private readonly plan = new WritePlan();
     private readonly stamped: FragmentModel[] = [];
-    /** For each index a related node's step was given, its stamped model's place among `stamped`, and its id. */
+    /** For each index a related node's step was given, its stamped model's place among `stamped`, and its id as bound. */
     private readonly handed = new Map<string, { group: number; id: any }>();
     private options: SaveOptions<any> = {};
     /** The root's id as the plan binds it (see boundIdOf). */
@@ -145,7 +145,7 @@ export class PostgresSaveBuilder {
                 };
                 bagEntries(concrete, nodeObject).forEach((value, key) => (props[key] = value));
                 const write = nodeWrite(concrete, nodeObject, props, concrete.nodeLabels ? false : undefined, {}, root);
-                const to = this.node(write, this.handedBack(root, write.id));
+                const to = this.node(write, this.handedBack(root, write.bound));
                 const relProps =
                     rel.related.kind === 'RELATIONSHIP_FRAGMENT'
                         ? propsOf(rel.related.model, item, [rel.related.model.targetField], false, true)
