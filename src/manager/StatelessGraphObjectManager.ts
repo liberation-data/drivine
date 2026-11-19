@@ -74,8 +74,12 @@ export interface LoadOptions {
 export type Filter<T> = string | LoadOptions | QueryFn<T>;
 
 /** A predicate the caller wrote, as the store reads it: see GraphBackend's `written`. */
-function written(backend: GraphBackend, where: string | undefined): string | undefined {
-    return where ? backend.written(where) : where;
+function written(
+    backend: GraphBackend,
+    where: string | undefined,
+    bindings: Record<string, any> = {}
+): string | undefined {
+    return where ? backend.written(where, bindings) : where;
 }
 
 /**
@@ -102,7 +106,7 @@ function loadOptions<T>(
     }
     const options = typeof where === 'object' ? where : { where, bindings };
     return {
-        where: written(backend, options.where) as string,
+        where: written(backend, options.where, options.bindings) as string,
         bindings: options.bindings ?? {},
         depth: checkedDepth(options.depth ?? {}),
         page: {},
@@ -129,7 +133,7 @@ function filterOnly<T>(
     indexed: SchemaItem[] = []
 ): { where?: string; bindings: Record<string, any>; tested: string[] } {
     if (typeof where !== 'function') {
-        return { where: written(backend, where), bindings, tested: [] };
+        return { where: written(backend, where, bindings), bindings, tested: [] };
     }
     const options = loadOptions(where, bindings, target, backend, indexed);
     if (options.query?.paged) {
@@ -896,7 +900,7 @@ export class StatelessGraphObjectManager {
         bindings: Record<string, any> = {}
     ): { where?: string; bindings: Record<string, any> } {
         if (typeof where !== 'function') {
-            return { where: written(this.backend, where), bindings };
+            return { where: written(this.backend, where, bindings), bindings };
         }
         return this.backend.renderWhere(where, target);
     }

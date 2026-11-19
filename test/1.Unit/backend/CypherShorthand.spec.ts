@@ -10,7 +10,8 @@ import { SqliteBackend } from '@/backend/sqlite/SqliteBackend';
 // writes them, read on Oracle, as drivine4j reads it.
 describe('CypherShorthand', () => {
     const shorthand = new CypherShorthand('n', 'n_', oracle);
-    const rewrite = (predicate: string): string => shorthand.rewrite(predicate);
+    const rewrite = (predicate: string, bindings?: Record<string, any>): string =>
+        shorthand.rewrite(predicate, bindings);
 
     it('should read a property of the root from its document', () => {
         expect(rewrite("n.name = 'x'")).toEqual("JSON_VALUE(n_.props, '$.name') = 'x'");
@@ -22,8 +23,8 @@ describe('CypherShorthand', () => {
 
     it('should read a property whose name begins with $ by the key layout 2 holds it under, the $ doubled (#793)', () => {
         expect(rewrite('n.`$score` > 1')).toEqual('JSON_VALUE(n_.props, \'$."$$score"\') > 1');
-        expect(rewrite('n.`$open` = true')).toEqual('JSON_VALUE(n_.props, \'$."$$open"\') = \'true\'');
-        expect(rewrite("n.`a$b` = 'x'")).toEqual('JSON_VALUE(n_.props, \'$."a$b"\') = \'x\'');
+        expect(rewrite('n.`$open` = true')).toEqual("JSON_VALUE(n_.props, '$.\"$$open\"') = 'true'");
+        expect(rewrite("n.`a$b` = 'x'")).toEqual("JSON_VALUE(n_.props, '$.\"a$b\"') = 'x'");
         // Each SQL store's raw where reads it so.
         expect(new OracleBackend().written('n.`$score` > 1')).toEqual('JSON_VALUE(n_.props, \'$."$$score"\') > 1');
         expect(new PostgresBackend().written('n.`$score` > 1')).toEqual("(n_.props ->> '$$score') > 1");
@@ -86,6 +87,40 @@ describe('CypherShorthand', () => {
         // A word that only begins as a boolean is not one, and nor is a boolean compared otherwise.
         expect(rewrite('n.state = truest')).toEqual("JSON_VALUE(n_.props, '$.state') = truest");
         expect(rewrite('true = n.locked')).toEqual("true = JSON_VALUE(n_.props, '$.locked')");
+    });
+
+    it("should compare a property compared with a parameter bound to a boolean with the boolean's text (#802)", () => {
+        // A driver binds a boolean as no text a property is read as (SQLite's as 1), so the comparison would hold for
+        // no node; it is compared as `n.open = true` is.
+        const bound = { open: true, shut: false, count: 1, name: 'x' };
+        expect(rewrite('n.open = $open AND n.shut <> $shut', bound)).toEqual(
+            "JSON_VALUE(n_.props, '$.open') = 'true' AND JSON_VALUE(n_.props, '$.shut') <> 'false'"
+        );
+        expect(rewrite("n.open\n!=\t$open OR 'n.open = $open' = $open", bound)).toEqual(
+            "JSON_VALUE(n_.props, '$.open')\n!=\t'true' OR 'n.open = $open' = $open"
+        );
+        // A parameter bound to anything else, one bound to none, and a longer name are read as they are.
+        expect(rewrite('n.count = $count AND n.name = $name AND n.open = $missing', bound)).toEqual(
+            "JSON_VALUE(n_.props, '$.count') = $count AND JSON_VALUE(n_.props, '$.name') = $name AND " +
+                "JSON_VALUE(n_.props, '$.open') = $missing"
+        );
+        expect(rewrite('n.open = $opened', { open: true, opened: 1 })).toEqual(
+            "JSON_VALUE(n_.props, '$.open') = $opened"
+        );
+        expect(rewrite('n.open = $toString', bound)).toEqual("JSON_VALUE(n_.props, '$.open') = $toString");
+        // Each SQL store reads it so given the bindings; a graph engine reads the predicate as it is.
+        expect(new OracleBackend().written('n.open = $open', bound)).toEqual("JSON_VALUE(n_.props, '$.open') = 'true'");
+        expect(new PostgresBackend().written('n.open = $open', bound)).toEqual("(n_.props ->> 'open') = 'true'");
+        expect(new SqliteBackend().written('n.open = $open', bound)).toEqual(
+            new SqliteBackend().written('n.open = true')
+        );
+        expect(new CypherBackend(NEO4J_GRAMMAR).written('n.open = $open', bound)).toEqual('n.open = $open');
+        // SQL of the caller's own over the row reads the boolean as the driver binds it.
+        expect(new SqliteBackend().written("(n.props ->> '$.open') = $open", bound)).toEqual(
+            "(n_.props ->> '$.open') = $open"
+        );
+        // Without the bindings the predicate is read as before.
+        expect(rewrite('n.open = $open')).toEqual("JSON_VALUE(n_.props, '$.open') = $open");
     });
 
     it('should escape a name in backticks for the literal and the path it is written in', () => {

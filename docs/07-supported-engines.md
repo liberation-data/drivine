@@ -111,9 +111,9 @@ Notes:
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row `n`: its `props`, `labels` and
   `stamp`. A read of the query DSL calls that row `n_`, and reads `n.props`, `n.labels` and `n.stamp` in your predicate
   as that row's. A property of the root may be written as Cypher writes it, `n.name = $name` (or ``n.`a name` ``), and
-  is read as that property, as text; a property compared with `true` or `false` is compared with the text a JSON
-  boolean is read as. To compare one with a number, read it as a number in SQL. One whose name begins with `$`,
-  ``n.`$k` ``, is read as it is held, under `$$k`.
+  is read as that property, as text; a property compared with `true` or `false`, or with a parameter bound to a
+  boolean (`n.open = $open`), is compared with the text a JSON boolean is read as. To compare one with a number, read
+  it as a number in SQL. One whose name begins with `$`, ``n.`$k` ``, is read as it is held, under `$$k`.
 - The query DSL's conditions, orders, seeks and grouped reads are the shared compiler's SQL for the Cypher the DSL writes
   for Neo4j ([drivine-cypher-spec#235](https://github.com/liberation-data/drivine-cypher-spec/issues/235)), as in
   compiled Cypher: a date is compared by its moment, and text is compared and ordered by its code points (`B, a, b`),
@@ -236,9 +236,10 @@ Notes:
   minute with Postgres's default settings; a read planned before then is slow until it ends.
 - A predicate you write yourself, for a load or a delete, is SQL over the root's row: its `props`, `labels` and `stamp`,
   e.g. `(n.props ->> 'name') = $name`. A property of the root may be written as Cypher writes it, `n.name = $name` (or
-  ``n.`a name` ``), and is read as that property, as text; a property compared with `true` or `false` is compared with
-  the text a JSON boolean is read as. To compare one with a number, read it as a number in SQL. One whose name begins
-  with `$`, ``n.`$k` ``, is read as it is held, under `$$k`.
+  ``n.`a name` ``), and is read as that property, as text; a property compared with `true` or `false`, or with a
+  parameter bound to a boolean (`n.open = $open`), is compared with the text a JSON boolean is read as. To compare one
+  with a number, read it as a number in SQL. One whose name begins with `$`, ``n.`$k` ``, is read as it is held, under
+  `$$k`.
 - A number is compared as a number only where one is stored: `'7'` is not `7`, as on the graph engines.
 - A compiled `MATCH` that compares a property by `=` with a value a row holds (`UNWIND $rows AS row MATCH (n:Person
   {id: row.id})`, `UNWIND $ids AS id MATCH (n:Person {id: id})`, or `WHERE n.id = row.id`) is read through the range

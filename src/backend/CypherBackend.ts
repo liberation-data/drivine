@@ -276,7 +276,7 @@ export class CypherBackend implements GraphBackend {
         return QueryRenderer.render(fn, target, this.grammar, NODE_ALIAS);
     }
 
-    written(predicate: string): string {
+    written(predicate: string, _bindings?: Record<string, any>): string {
         return predicate;
     }
 
