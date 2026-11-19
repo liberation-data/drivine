@@ -276,12 +276,10 @@ export class SessionStarter {
 A node of the ordered hop without the property comes last, whichever way the path is read. Targets whose first nodes
 hold equal values come in no set order. A text of digits such as `'0100'` is ordered as text, and an empty text as a
 text, the lowest one. On Neo4j and the SQL backends a date is ordered by its moment, an offset's included, not by its
-text. Where the property holds values of several kinds, Neo4j, Memgraph, SQLite and Oracle order them by kind as
+text. Where the property holds values of several kinds, Neo4j, Memgraph and the SQL backends order them by kind as
 Cypher's ORDER BY does: lowest first a map, a list, a temporal value, a text, a boolean, then a number, and the other
-way highest first. On Neo4j and Memgraph the path is sorted by the engine's own ORDER BY. Postgres will once Drivine
-takes the compiler's fix of liberation-data/drivine-cypher-spec#371; until then it orders them as jsonb does, a text
-before a number before a boolean, and a temporal value after them. FalkorDB orders them as its own ORDER BY does. A
-group key's path names no order: `pathKey` refuses one.
+way highest first. On Neo4j and Memgraph the path is sorted by the engine's own ORDER BY. FalkorDB orders them as its
+own ORDER BY does. A group key's path names no order: `pathKey` refuses one.
 
 #### 6. Aggregates: Counting and Summarising Without Loading
 

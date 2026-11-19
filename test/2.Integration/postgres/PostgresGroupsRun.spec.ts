@@ -94,9 +94,9 @@ describe.each(postgres)('a grouped read run on $name', (store) => {
         expect(await order('desc')).toEqual(['i0', 'i1', 'i2']);
     });
 
-    // Held: the module's order term on Postgres ranks kinds in jsonb's order, so a number sorts before a boolean
-    // (liberation-data/drivine-cypher-spec#371). SQLite's ranks them as Cypher does.
-    it.failing(
+    // As Cypher orders them since compiler 0.51.0, where the module's order term ranked kinds in jsonb's order, a number
+    // before a boolean (liberation-data/drivine-cypher-spec#371).
+    it(
         'orders a key of mixed kinds as Cypher orders them: a text, a boolean, a number, and no value last',
         async () => {
             await create(['b', true, 10, 9, undefined, false, 'a']);
