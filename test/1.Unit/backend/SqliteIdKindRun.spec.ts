@@ -608,6 +608,8 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
                     $t: 'datetime',
                     v: loaded.id.toISOString().replace('.000', '')
                 });
+                // A lookup given the changed Date binds it as given too, finding the node made of it, not the tag's.
+                expect((await gom.load(LookupDateAsDate, loaded.id))?.name).toEqual('moved');
             });
         });
     });
