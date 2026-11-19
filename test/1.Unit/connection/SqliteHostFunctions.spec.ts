@@ -94,6 +94,54 @@ describe('SqliteHostFunctions', () => {
             );
             expect(() => row(`SELECT drivine_equal('1')`)).toThrow('drivine_equal takes 2 argument(s), not 1.');
         });
+
+        /**
+         * `REGEXP` reads a pattern as Java does, with `UNICODE_CHARACTER_CLASS`, by the module's matcher and not V8's
+         * (#632, #568, #560, drivine-python#379). Each answer is `java.util.regex`'s: `Pattern.compile(pattern,
+         * UNICODE_CHARACTER_CLASS).matcher(text).find()` on JDK 25.
+         */
+        it.each([
+            ['^(?:a(?i)(?:[(|]|x)b|c)\\z', 'a(B', 1], // #632
+            ['[a-z&&b]', 'c', 0], // #568: a class's && is an intersection
+            ['[a-z&&b]', '&', 0],
+            ['[a-z&&[^aeiou]]', 'b', 1],
+            ['[a-z&&[^aeiou]]', 'a', 0],
+            ['^\\w+$', 'café', 1], // #560: \w, \d, \b and \s are Unicode's
+            ['^\\d$', '٣', 1],
+            ['\\bé', 'é', 1],
+            ['\\s', '﻿', 0],
+            ['\\s', '\u0085', 1],
+            ['^.$', '\u0085', 0], // a dot matches no U+0085
+            ['[a&&&b]', '&', 1], // drivine-python#379
+            ['[a\\Q\\E-c]', 'b', 1],
+            ['(?i)ß', 'ẞ', 0],
+            ['^a\\Z', 'a\n', 1], // \Z and \p{…} are Java's
+            ['^\\p{L}$', 'é', 1],
+            // The one departure, on purpose, as drivine4j's and drivine-python's: a POSIX class is read as Java names it,
+            // \p{Alpha}, where Java reads [[:alpha:]] as a class of the characters :, a, l, p and h (and gives 0, then 1).
+            ['[[:alpha:]]+', 'é', 1],
+            ['[[:alpha:]]', ':', 0]
+        ])('matches %j in %j as Java does', (pattern, text, expected) => {
+            expect(row('SELECT ? REGEXP ?', text, pattern)).toEqual([BigInt(expected)]);
+        });
+
+        it.each([
+            ['a++b', 'a possessive quantifier is not supported on this platform; rewrite the pattern without it.'],
+            ['(?<=a)b', 'a lookbehind is not supported on this platform; rewrite the pattern without it.'],
+            ['(a)\\1', 'a back reference is not supported on this platform; rewrite the pattern without it.'],
+            [
+                'x'.repeat(2_000_001),
+                'a pattern written as more than 2000000 characters is not supported on this platform; rewrite the pattern without it.'
+            ],
+            ['[&&]', 'Bad class syntax'],
+            ['\\p{IsAll}', 'Unknown character property name {IsAll}']
+        ])('refuses %#, naming what it refuses, with no prefix', (pattern, message) => {
+            expect(() => row('SELECT ? REGEXP ?', 'a', pattern)).toThrow(new Error(message));
+        });
+
+        it('takes a pattern of 2,000,000 characters', () => {
+            expect(row('SELECT ? REGEXP ?', 'a', 'x'.repeat(2_000_000))).toEqual([BigInt(0)]);
+        });
     });
 
     it('loads the package on the first call of a function, not on registering them', async () => {

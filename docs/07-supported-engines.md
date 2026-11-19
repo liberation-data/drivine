@@ -392,9 +392,32 @@ Notes:
   A vector or a full-text index is recorded and not made: `loadNearest` measures every node of the label that holds an
   embedding of the vector's size, and `loadMatching` reads every node of the label and scores by BM25, as Postgres
   does.
-- `matches` takes a JavaScript regular expression, matched against the whole value: `\w`, `\d` and `\b` are ASCII, as
-  JavaScript reads them, where drivine4j reads them as Unicode
-  ([#560](https://github.com/liberation-data/drivine/issues/560)).
+- `=~` and `matches` take Java's regular expression, matched against the whole value and read as Java reads it with
+  `UNICODE_CHARACTER_CLASS`: SQLite's `regexp` is the shared compiler's matcher, on every runtime, Node and the browser
+  bundle alike, not JavaScript's `RegExp`. So `\w`, `\d`, `\b` and `\s` are Unicode's, as on drivine4j, a class's `&&`
+  is an intersection, and `\Q…\E`, `\Z`, `\p{…}` and inline flags such as `(?i)` are Java's
+  ([#560](https://github.com/liberation-data/drivine/issues/560),
+  [#568](https://github.com/liberation-data/drivine/issues/568),
+  [#632](https://github.com/liberation-data/drivine/issues/632)). One departure is on purpose, as on drivine4j and
+  drivine-python: a POSIX class, `[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[:lower:]` or
+  `[:punct:]`, is read as Java names it, `\p{Alnum}` and so on, Unicode's, so `[[:alpha:]]` matches `é`, where Java
+  reads it as a class of the characters `:`, `a`, `l`, `p` and `h`; a full-text search's patterns, written for Postgres,
+  read alike. A pattern Java can't compile is refused with Java's description of the fault (`Bad class syntax`), without
+  its index. What the matcher can't match exactly as Java does, it refuses by name (`a lookbehind is not supported on
+  this platform; rewrite the pattern without it.`), as the
+  [compiler's README](https://github.com/liberation-data/drivine-cypher-spec/blob/main/compiler/README.md#regular-expressions)
+  lists them:
+  - a lookbehind, and any lookahead but one of literals, classes, alternatives, `$` and `\z` alone, unquantified;
+  - a back reference, `\1` or `\k<name>`;
+  - a possessive quantifier, and an atomic group, `(?>…)`;
+  - `\G`, `\X`, `\R`, `\N{…}` and `\b{g}`;
+  - a quantifier on what has no width (`^*`, `(\b)*`), and a quantifier on a quantifier (`a{2}{3}`);
+  - a lazy quantifier on a group but `*?` and `??` (`(bc)+?`);
+  - a capturing group of fixed length in a group repeated (`(?:(a))*a`), and a group that can match nothing in a group
+    repeated (`(?:a(?:b*)*){2}`);
+  - groups repeated within each other more than 3 deep;
+  - `(?-U)`, `(?-u)` and `(?c)`;
+  - and a pattern of more than 2,000,000 characters.
 - Text compares and sorts by SQLite's `BINARY` collation, the order of its code points, so a page of mixed-case text is
   in the order Neo4j gives (`B, a, b`), as on Postgres.
 - A whole number past 2^53 that a statement gives back is refused by Node's driver; one a save leaves alone keeps its
