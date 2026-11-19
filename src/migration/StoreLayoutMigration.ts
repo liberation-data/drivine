@@ -1,25 +1,20 @@
 import { DrivineError } from '@/DrivineError';
+import { DrivineLogger } from '@/logger/DrivineLogger';
 import { cypherCompilerModule } from '@/cypher/SharedCypherCompiler';
 import { stampParameters, storeStatements } from '@/backend/StoreStatements';
 import { Connection } from '@/connection/Connection';
-import { QuerySpecification } from '@/query/QuerySpecification';
+import { ClassType, QuerySpecification } from '@/query/QuerySpecification';
 import { randomUuid } from '@/utils/Random';
-import { classChain, propertyMetadata, ownClassMetadata } from '@/annotation/Metadata';
+import { ModelRegistry } from '@/model/ModelRegistry';
+import { FieldMapping } from '@/model/FieldMapping';
+import { FragmentModel } from '@/model/FragmentModel';
 
 /**
  * What a property is declared to hold, which store layout 1 can't tell: which texts are dates or moments, which whole
  * numbers are floats, and which lists of numbers are bytes (the shared module's kinds, by their words, as drivine4j's
  * `Kind` and drivine-python's give them).
  */
-export type Kind =
-    | 'date'
-    | 'localtime'
-    | 'time'
-    | 'localdatetime'
-    | 'datetime'
-    | 'duration'
-    | 'float'
-    | 'bytes';
+export type Kind = 'date' | 'localtime' | 'time' | 'localdatetime' | 'datetime' | 'duration' | 'float' | 'bytes';
 
 /** That the property `property` of the nodes labelled `label`, or the relationships of that type, holds `kind`, or lists of it. */
 export interface Declaration {
@@ -130,6 +125,7 @@ type Outcome = { type: 'rows'; rows: any[] } | { type: 'ran' } | { type: 'failed
  */
 export class StoreLayoutMigration {
     private readonly store: 'postgres' | 'oracle' | 'sqlite';
+    private readonly logger = new DrivineLogger(StoreLayoutMigration.name);
 
     constructor(private readonly provider: MigratableProvider) {
         const store = String(provider.type).toLowerCase();
@@ -148,24 +144,29 @@ export class StoreLayoutMigration {
                 'The store layout migration is not yet proven on every store (liberation-data/drivine#765): back the graph up first, and pass { unproven: true } to run it.'
             );
         }
+        // Declarations the module refuses, as one property declared two kinds, are refused before the store is reached.
+        let answer = this.ask({
+            start: {
+                declarations,
+                batchSize: options.batchSize ?? 1000,
+                dryRun: options.dryRun ?? false,
+                keepInvalid: options.keepInvalid ?? false
+            }
+        });
         const work = await this.provider.connectUnjudged();
         const held: { lock?: Connection } = {};
         try {
-            let answer = this.ask({
-                start: {
-                    declarations,
-                    batchSize: options.batchSize ?? 1000,
-                    dryRun: options.dryRun ?? false,
-                    keepInvalid: options.keepInvalid ?? false
-                }
-            });
             while ('run' in answer) {
                 answer = this.ask({
                     resume: answer.state,
                     outcomes: await this.round(work, held, answer.run as Action[])
                 });
             }
-            return answer.done as MigrationReport;
+            const report = answer.done as MigrationReport;
+            const graph = this.provider.graphName;
+            this.logger.log(`Store layout migration of '${graph}': ${report.status}: ${report.message}`);
+            report.notes.forEach((it) => this.logger.warn(`Store layout migration of '${graph}': ${it}`));
+            return report;
         } finally {
             if (held.lock) {
                 await held.lock.rollbackTransaction().catch(() => undefined);
@@ -196,6 +197,9 @@ export class StoreLayoutMigration {
                 }
             } catch (e) {
                 outcome = { type: 'failed', message: e instanceof Error ? e.message : String(e) };
+                this.logger.warn(
+                    `Store layout migration of '${this.provider.graphName}': ${action.type} failed: ${outcome.message}`
+                );
             }
             outcomes.push(outcome);
             if (outcome.type === 'failed') {
@@ -288,36 +292,32 @@ function document(row: any): any {
     return row;
 }
 
-/** The labels a node of `type` carries: its own and those it inherits, none where it has none. */
-function inheritedLabels(type: Function): string[] {
-    const labels = new Set<string>();
-    for (const it of classChain(type)) {
-        ownClassMetadata(it)?.labels?.forEach((label) => labels.add(label));
-    }
-    return [...labels];
-}
-
 /**
  * The declarations the node fragment `type` says, under each of its labels, its own and those it inherits, as a node of it
- * carries them, or with `relationshipType` the relationship fragment's, under that type: each field TypeScript records
- * as a `Date` (`datetime`, as a JavaScript Date is a moment, which layout 1 saved as its ISO text), as `design:type`
- * gives it for a decorated field, by the name it is stored under.
+ * carries them, or with `relationshipType` the relationship fragment's (`@RelationshipFragment`), under that type: each
+ * field the object manager's model knows is declared a `Date`, one TypeScript records as a `Date` for a field a Drivine
+ * decorator decorates or one the class initializes with a `Date` (`datetime`, as a JavaScript Date is a moment, which
+ * layout 1 saved as its ISO text), by the name it is stored under.
  *
  * A field layout 1 saved in a form other than its kind's is given no declaration, as the migration would read its values
- * as no value of the kind and refuse the graph: it is kept as it is. So bytes (`Uint8Array`, `Buffer`) are not declared,
- * as layout 1 saved one as `JSON.stringify` writes it, an object of its indexes or `{type: 'Buffer', data}`, not the
- * list of numbers or base64 text the migration reads bytes from. A date with no time, a float, or a list of either,
- * which TypeScript records no type of, is to be declared by hand.
+ * as no value of the kind and refuse the graph: it is kept as it is. So a `@JsonPacked` field, saved as a JSON text, is
+ * not declared, nor bytes (`Uint8Array`, `Buffer`), as layout 1 saved one as `JSON.stringify` writes it, an object of
+ * its indexes or `{type: 'Buffer', data}`, not the list of numbers or base64 text the migration reads bytes from. A
+ * `@GraphTransient` field, never saved, is not declared either. A date with no time, a float, or a list of either, which
+ * TypeScript records no type of, is to be declared by hand.
  */
 export function declarationsOf(type: Function, relationshipType?: string): Declaration[] {
-    const labels: string[] = relationshipType ? [relationshipType] : inheritedLabels(type);
+    const registry = new ModelRegistry();
+    const model: FieldMapping = relationshipType
+        ? registry.relationshipFragment(type as ClassType)
+        : registry.fragment(type as ClassType);
+    const labels: string[] = relationshipType ? [relationshipType] : (model as FragmentModel).labels;
     const declared: Declaration[] = [];
-    propertyMetadata(type).forEach((metadata, field) => {
-        const kind: Kind | undefined = metadata.designType === Date ? 'datetime' : undefined;
-        if (kind) {
-            const property = metadata.graphProperty ?? field;
-            labels.forEach((label) => declared.push({ label, property, kind }));
+    for (const field of model.dates) {
+        if (!model.jsonPacked.has(field) && !model.transientFields.has(field)) {
+            const property = model.graphProperties.get(field) ?? field;
+            labels.forEach((label) => declared.push({ label, property, kind: 'datetime' }));
         }
-    });
+    }
     return declared;
 }

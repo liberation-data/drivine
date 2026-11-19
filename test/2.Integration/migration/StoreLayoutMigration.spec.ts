@@ -116,9 +116,10 @@ describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
 /**
  * Bytes as Drivine for TypeScript 5.0.0 saved them, as `JSON.stringify` writes them: a Uint8Array as an object of its
  * indexes, a Buffer as `{type: 'Buffer', data}`. The migration reads bytes from a list of numbers or a base64 text alone,
- * so a declaration of them refuses the graph as `invalid`, writing nothing: why `declarationsOf` declares no bytes.
+ * so a declaration of them refuses the graph as `invalid`, writing nothing: why `declarationsOf` declares no bytes. So
+ * does a `@JsonPacked` Date, saved as its JSON text, `"2024-…Z"` quoted, which `declarationsOf` declares no kind for.
  */
-describe('bytes a graph 5.0.0 wrote, declared to a store layout migration', () => {
+describe('bytes and a packed Date a graph 5.0.0 wrote, declared to a store layout migration', () => {
     const folder = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'drivine-migration-bytes-')));
     const file = path.join(folder, 'layout1.sqlite');
 
@@ -127,7 +128,7 @@ describe('bytes a graph 5.0.0 wrote, declared to a store layout migration', () =
         const db = openSqlite(file);
         try {
             db.prepare(
-                `UPDATE drivine_node SET props = json_set(props, '$.raw', json('{"0":1,"1":2,"2":255}'), '$.buffer', json('{"type":"Buffer","data":[1,2,255]}')) WHERE json_extract(props, '$.name') = 'Ada'`
+                `UPDATE drivine_node SET props = json_set(props, '$.raw', json('{"0":1,"1":2,"2":255}'), '$.buffer', json('{"type":"Buffer","data":[1,2,255]}'), '$.packed', '"2024-03-15T10:30:00.000Z"') WHERE json_extract(props, '$.name') = 'Ada'`
             ).run();
         } finally {
             db.close();
@@ -136,18 +137,44 @@ describe('bytes a graph 5.0.0 wrote, declared to a store layout migration', () =
     afterAll(() => fs.rmSync(folder, { recursive: true, force: true }));
 
     it('should refuse each as invalid, and write nothing', async () => {
-        const provider = new SqliteConnectionProvider('migration-bytes', DatabaseType.SQLITE, file, { graph: 'drivine' });
+        const provider = new SqliteConnectionProvider('migration-bytes', DatabaseType.SQLITE, file, {
+            graph: 'drivine'
+        });
         try {
-            for (const property of ['raw', 'buffer']) {
-                const report = await new StoreLayoutMigration(provider).migrate([{ label: 'Person', property, kind: 'bytes' }], {
-                    unproven: true
-                });
+            const declared: Declaration[] = [
+                { label: 'Person', property: 'raw', kind: 'bytes' },
+                { label: 'Person', property: 'buffer', kind: 'bytes' },
+                { label: 'Person', property: 'packed', kind: 'datetime' }
+            ];
+            for (const declaration of declared) {
+                const report = await new StoreLayoutMigration(provider).migrate([declaration], { unproven: true });
                 expect(report.status).toBe('invalid');
-                expect(report.properties.find((it) => it.property === property)?.invalid).toHaveLength(1);
+                expect(report.properties.find((it) => it.property === declaration.property)?.invalid).toHaveLength(1);
             }
             await expect(provider.connect()).rejects.toBeInstanceOf(StoreLayoutError);
         } finally {
             await provider.end();
         }
+    });
+});
+
+describe('a store layout migration refused by its declarations', () => {
+    it('should refuse one property declared two kinds before it reaches the store', async () => {
+        const provider = {
+            type: 'SQLITE',
+            graphName: 'drivine',
+            connectUnjudged: jest.fn(),
+            prepareUnjudged: jest.fn()
+        };
+        await expect(
+            new StoreLayoutMigration(provider).migrate(
+                [
+                    { label: 'Person', property: 'born', kind: 'date' },
+                    { label: 'Person', property: 'born', kind: 'datetime' }
+                ],
+                { unproven: true }
+            )
+        ).rejects.toThrow(/declared date and datetime/);
+        expect(provider.connectUnjudged).not.toHaveBeenCalled();
     });
 });

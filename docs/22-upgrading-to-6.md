@@ -12,9 +12,10 @@ which is why this is a major version. Neo4j, Memgraph and FalkorDB hold their va
 The provider reads a graph's stamp, its `DrivineStore` node, on its first connection, before anything is made. A
 graph 5.0 or earlier wrote, in store layout 1, that holds no node but Drivine's own (its stamp and its schema marker)
 has that layout's indexes dropped and is stamped layout 2. One that holds the application's nodes is refused, on that
-connection and every one after it, with a `StoreLayoutError` (exported) that names the graph. Nothing is migrated:
-export the graph with the Drivine version that wrote it, and import it with 6.0. A graph a later Drivine stamped with
-a later layout is refused too. See [Oracle](07-supported-engines.md#oracle).
+connection and every one after it, with a `StoreLayoutError` (exported) that names the graph. Export the graph with
+the Drivine version that wrote it, and import it with 6.0, or migrate it in place with `StoreLayoutMigration`, not yet
+proven on every store, with a backup taken first. A graph a later Drivine stamped with a later layout is refused too.
+See [Oracle](07-supported-engines.md#oracle).
 
 ### Values are held as layout 2 holds them
 
@@ -81,8 +82,8 @@ CASE WHEN JSON_EXISTS(n.labels, '$?(@ == "Person")') THEN JSON_VALUE(n.props, '$
 ```
 
 which the shared compiler's SQL, drivine4j's, never reads through
-([#696](https://github.com/liberation-data/drivine/issues/696)). As with the values above, nothing is migrated in
-place. On a 5.0 graph's first connection, where it holds no node of the application, each index under a layout-1 name is
+([#696](https://github.com/liberation-data/drivine/issues/696)). As with the values above, nothing is migrated on a
+connection. On a 5.0 graph's first connection, where it holds no node of the application, each index under a layout-1 name is
 dropped, with the catalog records (`<graph>_schema`) that name it, and the graph is stamped layout 2; the next `ensure`,
 `SchemaManager`'s or a manager's, finds no such item and makes it as drivine4j does. A graph that holds the
 application's nodes is refused, as above. The schema marker keeps the shape all three libraries read: its inventory
