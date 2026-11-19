@@ -8,15 +8,19 @@ import {
     Direction,
     DrivineError,
     FullTextIndex,
+    count,
     GraphObjectManagerFactory,
     GraphPath,
+    GraphProperty,
     GraphRelationship,
     GraphView,
+    key,
     ModelRegistry,
     NodeFragment,
     NodeId,
     nodeRef,
     NodeStamp,
+    pathKey,
     PersistenceManager,
     PersistenceManagerFactory,
     QuerySpecification,
@@ -74,6 +78,33 @@ class LookupDateAsDate {
     name?: string;
 }
 
+/** An id stored under another name: refused by its field's name. */
+@NodeFragment({ labels: ['IdKindRun', 'Renamed'] })
+class RenamedId {
+    @NodeId() @GraphProperty('key') id: string;
+}
+
+@NodeFragment({ labels: ['IdKindRun', 'Base'] })
+class BaseKeyed {
+    @NodeId() id: string;
+}
+
+/** A subclass inheriting its @NodeId: TypeScript records the id's type on the base's prototype. */
+@NodeFragment({ labels: ['IdKindRun', 'Base', 'Sub'] })
+class SubKeyed extends BaseKeyed {
+    name?: string;
+}
+
+enum Code {
+    A = 'a'
+}
+
+/** A string enum: TypeScript records `String`. */
+@NodeFragment({ labels: ['IdKindRun', 'Keyed'] })
+class LookupDateAsEnum {
+    @NodeId() id: Code;
+}
+
 @NodeFragment({ labels: ['IdKindRun', 'Owner'] })
 class Owner {
     @NodeId() id: string;
@@ -119,6 +150,9 @@ class OwnedByPath {
 const KINDS = [
     { kind: 'date', cypher: "date('2026-01-05')", text: '2026-01-05' },
     { kind: 'datetime', cypher: "datetime('2026-01-05T10:11:12Z')", text: '2026-01-05T10:11:12Z' },
+    { kind: 'datetime', cypher: "datetime('2026-01-05T10:11:12+02:00')", text: '2026-01-05T10:11:12+02:00' },
+    { kind: 'localdatetime', cypher: "localdatetime('2026-01-05T10:11:12')", text: '2026-01-05T10:11:12' },
+    { kind: 'time', cypher: "time('10:11:12+02:00')", text: '10:11:12+02:00' },
     { kind: 'duration', cypher: "duration('P1DT2H')", text: 'P1DT2H' }
 ];
 
@@ -204,7 +238,7 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
 
     const keyedCount = async (): Promise<number> => gom.count(LookupDateAsAny);
 
-    describe.each(KINDS)('held as a $kind', ({ kind, cypher, text }: (typeof KINDS)[number]) => {
+    describe.each(KINDS)('held as $cypher', ({ kind, cypher, text }: (typeof KINDS)[number]) => {
         beforeEach(async () => reset(cypher));
 
         const asText = refusal('LookupDateAsText', 'string', text, kind);
@@ -238,6 +272,20 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
                 'edges.loadRelated',
                 async () => gom.edges.loadRelated(nodeRef(Owner, 'o'), 'OWNS', Direction.OUTGOING, LookupDateAsText),
                 asText
+            ],
+            [
+                "a grouped read's path key",
+                async () =>
+                    gom.groups.load(Owner, {
+                        keys: { keyed: pathKey(LookupDateAsText, [{ type: 'OWNS' }]) },
+                        aggregates: { all: count() }
+                    }),
+                asText
+            ],
+            [
+                'loadAll of a string enum id',
+                async () => gom.loadAll(LookupDateAsEnum),
+                refusal('LookupDateAsEnum', 'string', text, kind)
             ],
             ["a view's root", async () => gom.loadAll(KeyedView), asText],
             ["a view's related node, by load", async () => gom.load(Owned, 'o'), asText],
@@ -277,6 +325,37 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             // The object a load gave before #813: the id the read's text, which the save's lookup misses.
             await gom.save(Object.assign(new LookupDateAsText(), { id: text, name: 'resaved' }));
             expect(await keyedCount()).toEqual(2);
+        });
+
+        // Not refused, as the user didn't type the id, and left open as the Date over a date below: the save writes the
+        // text, which its lookup misses, so it makes a second node. Fails while that holds.
+        it.failing('saves an id declared any back onto the same node', async () => {
+            const [any] = await gom.loadAll(LookupDateAsAny);
+            await gom.save(Object.assign(any, { name: 'resaved' }));
+            expect(await keyedCount()).toEqual(1);
+        });
+
+        it('groups the nodes by their properties, as no node is mapped', async () => {
+            const groups = await gom.groups.load(LookupDateAsText, {
+                keys: { name: key('name') },
+                aggregates: { all: count() }
+            });
+            expect(groups).toEqual([{ name: 'x', all: 1 }]);
+            expect(await gom.groups.countBy(LookupDateAsText, 'id')).toEqual(new Map([[text, 1]]));
+        });
+
+        it('refuses an id stored under another name, by its field', async () => {
+            await pm.execute(
+                new QuerySpecification({ text: `CREATE (:IdKindRun:Renamed {key: ${cypher}})`, language: 'CYPHER' })
+            );
+            await expect(gom.loadAll(RenamedId)).rejects.toThrow(refusal('RenamedId', 'string', text, kind));
+        });
+
+        it('refuses a subclass that inherits its @NodeId', async () => {
+            await pm.execute(
+                new QuerySpecification({ text: `CREATE (:IdKindRun:Base:Sub {id: ${cypher}})`, language: 'CYPHER' })
+            );
+            await expect(gom.loadAll(SubKeyed)).rejects.toThrow(refusal('SubKeyed', 'string', text, kind));
         });
 
         it('loads an id declared any, or a union, as the text the read gives, as before', async () => {

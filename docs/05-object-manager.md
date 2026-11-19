@@ -322,14 +322,14 @@ On Oracle, Postgres and SQLite an id may be held as a temporal value another wri
 `date('2026-01-05')` or a drivine4j `Instant` id. A class that declares such an id a `string`, `number`, `bigint` or
 `boolean` can't load the node: the read gives the id as its text, which a lookup by id doesn't find, as it compares the
 id's kind as well, so a save of what was loaded would make a second node. Each read that maps the node (`load`,
-`loadAll`, `loadNearest`, `loadMatching`, `edges.loadRelated`, `update`, and a view's root, related nodes, nested views,
-relationship fragments and path ends) refuses it by name, before anything is written
+`loadAll`, `loadNearest`, `loadMatching`, `edges.loadRelated`, `update`, a grouped read's path key, and a view's root,
+related nodes, nested views, relationship fragments and path ends) refuses it by name, before anything is written
 ([#813](https://github.com/liberation-data/drivine/issues/813)): `Holiday's @NodeId id is declared a string, but the
 node whose id is '2026-01-05' holds it as a date: declare id as a date to load it.` Declare the id a `Date` for a
 `datetime` (the kind a `Date` is saved as), which loads, finds and saves the node as one. An id held as a `date` loads
 as a `Date` too, but a save writes a `Date` as a `datetime`, which a lookup doesn't find the date by: a save of such a
 node makes a second one, so write it with Cypher. An id declared `any`, `unknown` or a union, which TypeScript records
-no scalar type for, is not refused, and loads as the text the store gives.
+no scalar type for, is not refused, and loads as the text the store gives: a save of it makes a second node too.
 
 #### Count
 
