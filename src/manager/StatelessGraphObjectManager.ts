@@ -572,8 +572,7 @@ export class StatelessGraphObjectManager {
             const loaded = found.object;
             const before = ObjectUtils.deepCopy(loaded);
             // The root as loaded keeps its load's record, which a change that returns a copy is saved by (#811, #815).
-            const rootField = target.kind === 'GRAPH_VIEW' ? target.model.rootField : undefined;
-            keepLoadRecord(rootField ? (before as any)[rootField] : before, rootField ? (loaded as any)[rootField] : loaded);
+            keepLoadRecord(rootObjectOf(target, before), rootObjectOf(target, loaded));
             const changed = ((await change(loaded)) ?? loaded) as T;
             // The root's properties as the load read them, which the save compares a packed field with.
             const loadedProperties = (target.kind === 'GRAPH_VIEW' ? found.row?.root?.props : found.row?.props) ?? {};
@@ -697,7 +696,9 @@ export class StatelessGraphObjectManager {
         // Each statement bound before the first runs: one a SQL store refuses (a NaN) is refused with none written.
         const statements: QuerySpecification<PatchResult & { id: any }>[] = [];
         for (let start = 0; start < sorted.length; start += PATCH_ROWS) {
-            const rows = sorted.slice(start, start + PATCH_ROWS).map(({ bound, ...row }) => ({ ...row, id: bound }));
+            const rows = sorted
+                .slice(start, start + PATCH_ROWS)
+                .map(({ bound, ...row }: (typeof sorted)[number]) => ({ ...row, id: bound }));
             statements.push(this.backend.patchMany(root).spec({ rows }));
         }
         for (const statement of statements) {
@@ -1434,4 +1435,9 @@ function relatedIds(rel: RelationshipModel, value: any): any[] {
         // By value (see readBackKey): a loaded Date id is another Date, or the text a related object was given.
         return readBackKey(fragment?.[root.nodeIdField!], root);
     });
+}
+
+/** The root of an object of the target: a view's root, or the fragment itself. */
+function rootObjectOf(target: TargetModel, object: any): any {
+    return target.kind === 'GRAPH_VIEW' ? object?.[target.model.rootField] : object;
 }

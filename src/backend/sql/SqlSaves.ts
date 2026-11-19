@@ -50,7 +50,9 @@ export function heldIds(view: GraphViewModel, object: any, seen: Set<any> = new 
         const into = targetOf(rel);
         for (const item of items(rel, object[rel.field])) {
             const node = nodeOf(rel, item);
-            ids.push(...(into.kind === 'GRAPH_VIEW' ? heldIds(into.model, node, seen) : [boundOrNone(into.model, node)]));
+            ids.push(
+                ...(into.kind === 'GRAPH_VIEW' ? heldIds(into.model, node, seen) : [boundOrNone(into.model, node)])
+            );
         }
     }
     return ids.filter((it) => it != null);
