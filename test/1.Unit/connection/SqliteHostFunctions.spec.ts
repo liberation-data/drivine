@@ -128,6 +128,7 @@ describe('SqliteHostFunctions', () => {
         it.each([
             ['a++b', 'a possessive quantifier is not supported on this platform; rewrite the pattern without it.'],
             ['(?<=a)b', 'a lookbehind is not supported on this platform; rewrite the pattern without it.'],
+            ['(a)\\1', 'a back reference is not supported on this platform; rewrite the pattern without it.'],
             [
                 'x'.repeat(2_000_001),
                 'a pattern written as more than 2000000 characters is not supported on this platform; rewrite the pattern without it.'
