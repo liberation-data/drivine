@@ -165,7 +165,7 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
                 'CREATE (:Person {id: 7, k: -1}), (:Person {id: 8.0, k: -2}), (:Person {id: true, k: -3}), (:Person {id: [1, 2], k: -4})'
             );
             await query(
-                "CREATE (:Person {id: ['a', 'b'], k: -5}), (:Person {id: [], k: -6}), (:Person {id: [1], k: -7}), (:Person {id: [[1, 2]], k: -8})"
+                "CREATE (:Person {id: ['a', 'b'], k: -5}), (:Person {id: [], k: -6}), (:Person {id: [1], k: -7})"
             );
             await query(
                 'CREATE (:Person {id: 0.1, k: -9}), (:Person {id: 1.0e20, k: -10}), (:Person {id: -7, k: -11}), (:Person {id: 0, k: -12})'
@@ -186,8 +186,9 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
         });
 
         it("finds for a row's value of each kind the nodes it is equal to, as JSON compares them", async () => {
-            // 7.0 is 7, and 8 is 8.0, as in Cypher; a list, empty, of one item or of lists, is equal to the same list only, not
-            // to its item or to its items in another order; null and a missing key are equal to nothing.
+            // 7.0 is 7, and 8 is 8.0, as in Cypher; a list, empty or of one item, is equal to the same list only, not to its
+            // item or to its items in another order; null and a missing key are equal to nothing. No node holds a list of
+            // lists, which a write refuses as Neo4j does (liberation-data/drivine-cypher-spec#367), so that row finds none.
             const rows = [
                 { s: 'p5' },
                 { s: 7 },
@@ -206,7 +207,7 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
                 { s: [2, 1] },
                 { s: 1 }
             ];
-            const expected = [-8, -7, -6, -5, -4, -3, -2, -1, -1, 5];
+            const expected = [-7, -6, -5, -4, -3, -2, -1, -1, 5];
             expect(
                 await query('UNWIND $rows AS row MATCH (a:Person {id: row.s}) RETURN a.k ORDER BY a.k', { rows })
             ).toEqual(expected);
@@ -355,7 +356,7 @@ describe.each(cypherSqlStores().filter((it) => it.type !== DatabaseType.SQLITE))
             expect(
                 await query('UNWIND $rows AS row MERGE (a:Person {id: row.s}) RETURN a.k ORDER BY a.k', rows)
             ).toEqual([-13, -9, -4, -3, -2, -1, 3]);
-            expect(await query('MATCH (a:Person) RETURN count(a)')).toEqual([NODES + 15]);
+            expect(await query('MATCH (a:Person) RETURN count(a)')).toEqual([NODES + 14]);
         });
 
         it("finds a node at a relationship's end by a row's or a parameter's value", async () => {
