@@ -94,6 +94,38 @@ describe('SqliteHostFunctions', () => {
             );
             expect(() => row(`SELECT drivine_equal('1')`)).toThrow('drivine_equal takes 2 argument(s), not 1.');
         });
+
+        /**
+         * `REGEXP` reads a pattern as Java does, with `UNICODE_CHARACTER_CLASS`, by the module's matcher and not V8's
+         * (#632, #568, #560, drivine-python#379). Each answer is `java.util.regex`'s: `Pattern.compile(pattern,
+         * UNICODE_CHARACTER_CLASS).matcher(text).find()` on JDK 25.
+         */
+        it.each([
+            ['^(?:a(?i)(?:[(|]|x)b|c)\\z', 'a(B', 1], // #632
+            ['[a-z&&b]', 'c', 0], // #568: a class's && is an intersection
+            ['[a-z&&b]', '&', 0],
+            ['[a-z&&[^aeiou]]', 'b', 1],
+            ['[a-z&&[^aeiou]]', 'a', 0],
+            ['^\\w+$', 'café', 1], // #560: \w, \d, \b and \s are Unicode's
+            ['^\\d$', '٣', 1],
+            ['\\bé', 'é', 1],
+            ['\\s', '﻿', 0],
+            ['\\s', '\u0085', 1],
+            ['^.$', '\u0085', 0], // a dot matches no U+0085
+            ['[a&&&b]', '&', 1], // drivine-python#379
+            ['[a\\Q\\E-c]', 'b', 1],
+            ['(?i)ß', 'ẞ', 0]
+        ])('matches %j in %j as Java does', (pattern, text, expected) => {
+            expect(row('SELECT ? REGEXP ?', text, pattern)).toEqual([BigInt(expected)]);
+        });
+
+        it.each([
+            ['a++b', 'a possessive quantifier is not supported on this platform; rewrite the pattern without it.'],
+            ['[&&]', 'Bad class syntax'],
+            ['\\p{IsAll}', 'Unknown character property name {IsAll}']
+        ])('refuses %j, naming what it refuses', (pattern, message) => {
+            expect(() => row('SELECT ? REGEXP ?', 'a', pattern)).toThrow(message);
+        });
     });
 
     it('loads the package on the first call of a function, not on registering them', async () => {
