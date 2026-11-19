@@ -97,10 +97,46 @@ first connection, before anything is made. A graph an earlier Drivine wrote in l
 Drivine's own, its stamp and its schema marker, has that layout's indexes dropped and is stamped layout 2. One that
 holds the application's nodes is refused,
 on that connection and every one after it, with a `StoreLayoutError` that names the graph and says what to do: export
-it with the Drivine version that wrote it, and import it with this one. Nothing is migrated. A graph a later Drivine
-stamped with a later layout is refused too. The error's `graph` names the graph, `from` the earlier layout it was
-written in, where it holds values, and `inProgress` is true where a migration of it to this layout was begun and
+it with the Drivine version that wrote it, and import it with this one, or migrate it in place (below). A graph a later
+Drivine stamped with a later layout is refused too. The error's `graph` names the graph, `from` the earlier layout it
+was written in, where it holds values, and `inProgress` is true where a migration of it to this layout was begun and
 not finished.
+
+**Migrating a graph from layout 1 to layout 2.** `StoreLayoutMigration` moves a graph on Oracle, Postgres or SQLite
+from layout 1 to layout 2 in place, by the shared compiler's migrator, which drivine4j and drivine-python run alike
+([#765](https://github.com/liberation-data/drivine/issues/765)). It is not yet proven on every store: `migrate` is
+refused unless passed `{ unproven: true }`, and its `Declaration`, `Kind`, `MigrationStatus` and `MigrationReport` may
+change in any release until it is. Run it while nothing else uses the graph, with a backup taken first. It is given the
+provider, and runs on connections of its own from the provider's pool, never one of a `TransactionContextHolder`'s
+transaction: two on Postgres and Oracle, one holding the migration's lock, so the pool needs room for both. Layout 1
+can't tell which texts are dates or moments, which whole numbers are floats and which texts are bytes, so it is told by
+declarations, a label's property and its kind each; `declarationsOf(Person)` derives them from
+a node fragment's fields declared a `Date` (a moment, `datetime`), as the object manager knows them (a field a Drivine
+decorator decorates, or one the class initializes with a `Date`), under each of its labels, inherited ones too, and
+`declarationsOf(Knows, 'KNOWS')` from a relationship fragment's. A field layout 1 saved in another form than its
+kind's is not declared, as the migration would read it as no value of its kind and refuse the graph, and is kept as it
+is: a `@JsonPacked` one, saved as a JSON text, and bytes (`Uint8Array`, `Buffer`), which 5.0 saved as `JSON.stringify`
+writes them. A list of `Date`s, which TypeScript records as an `Array`, a date with no time, a float, or a list of
+either is declared by hand.
+
+```typescript
+const migration = new StoreLayoutMigration(provider); // a PostgresConnectionProvider, say
+const declarations = [...declarationsOf(Person), { label: 'Person', property: 'born', kind: 'date' } as Declaration];
+const dryRun = await migration.migrate(declarations, { dryRun: true, unproven: true });
+const report = await migration.migrate(declarations, { unproven: true });
+```
+
+A dry run (`dryRun: true`) writes nothing, and reports what would change, the values that are no value of their
+declared kind, the properties whose values all read as one kind (`candidates` to declare), and the uniqueness
+constraints' keys that may collide. A migration ends with a `MigrationReport` whose `status` says how: `migrated`,
+`current` or `empty` (nothing to do), `dryRun` (a dry run's), `inProgress` (a dry run of a graph part way through a
+migration, which only resuming it goes on with), `invalid` (a value not of its kind: declare it otherwise, or pass
+`keepInvalid: true`), `collisions` (keys a uniqueness constraint holds once that layout 2 reads as one: correct them
+with plain SQL and run it again), `refused` (a graph of another layout, or one changed since its migration began, or
+resumed, before every row is written, with other declarations or `keepInvalid`), or `failed` (the store's error). One
+stopped at any moment, or by `collisions`, is resumed by running it again with the same declarations. It makes no
+index or constraint, which the application's schema plan makes at its next start, and leaves the count store unseeded,
+as the report's `notes` say.
 
 Notes:
 

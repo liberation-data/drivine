@@ -10,6 +10,7 @@ export * from './dsl';
 export * from './logger';
 export * from './manager';
 export * from './mapper';
+export * from './migration';
 export * from './model';
 export * from './query';
 export * from './schema';

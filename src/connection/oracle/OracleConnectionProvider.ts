@@ -119,6 +119,28 @@ export class OracleConnectionProvider implements ConnectionProvider {
         );
     }
 
+    /**
+     * A connection that neither makes the graph's tables nor judges its store layout, as {@link connect} does first: what a
+     * store layout migration runs on, as the graph it migrates is one {@link connect} refuses (see StoreLayoutMigration).
+     */
+    async connectUnjudged(): Promise<Connection> {
+        const connection = await (await this.poolOf()).getConnection();
+        this.checkVersion(connection);
+        return new OracleConnection(
+            connection,
+            new OracleResultMapper(),
+            'migration',
+            this.graphName,
+            `${this.connectionProperties.connectString}|${this.connectionProperties.user ?? ''}`,
+            this.cypherRefusal
+        );
+    }
+
+    /** Makes the graph's tables on `connection` as a first connection makes them, without the layout's verdict. */
+    async prepareUnjudged(connection: Connection): Promise<void> {
+        await new OracleGraph(this.graphName).ensure((connection as OracleConnection).connection);
+    }
+
     async end(): Promise<void> {
         if (this.pool) {
             const pool = await this.pool;
