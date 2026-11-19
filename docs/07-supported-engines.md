@@ -108,8 +108,9 @@ from layout 1 to layout 2 in place, by the shared compiler's migrator, which dri
 refused unless passed `{ unproven: true }`, and its `Declaration`, `Kind`, `MigrationStatus` and `MigrationReport` may
 change in any release until it is. Run it while nothing else uses the graph, with a backup taken first. It is given the
 provider, and runs on connections of its own from the provider's pool, never one of a `TransactionContextHolder`'s
-transaction. Layout 1 can't tell which texts are dates or moments, which whole numbers are floats and which texts are
-bytes, so it is told by declarations, a label's property and its kind each; `declarationsOf(Person)` derives them from
+transaction: two on Postgres and Oracle, one holding the migration's lock, so the pool needs room for both. Layout 1
+can't tell which texts are dates or moments, which whole numbers are floats and which texts are bytes, so it is told by
+declarations, a label's property and its kind each; `declarationsOf(Person)` derives them from
 a node fragment's fields declared a `Date` (a moment, `datetime`), as the object manager knows them (a field a Drivine
 decorator decorates, or one the class initializes with a `Date`), under each of its labels, inherited ones too, and
 `declarationsOf(Knows, 'KNOWS')` from a relationship fragment's. A field layout 1 saved in another form than its

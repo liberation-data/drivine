@@ -119,9 +119,10 @@ type Outcome = { type: 'rows'; rows: any[] } | { type: 'ran' } | { type: 'failed
  * A migration makes no index or constraint: the application's schema plan makes its declared ones at its next start.
  *
  * Statements run on a connection of their own that neither makes the graph's tables nor judges its layout, as `connect`
- * would, and refuse the graph; the lock on another, in a transaction left open until the migration ends. Each is the
- * provider's own, taken from its pool, never one of an application's transaction (a `TransactionContextHolder`'s), so a
- * round's writes commit as the migration commits them, whatever the caller is running in.
+ * would, and refuse the graph; the lock on another, in a transaction left open until the migration ends, so a pool needs
+ * room for two. Each is the provider's own, taken from its pool, never one of an application's transaction (a
+ * `TransactionContextHolder`'s), so a round's writes commit as the migration commits them, whatever the caller is
+ * running in.
  */
 export class StoreLayoutMigration {
     private readonly store: 'postgres' | 'oracle' | 'sqlite';

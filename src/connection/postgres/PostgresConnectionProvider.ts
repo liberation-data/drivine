@@ -65,10 +65,7 @@ export class PostgresConnectionProvider implements ConnectionProvider {
             },
             (it, failure) => it.release(failure)
         );
-        if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
-            await this.setSessionId(client);
-        }
-        return new PostgresConnection(client, new PostgresResultMapper(), this.graphName);
+        return this.connection(client);
     }
 
     /**
@@ -76,11 +73,7 @@ export class PostgresConnectionProvider implements ConnectionProvider {
      * store layout migration runs on, as the graph it migrates is one {@link connect} refuses (see StoreLayoutMigration).
      */
     async connectUnjudged(): Promise<Connection> {
-        const client = await this.pool.connect();
-        if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
-            await this.setSessionId(client);
-        }
-        return new PostgresConnection(client, new PostgresResultMapper(), this.graphName);
+        return this.connection(await this.pool.connect());
     }
 
     /** Makes the graph's tables on `connection` as a first connection makes them, without the layout's verdict. */
@@ -105,6 +98,19 @@ export class PostgresConnectionProvider implements ConnectionProvider {
 
     [INSPECT](): Record<string, unknown> {
         return this.toJSON();
+    }
+
+    /** `client` as a connection, its session's id read first where it has none; handed back to the pool where that fails. */
+    private async connection(client: PoolClient): Promise<Connection> {
+        if (!Object.prototype.hasOwnProperty.call(client, 'sessionId')) {
+            try {
+                await this.setSessionId(client);
+            } catch (e) {
+                client.release(e as Error);
+                throw e;
+            }
+        }
+        return new PostgresConnection(client, new PostgresResultMapper(), this.graphName);
     }
 
     private async setSessionId(client: PoolClient): Promise<void> {

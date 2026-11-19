@@ -80,4 +80,27 @@ describe('PostgresConnectionProvider', () => {
         expect(warn).toHaveBeenCalledTimes(2);
         warn.mockRestore();
     });
+
+    /** A session whose id can't be read is handed back to the pool, closed, not kept from it (liberation-data/drivine#765). */
+    it('should hand a connection back to the pool where its session id could not be read, judged or not', async () => {
+        for (const connect of ['connect', 'connectUnjudged'] as const) {
+            const failure = new Error('connection terminated');
+            const client = {
+                query: async (sql: string | { text: string }) => {
+                    const text = typeof sql === 'string' ? sql : sql.text;
+                    if (text.includes('pg_backend_pid')) {
+                        return Promise.reject(failure);
+                    }
+                    return Promise.resolve({
+                        rows: text.startsWith('SELECT count(*) AS "made"') ? [{ made: '0' }] : []
+                    });
+                },
+                release: jest.fn()
+            };
+            const provider = new PostgresConnectionProvider('PG', DatabaseType.POSTGRES, {}, 'pg_session');
+            Object.assign(provider, { pool: { connect: async () => Promise.resolve(client) } });
+            await expect(provider[connect]()).rejects.toBe(failure);
+            expect(client.release).toHaveBeenCalledWith(failure);
+        }
+    });
 });
