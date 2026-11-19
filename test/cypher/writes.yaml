@@ -2647,3 +2647,32 @@ cases:
       - only: [sql]
         cypher: "MATCH (n:CyWrite {i: 1}) RETURN n.i + 1, 2 * n.i"
         rows: [[2, 2]]
+
+  - name: "Arithmetic of a stored value in the properties of a relationship matched"
+    description: "A relationship's properties matched, in a MERGE or an OPTIONAL MATCH, worked out of a value a node holds, are worked out for each row, and fail only where the row's value does: on Postgres every such statement failed as a truth value beside a number, whatever the values, as its planner worked out the failure of constants in the CASE before any row (liberation-data/drivine-cypher-spec#399)."
+    steps:
+      - cypher: "CREATE (:CyWrite {i: 2, s: '2026-01-05', l: [5]}), (:CyWrite {i: 0}), (:CyWrite {i: 3, flag: true})"
+      - cypher: "MATCH (n:CyWrite {i: 2}) MERGE (n)-[r:DS {w: 1 / n.i}]->(n) RETURN r.w"
+        rows: [0]
+      - note: "Found, not made again."
+        cypher: "MATCH (n:CyWrite {i: 2}) MERGE (n)-[r:DS {w: 1 / n.i}]->(n) RETURN r.w"
+        rows: [0]
+      - cypher: "MATCH (:CyWrite {i: 2})-[r:DS]->() RETURN count(r)"
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite {i: 2}) MERGE (n)-[r:DP {w: n.i + 1, v: n.i * 3, u: n.i - 5, k: $k / n.i}]->(n) RETURN [r.w, r.v, r.u, r.k]"
+        parameters: {k: 4}
+        rows: [[3, 6, -3, 2]]
+      - cypher: "MATCH (n:CyWrite {i: 2}) OPTIONAL MATCH (n)-[r:DS {w: 1 / n.i}]->(n) RETURN r.w"
+        rows: [0]
+      - cypher: "MATCH (n:CyWrite {i: 2}) MERGE (n)-[r:DD {d: date(n.s)}]->(n) RETURN toString(r.d)"
+        rows: ["2026-01-05"]
+      - note: "An item of a list by a number written, and a round() by places written out of range of a value that is null, which rounds to null, fail only for a row that is no list or holds a number."
+        cypher: "MATCH (n:CyWrite {i: 2}) MERGE (n)-[r:DL {w: n.l[0]}]->(n) RETURN r.w"
+        rows: [5]
+      - cypher: "MATCH (n:CyWrite {i: 2}) OPTIONAL MATCH (n)-[r:DS {w: round(n.missing, -1)}]->(n) RETURN r"
+        rows: [null]
+      - note: "A row whose value fails fails as it would anywhere: by zero, and a truth value beside a number."
+        cypher: "MATCH (n:CyWrite {i: 0}) MERGE (n)-[r:DZ {w: 1 / n.i}]->(n) RETURN r.w"
+        error: true
+      - cypher: "MATCH (n:CyWrite {i: 3}) MERGE (n)-[r:DB {w: n.flag + 1}]->(n) RETURN r.w"
+        error: true
