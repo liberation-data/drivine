@@ -3,7 +3,8 @@
  *
  * 1. Everything else, in parallel.
  * 2. The suites that make indexes and constraints, one at a time: on Neo4j, schema changes in parallel queue on its
- *    schema lock behind other suites, and on Oracle they wait on the tables other suites write. And the one that times
+ *    schema lock behind other suites, and on Oracle they wait on the tables other suites write, and a full-text index
+ *    still loading fails their writes (#826). And the one that times
  *    Oracle's planning, which another suite's planning would slow, and the one that times write loops.
  * 3. The sample app, alone: it clears generic labels (Person, Organization, ...) other suites write.
  *
