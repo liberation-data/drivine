@@ -104,11 +104,18 @@ export class OracleConnectionProvider implements ConnectionProvider {
             },
             async (it) => it.close()
         );
-        const session = await connection.execute<{ SID: string }>(
-            "SELECT SYS_CONTEXT('USERENV', 'SID') AS SID FROM dual",
-            {},
-            { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
+        // Handed back to the pool where the session's id can't be read, as a session whose set-up fails is (#824).
+        let session: oracledb.Result<{ SID: string }>;
+        try {
+            session = await connection.execute<{ SID: string }>(
+                "SELECT SYS_CONTEXT('USERENV', 'SID') AS SID FROM dual",
+                {},
+                { outFormat: oracledb.OUT_FORMAT_OBJECT }
+            );
+        } catch (e) {
+            await connection.close().catch(() => undefined);
+            throw e;
+        }
         return new OracleConnection(
             connection,
             new OracleResultMapper(),
