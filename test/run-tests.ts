@@ -3,8 +3,9 @@
  *
  * 1. Everything else, in parallel.
  * 2. The suites that make indexes and constraints, one at a time: on Neo4j, schema changes in parallel queue on its
- *    schema lock behind other suites, and on Oracle they wait on the tables other suites write. And the one that times
- *    Oracle's planning, which another suite's planning would slow, and the one that times write loops.
+ *    schema lock behind other suites, and on Oracle they wait on the tables other suites write, and a full-text index
+ *    still loading fails other suites' writes to them (#826). And the one that times Oracle's planning, which another
+ *    suite's planning would slow, and the one that times write loops.
  * 3. The sample app, alone: it clears generic labels (Person, Organization, ...) other suites write.
  *
  * `npm test -- <jest arguments>` runs Jest on them alone, in one stage, as `npx jest` does.
@@ -31,6 +32,11 @@ const SERIAL = [
     'test/2.Integration/manager/StatelessGraphObjectManager.nearest',
     'test/2.Integration/manager/StatelessGraphObjectManager.vectorScore',
     'test/2.Integration/manager/StatelessGraphObjectManager.matching',
+    // Suites that make a full-text index on Oracle: while its domain index is LOADING, another suite's write to the
+    // graph's tables fails with ORA-29861 (#826).
+    'test/2.Integration/manager/StatelessGraphObjectManager.idKind',
+    'test/2.Integration/manager/StatelessGraphObjectManager.bm25',
+    'test/2.Integration/manager/StatelessGraphObjectManager.rankingAgreement',
     // How long Oracle takes to plan a statement, which a parallel suite's own planning on the same database would add to.
     'test/2.Integration/oracle/OracleEraParse',
     // How a write's time grows with its rows, over two runs that a parallel suite's load would slow unevenly.
