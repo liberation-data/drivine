@@ -240,6 +240,10 @@ describe('SchemaPlan', () => {
                         Object.assign(new Error('could not create unique index'), { code: '23505', severity: 'ERROR' })
                     );
                 }
+                // The build's claim taken, as Postgres's RETURNING gives the claim's time (drivine-cypher-spec#382).
+                if (text.includes("'CLAIM:")) {
+                    return Promise.resolve(['t1']);
+                }
                 // The sample of the keys held more than once.
                 return Promise.resolve(
                     text.includes("'count', COUNT(*)") ? [{ properties: { email: 'a' }, count: 2, nodes: [] }] : []
@@ -285,7 +289,11 @@ describe('SchemaPlan', () => {
                 run: async (statement: string | NativeOperation): Promise<any[]> => {
                     const text = String(statement);
                     ran.push(text);
-                    return online.test(text) ? Promise.reject(refusal) : Promise.resolve([]);
+                    if (online.test(text)) {
+                        return Promise.reject(refusal);
+                    }
+                    // The build's claim taken, as Postgres's RETURNING gives the claim's time (drivine-cypher-spec#382).
+                    return Promise.resolve(text.includes("'CLAIM:") ? ['t1'] : []);
                 }
             };
             const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
