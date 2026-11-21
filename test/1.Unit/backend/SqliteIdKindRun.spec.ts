@@ -27,6 +27,7 @@ import {
     PropertyBag,
     QuerySpecification,
     RelationshipFragment,
+    RemovedTargets,
     Root,
     SchemaCatalog,
     SchemaManager,
@@ -711,6 +712,18 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
                 { replace: ['keyed'] }
             );
             expect(await ownsEdges()).toEqual(1);
+        });
+
+        it("deletes, by DELETE_UNREFERENCED, the date's node, not the node of the text the view holds", async () => {
+            await gom.save(
+                Object.assign(new Owned(), {
+                    owner: Object.assign(new Owner(), { id: 'o', name: 'owner' }),
+                    keyed: [Object.assign(new LookupDateAsText(), { id: '2026-01-05', name: 'text' })]
+                }),
+                { replace: ['keyed'], removedTargets: RemovedTargets.DELETE_UNREFERENCED }
+            );
+            expect(await ownsEdges()).toEqual(1);
+            expect(await names()).toEqual({ '"2026-01-05"': 'text' });
         });
 
         it("trims a view's relationship to the text's node, kept the date's node alone", async () => {

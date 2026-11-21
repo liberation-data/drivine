@@ -193,7 +193,8 @@ export class WritePlan {
     /**
      * The step that removes the relationships of `type` in `direction` from `from` to the nodes of `shape` whose stored
      * ids are `ids`, or with `keep` to every one but those. With `remove`, a node left with no relationship on the
-     * field's side goes too, unless its id is among `held`.
+     * field's side goes too, unless its id is among `held`. `ids` and `held` are plan keys (see storedKey), which the
+     * store's write compares with each target's id read back as one (the module's `planKey`).
      */
     unlink(
         from: number,
