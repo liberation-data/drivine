@@ -190,6 +190,30 @@ marker:
               -- Another process recorded it between the MERGE's read and its insert: it is recorded.
               NULL;
           END;
+      claim: |-
+        DECLARE
+            PRAGMA AUTONOMOUS_TRANSACTION;
+            v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+        BEGIN
+            DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = '_DrivineSchema' AND properties = '["scope"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+            INSERT INTO drivine_schema (kind, label, properties, details)
+            VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+            COMMIT;
+        EXCEPTION
+            WHEN OTHERS THEN
+                ROLLBACK;
+                RAISE;
+        END;
+      claimParameters: ["at"]
+      release: |-
+        DECLARE
+            PRAGMA AUTONOMOUS_TRANSACTION;
+        BEGIN
+            DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = '_DrivineSchema' AND properties = '["scope"]' AND JSON_VALUE(details, '$.at') = $at;
+            COMMIT;
+        END;
+      releaseParameters: ["at"]
+      held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = '_DrivineSchema' AND properties = '[\"scope\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
     sqlite:
       prepare: "ddl[0]"
       read:

@@ -2135,6 +2135,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["name"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -2311,6 +2333,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["name","born"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -2465,6 +2509,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["name","born"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -2597,6 +2663,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["name","born"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -2736,6 +2824,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["name"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["name"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -2865,6 +2975,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["__drivine.lower.email"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["__drivine.lower.email"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["__drivine.lower.email"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -3050,6 +3182,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["email"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '["email"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["email"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -3298,6 +3452,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["first","last"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '["first","last"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["first","last"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -3563,6 +3739,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -3795,6 +3993,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -3982,6 +4202,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '["embedding"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:VECTOR_INDEX', 'Chunk', '["embedding"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '["embedding"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"embedding\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -4110,6 +4352,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '["vec"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:VECTOR_INDEX', 'Chunk', '["vec"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '["vec"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"vec\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -4245,6 +4509,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '["tuned"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:VECTOR_INDEX', 'Chunk', '["tuned"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '["tuned"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"tuned\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -4392,6 +4678,28 @@ cases:
                                 NULL;
                             END;
                         END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '["title","body"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:FULLTEXT_INDEX', 'Doc', '["title","body"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '["title","body"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -4530,6 +4838,28 @@ cases:
                                 NULL;
                             END;
                         END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '["title","body"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:FULLTEXT_INDEX', 'Doc', '["title","body"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '["title","body"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -4671,6 +5001,28 @@ cases:
                                 NULL;
                             END;
                         END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '["title"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:FULLTEXT_INDEX', 'Doc', '["title"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '["title"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -4861,6 +5213,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Per"son' AND properties = '["name"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Per"son', '["name"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Per"son' AND properties = '["name"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Per\"son' AND properties = '[\"name\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -5008,6 +5382,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'a b' AND properties = '["name"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'a b', '["name"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'a b' AND properties = '["name"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'a b' AND properties = '[\"name\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -5187,6 +5583,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Per"son' AND properties = '["name"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Per"son', '["name"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Per"son' AND properties = '["name"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -5398,6 +5816,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["address.city"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["address.city"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["address.city"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"address.city\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -5545,6 +5985,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["o''name"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:RANGE_INDEX', 'Person', '["o''name"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '["o''name"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"o''name\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
@@ -5727,6 +6189,28 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
+        claim: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+              v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["say\"hi"]' AND JSON_VALUE(details, '$.since' RETURNING NUMBER) < v_now - 60 AND NOT EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node'));
+              INSERT INTO drivine_schema (kind, label, properties, details)
+              VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '["say\"hi"]', JSON_OBJECT('at' VALUE $at, 'since' VALUE v_now));
+              COMMIT;
+          EXCEPTION
+              WHEN OTHERS THEN
+                  ROLLBACK;
+                  RAISE;
+          END;
+        release: |-
+          DECLARE
+              PRAGMA AUTONOMOUS_TRANSACTION;
+          BEGIN
+              DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["say\"hi"]' AND JSON_VALUE(details, '$.at') = $at;
+              COMMIT;
+          END;
+        held: "SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]' AND (JSON_VALUE(details, '$.since' RETURNING NUMBER) >= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER('drivine_node')))"
         drop:
           - |-
             DECLARE
