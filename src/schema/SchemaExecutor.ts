@@ -13,9 +13,10 @@ import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 
 /**
  * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or a SQL store turning DDL
- * away because of another session's (see {@link ddlContended}), as when managers that start together each make the
- * indexes of the store's key. A statement that `waitedOutBusy`, as an Oracle index's block does (see
- * {@link waitsOutBusyLock}), is taken as turned away only for a deadlock (see {@link ddlDeadlocked}).
+ * away because of another session's (see {@link ddlContended}), as a graph's first-use block may be when managers that
+ * start together each make the store. A statement the schema planner reads the failure of is not run again for it
+ * (#830). A statement that `waitedOutBusy`, as an Oracle index's block does (see {@link waitsOutBusyLock}), is taken as
+ * turned away only for a deadlock (see {@link ddlDeadlocked}).
  */
 function contended(failure: unknown, waitedOutBusy: boolean): boolean {
     if (waitedOutBusy ? ddlDeadlocked(failure) : ddlContended(failure)) {
@@ -59,10 +60,10 @@ export class SchemaExecutor {
         once: boolean = false
     ): Promise<any[]> {
         await this.prepare?.();
-        const waitedOutBusy = typeof statement === 'string' && waitsOutBusyLock(statement);
         if (once) {
             return this.runOnce(statement, bindings);
         }
+        const waitedOutBusy = typeof statement === 'string' && waitsOutBusyLock(statement);
         return whenNotContended(
             async () => this.runOnce(statement, bindings),
             (failure) => contended(failure, waitedOutBusy)

@@ -6,7 +6,7 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 import { GraphBackend } from '@/backend/GraphBackend';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { EnsureResult, uniquenessConstraint, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
-import { anyCause, contendedPause, gaveUpAsContended } from '@/manager/Contention';
+import { anyCause, contendedPause, ddlContended, gaveUpAsContended } from '@/manager/Contention';
 
 /**
  * The stable identity of the store behind a connection: who the graph is, not where it lives. An address can't answer
@@ -146,7 +146,7 @@ export class StoreIdentityResolver {
         try {
             return this.inForceAfter(await this.ensuredAgainWhenMadeMeanwhile(this.constraints));
         } catch (e) {
-            const contended = gaveUpAsContended(e) || this.backend.contended(e);
+            const contended = this.contended(e);
             if (await this.winnersInForce(this.constraints, contended)) {
                 return true;
             }
@@ -190,7 +190,7 @@ export class StoreIdentityResolver {
     /**
      * Whether another manager's key constraint is in force, looked for after this one's making failed. Of managers
      * making it at once on Neo4j, each round of the label's lock goes to one and turns the rest away as deadlocked; with
-     * many at once, the rounds can go on past the schema executor's attempts (as in CI run 41260212023). A loser turned
+     * many at once, the rounds can outlast a loser's ensures (as in CI run 41260212023). A loser turned
      * away each time finds the winner's here, and, looking rather than making it again, leaves the lock to the others,
      * so that one of them wins sooner. The winner may still be making it, so after `contended` making it is looked for
      * up to LOOKS_FOR_THE_WINNER times, with longer pauses between (see {@link lookPause}), as drivine4j does. After a
@@ -210,6 +210,15 @@ export class StoreIdentityResolver {
         return false;
     }
 
+    /**
+     * Whether the key constraint's making was turned away by another session's, run once by the schema executor (#830):
+     * a deadlock or a busy lock on a SQL store's DDL (ORA-00054 and ORA-04020 too, which the backend's data writes don't
+     * take for contention), or what the backend takes for it; or a listing the executor ran again and gave up on.
+     */
+    private contended(failure: unknown): boolean {
+        return gaveUpAsContended(failure) || ddlContended(failure) || this.backend.contended(failure);
+    }
+
     /** `ensure`s the key's constraint, again when another manager made it, or what it needs, meanwhile. */
     private async ensuredAgainWhenMadeMeanwhile(
         constraints: ConstraintManager
@@ -219,8 +228,8 @@ export class StoreIdentityResolver {
                 // The label is Drivine's, so a plain index on the key (Neo4j) is replaced by the constraint.
                 return await constraints.ensure(KEY_CONSTRAINT, undefined, true);
             } catch (e) {
-                // Not a deadlock: the schema executor has run that again already, as many times as it runs one.
-                if (attempt >= ENSURE_ATTEMPTS || !madeMeanwhile(e)) {
+                // Not a statement turned away, though its words say "already exists": that is looked for the winner of.
+                if (attempt >= ENSURE_ATTEMPTS || !madeMeanwhile(e) || this.contended(e)) {
                     throw e;
                 }
                 await new Promise((resolve) => setTimeout(resolve, contendedPause(attempt - 1)));

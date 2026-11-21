@@ -64,9 +64,10 @@ export class Neo4jConnection implements Connection {
 
     /**
      * Closes the session. A failure is logged, at debug when the engine turned the statement away for another
-     * session's (a deadlock or conflict): its caller runs it again, as a save and a schema statement are (see
-     * `whenNotContended`), and one that still fails is thrown there. Otherwise each manager of several starting at once
-     * would warn of each deadlock it got past making the store identity's constraint (#479).
+     * session's (a deadlock or conflict): its caller runs it again, as a save is (see `whenNotContended`), or, for a
+     * schema statement run once, as its plan says or the store identity's constraint does (#830), and one that still
+     * fails is thrown there. Otherwise each manager of several starting at once would warn of each deadlock it got past
+     * making the store identity's constraint (#479).
      */
     async release(err?: Error): Promise<void> {
         if (err && transientOverBolt(err)) {

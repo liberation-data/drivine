@@ -1,6 +1,5 @@
 import {
     backendFor,
-    CONTENDED_ATTEMPTS,
     Connection,
     ConnectionProvider,
     ConstraintManager,
@@ -293,9 +292,9 @@ describe('Managers making the store key constraint at once', () => {
         expect(warned()).toContain('best-effort');
     });
 
-    it('should not ensure the constraint again for a deadlock the schema executor already gave up on', async () => {
-        // The executor ran it as many times as it runs one; ensuring again would run it as many times again, each. It is
-        // ensured once more only after the looks for the winner's constraint, which find none.
+    it('should not ensure the constraint again at once for a deadlock whose words say already exists', async () => {
+        // Turned away, not made meanwhile: the winner's constraint is looked for, and, finding none, it is ensured once
+        // more, each run once by the schema executor (#830).
         const deadlock = new Neo4jError(
             "ForsetiClient can't acquire EXCLUSIVE LABEL: the lock its index already exists under is held. Deadlock wait cycle.",
             'Neo.TransientError.Transaction.DeadlockDetected'
@@ -303,11 +302,11 @@ describe('Managers making the store key constraint at once', () => {
         const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], deadlock, false);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(2 * CONTENDED_ATTEMPTS);
+        expect(creates()).toEqual(2);
         expect(warned()).toContain('best-effort');
     });
 
-    it("should find the winner's constraint when its own making deadlocked as many times as the executor runs one", async () => {
+    it("should find the winner's constraint when its own making deadlocked", async () => {
         // CI's 16 managers (run 41260212023): this one lost every round of the label's lock, while another made it.
         const { resolver, creates, merges }: Neo4jStore = neo4jStore(
             Number.MAX_SAFE_INTEGER,
@@ -315,11 +314,12 @@ describe('Managers making the store key constraint at once', () => {
             undefined,
             true,
             DatabaseType.NEO4J,
-            (made) => made >= CONTENDED_ATTEMPTS
+            (made) => made >= 1
         );
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        // Run once by the schema executor (#830), and not again: the winner's is found.
+        expect(creates()).toEqual(1);
         // Under the constraint found, a conflict is a lost race, and the stamp is written again.
         expect(merges()).toEqual(2);
         expect(warned()).not.toContain('best-effort');
@@ -332,12 +332,12 @@ describe('Managers making the store key constraint at once', () => {
             undefined,
             true,
             DatabaseType.NEO4J,
-            // The ensure's first look, then the first two looks after the deadlocks, find nothing.
-            (made, shows) => made >= CONTENDED_ATTEMPTS && shows > 3
+            // The ensure's first look, then the first two looks after the deadlock, find nothing.
+            (_, shows) => shows > 3
         );
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(CONTENDED_ATTEMPTS);
+        expect(creates()).toEqual(1);
         expect(warned()).not.toContain('best-effort');
     });
 
@@ -367,15 +367,54 @@ describe('Managers making the store key constraint at once', () => {
     it("should ensure the constraint once more when the looks for the winner's find none, and write the stamp under it", async () => {
         // The other managers have stopped making it, or given up: the last ensure makes it, so no stamp goes unguarded.
         const conflict = new Error('Cannot resolve conflicting transactions. You can retry this transaction.');
-        const { resolver, creates, merges, pauses }: Neo4jStore = neo4jStore(CONTENDED_ATTEMPTS, [conflict]);
+        const { resolver, creates, merges, pauses }: Neo4jStore = neo4jStore(1, [conflict]);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(CONTENDED_ATTEMPTS + 1);
+        expect(creates()).toEqual(2);
         expect(pauses).toHaveLength(7);
         // Under the constraint made, a conflict is a lost race, and the stamp is written again.
         expect(merges()).toEqual(2);
         expect(warned()).not.toContain('best-effort');
     });
+
+    it.each([
+        ['ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'],
+        ['ORA-04020: deadlock detected while trying to lock object DRIVINE.DRIVINE_NODES'],
+        ['ORA-00060: deadlock detected while waiting for resource']
+    ])(
+        "should ensure Oracle's constraint once more when its DDL was turned away by another session's: %s",
+        async (message) => {
+            // Run once by the schema executor (#830), it comes back here: a lock the data writes don't take for contention.
+            let ensures = 0;
+            const constraints = {
+                ensure: async () => {
+                    if (++ensures === 1) {
+                        return Promise.reject(DrivineError.withRootCause(new Error(message)));
+                    }
+                    return Promise.resolve({ status: 'CREATED' });
+                },
+                inForce: async () => Promise.resolve(false)
+            } as unknown as ConstraintManager;
+            const persistenceManager = {
+                database: 'oracle',
+                type: DatabaseType.ORACLE,
+                execute: async () => Promise.resolve(),
+                query: async () => Promise.resolve([{ id: 'store-8', assignedAt: '2026-01-01T00:00:00Z' }])
+            } as unknown as PersistenceManager;
+            // Oracle's own judgement of contention, as its data writes take it.
+            const backend = Object.assign(backendFor(DatabaseType.ORACLE), {
+                storeStamps: () => ({ spec: () => ({}) }),
+                assignStoreStamp: () => ({ spec: () => ({}) })
+            }) as unknown as GraphBackend;
+            const resolver = new StoreIdentityResolver(persistenceManager, backend, constraints, async () =>
+                Promise.resolve()
+            );
+
+            expect((await resolver.resolve()).id).toEqual('store-8');
+            expect(ensures).toEqual(2);
+            expect(warned()).not.toContain('best-effort');
+        }
+    );
 
     it("should look for the winner's constraint once, without a pause, after a refusal that isn't contention", async () => {
         // No permission to make it: no winner is still making it, so the warning doesn't wait out the looks.
@@ -397,15 +436,14 @@ describe('Managers making the store key constraint at once', () => {
         expect(warned()).toContain('best-effort');
     });
 
-    it('should run the constraint at most twice refused at once and then as many times as the executor runs one', async () => {
-        // The worst case: ensured again for each refusal made meanwhile, until the last ensure, whose deadlocks the
-        // executor runs again in full, and once more after the looks for the winner's constraint find none. Not three
-        // ensures of CONTENDED_ATTEMPTS each, then three more.
+    it('should run the constraint at most twice refused at once, then once deadlocked, and once more', async () => {
+        // The worst case: ensured again for each refusal made meanwhile, until the last ensure, whose deadlock the
+        // executor runs once (#830), and once more after the looks for the winner's constraint find none.
         const refusal = new Error('There already exists an index (:DrivineStore {key}).');
         const { resolver, creates }: Neo4jStore = neo4jStore(Number.MAX_SAFE_INTEGER, [], [refusal, refusal], false);
 
         expect((await resolver.resolve()).id).toEqual('store-8');
-        expect(creates()).toEqual(2 + 2 * CONTENDED_ATTEMPTS);
+        expect(creates()).toEqual(2 + 1 + 1);
         expect(warned()).toContain('best-effort');
     });
 
