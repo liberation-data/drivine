@@ -133,12 +133,14 @@ describe.each(sqlStores())('a temporal property a save leaves as loaded, on $typ
                 ]
             })
         );
-        // Nanoseconds and an offset, which a Date holds neither of, as Cypher writes them.
+        // Nanoseconds and an offset, which a Date holds neither of, and values of other temporal kinds, as Cypher writes
+        // them: a list of one kind, as a list of more than one is refused, as Neo4j refuses it.
         await pm.execute(
             new QuerySpecification({
                 text:
                     "MATCH (n:HeldTag:Event {id: 'e1'}) SET n.at = datetime('2026-01-01T00:00:00.123456789+02:00'), " +
-                    "n.undecoratedDays = [date('2026-01-02'), localdatetime('2026-01-01T10:11:12.5'), duration('P1DT2H')]",
+                    "n.undecorated = localdatetime('2026-01-01T10:11:12.5'), " +
+                    "n.undecoratedDays = [date('2026-01-02'), date('2026-01-03')]",
                 language: 'CYPHER'
             })
         );
