@@ -122,9 +122,10 @@ export class StoreIdentityResolver {
      * best-effort convergence rather than failing boot over an identity that can still be read.
      *
      * Managers making the constraint at once get in each other's way. A deadlock (Neo4j's, on the label's lock) or a
-     * write turned away is already run again by the schema executor (see `whenNotContended`). One manager's statement can
-     * also be refused for what another's has just made: the constraint or the key's index already there (FalkorDB), or
-     * the index's name taken in the catalog (Postgres's `pg_class`, 23505). The constraint is then ensured
+     * write turned away is not run again by the schema executor, as it runs a statement the planner reads the failure of
+     * once (#830), as drivine4j does: it comes back here, contended, and is ensured once more, below. One manager's
+     * statement can also be refused for what another's has just made: the constraint or the key's index already there
+     * (FalkorDB), or the index's name taken in the catalog (Postgres's `pg_class`, 23505). The constraint is then ensured
      * again, which finds the other's. Going on without it would let a stamp be refused by the other's constraint, or two
      * stamps be written before it is in force (#479, as drivine4j#473).
      *
