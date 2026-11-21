@@ -167,19 +167,6 @@ export function hasId(store: SharedStore, alias: string, property: string, json:
 }
 
 /**
- * The id `id` as the text a write plan keys its node by, within the plan, where `layout` is the JSON text the store's
- * layout holds it as: a temporal value's tag (`{"$t": …, "v": …}`) as its text `v`, as the module writes it and reads a
- * stored target's id back as (drivine4j's `NodeIds.temporalText`); undefined for any other id.
- */
-export function temporalText(layout: string): string | undefined {
-    if (!layout.startsWith('{"$t"')) {
-        return undefined;
-    }
-    const tag = JSON.parse(layout);
-    return typeof tag?.v === 'string' ? tag.v : undefined;
-}
-
-/**
  * `id` as a store reads a node's id back, where the manager matches what a statement hands back to its objects: a `Date`
  * by its time, as its ISO text; a `bigint` within 2^53 as the number Oracle and Neo4j read it as; and, given the node's
  * `model`, text read as the id's type first ({@link typedId}), as Oracle reads a date back as its tag's text `v` and

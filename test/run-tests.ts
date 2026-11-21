@@ -29,6 +29,9 @@ import { CONTAINERS_STARTED, loadTestEnvironment, seedTestData } from './TestEnv
 
 const SERIAL = [
     'test/2.Integration/schema',
+    // Builds indexes online over a million rows: a takeover of a stale claim waits on any build another suite runs in
+    // the database, and the builds' parallel workers take /dev/shm another suite's HNSW build needs.
+    'test/2.Integration/postgres/PostgresConcurrentConstraintEnsure',
     'test/2.Integration/manager/StatelessGraphObjectManager.nearest',
     'test/2.Integration/manager/StatelessGraphObjectManager.vectorScore',
     'test/2.Integration/manager/StatelessGraphObjectManager.matching',

@@ -240,6 +240,10 @@ describe('SchemaPlan', () => {
                         Object.assign(new Error('could not create unique index'), { code: '23505', severity: 'ERROR' })
                     );
                 }
+                // The build's claim taken, as Postgres's RETURNING gives the claim's time (drivine-cypher-spec#382).
+                if (text.includes("'CLAIM:")) {
+                    return Promise.resolve(['t1']);
+                }
                 // The sample of the keys held more than once.
                 return Promise.resolve(
                     text.includes("'count', COUNT(*)") ? [{ properties: { email: 'a' }, count: 2, nodes: [] }] : []
@@ -285,7 +289,11 @@ describe('SchemaPlan', () => {
                 run: async (statement: string | NativeOperation): Promise<any[]> => {
                     const text = String(statement);
                     ran.push(text);
-                    return online.test(text) ? Promise.reject(refusal) : Promise.resolve([]);
+                    if (online.test(text)) {
+                        return Promise.reject(refusal);
+                    }
+                    // The build's claim taken, as Postgres's RETURNING gives the claim's time (drivine-cypher-spec#382).
+                    return Promise.resolve(text.includes("'CLAIM:") ? ['t1'] : []);
                 }
             };
             const warn = jest.spyOn(DrivineLogger.prototype, 'warn').mockImplementation(() => undefined);
@@ -302,6 +310,48 @@ describe('SchemaPlan', () => {
             expect(ran.slice(tried + 1).some((it) => /CREATE INDEX/.test(it) && !online.test(it))).toBe(true);
         }
     );
+
+    it("gives a Postgres build's deadlock to the planner, which waits for the online builds and builds again", async () => {
+        // Each statement the plan runs, and whether the plan reads its failure itself (its `ONCE`), so the host runs it
+        // once: the planner waits out a deadlock with another session's online build (drivine-cypher-spec#382).
+        const ran: { text: string; once: boolean }[] = [];
+        const planning = planningOn('postgres', { run: async () => Promise.resolve([]) });
+        planning.host.run = async (statement, _parameters, once) => {
+            const text = String(statement);
+            ran.push({ text, once: once === true });
+            if (text.includes("'CLAIM:")) {
+                return Promise.resolve(text.startsWith('DELETE') ? ['CLAIM:UNIQUENESS_CONSTRAINT'] : ['t1']);
+            }
+            if (text.includes('CREATE UNIQUE INDEX') && ran.filter((it) => it.text === text).length === 1) {
+                return Promise.reject(
+                    Object.assign(new Error('deadlock detected'), { code: '40P01', severity: 'ERROR' })
+                );
+            }
+            return Promise.resolve([]);
+        };
+        const log = jest.spyOn(DrivineLogger.prototype, 'log').mockImplementation(() => undefined);
+        try {
+            // Nothing is listed after the build here, so the ensure ends unmade: what it gives is not this test's.
+            await new ConstraintManager(planning)
+                .ensure(uniquenessConstraint('Person', 'email'))
+                .catch(() => undefined);
+            expect(log).toHaveBeenCalledWith(
+                expect.stringContaining("deadlocked with another session's online build on the same table")
+            );
+        } finally {
+            log.mockRestore();
+        }
+        const builds = ran.flatMap((it, at) => (it.text.includes('CREATE UNIQUE INDEX') ? [at] : []));
+        expect(builds.length).toBeGreaterThanOrEqual(2);
+        expect(builds.every((at) => ran[at].once)).toBe(true);
+        // Between the deadlock and the build again, the online builds under way are read, as a listing, run again
+        // where contended.
+        const waited = ran
+            .slice(builds[0] + 1, builds[1])
+            .filter((it) => it.text.includes('pg_stat_progress_create_index') && it.text.startsWith('SELECT p.pid'));
+        expect(waited.length).toBeGreaterThan(0);
+        expect(waited.every((it) => !it.once)).toBe(true);
+    });
 
     it("runs FalkorDB's GRAPH.CONSTRAINT as its driver's command", async () => {
         const ran: (string | NativeOperation)[] = [];

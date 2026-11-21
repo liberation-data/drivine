@@ -27,6 +27,7 @@ import {
     PropertyBag,
     QuerySpecification,
     RelationshipFragment,
+    RemovedTargets,
     Root,
     SchemaCatalog,
     SchemaManager,
@@ -698,13 +699,11 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
         });
 
         /**
-         * A write plan keys a node within the plan by its id's text (PostgresSaveBuilder's storedKey, the module's
-         * keyText), which a date and the date's text share: a `replace` that keeps one keeps the other's relationship
-         * too, silently. Not #815's: a plan keyed so before it, by an object no load made. Pinned until the plan's keys
-         * tell the kinds apart, in the shared module.
+         * A write plan keys a node within the plan by the module's plan key (PostgresSaveBuilder's storedKey, the module's
+         * planKeyOf and planKey), which keys a text id apart from a date that reads alike: a `replace` that keeps one drops
+         * the other's relationship (drivine-cypher-spec#391). Keyed by the id's text alone, it kept both, silently.
          */
-        // A write plan keys a date id and its text alike (drivine-cypher-spec#391).
-        it.failing("trims a view's relationship to a node whose id is a date, kept the date's text alone", async () => {
+        it("trims a view's relationship to a node whose id is a date, kept the date's text alone", async () => {
             await gom.save(
                 Object.assign(new Owned(), {
                     owner: Object.assign(new Owner(), { id: 'o', name: 'owner' }),
@@ -715,7 +714,19 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             expect(await ownsEdges()).toEqual(1);
         });
 
-        it.failing("trims a view's relationship to the text's node, kept the date's node alone", async () => {
+        it("deletes, by DELETE_UNREFERENCED, the date's node, not the node of the text the view holds", async () => {
+            await gom.save(
+                Object.assign(new Owned(), {
+                    owner: Object.assign(new Owner(), { id: 'o', name: 'owner' }),
+                    keyed: [Object.assign(new LookupDateAsText(), { id: '2026-01-05', name: 'text' })]
+                }),
+                { replace: ['keyed'], removedTargets: RemovedTargets.DELETE_UNREFERENCED }
+            );
+            expect(await ownsEdges()).toEqual(1);
+            expect(await names()).toEqual({ '"2026-01-05"': 'text' });
+        });
+
+        it("trims a view's relationship to the text's node, kept the date's node alone", async () => {
             await pm.execute(
                 new QuerySpecification({
                     text: "MATCH (o:IdKindRun:Owner {id: 'o'}), (k:IdKindRun:Keyed {name: 'text'}) CREATE (o)-[:OWNS]->(k)",
@@ -811,7 +822,8 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             const fresh = Object.assign(new LookupDateAsAny(), { id: '2026-01-05', name: 'x' });
             expect(oracle(fresh)).toEqual({ key: '"2026-01-05"', property: '"2026-01-05"' });
             for (const type of [DatabaseType.POSTGRES, DatabaseType.SQLITE]) {
-                expect(plan(type, fresh)).toEqual({ key: '"2026-01-05"', k: '2026-01-05', set: ['name'] });
+                // Keyed as a text, apart from the date it reads as (drivine-cypher-spec#391).
+                expect(plan(type, fresh)).toEqual({ key: '"2026-01-05"', k: 't:2026-01-05', set: ['name'] });
             }
         });
 
@@ -822,7 +834,7 @@ describe('A @NodeId held as a temporal, declared a non-temporal scalar, on SQLit
             for (const type of [DatabaseType.POSTGRES, DatabaseType.SQLITE]) {
                 expect(plan(type, loaded)).toEqual({
                     key: '"2026-01-06"',
-                    k: '2026-01-06',
+                    k: 't:2026-01-06',
                     set: ['name', 'body', 'embedding']
                 });
             }

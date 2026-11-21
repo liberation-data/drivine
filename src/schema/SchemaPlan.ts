@@ -239,8 +239,12 @@ export type PlanAction =
 
 /** What a host runs a plan's actions with, on the database the plan is for. */
 export interface PlanHost {
-    /** Runs a schema statement, or a listing, on a connection of its own: its rows, a row of one column its value. */
-    run(statement: string | NativeOperation, parameters: Record<string, any>): Promise<any[]>;
+    /**
+     * Runs a schema statement, or a listing, on a connection of its own: its rows, a row of one column its value. With
+     * `once`, the plan reads its failure itself (an `execute`'s `ONCE`), so a deadlock the planner waits out isn't run
+     * again first (see SchemaExecutor.run).
+     */
+    run(statement: string | NativeOperation, parameters: Record<string, any>, once?: boolean): Promise<any[]>;
     /** Runs a statement of the marker's through the database's auto-commit manager: Cypher where `compiled`. */
     marker(statement: string, parameters: Record<string, any>, compiled: boolean, rows: boolean): Promise<any[]>;
     /** The lowercased copies recorded as filled in, each `[label, property]`; undefined where there is no store of them. */
@@ -459,7 +463,7 @@ export class SchemaPlan {
             return { type: 'ran' };
         }
         try {
-            await host.run(native(action.statement), action.parameters);
+            await host.run(native(action.statement), action.parameters, action.retry === 'ONCE');
         } finally {
             if (action.purpose !== 'PREPARE') {
                 host.changed?.();

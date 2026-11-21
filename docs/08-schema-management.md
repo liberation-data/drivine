@@ -39,11 +39,25 @@ returns once its index is built, so a constraint is not waited on; FalkorDB's is
 it needs first.
 
 On Postgres and Oracle, `ensure` builds an index so that writes to the graph go on while it is built: on Postgres a
-range, vector or full-text index is made `CREATE INDEX CONCURRENTLY`, and on Oracle a range index is built `ONLINE`. A
-uniqueness constraint's index blocks writes while it is built, as before. Where the store can't build online (Oracle
-without Enterprise Edition, `ORA-00439`), the index is built by a statement that blocks writes, said once at `WARN`. A
-Postgres build cut short leaves its index invalid; the next `ensure` drops it and builds it again
+range, vector or full-text index is made `CREATE INDEX CONCURRENTLY`, and a uniqueness constraint's index
+`CREATE UNIQUE INDEX CONCURRENTLY`; on Oracle a range index is built `ONLINE`. On Oracle a uniqueness constraint's
+indexes block writes while they are built, as before, and so does the index a `recreate` builds beside the old one on
+both. Where the store can't build online (Oracle without Enterprise Edition, `ORA-00439`), the index is built by a
+statement that blocks writes, said once at `WARN`. A Postgres build cut short, or one the data refuses, leaves its index
+invalid; the next `ensure` drops it and builds it again
 ([drivine-cypher-spec#381](https://github.com/liberation-data/drivine-cypher-spec/issues/381)).
+
+Ensures of one item at once on Postgres, as replicas booting together run them, take turns
+([drivine-cypher-spec#382](https://github.com/liberation-data/drivine-cypher-spec/issues/382)). Before it builds or
+drops an item's index, an `ensure` claims its turn, a `CLAIM:<kind>` row of the graph's schema table that no listing
+reads, and gives it up once done, made or failed. While another session holds the turn it waits, for 60 seconds at most,
+then reads the store again, finding the item where the other session made it, and ensures it without its turn where the
+wait ran out, said at `INFO`. A claim older than 60 seconds, with no online build under way on the node table, is taken
+over at once, as its session ended without giving it up. An `ensure` that finds another session's build of the index
+under way waits for it and reads how it ended, rather than take the index as made or drop it as invalid, so a constraint is never reported `CREATED` or `ALREADY_MATCHING` over an index that isn't there,
+is still being built, or enforces nothing. Postgres can cancel one of two online builds on the same table as a deadlock;
+that `ensure` waits until no build is under way there and runs again, up to 3 times. An online build waits for each
+transaction older than it, so a `REPEATABLE READ` or `SERIALIZABLE` transaction left open holds it up until it ends.
 
 `ensure` returns a result whose `status` is:
 

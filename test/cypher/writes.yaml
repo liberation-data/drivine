@@ -1722,26 +1722,85 @@ cases:
       - cypher: "OPTIONAL MATCH (n:CyWrite {id: 9}) SET n.p = $m RETURN count(*)"
         parameters: {m: {a: 1}}
         rows: [1]
-      - note: "A row a WITH passes on is no longer known as given, so a WHERE or a LIMIT that leaves out the row that is no property leaves the write as Neo4j makes it. One it keeps is written as it is, where Neo4j fails it: drivine4j#820's second part."
+      - note: "A row is tested as it is written, so a WHERE, a LIMIT or a MATCH that leaves out the row that is no property leaves the write as Neo4j makes it."
         cypher: "UNWIND $rows AS row WITH row WHERE row.m = 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
         parameters: {rows: [{m: 1}, {m: {a: 1}}]}
         rows: [1]
       - cypher: "UNWIND $rows AS row WITH row LIMIT 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
         parameters: {rows: [{m: 1}, {m: {a: 1}}]}
         rows: [1]
-      - note: "A SQL store fails where any row given is no property, though a MATCH that finds nothing for it leaves that row out; Neo4j writes the others (drivine4j#820)."
-        cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
-        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
-        only: [neo4j]
-        rows: [1]
       - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
         parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
-        only: [sql]
-        error: true
+        rows: [1]
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n += {q: row.m} RETURN count(*)"
+        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
+        rows: [1]
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = [row.m] RETURN count(*)"
+        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
+        rows: [1]
       - cypher: "MATCH (n:CyWrite {id: 1}) SET n.f = $f, n.e = $e"
         parameters: {f: [1, 2.5], e: []}
       - cypher: "MATCH (n:CyWrite {id: 1}) RETURN [n.id, size(n.f), n.f[1], n.e]"
         rows: [[1, 2, 2.5, []]]
+
+  - name: "A value worked out as it runs that Neo4j stores as no property"
+    description: "A statement that writes a property the statement leaves to be worked out as it runs, as a key of a row a WITH passes on, a WITH of a parameter or an entry of a parameter's map, fails as the row that is a map, a list that holds a map or a list, or a list of more than one kind is written, as Neo4j fails it (drivine4j#820), and stores nothing. A row a WHERE or a MATCH leaves out fails nothing. A value of a kind known when compiling is not tested. Neo4j 2026.10.1: 22G03, with 22N01 for a map and 22N39 for a list."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 1, q: 'a'})"
+      - note: "A SQL store stored the value as a document (drivine4j#820)."
+        cypher: "UNWIND $rows AS row WITH row CREATE (:CyWrite {p: row.m})"
+        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
+        error: true
+      - cypher: "UNWIND $rows AS row WITH row WHERE row.m IS NOT NULL CREATE (:CyWrite {p: row.m})"
+        parameters: {rows: [{m: [1]}, {m: [[1]]}]}
+        error: true
+      - cypher: "UNWIND $rows AS row WITH row MATCH (n:CyWrite {id: 1}) SET n.p = row.l"
+        parameters: {rows: [{l: [1]}, {l: [1, "a"]}]}
+        error: true
+      - cypher: "UNWIND $rows AS row WITH row MATCH (n:CyWrite {id: 1}) SET n += row"
+        parameters: {rows: [{p: 1}, {p: {a: 1}}]}
+        error: true
+      - cypher: "UNWIND $rows AS row WITH row MATCH (n:CyWrite {id: 1}) SET n += {p: row.m}"
+        parameters: {rows: [{m: [true]}, {m: [true, 1]}]}
+        error: true
+      - cypher: "WITH $m AS m MATCH (n:CyWrite {id: 1}) SET n.p = m"
+        parameters: {m: {a: 1}}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = $m.a"
+        parameters: {m: {a: {b: 1}}}
+        error: true
+      - cypher: "WITH [{a: 1}] AS l MATCH (n:CyWrite {id: 1}) SET n.p = l"
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) WITH n, {p: {a: 1}} AS m SET n += m"
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = [1, n.q]"
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) CREATE (n)-[:R {p: coalesce(n.x, $m.a)}]->(:CyWrite {id: 3})"
+        parameters: {m: {a: [1, "a"]}}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = coalesce(n.x, $m)"
+        parameters: {m: {a: 1}}
+        error: true
+      - note: "A temporal value is a property, alone and in a list of its kind, read out of a map worked out as it runs."
+        cypher: "UNWIND $rows AS row WITH {d: date(row.s)} AS m MATCH (n:CyWrite {id: 1}) SET n.d = m.d, n.l = [m.d, date('2026-01-06')] RETURN [toString(n.d), [x IN n.l | toString(x)]]"
+        parameters: {rows: [{s: "2026-01-05"}]}
+        rows: [["2026-01-05", ["2026-01-05", "2026-01-06"]]]
+      - note: "A row that is a property is written, and one a WHERE leaves out fails nothing."
+        cypher: "UNWIND $rows AS row WITH row WHERE row.id = 1 MATCH (n:CyWrite {id: row.id}) SET n += row.props RETURN [n.p, n.f]"
+        parameters: {rows: [{id: 1, props: {p: [1, 2], f: 1.5}}, {id: 2, props: {p: {a: 1}}}]}
+        rows: [[[1, 2], 1.5]]
+      - cypher: "WITH $m AS m MATCH (n:CyWrite {id: 1}) SET n.p = m.a, n.e = m.e RETURN [n.p, n.e]"
+        parameters: {m: {a: ["x", "y"], e: []}}
+        rows: [[["x", "y"], []]]
+      - note: "On a node that is null, nothing is set, and nothing fails, as in Neo4j."
+        cypher: "UNWIND $rows AS row WITH row OPTIONAL MATCH (n:CyWrite {id: 9}) SET n.p = row.m RETURN count(*)"
+        parameters: {rows: [{m: {a: 1}}]}
+        rows: [1]
+      - note: "Nothing the statements that failed would have written is kept."
+        cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [1]
+      - cypher: "MATCH ()-[r]->() RETURN count(r)"
+        rows: [0]
 
   - name: "NaN worked out from stored infinities"
     description: "NaN that a statement given no NaN or infinity works out, from infinities stored, is the float it is, as NaN given is: equal to nothing and ordered with nothing, kept by `+`, written by toString() as Java writes it, no map, sorted after every number, and NaN in a sum and a max(). SQLite's JSON holds no NaN, so its rows give it back from the value it stands in for it (see host.yaml), and it refuses a write of it. Postgres stores no infinity to start from."
@@ -1774,6 +1833,10 @@ cases:
       - only: [neo4j, oracle]
         cypher: "MATCH (n:CyWrite) SET n.x = n.b + n.c[0] RETURN [n.x, n.x = n.x]"
         rows: [[{$float: "NaN"}, false]]
+      - note: "A list of floats worked out as it runs, NaN and an infinity among them, is one kind, and stored."
+        only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) SET n.y = [1.5, n.b + n.c[0], n.b] RETURN [size(n.y), n.y[0], n.y[2]]"
+        rows: [[3, 1.5, {$float: "Infinity"}]]
       - note: "The store fails as the statement runs: \"A statement that writes works out NaN, which SQLite's JSON holds as no number: it would store another value in its place.\""
         only: [sqlite]
         cypher: "MATCH (n:CyWrite) SET n.x = n.b + n.c[0]"
