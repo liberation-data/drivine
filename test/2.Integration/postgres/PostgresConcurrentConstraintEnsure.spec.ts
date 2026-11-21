@@ -14,6 +14,7 @@ import {
     TransactionContextHolder,
     uniquenessConstraint
 } from '@liberation-data/drivine';
+import { DrivineLogger } from '@/logger';
 import { sqlStores } from '../support/SqlStores';
 
 // Filling a graph of 300,000 nodes, or a million, and building an index over it, three rounds a test.
@@ -22,6 +23,9 @@ jest.setTimeout(600_000);
 /** Enough nodes that a build takes about a second, so two ensures overlap. */
 const NODES = 300_000;
 const ROUNDS = 3;
+
+/** What the planner says at INFO where Postgres cancelled an ensure's online build as a deadlock (drivine-cypher-spec#382). */
+const DEADLOCKED = "deadlocked with another session's online build on the same table";
 
 /** What an ensure gave, or what it threw. */
 type Outcome = EnsureResult<unknown> | Error;
@@ -329,23 +333,40 @@ describe.each(sqlStores().filter((it) => it.type === DatabaseType.POSTGRES))(
 
         it('should make both of two ensures at once of different items on one table', async () => {
             // A constraint and a range index on the same node table, built online at once: Postgres cancels one as a
-            // deadlock, which waits for the other's build to end, and is made then.
-            for (let round = 0; round < ROUNDS; round++) {
-                const graph = `cc382_apart${round}`;
-                const gom = await seeded(graph);
-                try {
-                    await run(`UPDATE ${graph}_node SET props = props || jsonb_build_object('n', props -> 'id')`);
-                    const [first, second] = [await manager(graph), await manager(graph)];
-                    const results = await together(
-                        async () => first.constraints.ensure(spec),
-                        async () => second.indexes.ensure(rangeIndex('Big', 'n'))
-                    );
-                    expect([round, results.map(status)]).toEqual([round, ['CREATED', 'CREATED']]);
-                    expect([round, Object.values(await uniqueIndexes(graph))]).toEqual([round, [true]]);
-                    expect([round, await enforced(gom)]).toEqual([round, true]);
-                } finally {
-                    await done(graph);
+            // deadlock (40P01), which the planner reads, as the build is run once, and it waits for the other's build to
+            // end and ensures again, said at INFO. The line is read off the logger, whatever level it prints at.
+            const info = jest.spyOn(DrivineLogger.prototype, 'log');
+            const deadlocked: boolean[] = [];
+            try {
+                for (let round = 0; round < ROUNDS; round++) {
+                    const graph = `cc382_apart${round}`;
+                    const gom = await seeded(graph);
+                    try {
+                        await run(`UPDATE ${graph}_node SET props = props || jsonb_build_object('n', props -> 'id')`);
+                        const [first, second] = [await manager(graph), await manager(graph)];
+                        info.mockClear();
+                        const results = await together(
+                            async () => first.constraints.ensure(spec),
+                            async () => second.indexes.ensure(rangeIndex('Big', 'n'))
+                        );
+                        deadlocked.push(info.mock.calls.some(([message]) => String(message).includes(DEADLOCKED)));
+                        expect([round, results.map(status)]).toEqual([round, ['CREATED', 'CREATED']]);
+                        expect([round, Object.values(await uniqueIndexes(graph))]).toEqual([round, [true]]);
+                        expect([round, await enforced(gom)]).toEqual([round, true]);
+                    } finally {
+                        await done(graph);
+                    }
                 }
+            } finally {
+                info.mockRestore();
+            }
+            // A round that didn't deadlock proves nothing of the planner's handling: at least one must have.
+            if (!deadlocked.includes(true)) {
+                throw new Error(
+                    `no round's builds deadlocked, so the planner's handling of one went untested: ${JSON.stringify(
+                        deadlocked
+                    )}`
+                );
             }
         });
     }
