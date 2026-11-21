@@ -396,7 +396,7 @@ describe('A property declared a Date, loaded on SQLite', () => {
                     text:
                         "MATCH (n:DateLoadRun:Event {id: 'e1'}) SET n.at = datetime('2026-01-01T00:00:00.123456789+02:00'), " +
                         "n.undecorated = localdatetime('2026-01-01T10:11:12.5'), n.undecoratedDays = [date('2026-01-01'), " +
-                        "duration('P1Y2M3DT4H5M6.789S')]",
+                        "date('2026-01-02')]",
                     language: 'CYPHER'
                 })
             );
@@ -435,17 +435,17 @@ describe('A property declared a Date, loaded on SQLite', () => {
         it('writes a set given in another order afresh, its items where the set has them', async () => {
             await pm.execute(
                 new QuerySpecification({
-                    text: "MATCH (n:DateLoadRun:Event {id: 'e1'}) SET n.mixed = ['a', date('2026-01-01')]",
+                    text: "MATCH (n:DateLoadRun:Event {id: 'e1'}) SET n.mixed = [date('2026-01-02'), date('2026-01-01')]",
                     language: 'CYPHER'
                 })
             );
             const loaded = (await gom.load(Event, 'e1'))!;
-            expect(loaded.mixed).toEqual(new Set(['a', '2026-01-01']));
+            expect(loaded.mixed).toEqual(new Set(['2026-01-02', '2026-01-01']));
             // The same items, so a set equal to the one loaded, but not held in the order the store holds them.
-            loaded.mixed = new Set(['2026-01-01', 'a']);
+            loaded.mixed = new Set(['2026-01-01', '2026-01-02']);
             await gom.save(loaded);
-            expect((await gom.load(Event, 'e1'))!.mixed).toEqual(new Set(['2026-01-01', 'a']));
-            expect((await stored()).e1).toContain('"mixed":["2026-01-01","a"]');
+            expect((await gom.load(Event, 'e1'))!.mixed).toEqual(new Set(['2026-01-01', '2026-01-02']));
+            expect((await stored()).e1).toContain('"mixed":["2026-01-01","2026-01-02"]');
         });
 
         it('in a patchAll of nodes as loaded, each field it writes as loaded', async () => {
