@@ -22,6 +22,7 @@ import {
     PostgresGraph,
     QuerySpecification,
     RelationshipFragment,
+    RemovedTargets,
     Root,
     SchemaCatalog,
     SchemaManager,
@@ -224,6 +225,18 @@ describe.each(sqlStores())('a @NodeId held as a temporal, declared a non-tempora
         );
     };
 
+    /** What the Cypher statement `text` gives, each row's one value. */
+    const values = async (text: string): Promise<any[]> =>
+        pm.query(new QuerySpecification<any>({ text, language: 'CYPHER' }));
+
+    /** How many OWNS relationships the run holds. */
+    const ownsEdges = async (): Promise<number> =>
+        Number((await values('MATCH (:IdKindTest)-[r:OWNS]->(:IdKindTest) RETURN count(r)'))[0]);
+
+    /** How many Keyed nodes hold their id as `literal` gives it: the tag, and not its text. */
+    const heldAs = async (literal: string): Promise<number> =>
+        Number((await values(`MATCH (n:IdKindTest:Keyed) WHERE n.id = ${literal} RETURN count(n)`))[0]);
+
     /** The names of the Keyed nodes and the owner's, by a class that refuses none: unchanged by a refused read. */
     const names = async (): Promise<string[]> => [
         ...(await gom.loadAll(LookupDateAsAny)).map((it) => String(it.name)),
@@ -329,6 +342,23 @@ describe.each(sqlStores())('a @NodeId held as a temporal, declared a non-tempora
             expect((await gom.loadAll(LookupDateAsAny)).map((it) => it.name)).toEqual(['patched']);
         });
 
+        /**
+         * A related node whose id, declared any, a load gave as its tag's text is held by a `replace` as the tag, as
+         * the plan keys the node: its relationship is kept, and its node too under DELETE_UNREFERENCED. The plan's key
+         * marks a text apart (drivine-cypher-spec#391), so the text alone would drop it.
+         */
+        it('keeps, by a replace, a related node whose id declared any was loaded from a tag', async () => {
+            await gom.save((await gom.load(OwnedAny, 'o'))!, { replace: ['keyed'] });
+            expect(await ownsEdges()).toEqual(1);
+            await gom.save((await gom.load(OwnedAny, 'o'))!, {
+                replace: ['keyed'],
+                removedTargets: RemovedTargets.DELETE_UNREFERENCED
+            });
+            expect(await ownsEdges()).toEqual(1);
+            expect(await gom.count(LookupDateAsAny)).toEqual(1);
+            expect(await heldAs(cypher)).toEqual(1);
+        });
+
         it('writes an id declared any as given once it is changed, or given an object no load made', async () => {
             await gom.save(Object.assign(new LookupDateAsAny(), { id: text, name: 'fresh' }));
             expect(await gom.count(LookupDateAsAny)).toEqual(2);
@@ -416,5 +446,59 @@ describe.each(sqlStores())('a @NodeId held as a temporal, declared a non-tempora
         const texts = await gom.loadAll(LookupDateAsText, (q) => ({ where: q.name.eq('text, saved') }));
         expect(texts.map((it) => it.id)).toEqual(['2026-01-05']);
         expect((await gom.loadAll(LookupDateAsAny)).map((it) => it.name).sort()).toEqual(['text, saved', 'x, saved']);
+    });
+    /**
+     * The owner, owning a date's node and the date's text's, and a number's node and the number's text's, made by
+     * Cypher.
+     */
+    const ownedAlike = async (): Promise<void> => {
+        await clearLabels(pm, store, 'IdKindTest');
+        await pm.execute(
+            new QuerySpecification({
+                text:
+                    "CREATE (o:IdKindTest:Owner {id: 'o', name: 'owner'}), " +
+                    "(d:IdKindTest:Keyed {id: date('2026-01-05'), name: 'date'}), " +
+                    "(t:IdKindTest:Keyed {id: '2026-01-05', name: 'text'}), (n:IdKindTest:Keyed {id: 1, name: 'number'}), " +
+                    "(s:IdKindTest:Keyed {id: '1', name: 'one'}) " +
+                    'CREATE (o)-[:OWNS]->(d), (o)-[:OWNS]->(t), (o)-[:OWNS]->(n), (o)-[:OWNS]->(s)',
+                language: 'CYPHER'
+            })
+        );
+    };
+
+    /** The names of the nodes the owner owns. */
+    const owned = async (): Promise<string[]> =>
+        values("MATCH (:IdKindTest:Owner {id: 'o'})-[:OWNS]->(k) RETURN k.name ORDER BY k.name");
+
+    /** The owner, owning the nodes whose ids are the texts '2026-01-05' and '1'. */
+    const texts = (): Owned =>
+        Object.assign(new Owned(), {
+            owner: Object.assign(new Owner(), { id: 'o', name: 'owner' }),
+            keyed: [
+                Object.assign(new LookupDateAsText(), { id: '2026-01-05', name: 'text' }),
+                Object.assign(new LookupDateAsText(), { id: '1', name: 'one' })
+            ]
+        });
+
+    /**
+     * A write plan keys a related node by its id, a text id apart from a date or a number that reads alike
+     * (drivine-cypher-spec#391): a `replace` that keeps the text's node drops the date's relationship, and the
+     * number's. Before, the plan keyed the text '2026-01-05' and the date 2026-01-05 alike, and '1' and 1, so it kept
+     * all four, with no error.
+     */
+    it("drops, by a replace that keeps a text id's node, the relationship to a date or a number whose text it is", async () => {
+        await ownedAlike();
+        await gom.save(texts(), { replace: ['keyed'] });
+        expect(await owned()).toEqual(['one', 'text']);
+        // A replace that keeps removed targets deletes none.
+        expect(Number((await values('MATCH (n:IdKindTest) RETURN count(n)'))[0])).toEqual(5);
+    });
+
+    /** As a `replace` keys them, DELETE_UNREFERENCED deletes the date's and the number's nodes, not the texts' it holds. */
+    it("deletes, by DELETE_UNREFERENCED, the date's node and the number's, not the text ids' nodes the view holds", async () => {
+        await ownedAlike();
+        await gom.save(texts(), { replace: ['keyed'], removedTargets: RemovedTargets.DELETE_UNREFERENCED });
+        expect(await owned()).toEqual(['one', 'text']);
+        expect(await values('MATCH (n:IdKindTest:Keyed) RETURN n.name ORDER BY n.name')).toEqual(['one', 'text']);
     });
 });
