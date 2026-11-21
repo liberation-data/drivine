@@ -16,7 +16,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -44,6 +44,77 @@ cases:
                 actions:
                   - {execute: {create: "Uniqueness constraint"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, {spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {marker: "claim"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "release", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t2"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t3"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Uniqueness constraint", at: "t3"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -197,7 +268,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -211,6 +282,43 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "There is no procedure with the name `vector_search.show_index_info` registered"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "There is no procedure with the name `vector_search.show_index_info` registered"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -721,7 +829,7 @@ cases:
         runtime: [{owner: null, items: ["Vector index by cosine"]}]
         runtimeAfter: [{owner: null, items: ["Vector index by cosine"]}]
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -733,6 +841,39 @@ cases:
                 actions:
                   - {execute: {create: "Vector index by cosine"}}
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", created: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+              log:
+                - ["INFO", "SchemaManager", "Ensuring schema for owner 'schema' on 'default': 1 runtime items, 2 declared in all"]
+                - ["INFO", "IndexManager", "Created {engine} VECTOR_INDEX on Chunk[embedding]"]
+                - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Vector index by cosine"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Vector index by cosine", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -1377,7 +1518,7 @@ cases:
         runtime: [{owner: null, items: ["Vector index by cosine", "Full-text index"]}]
         runtimeAfter: [{owner: null, items: ["Vector index by cosine", "Full-text index"]}]
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -1391,6 +1532,40 @@ cases:
                   - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
                   - {execute: {create: "Full-text index"}}
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nruntime:FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Full-text index", created: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nruntime:FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+              log:
+                - ["INFO", "SchemaManager", "Ensuring schema for owner 'schema' on 'default': 1 runtime items, 3 declared in all"]
+                - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"]}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {claim: "Full-text index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Full-text index"}}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Full-text index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nruntime:FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -1927,7 +2102,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -1950,6 +2125,66 @@ cases:
                 actions:
                   - {execute: {create: "Uniqueness constraint"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Uniqueness constraint", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -2092,7 +2327,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -2113,6 +2348,84 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {execute: {leftover: "Uniqueness constraint"}}
+                  - {execute: {build: "Uniqueness constraint"}}
+                  - {execute: {swap: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", recreated: {previous: null, current: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=true, version=v2)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {marker: "claim"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "release", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -2321,7 +2634,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -2340,6 +2653,48 @@ cases:
                 actions:
                   - {execute: {create: "Uniqueness constraint"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "An unknown error occurred"}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nAn unknown error occurred"
+              log:
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: An unknown error occurred"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, failed: [{}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -2427,7 +2782,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -2442,6 +2797,44 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -2510,7 +2903,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -2525,6 +2918,46 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["WARN", "SchemaManager", "  - DRIFT: VECTOR_INDEX on Chunk[embedding] exists with a different shape: SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null)"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
@@ -2597,7 +3030,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -2623,6 +3056,59 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", recreated: {previous: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, current: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}}, {spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} VECTOR_INDEX on Chunk[embedding]"]
+                - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
+                - ["WARN", "IndexManager", "Recreated {engine} VECTOR_INDEX on Chunk[embedding] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
@@ -3177,11 +3663,24 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {execute: {create: "Uniqueness constraint"}, failed: {at: 1, causes: [{sqlState: "23505", vendorCode: 0, message: "ERROR: could not create unique index"}]}}
                   - {query: {listing: "constraints"}}
               - now: 1000000
                 actions:
                   - {query: {sample: {spec: "Uniqueness constraint", limit: 10}}, rows: [{properties: {email: "dup@example.com"}, count: 2, nodes: [{elementId: "4:a:1"}, {elementId: "4:a:2"}]}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "onlineBuilds"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DO $incomplete$\nDECLARE\n    v_table regclass;\nBEGIN\n    SELECT x.indrelid::regclass INTO v_table FROM pg_index x WHERE x.indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END = 'INVALID';\n    IF v_table IS NOT NULL THEN\n        EXECUTE 'LOCK TABLE ' || v_table || ' IN ACCESS EXCLUSIVE MODE';\n        IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND NOT indisvalid) THEN\n            DROP INDEX drivine_uq2_Personemail_5482a751;\n        END IF;\n    END IF;\nEND\n$incomplete$"}}
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -3212,6 +3711,12 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {execute: {create: "Uniqueness constraint"}, failed: {at: 1, causes: [{sqlState: "23505", vendorCode: 0, message: "ERROR: could not create unique index"}]}}
                   - {query: {listing: "constraints"}}
               - now: 1000000
@@ -3219,11 +3724,27 @@ cases:
                   - {query: {sample: {spec: "Uniqueness constraint", limit: 10}}, rows: [{properties: {email: "dup@example.com"}, count: 2, nodes: [{elementId: "4:a:1"}, {elementId: "4:a:2"}]}]}
               - now: 1000000
                 actions:
+                  - {query: {listing: "onlineBuilds"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DO $incomplete$\nDECLARE\n    v_table regclass;\nBEGIN\n    SELECT x.indrelid::regclass INTO v_table FROM pg_index x WHERE x.indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END = 'INVALID';\n    IF v_table IS NOT NULL THEN\n        EXECUTE 'LOCK TABLE ' || v_table || ' IN ACCESS EXCLUSIVE MODE';\n        IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND NOT indisvalid) THEN\n            DROP INDEX drivine_uq2_Personemail_5482a751;\n        END IF;\n    END IF;\nEND\n$incomplete$"}}
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {create: "Uniqueness constraint"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Uniqueness constraint", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "b", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -3371,7 +3892,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -3402,6 +3923,83 @@ cases:
                 actions:
                   - {execute: {create: "Full-text index"}}
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "rag", version: "v1", items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "rag", results: [{spec: "Full-text index", created: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}}], marker: {version: "v1", items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'rag' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'rag' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.version", scope: "rag"}, rows: []}
+                  - {query: {marker: "read.items", scope: "rag"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {execute: {marker: "deleteAllButNewest", scope: "rag"}}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "claim"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "release", at: "t2"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Full-text index"}, rows: ["t3"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Full-text index"}}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Full-text index", at: "t3"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: "v1", items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -3520,7 +4118,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -3540,6 +4138,48 @@ cases:
                 actions:
                   - {execute: {create: "Full-text index"}}
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "lock timeout"}
+                - {owner: "rag", results: [{spec: "Full-text index", created: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}}], marker: {version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nlock timeout"
+              log:
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: lock timeout"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'rag' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'rag' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "rag"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}, failed: [{message: "lock timeout"}]}
+                  - {query: {marker: "claim"}}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Full-text index"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Full-text index"}}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Full-text index", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -3658,7 +4298,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -3697,6 +4337,52 @@ cases:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'rag' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'rag' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "rag"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}, failed: [{sqlState: "23505", vendorCode: 0, message: "duplicate key value violates unique constraint"}]}
+                  - {query: {claim: "Full-text index"}}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}, failed: [{sqlState: "23505", vendorCode: 0, message: "duplicate key value violates unique constraint"}]}
+                  - {query: {claim: "Full-text index"}}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Full-text index"}, rows: ["t3"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Full-text index"}}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Full-text index", at: "t3"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "duplicate key value violates unique constraint"}
+                - {owner: "rag", results: [{spec: "Full-text index", created: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}}], marker: {version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nduplicate key value violates unique constraint"
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: duplicate key value violates unique constraint"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'rag' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'rag' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
   - case: "24"
     name: "ensure recording the stored version"
     description: "An ensure neither adopts nor acts on a changed version: it records the one stored."
@@ -3708,7 +4394,7 @@ cases:
         runtime: [{owner: null, items: ["Vector index by cosine"]}]
         runtimeAfter: [{owner: null, items: ["Vector index by cosine"]}]
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -3722,6 +4408,41 @@ cases:
                   - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
                   - {execute: {create: "Vector index by cosine"}}
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v3", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Vector index by cosine", created: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}], marker: {version: "v3", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+              log:
+                - ["INFO", "SchemaManager", "Ensuring schema for owner 'schema' on 'default': 1 runtime items, 2 declared in all"]
+                - ["INFO", "IndexManager", "Created {engine} VECTOR_INDEX on Chunk[embedding]"]
+                - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v3"]}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {claim: "Vector index by cosine"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Vector index by cosine", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v3", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -3797,7 +4518,7 @@ cases:
         runtime: [{owner: null, items: ["Range index over two properties", "Vector index by cosine"]}]
         runtimeAfter: [{owner: null, items: ["Range index over two properties", "Vector index by cosine"]}]
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -3817,6 +4538,57 @@ cases:
                 actions:
                   - {execute: {create: "Vector index by cosine"}}
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "runtime:RANGE_INDEX:Person:name,born:Person_name_born_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index over two properties", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}}, {spec: "Vector index by cosine", created: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}}], marker: {version: null, items: "runtime:RANGE_INDEX:Person:name,born:Person_name_born_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+              log:
+                - ["INFO", "SchemaManager", "Ensuring schema for owner 'schema' on 'default': 2 runtime items, 2 declared in all"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name, born]"]
+                - ["INFO", "IndexManager", "Created {engine} VECTOR_INDEX on Chunk[embedding]"]
+                - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index over two properties"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index over two properties"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index over two properties", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Vector index by cosine"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Vector index by cosine", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "runtime:RANGE_INDEX:Person:name,born:Person_name_born_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -4308,7 +5080,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["sqlite", "postgres"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -4353,6 +5125,71 @@ cases:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'b' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'b' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "a"}, rows: []}
+                  - {query: {marker: "read.items", scope: "b"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
+                  - {query: {claim: "Range index that ignores case"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Full-text index"}, rows: ["t3"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Full-text index"}}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Full-text index", at: "t3"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "b", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: "a", results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "canceling statement due to statement timeout"}
+                - {owner: "b", results: [{spec: "Full-text index", created: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}}], marker: {version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\ncanceling statement due to statement timeout"
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'a' on 'default': 3 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'a' on 'default' failed: canceling statement due to statement timeout"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'b' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'b' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
   - case: "27"
     name: "A failure mid-plan under WARN"
     description: "WARN logs a drift and goes on, but a failure still ends the owner; owner 'b' is applied."
@@ -4364,7 +5201,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["sqlite", "postgres"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -4400,6 +5237,50 @@ cases:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'b' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'b' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "a"}, rows: []}
+                  - {query: {marker: "read.items", scope: "b"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
+                  - {query: {claim: "Range index that ignores case"}}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Full-text index"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Full-text index"}}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Full-text index", at: "t2"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "b", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: "a", results: [{spec: "Vector index by cosine", drift: {existing: {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 768, similarity: "COSINE"}, requested: "Vector index by cosine"}}], marker: null, failure: "canceling statement due to statement timeout"}
+                - {owner: "b", results: [{spec: "Full-text index", created: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}}], marker: {version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\ncanceling statement due to statement timeout"
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'a' on 'default': 3 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Chunk[embedding]: existing SchemaItemInfo(kind=VECTOR_INDEX, label=Chunk, properties=[embedding], name=Chunk_embedding_vector, dimensions=768, similarity=COSINE, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null, owningConstraint=null) does not match requested VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]). Call recreate() to replace it (destructive)."]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'a' on 'default' failed: canceling statement due to statement timeout"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'b' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'b' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
   - case: "28a"
     name: "A TEXT index off Neo4j, refused first"
     description: "The TEXT index is refused before anything is read for it, and ends the owner."
@@ -4409,7 +5290,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -4421,6 +5302,39 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: null, failure: "TEXT index Person_name_text on Person[name] cannot be made on {engine}: a TEXT index is Neo4j's, and {engine} has none. For tokenized search declare a FullTextIndexSpec (@FullTextIndex), which is also what Memgraph calls a TEXT INDEX; for exact lookups, a RangeIndexSpec."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nTEXT index Person_name_text on Person[name] cannot be made on {engine}: a TEXT index is Neo4j's, and {engine} has none. For tokenized search declare a FullTextIndexSpec (@FullTextIndex), which is also what Memgraph calls a TEXT INDEX; for exact lookups, a RangeIndexSpec."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 3 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: TEXT index Person_name_text on Person[name] cannot be made on {engine}: a TEXT index is Neo4j's, and {engine} has none. For tokenized search declare a FullTextIndexSpec (@FullTextIndex), which is also what Memgraph calls a TEXT INDEX; for exact lookups, a RangeIndexSpec."]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -4510,7 +5424,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -4531,6 +5445,60 @@ cases:
                   - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Uniqueness constraint that ignores case"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index that ignores case", created: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}, {spec: "Uniqueness constraint that ignores case", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[__drivine.lower.email]"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {query: {claim: "Range index that ignores case"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index that ignores case"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index that ignores case", at: "t1"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {query: {claim: "Uniqueness constraint that ignores case"}, rows: ["t2"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint that ignores case"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Uniqueness constraint that ignores case", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
@@ -8063,7 +9031,7 @@ cases:
     steps:
       - operation: {item: {call: "ENSURE", spec: "Uniqueness constraint"}}
         runs:
-          - stores: ["sqlite", "postgres", "neo4j"]
+          - stores: ["sqlite", "neo4j"]
             rounds:
               - now: 1000000
                 actions:
@@ -8072,6 +9040,29 @@ cases:
                 actions:
                   - {execute: {create: "Uniqueness constraint"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+            done: 1000000
+            report:
+              item: {result: {created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}, dropped: null}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
             done: 1000000
             report:
               item: {result: {created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}, dropped: null}
@@ -8360,7 +9351,7 @@ cases:
       # A uniqueness constraint over another property, or of another label, serves no range index: one is made.
       - operation: {item: {call: "ENSURE", spec: "Range index"}}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -8372,6 +9363,35 @@ cases:
                 actions:
                   - {execute: {create: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+            done: 1000000
+            report:
+              item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}
+              log:
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Company", properties: ["name"], name: "Company_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Company", properties: ["name"], name: "Company_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
             done: 1000000
             report:
               item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}

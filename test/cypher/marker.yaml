@@ -87,11 +87,20 @@ marker:
       scopes: null
       itemsMark: ""
       constraint:
-        - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_DrivineSchemascope_4cab9cbb ON drivine_node (((props -> 'scope'))) WHERE labels @> '[\"_DrivineSchema\"]'"
+        - "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS drivine_uq2_DrivineSchemascope_4cab9cbb ON drivine_node (((props -> 'scope'))) WHERE labels @> '[\"_DrivineSchema\"]'"
         - |-
           INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
           VALUES ('UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{"form": 2}')
           ON CONFLICT (kind, label, properties) DO NOTHING
+      claim: |-
+        INSERT INTO drivine_schema AS c (kind, label, properties, details)
+        VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', jsonb_build_object('at', clock_timestamp()::text))
+        ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
+        WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
+          AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
+        RETURNING c.details ->> 'at'
+      release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = '_DrivineSchema' AND properties = '[\"scope\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
+      releaseParameters: ["at"]
     oracle:
       prepare: "ensuring"
       read:
@@ -405,7 +414,7 @@ storeStamp:
         ORDER BY 1
       layout: 2
       constraint:
-        - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_DrivineStorekey_e211949b ON drivine_node (((props -> 'key'))) WHERE labels @> '[\"DrivineStore\"]'"
+        - "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS drivine_uq2_DrivineStorekey_e211949b ON drivine_node (((props -> 'key'))) WHERE labels @> '[\"DrivineStore\"]'"
         - |-
           INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
           VALUES ('UNIQUENESS_CONSTRAINT', 'DrivineStore', '["key"]', 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{"form": 2}')
