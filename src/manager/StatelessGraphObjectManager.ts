@@ -302,7 +302,7 @@ export class StatelessGraphObjectManager {
             plan: new SchemaPlan(this.backend.moduleStore.store, this.backend.moduleStore.graph),
             database: pm.database,
             host: {
-                run: async (statement, parameters) => executor.run(statement, parameters),
+                run: async (statement, parameters, once) => executor.run(statement, parameters, once),
                 marker: async (statement, parameters, compiled, rows) => {
                     const spec = new QuerySpecification<any>(compiled ? cypherStatement(statement) : statement).bind(
                         parameters

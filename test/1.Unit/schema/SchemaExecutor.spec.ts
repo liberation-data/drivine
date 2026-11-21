@@ -110,9 +110,33 @@ describe('SchemaExecutor', () => {
                     })
             } as any;
             const run = new SchemaExecutor(provider).run('CREATE INDEX x ON y (z)');
-            await (expected === 2 ? expect(run).resolves.toEqual([]) : expect(run).rejects.toMatchObject({ rootCause: { code } }));
+            await (expected === 2
+                ? expect(run).resolves.toEqual([])
+                : expect(run).rejects.toMatchObject({ rootCause: { code } }));
             expect(runs).toEqual(expected);
         }
+    });
+
+    it('should throw at once a Postgres deadlock of a statement the schema planner reads the failure of', async () => {
+        // The planner waits out a deadlock with another session's online build, and runs the ensure again
+        // (drivine-cypher-spec#382): run again here at once, the build would pass over the index it left invalid.
+        let runs = 0;
+        const provider = {
+            name: 'postgres',
+            type: DatabaseType.POSTGRES,
+            connect: async () =>
+                Promise.resolve({
+                    query: async () => {
+                        runs++;
+                        return Promise.reject(Object.assign(new Error('deadlock detected'), { code: '40P01' }));
+                    },
+                    release: async () => Promise.resolve()
+                })
+        } as any;
+        await expect(
+            new SchemaExecutor(provider).run('CREATE UNIQUE INDEX CONCURRENTLY x ON y (z)', {}, true)
+        ).rejects.toMatchObject({ rootCause: { code: '40P01' } });
+        expect(runs).toEqual(1);
     });
 
     /** A provider whose first connection runs a graph's first-use block that fails with `message` each time. */

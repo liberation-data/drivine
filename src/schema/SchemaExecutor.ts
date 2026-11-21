@@ -45,13 +45,23 @@ export class SchemaExecutor {
         private readonly prepare?: () => Promise<void>
     ) {}
 
-    /** Runs a statement, again after a pause when the engine turned it away because another write was in progress. */
-    async run(statement: string | NativeOperation, bindings: Record<string, any> = {}): Promise<any[]> {
+    /**
+     * Runs a statement, again after a pause when the engine turned it away because another write was in progress. With
+     * `once`, a statement the schema planner reads the failure of itself (its `ONCE`), a Postgres deadlock is thrown at
+     * once: the planner waits until no online build is under way on the node table and runs the ensure again
+     * (drivine-cypher-spec#382), where running the build again at once would pass over the index it left invalid.
+     */
+    async run(
+        statement: string | NativeOperation,
+        bindings: Record<string, any> = {},
+        once: boolean = false
+    ): Promise<any[]> {
         await this.prepare?.();
         const waitedOutBusy = typeof statement === 'string' && waitsOutBusyLock(statement);
+        const planned = once && this.provider.type === DatabaseType.POSTGRES;
         return whenNotContended(
             async () => this.runOnce(statement, bindings),
-            (failure) => contended(failure, waitedOutBusy)
+            (failure) => !planned && contended(failure, waitedOutBusy)
         );
     }
 
