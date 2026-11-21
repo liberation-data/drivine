@@ -121,11 +121,26 @@ describe('drivine_write', () => {
         const plan = saving('p1', {});
         const tags = plan.shape(['Tag'], 'id');
         for (const id of ['t1', 't2']) {
-            plan.link(0, plan.node(tags, 'id', id, id, ['Tag'], {}), 'TAGGED', Direction.OUTGOING, {});
+            plan.link(
+                0,
+                plan.node(tags, 'id', id, storedKey(id, 'sqlite'), ['Tag'], {}),
+                'TAGGED',
+                Direction.OUTGOING,
+                {}
+            );
         }
         write(plan, 'STAMPS');
         const trim = saving('p1', {});
-        trim.unlink(0, 'TAGGED', Direction.OUTGOING, trim.shape(['Tag'], 'id'), ['t1'], true, true, []);
+        trim.unlink(
+            0,
+            'TAGGED',
+            Direction.OUTGOING,
+            trim.shape(['Tag'], 'id'),
+            [storedKey('t1', 'sqlite')],
+            true,
+            true,
+            []
+        );
         write(trim, 'STAMPS');
         expect(edges().map((it) => it.type)).toEqual(['TAGGED']);
         expect(node('t2')).toBeUndefined();

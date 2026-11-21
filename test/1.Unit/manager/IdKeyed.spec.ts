@@ -31,7 +31,7 @@ import {
     StatelessGraphObjectManager
 } from '@liberation-data/drivine';
 import { FoundStamp } from '@/backend/postgres/FoundStamp';
-import { numericText, storedKey } from '@/backend/postgres/PostgresSaveBuilder';
+import { storedKey } from '@/backend/postgres/PostgresSaveBuilder';
 import { textOf } from '@/backend/sqlite/SqliteGraph';
 import { DSL_ROW } from '@/backend/sql/FragmentQueryRenderer';
 import { GraphStatement } from '@/backend/GraphStatement';
@@ -73,24 +73,28 @@ class GaugeTree {
 }
 
 describe('storedKey', () => {
-    it("is on Postgres a number's text as jsonb gives it back, numeric's, with no exponent", () => {
-        expect(
-            ['1.0E-7', '-1.5E-10', '1.230e-5', '2.0', '12', '0.1', '-0.0', '1.0E+2', '"1.0E-7"', '[1]'].map(numericText)
-        ).toEqual(['0.00000010', '-0.00000000015', '0.00001230', '2.0', '12', '0.1', '0.0', '100', '"1.0E-7"', '[1]']);
-        expect([1e-7, 4.5, 7, 'a1e-7', true].map((it) => storedKey(it, 'postgres'))).toEqual([
+    it("is on Postgres a number's text as jsonb gives it back, numeric's, with no exponent, and a text apart", () => {
+        expect([1e-7, -1.5e-10, 1e21, 4.5, 7, 'a1e-7', '7', true].map((it) => storedKey(it, 'postgres'))).toEqual([
             '0.00000010',
+            '-0.00000000015',
+            '1000000000000000000000.0',
             '4.5',
             '7',
-            'a1e-7',
+            't:a1e-7',
+            't:7',
             'true'
         ]);
     });
 
-    it("is a temporal id's tag text, as the module reads a stored target's id back (keyText)", () => {
+    it("is a temporal id's tag text, and the same text as an id apart from it (drivine-cypher-spec#391)", () => {
         const day = new Date('2024-01-02T03:04:05.000Z');
         expect([storedKey(day, 'postgres'), storedKey(day, 'sqlite')]).toEqual([
             '2024-01-02T03:04:05Z',
             '2024-01-02T03:04:05Z'
+        ]);
+        expect([storedKey('2024-01-02T03:04:05Z', 'postgres'), storedKey('2024-01-02T03:04:05Z', 'sqlite')]).toEqual([
+            't:2024-01-02T03:04:05Z',
+            't:2024-01-02T03:04:05Z'
         ]);
     });
 
@@ -109,6 +113,27 @@ describe('storedKey', () => {
                 .prepare(`SELECT count(*) AS c FROM (SELECT ? AS props) n WHERE ${textOf('n', 'id')} = CAST(? AS TEXT)`)
                 .get(props, storedKey(1e-7, 'sqlite')) as { c: number };
             expect(found.c).toEqual(1);
+        } finally {
+            db.close();
+        }
+    });
+
+    it("is on SQLite the key the module's planKey reads a stored id back as, a text's apart from a date's", () => {
+        const db = openSqlite(':memory:');
+        try {
+            const read = (props: string): string =>
+                (
+                    db
+                        .prepare(`SELECT ${idSql('sqlite', 'planKey', 'n', 'id')} AS k FROM (SELECT ? AS props) n`)
+                        .get(props) as {
+                        k: string;
+                    }
+                ).k;
+            const day = new Date('2026-01-05T00:00:00.000Z');
+            for (const id of [day, '2026-01-05T00:00:00Z', 7, '7', 1e-7, true]) {
+                expect([id, read(`{"id":${writeLayout(id, 'sqlite')}}`)]).toEqual([id, storedKey(id, 'sqlite')]);
+            }
+            expect(storedKey(day, 'sqlite')).not.toEqual(storedKey('2026-01-05T00:00:00Z', 'sqlite'));
         } finally {
             db.close();
         }

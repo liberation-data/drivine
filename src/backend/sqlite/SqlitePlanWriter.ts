@@ -441,8 +441,9 @@ export class SqlitePlanWriter {
         const held = new Set(strings(step.held));
         const keep = flag(step, 'keep', false);
         const remove = flag(step, 'delete', false);
-        // Each target's id as the text the plan keys it by in `ids` and `held`: a temporal value's tag as its text.
-        const key = idSql('sqlite', 'keyText', 't', shape.key);
+        // Each target's id as the key the plan keys it by in `ids` and `held` (storedKey), a text id's apart from a date's
+        // or a number's that reads alike (liberation-data/drivine-cypher-spec#391).
+        const key = idSql('sqlite', 'planKey', 't', shape.key);
         const labels = shape.labels.length ? ` AND ${hasLabels('t', shape.labels)}` : '';
         // A relationship from the node to itself is read as leaving it, and so once when both directions are read.
         const reached = this.statements

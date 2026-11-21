@@ -32,7 +32,7 @@ import { ModelRegistry } from '@/model/ModelRegistry';
 import { RelationshipModel, TargetModel } from '@/model/RelationshipModel';
 import { Stamps } from '@/model/Stamps';
 import { writeLayout } from '@/cypher/ValueLayout';
-import { temporalText } from '@/backend/sql/NodeIds';
+import { planKeyOf } from '@/cypher/SharedCypherCompiler';
 
 /**
  * Writes a save as one plan for drivine4j's write function (Postgres's, or SQLite's: see WriteFunction), applied whole or not at all, with or without a transaction.
@@ -258,45 +258,15 @@ export class PostgresSaveBuilder {
 }
 
 /**
- * An id as the text a write plan keys its node by, within the plan (a step's `k`, an unlink's `ids` and `held`), which is
- * how the store's write reads a stored target's id back (the module's `keyText`): text as it is; a temporal value as its
- * tag's text `v`, as the module writes it (drivine4j's `NodeIds.temporalText`), and so an id held as loaded (see
- * boundIdOf) as the text of the tag it was loaded from; and anything else as the JSON text
- * `store`'s layout holds it as (see writeLayout), as a save writes it, so a float id is keyed by the text it is held as
- * (`1.0E-7` on SQLite, where JSON text writes `1e-7`). On Postgres a number is the text `jsonb` gives back for it,
- * `numeric`'s, with no exponent (`0.00000010` for `1.0E-7`): `jsonb` holds a number as a `numeric`, not as the text it was
- * written as. A node is found by its id's JSON, not by this text: see NodeIds.
+ * An id as the key a write plan keys its node by, within the plan (a step's `k`, an unlink's `ids` and `held`): the
+ * module's `planKeyOf` of the JSON `store`'s layout holds it as (see writeLayout), as a save writes it, which is how the
+ * store's write reads a stored target's id back (the module's `planKey`). A text id is keyed apart from a date or a
+ * number that reads alike, so a relationship `replace` or `DELETE_UNREFERENCED` drops the edge to the one it no longer
+ * holds (liberation-data/drivine-cypher-spec#391). An id held as loaded (see boundIdOf) is keyed by the tag it was
+ * loaded from. A node is found by its id's JSON, not by this key: see NodeIds.
  */
 export function storedKey(id: unknown, store: 'postgres' | 'sqlite'): string {
-    if (typeof id === 'string') {
-        return id;
-    }
-    const text = writeLayout(id, store);
-    return temporalText(text) ?? (store === 'postgres' ? numericText(text) : text);
-}
-
-/**
- * `json`, JSON text, as Postgres's `numeric` writes the number it is, where it is one (`1.0E-7` as `0.00000010`): its
- * digits with no exponent, as many after the point as were written after it less the exponent, and zero with no sign.
- * Any other JSON is as it is.
- */
-export function numericText(json: string): string {
-    const number = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(json);
-    if (!number) {
-        return json;
-    }
-    const [, sign, whole, fraction = '', exponent = '0'] = number;
-    const digits = whole + fraction;
-    const point = whole.length + Number(exponent);
-    const before =
-        point <= 0
-            ? '0'
-            : digits
-                  .slice(0, point)
-                  .padEnd(point, '0')
-                  .replace(/^0+(?=\d)/, '');
-    const after = point <= 0 ? '0'.repeat(-point) + digits : digits.slice(point);
-    return `${/[1-9]/.test(digits) ? sign : ''}${before}${after ? `.${after}` : ''}`;
+    return planKeyOf(store, writeLayout(id, store));
 }
 
 /** The properties a node step writes: its id is the step's key, which a node is made with and found by, and no more. */

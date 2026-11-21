@@ -201,11 +201,12 @@ export function fullTextIndexLookup(
 
 /**
  * What the module's `idSql` request writes (its `IdSql`): `hasId`, whether the node's id is the id whose JSON, as the node
- * holds it, is `json`; `keyText`, the id held as the text a write plan keys a node by (a temporal value's tag read as its
- * text `v`); `property`, the property read as text, which a range index is made over; and `hasProperty`, whether the node
- * has the property at all.
+ * holds it, is `json`; `keyText`, the id held as text (a temporal value's tag read as its text `v`); `planKey`, the key a
+ * write plan finds a stored node by, a text id's apart from a date's or a number's that reads alike (see planKeyOf,
+ * liberation-data/drivine-cypher-spec#391); `property`, the property read as text, which a range index is made over;
+ * and `hasProperty`, whether the node has the property at all.
  */
-export type IdSqlHelper = 'hasId' | 'keyText' | 'property' | 'hasProperty';
+export type IdSqlHelper = 'hasId' | 'keyText' | 'planKey' | 'property' | 'hasProperty';
 
 /** The SQL the module wrote for each request asked of {@link idSql}, by the request: it is the same every time. */
 const idSqlWritten = new Map<string, string>();
@@ -229,6 +230,26 @@ export function idSql(store: SharedStore, helper: IdSqlHelper, alias: string, ke
         idSqlWritten.set(request, sql);
     }
     return sql;
+}
+
+/**
+ * The key a write plan keys a node of id `json` by on `store`, as the module gives it (its `planKeyOf`): a text id as `t:`
+ * and its text, a temporal value as its tag's text `v`, a number as `store` reads it back (on Postgres `numeric`'s text),
+ * and a truth value as its word. It is what the module's `planKey` reads a stored node's id as, so a text `'2026-01-05'`
+ * and a date `2026-01-05`, or `'1'` and `1`, are two nodes in a plan (liberation-data/drivine-cypher-spec#391). `json` is
+ * the id's JSON as `store`'s layout holds it (see writeLayout).
+ */
+export function planKeyOf(store: 'postgres' | 'sqlite', json: string): string {
+    const answer = JSON.parse(compileFunction()(JSON.stringify({ idSql: { store, helper: 'planKeyOf', json } }))) as {
+        key?: string;
+        error?: string;
+    };
+    if (typeof answer.key !== 'string') {
+        throw new DrivineError(
+            `The shared module gave no plan key for ${json} on ${store}: ${answer.error ?? 'no key'}`
+        );
+    }
+    return answer.key;
 }
 
 /**
