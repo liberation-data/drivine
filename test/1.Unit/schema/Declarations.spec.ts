@@ -6,6 +6,8 @@ import {
 } from '@liberation-data/drivine';
 import { moduleSpec, PlanRequest } from '@/schema/SchemaPlan';
 import { SchemaManager } from '@/schema/SchemaManager';
+import { SchemaCatalog } from '@/schema/SchemaCatalog';
+import { rangeIndex, uniquenessConstraint } from '@/schema/SchemaSpecs';
 import { Case, CASES, DECLARATIONS, GAPS } from './Declarations';
 
 /**
@@ -76,6 +78,41 @@ describe("The schema declarations, as the spec's declarations.yaml pins what the
     it.failing.each(
         CASES.filter((it) => it.case in GAPS).map((it) => [it.case, GAPS[it.case].join(', '), it] as const)
     )('gives the planner the catalogs of %s, once %s lands', async (_, __, pinned) => gives(pinned));
+
+    it("gives the planner an ensure's items as a catalog of them, the indexes before the constraints", async () => {
+        // As drivine4j's ensure(owner, specs) builds SchemaCatalog.of(specs): not caught by the pinned runtime case, which
+        // ensures two indexes.
+        const request = await requested({
+            catalogs: [],
+            runtime: [
+                [
+                    'dice',
+                    SchemaCatalog.of(
+                        uniquenessConstraint('Tenant', 'code'),
+                        rangeIndex('Tenant', 'name'),
+                        uniquenessConstraint('Tenant', 'code')
+                    )
+                ]
+            ]
+        });
+        expect(JSON.parse(JSON.stringify(request.runtime))).toEqual([
+            {
+                owner: 'dice',
+                version: null,
+                items: [
+                    { kind: 'RANGE_INDEX', label: 'Tenant', properties: ['name'], name: null, ignoreCase: false },
+                    {
+                        kind: 'UNIQUENESS_CONSTRAINT',
+                        label: 'Tenant',
+                        properties: ['code'],
+                        name: null,
+                        ignoreCase: false,
+                        nodeIdProperty: null
+                    }
+                ]
+            }
+        ]);
+    });
 
     it('lists only cases the spec pins as waiting on an issue', () => {
         expect(Object.keys(GAPS).filter((it) => !CASES.some((c) => c.case === it))).toEqual([]);
