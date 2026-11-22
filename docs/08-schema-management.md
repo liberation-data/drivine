@@ -121,6 +121,9 @@ export class PropositionNode {
 export class MessageNode { /* … */ }
 ```
 
+A field may carry several of these, as `id` does: each is made. A subclass that decorates an inherited field again
+replaces all of its superclass's declarations on it.
+
 `@RangeIndex({ ignoreCase: true })` and `@Unique({ ignoreCase: true })` on a `@CaseInsensitive` field are made over the
 lowercased copy a save keeps of it, so they serve `eqIgnoreCase` and refuse two values that differ only in case.
 Ensuring one fills the copies in first. See [Lookups That Ignore Case](05-object-manager.md#lookups-that-ignore-case).

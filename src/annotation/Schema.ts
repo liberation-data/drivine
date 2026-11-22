@@ -1,4 +1,4 @@
-import { definePropertyMetadata } from '@/annotation/Metadata';
+import { definePropertyMetadata, ownPropertyMetadata } from '@/annotation/Metadata';
 import 'reflect-metadata';
 
 export type SchemaSimilarity = 'COSINE' | 'EUCLIDEAN';
@@ -54,6 +54,8 @@ function declare(
             );
             return;
         }
+        // Decorators on a field run from the last written to the first, so each goes before those already there: the
+        // field's declarations are kept, each of them, in the order written, as drivine4j reads a property's (#836).
         definePropertyMetadata(target, String(property), {
             schema: [
                 {
@@ -64,7 +66,8 @@ function declare(
                     hnswM: options.hnswM,
                     hnswEfConstruction: options.hnswEfConstruction,
                     ...(options.ignoreCase ? { ignoreCase: true } : {})
-                }
+                },
+                ...(ownPropertyMetadata(target, String(property))?.schema ?? [])
             ]
         });
     };
