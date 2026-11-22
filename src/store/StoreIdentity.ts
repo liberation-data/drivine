@@ -6,7 +6,7 @@ import { PersistenceManager } from '@/manager/PersistenceManager';
 import { GraphBackend } from '@/backend/GraphBackend';
 import { ConstraintManager } from '@/schema/ConstraintManager';
 import { EnsureResult, uniquenessConstraint, UniquenessConstraintSpec } from '@/schema/SchemaSpecs';
-import { anyCause, contendedPause, ddlContended, gaveUpAsContended } from '@/manager/Contention';
+import { anyCause, contendedPause, ddlDeadlocked, gaveUpAsContended } from '@/manager/Contention';
 
 /**
  * The stable identity of the store behind a connection: who the graph is, not where it lives. An address can't answer
@@ -212,11 +212,13 @@ export class StoreIdentityResolver {
 
     /**
      * Whether the key constraint's making was turned away by another session's, run once by the schema executor (#830):
-     * a deadlock or a busy lock on a SQL store's DDL (ORA-00054 and ORA-04020 too, which the backend's data writes don't
-     * take for contention), or what the backend takes for it; or a listing the executor ran again and gave up on.
+     * a deadlock on a SQL store's DDL (ORA-04020 too, which the backend's data writes don't take for contention), or what
+     * the backend takes for it; or a listing the executor ran again and gave up on. A busy lock (ORA-00054) is not: the
+     * block has waited it out already, and ensuring again would hold the start that long again, as drivine4j's
+     * `DdlContention.contended` leaves it out.
      */
     private contended(failure: unknown): boolean {
-        return gaveUpAsContended(failure) || ddlContended(failure) || this.backend.contended(failure);
+        return gaveUpAsContended(failure) || ddlDeadlocked(failure) || this.backend.contended(failure);
     }
 
     /** `ensure`s the key's constraint, again when another manager made it, or what it needs, meanwhile. */

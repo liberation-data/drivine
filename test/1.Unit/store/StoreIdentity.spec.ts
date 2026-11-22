@@ -378,7 +378,6 @@ describe('Managers making the store key constraint at once', () => {
     });
 
     it.each([
-        [DatabaseType.ORACLE, 'ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'],
         [DatabaseType.ORACLE, 'ORA-04020: deadlock detected while trying to lock object DRIVINE.DRIVINE_NODES'],
         [DatabaseType.ORACLE, 'ORA-00060: deadlock detected while waiting for resource'],
         [DatabaseType.FALKORDB, 'another write is in progress'],
@@ -386,8 +385,8 @@ describe('Managers making the store key constraint at once', () => {
     ] as const)(
         "should ensure the %s constraint once more when its making was turned away by another session's: %s",
         async (type, message) => {
-            // Run once by the schema executor (#830), it comes back here: on Oracle, a lock the data writes don't take for
-            // contention; on FalkorDB and Memgraph, what the backend takes for it.
+            // Run once by the schema executor (#830), it comes back here: on Oracle, a deadlock the data writes don't take
+            // for contention; on FalkorDB and Memgraph, what the backend takes for it.
             const turnedAway =
                 type === DatabaseType.MEMGRAPH
                     ? new Neo4jError(message, 'Memgraph.TransientError.MemgraphError')
@@ -422,6 +421,40 @@ describe('Managers making the store key constraint at once', () => {
             expect(warned()).not.toContain('best-effort');
         }
     );
+
+    it('should not ensure the Oracle constraint again for a busy lock, which its block has waited out already', async () => {
+        // ORA-00054 comes after the block's own wait for the lock: ensuring again would hold the start that long again,
+        // so it isn't contention here, as drivine4j's DdlContention.contended leaves it out (#830).
+        let ensures = 0;
+        const constraints = {
+            ensure: async () => {
+                ensures++;
+                return Promise.reject(
+                    DrivineError.withRootCause(
+                        new Error('ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired')
+                    )
+                );
+            },
+            inForce: async () => Promise.resolve(false)
+        } as unknown as ConstraintManager;
+        const persistenceManager = {
+            database: 'store',
+            type: DatabaseType.ORACLE,
+            execute: async () => Promise.resolve(),
+            query: async () => Promise.resolve([{ id: 'store-8', assignedAt: '2026-01-01T00:00:00Z' }])
+        } as unknown as PersistenceManager;
+        const backend = Object.assign(backendFor(DatabaseType.ORACLE), {
+            storeStamps: () => ({ spec: () => ({}) }),
+            assignStoreStamp: () => ({ spec: () => ({}) })
+        }) as unknown as GraphBackend;
+        const resolver = new StoreIdentityResolver(persistenceManager, backend, constraints, async () =>
+            Promise.resolve()
+        );
+
+        expect((await resolver.resolve()).id).toEqual('store-8');
+        expect(ensures).toEqual(1);
+        expect(warned()).toContain('best-effort');
+    });
 
     it("should look for the winner's constraint once, without a pause, after a refusal that isn't contention", async () => {
         // No permission to make it: no winner is still making it, so the warning doesn't wait out the looks.
