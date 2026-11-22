@@ -61,8 +61,10 @@ transaction older than it, so a `REPEATABLE READ` or `SERIALIZABLE` transaction 
 
 Each statement an `ensure` runs is run once, on every store, as drivine4j runs it. Where the store turns it away for
 another session's (a deadlock, a lock another session holds, FalkorDB's write in progress), the plan decides what comes
-next: it waits out a Postgres online build's deadlock and ensures again, as above, and throws the store's error for the
-rest ([#830](https://github.com/liberation-data/drivine/issues/830)).
+next: it waits out a Postgres online build's deadlock and ensures again, as above, waits for its turn where Oracle
+refuses its claim as another session's (`ORA-00001`), runs again a marker's merge that lost the race to make it, takes a
+Postgres `23505` over another session's build under the index's name as that build, and throws the store's error for
+the rest ([#830](https://github.com/liberation-data/drivine/issues/830)).
 
 `ensure` returns a result whose `status` is:
 
