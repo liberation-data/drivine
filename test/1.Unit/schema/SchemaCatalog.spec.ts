@@ -40,6 +40,27 @@ class NoIdNode {
 }
 
 describe('SchemaCatalog.fromFragments', () => {
+    it('should keep each of the schema decorators on one field (#836)', () => {
+        @NodeFragment({ labels: ['TwoOnOne'] })
+        class TwoOnOne {
+            @NodeId() id: string;
+            @RangeIndex() @Unique() email: string;
+            @FullTextIndex() @RangeIndex() @Unique() handle: string;
+        }
+        // Each declaration is kept: a constraint beside an index is made, as drivine4j makes it.
+        const items = SchemaCatalog.fromFragments(undefined, TwoOnOne).items;
+        expect(items).toHaveLength(5);
+        expect(items).toEqual(
+            expect.arrayContaining([
+                { kind: 'RANGE', label: 'TwoOnOne', properties: ['email'] },
+                { kind: 'UNIQUE', label: 'TwoOnOne', properties: ['email'], nodeIdProperty: 'id' },
+                { kind: 'FULLTEXT', label: 'TwoOnOne', properties: ['handle'] },
+                { kind: 'RANGE', label: 'TwoOnOne', properties: ['handle'] },
+                { kind: 'UNIQUE', label: 'TwoOnOne', properties: ['handle'], nodeIdProperty: 'id' }
+            ])
+        );
+    });
+
     it('should read field and class declarations, over the first label and graph names', () => {
         const catalog = SchemaCatalog.fromFragments(
             (label, property) => (label === 'Message' && property === 'embedding' ? 1536 : 0),

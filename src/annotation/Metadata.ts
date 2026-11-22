@@ -124,6 +124,13 @@ export function ownClassMetadata(target: Function): ClassMetadata | undefined {
     return Reflect.getOwnMetadata(CLASS_KEY, target);
 }
 
+/** The metadata decorators on `property` of `prototype`'s own class have defined so far, not its superclasses'. */
+export function ownPropertyMetadata(prototype: object, property: string): PropertyMetadata | undefined {
+    return (
+        Reflect.getOwnMetadata(PROPERTIES_KEY, prototype.constructor) as Map<string, PropertyMetadata> | undefined
+    )?.get(property);
+}
+
 export function definePropertyMetadata(prototype: object, property: string, metadata: Partial<PropertyMetadata>): void {
     const target = prototype.constructor;
     const all: Map<string, PropertyMetadata> = Reflect.getOwnMetadata(PROPERTIES_KEY, target) ?? new Map();
