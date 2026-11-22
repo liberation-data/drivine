@@ -59,10 +59,10 @@ is still being built, or enforces nothing. Postgres can cancel one of two online
 that `ensure` waits until no build is under way there and runs again, up to 3 times. An online build waits for each
 transaction older than it, so a `REPEATABLE READ` or `SERIALIZABLE` transaction left open holds it up until it ends.
 
-Each statement an `ensure` runs is run once, on every store, as drivine4j runs it: where the store turns it away for
-another session's (a deadlock, a lock another session holds, FalkorDB's write in progress), what comes next is the
-plan's, as above, and otherwise the store's error is thrown
-([#830](https://github.com/liberation-data/drivine/issues/830)).
+Each statement an `ensure` runs is run once, on every store, as drivine4j runs it. Where the store turns it away for
+another session's (a deadlock, a lock another session holds, FalkorDB's write in progress), the plan decides what comes
+next: it waits out a Postgres online build's deadlock and ensures again, as above, and throws the store's error for the
+rest ([#830](https://github.com/liberation-data/drivine/issues/830)).
 
 `ensure` returns a result whose `status` is:
 
