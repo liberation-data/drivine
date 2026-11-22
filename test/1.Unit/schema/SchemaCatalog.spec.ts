@@ -1,7 +1,9 @@
 import {
+    CaseInsensitive,
     FullTextIndex,
     GraphProperty,
     NodeFragment,
+    ModelRegistry,
     NodeId,
     RangeIndex,
     SchemaCatalog,
@@ -59,6 +61,64 @@ describe('SchemaCatalog.fromFragments', () => {
                 { kind: 'UNIQUE', label: 'TwoOnOne', properties: ['handle'], nodeIdProperty: 'id' }
             ])
         );
+    });
+
+    it('should keep a vector index beside a range index on one field, and its similarity (#836)', () => {
+        @NodeFragment({ labels: ['VectorBeside'] })
+        class VectorBeside {
+            @NodeId() id: string;
+            @RangeIndex() @VectorIndex({ similarity: 'EUCLIDEAN', dimensions: 4 }) embedding: number[];
+        }
+        expect(SchemaCatalog.fromFragments(undefined, VectorBeside).items).toEqual(
+            expect.arrayContaining([
+                { kind: 'RANGE', label: 'VectorBeside', properties: ['embedding'] },
+                expect.objectContaining({ kind: 'VECTOR', properties: ['embedding'], similarity: 'EUCLIDEAN' })
+            ])
+        );
+        expect(new ModelRegistry().fragment(VectorBeside).vectorFields.get('embedding')).toEqual({
+            property: 'embedding',
+            similarity: 'EUCLIDEAN'
+        });
+    });
+
+    it('should keep both of the declarations that ignore case on a @CaseInsensitive field (#836)', () => {
+        @NodeFragment({ labels: ['BothIgnoreCase'] })
+        class BothIgnoreCase {
+            @NodeId() id: string;
+            @CaseInsensitive() @RangeIndex({ ignoreCase: true }) @Unique({ ignoreCase: true }) email: string;
+        }
+        const items = SchemaCatalog.fromFragments(undefined, BothIgnoreCase).items;
+        expect(items).toHaveLength(2);
+        expect(items).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ kind: 'RANGE', properties: ['email'], ignoreCase: true }),
+                expect.objectContaining({ kind: 'UNIQUE', properties: ['email'], ignoreCase: true })
+            ])
+        );
+    });
+
+    it("should keep a subclass's declarations on a field, in place of its superclass's (#836)", () => {
+        @NodeFragment({ labels: ['Account'] })
+        class Account {
+            @NodeId() id: string;
+            @FullTextIndex() @Unique() email: string;
+            @RangeIndex() @Unique() handle: string;
+        }
+        @NodeFragment({ labels: ['Admin'] })
+        class Admin extends Account {
+            @RangeIndex() @Unique() declare email: string;
+            @RangeIndex() declare handle: string;
+        }
+        expect(SchemaCatalog.fromFragments(undefined, Admin).items).toHaveLength(3);
+        expect(SchemaCatalog.fromFragments(undefined, Admin).items).toEqual(
+            expect.arrayContaining([
+                { kind: 'RANGE', label: 'Admin', properties: ['email'] },
+                { kind: 'UNIQUE', label: 'Admin', properties: ['email'], nodeIdProperty: 'id' },
+                { kind: 'RANGE', label: 'Admin', properties: ['handle'] }
+            ])
+        );
+        // The superclass keeps its own, each of them.
+        expect(SchemaCatalog.fromFragments(undefined, Account).items).toHaveLength(4);
     });
 
     it('should read field and class declarations, over the first label and graph names', () => {
