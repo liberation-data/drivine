@@ -92,7 +92,6 @@ export const GAPS: Record<string, string[]> = {
     'full-text': ['#648'],
     text: ['#541'],
     fragment: ['#800'],
-    "fragment without its id's index": ['#800'],
     'fragment class items': ['#800', '#648'],
     'fragments merged': ['#800'],
     'fragment ignoring case': ['#800']
@@ -151,6 +150,7 @@ export const DECLARATIONS: Record<string, { catalogs: SchemaCatalog[]; runtime?:
     text: { catalogs: [SchemaCatalog.of({ kind: 'TEXT', label: 'Person', properties: ['name'] } as any)] },
     fragment: { catalogs: [SchemaCatalog.fromFragments(dimensions, Article)] },
     'fragment id served by a constraint': { catalogs: [SchemaCatalog.fromFragments(undefined, Account)] },
+    // A @NodeId gets no index by default until #800, which adds the default and the means to turn it off, as here.
     "fragment without its id's index": { catalogs: [SchemaCatalog.fromFragments(undefined, Ticket)] },
     'fragment class items': { catalogs: [SchemaCatalog.fromFragments(undefined, Message)] },
     'fragments merged': { catalogs: [SchemaCatalog.fromFragments(undefined, Customer, PreferredCustomer)] },
