@@ -378,31 +378,38 @@ describe('Managers making the store key constraint at once', () => {
     });
 
     it.each([
-        ['ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'],
-        ['ORA-04020: deadlock detected while trying to lock object DRIVINE.DRIVINE_NODES'],
-        ['ORA-00060: deadlock detected while waiting for resource']
-    ])(
-        "should ensure Oracle's constraint once more when its DDL was turned away by another session's: %s",
-        async (message) => {
-            // Run once by the schema executor (#830), it comes back here: a lock the data writes don't take for contention.
+        [DatabaseType.ORACLE, 'ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired'],
+        [DatabaseType.ORACLE, 'ORA-04020: deadlock detected while trying to lock object DRIVINE.DRIVINE_NODES'],
+        [DatabaseType.ORACLE, 'ORA-00060: deadlock detected while waiting for resource'],
+        [DatabaseType.FALKORDB, 'another write is in progress'],
+        [DatabaseType.MEMGRAPH, 'Cannot resolve conflicting transactions. You can retry this transaction.']
+    ] as const)(
+        "should ensure the %s constraint once more when its making was turned away by another session's: %s",
+        async (type, message) => {
+            // Run once by the schema executor (#830), it comes back here: on Oracle, a lock the data writes don't take for
+            // contention; on FalkorDB and Memgraph, what the backend takes for it.
+            const turnedAway =
+                type === DatabaseType.MEMGRAPH
+                    ? new Neo4jError(message, 'Memgraph.TransientError.MemgraphError')
+                    : new Error(message);
             let ensures = 0;
             const constraints = {
                 ensure: async () => {
                     if (++ensures === 1) {
-                        return Promise.reject(DrivineError.withRootCause(new Error(message)));
+                        return Promise.reject(DrivineError.withRootCause(turnedAway));
                     }
                     return Promise.resolve({ status: 'CREATED' });
                 },
                 inForce: async () => Promise.resolve(false)
             } as unknown as ConstraintManager;
             const persistenceManager = {
-                database: 'oracle',
-                type: DatabaseType.ORACLE,
+                database: 'store',
+                type,
                 execute: async () => Promise.resolve(),
                 query: async () => Promise.resolve([{ id: 'store-8', assignedAt: '2026-01-01T00:00:00Z' }])
             } as unknown as PersistenceManager;
-            // Oracle's own judgement of contention, as its data writes take it.
-            const backend = Object.assign(backendFor(DatabaseType.ORACLE), {
+            // The store's own judgement of contention, as its data writes take it.
+            const backend = Object.assign(backendFor(type), {
                 storeStamps: () => ({ spec: () => ({}) }),
                 assignStoreStamp: () => ({ spec: () => ({}) })
             }) as unknown as GraphBackend;
