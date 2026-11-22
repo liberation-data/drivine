@@ -1,0 +1,223 @@
+# What each library's schema declarations give the module's schema planner (liberation-data/drivine-cypher-spec#135): the
+# catalogs of a PlanRequest, as its JSON writes them (PlanRequest.toJson, the JSON entry's `schemaPlan` `start`), and the
+# items ensured at runtime. The planner decides everything from these, the store's listings and its markers, so a store
+# one library indexed is up to date for the others only where each library's declarations give the same catalogs. drivine4j's,
+# the reference, give these; each library declares each case in its own API, and checks it gives them, failing on a case
+# it has no declaration for. See README.md, "The schema declarations".
+#
+# - `declare`: what to declare, in words, to each library's own API.
+# - `catalogs`: the startup catalogs, in the order given, each with its `owner` (null for the owner with no name), its
+#   `version`, and its `items` in the order the library gives them to the planner, each as a spec's JSON: an item given
+#   no name has `name: null`, and a fragment's uniqueness constraint has the fragment's node id as its `nodeIdProperty`.
+# - `runtime`: the items ensured at runtime, a catalog for each owner, for an enforce after them.
+
+cases:
+  - case: "range"
+    declare: "A catalog of one item, with no owner and no version: a range index over Person.name, given no name."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "range named"
+    declare: "A range index over Person.name named person_name_idx."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "person_name_idx", "ignoreCase": false}
+    runtime: []
+  - case: "range composite"
+    declare: "A range index over Person's last and first, in that order, given no name."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["last", "first"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "range long name"
+    declare: "A range index over AVeryLongLabelNameThatGoesOnAndOnForTheSakeOfAnIdentifierLimit's aPropertyWithALongName and anotherPropertyWithALongName, given no name: the name the store makes it under is the module's to work out, and none is sent."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "AVeryLongLabelNameThatGoesOnAndOnForTheSakeOfAnIdentifierLimit", "properties": ["aPropertyWithALongName", "anotherPropertyWithALongName"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "unique"
+    declare: "A uniqueness constraint over Person.email, given no name."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": null, "ignoreCase": false, "nodeIdProperty": null}
+    runtime: []
+  - case: "unique composite"
+    declare: "A uniqueness constraint over Person's email and tenant, in that order."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email", "tenant"], "name": null, "ignoreCase": false, "nodeIdProperty": null}
+    runtime: []
+  - case: "unique named"
+    declare: "A uniqueness constraint over Person.email named person_email_unique."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "person_email_unique", "ignoreCase": false, "nodeIdProperty": null}
+    runtime: []
+  - case: "ignore case"
+    declare: "A range index over Person.name and a uniqueness constraint over Person.email, each ignoring case, declared in that order."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": true}
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": null, "ignoreCase": true, "nodeIdProperty": null}
+    runtime: []
+  - case: "vector"
+    declare: "A vector index over Chunk.embedding of 384 dimensions, by Euclidean similarity."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": null, "dimensions": 384, "similarity": "EUCLIDEAN", "hnswM": null, "hnswEfConstruction": null, "engineOptions": []}
+    runtime: []
+  - case: "vector dimensions only"
+    declare: "A vector index over Chunk.embedding of 384 dimensions, with nothing else given: the similarity and the rest as the library defaults them."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": null, "dimensions": 384, "similarity": "COSINE", "hnswM": null, "hnswEfConstruction": null, "engineOptions": []}
+    runtime: []
+  - case: "vector tuned"
+    declare: "A vector index over Chunk.embedding of 384 dimensions, by cosine similarity, with hnswM 16 and hnswEfConstruction 200, and options for two engines: Neo4j's with quantization off, and FalkorDB's with efRuntime 10."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": null, "dimensions": 384, "similarity": "COSINE", "hnswM": 16, "hnswEfConstruction": 200, "engineOptions": [{"engine": "Neo4j", "quantizationEnabled": false, "hnswM": null, "hnswEfConstruction": null}, {"engine": "FalkorDB", "efRuntime": 10, "hnswM": null, "hnswEfConstruction": null}]}
+    runtime: []
+  - case: "full-text"
+    declare: "A full-text index over Article's title and body, in that order, with the analyzer english."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "FULLTEXT_INDEX", "label": "Article", "properties": ["title", "body"], "name": null, "analyzer": "english"}
+    runtime: []
+  - case: "full-text default analyzer"
+    declare: "A full-text index over Article.body with no analyzer given."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "FULLTEXT_INDEX", "label": "Article", "properties": ["body"], "name": null, "analyzer": null}
+    runtime: []
+  - case: "text"
+    declare: "A TEXT index (Neo4j's) over Person.name."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "TEXT_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "fragment"
+    declare: "A fragment labelled Article: an id that is its node id, a slug that is unique, a title with a range index, an embedding with a vector index (a dimension provider giving 384, nothing else given) and a body with a full-text index. Its node id gets a range index, as nothing else declared serves it."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "FULLTEXT_INDEX", "label": "Article", "properties": ["body"], "name": null, "analyzer": null}
+          - {"kind": "VECTOR_INDEX", "label": "Article", "properties": ["embedding"], "name": null, "dimensions": 384, "similarity": "COSINE", "hnswM": null, "hnswEfConstruction": null, "engineOptions": []}
+          - {"kind": "RANGE_INDEX", "label": "Article", "properties": ["title"], "name": null, "ignoreCase": false}
+          - {"kind": "RANGE_INDEX", "label": "Article", "properties": ["id"], "name": null, "ignoreCase": false}
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Article", "properties": ["slug"], "name": null, "ignoreCase": false, "nodeIdProperty": "id"}
+    runtime: []
+  - case: "fragment id served by a constraint"
+    declare: "A fragment labelled Account whose node id, id, is unique, and a name with nothing declared: the constraint serves the node id, so it gets no range index of its own."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["id"], "name": null, "ignoreCase": false, "nodeIdProperty": "id"}
+    runtime: []
+  - case: "fragment without its id's index"
+    declare: "A fragment labelled Ticket with a node id, id, read with its node id's default index turned off: it declares nothing."
+    catalogs:
+      - owner: null
+        version: null
+        items: []
+    runtime: []
+  - case: "fragment class items"
+    declare: "A fragment labelled Message, with a node id, id, that declares on the fragment itself a uniqueness constraint over sessionId and sequence, and a full-text index over subject and body with the analyzer english."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "FULLTEXT_INDEX", "label": "Message", "properties": ["subject", "body"], "name": null, "analyzer": "english"}
+          - {"kind": "RANGE_INDEX", "label": "Message", "properties": ["id"], "name": null, "ignoreCase": false}
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Message", "properties": ["sessionId", "sequence"], "name": null, "ignoreCase": false, "nodeIdProperty": "id"}
+    runtime: []
+  - case: "fragments merged"
+    declare: "Two fragments, both labelled Customer, each with a node id, id, and a range index over email, read into one catalog: each item once."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Customer", "properties": ["email"], "name": null, "ignoreCase": false}
+          - {"kind": "RANGE_INDEX", "label": "Customer", "properties": ["id"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "fragment ignoring case"
+    declare: "A fragment labelled Member with a node id, id, and an email kept ignoring case (a lowercased copy) under a uniqueness constraint that ignores case."
+    catalogs:
+      - owner: null
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Member", "properties": ["id"], "name": null, "ignoreCase": false}
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Member", "properties": ["email"], "name": null, "ignoreCase": true, "nodeIdProperty": "id"}
+    runtime: []
+  - case: "owner and version"
+    declare: "A range index over Person.name in a catalog of the owner rag at version v2."
+    catalogs:
+      - owner: "rag"
+        version: "v2"
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "versions combined"
+    declare: "Two catalogs of the owner rag: a range index over Person.name at version v2, and a uniqueness constraint over Person.email at version a1, given in that order."
+    catalogs:
+      - owner: "rag"
+        version: "v2"
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": false}
+      - owner: "rag"
+        version: "a1"
+        items:
+          - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": null, "ignoreCase": false, "nodeIdProperty": null}
+    runtime: []
+  - case: "co-owned"
+    declare: "A range index over Person.name declared by two owners, a and b, each in a catalog of its own."
+    catalogs:
+      - owner: "a"
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": false}
+      - owner: "b"
+        version: null
+        items:
+          - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": null, "ignoreCase": false}
+    runtime: []
+  - case: "ensured at runtime"
+    declare: "No startup catalog. At runtime, the owner dice ensures a vector index over Chunk.embedding of 768 dimensions, nothing else given, and a range index over Tenant.code, in that order."
+    catalogs: []
+    runtime:
+      - owner: "dice"
+        version: null
+        items:
+          - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": null, "dimensions": 768, "similarity": "COSINE", "hnswM": null, "hnswEfConstruction": null, "engineOptions": []}
+          - {"kind": "RANGE_INDEX", "label": "Tenant", "properties": ["code"], "name": null, "ignoreCase": false}
