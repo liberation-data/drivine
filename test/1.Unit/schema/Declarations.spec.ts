@@ -6,7 +6,7 @@ import {
 } from '@liberation-data/drivine';
 import { moduleSpec, PlanRequest } from '@/schema/SchemaPlan';
 import { SchemaManager } from '@/schema/SchemaManager';
-import { SchemaCatalog } from '@/schema/SchemaCatalog';
+import { SchemaCatalog, SchemaSpec } from '@/schema/SchemaCatalog';
 import { rangeIndex, uniquenessConstraint } from '@/schema/SchemaSpecs';
 import { Case, CASES, DECLARATIONS, GAPS } from './Declarations';
 
@@ -17,8 +17,14 @@ import { Case, CASES, DECLARATIONS, GAPS } from './Declarations';
  * each library's declarations give the same catalogs. drivine4j's DeclarationsGoldenTest.
  */
 
-/** The request each plan run is given, by a manager over one graph database whose planning only records it. */
-async function requested(declared: (typeof DECLARATIONS)[string]): Promise<PlanRequest> {
+/**
+ * The request each plan run is given, by a manager over one graph database whose planning only records it. Items ensured
+ * at runtime as a list are given to `ensure(owner, ...specs)`, a catalog to `ensure(catalog)`.
+ */
+async function requested(declared: {
+    catalogs: SchemaCatalog[];
+    runtime?: [string, SchemaCatalog | SchemaSpec[]][];
+}): Promise<PlanRequest> {
     const requests: PlanRequest[] = [];
     const planning = {
         plan: {
@@ -33,8 +39,8 @@ async function requested(declared: (typeof DECLARATIONS)[string]): Promise<PlanR
     };
     const factory = { get: () => ({ schemaPlanning: () => planning }) } as unknown as GraphObjectManagerFactory;
     const manager = new SchemaManager(factory, { catalogs: declared.catalogs });
-    for (const [owner, catalog] of declared.runtime ?? []) {
-        await manager.ensure(catalog.named(owner));
+    for (const [owner, ensured] of declared.runtime ?? []) {
+        await (Array.isArray(ensured) ? manager.ensure(owner, ...ensured) : manager.ensure(ensured.named(owner)));
     }
     await manager.enforce();
     // An enforce with nothing to apply plans nothing, as drivine4j's does: the request is then read as the planner would
@@ -81,17 +87,17 @@ describe("The schema declarations, as the spec's declarations.yaml pins what the
 
     it("gives the planner an ensure's items as a catalog of them, the indexes before the constraints", async () => {
         // As drivine4j's ensure(owner, specs) builds SchemaCatalog.of(specs): not caught by the pinned runtime case, which
-        // ensures two indexes.
+        // ensures two indexes as a catalog.
         const request = await requested({
             catalogs: [],
             runtime: [
                 [
                     'dice',
-                    SchemaCatalog.of(
+                    [
                         uniquenessConstraint('Tenant', 'code'),
                         rangeIndex('Tenant', 'name'),
                         uniquenessConstraint('Tenant', 'code')
-                    )
+                    ]
                 ]
             ]
         });
