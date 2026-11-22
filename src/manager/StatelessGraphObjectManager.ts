@@ -872,7 +872,7 @@ export class StatelessGraphObjectManager {
     }
 
     /**
-     * The id a lookup of the target's root by `given` binds: on a SQL store read as the `@NodeId` field's type, and
+     * The id a lookup of the target's root by `given` binds: read as the `@NodeId` field's type, on every store, and
      * NO_NODE where no node can have it, for which no statement is run (see NodeIds).
      */
     private lookupId(target: TargetModel, given: unknown): unknown {

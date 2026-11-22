@@ -566,7 +566,8 @@ describe('idSql', () => {
 });
 
 describe('a lookup by id on a graph engine', () => {
-    it('binds text as it is given: the engine compares it', async () => {
+    // As a SQL store reads it (#838): the engine compares the value a save wrote, never its text.
+    it("binds text read as the @NodeId's type, and runs nothing for text that is no value of it", async () => {
         const bound: any[] = [];
         const pm = {
             database: 'id-keyed',
@@ -578,7 +579,11 @@ describe('a lookup by id on a graph engine', () => {
         const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
         await gom.load(Dial, '6');
         await gom.load(Dial, 'abc');
-        expect(bound).toEqual(['6', 'abc']);
+        await gom.load(Counted, '7');
+        await gom.load(Dated, '2024-03-04');
+        await gom.load(Coded, '6');
+        await gom.load(Flagged, 'true');
+        expect(bound).toEqual([6, BigInt(7), new Date('2024-03-04T00:00:00.000Z'), '6', true]);
     });
 });
 

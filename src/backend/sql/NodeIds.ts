@@ -133,17 +133,15 @@ function heldAsLoaded(given: unknown): HeldAsLoaded | undefined {
 }
 
 /**
- * The id a lookup of a node of `model` by `given` binds on `backend`: on a SQL store `given` read as the id's type
- * ({@link typedId}), and {@link NO_NODE} where it finds no node, which the caller runs no statement for, logging why at
- * DEBUG; on a graph engine `given` as it is, as the engine compares it. A `Date` a SQL store's load gave as an id, and
- * unchanged since, is the tag the store held it as (#815), so `update`, `patch`, `delete`, a load and a relationship's end
- * given a loaded object's id find its node.
+ * The id a lookup of a node of `model` by `given` binds on `backend`: `given` read as the id's type ({@link typedId}), the
+ * value a save binds for the field, and {@link NO_NODE} where it finds no node, which the caller runs no statement for,
+ * logging why at DEBUG. So a load by an id's text finds the node on a graph engine as on a SQL store (#838): `'5'` is the
+ * number id 5, and a date id's ISO text that `Date`. On a SQL store, a `Date` its load gave as an id, and unchanged
+ * since, is the tag the store held it as (#815), so `update`, `patch`, `delete`, a load and a relationship's end given a
+ * loaded object's id find its node; a graph engine holds that value as it is.
  */
 export function lookupId(backend: GraphBackend, model: FragmentModel, given: unknown): unknown {
-    if (!isSqlBackend(backend)) {
-        return given;
-    }
-    const held = heldAsLoaded(given);
+    const held = isSqlBackend(backend) ? heldAsLoaded(given) : undefined;
     if (held) {
         return held;
     }
