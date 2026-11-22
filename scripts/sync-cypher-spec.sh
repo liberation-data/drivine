@@ -23,10 +23,11 @@ else
   curl -fsSL "https://github.com/liberation-data/drivine-cypher-spec/archive/refs/tags/$tag.tar.gz" | tar -xz -C "$tmp" --strip-components=1
 fi
 # The statements each store answers, and, since store layout 2, the store's own: its DDL and reads (store.yaml), its stamps
-# and schema marker (marker.yaml), the fragments the object manager compiles (fragments.yaml), the schema plans (plans.yaml)
-# and vector search (vector.yaml).
+# and schema marker (marker.yaml), the fragments the object manager compiles (fragments.yaml), the schema plans (plans.yaml),
+# vector search (vector.yaml), and what the schema declarations give the planner (declarations.yaml).
 cp "$tmp"/queries.yaml "$tmp"/writes.yaml "$tmp"/temporal.yaml "$tmp"/refusals.yaml "$tmp"/schema.yaml "$tmp"/host.yaml \
-  "$tmp"/store.yaml "$tmp"/marker.yaml "$tmp"/fragments.yaml "$tmp"/plans.yaml "$tmp"/vector.yaml "$tmp"/README.md "$dir"/
+  "$tmp"/store.yaml "$tmp"/marker.yaml "$tmp"/fragments.yaml "$tmp"/plans.yaml "$tmp"/vector.yaml "$tmp"/declarations.yaml \
+  "$tmp"/README.md "$dir"/
 # The model file's format, which the model file generator writes to.
 mkdir -p "$dir/model"
 cp "$tmp"/model/schema.json "$tmp"/model/README.md "$dir/model/"
