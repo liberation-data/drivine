@@ -105,4 +105,17 @@ describe("The schema declarations, as the spec's declarations.yaml pins what the
         const catalog = DECLARATIONS['fragment class items'].catalogs[0];
         expect(JSON.parse(JSON.stringify(catalog.items.map(moduleSpec)))).toEqual(items);
     });
+
+    // And full-text's request is the pin's but for the analyzer (#648), so that nothing else hides behind its gap.
+    it('gives the planner the catalogs of full-text in the pin, but for the analyzer', async () => {
+        const pinned = CASES.find((it) => it.case === 'full-text')!;
+        const request = await requested(DECLARATIONS['full-text']);
+        expect(JSON.parse(JSON.stringify({ catalogs: request.catalogs, runtime: request.runtime }))).toEqual({
+            catalogs: pinned.catalogs.map((it) => ({
+                ...it,
+                items: it.items.map((item) => ({ ...item, analyzer: null }))
+            })),
+            runtime: pinned.runtime
+        });
+    });
 });
