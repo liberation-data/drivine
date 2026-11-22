@@ -327,9 +327,10 @@ describe('@CaseInsensitive', () => {
 
         it('should read ignoreCase from the decorators, over the stored names', () => {
             const items = SchemaCatalog.fromFragments(undefined, CiMember).items;
+            // The indexes before the constraints, as drivine4j's catalog gives them (drivine-cypher-spec#135).
             expect(items).toEqual([
-                uniquenessConstraint('CiMember', 'email', { ignoreCase: true, nodeIdProperty: 'id' }),
-                rangeIndex('CiMember', 'handle_name', { ignoreCase: true })
+                rangeIndex('CiMember', 'handle_name', { ignoreCase: true }),
+                uniquenessConstraint('CiMember', 'email', { ignoreCase: true, nodeIdProperty: 'id' })
             ]);
         });
 
