@@ -241,8 +241,8 @@ export type PlanAction =
 export interface PlanHost {
     /**
      * Runs a schema statement, or a listing, on a connection of its own: its rows, a row of one column its value. With
-     * `once`, the plan reads its failure itself (an `execute`'s `ONCE`), so a deadlock the planner waits out isn't run
-     * again first (see SchemaExecutor.run).
+     * `once`, the plan reads its failure itself (an `execute`'s `ONCE`), so it is run once on every store, not again
+     * when turned away as contended (see SchemaExecutor.run, #830).
      */
     run(statement: string | NativeOperation, parameters: Record<string, any>, once?: boolean): Promise<any[]>;
     /** Runs a statement of the marker's through the database's auto-commit manager: Cypher where `compiled`. */

@@ -74,6 +74,9 @@ describe.each(allStores())('store identity on $type', (engine) => {
     // it was in force, leaving two stamps. Each manager must instead find the winner's constraint, and write under it.
     it('should agree on one identity, under the key constraint, when many managers race to make it', async () => {
         const warn = jest.spyOn(DrivineLogger.prototype, 'warn');
+        // A Neo4j session closed on a transient error, as a manager's constraint statement turned away as a deadlock
+        // on the label's lock is: run once (#830), it comes back to resolve(), which ensures it once more.
+        const closedContended = jest.spyOn(DrivineLogger.prototype, 'debug');
         try {
             for (let round = 0; round < (RACE_ROUNDS[engine.type] ?? 5); round++) {
                 await manager().constraints.drop(uniquenessConstraint('DrivineStore', 'key'));
@@ -87,8 +90,16 @@ describe.each(allStores())('store identity on $type', (engine) => {
                 .map(([message]) => String(message))
                 .filter((it) => /best-effort/.test(it));
             expect(bestEffort).toEqual([]);
+            if (engine.type === DatabaseType.NEO4J) {
+                // Rounds with no deadlock prove nothing of the fallback the managers converge by on Neo4j.
+                const deadlocks = closedContended.mock.calls.filter(([message]) =>
+                    /Closing session with error/.test(String(message))
+                );
+                expect(deadlocks.length).toBeGreaterThan(0);
+            }
         } finally {
             warn.mockRestore();
+            closedContended.mockRestore();
         }
     }, 120_000);
 

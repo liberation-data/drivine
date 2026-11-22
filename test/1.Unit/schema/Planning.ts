@@ -5,7 +5,7 @@ import { SchemaPlan, SchemaPlanning } from '@/schema/SchemaPlan';
 
 /** What a unit test runs a plan's statements on: one that records or answers each, with no store. */
 export interface Runs {
-    run(statement: string | NativeOperation, parameters?: Record<string, any>): Promise<any[]>;
+    run(statement: string | NativeOperation, parameters?: Record<string, any>, once?: boolean): Promise<any[]>;
 }
 
 /**
@@ -22,7 +22,7 @@ export function planningOn(
         plan: new SchemaPlan(store, graph),
         database: 'default',
         host: {
-            run: async (statement, parameters) => executor.run(statement, parameters),
+            run: async (statement, parameters, once) => executor.run(statement, parameters, once),
             marker: async (statement, parameters, _compiled, rows) => {
                 const answered = await executor.run(statement, parameters);
                 return rows ? answered : [];

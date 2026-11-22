@@ -139,6 +139,45 @@ describe('SchemaExecutor', () => {
         expect(runs).toEqual(1);
     });
 
+    // The library runs a failed action again only as the planner's `retry` says (drivine-cypher-spec's README), on every
+    // store, as drivine4j runs a `ONCE` statement: the planner reads its failure, and plans.yaml pins what it does (#830).
+    it.each([
+        ['ORACLE', DatabaseType.ORACLE, () => new Error('ORA-00060: deadlock detected while waiting for resource')],
+        ['ORACLE', DatabaseType.ORACLE, () => new Error('ORA-04020: deadlock detected while trying to lock object')],
+        ['ORACLE', DatabaseType.ORACLE, () => new Error('ORA-00054: resource busy and acquire with NOWAIT specified')],
+        [
+            'NEO4J',
+            DatabaseType.NEO4J,
+            () => new Neo4jError('Deadlock wait cycle.', 'Neo.TransientError.Transaction.DeadlockDetected')
+        ],
+        ['FALKORDB', DatabaseType.FALKORDB, () => new Error('another write is in progress')]
+    ] as const)(
+        'should run once a statement the schema planner reads the failure of on %s, turned away as contended',
+        async (_name, type, failure) => {
+            let runs = 0;
+            const provider = {
+                name: 'store',
+                type,
+                connect: async () =>
+                    Promise.resolve({
+                        query: async () => {
+                            runs++;
+                            return Promise.reject(failure());
+                        },
+                        release: async () => Promise.resolve()
+                    })
+            } as any;
+            await expect(new SchemaExecutor(provider).run('CREATE INDEX x', {}, true)).rejects.toMatchObject({
+                rootCause: { message: failure().message }
+            });
+            expect(runs).toEqual(1);
+            // Not marked so, it is run again, as a listing is.
+            runs = 0;
+            await expect(new SchemaExecutor(provider).run('CREATE INDEX x', {})).rejects.toBeDefined();
+            expect(runs).toBeGreaterThan(1);
+        }
+    );
+
     /** A provider whose first connection runs a graph's first-use block that fails with `message` each time. */
     const firstUseFailing = (message: string): { provider: ConnectionProvider; runs: () => number } => {
         let runs = 0;

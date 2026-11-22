@@ -13,9 +13,10 @@ import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 
 /**
  * A transient error over Bolt, FalkorDB turning a write away while another is in progress, or a SQL store turning DDL
- * away because of another session's (see {@link ddlContended}), as when managers that start together each make the
- * indexes of the store's key. A statement that `waitedOutBusy`, as an Oracle index's block does (see
- * {@link waitsOutBusyLock}), is taken as turned away only for a deadlock (see {@link ddlDeadlocked}).
+ * away because of another session's (see {@link ddlContended}), as a graph's first-use block may be when managers that
+ * start together each make the store. A statement the schema planner reads the failure of is not run again for it
+ * (#830). A statement that `waitedOutBusy`, as an Oracle index's block does (see {@link waitsOutBusyLock}), is taken as
+ * turned away only for a deadlock (see {@link ddlDeadlocked}).
  */
 function contended(failure: unknown, waitedOutBusy: boolean): boolean {
     if (waitedOutBusy ? ddlDeadlocked(failure) : ddlContended(failure)) {
@@ -47,9 +48,11 @@ export class SchemaExecutor {
 
     /**
      * Runs a statement, again after a pause when the engine turned it away because another write was in progress. With
-     * `once`, a statement the schema planner reads the failure of itself (its `ONCE`), a Postgres deadlock is thrown at
-     * once: the planner waits until no online build is under way on the node table and runs the ensure again
-     * (drivine-cypher-spec#382), where running the build again at once would pass over the index it left invalid.
+     * `once`, a statement the schema planner reads the failure of itself (its `ONCE`), it runs once on every store and
+     * its failure is thrown with its cause, as drivine4j runs it: the library runs a failed action again only as the
+     * planner's `retry` says (drivine-cypher-spec's README). So a Postgres deadlock of an online build reaches the planner,
+     * which waits until no build is under way on the node table and ensures again (drivine-cypher-spec#382), where running
+     * the build again at once would pass over the index it left invalid (#830).
      */
     async run(
         statement: string | NativeOperation,
@@ -57,11 +60,13 @@ export class SchemaExecutor {
         once: boolean = false
     ): Promise<any[]> {
         await this.prepare?.();
+        if (once) {
+            return this.runOnce(statement, bindings);
+        }
         const waitedOutBusy = typeof statement === 'string' && waitsOutBusyLock(statement);
-        const planned = once && this.provider.type === DatabaseType.POSTGRES;
         return whenNotContended(
             async () => this.runOnce(statement, bindings),
-            (failure) => !planned && contended(failure, waitedOutBusy)
+            (failure) => contended(failure, waitedOutBusy)
         );
     }
 
