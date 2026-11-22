@@ -5,13 +5,14 @@ import {
     DatabaseRegistry,
     DatabaseType,
     GraphObjectManagerFactory,
+    PersistenceManager,
     PersistenceManagerFactory,
     QuerySpecification,
     TransactionContextHolder
 } from '@liberation-data/drivine';
 import { SchemaManager } from '@/schema/SchemaManager';
 import { SchemaPlan } from '@/schema/SchemaPlan';
-import { Case, DECLARATIONS, GAPS } from '../../1.Unit/schema/Declarations';
+import { Case, CASES, DECLARATIONS, GAPS } from '../../1.Unit/schema/Declarations';
 
 /**
  * One library's half of a run of drivine-cypher-spec#135's declarations across the three libraries over one store: for
@@ -68,7 +69,9 @@ function register(graph: string): void {
 }
 
 run('drivine-cypher-spec#135: the declarations over one store, a half of a run across the libraries', () => {
-    const cases: Case[] = parse(fs.readFileSync(env.INTEROP_CASES!, 'utf8')).cases;
+    // A skipped describe still collects its tests: without the driver's cases, this copy's, so that a run that isn't one
+    // of the driver's skips them rather than failing to read INTEROP_CASES.
+    const cases: Case[] = env.INTEROP_CASES ? parse(fs.readFileSync(env.INTEROP_CASES, 'utf8')).cases : CASES;
     const reports: Report[] = [];
 
     afterAll(async () => {
@@ -89,12 +92,11 @@ run('drivine-cypher-spec#135: the declarations over one store, a half of a run a
             ...(name in GAPS ? { gap: GAPS[name] } : {})
         };
         reports.push(report);
-        register(graph);
-        const pm = new PersistenceManagerFactory(
-            DatabaseRegistry.getInstance(),
-            TransactionContextHolder.getInstance()
-        ).get(graph, 'NON_TRANSACTIONAL');
+        let pm: PersistenceManager | undefined;
         const marker = async (): Promise<string | null> => {
+            if (!pm) {
+                return null;
+            }
             try {
                 const rows = await pm.query<any>(
                     new QuerySpecification<any>({
@@ -110,6 +112,12 @@ run('drivine-cypher-spec#135: the declarations over one store, a half of a run a
         // Each statement the plan runs, with its purpose, as the module names it: the spy runs each as it would be.
         const execute = jest.spyOn(SchemaPlan.prototype as any, 'execute');
         try {
+            // Inside the try, so that a store that can't be registered is the case's failure, in the report.
+            register(graph);
+            pm = new PersistenceManagerFactory(
+                DatabaseRegistry.getInstance(),
+                TransactionContextHolder.getInstance()
+            ).get(graph, 'NON_TRANSACTIONAL');
             report.markerBefore = await marker();
             const declared = DECLARATIONS[name];
             if (!declared) {
