@@ -10,6 +10,7 @@ import {
     Unique,
     VectorIndex
 } from '@liberation-data/drivine';
+import { propertyMetadata } from '@/annotation/Metadata';
 
 @NodeFragment({ labels: ['Message', 'Mapped'] })
 @RangeIndex({ properties: ['sessionId', 'createdAt'] })
@@ -61,6 +62,19 @@ describe('SchemaCatalog.fromFragments', () => {
                 { kind: 'UNIQUE', label: 'TwoOnOne', properties: ['handle'], nodeIdProperty: 'id' }
             ])
         );
+    });
+
+    it("should keep a field's declarations in the order written, as drivine4j reads a property's (#836)", () => {
+        @NodeFragment({ labels: ['WrittenOrder'] })
+        class WrittenOrder {
+            @NodeId() id: string;
+            @FullTextIndex() @RangeIndex() @Unique() handle: string;
+        }
+        expect(
+            propertyMetadata(WrittenOrder)
+                .get('handle')
+                ?.schema?.map((it) => it.kind)
+        ).toEqual(['FULLTEXT', 'RANGE', 'UNIQUE']);
     });
 
     it('should keep a vector index beside a range index on one field, and its similarity (#836)', () => {
