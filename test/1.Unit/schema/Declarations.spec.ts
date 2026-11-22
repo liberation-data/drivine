@@ -68,10 +68,9 @@ describe("The schema declarations, as the spec's declarations.yaml pins what the
         async (_, pinned) => gives(pinned)
     );
 
-    it.failing.each(CASES.filter((it) => it.case in GAPS).map((it) => [it.case, GAPS[it.case], it] as const))(
-        'gives the planner the catalogs of %s, once %s lands',
-        async (_, __, pinned) => gives(pinned)
-    );
+    it.failing.each(
+        CASES.filter((it) => it.case in GAPS).map((it) => [it.case, GAPS[it.case].join(', '), it] as const)
+    )('gives the planner the catalogs of %s, once %s lands', async (_, __, pinned) => gives(pinned));
 
     it('lists only cases the spec pins as waiting on an issue', () => {
         expect(Object.keys(GAPS).filter((it) => !CASES.some((c) => c.case === it))).toEqual([]);

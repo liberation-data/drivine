@@ -88,14 +88,14 @@ const dimensions = (): number => 384;
  * case is taken off this list: a fragment's @NodeId is given no range index by default and none can be turned off (#800),
  * a full-text index takes no analyzer (#648), and there is no TEXT index (#541).
  */
-export const GAPS: Record<string, string> = {
-    'full-text': '#648',
-    text: '#541',
-    fragment: '#800',
-    "fragment without its id's index": '#800',
-    'fragment class items': '#800, #648',
-    'fragments merged': '#800',
-    'fragment ignoring case': '#800'
+export const GAPS: Record<string, string[]> = {
+    'full-text': ['#648'],
+    text: ['#541'],
+    fragment: ['#800'],
+    "fragment without its id's index": ['#800'],
+    'fragment class items': ['#800', '#648'],
+    'fragments merged': ['#800'],
+    'fragment ignoring case': ['#800']
 };
 
 /** What each case declares, in this library's own API: its startup catalogs, and what is ensured at runtime, by owner, before an enforce. */

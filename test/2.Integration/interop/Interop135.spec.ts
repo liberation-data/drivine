@@ -45,8 +45,8 @@ interface Report {
     markerBefore: string | null;
     markerAfter: string | null;
     failure: string | null;
-    /** The issue this library waits on to declare the case as drivine4j does, where it can't yet (see GAPS). */
-    gap?: string;
+    /** This library's issues the case waits on, where it can't yet be declared as drivine4j declares it (see GAPS). */
+    gap?: string[];
 }
 
 /** Registers the store's graph `graph` under that name, as the driver set the store out. */
