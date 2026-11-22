@@ -6,6 +6,7 @@ import { ClassRef, ClassType } from '@/query/QuerySpecification';
 import {
     fullTextIndex,
     IndexSpec,
+    madeAs,
     rangeIndex,
     uniquenessConstraint,
     UniquenessConstraintSpec,
@@ -26,7 +27,7 @@ export const DEFAULT_SCOPE = 'schema';
 
 export class SchemaCatalog {
     static of(...items: SchemaSpec[]): SchemaCatalog {
-        return new SchemaCatalog(items);
+        return new SchemaCatalog(asPlanned(items));
     }
 
     /**
@@ -39,9 +40,13 @@ export class SchemaCatalog {
             const model = registry.fragment(type as ClassType);
             const label = model.labels[0];
             const graphName = (field: string): string => model.graphProperties.get(field) ?? field;
+            // The class's own first, its range indexes, then its full-text indexes, then its constraints, then each
+            // property's, by its name, as drivine4j's scanner reads them.
             const declarations: SchemaDeclaration[] = [
-                ...[...propertyMetadata(type)].flatMap(([, it]) => it.schema ?? []),
-                ...classSchemaDeclarations(type)
+                ...CLASS_ORDER.flatMap((kind) => classSchemaDeclarations(type).filter((it) => it.kind === kind)),
+                ...[...propertyMetadata(type)]
+                    .sort(([a], [b]) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0))
+                    .flatMap(([, it]) => it.schema ?? [])
             ];
             return declarations.map((it) => {
                 const properties = it.fields.map(graphName);
@@ -86,7 +91,7 @@ export class SchemaCatalog {
                 }
             });
         });
-        return new SchemaCatalog(items);
+        return new SchemaCatalog(asPlanned(items));
     }
 
     private constructor(
@@ -123,4 +128,41 @@ export class SchemaCatalog {
     forDefaultDatabase(): SchemaCatalog {
         return this.forDatabases('default');
     }
+}
+
+/** The order drivine4j's scanner reads a fragment class's own declarations in, by kind. */
+const CLASS_ORDER = ['RANGE', 'FULLTEXT', 'UNIQUE'];
+
+/**
+ * `items` as the planner is given them, as drivine4j's catalog gives them (drivine-cypher-spec#135's declarations.yaml):
+ * each item declared once, the indexes before the constraints, each in the order declared. Declarations of one item
+ * share its kind, label and properties as made, in any order; of a uniqueness constraint declared with and without a
+ * node id to sample by, the one with it is kept. Declarations of one item that differ otherwise are kept, for the
+ * planner to refuse. A store one library indexed is up to date for another only where both give the same catalogs.
+ */
+function asPlanned(items: SchemaSpec[]): SchemaSpec[] {
+    const once: SchemaSpec[] = [];
+    for (const item of items) {
+        const same = once.findIndex((it) => sameItem(it, item));
+        if (same < 0) {
+            once.push(item);
+        } else if (item.kind === 'UNIQUE' && item.nodeIdProperty !== undefined) {
+            const kept = once[same] as UniquenessConstraintSpec;
+            if (kept.nodeIdProperty === undefined) {
+                once[same] = item;
+            }
+        }
+    }
+    return [...once.filter((it) => it.kind !== 'UNIQUE'), ...once.filter((it) => it.kind === 'UNIQUE')];
+}
+
+/** Whether `a` and `b` declare one item alike, but for a uniqueness constraint's node id to sample by. */
+function sameItem(a: SchemaSpec, b: SchemaSpec): boolean {
+    const key = (it: SchemaSpec): string => JSON.stringify([it.kind, it.label, [...madeAs(it).properties].sort()]);
+    if (key(a) !== key(b)) {
+        return false;
+    }
+    const plain = (it: SchemaSpec): string =>
+        JSON.stringify({ ...it, properties: [...it.properties].sort(), nodeIdProperty: undefined });
+    return plain(a) === plain(b);
 }
