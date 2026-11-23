@@ -610,17 +610,11 @@ describe('a lookup by id on a graph engine', () => {
         await gom.edges.unrelate(dial, dated, 'ON');
         await gom.edges.unrelateAll(dated, 'ON');
         // The update's load, the patch, the delete, the cascade's check and its delete, then the edges' ends.
-        expect(bound.map(({ id, _fromId, _toId }) => [id, _fromId, _toId].filter((it) => it !== undefined))).toEqual([
-            [6],
-            [6],
-            [6],
-            [6],
-            [6],
-            [6],
-            [6, day],
-            [6, day],
-            [day]
-        ]);
+        expect(
+            bound.map(({ id, _fromId, _toId }: Record<string, unknown>) =>
+                [id, _fromId, _toId].filter((it) => it !== undefined)
+            )
+        ).toEqual([[6], [6], [6], [6], [6], [6], [6, day], [6, day], [day]]);
 
         bound.length = 0;
         const nowhere = nodeRef(Dial, 'abc');
