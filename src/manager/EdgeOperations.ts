@@ -80,7 +80,7 @@ export class EdgeOperations {
     }
 
     /**
-     * The node `ref` names, its id read as the `@NodeId` field's type on a SQL store; undefined where no node can have the
+     * The node `ref` names, its id read as the `@NodeId` field's type; undefined where no node can have the
      * id, for which no statement is run (see NodeIds).
      */
     private node(ref: NodeRef): MatchedNode | undefined {

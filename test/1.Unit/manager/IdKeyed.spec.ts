@@ -566,7 +566,8 @@ describe('idSql', () => {
 });
 
 describe('a lookup by id on a graph engine', () => {
-    it('binds text as it is given: the engine compares it', async () => {
+    // As a SQL store reads it (#838): the engine compares the value a save wrote, never its text.
+    it("binds text read as the @NodeId's type, and runs nothing for text that is no value of it", async () => {
         const bound: any[] = [];
         const pm = {
             database: 'id-keyed',
@@ -578,7 +579,53 @@ describe('a lookup by id on a graph engine', () => {
         const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
         await gom.load(Dial, '6');
         await gom.load(Dial, 'abc');
-        expect(bound).toEqual(['6', 'abc']);
+        await gom.load(Counted, '7');
+        await gom.load(Dated, '2024-03-04');
+        await gom.load(Coded, '6');
+        await gom.load(Flagged, 'true');
+        expect(bound).toEqual([6, BigInt(7), new Date('2024-03-04T00:00:00.000Z'), '6', true]);
+    });
+
+    it('reads the text so for an update, a patch, a delete, a cascade check and edges, running nothing for "abc"', async () => {
+        const bound: Record<string, any>[] = [];
+        const record = async (spec: QuerySpecification<any>, result: any): Promise<any> => {
+            bound.push(spec.parameters as any);
+            return Promise.resolve(result);
+        };
+        const pm = {
+            database: 'id-keyed',
+            query: async (spec: QuerySpecification<any>) => record(spec, []),
+            execute: async () => Promise.resolve(),
+            getOne: async (spec: QuerySpecification<any>) => record(spec, 0)
+        } as unknown as PersistenceManager;
+        const gom = new StatelessGraphObjectManager(pm, new CypherBackend(NEO4J_GRAMMAR), new ModelRegistry());
+        const day = new Date('2024-03-04T00:00:00.000Z');
+        const [dial, dated] = [nodeRef(Dial, '6'), nodeRef(Dated, '2024-03-04')];
+        await gom.update(Dial, '6', (it) => it);
+        await gom.patch(Dial, '6', { set: { name: 'a' } });
+        await gom.delete(Gauge, '6');
+        await gom.delete(GaugeTree, '6', { cascade: CascadeType.DELETE_ALL });
+        await gom.edges.loadRelated(dial, 'READS', undefined, Coded);
+        await gom.edges.relate(dial, dated, 'ON');
+        await gom.edges.unrelate(dial, dated, 'ON');
+        await gom.edges.unrelateAll(dated, 'ON');
+        // The update's load, the patch, the delete, the cascade's check and its delete, then the edges' ends.
+        expect(
+            bound.map(({ id, _fromId, _toId }: Record<string, unknown>) =>
+                [id, _fromId, _toId].filter((it) => it !== undefined)
+            )
+        ).toEqual([[6], [6], [6], [6], [6], [6], [6, day], [6, day], [day]]);
+
+        bound.length = 0;
+        const nowhere = nodeRef(Dial, 'abc');
+        expect(await gom.update(Dial, 'abc', (it) => it)).toBeUndefined();
+        expect(await gom.patch(Dial, 'abc', { set: { name: 'a' } })).toMatchObject({ found: false });
+        expect(await gom.delete(GaugeTree, 'abc', { cascade: CascadeType.DELETE_ALL })).toEqual(0);
+        expect(await gom.edges.loadRelated(nowhere, 'READS', undefined, Coded)).toEqual([]);
+        expect(await gom.edges.relate(nowhere, dated, 'ON')).toBe(false);
+        expect(await gom.edges.unrelate(dial, nodeRef(Dated, 'not a day'), 'ON')).toEqual(0);
+        expect(await gom.edges.unrelateAll(nowhere, 'ON')).toEqual(0);
+        expect(bound).toEqual([]);
     });
 });
 

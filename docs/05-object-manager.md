@@ -308,13 +308,14 @@ const raw = await gom.loadAll(Issue, 'n.state = $state', { state: 'open' }); // 
 ```
 
 On Oracle, Postgres and SQLite a node is found by its id as the store's range index and uniqueness constraint over the
-id are made, so a lookup by id reads that index, and a `Date` id is one node however often it is saved. An id given as
-text to `load`, `update`, `patch`, `delete` or `edges` is read as the `@NodeId` field's type, as TypeScript records it:
+id are made, so a lookup by id reads that index, and a `Date` id is one node however often it is saved. On every store,
+the graph engines too (#838), an id given as text to `load`, `update`, `patch`, `delete` or `edges` is read as the
+`@NodeId` field's type, as TypeScript records it, and bound as a save writes the field:
 `'6'` finds the node whose number id is 6 (a `bigint` id's 6n), an ISO 8601 text the node whose `Date` id is that moment
 (in UTC where the text has no offset), and `'true'` the node whose boolean id is true. A `string` id is the text given,
 so `'6'` doesn't find a node of the same labels whose id is the number 6. Text that is no value of the type, such as
 `'abc'` for a number id, finds no node: nothing is run, and a DEBUG line says why. A null id finds none either, and runs
-nothing. Neo4j, Memgraph and FalkorDB compare the id as it is given.
+nothing.
 
 On Oracle, Postgres and SQLite an id may be held as a temporal value another writer stored, such as Cypher's
 `date('2026-01-05')` or a drivine4j `Instant` id. A class that declares such an id a `string`, `number`, `bigint` or
