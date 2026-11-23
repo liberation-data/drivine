@@ -17,6 +17,7 @@ import {
 import { StoreLayoutError } from '@/backend/sql/StoreLayout';
 import { Connection } from '@/connection/Connection';
 import { Declaration, MigratableProvider, MigrationReport, StoreLayoutMigration } from '@liberation-data/drivine';
+import { rawProperty, sqlStores } from '../support/SqlStores';
 
 // A migration on Oracle makes and drops its objects one DDL at a time, and the graph 5.0.0 writes is made the same way.
 jest.setTimeout(300_000);
@@ -35,10 +36,9 @@ jest.setTimeout(300_000);
  * - A run stopped by a failed batch, or by its session killed while it writes, is resumed to the end, each row
  *   rewritten once.
  */
-const STORES = [
-    ...(process.env.POSTGRES_DATABASE_TYPE === 'POSTGRES' ? ['POSTGRES' as const] : []),
-    ...(process.env.ORACLE_DATABASE_TYPE === 'ORACLE' ? ['ORACLE' as const] : [])
-];
+const STORES = sqlStores()
+    .map((it) => it.name)
+    .filter((it): it is 'POSTGRES' | 'ORACLE' => it !== 'SQLITE');
 
 const FIXTURE = path.join(__dirname, '..', '..', '..', 'scripts', 'migration-fixture-5.0.0');
 
@@ -79,6 +79,8 @@ function installFixture(): void {
     (store) => {
         const oracle = store === 'ORACLE';
         const env = ConnectionPropertiesFromEnv(store);
+        // The port each driver takes when the environment names none, given to the fixture and the driver's own connections.
+        const port = env.port ?? (oracle ? 1521 : 5432);
         const registered: string[] = [];
 
         beforeAll(() => installFixture());
@@ -126,7 +128,7 @@ function installFixture(): void {
                     'fixture.js',
                     store.toLowerCase(),
                     env.host,
-                    String(env.port),
+                    String(port),
                     env.userName!,
                     env.password!,
                     env.databaseName!,
@@ -157,7 +159,7 @@ function installFixture(): void {
                 const own = await oracledb.getConnection({
                     user: env.userName,
                     password: env.password,
-                    connectString: `${env.host}:${env.port}/${env.databaseName}`
+                    connectString: `${env.host}:${port}/${env.databaseName}`
                 });
                 try {
                     const result = await own.execute<any[]>(sql, [], {
@@ -197,7 +199,7 @@ function installFixture(): void {
                   `WHERE table_name LIKE UPPER('${graph}\\_%') ESCAPE '\\' AND index_name NOT LIKE 'SYS\\_%' ESCAPE '\\'`
                 : `SELECT indexname AS "n", indexdef AS "d" FROM pg_indexes WHERE schemaname = current_schema() AND tablename LIKE '${graph}\\_%'`;
         const propertyIs = (property: string, text: string): string =>
-            oracle ? `JSON_VALUE(n.props, '$.${property}') = '${text}'` : `n.props->>'${property}' = '${text}'`;
+            `${rawProperty({ name: store, type: DatabaseType[store] }, property)} = '${text}'`;
 
         /** Every row of the table `table`, as texts. On Oracle a JSON column is read as its text, as the driver reads none. */
         const rowsOf = async (graph: string, table: string): Promise<string[]> => {
@@ -242,8 +244,10 @@ function installFixture(): void {
 
         const stopAtRobot = async (graph: string, sleep: boolean): Promise<void> => {
             if (oracle) {
+                // The sleeper names its graph, so killSleeper kills it alone, and not another suite's session of the test
+                // user waiting out a busy DDL in DBMS_SESSION.SLEEP too.
                 const stop = sleep
-                    ? 'DBMS_SESSION.SLEEP(600);'
+                    ? `DBMS_APPLICATION_INFO.SET_CLIENT_INFO('${graph}'); DBMS_SESSION.SLEEP(600);`
                     : "RAISE_APPLICATION_ERROR(-20001, 'stopped by the test');";
                 await execute(
                     graph,
@@ -289,12 +293,12 @@ function installFixture(): void {
             const admin = await oracledb.getConnection({
                 user: 'system',
                 password: env.password,
-                connectString: `${env.host}:${env.port}/${env.databaseName}`
+                connectString: `${env.host}:${port}/${env.databaseName}`
             });
             try {
                 const sessions = await admin.execute<[string]>(
-                    `SELECT sid || ',' || serial# FROM v$session WHERE username = UPPER(:u) AND event = 'PL/SQL lock timer'`,
-                    { u: env.userName }
+                    `SELECT sid || ',' || serial# FROM v$session WHERE username = UPPER(:u) AND event = 'PL/SQL lock timer' AND client_info = :g`,
+                    { u: env.userName, g: graph }
                 );
                 for (const [session] of sessions.rows ?? []) {
                     try {
@@ -531,7 +535,15 @@ function installFixture(): void {
             writeLayout1(graph);
             const untouched = await snapshot(graph);
             const wrong: Declaration[] = [...declarations, { label: 'Person', property: 'name', kind: 'date' }];
-            expect((await migrate(graph, { declarations: wrong })).status).toBe('invalid');
+            const refused = await migrate(graph, { declarations: wrong });
+            expect(refused.status).toBe('invalid');
+            // Each Person's name, named: none is a date.
+            expect(
+                refused.properties
+                    .find((it) => it.label === 'Person' && it.property === 'name')
+                    ?.invalid.map((it) => it.value)
+                    .sort()
+            ).toEqual(['"Ada"', '"Bob"', '"Charles"', '"Cy"', '"Mary"']);
             expect(await snapshot(graph)).toEqual(untouched);
             const kept = await migrate(graph, { declarations: wrong, dryRun: true, keepInvalid: true });
             expect(kept.status).toBe('dryRun');
