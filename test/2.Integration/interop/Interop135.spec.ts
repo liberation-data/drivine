@@ -26,6 +26,10 @@ import { Case, CASES, DECLARATIONS, GAPS } from '../../1.Unit/schema/Declaration
  * directory of SQLite's `<graph>.db` files).
  */
 const env = process.env;
+
+// A case's enforce on Oracle builds its indexes and constraints one DDL at a time, past jest's 5 s for the slowest
+// ("fragment"), so a run on its own needs no driver to lengthen it.
+jest.setTimeout(120_000);
 const run = env.INTEROP_STORE ? describe : describe.skip;
 
 const TYPES: Record<string, DatabaseType> = {
