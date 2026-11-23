@@ -154,7 +154,9 @@ Without Nest, enforce the schema yourself before the application serves:
 await new SchemaManager(graphObjectManagers, { catalogs: [/* … */] }).enforce();
 ```
 
-Catalogs merge, identical declarations count once, and conflicting ones for the same kind, label and properties fail
+A catalog's `items` give each declaration once, its indexes before its constraints, as drivine4j's catalogs give them,
+so that each library plans the same schema from the same declarations. Catalogs merge, identical declarations count
+once, and conflicting ones for the same kind, label and properties fail
 startup. A catalog applies to every database that supports schema, unless you narrow it:
 `.forDefaultDatabase()`, `.forDatabase('users')` or `.forDatabases('a', 'b')`. A named target is strict: an unknown
 database, or one without schema support, fails startup.

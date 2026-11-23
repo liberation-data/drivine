@@ -6,8 +6,10 @@ import {
     ModelRegistry,
     NodeId,
     RangeIndex,
+    rangeIndex,
     SchemaCatalog,
     Unique,
+    uniquenessConstraint,
     VectorIndex
 } from '@liberation-data/drivine';
 import { propertyMetadata } from '@/annotation/Metadata';
@@ -41,6 +43,69 @@ class RenamedIdNode {
 class NoIdNode {
     @Unique() email: string;
 }
+
+@NodeFragment({ labels: ['Ordered'] })
+@RangeIndex({ properties: ['b', 'c'] })
+@Unique({ properties: ['a', 'b'] })
+@FullTextIndex({ properties: ['c'] })
+@RangeIndex({ properties: ['a', 'c'] })
+class OrderedNode {
+    @NodeId() id: string;
+    @RangeIndex() @GraphProperty('zeta') alpha: string;
+    @Unique() beta: string;
+    @RangeIndex() gamma: string;
+    a: string;
+    b: string;
+    c: string;
+}
+
+describe('SchemaCatalog.of', () => {
+    it('should give the indexes before the constraints, each in the order declared', () => {
+        expect(
+            SchemaCatalog.of(
+                uniquenessConstraint('P', 'email'),
+                rangeIndex('P', 'name'),
+                uniquenessConstraint('P', 'tenant'),
+                rangeIndex('P', 'age')
+            ).items
+        ).toEqual([
+            rangeIndex('P', 'name'),
+            rangeIndex('P', 'age'),
+            uniquenessConstraint('P', 'email'),
+            uniquenessConstraint('P', 'tenant')
+        ]);
+    });
+
+    it('should keep a constraint once, the declaration with its node id, where it was first declared', () => {
+        const plain = uniquenessConstraint('P', 'email');
+        const withId = uniquenessConstraint('P', 'email', { nodeIdProperty: 'id' });
+        expect(SchemaCatalog.of(plain, uniquenessConstraint('P', 'tenant'), withId).items).toEqual([
+            withId,
+            uniquenessConstraint('P', 'tenant')
+        ]);
+        expect(SchemaCatalog.of(withId, plain).items).toEqual([withId]);
+    });
+
+    it('should keep a spec written by hand once beside the one a builder gives', () => {
+        const byHand = { label: 'P', properties: ['name'], ignoreCase: false, kind: 'RANGE' as const };
+        expect(SchemaCatalog.of(rangeIndex('P', 'name'), byHand).items).toEqual([rangeIndex('P', 'name')]);
+    });
+
+    it('should keep declarations of one item that differ otherwise, for the planner to refuse', () => {
+        const named = { ...rangeIndex('P', 'name'), name: 'p_name' };
+        expect(SchemaCatalog.of(rangeIndex('P', 'name'), named).items).toEqual([rangeIndex('P', 'name'), named]);
+        // Over the same properties in another order: drivine4j's declarations differ there too.
+        expect(SchemaCatalog.of(rangeIndex('P', ['a', 'b']), rangeIndex('P', ['b', 'a'])).items).toEqual([
+            rangeIndex('P', ['a', 'b']),
+            rangeIndex('P', ['b', 'a'])
+        ]);
+    });
+
+    it('should tell an item that ignores case from one over the property itself, by the properties it is made over', () => {
+        const ci = rangeIndex('P', 'email', { ignoreCase: true });
+        expect(SchemaCatalog.of(ci, rangeIndex('P', 'email'), ci).items).toEqual([ci, rangeIndex('P', 'email')]);
+    });
+});
 
 describe('SchemaCatalog.fromFragments', () => {
     it('should keep each of the schema decorators on one field (#836)', () => {
@@ -133,6 +198,19 @@ describe('SchemaCatalog.fromFragments', () => {
         );
         // The superclass keeps its own, each of them.
         expect(SchemaCatalog.fromFragments(undefined, Account).items).toHaveLength(4);
+    });
+
+    it("should read the class's own declarations by kind, each as written, then each field's by its name", () => {
+        expect(SchemaCatalog.fromFragments(undefined, OrderedNode).items).toEqual([
+            rangeIndex('Ordered', ['b', 'c']),
+            rangeIndex('Ordered', ['a', 'c']),
+            { kind: 'FULLTEXT', label: 'Ordered', properties: ['c'] },
+            // By the field's name, alpha, as drivine4j sorts its Kotlin properties, not by the graph's, zeta.
+            rangeIndex('Ordered', 'zeta'),
+            rangeIndex('Ordered', 'gamma'),
+            uniquenessConstraint('Ordered', ['a', 'b'], { nodeIdProperty: 'id' }),
+            uniquenessConstraint('Ordered', 'beta', { nodeIdProperty: 'id' })
+        ]);
     });
 
     it('should read field and class declarations, over the first label and graph names', () => {
