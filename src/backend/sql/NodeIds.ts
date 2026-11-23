@@ -97,7 +97,7 @@ function isCalendarDay(year: number, month: number, day: number): boolean {
     return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-/** Whether `backend` keeps its graph in SQL tables, where an id is found as {@link typedId} reads it. */
+/** Whether `backend` keeps its graph in SQL tables, where a node holds its id as JSON, a temporal one as its tag. */
 export function isSqlBackend(backend: GraphBackend): boolean {
     const store: string = backend.moduleStore.store;
     return store === 'postgres' || store === 'oracle' || store === 'sqlite';

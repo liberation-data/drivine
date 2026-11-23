@@ -147,8 +147,10 @@ answers the lookup. `'6'` finds the node whose number id is 6, where 5.0 compare
 a node of the same labels whose id is the text `'6'`; on a `string` id `'6'` finds only the text. Text that is no
 value of the type (`'abc'` for a number id) finds no node and runs nothing, and so does a null id: 5.0's `patch` by a
 null id could change the node whose id is the text `'null'`
-([#773](https://github.com/liberation-data/drivine/issues/773)). See
-[Object Manager](05-object-manager.md#loading-data).
+([#773](https://github.com/liberation-data/drivine/issues/773)). Neo4j, Memgraph and FalkorDB read it so too
+([#838](https://github.com/liberation-data/drivine/issues/838)), binding what a save writes for the field: 5.0 bound the
+text as given, so `'6'` missed the node whose number id is 6 and found one of the same labels whose id is the text
+`'6'`. See [Object Manager](05-object-manager.md#loading-data).
 
 ### A regular expression on SQLite is Java's
 
