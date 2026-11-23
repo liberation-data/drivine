@@ -95,7 +95,7 @@ How a migration ends (`MigrationReport.status`):
 | `refused` | A graph of another layout, one changed since its migration began, a resume with other declarations, or another migration running. | Read the message. |
 | `failed` | A statement failed, and the message is the store's. | Fix the cause, and run it again to resume. |
 
-**Values not of their kind.** Pass `keepInvalid: true` to keep each such value as it is, named in the report, rather than refuse the graph. A dry run with `keepInvalid: true` lists them all first. Resume a migration with the same `keepInvalid` it began with.
+**Values not of their kind.** Pass `keepInvalid: true` to keep each such value as it is, named in the report, rather than refuse the graph. A dry run that finds such a value ends `invalid`, every one listed, before it checks the collisions; with `keepInvalid: true` it goes on to check them too. Resume a migration with the same `keepInvalid` it began with.
 
 ### Collisions
 
