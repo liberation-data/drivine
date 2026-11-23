@@ -68,9 +68,10 @@ const day = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`);
 
 /**
  * A node found by its id's text on a graph engine, as on a SQL store (#838, a port of drivine4j's
- * NodeIdTextGraphCrossEngineTest): a load, a relate, loadRelated, an unrelate, a patch and a delete read the given text as
- * the @NodeId field's type, and bind what a save writes for it. So `'5'` finds the number id 5, and a date's ISO text its
- * Date id; text that is no value of the type finds nothing and throws nothing, and a string id is the text given.
+ * NodeIdTextGraphCrossEngineTest): a load, a relate, loadRelated, an unrelate, a patch, an update and a delete read the
+ * given text as the @NodeId field's type, and bind what a save writes for it. So `'5'` finds the number id 5, and a
+ * date's ISO text its Date id; text that is no value of the type finds nothing and throws nothing, and a string id is
+ * the text given.
  */
 describe.each(graphEngines())("a lookup by an id's text on $type", (engine) => {
     let pm: PersistenceManager;
@@ -109,8 +110,8 @@ describe.each(graphEngines())("a lookup by an id's text on $type", (engine) => {
     });
 
     /**
-     * Saves `node`, and finds it by `text` through a relate, a load, loadRelated, an unrelate, a patch and a delete,
-     * the relate given its id's value too.
+     * Saves `node`, and finds it by `text` through a relate, a load, loadRelated, an unrelate, a patch, an update and
+     * a delete, the relate given its id's value too.
      */
     const lookups = async (type: ClassType, node: any, text: string): Promise<void> => {
         await gom.save(node);
@@ -126,6 +127,11 @@ describe.each(graphEngines())("a lookup by an id's text on $type", (engine) => {
             changed: true
         });
         expect(((await gom.load(type, node.id)) as any).name).toEqual('renamed');
+        const updated: any = await gom.update(type, text, (it: any) => {
+            it.name = 'updated';
+        });
+        expect(updated?.name).toEqual('updated');
+        expect(((await gom.load(type, node.id)) as any).name).toEqual('updated');
         expect(await gom.delete(type, text)).toEqual(1);
         expect(await gom.load(type, text)).toBeUndefined();
     };
