@@ -79,7 +79,7 @@ const report = await migration.migrate(declarations);
 console.log(report.status === 'migrated' ? report.tables : `${report.status}: ${report.message}`);
 ```
 
-The migration reads and rewrites the nodes, then the relationships, 1000 rows at a time (`batchSize`). Each batch's rows are written with the migration's checkpoint in one transaction, so each row is rewritten exactly once. Then it checks the uniqueness constraints, drops layout 1's indexes, stamps the graph layout 2 and drops its checkpoint.
+The migration drops layout 1's indexes first, then reads and rewrites the nodes, then the relationships, 1000 rows at a time (`batchSize`). Each batch's rows are written with the migration's checkpoint in one transaction, so each row is rewritten exactly once. Then it checks the uniqueness constraints, stamps the graph layout 2 and drops its checkpoint.
 
 How a migration ends (`MigrationReport.status`):
 
@@ -89,7 +89,7 @@ How a migration ends (`MigrationReport.status`):
 | `current` | The graph is in layout 2 already. | Nothing. |
 | `empty` | The graph holds no nodes of yours. | Nothing. A first connection stamps it. |
 | `dryRun` | A dry run's report. Nothing was written. | Read it, then migrate. |
-| `invalid` | A declared property holds a value that isn't of its kind. Nothing was written. | Declare it otherwise, correct the value, or keep such values (below). |
+| `invalid` | A declared property holds a value that isn't of its kind. Nothing was written, unless the value was written to the graph during the migration: then the batches before its own are written, and the graph keeps its checkpoint. | Declare it otherwise, correct the value, or keep such values (below). |
 | `collisions` | Keys a uniqueness constraint holds are one value in layout 2. Every row is written, and the graph keeps its checkpoint. | Correct the rows, and run it again. |
 | `inProgress` | A dry run of a graph part way through its migration. | Run the migration again to resume it. |
 | `refused` | A graph of another layout, one changed since its migration began, a resume with other declarations, or another migration running. | Read the message. |

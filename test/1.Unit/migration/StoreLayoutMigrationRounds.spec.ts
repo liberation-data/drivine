@@ -64,7 +64,8 @@ describe('StoreLayoutMigration rounds', () => {
 
     it('should take the lock once on a connection of its own, commit each transaction, and give both connections back', async () => {
         const { migration, calls, asked }: ReturnType<typeof setUp> = setUp();
-        await expect(migration.migrate([], {})).resolves.toMatchObject({ status: 'migrated' });
+        await expect(migration.migrate([])).resolves.toMatchObject({ status: 'migrated' });
+        expect(asked[0]).toEqual({ start: { declarations: [], batchSize: 1000, dryRun: false, keepInvalid: false } });
         expect(calls).toEqual([
             'lock: begin',
             'lock: LOCK',

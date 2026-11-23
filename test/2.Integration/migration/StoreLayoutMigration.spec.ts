@@ -19,7 +19,7 @@ jest.setTimeout(60_000);
 /**
  * A SQLite graph Drivine for TypeScript 5.0.0 wrote, in store layout 1 (`layout1-5.0.0.sqlite`, written by
  * `scripts/migration-fixture-5.0.0/fixture.js`), migrated to layout 2 by the shared module's migrator, run by StoreLayoutMigration on the store
- * itself (liberation-data/drivine#765, drivine-cypher-spec#256): refused before, a dry run that writes nothing, two
+ * itself (liberation-data/drivine#765, drivine-cypher-spec#256): a dry run that writes nothing, two
  * spellings of one moment under a unique index stopping the run as `collisions`, resumed once corrected with plain SQL,
  * and read by this version as layout 2 after.
  */
