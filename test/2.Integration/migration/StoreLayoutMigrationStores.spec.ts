@@ -226,13 +226,15 @@ function installFixture(): void {
             }
             return [...out, ...(await texts(graph, indexes(graph))).sort()];
         };
-        const robotProps = async (graph: string): Promise<string> =>
+        /** The properties of the node named `name`, as the store holds them. */
+        const propsOf = async (graph: string, name: string): Promise<string> =>
             (
                 await texts(
                     graph,
-                    `SELECT ${json('n.props')} AS "p" FROM ${graph}_node n WHERE ${propertyIs('name', 'R2')}`
+                    `SELECT ${json('n.props')} AS "p" FROM ${graph}_node n WHERE ${propertyIs('name', name)}`
                 )
             )[0];
+        const robotProps = async (graph: string): Promise<string> => propsOf(graph, 'R2');
         /** The id of the Event 5.0.0 wrote second, which collides with the first in layout 2: read before it is rewritten. */
         const laterEvent = async (graph: string): Promise<string> =>
             (
@@ -486,12 +488,15 @@ function installFixture(): void {
             const graph = graphNamed('failed');
             writeLayout1(graph);
             const robot = await robotProps(graph);
+            const ada = await propsOf(graph, 'Ada');
             const later = await laterEvent(graph);
             await stopAtRobot(graph, false);
             const failed = await migrate(graph, { batchSize: 2 });
             expect(failed.status).toBe('failed');
             expect(failed.message).toContain('stopped by the test');
             expect(await robotProps(graph)).toEqual(robot);
+            // Ada's batch, committed before the Robot's, is kept: her date rewritten.
+            expect(await propsOf(graph, 'Ada')).not.toEqual(ada);
             await expect(provider(graph).connect()).rejects.toBeInstanceOf(StoreLayoutError);
             await unstop(graph);
 
