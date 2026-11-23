@@ -66,11 +66,11 @@ const report = await migration.migrate(declarations, { dryRun: true });
 A dry run writes nothing. Its `MigrationReport` gives:
 
 - **`tables`:** the rows of nodes and of relationships, and how many would change.
-- **`properties`:** for each declared label and property, the count of each change, and each value that is no value of its declared kind, with why.
+- **`properties`:** for each label and property a rewrite changes, the count of each change, and each value that is no value of its declared kind, with why.
 - **`candidates`:** properties you didn't declare whose values all read as one kind. Declare them if they are that kind. They are never applied otherwise.
 - **`collisions`:** the uniqueness constraints' keys that may collide.
 
-**What a dry run's collisions cover.** A dry run checks each uniqueness constraint over the values as layout 1 holds them. Some keys are distinct in layout 1 but one value in layout 2, and the dry run doesn't report those. For example, two spellings of one moment, `2024-03-15T10:30:00.5Z` and `2024-03-15T10:30:00.500Z`, declared `datetime` under a unique key. Such a collision is found after the writes: the migration stops at `collisions`, and once corrected it resumes (see [Collisions](#collisions)). Checking rewritten values in the dry run is tracked in drivine-cypher-spec#429.
+**What a dry run's collisions cover.** A dry run checks each uniqueness constraint over the values as layout 1 holds them. Some keys are distinct in layout 1 but one value in layout 2, and the dry run doesn't report those. For example, two spellings of one moment, `2024-03-15T10:30:00.5Z` and `2024-03-15T10:30:00.500Z`, declared `datetime` under a unique key. Such a collision is found after the writes: the migration stops at `collisions`, and once corrected it resumes (see [Collisions](#collisions)). Checking rewritten values in the dry run is tracked in [drivine-cypher-spec#429](https://github.com/liberation-data/drivine-cypher-spec/issues/429).
 
 ### 3. Migrate
 
@@ -116,5 +116,5 @@ While a migration is part way through, the graph is refused to the application's
 ### After the migration
 
 - **Indexes and constraints:** the migration makes none. It drops layout 1's, which index values as layout 1 held them. Your application's schema plan makes the ones it declares at its next start, as it does on a new store (see [Schema Management](08-schema-management.md)). Until then a query that would read one scans, and no uniqueness constraint is enforced, so start the application, or ensure its schema, before anything else writes.
-- **The count store** (`<graph>_count2`) is left empty, as a new store has it. Nothing reads it in this release (drivine-cypher-spec#349).
+- **The count store** (`<graph>_count2`) is left empty, as a new store has it. Nothing reads it in this release ([drivine-cypher-spec#349](https://github.com/liberation-data/drivine-cypher-spec/issues/349)).
 - **The rest is unchanged:** the graph's nodes and relationships keep their ids, and its stamp, its `DrivineStore` node, is kept and given layout 2.
