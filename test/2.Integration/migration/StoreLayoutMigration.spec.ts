@@ -19,7 +19,7 @@ jest.setTimeout(60_000);
 /**
  * A SQLite graph Drivine for TypeScript 5.0.0 wrote, in store layout 1 (`layout1-5.0.0.sqlite`, written by
  * `scripts/migration-fixture-5.0.0/fixture.js`), migrated to layout 2 by the shared module's migrator, run by StoreLayoutMigration on the store
- * itself (liberation-data/drivine#765, drivine-cypher-spec#256): refused before, a dry run that writes nothing, two
+ * itself (liberation-data/drivine#765, drivine-cypher-spec#256): a dry run that writes nothing, two
  * spellings of one moment under a unique index stopping the run as `collisions`, resumed once corrected with plain SQL,
  * and read by this version as layout 2 after.
  */
@@ -59,16 +59,15 @@ describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
 
         const migrating = provider();
         const migration = new StoreLayoutMigration(migrating);
-        await expect(migration.migrate(declarations, {} as any)).rejects.toThrow(/not yet proven/);
 
         const untouched = snapshot();
-        const dryRun = await migration.migrate(declarations, { dryRun: true, unproven: true });
+        const dryRun = await migration.migrate(declarations, { dryRun: true });
         expect(dryRun.status).toBe('dryRun');
         expect(snapshot()).toEqual(untouched);
         expect(dryRun.notes).toHaveLength(2);
         expect(dryRun.candidates).toContainEqual({ label: 'Person', property: 'nick', kind: 'date', values: 1 });
 
-        const stopped = await migration.migrate(declarations, { unproven: true });
+        const stopped = await migration.migrate(declarations, {});
         expect(stopped.status).toBe('collisions');
         expect(stopped.collisions.map((it) => [it.label, it.properties])).toEqual([['Event', ['at']]]);
 
@@ -76,7 +75,7 @@ describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
         const db = openSqlite(file);
         db.exec('DELETE FROM drivine_node WHERE nid = 9');
         db.close();
-        const migrated = await migration.migrate(declarations, { unproven: true });
+        const migrated = await migration.migrate(declarations, {});
         expect(migrated.status).toBe('migrated');
         await migrating.end();
 
@@ -147,7 +146,7 @@ describe('bytes and a packed Date a graph 5.0.0 wrote, declared to a store layou
                 { label: 'Person', property: 'packed', kind: 'datetime' }
             ];
             for (const declaration of declared) {
-                const report = await new StoreLayoutMigration(provider).migrate([declaration], { unproven: true });
+                const report = await new StoreLayoutMigration(provider).migrate([declaration], {});
                 expect(report.status).toBe('invalid');
                 expect(report.properties.find((it) => it.property === declaration.property)?.invalid).toHaveLength(1);
             }
@@ -172,7 +171,7 @@ describe('a store layout migration refused by its declarations', () => {
                     { label: 'Person', property: 'born', kind: 'date' },
                     { label: 'Person', property: 'born', kind: 'datetime' }
                 ],
-                { unproven: true }
+                {}
             )
         ).rejects.toThrow(/declared date and datetime/);
         expect(provider.connectUnjudged).not.toHaveBeenCalled();

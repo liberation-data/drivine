@@ -104,9 +104,8 @@ not finished.
 
 **Migrating a graph from layout 1 to layout 2.** `StoreLayoutMigration` moves a graph on Oracle, Postgres or SQLite
 from layout 1 to layout 2 in place, by the shared compiler's migrator, which drivine4j and drivine-python run alike
-([#765](https://github.com/liberation-data/drivine/issues/765)). It is not yet proven on every store: `migrate` is
-refused unless passed `{ unproven: true }`, and its `Declaration`, `Kind`, `MigrationStatus` and `MigrationReport` may
-change in any release until it is. Run it while nothing else uses the graph, with a backup taken first. It is given the
+([#765](https://github.com/liberation-data/drivine/issues/765)): [Migrating a graph from store layout 1 to layout
+2](23-migrating-a-store-layout.md) gives the steps. Run it while nothing else uses the graph, with a backup taken first. It is given the
 provider, and runs on connections of its own from the provider's pool, never one of a `TransactionContextHolder`'s
 transaction: two on Postgres and Oracle, one holding the migration's lock, so the pool needs room for both. Layout 1
 can't tell which texts are dates or moments, which whole numbers are floats and which texts are bytes, so it is told by
@@ -122,8 +121,8 @@ either is declared by hand.
 ```typescript
 const migration = new StoreLayoutMigration(provider); // a PostgresConnectionProvider, say
 const declarations = [...declarationsOf(Person), { label: 'Person', property: 'born', kind: 'date' } as Declaration];
-const dryRun = await migration.migrate(declarations, { dryRun: true, unproven: true });
-const report = await migration.migrate(declarations, { unproven: true });
+const dryRun = await migration.migrate(declarations, { dryRun: true });
+const report = await migration.migrate(declarations);
 ```
 
 A dry run (`dryRun: true`) writes nothing, and reports what would change, the values that are no value of their

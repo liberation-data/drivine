@@ -64,7 +64,8 @@ describe('StoreLayoutMigration rounds', () => {
 
     it('should take the lock once on a connection of its own, commit each transaction, and give both connections back', async () => {
         const { migration, calls, asked }: ReturnType<typeof setUp> = setUp();
-        await expect(migration.migrate([], { unproven: true })).resolves.toMatchObject({ status: 'migrated' });
+        await expect(migration.migrate([])).resolves.toMatchObject({ status: 'migrated' });
+        expect(asked[0]).toEqual({ start: { declarations: [], batchSize: 1000, dryRun: false, keepInvalid: false } });
         expect(calls).toEqual([
             'lock: begin',
             'lock: LOCK',
@@ -84,7 +85,7 @@ describe('StoreLayoutMigration rounds', () => {
 
     it("should roll back a transaction whose statement fails, stop the round there, and give the module the store's message", async () => {
         const { migration, calls, asked }: ReturnType<typeof setUp> = setUp('W1');
-        await migration.migrate([], { unproven: true });
+        await migration.migrate([], {});
         expect(calls.slice(2, 5)).toEqual(['work: begin', 'work: W1', 'work: rollback']);
         expect(calls).not.toContain('work: X');
         expect(asked[1].outcomes).toEqual([{ type: 'ran' }, { type: 'failed', message: 'W1 failed' }]);
@@ -93,7 +94,7 @@ describe('StoreLayoutMigration rounds', () => {
 
     it('should give the lock back where its statement fails', async () => {
         const { migration, calls, asked }: ReturnType<typeof setUp> = setUp('LOCK');
-        await migration.migrate([], { unproven: true });
+        await migration.migrate([], {});
         expect(asked[1].outcomes).toEqual([{ type: 'failed', message: 'LOCK failed' }]);
         expect(calls).not.toContain('work: begin');
         expect(calls.slice(-3)).toEqual(['lock: rollback', 'lock: release', 'work: release']);

@@ -31,11 +31,6 @@ export interface MigrationOptions {
     dryRun?: boolean;
     /** Keeps a value that is no value of its declared kind as it is, named in the report, where it would refuse the graph. */
     keepInvalid?: boolean;
-    /**
-     * Must be true: the migration's statements are the shared module's, pinned by the spec, but their runs on Postgres and
-     * Oracle are still to be made (liberation-data/drivine#765). Back the graph up first.
-     */
-    unproven: true;
 }
 
 /**
@@ -139,12 +134,7 @@ export class StoreLayoutMigration {
     }
 
     /** Migrates the graph by `declarations`, or with `dryRun` reports what a migration would do: see the class. */
-    async migrate(declarations: Declaration[], options: MigrationOptions): Promise<MigrationReport> {
-        if (options?.unproven !== true) {
-            throw new DrivineError(
-                'The store layout migration is not yet proven on every store (liberation-data/drivine#765): back the graph up first, and pass { unproven: true } to run it.'
-            );
-        }
+    async migrate(declarations: Declaration[], options: MigrationOptions = {}): Promise<MigrationReport> {
         // Declarations the module refuses, as one property declared two kinds, are refused before the store is reached.
         let answer = this.ask({
             start: {
