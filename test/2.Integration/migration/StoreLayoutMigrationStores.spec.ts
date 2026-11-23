@@ -115,10 +115,7 @@ function installFixture(): void {
         };
 
         const migrate = async (graph: string, options: Record<string, any> = {}): Promise<MigrationReport> =>
-            new StoreLayoutMigration(provider(graph)).migrate(options.declarations ?? declarations, {
-                unproven: true,
-                ...options
-            });
+            new StoreLayoutMigration(provider(graph)).migrate(options.declarations ?? declarations, options);
 
         /** Writes the fixture's layout-1 graph `graph` with 5.0.0, in a process of its own. */
         const writeLayout1 = (graph: string): void => {
