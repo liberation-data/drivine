@@ -1,4 +1,5 @@
 import { DatabaseType } from '@/connection/DatabaseType';
+import { PostgresConnection } from '@/connection/postgres/PostgresConnection';
 import { PostgresConnectionProvider } from '@/connection/postgres/PostgresConnectionProvider';
 import { DrivineLogger } from '@/logger';
 import { EventEmitter } from 'events';
@@ -157,6 +158,16 @@ describe('PostgresConnectionProvider', () => {
             const connection = await provider.connect();
             await connection.release();
             expect(release).toHaveBeenCalledWith(undefined);
+            expect(client.listenerCount('error')).toEqual(0);
+        });
+
+        it('should still close for good a session an index build ran on, where the server ended none', async () => {
+            const { provider, client }: Ending = ending();
+            const release = client.release;
+            const connection = (await provider.connect()) as PostgresConnection;
+            connection.buildingIndex();
+            await connection.release();
+            expect(release).toHaveBeenCalledWith(true);
             expect(client.listenerCount('error')).toEqual(0);
         });
 
