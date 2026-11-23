@@ -13,8 +13,8 @@ The provider reads a graph's stamp, its `DrivineStore` node, on its first connec
 graph 5.0 or earlier wrote, in store layout 1, that holds no node but Drivine's own (its stamp and its schema marker)
 has that layout's indexes dropped and is stamped layout 2. One that holds the application's nodes is refused, on that
 connection and every one after it, with a `StoreLayoutError` (exported) that names the graph. Export the graph with
-the Drivine version that wrote it, and import it with 6.0, or migrate it in place with `StoreLayoutMigration`, not yet
-proven on every store, with a backup taken first. A graph a later Drivine stamped with a later layout is refused too.
+the Drivine version that wrote it, and import it with 6.0, or migrate it in place with `StoreLayoutMigration`, with a
+backup taken first: see [Migrating a graph from store layout 1 to layout 2](23-migrating-a-store-layout.md). A graph a later Drivine stamped with a later layout is refused too.
 See [Oracle](07-supported-engines.md#oracle).
 
 ### Values are held as layout 2 holds them

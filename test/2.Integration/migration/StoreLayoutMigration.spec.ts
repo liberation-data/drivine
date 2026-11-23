@@ -59,16 +59,15 @@ describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
 
         const migrating = provider();
         const migration = new StoreLayoutMigration(migrating);
-        await expect(migration.migrate(declarations, {} as any)).rejects.toThrow(/not yet proven/);
 
         const untouched = snapshot();
-        const dryRun = await migration.migrate(declarations, { dryRun: true, unproven: true });
+        const dryRun = await migration.migrate(declarations, { dryRun: true });
         expect(dryRun.status).toBe('dryRun');
         expect(snapshot()).toEqual(untouched);
         expect(dryRun.notes).toHaveLength(2);
         expect(dryRun.candidates).toContainEqual({ label: 'Person', property: 'nick', kind: 'date', values: 1 });
 
-        const stopped = await migration.migrate(declarations, { unproven: true });
+        const stopped = await migration.migrate(declarations, {});
         expect(stopped.status).toBe('collisions');
         expect(stopped.collisions.map((it) => [it.label, it.properties])).toEqual([['Event', ['at']]]);
 
@@ -76,7 +75,7 @@ describe('a store layout migration of a graph 5.0.0 wrote, on SQLite', () => {
         const db = openSqlite(file);
         db.exec('DELETE FROM drivine_node WHERE nid = 9');
         db.close();
-        const migrated = await migration.migrate(declarations, { unproven: true });
+        const migrated = await migration.migrate(declarations, {});
         expect(migrated.status).toBe('migrated');
         await migrating.end();
 
@@ -147,7 +146,7 @@ describe('bytes and a packed Date a graph 5.0.0 wrote, declared to a store layou
                 { label: 'Person', property: 'packed', kind: 'datetime' }
             ];
             for (const declaration of declared) {
-                const report = await new StoreLayoutMigration(provider).migrate([declaration], { unproven: true });
+                const report = await new StoreLayoutMigration(provider).migrate([declaration], {});
                 expect(report.status).toBe('invalid');
                 expect(report.properties.find((it) => it.property === declaration.property)?.invalid).toHaveLength(1);
             }
@@ -172,7 +171,7 @@ describe('a store layout migration refused by its declarations', () => {
                     { label: 'Person', property: 'born', kind: 'date' },
                     { label: 'Person', property: 'born', kind: 'datetime' }
                 ],
-                { unproven: true }
+                {}
             )
         ).rejects.toThrow(/declared date and datetime/);
         expect(provider.connectUnjudged).not.toHaveBeenCalled();
